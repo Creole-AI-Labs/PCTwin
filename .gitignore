@@ -18,3 +18,6 @@ dist/
 *.p12
 *.pfx
 secrets/
+
+# Local logs
+*.log
