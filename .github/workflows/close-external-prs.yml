@@ -1,0 +1,27 @@
+# Closes pull requests opened by people outside Creole AI Labs, with a polite note.
+# pull_request_target is used only so the token can comment and close on fork PRs.
+# This workflow never checks out or runs code from the pull request.
+name: Close external pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions: {}
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Comment and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr close "$PR_URL" --comment "Thanks for your interest in PCTwin. We don't accept code contributions from outside Creole AI Labs, so this pull request has been closed. If you found a bug or have an idea, please open an issue. For security problems, see SECURITY.md."
