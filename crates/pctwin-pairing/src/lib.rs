@@ -17,12 +17,13 @@
 //! 4. A Noise `NNpsk0` handshake builds the encrypted link with fresh ephemeral keys
 //!    (forward secrecy). The SPAKE2 secret is the pre-shared key; the protocol version, the session
 //!    tag and both SPAKE2 messages are bound in as the Noise prologue.
-//! 5. Both sides derive a two-digit match number from the final handshake hash. The sender shows
-//!    it; the receiver offers three numbers (the right one and two random decoys) and the person
-//!    picks the one on the sender's screen.
-//! 6. The receiver seals the picked number into its confirmation. The sender accepts only a
-//!    confirmation carrying its own number, so skipping the comparison does not work even for
-//!    someone who knows the code. Only then does either side get a usable [`Paired`] link.
+//! 5. Both sides derive a two-digit match number from the final handshake hash. The receiver
+//!    (new laptop) shows it; the sender (old laptop) offers three numbers (the right one and two
+//!    random decoys) and the person picks, on the old laptop, the one shown on the new laptop.
+//! 6. Only that pick on the old laptop unlocks it: nothing the other side sends can, so someone
+//!    who knows the code still cannot reach the old laptop's files without the person at the old
+//!    laptop choosing the right number. The sender then seals an approval to the receiver, which
+//!    unlocks the receiver. Only then does either side get a usable [`Paired`] link.
 //!
 //! Every message carries the protocol version and a message kind, and is size-limited. Malformed
 //! input returns an error instead of panicking. Messages that fail before authentication hand the
@@ -30,6 +31,9 @@
 //!
 //! # Known limits
 //!
+//! - The human decision protects the sender, which holds the files. Someone who knows the code can
+//!   pose as a sender and be approved by a receiver; the receiver's safety gate and the person's
+//!   review of the plan then guard what that fake sender offers.
 //! - `spake2` states it has had no independent audit and is probably not constant-time; `snow`
 //!   has had no formal audit. Neither zeroizes its internal secrets on drop.
 //! - Session tags are public, so anyone who sees message 1 can spend that code's single attempt
@@ -56,7 +60,7 @@ pub const PROTOCOL_VERSION: u8 = 1;
 pub const CODE_LIFETIME: Duration = Duration::from_secs(60);
 /// How long a replaced code still works, for someone who was typing it when it changed.
 pub const ROTATION_GRACE: Duration = Duration::from_secs(15);
-/// How long the sender waits for the receiver's confirmation after the handshake.
+/// How long either side waits, after the handshake, for the person's pick and the approval.
 pub const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(180);
 /// Failed attempts in a row before pairing locks until the person on the sender starts again.
 pub const MAX_FAILED_ATTEMPTS: u32 = 5;
@@ -73,14 +77,14 @@ const ID_RECEIVER: &[u8] = b"pctwin/v1/receiver";
 const PROLOGUE_LABEL: &[u8] = b"pctwin/v1/pairing-prologue";
 const PSK_SALT: &[u8] = b"pctwin/v1/pairing-psk";
 const MATCH_SALT: &[u8] = b"pctwin/v1/match-number";
-const CONFIRM_LABEL: &[u8] = b"pctwin/v1/confirmed";
+const APPROVE_LABEL: &[u8] = b"pctwin/v1/approved";
 const AEAD_TAG_LEN: usize = 16;
 const NOISE_MAX: usize = 65_535;
 
 const KIND_SPAKE_A: u8 = 1;
 const KIND_SPAKE_B_NOISE_1: u8 = 2;
 const KIND_NOISE_2: u8 = 3;
-const KIND_CONFIRM: u8 = 4;
+const KIND_APPROVE: u8 = 4;
 
 /// Why pairing or the encrypted link failed. Messages say what to do, not which byte was wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -265,12 +269,12 @@ impl SenderSession {
     }
 
     /// Handles message 2 at time `now`. Consumes the session: a code gets exactly one attempt.
-    /// Returns the sender's waiting state (with its match number) and message 3 to send.
+    /// Returns the three numbers to offer the person on the sender, and message 3 to send.
     pub fn receive(
         self,
         msg2: &[u8],
         now: Instant,
-    ) -> Result<(SenderAwaitingConfirmation, Vec<u8>), PairingError> {
+    ) -> Result<(SenderChoosing, Vec<u8>), PairingError> {
         if now > self.deadline {
             return Err(PairingError::Expired);
         }
@@ -307,11 +311,13 @@ impl SenderSession {
             .map_err(|_| PairingError::HandshakeFailed)?;
         let msg3 = frame(KIND_NOISE_2, &buf[..written]);
 
-        let (transport, match_number) = finish_handshake(hs)?;
+        let (transport, correct) = finish_handshake(hs)?;
+        let choices = offer_choices(correct)?;
         Ok((
-            SenderAwaitingConfirmation {
+            SenderChoosing {
                 transport,
-                match_number,
+                correct,
+                choices,
                 deadline: now + CONFIRMATION_TIMEOUT,
             },
             msg3,
@@ -319,59 +325,51 @@ impl SenderSession {
     }
 }
 
-/// Sender side, showing its match number and waiting for the receiver's confirmation.
-pub struct SenderAwaitingConfirmation {
+/// Sender side, offering three numbers. The person picks the one shown on the receiver.
+/// This pick, made on the sender, is the only thing that unlocks the sender.
+pub struct SenderChoosing {
     transport: TransportState,
-    match_number: u8,
+    correct: u8,
+    choices: [u8; 3],
     deadline: Instant,
 }
 
-impl SenderAwaitingConfirmation {
-    /// The number to show on the sender's screen.
-    pub fn match_number(&self) -> u8 {
-        self.match_number
+impl SenderChoosing {
+    /// The three numbers to show on the sender, in display order. Exactly one matches the receiver.
+    pub fn choices(&self) -> [u8; 3] {
+        self.choices
     }
 
-    /// When the sender stops waiting for confirmation.
+    /// When the sender stops waiting for the person's pick.
     pub fn deadline(&self) -> Instant {
         self.deadline
     }
 
-    /// Handles message 4 at time `now`. Succeeds only for a genuine confirmation from this session
-    /// carrying the sender's own number. Junk, truncated or forged messages hand the waiting state
-    /// back; a wrong number or a missed deadline ends the pairing.
-    pub fn receive_confirmation(
-        mut self,
-        msg4: &[u8],
-        now: Instant,
-    ) -> Result<Paired, Rejected<Self>> {
+    /// Records the person's pick at time `now`. The right number unlocks the sender and returns
+    /// message 4, the sealed approval for the receiver. Any other number, or a pick after the
+    /// deadline, cancels pairing. To cancel without picking (for example when none of the three
+    /// numbers matches the receiver), drop this value.
+    pub fn choose(mut self, picked: u8, now: Instant) -> Result<(Paired, Vec<u8>), PairingError> {
         if now > self.deadline {
-            return Err(Rejected::end(PairingError::Expired));
+            return Err(PairingError::Expired);
         }
-        let payload = match parse_frame(msg4, KIND_CONFIRM) {
-            Ok(p) => p,
-            Err(e) => return Err(Rejected::keep(e, self)),
-        };
-        let mut buf = Zeroizing::new(vec![0u8; payload.len()]);
-        // A message that fails authentication does not advance the transport's nonce, so the
-        // waiting state stays usable for the genuine confirmation.
-        let read = match self.transport.read_message(payload, &mut buf) {
-            Ok(n) => n,
-            Err(_) => return Err(Rejected::keep(PairingError::HandshakeFailed, self)),
-        };
-        let plain = &buf[..read];
-        match plain.split_last() {
-            Some((&picked, label)) if label == CONFIRM_LABEL => {
-                if picked == self.match_number {
-                    Ok(Paired {
-                        transport: Transport(self.transport),
-                    })
-                } else {
-                    Err(Rejected::end(PairingError::WrongNumber))
-                }
-            }
-            _ => Err(Rejected::end(PairingError::HandshakeFailed)),
+        if picked != self.correct {
+            return Err(PairingError::WrongNumber);
         }
+        let mut plain = APPROVE_LABEL.to_vec();
+        plain.push(picked);
+        let mut buf = [0u8; 64];
+        let written = self
+            .transport
+            .write_message(&plain, &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        let msg4 = frame(KIND_APPROVE, &buf[..written]);
+        Ok((
+            Paired {
+                transport: Transport(self.transport),
+            },
+            msg4,
+        ))
     }
 }
 
@@ -415,10 +413,14 @@ impl ReceiverSession {
         Ok((Self { hs }, frame(KIND_SPAKE_B_NOISE_1, &payload)))
     }
 
-    /// Handles message 3. Returns the three numbers to offer the person. Any message that fails
+    /// Handles message 3 at time `now`. Returns the number to show on the receiver. Any message that fails
     /// before the handshake completes (junk, truncated, forged) hands the session back: `snow`
     /// restores its handshake state on a failed read, so the genuine message 3 still works.
-    pub fn receive(mut self, msg3: &[u8]) -> Result<ReceiverChoosing, Rejected<Self>> {
+    pub fn receive(
+        mut self,
+        msg3: &[u8],
+        now: Instant,
+    ) -> Result<ReceiverAwaitingApproval, Rejected<Self>> {
         let payload = match parse_frame(msg3, KIND_NOISE_2) {
             Ok(p) => p,
             Err(e) => return Err(Rejected::keep(e, self)),
@@ -431,49 +433,64 @@ impl ReceiverSession {
         if read != 0 {
             return Err(Rejected::end(PairingError::Malformed));
         }
-        let (transport, correct) = finish_handshake(self.hs).map_err(Rejected::end)?;
-        let choices = offer_choices(correct).map_err(Rejected::end)?;
-        Ok(ReceiverChoosing {
+        let (transport, match_number) = finish_handshake(self.hs).map_err(Rejected::end)?;
+        Ok(ReceiverAwaitingApproval {
             transport,
-            correct,
-            choices,
+            match_number,
+            deadline: now + CONFIRMATION_TIMEOUT,
         })
     }
 }
 
-/// Receiver side, showing three numbers for the person to choose from.
-pub struct ReceiverChoosing {
+/// Receiver side, showing its number and waiting for the sender's approval.
+pub struct ReceiverAwaitingApproval {
     transport: TransportState,
-    correct: u8,
-    choices: [u8; 3],
+    match_number: u8,
+    deadline: Instant,
 }
 
-impl ReceiverChoosing {
-    /// The three numbers to show, in display order. Exactly one matches the sender.
-    pub fn choices(&self) -> [u8; 3] {
-        self.choices
+impl ReceiverAwaitingApproval {
+    /// The number to show on the receiver's screen.
+    pub fn match_number(&self) -> u8 {
+        self.match_number
     }
 
-    /// Records the person's pick. The right number unlocks the link and returns message 4, which
-    /// carries the pick sealed for the sender to check. Any other number cancels pairing.
-    pub fn choose(mut self, picked: u8) -> Result<(Paired, Vec<u8>), PairingError> {
-        if picked != self.correct {
-            return Err(PairingError::WrongNumber);
+    /// When the receiver stops waiting for the approval.
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    /// Handles message 4 at time `now`. Succeeds only for a genuine approval from this session
+    /// carrying the receiver's own number. Junk, truncated or forged messages hand the waiting
+    /// state back; a wrong number, a malformed approval or a missed deadline ends the pairing.
+    pub fn receive_approval(mut self, msg4: &[u8], now: Instant) -> Result<Paired, Rejected<Self>> {
+        if now > self.deadline {
+            return Err(Rejected::end(PairingError::Expired));
         }
-        let mut plain = CONFIRM_LABEL.to_vec();
-        plain.push(picked);
-        let mut buf = [0u8; 64];
-        let written = self
-            .transport
-            .write_message(&plain, &mut buf)
-            .map_err(|_| PairingError::HandshakeFailed)?;
-        let msg4 = frame(KIND_CONFIRM, &buf[..written]);
-        Ok((
-            Paired {
-                transport: Transport(self.transport),
-            },
-            msg4,
-        ))
+        let payload = match parse_frame(msg4, KIND_APPROVE) {
+            Ok(p) => p,
+            Err(e) => return Err(Rejected::keep(e, self)),
+        };
+        let mut buf = Zeroizing::new(vec![0u8; payload.len()]);
+        // A message that fails authentication does not advance the transport's nonce, so the
+        // waiting state stays usable for the genuine approval.
+        let read = match self.transport.read_message(payload, &mut buf) {
+            Ok(n) => n,
+            Err(_) => return Err(Rejected::keep(PairingError::HandshakeFailed, self)),
+        };
+        let plain = &buf[..read];
+        match plain.split_last() {
+            Some((&picked, label)) if label == APPROVE_LABEL => {
+                if picked == self.match_number {
+                    Ok(Paired {
+                        transport: Transport(self.transport),
+                    })
+                } else {
+                    Err(Rejected::end(PairingError::WrongNumber))
+                }
+            }
+            _ => Err(Rejected::end(PairingError::HandshakeFailed)),
+        }
     }
 }
 
@@ -660,7 +677,7 @@ impl RotatingSender {
         &mut self,
         msg2: &[u8],
         now: Instant,
-    ) -> Result<(SenderAwaitingConfirmation, Vec<u8>), PairingError> {
+    ) -> Result<(SenderChoosing, Vec<u8>), PairingError> {
         self.tick(now)?;
         if self.locked {
             return Err(PairingError::Locked);
@@ -731,9 +748,9 @@ macro_rules! redacted_debug {
 redacted_debug!(
     RotatingSender,
     SenderSession,
-    SenderAwaitingConfirmation,
+    SenderChoosing,
     ReceiverSession,
-    ReceiverChoosing,
+    ReceiverAwaitingApproval,
     Paired,
     Transport
 );

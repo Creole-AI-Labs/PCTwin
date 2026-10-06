@@ -6,15 +6,17 @@
 //! 1. sender   -> receiver : message 1 (SPAKE2 A)
 //! 2. receiver -> sender   : message 2 (SPAKE2 B + Noise handshake 1)
 //! 3. sender   -> receiver : message 3 (Noise handshake 2)
-//! 4. the sender shows one number; the receiver shows three and the person picks the match
-//! 5. receiver -> sender   : message 4 (sealed confirmation)
+//! 4. the receiver shows one number; the sender shows three and the person picks the match
+//!    on the sender
+//! 5. sender   -> receiver : message 4 (sealed approval)
 //! ```
 //!
-//! Only after the right pick do both sides get the encrypted transport.
+//! Only after the right pick on the sender do both sides get the encrypted transport.
 
 use pctwin_pairing::{
     CODE_LIFETIME, MATCH_NUMBER_RANGE, MAX_MESSAGE_LEN, PROTOCOL_VERSION, Paired, PairingCode,
-    PairingError, ROTATION_GRACE, ReceiverSession, SenderSession,
+    PairingError, ROTATION_GRACE, ReceiverAwaitingApproval, ReceiverSession, SenderChoosing,
+    SenderSession,
 };
 use std::time::{Duration, Instant};
 
@@ -25,12 +27,12 @@ fn pair_with(
     let now = Instant::now();
     let (sender, msg1) = SenderSession::start(sender_code, now);
     let (receiver, msg2) = ReceiverSession::respond(typed, &msg1)?;
-    let (sender_waiting, msg3) = sender.receive(&msg2, now)?;
-    let choosing = receiver.receive(&msg3)?;
-    // The person reads the sender's number and picks it on the receiver.
-    let shown = sender_waiting.match_number();
-    let (receiver_paired, msg4) = choosing.choose(shown)?;
-    let sender_paired = sender_waiting.receive_confirmation(&msg4, now)?;
+    let (sender_choosing, msg3) = sender.receive(&msg2, now)?;
+    let waiting = receiver.receive(&msg3, now)?;
+    // The person reads the new laptop's number and picks it on the old laptop.
+    let shown = waiting.match_number();
+    let (sender_paired, msg4) = sender_choosing.choose(shown, now)?;
+    let receiver_paired = waiting.receive_approval(&msg4, now)?;
     Ok((sender_paired, receiver_paired))
 }
 
@@ -43,29 +45,24 @@ fn correct_code_and_correct_pick_pairs() {
     pair_with(&code, &typed).expect("pairing succeeds");
 }
 
-fn up_to_choice(
-    code: &PairingCode,
-) -> (
-    pctwin_pairing::SenderAwaitingConfirmation,
-    pctwin_pairing::ReceiverChoosing,
-) {
+fn up_to_choice(code: &PairingCode) -> (SenderChoosing, ReceiverAwaitingApproval) {
     let now = Instant::now();
     let (sender, msg1) = SenderSession::start(code, now);
     let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
-    let (sender_waiting, msg3) = sender.receive(&msg2, now).unwrap();
-    (sender_waiting, receiver.receive(&msg3).unwrap())
+    let (choosing, msg3) = sender.receive(&msg2, now).unwrap();
+    (choosing, receiver.receive(&msg3, now).unwrap())
 }
 
 #[test]
-fn receiver_offers_three_different_numbers_including_the_senders() {
+fn sender_offers_three_different_numbers_including_the_receivers() {
     let code = PairingCode::generate().unwrap();
     for _ in 0..200 {
         let (s, r) = up_to_choice(&code);
-        let choices = r.choices();
-        assert!(choices.contains(&s.match_number()));
+        let choices = s.choices();
+        assert!(choices.contains(&r.match_number()));
         assert!(choices[0] != choices[1] && choices[1] != choices[2] && choices[0] != choices[2]);
         assert!(choices.iter().all(|c| MATCH_NUMBER_RANGE.contains(c)));
-        assert!(MATCH_NUMBER_RANGE.contains(&s.match_number()));
+        assert!(MATCH_NUMBER_RANGE.contains(&r.match_number()));
     }
 }
 
@@ -75,10 +72,10 @@ fn the_correct_number_appears_in_every_position() {
     let mut positions = [false; 3];
     for _ in 0..200 {
         let (s, r) = up_to_choice(&code);
-        let i = r
+        let i = s
             .choices()
             .iter()
-            .position(|&c| c == s.match_number())
+            .position(|&c| c == r.match_number())
             .unwrap();
         positions[i] = true;
     }
@@ -89,56 +86,56 @@ fn the_correct_number_appears_in_every_position() {
 }
 
 #[test]
-fn picking_a_wrong_number_cancels_pairing() {
+fn picking_a_wrong_number_on_the_sender_cancels_pairing() {
     let code = PairingCode::generate().unwrap();
     let (s, r) = up_to_choice(&code);
-    let wrong = *r
+    let wrong = *s
         .choices()
         .iter()
-        .find(|&&c| c != s.match_number())
+        .find(|&&c| c != r.match_number())
         .unwrap();
-    assert!(matches!(r.choose(wrong), Err(PairingError::WrongNumber)));
+    assert!(matches!(
+        s.choose(wrong, Instant::now()),
+        Err(PairingError::WrongNumber)
+    ));
 }
 
 #[test]
 fn picking_a_number_that_was_not_offered_cancels_pairing() {
     let code = PairingCode::generate().unwrap();
-    let (_s, r) = up_to_choice(&code);
+    let (s, _r) = up_to_choice(&code);
     let not_offered = MATCH_NUMBER_RANGE
         .clone()
-        .find(|n| !r.choices().contains(n))
+        .find(|n| !s.choices().contains(n))
         .unwrap();
-    assert!(r.choose(not_offered).is_err());
+    assert!(s.choose(not_offered, Instant::now()).is_err());
 }
 
 #[test]
-fn sender_rejects_a_forged_or_tampered_confirmation() {
+fn receiver_rejects_a_forged_or_tampered_approval() {
     let code = PairingCode::generate().unwrap();
+    let now = Instant::now();
     let (s, r) = up_to_choice(&code);
-    let n = s.match_number();
-    let (_rp, mut msg4) = r.choose(n).unwrap();
+    let n = r.match_number();
+    let (_sp, mut msg4) = s.choose(n, now).unwrap();
     let last = msg4.len() - 1;
     msg4[last] ^= 0x01;
-    assert!(s.receive_confirmation(&msg4, Instant::now()).is_err());
-
-    let (s2, _r2) = up_to_choice(&code);
-    assert!(
-        s2.receive_confirmation(b"\x01\x04confirmed", Instant::now())
-            .is_err()
-    );
+    let r = r
+        .receive_approval(&msg4, now)
+        .unwrap_err()
+        .into_retry()
+        .expect("a tampered approval is junk, not a cancel");
+    assert!(r.receive_approval(b"\x01\x04approved", now).is_err());
 }
 
 #[test]
-fn a_confirmation_from_another_session_is_rejected() {
+fn an_approval_from_another_session_is_rejected() {
     let code = PairingCode::generate().unwrap();
+    let now = Instant::now();
     let (s1, r1) = up_to_choice(&code);
-    let n1 = s1.match_number();
-    let (_p, msg4_from_1) = r1.choose(n1).unwrap();
-    let (s2, _r2) = up_to_choice(&code);
-    assert!(
-        s2.receive_confirmation(&msg4_from_1, Instant::now())
-            .is_err()
-    );
+    let (_p, msg4_from_1) = s1.choose(r1.match_number(), now).unwrap();
+    let (_s2, r2) = up_to_choice(&code);
+    assert!(r2.receive_approval(&msg4_from_1, now).is_err());
 }
 
 #[test]
@@ -286,7 +283,7 @@ fn receiver_rejects_its_own_message_reflected() {
     let code = PairingCode::generate().unwrap();
     let (_sender, msg1) = SenderSession::start(&code, Instant::now());
     let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
-    assert!(receiver.receive(&msg2).is_err());
+    assert!(receiver.receive(&msg2, Instant::now()).is_err());
 }
 
 #[test]
@@ -297,7 +294,7 @@ fn replayed_messages_from_an_old_session_are_rejected() {
     let (old_sender, old_msg1) = SenderSession::start(&code, now);
     let (old_receiver, old_msg2) = ReceiverSession::respond(&code.clone(), &old_msg1).unwrap();
     let (_, old_msg3) = old_sender.receive(&old_msg2, now).unwrap();
-    old_receiver.receive(&old_msg3).unwrap();
+    old_receiver.receive(&old_msg3, now).unwrap();
 
     // New session with the same code: replaying old message 2 to the new sender fails.
     let (new_sender, _new_msg1) = SenderSession::start(&code, now);
@@ -306,7 +303,7 @@ fn replayed_messages_from_an_old_session_are_rejected() {
     // Replaying old message 3 to a new receiver fails.
     let (_s, new_msg1) = SenderSession::start(&code, now);
     let (new_receiver, _) = ReceiverSession::respond(&code.clone(), &new_msg1).unwrap();
-    assert!(new_receiver.receive(&old_msg3).is_err());
+    assert!(new_receiver.receive(&old_msg3, now).is_err());
 }
 
 #[test]
@@ -338,7 +335,7 @@ fn tampering_with_any_byte_of_message_2_or_3_is_detected() {
         let (_, mut m3) = s2.receive(&m2, now).unwrap();
         m3[i] ^= 0x01;
         assert!(
-            r2.receive(&m3).is_err(),
+            r2.receive(&m3, now).is_err(),
             "flip at byte {i} of message 3 went unnoticed"
         );
     }
@@ -382,8 +379,8 @@ fn different_sessions_give_varied_match_numbers() {
     let code = PairingCode::generate().unwrap();
     let mut numbers = std::collections::HashSet::new();
     for _ in 0..200 {
-        let (s, _) = up_to_choice(&code);
-        numbers.insert(s.match_number());
+        let (_, r) = up_to_choice(&code);
+        numbers.insert(r.match_number());
     }
     assert!(
         numbers.len() > 40,
