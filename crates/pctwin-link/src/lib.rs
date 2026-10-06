@@ -61,6 +61,8 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Default time an address whose attempt failed for any reason other than a wrong or expired
 /// code is refused.
 pub const SILENCE_PENALTY: Duration = Duration::from_secs(30);
+/// Default longest wait to reach one of the old laptop's addresses.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 const KIND_PAIRING: u8 = 1;
 const KIND_BUSY: u8 = 2;
@@ -93,6 +95,8 @@ pub struct LinkConfig {
     pub handshake_timeout: Duration,
     /// How long an address whose attempt failed other than by a wrong or expired code is refused.
     pub silence_penalty: Duration,
+    /// Longest wait to reach the old laptop at one address before trying the next.
+    pub connect_timeout: Duration,
 }
 
 impl Default for LinkConfig {
@@ -101,6 +105,7 @@ impl Default for LinkConfig {
             step_timeout: STEP_TIMEOUT,
             handshake_timeout: HANDSHAKE_TIMEOUT,
             silence_penalty: SILENCE_PENALTY,
+            connect_timeout: CONNECT_TIMEOUT,
         }
     }
 }
@@ -110,6 +115,8 @@ impl Default for LinkConfig {
 pub enum LinkError {
     #[error("the old laptop is pairing with another device; try again in a moment")]
     Busy,
+    #[error("the old laptop could not be reached at that address")]
+    Unreachable,
     #[error("the other laptop stopped responding")]
     Timeout,
     #[error("the connection to the other laptop closed")]
@@ -407,15 +414,19 @@ impl HostPending {
 
 /// Connects the new laptop to the old laptop at `addr` with the code the person typed, and runs
 /// the handshake. Returns the number to show while the person picks on the old laptop.
+///
+/// Fails with [`LinkError::Unreachable`] only if nothing was sent: then trying another address of
+/// the same old laptop cannot spend a guess. Any later failure means an attempt was made.
 pub async fn connect(
     addr: SocketAddr,
     code: &PairingCode,
     config: LinkConfig,
 ) -> Result<GuestPending, LinkError> {
     let wait = config.step_timeout;
-    let mut stream = tokio::time::timeout(wait, TcpStream::connect(addr))
+    let mut stream = tokio::time::timeout(config.connect_timeout, TcpStream::connect(addr))
         .await
-        .map_err(|_| LinkError::Timeout)??;
+        .map_err(|_| LinkError::Unreachable)?
+        .map_err(|_| LinkError::Unreachable)?;
     write_frame(&mut stream, KIND_HELLO, &[code.parity()], wait).await?;
     let msg1 = read_from_host(&mut stream, wait).await?;
     let (receiver, msg2) = ReceiverSession::respond(code, &msg1, Instant::now())?;

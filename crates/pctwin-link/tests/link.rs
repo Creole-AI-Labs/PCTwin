@@ -25,7 +25,21 @@ fn fast() -> LinkConfig {
         step_timeout: Duration::from_millis(400),
         handshake_timeout: Duration::from_millis(400),
         silence_penalty: Duration::ZERO,
+        connect_timeout: Duration::from_millis(400),
     }
+}
+
+#[tokio::test]
+async fn a_closed_address_is_reported_unreachable_without_sending_anything() {
+    // Find a port nothing listens on.
+    let spare = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = spare.local_addr().unwrap();
+    drop(spare);
+    let code = PairingCode::parse("123456").unwrap();
+    let started = Instant::now();
+    let err = connect(addr, &code, fast()).await.unwrap_err();
+    assert!(matches!(err, LinkError::Unreachable), "got {err:?}");
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 async fn host_with(config: LinkConfig) -> (Host, Arc<Mutex<RotatingSender>>) {

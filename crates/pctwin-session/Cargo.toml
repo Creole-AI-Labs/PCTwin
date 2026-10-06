@@ -1,0 +1,22 @@
+[package]
+name = "pctwin-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-discovery = { path = "../pctwin-discovery" }
+pctwin-link = { path = "../pctwin-link" }
+pctwin-pairing = { path = "../pctwin-pairing" }
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["net", "rt"] }
+
+[dev-dependencies]
+getrandom = "0.4.3"
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
