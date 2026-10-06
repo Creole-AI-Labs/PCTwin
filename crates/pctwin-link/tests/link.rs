@@ -8,18 +8,22 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pctwin_link::{Host, LinkConfig, LinkError, connect, is_local_peer};
-use pctwin_pairing::{CODE_LIFETIME, PairingCode, PairingError, RotatingSender};
+use pctwin_pairing::{
+    CODE_LIFETIME, PairingCode, PairingError, ROTATION_GRACE, ReceiverSession, RotatingSender,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const KIND_PAIRING: u8 = 1;
 const KIND_BUSY: u8 = 2;
 const KIND_HELLO: u8 = 4;
+const KIND_PAUSED: u8 = 5;
+const KIND_EXPIRED: u8 = 6;
 
 fn fast() -> LinkConfig {
     LinkConfig {
         step_timeout: Duration::from_millis(400),
-        first_step_timeout: Duration::from_millis(400),
+        handshake_timeout: Duration::from_millis(400),
         silence_penalty: Duration::ZERO,
     }
 }
@@ -118,6 +122,49 @@ async fn a_code_that_changed_while_the_person_typed_it_still_pairs() {
     assert_eq!(sender.lock().unwrap().failed_attempts(), 0);
 }
 
+#[tokio::test]
+async fn a_code_that_runs_out_mid_handshake_is_reported_expired_and_costs_nothing() {
+    let config = LinkConfig {
+        silence_penalty: Duration::from_secs(5),
+        ..fast()
+    };
+    let (host, sender) = host_with(config).await;
+    let addr = host.local_addr().unwrap();
+    let start = Instant::now();
+    let typed = shown_code(&sender);
+    sender
+        .lock()
+        .unwrap()
+        .tick(start + CODE_LIFETIME + Duration::from_secs(5))
+        .unwrap();
+    let serving = spawn_host(host, sender.clone());
+
+    // The new laptop asks for its code (still in grace) and gets message 1 ...
+    let mut raw = TcpStream::connect(addr).await.unwrap();
+    raw.write_all(&[KIND_HELLO, 0, 1, typed.parity()])
+        .await
+        .unwrap();
+    let (_, msg1) = read_frame(&mut raw).await;
+    // ... and the grace ends before its reply arrives.
+    sender
+        .lock()
+        .unwrap()
+        .tick(start + CODE_LIFETIME + ROTATION_GRACE + Duration::from_secs(1))
+        .unwrap();
+    let (_r, msg2) = ReceiverSession::respond(&typed, &msg1, Instant::now()).unwrap();
+    let mut frame = vec![1u8];
+    frame.extend((msg2.len() as u16).to_be_bytes());
+    frame.extend(&msg2);
+    raw.write_all(&frame).await.unwrap();
+    assert_eq!(read_frame(&mut raw).await.0, KIND_EXPIRED);
+
+    // Not a guess, and the address is not refused: typing the new code pairs at once.
+    assert_eq!(sender.lock().unwrap().failed_attempts(), 0);
+    let fresh = shown_code(&sender);
+    assert!(connect(addr, &fresh, config).await.is_ok());
+    serving.abort();
+}
+
 // ---------- one device at a time ----------
 
 #[tokio::test]
@@ -211,6 +258,167 @@ async fn an_address_that_held_the_slot_in_silence_is_refused_for_a_while() {
     serving.abort();
 }
 
+/// Runs `misbehave` against a host whose penalty is 2 s, then checks a device at the same
+/// address is refused at once, and that the slot was held no longer than the handshake limit.
+async fn assert_penalised<F, Fut>(misbehave: F)
+where
+    F: FnOnce(std::net::SocketAddr, u8) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let config = LinkConfig {
+        silence_penalty: Duration::from_secs(2),
+        ..fast()
+    };
+    let (host, sender) = host_with(config).await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let serving = spawn_host(host, sender.clone());
+
+    let started = Instant::now();
+    misbehave(addr, code.parity()).await;
+    assert!(
+        started.elapsed() < Duration::from_millis(900),
+        "held the slot for {:?}",
+        started.elapsed()
+    );
+    // Give the host a moment to record the outcome.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let err = connect(addr, &code, config).await.unwrap_err();
+    assert!(matches!(err, LinkError::Busy), "got {err:?}");
+    assert_eq!(sender.lock().unwrap().failed_attempts(), 0, "not a guess");
+    serving.abort();
+}
+
+#[tokio::test]
+async fn hanging_up_before_the_time_limit_still_costs_the_address() {
+    assert_penalised(|addr, parity| async move {
+        let mut raw = TcpStream::connect(addr).await.unwrap();
+        raw.write_all(&[KIND_HELLO, 0, 1, parity]).await.unwrap();
+        let _msg1 = read_frame(&mut raw).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        drop(raw); // hang up just before the limit
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_status_notice_sent_to_the_old_laptop_costs_the_address() {
+    assert_penalised(|addr, parity| async move {
+        let mut raw = TcpStream::connect(addr).await.unwrap();
+        raw.write_all(&[KIND_HELLO, 0, 1, parity]).await.unwrap();
+        let _msg1 = read_frame(&mut raw).await;
+        raw.write_all(&[KIND_PAUSED, 0, 0]).await.unwrap();
+        let mut sink = Vec::new();
+        let _ = raw.read_to_end(&mut sink).await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stalling_after_hello_is_cut_off_at_the_handshake_limit_and_costs_the_address() {
+    assert_penalised(|addr, parity| async move {
+        let mut raw = TcpStream::connect(addr).await.unwrap();
+        raw.write_all(&[KIND_HELLO, 0, 1, parity]).await.unwrap();
+        let _msg1 = read_frame(&mut raw).await;
+        let mut sink = Vec::new();
+        let _ = raw.read_to_end(&mut sink).await; // the host hangs up at the limit
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_reply_naming_another_session_costs_the_address() {
+    // Otherwise it would look like an honestly expired code and cost nothing.
+    assert_penalised(|addr, parity| async move {
+        let mut raw = TcpStream::connect(addr).await.unwrap();
+        raw.write_all(&[KIND_HELLO, 0, 1, parity]).await.unwrap();
+        let (_, mut msg2) = read_frame(&mut raw).await;
+        msg2[1] = 2;
+        msg2[2] ^= 0xff; // a session tag nobody was given
+        let mut frame = vec![1u8];
+        frame.extend((msg2.len() as u16).to_be_bytes());
+        frame.extend(&msg2);
+        raw.write_all(&frame).await.unwrap();
+        let mut sink = Vec::new();
+        let _ = raw.read_to_end(&mut sink).await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn a_device_that_dawdles_at_every_step_is_cut_off_at_the_whole_handshake_limit() {
+    // Each step alone is within the limit; together they are not.
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let reached_pick = tokio::spawn({
+        let sender = sender.clone();
+        async move {
+            tokio::time::timeout(Duration::from_millis(1500), host.next_peer(&sender))
+                .await
+                .is_ok()
+        }
+    });
+
+    let mut raw = TcpStream::connect(addr).await.unwrap();
+    raw.write_all(&[KIND_HELLO, 0, 1, code.parity()])
+        .await
+        .unwrap();
+    let (_, msg1) = read_frame(&mut raw).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let (receiver, msg2) = ReceiverSession::respond(&code, &msg1, Instant::now()).unwrap();
+    let mut frame = vec![1u8];
+    frame.extend((msg2.len() as u16).to_be_bytes());
+    frame.extend(&msg2);
+    raw.write_all(&frame).await.unwrap();
+    let (_, msg3) = read_frame(&mut raw).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let (_waiting, reveal) = receiver.receive(&msg3, Instant::now()).unwrap();
+    let mut frame = vec![1u8];
+    frame.extend((reveal.len() as u16).to_be_bytes());
+    frame.extend(&reveal);
+    let _ = raw.write_all(&frame).await;
+    // The host hung up at the 400 ms limit, so this device never reached the number pick.
+    assert!(
+        !reached_pick.await.unwrap(),
+        "a dawdling device must not reach the pick"
+    );
+}
+
+#[tokio::test]
+async fn an_expired_code_does_not_cost_the_address() {
+    let config = LinkConfig {
+        silence_penalty: Duration::from_secs(5),
+        ..fast()
+    };
+    let (host, sender) = host_with(config).await;
+    let addr = host.local_addr().unwrap();
+    let shown = shown_code(&sender);
+    let other_last = if shown.digits().as_bytes()[5].is_multiple_of(2) {
+        '1'
+    } else {
+        '0'
+    };
+    let stale = PairingCode::parse(&format!("{}{other_last}", &shown.digits()[..5])).unwrap();
+    let serving = spawn_host(host, sender.clone());
+    let err = connect(addr, &stale, config).await.unwrap_err();
+    assert!(matches!(err, LinkError::Pairing(PairingError::Expired)));
+    // Typing the code shown now works straight away.
+    assert!(connect(addr, &shown, config).await.is_ok());
+    serving.abort();
+}
+
+#[tokio::test]
+async fn a_bad_hello_costs_the_address() {
+    assert_penalised(|addr, _parity| async move {
+        let mut raw = TcpStream::connect(addr).await.unwrap();
+        raw.write_all(&[KIND_HELLO, 0, 1, 7]).await.unwrap();
+        let mut sink = Vec::new();
+        let _ = raw.read_to_end(&mut sink).await;
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn an_oversized_message_is_refused_and_the_next_device_pairs() {
     let (host, sender) = host_and_sender().await;
@@ -282,8 +490,11 @@ async fn a_wrong_code_fails_for_the_guest_and_counts_as_one_guess() {
     let addr = host.local_addr().unwrap();
     let wrong = wrong_code_for(&sender);
     let serving = spawn_host(host, sender.clone());
-    assert!(connect(addr, &wrong, fast()).await.is_err());
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let err = connect(addr, &wrong, fast()).await.unwrap_err();
+    assert!(
+        matches!(err, LinkError::Pairing(PairingError::HandshakeFailed)),
+        "a mistyped code says so plainly; got {err:?}"
+    );
     assert_eq!(sender.lock().unwrap().failed_attempts(), 1);
     serving.abort();
 }
@@ -332,27 +543,107 @@ async fn a_code_that_is_no_longer_live_is_reported_as_expired() {
     serving.abort();
 }
 
+fn lock_by_five_guesses(sender: &Mutex<RotatingSender>) {
+    let mut s = sender.lock().unwrap();
+    let start = Instant::now();
+    for i in 0..5u64 {
+        let t = start + Duration::from_secs(100 * i);
+        s.tick(t).unwrap();
+        let mut junk = vec![1u8, 2];
+        junk.extend(&s.message_1().unwrap()[2..10]);
+        junk.extend([7u8; 60]);
+        assert!(s.receive(&junk, t).is_err());
+    }
+}
+
 #[tokio::test]
-async fn a_locked_old_laptop_stops_serving_until_the_person_starts_again() {
+async fn while_locked_every_device_is_told_at_once_until_the_person_starts_again() {
     let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    lock_by_five_guesses(&sender);
+    let serving = tokio::spawn({
+        let sender = sender.clone();
+        async move { host.next_peer(&sender).await.map(|p| p.choices()) }
+    });
+
+    let code = PairingCode::parse("123456").unwrap();
+    for _ in 0..3 {
+        let started = Instant::now();
+        let err = connect(addr, &code, fast()).await.unwrap_err();
+        assert!(
+            matches!(err, LinkError::Pairing(PairingError::Locked)),
+            "got {err:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "told at once"
+        );
+    }
+
+    // The person chooses Start again; the next device pairs.
+    sender.lock().unwrap().unlock(Instant::now()).unwrap();
+    let fresh = shown_code(&sender);
+    let guest = connect(addr, &fresh, fast()).await.unwrap();
+    let choices = serving.await.unwrap().unwrap();
+    assert!(choices.contains(&guest.match_number()));
+}
+
+#[tokio::test]
+async fn the_guess_that_triggers_the_safety_stop_is_told_locked() {
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
     {
-        // Five failed guesses, spaced past each pause.
+        // Four failures so far; the fifth will lock.
         let mut s = sender.lock().unwrap();
-        let start = Instant::now();
-        for i in 0..5u64 {
-            let t = start + Duration::from_secs(100 * i);
+        // Spaced 10 s apart and ending 10 s ago, so every pause (1, 2, 4, 8 s) is over now.
+        let start = Instant::now() - Duration::from_secs(40);
+        for i in 0..4u64 {
+            let t = start + Duration::from_secs(10 * i);
             s.tick(t).unwrap();
             let mut junk = vec![1u8, 2];
             junk.extend(&s.message_1().unwrap()[2..10]);
             junk.extend([7u8; 60]);
             assert!(s.receive(&junk, t).is_err());
         }
+        s.tick(Instant::now()).unwrap();
     }
-    let err = host.next_peer(&sender).await.unwrap_err();
+    let wrong = wrong_code_for(&sender);
+    let serving = spawn_host(host, sender.clone());
+    let err = connect(addr, &wrong, fast()).await.unwrap_err();
     assert!(
         matches!(err, LinkError::Pairing(PairingError::Locked)),
         "got {err:?}"
     );
+    serving.abort();
+}
+
+#[tokio::test]
+async fn after_a_send_times_out_the_link_refuses_further_use() {
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let guest = tokio::spawn(async move { connect(addr, &code, fast()).await.unwrap() });
+    let pending_host = host.next_peer(&sender).await.unwrap();
+    let pending_guest = guest.await.unwrap();
+    let shown = pending_guest.match_number();
+    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
+    let _guest_link = pending_guest.approval().await.unwrap(); // never reads
+
+    let big = vec![0u8; 60_000];
+    let mut timed_out = false;
+    for _ in 0..200 {
+        if let Err(e) = host_link.send(&big).await {
+            assert!(matches!(e, LinkError::Timeout), "got {e:?}");
+            timed_out = true;
+            break;
+        }
+    }
+    assert!(timed_out, "the other laptop stopped reading");
+    // A half-written frame would corrupt the stream, so the link is now closed for good.
+    assert!(matches!(
+        host_link.send(b"more").await,
+        Err(LinkError::Closed)
+    ));
 }
 
 // ---------- only the local network ----------

@@ -773,7 +773,9 @@ impl RotatingSender {
                 return Ok(false);
             }
             self.blocked_until = None;
-            self.current = self.replacement(now)?;
+            // Keep the even/odd of the code chosen when the attempt failed (never shown): it
+            // already differs from any code in its grace period and from the spent code.
+            self.current = SenderEntry::new(now, self.current.code.parity())?;
             rotated = true;
         }
         if now >= self.current.started + CODE_LIFETIME {

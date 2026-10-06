@@ -4,19 +4,22 @@
 //! # How it works
 //!
 //! - The old laptop is the [`Host`]: it listens on a TCP port while pairing and serves one device
-//!   at a time, and only devices on the local network ([`is_local_peer`]). Any other device that
-//!   connects meanwhile is told the old laptop is busy and is closed without anything it sent
-//!   being read, so nobody else can spend or disturb the attempt in progress.
+//!   at a time, and only devices with local-network addresses ([`is_local_peer`]). Any other
+//!   device that connects meanwhile is told the old laptop is busy and is closed without anything
+//!   it sent being read, so nobody else can spend or disturb the attempt in progress.
 //! - The new laptop calls [`connect`] after the person typed the code. It first says whether the
 //!   code ends in an even or odd digit, so the host can answer with that code's message 1 even if
 //!   the code was replaced a moment ago (the grace period). The parity is the only thing it
 //!   reveals, and costs one bit of the code.
-//! - The first reply must come within [`LinkConfig::first_step_timeout`]; later steps within
-//!   [`LinkConfig::step_timeout`]. A device that goes quiet or breaks the protocol is dropped,
-//!   does not count as a guess, and its address is refused for [`LinkConfig::silence_penalty`].
-//!   A wrong code counts against the old laptop's failure budget.
-//! - A device that arrives while the old laptop is pausing after a wrong code, or whose code is no
-//!   longer live, is told so at once instead of being left to time out.
+//! - The whole handshake must finish within [`LinkConfig::handshake_timeout`]: the person has
+//!   already typed the code, so a real new laptop answers at once. Every attempt that fails is
+//!   classified where it fails. Only two outcomes are treated as honest: a wrong code (the person
+//!   may have mistyped; it counts against the failure budget instead) and a code that is no longer
+//!   live. Everything else, including silence, hanging up and sending the host a status notice,
+//!   refuses that address for [`LinkConfig::silence_penalty`].
+//! - Devices are told at once when the old laptop is busy, pausing after a wrong code, locked, or
+//!   when their code was wrong or has expired, instead of being left to time out. The host keeps
+//!   answering while locked, so the app learns about the lock from [`RotatingSender::status`].
 //! - After the person's pick on the old laptop, both sides get a [`Link`] that seals every message.
 //!
 //! Every frame on the wire is `[kind][length, 2 bytes big-endian][body]`. Pairing frames are
@@ -26,8 +29,10 @@
 //!
 //! - Someone on the local network can still stop pairing on purpose: wrong guesses from several
 //!   addresses trigger the safety stop (pairing locks until the person chooses Start again), and
-//!   a new address can hold the single slot for one first-step wait. This is an accepted nuisance,
-//!   not a way in (Security Design, decided 6 October 2026).
+//!   each new address can hold the single slot for one handshake limit. This is an accepted
+//!   nuisance, not a way in (Security Design, decided 6 October 2026).
+//! - "Local network" means private, link-local and loopback addresses. Some VPNs use such
+//!   addresses too, so the app should listen only on the chosen Wi-Fi interface's own address.
 //! - While the person is choosing the number, the host is not accepting: devices that connect then
 //!   wait in the operating system's queue and are served on the next [`Host::next_peer`] call.
 //! - [`Link::recv`] waits as long as it takes; the app decides how long a quiet link may last.
@@ -35,7 +40,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -48,11 +53,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use zeroize::Zeroizing;
 
-/// Default longest wait for each later pairing step from the other laptop.
+/// Default longest wait for each step the new laptop waits on, and for each send.
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
-/// Default longest wait for the new laptop's first message: it has already typed the code.
-pub const FIRST_STEP_TIMEOUT: Duration = Duration::from_secs(3);
-/// Default time an address that held the slot in silence, or broke the protocol, is refused.
+/// Default longest time one device may hold the old laptop's single pairing slot.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Default time an address whose attempt failed for any reason other than a wrong or expired
+/// code is refused.
 pub const SILENCE_PENALTY: Duration = Duration::from_secs(30);
 
 const KIND_PAIRING: u8 = 1;
@@ -62,10 +68,12 @@ const KIND_HELLO: u8 = 4;
 const KIND_PAUSED: u8 = 5;
 const KIND_EXPIRED: u8 = 6;
 const KIND_LOCKED: u8 = 7;
+const KIND_WRONG_CODE: u8 = 8;
 const HEADER_LEN: usize = 3;
 const MAX_DATA_LEN: usize = u16::MAX as usize;
-/// How long a refused device gets to read its notice before it is closed.
-const REFUSE_LINGER: Duration = Duration::from_secs(1);
+const SESSION_TAG: std::ops::Range<usize> = 2..10;
+/// How long a device gets to read a notice before it is closed.
+const NOTICE_LINGER: Duration = Duration::from_secs(1);
 /// Most devices being refused at once; beyond this, extra connections are closed without a notice.
 const MAX_REFUSALS: usize = 64;
 /// Most addresses remembered as penalised.
@@ -76,11 +84,11 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 /// Timing for one link.
 #[derive(Debug, Clone, Copy)]
 pub struct LinkConfig {
-    /// Longest wait for each later pairing step, and for each sealed message to be sent.
+    /// Longest wait for each step the new laptop waits on, and for each send.
     pub step_timeout: Duration,
-    /// Longest wait for the new laptop's first message.
-    pub first_step_timeout: Duration,
-    /// How long an address that held the slot in silence, or broke the protocol, is refused.
+    /// Longest time one device may hold the old laptop's pairing slot, from hello to reveal.
+    pub handshake_timeout: Duration,
+    /// How long an address whose attempt failed other than by a wrong or expired code is refused.
     pub silence_penalty: Duration,
 }
 
@@ -88,7 +96,7 @@ impl Default for LinkConfig {
     fn default() -> Self {
         Self {
             step_timeout: STEP_TIMEOUT,
-            first_step_timeout: FIRST_STEP_TIMEOUT,
+            handshake_timeout: HANDSHAKE_TIMEOUT,
             silence_penalty: SILENCE_PENALTY,
         }
     }
@@ -125,8 +133,8 @@ impl From<io::Error> for LinkError {
     }
 }
 
-/// Whether `ip` is on the local network: private, link-local or loopback. The host serves only
-/// these, so a laptop that is also on a VPN or the open internet is not reachable from there.
+/// Whether `ip` has a local-network address: private, link-local or loopback. The host serves
+/// only these.
 pub fn is_local_peer(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => v4.is_private() || v4.is_link_local() || v4.is_loopback(),
@@ -134,6 +142,36 @@ pub fn is_local_peer(ip: IpAddr) -> bool {
             Some(v4) => is_local_peer(IpAddr::V4(v4)),
             None => v6.is_loopback() || v6.is_unicast_link_local() || v6.is_unique_local(),
         },
+    }
+}
+
+/// How a failed attempt is judged.
+enum Blame {
+    /// A wrong code or a code that is no longer live: no penalty for the address.
+    Honest,
+    /// Anything else: the address is refused for a while.
+    Address,
+}
+
+struct Failure {
+    error: LinkError,
+    blame: Blame,
+}
+
+impl<E: Into<LinkError>> From<E> for Failure {
+    /// By default a failure is the address's fault; honest outcomes are marked where they happen.
+    fn from(e: E) -> Self {
+        Self {
+            error: e.into(),
+            blame: Blame::Address,
+        }
+    }
+}
+
+fn honest(error: impl Into<LinkError>) -> Failure {
+    Failure {
+        error: error.into(),
+        blame: Blame::Honest,
     }
 }
 
@@ -163,23 +201,22 @@ impl Host {
     }
 
     /// Serves devices one at a time until one completes the handshake and the person can pick
-    /// the number. Devices that fail are dropped and the next one is served. Returns an error
-    /// only when pairing is locked; the app then offers Start again ([`RotatingSender::unlock`]).
+    /// the number. Devices that fail are dropped and the next one is served. While pairing is
+    /// locked it keeps telling arriving devices so; after the person chooses Start again
+    /// ([`RotatingSender::unlock`]) it serves them again. Fails only if the system's secure random
+    /// source fails.
     pub async fn next_peer(
         &self,
         sender: &Mutex<RotatingSender>,
     ) -> Result<HostPending, LinkError> {
         loop {
-            if current_status(sender)? == SenderStatus::Locked {
-                return Err(PairingError::Locked.into());
-            }
             let Some((stream, peer)) = self.accept_local().await else {
                 continue;
             };
             match current_status(sender)? {
                 SenderStatus::Locked => {
                     self.refuse(stream, KIND_LOCKED);
-                    return Err(PairingError::Locked.into());
+                    continue;
                 }
                 SenderStatus::CoolingDown { .. } => {
                     self.refuse(stream, KIND_PAUSED);
@@ -192,7 +229,12 @@ impl Host {
                 continue;
             }
 
-            let attempt = serve(stream, sender, self.config);
+            let limit = self.config.handshake_timeout;
+            let attempt = async {
+                tokio::time::timeout(limit, serve(stream, sender, self.config))
+                    .await
+                    .unwrap_or_else(|_| Err(LinkError::Timeout.into()))
+            };
             tokio::pin!(attempt);
             let outcome = loop {
                 tokio::select! {
@@ -213,12 +255,18 @@ impl Host {
                         send_timeout: self.config.step_timeout,
                     });
                 }
-                Err(e) => {
-                    if deserves_penalty(&e) {
-                        self.penalise(peer.ip());
-                    }
-                    // Serve the next device; a lock is reported at the top of the loop.
-                }
+                Err(Failure {
+                    error: LinkError::Pairing(PairingError::Random),
+                    ..
+                }) => return Err(PairingError::Random.into()),
+                Err(Failure {
+                    blame: Blame::Address,
+                    ..
+                }) => self.penalise(peer.ip()),
+                Err(Failure {
+                    blame: Blame::Honest,
+                    ..
+                }) => {}
             }
         }
     }
@@ -253,7 +301,7 @@ impl Host {
             .penalised
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        map.get(&ip).is_some_and(|&until| now < until)
+        map.get(&penalty_key(ip)).is_some_and(|&until| now < until)
     }
 
     fn penalise(&self, ip: IpAddr) {
@@ -267,26 +315,21 @@ impl Host {
             .unwrap_or_else(PoisonError::into_inner);
         map.retain(|_, until| now < *until);
         if map.len() < MAX_PENALISED {
-            map.insert(ip, now + self.config.silence_penalty);
+            map.insert(penalty_key(ip), now + self.config.silence_penalty);
         }
     }
 }
 
-/// Silence and protocol breakage cost the address a penalty. A plausible wrong code does not:
-/// the person may simply have mistyped, and the failure budget already counts it.
-fn deserves_penalty(e: &LinkError) -> bool {
-    matches!(
-        e,
-        LinkError::Timeout
-            | LinkError::TooLarge
-            | LinkError::Unexpected
-            | LinkError::Pairing(
-                PairingError::Malformed
-                    | PairingError::InvalidKey
-                    | PairingError::UnknownSession
-                    | PairingError::UnsupportedVersion(_)
-            )
-    )
+/// IPv6 devices choose their own address within a /64, so penalties apply to the whole /64.
+fn penalty_key(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) if v6.to_ipv4_mapped().is_none() => {
+            let s = v6.segments();
+            IpAddr::V6(Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
+        }
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        v4 => v4,
+    }
 }
 
 /// The old laptop, offering three numbers to the person.
@@ -322,6 +365,7 @@ impl HostPending {
             paired,
             stream: self.stream,
             send_timeout: self.send_timeout,
+            broken: false,
         })
     }
 }
@@ -338,10 +382,10 @@ pub async fn connect(
         .await
         .map_err(|_| LinkError::Timeout)??;
     write_frame(&mut stream, KIND_HELLO, &[code.parity()], wait).await?;
-    let msg1 = read_pairing(&mut stream, wait).await?;
+    let msg1 = read_from_host(&mut stream, wait).await?;
     let (receiver, msg2) = ReceiverSession::respond(code, &msg1, Instant::now())?;
     write_frame(&mut stream, KIND_PAIRING, &msg2, wait).await?;
-    let msg3 = read_pairing(&mut stream, wait).await?;
+    let msg3 = read_from_host(&mut stream, wait).await?;
     let (waiting, reveal) = receiver
         .receive(&msg3, Instant::now())
         .map_err(PairingError::from)?;
@@ -377,7 +421,7 @@ impl GuestPending {
             .waiting
             .deadline()
             .saturating_duration_since(Instant::now());
-        let approval = read_pairing(&mut self.stream, wait).await?;
+        let approval = read_from_host(&mut self.stream, wait).await?;
         let paired = self
             .waiting
             .receive_approval(&approval, Instant::now())
@@ -386,33 +430,49 @@ impl GuestPending {
             paired,
             stream: self.stream,
             send_timeout: self.send_timeout,
+            broken: false,
         })
     }
 }
 
 /// A paired, encrypted link. Every message is sealed; anything altered, replayed or forged is
-/// rejected.
+/// rejected. After any failure the link is closed for good, since a half-sent or half-read frame
+/// would leave the stream out of step.
 pub struct Link {
     paired: Paired,
     stream: TcpStream,
     send_timeout: Duration,
+    broken: bool,
 }
 
 impl Link {
     /// Seals and sends one message. Fails with [`LinkError::Timeout`] if the other laptop stops
     /// reading.
     pub async fn send(&mut self, data: &[u8]) -> Result<(), LinkError> {
+        if self.broken {
+            return Err(LinkError::Closed);
+        }
         let sealed = self.paired.transport_mut().seal(data)?;
-        write_frame(&mut self.stream, KIND_DATA, &sealed, self.send_timeout).await
+        let sent = write_frame(&mut self.stream, KIND_DATA, &sealed, self.send_timeout).await;
+        self.broken = sent.is_err();
+        sent
     }
 
     /// Receives and opens one message. Waits as long as it takes; wrap in a timeout if needed.
     pub async fn recv(&mut self) -> Result<Zeroizing<Vec<u8>>, LinkError> {
-        let (kind, body) = read_frame(&mut self.stream, MAX_DATA_LEN).await?;
-        if kind != KIND_DATA {
-            return Err(LinkError::Unexpected);
+        if self.broken {
+            return Err(LinkError::Closed);
         }
-        Ok(self.paired.transport_mut().open(&body)?)
+        let opened = async {
+            let (kind, body) = read_frame(&mut self.stream, MAX_DATA_LEN).await?;
+            if kind != KIND_DATA {
+                return Err(LinkError::Unexpected);
+            }
+            Ok(self.paired.transport_mut().open(&body)?)
+        }
+        .await;
+        self.broken = opened.is_err();
+        opened
     }
 }
 
@@ -439,16 +499,18 @@ fn current_status(sender: &Mutex<RotatingSender>) -> Result<SenderStatus, LinkEr
     Ok(s.status())
 }
 
+/// Runs one device's attempt. Every failure is the address's fault unless marked honest.
 async fn serve(
     mut stream: TcpStream,
     sender: &Mutex<RotatingSender>,
     config: LinkConfig,
-) -> Result<(SenderChoosing, TcpStream), LinkError> {
-    let wait = config.step_timeout;
-    let hello = read_kind(&mut stream, KIND_HELLO, config.first_step_timeout).await?;
+) -> Result<(SenderChoosing, TcpStream), Failure> {
+    // Each read is bounded by the whole-handshake limit around this function.
+    let wait = config.handshake_timeout;
+    let hello = read_from_guest(&mut stream, KIND_HELLO, wait).await?;
     let parity = match hello.as_slice() {
         [p @ (0 | 1)] => *p,
-        _ => return Err(LinkError::Unexpected),
+        _ => return Err(LinkError::Unexpected.into()),
     };
     let msg1 = {
         let mut s = lock(sender);
@@ -456,24 +518,55 @@ async fn serve(
         s.message_1_for(parity).map(<[u8]>::to_vec)
     };
     let Some(msg1) = msg1 else {
-        write_frame(&mut stream, KIND_EXPIRED, &[], wait).await?;
-        return Err(PairingError::Expired.into());
+        notify(&mut stream, KIND_EXPIRED).await;
+        return Err(honest(PairingError::Expired));
     };
     write_frame(&mut stream, KIND_PAIRING, &msg1, wait).await?;
-    let msg2 = read_pairing(&mut stream, wait).await?;
-    let (waiting, msg3) = lock(sender).receive(&msg2, Instant::now())?;
+
+    let msg2 = read_from_guest(&mut stream, KIND_PAIRING, wait).await?;
+    if msg2.get(SESSION_TAG) != msg1.get(SESSION_TAG) {
+        // A reply must answer the message 1 this device was given.
+        return Err(LinkError::Unexpected.into());
+    }
+    let received = lock(sender).receive(&msg2, Instant::now());
+    let (waiting, msg3) = match received {
+        Ok(done) => done,
+        // The code this device holds ran out of grace during the handshake.
+        Err(PairingError::UnknownSession) => {
+            notify(&mut stream, KIND_EXPIRED).await;
+            return Err(honest(PairingError::Expired));
+        }
+        // A wrong code: counted against the failure budget, which may now have locked pairing.
+        Err(PairingError::HandshakeFailed) => {
+            let locked = current_status(sender)? == SenderStatus::Locked;
+            let (kind, error) = if locked {
+                (KIND_LOCKED, PairingError::Locked)
+            } else {
+                (KIND_WRONG_CODE, PairingError::HandshakeFailed)
+            };
+            notify(&mut stream, kind).await;
+            return Err(honest(error));
+        }
+        Err(e) => return Err(e.into()),
+    };
     write_frame(&mut stream, KIND_PAIRING, &msg3, wait).await?;
-    let reveal = read_pairing(&mut stream, wait).await?;
+    let reveal = read_from_guest(&mut stream, KIND_PAIRING, wait).await?;
     let choosing = waiting
         .receive_reveal(&reveal, Instant::now())
         .map_err(PairingError::from)?;
     Ok((choosing, stream))
 }
 
+/// Sends a notice on a connection that is about to close, without waiting long.
+async fn notify(stream: &mut TcpStream, kind: u8) {
+    let _ = write_frame(stream, kind, &[], NOTICE_LINGER).await;
+    let _ = tokio::time::timeout(NOTICE_LINGER, stream.shutdown()).await;
+}
+
 /// Sends a notice of `kind` and closes, without reading anything the device sent.
 async fn send_notice_and_close(mut stream: TcpStream, kind: u8) {
-    let _ = tokio::time::timeout(REFUSE_LINGER, async {
-        write_frame(&mut stream, kind, &[], REFUSE_LINGER).await?;
+    let _ = tokio::time::timeout(NOTICE_LINGER, async {
+        write_frame(&mut stream, kind, &[], NOTICE_LINGER).await?;
         stream.shutdown().await?;
         // Let the device read the notice before the socket closes; its bytes are discarded.
         let mut sink = [0u8; 512];
@@ -512,24 +605,35 @@ async fn read_frame(stream: &mut TcpStream, max: usize) -> Result<(u8, Vec<u8>),
     Ok((header[0], body))
 }
 
-async fn read_kind(
+async fn read_timed(stream: &mut TcpStream, wait: Duration) -> Result<(u8, Vec<u8>), LinkError> {
+    tokio::time::timeout(wait, read_frame(stream, MAX_MESSAGE_LEN))
+        .await
+        .map_err(|_| LinkError::Timeout)?
+}
+
+/// The host reads exactly the kind it expects. Notices only ever travel from host to guest, so a
+/// guest that sends one is breaking the protocol.
+async fn read_from_guest(
     stream: &mut TcpStream,
     expected: u8,
     wait: Duration,
 ) -> Result<Vec<u8>, LinkError> {
-    let (kind, body) = tokio::time::timeout(wait, read_frame(stream, MAX_MESSAGE_LEN))
-        .await
-        .map_err(|_| LinkError::Timeout)??;
-    match kind {
-        k if k == expected => Ok(body),
-        KIND_BUSY => Err(LinkError::Busy),
-        KIND_PAUSED => Err(PairingError::CoolingDown.into()),
-        KIND_EXPIRED => Err(PairingError::Expired.into()),
-        KIND_LOCKED => Err(PairingError::Locked.into()),
+    match read_timed(stream, wait).await? {
+        (kind, body) if kind == expected => Ok(body),
         _ => Err(LinkError::Unexpected),
     }
 }
 
-async fn read_pairing(stream: &mut TcpStream, wait: Duration) -> Result<Vec<u8>, LinkError> {
-    read_kind(stream, KIND_PAIRING, wait).await
+/// The guest reads a pairing message, or a notice explaining why the host stopped.
+async fn read_from_host(stream: &mut TcpStream, wait: Duration) -> Result<Vec<u8>, LinkError> {
+    let (kind, body) = read_timed(stream, wait).await?;
+    match kind {
+        KIND_PAIRING => Ok(body),
+        KIND_BUSY => Err(LinkError::Busy),
+        KIND_PAUSED => Err(PairingError::CoolingDown.into()),
+        KIND_EXPIRED => Err(PairingError::Expired.into()),
+        KIND_LOCKED => Err(PairingError::Locked.into()),
+        KIND_WRONG_CODE => Err(PairingError::HandshakeFailed.into()),
+        _ => Err(LinkError::Unexpected),
+    }
 }

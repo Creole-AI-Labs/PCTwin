@@ -313,3 +313,21 @@ fn codes_stay_random_apart_from_the_last_digit() {
         "every digit should appear in every position"
     );
 }
+
+#[test]
+fn after_a_pause_the_spent_code_is_reported_expired_not_charged_again() {
+    // With no code in its grace period, the code shown after a pause has the other even/odd
+    // than the code a wrong guess just spent, so the spent code's holder is told it expired.
+    let start = Instant::now();
+    let mut sender = RotatingSender::new(start).unwrap();
+    let spent = sender.code().unwrap();
+    let wrong = if spent == "000000" {
+        "000002"
+    } else {
+        "000000"
+    };
+    let msg1 = sender.message_1().unwrap().to_vec();
+    let _ = attempt(&mut sender, wrong, &msg1, start);
+    sender.tick(start + Duration::from_secs(2)).unwrap();
+    assert!(sender.message_1_for(parity_of(&spent)).is_none());
+}
