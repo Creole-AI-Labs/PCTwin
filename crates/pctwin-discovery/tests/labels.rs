@@ -266,3 +266,146 @@ fn announcements_from_others_are_checked_like_anything_else_that_arrives() {
     let too_long = "a".repeat(MAX_NAME_CHARS + 1);
     assert_eq!(parse(&[("v", "1"), ("n", too_long.as_str())]), None);
 }
+
+// ---------- real names people type, in many languages ----------
+
+#[test]
+fn everyday_punctuation_from_many_languages_is_accepted() {
+    for name in [
+        "艾伦·图灵", // Chinese middle dot in a name
+        "买买提·艾力",
+        "张伟的电脑（旧）", // full-width brackets, as Chinese keyboards type them
+        "我的电脑，旧的",
+        "家里、办公室",
+        "Bureau n°2",
+        "« Bureau »",
+        "Salon – PC",
+        "¡Mi PC!",
+        "¿Dónde?",
+        "José/María",
+        "حاسوب سارة، القديم", // Arabic comma
+        "هل هذا؟",            // Arabic question mark
+        "Home/Office PC",
+        "MacBook Pro 15\"",
+        "“Ada’s” laptop",
+        "Ada — work",
+        "Old one…",
+        "[Office]",
+        "PC; old",
+        "PC*",
+        "डॉ॰ शर्मा",
+        "ジョン・スミス", // Japanese middle dot
+        "བསྟན་འཛིན",        // Tibetan syllable mark (Tenzin)
+    ] {
+        assert_eq!(
+            Label::named(name).unwrap(),
+            Label::Named(name.into()),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn scripts_that_need_joiners_or_stacked_marks_are_accepted() {
+    for name in [
+        "لپ‌تاپ", // Persian: zero-width non-joiner between letters
+        "ශ්‍රී",    // Sinhala: zero-width joiner
+        "ကျော်",  // Burmese: four marks on one letter
+        "में",     // Hindi: two marks in a row
+        "हैं",
+        "مُحَمَّد", // Arabic: shadda with a vowel mark
+    ] {
+        assert_eq!(
+            Label::named(name).unwrap(),
+            Label::Named(name.into()),
+            "{name:?}"
+        );
+    }
+}
+
+#[test]
+fn joiners_are_only_allowed_between_letters() {
+    for bad in [
+        "\u{200C}Ada",
+        "Ada\u{200C}",
+        "A\u{200C}\u{200C}da",
+        "Ada \u{200C}x",
+        "Ada\u{200D} x",
+        "Ada.\u{200D}x",
+        "\u{200D}",
+    ] {
+        assert!(Label::named(bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn marks_must_sit_on_a_letter_and_cannot_pile_up() {
+    for bad in [
+        "Ada \u{301}x",
+        "Ada.\u{301}",
+        "Ada,\u{301}",
+        "a\u{301}\u{301}\u{301}\u{301}\u{301}\u{301}",
+    ] {
+        assert!(Label::named(bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn more_invisible_characters_are_refused() {
+    for bad in [
+        "Ada\u{180B}",
+        "Ada\u{180D}",
+        "Ada\u{E0100}",
+        "Ada\u{1160}",
+        "Ada\u{17B4}",
+        "Ada\u{17B5}",
+        "Ada\u{A0}laptop", // no-break space looks like a space but is not one
+        "Ada\u{2007}laptop",
+    ] {
+        assert!(Label::named(bad).is_err(), "{bad:?}");
+    }
+    // Arriving from the network, a trailing space is not tidy and is refused.
+    assert_eq!(Label::from_txt(&[("v", "1"), ("n", "Ada ")]), None);
+}
+
+#[test]
+fn the_length_limit_counts_letters_people_see() {
+    // About 20 visible letters, 36 code points: fits.
+    let hindi = "श्रीमती प्रियंका चतुर्वेदी का लैपटॉप";
+    assert!(hindi.chars().count() > MAX_NAME_CHARS);
+    assert!(Label::named(hindi).is_ok());
+    assert!(Label::named(&"a".repeat(MAX_NAME_CHARS)).is_ok());
+    assert!(Label::named(&"a".repeat(MAX_NAME_CHARS + 1)).is_err());
+}
+
+#[test]
+fn twins_are_recognised_through_width_and_joiners() {
+    let key = |s: &str| Label::named(s).unwrap().comparison_key();
+    assert_eq!(key("ＡＤＡ ＰＣ"), key("ada pc"));
+    assert_eq!(key("ﬁle"), key("file"));
+    assert_eq!(key("لپ‌تاپ"), key("لپتاپ"));
+}
+
+#[test]
+fn every_colour_and_animal_label_has_its_own_comparison_key() {
+    let keys: HashSet<String> = (0..1200u16)
+        .map(|i| {
+            Label::Picked {
+                colour: (i / 100) as u8,
+                animal: (i % 100) as u8,
+            }
+            .comparison_key()
+        })
+        .collect();
+    assert_eq!(keys.len(), 1200);
+}
+
+#[test]
+fn a_name_that_looks_short_but_is_huge_underneath_is_refused() {
+    // 32 visible letters, each carrying four accent marks: 288 bytes, too big for one field.
+    let heavy = "x\u{301}\u{301}\u{301}\u{301}".repeat(MAX_NAME_CHARS);
+    assert!(heavy.len() > 255);
+    assert!(Label::named(&heavy).is_err());
+    // The same with fewer letters fits.
+    assert!(Label::named(&"x\u{301}\u{301}\u{301}\u{301}".repeat(20)).is_ok());
+}

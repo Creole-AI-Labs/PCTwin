@@ -14,9 +14,9 @@
 //! connects only to the laptop the person chose. The code and the number match keep pairing safe.
 //!
 //! Names are checked against an allow-list, not a block-list: letters and numbers in any script,
-//! accent marks on them (at most three in a row), single spaces between words and a little
-//! ordinary punctuation, at most [`MAX_NAME_CHARS`] characters, with at least one visible letter or
-//! number. Invisible, blank-looking, control, text-direction and private characters are refused.
+//! accent marks on them (at most four in a row), joiners only inside words, single spaces between
+//! words and everyday punctuation from many languages, at most [`MAX_NAME_CHARS`] visible
+//! characters, with at least one letter or number. Emoji, invisible, blank-looking, control, text-direction and private characters are refused.
 //! Names are stored in one standard accent form (Unicode NFC), and two labels count as the same
 //! when they match ignoring case and accent form ([`Label::comparison_key`]).
 //!
@@ -37,17 +37,34 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 /// The multicast DNS service type PCTwin old laptops announce while pairing.
 pub const SERVICE_TYPE: &str = "_pctwin._tcp.local.";
-/// Longest name a person may type, in characters.
+/// Longest name a person may type, in letters people see (accent marks and joiners don't count).
 pub const MAX_NAME_CHARS: usize = 32;
+/// Longest name in bytes, so it always fits in one announcement field.
+const MAX_NAME_BYTES: usize = 240;
 /// Most addresses kept for one old laptop.
 pub const MAX_ADDRS: usize = 8;
 /// Version of the announcement format.
 const FORMAT_VERSION: &str = "1";
-/// Most accent marks allowed on one letter.
-const MAX_MARKS_IN_A_ROW: usize = 3;
-/// Punctuation allowed in a typed name, besides letters, numbers and single spaces.
-const NAME_PUNCTUATION: &[char] = &[
-    '\'', '\u{2019}', '-', '_', '.', ',', '&', '(', ')', '!', '?', '#', '+', '@', ':',
+/// Most accent marks allowed on one letter (Burmese and Hindi stack several).
+const MAX_MARKS_IN_A_ROW: usize = 4;
+/// Zero-width non-joiner and joiner: needed inside words in Persian, Sinhala and other scripts,
+/// so allowed only between two letters.
+const JOINERS: [char; 2] = ['\u{200C}', '\u{200D}'];
+/// Everyday punctuation from many languages, besides all ASCII punctuation.
+const EXTRA_PUNCTUATION: &[char] = &[
+    '\u{00B7}', // middle dot, in Chinese transliterated names
+    '\u{30FB}', // katakana middle dot
+    '\u{FF08}', '\u{FF09}', '\u{FF0C}', '\u{FF1A}', '\u{FF01}',
+    '\u{FF1F}', // full-width ( ) , : ! ?
+    '\u{3001}', '\u{3002}', // ideographic comma and full stop
+    '\u{00B0}', '\u{2116}', // degree sign, numero sign
+    '\u{00AB}', '\u{00BB}', // guillemets
+    '\u{2013}', '\u{2014}', '\u{2026}', // en dash, em dash, ellipsis
+    '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}', // curly quotes
+    '\u{00A1}', '\u{00BF}', // inverted ! and ?
+    '\u{060C}', '\u{061F}', // Arabic comma and question mark
+    '\u{0970}', // Devanagari abbreviation sign
+    '\u{0F0B}', // Tibetan syllable mark
 ];
 
 /// Label colours, as translation keys. Shown with the animal's picture and its name, never as
@@ -166,7 +183,9 @@ pub const ANIMALS: [&str; 100] = [
 pub enum DiscoveryError {
     #[error("the system's secure random source failed")]
     Random,
-    #[error("that name can't be used; use up to 32 letters, numbers and spaces")]
+    #[error(
+        "that name can't be used; use up to 32 letters, numbers, spaces and ordinary punctuation"
+    )]
     InvalidName,
     #[error("local discovery is not available on this network: {0}")]
     Network(String),
@@ -227,12 +246,16 @@ impl Label {
     }
 
     /// What two labels are compared by when flagging duplicates: the colour and animal, or the
-    /// name ignoring case and accent form.
+    /// name ignoring case, accent form, width and joiners.
     pub fn comparison_key(&self) -> String {
         match self {
             Self::Picked { colour, animal } => format!("picked:{colour}:{animal}"),
             Self::Named(name) => {
-                let lower: String = name.nfkc().flat_map(char::to_lowercase).collect();
+                let lower: String = name
+                    .nfkc()
+                    .filter(|c| !JOINERS.contains(c))
+                    .flat_map(char::to_lowercase)
+                    .collect();
                 format!("named:{}", lower.nfc().collect::<String>())
             }
         }
@@ -279,7 +302,8 @@ impl Label {
             (None, None, Some(n)) if is_acceptable_name(n) => Self::Named(n.to_string()),
             _ => return None,
         };
-        // Nothing else may be present, and no field twice.
+        // Nothing else may be present, and no field twice. (The network library already keeps
+        // only the first of any repeated field it receives; this also covers direct callers.)
         (fields.len() == label.to_txt().len()).then_some(label)
     }
 
@@ -294,39 +318,50 @@ impl Label {
 
 /// The allow-list for names: see the module documentation.
 fn is_acceptable_name(name: &str) -> bool {
-    if !(1..=MAX_NAME_CHARS).contains(&name.chars().count()) || !is_nfc(name) {
+    if name.is_empty() || name.len() > MAX_NAME_BYTES || !is_nfc(name) {
         return false;
     }
-    let mut visible = false;
+    let chars: Vec<char> = name.chars().collect();
+    let is_letter = |c: char| c.is_alphanumeric() && !is_invisible(c);
+    let mut visible = 0;
     let mut marks_in_a_row = 0;
-    let mut previous: Option<char> = None;
-    for c in name.chars() {
+    for (i, &c) in chars.iter().enumerate() {
+        let previous = i.checked_sub(1).map(|j| chars[j]);
+        let next = chars.get(i + 1).copied();
         if is_invisible(c) {
             return false;
         }
         if is_combining_mark(c) {
-            // A mark must sit on a letter or number, and not pile up.
+            // A mark sits on a letter or on another mark, and does not pile up.
             marks_in_a_row += 1;
             if marks_in_a_row > MAX_MARKS_IN_A_ROW
-                || previous.is_none_or(|p| p == ' ' || NAME_PUNCTUATION.contains(&p))
+                || !previous.is_some_and(|p| is_letter(p) || is_combining_mark(p))
             {
                 return false;
             }
-        } else {
-            marks_in_a_row = 0;
-            if c == ' ' {
-                if previous.is_none_or(|p| p == ' ') {
-                    return false;
-                }
-            } else if c.is_alphanumeric() {
-                visible = true;
-            } else if !NAME_PUNCTUATION.contains(&c) {
+            continue;
+        }
+        marks_in_a_row = 0;
+        if JOINERS.contains(&c) {
+            // Inside a word only: after a letter or mark, before a letter.
+            let after_letter = previous.is_some_and(|p| is_letter(p) || is_combining_mark(p));
+            if !after_letter || !next.is_some_and(is_letter) {
                 return false;
             }
+        } else if c == ' ' {
+            // Single spaces between words.
+            if previous.is_none_or(|p| p == ' ') || next.is_none() {
+                return false;
+            }
+            visible += 1;
+        } else if is_letter(c) || c.is_ascii_punctuation() || EXTRA_PUNCTUATION.contains(&c) {
+            visible += 1;
+        } else {
+            return false;
         }
-        previous = Some(c);
     }
-    visible && previous != Some(' ')
+    let has_letter = chars.iter().any(|&c| is_letter(c));
+    has_letter && visible <= MAX_NAME_CHARS
 }
 
 /// Letters and marks that Unicode treats as invisible ("default ignorable") or that render blank,
@@ -516,10 +551,8 @@ pub struct Announcement {
 
 impl Drop for Announcement {
     fn drop(&mut self) {
-        if let Ok(done) = self.daemon.unregister(&self.fullname) {
-            // Wait briefly so the goodbye is sent before the daemon may shut down.
-            let _ = done.recv_timeout(Duration::from_secs(1));
-        }
+        // The goodbye is queued at once; waiting for confirmation was shown to add nothing.
+        let _ = self.daemon.unregister(&self.fullname);
     }
 }
 
@@ -549,6 +582,19 @@ mod tests {
             kept,
             ["10.0.0.5:4000", "192.168.1.20:4000", "[fd00::5]:4000"]
         );
+    }
+
+    #[test]
+    fn ipv4_addresses_are_kept_first_when_there_are_too_many() {
+        let mut ips: Vec<ScopedIp> = (1..=7).map(|i| v4(&format!("fd00::{i}"))).collect();
+        ips.insert(3, v4("192.168.1.9"));
+        ips.push(v4("10.0.0.2"));
+        ips.push(v4("10.0.0.1"));
+        let kept = usable_addrs(ips.iter(), 4000);
+        assert_eq!(kept.len(), MAX_ADDRS);
+        let v4_kept = kept.iter().filter(|a| a.is_ipv4()).count();
+        assert_eq!(v4_kept, 3, "{kept:?}");
+        assert!(kept[..3].iter().all(SocketAddr::is_ipv4));
     }
 
     #[test]
