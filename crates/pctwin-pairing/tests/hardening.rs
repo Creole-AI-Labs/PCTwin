@@ -285,6 +285,47 @@ fn a_malformed_message_3_does_not_cancel_the_receiver() {
     assert!(r.receive(&m3).is_ok());
 }
 
+#[test]
+fn well_framed_junk_message_3_does_not_cancel_the_receiver() {
+    let now = Instant::now();
+    let code = PairingCode::generate().unwrap();
+    let (s, m1) = SenderSession::start(&code, now);
+    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
+    let (_waiting, m3) = s.receive(&m2, now).unwrap();
+
+    // Correct version and kind, then junk of every length up to a full-size message 3 and beyond.
+    let mut r = r;
+    let mut seed = 0x5eed_u64;
+    for len in 0..=120usize {
+        let mut junk = vec![1u8, 3];
+        for _ in 0..len {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            junk.push((seed & 0xff) as u8);
+        }
+        r = r
+            .receive(&junk)
+            .unwrap_err()
+            .into_retry()
+            .unwrap_or_else(|| panic!("{len}-byte junk message 3 cancelled the receiver"));
+    }
+    // A genuine message 3 with one byte flipped is also junk to the receiver.
+    for i in 2..m3.len() {
+        let mut flipped = m3.clone();
+        flipped[i] ^= 1;
+        r = r
+            .receive(&flipped)
+            .unwrap_err()
+            .into_retry()
+            .unwrap_or_else(|| panic!("flipped byte {i} cancelled the receiver"));
+    }
+    assert!(
+        r.receive(&m3).is_ok(),
+        "the genuine message 3 still completes pairing"
+    );
+}
+
 // ---------- F9: degenerate SPAKE2 points ----------
 
 const IDENTITY: [u8; 32] = {
@@ -321,8 +362,11 @@ fn receiver_rejects_degenerate_points_from_the_sender() {
     bad.push((honest + EIGHT_TORSION[1]).compress().to_bytes());
     for p in bad {
         assert!(
-            ReceiverSession::respond(&code, &with_point(&m1, 11, p)).is_err(),
-            "accepted point {p:02x?}"
+            matches!(
+                ReceiverSession::respond(&code, &with_point(&m1, 11, p)),
+                Err(PairingError::InvalidKey)
+            ),
+            "point {p:02x?} was not rejected by the point check"
         );
     }
 }
@@ -335,6 +379,12 @@ fn sender_rejects_degenerate_points_from_the_receiver() {
     for p in small_order_points() {
         let (s, m1) = SenderSession::start(&code, now);
         let (_r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
-        assert!(s.receive(&with_point(&m2, 11, p), now).is_err());
+        assert!(
+            matches!(
+                s.receive(&with_point(&m2, 11, p), now),
+                Err(PairingError::InvalidKey)
+            ),
+            "point {p:02x?} was not rejected by the point check"
+        );
     }
 }

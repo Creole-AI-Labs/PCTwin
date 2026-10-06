@@ -99,6 +99,8 @@ pub enum PairingError {
     UnsupportedVersion(u8),
     #[error("a pairing message was not in the expected form")]
     Malformed,
+    #[error("the other laptop sent an invalid pairing key")]
+    InvalidKey,
     #[error("the laptops could not pair; check the code and try a new one")]
     HandshakeFailed,
     #[error("that number does not match the one on the other laptop")]
@@ -413,18 +415,19 @@ impl ReceiverSession {
         Ok((Self { hs }, frame(KIND_SPAKE_B_NOISE_1, &payload)))
     }
 
-    /// Handles message 3. Returns the three numbers to offer the person. A message that is not a
-    /// well-formed message 3 hands the session back; a message 3 that fails the handshake ends it.
+    /// Handles message 3. Returns the three numbers to offer the person. Any message that fails
+    /// before the handshake completes (junk, truncated, forged) hands the session back: `snow`
+    /// restores its handshake state on a failed read, so the genuine message 3 still works.
     pub fn receive(mut self, msg3: &[u8]) -> Result<ReceiverChoosing, Rejected<Self>> {
         let payload = match parse_frame(msg3, KIND_NOISE_2) {
             Ok(p) => p,
             Err(e) => return Err(Rejected::keep(e, self)),
         };
         let mut buf = [0u8; 128];
-        let read = self
-            .hs
-            .read_message(payload, &mut buf)
-            .map_err(|_| Rejected::end(PairingError::HandshakeFailed))?;
+        let read = match self.hs.read_message(payload, &mut buf) {
+            Ok(n) => n,
+            Err(_) => return Err(Rejected::keep(PairingError::HandshakeFailed, self)),
+        };
         if read != 0 {
             return Err(Rejected::end(PairingError::Malformed));
         }
@@ -765,9 +768,9 @@ fn check_spake_point(msg: &[u8]) -> Result<(), PairingError> {
         .ok_or(PairingError::Malformed)?;
     let point = CompressedEdwardsY(encoded)
         .decompress()
-        .ok_or(PairingError::HandshakeFailed)?;
+        .ok_or(PairingError::InvalidKey)?;
     if point.is_small_order() || !point.is_torsion_free() {
-        return Err(PairingError::HandshakeFailed);
+        return Err(PairingError::InvalidKey);
     }
     Ok(())
 }
