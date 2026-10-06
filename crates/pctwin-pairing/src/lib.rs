@@ -869,6 +869,35 @@ mod tests {
     }
 
     #[test]
+    fn a_locked_sender_refuses_everything_even_a_grace_code_with_the_right_digits() {
+        let t0 = Instant::now();
+        let mut s = RotatingSender::new(t0).expect("sender");
+        let old_code = s.code().expect("code");
+        let old_msg1 = s.message_1().expect("msg1").to_vec();
+        // The old code moves into its grace period.
+        s.tick(t0 + CODE_LIFETIME).expect("tick");
+        // Lock while the old code is still within grace.
+        let t = t0 + CODE_LIFETIME + Duration::from_secs(1);
+        for _ in 0..MAX_FAILED_ATTEMPTS {
+            s.record_failure(t);
+        }
+        assert_eq!(s.status(), SenderStatus::Locked);
+        let failures = s.failed_attempts();
+
+        let typed = PairingCode::parse(&old_code).expect("parse");
+        let (_r, msg2) = ReceiverSession::respond(&typed, &old_msg1).expect("respond");
+        assert!(matches!(s.receive(&msg2, t), Err(PairingError::Locked)));
+        assert_eq!(
+            s.failed_attempts(),
+            failures,
+            "a refused reply must not count"
+        );
+        // Long after, the lock still holds and the old code still cannot pair.
+        let later = t + Duration::from_secs(3600);
+        assert!(matches!(s.receive(&msg2, later), Err(PairingError::Locked)));
+    }
+
+    #[test]
     fn backoff_doubles_then_locks() {
         let now = Instant::now();
         let mut s = RotatingSender::new(now).expect("sender");

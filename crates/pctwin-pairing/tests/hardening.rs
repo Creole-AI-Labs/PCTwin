@@ -111,6 +111,28 @@ fn a_confirmation_without_a_number_is_rejected() {
     assert!(rejected.into_retry().is_none());
 }
 
+#[test]
+fn a_confirmation_with_the_right_number_but_a_wrong_label_is_rejected() {
+    for bad_label in [
+        &b""[..],
+        b"pctwin/v1/WRONG!!",
+        b"pctwin/v1/confirme",
+        b"PCTWIN/V1/CONFIRMED",
+    ] {
+        let now = Instant::now();
+        let mut sender = RotatingSender::new(now).unwrap();
+        let (waiting, mut tr) = raw_receiver(&mut sender, now);
+        let mut plain = bad_label.to_vec();
+        plain.push(waiting.match_number());
+        let m4 = sealed_confirmation(&mut tr, &plain);
+        let rejected = waiting.receive_confirmation(&m4, now).unwrap_err();
+        assert!(
+            rejected.into_retry().is_none(),
+            "label {bad_label:?} was not checked"
+        );
+    }
+}
+
 // ---------- F2: failure budget ----------
 
 fn burn_one(sender: &mut RotatingSender, now: Instant) -> PairingError {
@@ -264,6 +286,14 @@ fn confirmation_after_the_deadline_is_refused() {
     let rejected = waiting.receive_confirmation(&m4, late).unwrap_err();
     assert_eq!(rejected.error(), PairingError::Expired);
     assert!(rejected.into_retry().is_none());
+}
+
+#[test]
+fn a_confirmation_arriving_exactly_at_the_deadline_is_accepted() {
+    let now = Instant::now();
+    let (waiting, m4) = up_to_confirmation(now);
+    let deadline = waiting.deadline();
+    assert!(waiting.receive_confirmation(&m4, deadline).is_ok());
 }
 
 #[test]
