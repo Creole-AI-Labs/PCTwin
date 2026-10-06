@@ -173,3 +173,104 @@ fn an_old_laptop_that_stops_during_the_search_drops_out_of_the_list() {
     let found = searching.join().unwrap().unwrap();
     assert!(find(&found, &label).is_empty(), "{found:?}");
 }
+
+#[test]
+fn two_old_laptops_showing_the_same_colour_and_animal_are_both_flagged() {
+    let label = Label::random().unwrap();
+    let a = Discovery::new().unwrap();
+    let b = Discovery::new().unwrap();
+    let _one = a.announce(&label, 47_131).unwrap();
+    let _two = b.announce(&label, 47_132).unwrap();
+    let found = Discovery::new().unwrap().browse(WAIT).unwrap();
+    let mine: Vec<&Found> = found
+        .iter()
+        .filter(|f| f.addrs.iter().all(|a| [47_131, 47_132].contains(&a.port())))
+        .collect();
+    assert_eq!(mine.len(), 2, "{found:?}");
+    assert!(mine.iter().all(|f| f.same_label_nearby));
+}
+
+#[test]
+fn names_differing_only_in_case_are_flagged_as_the_same() {
+    let lower = unique("twin case");
+    let Label::Named(name) = &lower else {
+        unreachable!()
+    };
+    let upper = Label::named(&name.to_uppercase()).unwrap();
+    let a = Discovery::new().unwrap();
+    let b = Discovery::new().unwrap();
+    let _one = a.announce(&lower, 47_133).unwrap();
+    let _two = b.announce(&upper, 47_134).unwrap();
+    let found = Discovery::new().unwrap().browse(WAIT).unwrap();
+    let mine: Vec<&Found> = found
+        .iter()
+        .filter(|f| f.addrs.iter().all(|a| [47_133, 47_134].contains(&a.port())))
+        .collect();
+    assert_eq!(mine.len(), 2, "{found:?}");
+    assert!(mine.iter().all(|f| f.same_label_nearby));
+}
+
+#[test]
+fn closing_discovery_stops_its_announcements() {
+    let label = unique("closing");
+    let old = Discovery::new().unwrap();
+    let announcing = old.announce(&label, 47_135).unwrap();
+    assert_eq!(
+        find(&Discovery::new().unwrap().browse(WAIT).unwrap(), &label).len(),
+        1
+    );
+    drop(old); // the app leaves the pairing screen
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(find(&Discovery::new().unwrap().browse(WAIT).unwrap(), &label).is_empty());
+    drop(announcing);
+}
+
+#[test]
+fn found_addresses_are_on_this_network_and_never_loopback() {
+    let label = unique("addresses");
+    let old = Discovery::new().unwrap();
+    let _announcing = old.announce(&label, 47_136).unwrap();
+    let found = Discovery::new().unwrap().browse(WAIT).unwrap();
+    let mine = find(&found, &label);
+    assert_eq!(mine.len(), 1);
+    assert!(mine[0].addrs.len() <= pctwin_discovery::MAX_ADDRS);
+    for a in &mine[0].addrs {
+        assert!(!a.ip().is_loopback(), "{a}");
+        assert!(pctwin_link::is_local_peer(a.ip()), "{a}");
+    }
+}
+
+#[test]
+fn an_old_laptop_whose_announcement_turns_invalid_drops_out_of_the_list() {
+    let label = unique("turns invalid");
+    let Label::Named(name) = &label else {
+        unreachable!()
+    };
+    let daemon = mdns_sd::ServiceDaemon::new().unwrap();
+    let mut tag = [0u8; 4];
+    getrandom::fill(&mut tag).unwrap();
+    let instance = format!(
+        "pctwin-change-{:02x}{:02x}{:02x}{:02x}",
+        tag[0], tag[1], tag[2], tag[3]
+    );
+    let host = format!("{instance}.local.");
+    let announce = |fields: &[(&str, &str)]| {
+        let info = mdns_sd::ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", 47_137, fields)
+            .unwrap()
+            .enable_addr_auto();
+        daemon.register(info).unwrap();
+    };
+    announce(&[("v", "1"), ("n", name.as_str())]);
+    let searching = std::thread::spawn(|| Discovery::new().unwrap().browse(Duration::from_secs(5)));
+    std::thread::sleep(Duration::from_millis(2500));
+    // The same laptop now announces something PCTwin would never write.
+    announce(&[("v", "1"), ("n", name.as_str()), ("x", "1")]);
+    let found = searching.join().unwrap().unwrap();
+    let _ = daemon.shutdown();
+    assert!(
+        found
+            .iter()
+            .all(|f| f.addrs.iter().all(|a| a.port() != 47_137)),
+        "{found:?}"
+    );
+}

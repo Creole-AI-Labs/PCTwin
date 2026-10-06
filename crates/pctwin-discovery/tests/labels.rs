@@ -39,6 +39,15 @@ fn random_labels_cover_every_colour_and_animal() {
 }
 
 #[test]
+fn every_one_of_the_1200_labels_can_come_up() {
+    let mut seen = HashSet::new();
+    for _ in 0..60_000 {
+        seen.insert(Label::random().unwrap());
+    }
+    assert_eq!(seen.len(), 1200);
+}
+
+#[test]
 fn a_picked_label_reads_as_colour_then_animal() {
     let label = Label::Picked {
         colour: COLOURS.iter().position(|c| *c == "blue").unwrap() as u8,
@@ -69,6 +78,32 @@ fn shuffle_never_picks_a_label_already_in_use_nearby() {
 }
 
 #[test]
+fn shuffle_is_random_among_the_free_labels() {
+    let in_use: Vec<Label> = (0..1198u16)
+        .map(|i| Label::Picked {
+            colour: (i / 100) as u8,
+            animal: (i % 100) as u8,
+        })
+        .collect();
+    let mut seen = HashSet::new();
+    for _ in 0..200 {
+        seen.insert(Label::shuffle(&in_use).unwrap());
+    }
+    assert_eq!(seen.len(), 2, "both free labels come up");
+}
+
+#[test]
+fn shuffle_still_works_when_every_label_is_taken() {
+    let all: Vec<Label> = (0..1200u16)
+        .map(|i| Label::Picked {
+            colour: (i / 100) as u8,
+            animal: (i % 100) as u8,
+        })
+        .collect();
+    assert!(Label::shuffle(&all).is_ok());
+}
+
+#[test]
 fn shuffle_gives_a_new_label_each_time_it_is_pressed() {
     let mut current = Label::random().unwrap();
     for _ in 0..200 {
@@ -84,11 +119,76 @@ fn a_typed_name_is_trimmed_and_kept_as_typed() {
         Label::named("  Ada's laptop  ").unwrap(),
         Label::Named("Ada's laptop".into())
     );
-    // Any language works.
-    for name in ["Ọlá's PC", "Ноутбук Маши", "李明的电脑", "لابتوب سارة"]
-    {
+    // Any language works, including scripts that build letters from marks.
+    for name in [
+        "Ọlá's PC",
+        "Ноутбук Маши",
+        "李明的电脑",
+        "لابتوب سارة",
+        "नमस्ते",
+        "Nguyễn's laptop",
+        "Zoë (office)",
+    ] {
         assert_eq!(Label::named(name).unwrap(), Label::Named(name.into()));
     }
+    // Spaces inside are tidied, and accents are stored in one standard form.
+    assert_eq!(
+        Label::named("Ada   old \t laptop").unwrap(),
+        Label::Named("Ada old laptop".into())
+    );
+    assert_eq!(
+        Label::named("Cafe\u{301}").unwrap(),
+        Label::Named("Caf\u{e9}".into())
+    );
+    // 32 characters in any script.
+    assert!(Label::named(&"李".repeat(MAX_NAME_CHARS)).is_ok());
+    assert!(Label::named(&"李".repeat(MAX_NAME_CHARS + 1)).is_err());
+}
+
+#[test]
+fn names_cannot_be_invisible_or_disguised() {
+    for bad in [
+        "\u{3164}", // Hangul filler: looks blank
+        "\u{00AD}", // soft hyphen
+        "\u{115F}",
+        "\u{FFA0}",
+        "\u{2800}",       // blank braille pattern
+        "Ada\u{061C}",    // Arabic letter mark (text direction)
+        "Ada\u{2028}Bob", // line separator
+        "Ada\u{2029}",    // paragraph separator
+        "Ada\u{180E}",
+        "A\u{034F}da",  // combining grapheme joiner
+        "Ada\u{FE0F}",  // variation selector
+        "Ada\u{FFF9}",  // interlinear annotation
+        "Ada\u{E0041}", // tag character (hidden text)
+        "Ada\u{E000}",  // private use
+        "Ada\u{0378}",  // unassigned
+        "Ada\u{FFFF}",  // noncharacter
+        "Ada\u{FEFF}",  // byte order mark
+        "Ada\u{85}",    // next line (a control character)
+        "Ada 🦊",       // pictures are not names
+        "\u{301}Ada",   // starts with a mark
+        "...",          // nothing to read
+    ] {
+        assert!(
+            matches!(Label::named(bad), Err(DiscoveryError::InvalidName)),
+            "{bad:?}"
+        );
+    }
+    // A pile of accents on one letter.
+    let flood = format!("a{}", "\u{301}".repeat(31));
+    assert!(Label::named(&flood).is_err());
+}
+
+#[test]
+fn names_that_differ_only_in_case_or_accent_form_count_as_the_same() {
+    let a = Label::named("Twin laptop").unwrap();
+    let b = Label::named("TWIN LAPTOP").unwrap();
+    let c = Label::named("Café").unwrap();
+    let d = Label::named("Cafe\u{301}").unwrap();
+    assert_eq!(a.comparison_key(), b.comparison_key());
+    assert_eq!(c.comparison_key(), d.comparison_key());
+    assert_ne!(a.comparison_key(), c.comparison_key());
 }
 
 #[test]
@@ -127,20 +227,15 @@ fn labels_survive_the_trip_through_an_announcement() {
         Label::named("李明的电脑").unwrap(),
     ] {
         let txt = label.to_txt();
-        let back = Label::from_txt(|k| {
-            txt.iter()
-                .find(|(key, _)| *key == k)
-                .map(|(_, v)| v.as_str())
-        });
+        let fields: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let back = Label::from_txt(&fields);
         assert_eq!(back, Some(label));
     }
 }
 
 #[test]
 fn announcements_from_others_are_checked_like_anything_else_that_arrives() {
-    let parse = |pairs: &[(&str, &str)]| {
-        Label::from_txt(|k| pairs.iter().find(|(key, _)| *key == k).map(|(_, v)| *v))
-    };
+    let parse = |pairs: &[(&str, &str)]| Label::from_txt(pairs);
     assert_eq!(
         parse(&[("v", "1"), ("c", "5"), ("a", "27")]),
         Some(Label::Picked {
@@ -159,6 +254,12 @@ fn announcements_from_others_are_checked_like_anything_else_that_arrives() {
         &[("v", "1"), ("n", "")],                   // empty name
         &[("v", "1"), ("n", "Ada\u{202E}")],        // direction trick
         &[("v", "1"), ("c", "5"), ("a", "3"), ("n", "Ada")], // both kinds at once
+        &[("v", "1"), ("c", "5"), ("a", "3"), ("x", "1")], // a field PCTwin never writes
+        &[("v", "1"), ("v", "1"), ("c", "5"), ("a", "3")], // a field twice
+        &[("v", "1"), ("n", " Ada")],               // not tidied
+        &[("v", "1"), ("n", "Ada  laptop")],        // not tidied
+        &[("v", "1"), ("n", "Cafe\u{301}")],        // not in the standard accent form
+        &[("v", "1"), ("n", "\u{3164}")],           // looks blank
     ] {
         assert_eq!(parse(bad), None, "{bad:?}");
     }

@@ -12,6 +12,7 @@ getrandom = "0.4.3"
 mdns-sd = "0.21.5"
 pctwin-link = { path = "../pctwin-link" }
 thiserror = "2.0.21"
+unicode-normalization = "0.1.25"
 
 [lints]
 workspace = true
