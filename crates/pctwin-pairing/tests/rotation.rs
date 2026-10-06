@@ -211,3 +211,105 @@ fn the_shown_code_is_the_one_that_works() {
     let msg1 = sender.message_1().unwrap().to_vec();
     assert!(attempt(&mut sender, &code, &msg1, now + CODE_LIFETIME * 10).is_ok());
 }
+
+// ---------- even/odd codes, so the new laptop can say which live code it holds ----------
+
+fn parity_of(code: &str) -> u8 {
+    PairingCode::parse(code).unwrap().parity()
+}
+
+#[test]
+fn parity_is_the_last_digit_even_or_odd() {
+    assert_eq!(parity_of("123456"), 0);
+    assert_eq!(parity_of("000001"), 1);
+    assert_eq!(parity_of("999999"), 1);
+}
+
+#[test]
+fn codes_alternate_even_and_odd_through_rotations_failures_and_grace() {
+    let start = Instant::now();
+    let mut sender = RotatingSender::new(start).unwrap();
+    let mut t = start;
+    let mut last = parity_of(&sender.code().unwrap());
+    for round in 0..40u32 {
+        if round % 3 == 0 {
+            // A failed attempt replaces the code; wait out the pause.
+            let code = sender.code().unwrap();
+            let wrong = if code == "000000" { "000002" } else { "000000" };
+            let msg1 = sender.message_1().unwrap().to_vec();
+            let _ = attempt(&mut sender, wrong, &msg1, t);
+            t += Duration::from_secs(10);
+            sender.tick(t).unwrap();
+            if sender.status() == SenderStatus::Locked {
+                sender.unlock(t).unwrap();
+            }
+        } else {
+            t += CODE_LIFETIME;
+            sender.tick(t).unwrap();
+        }
+        let now_parity = parity_of(&sender.code().unwrap());
+        if round % 3 != 0 {
+            assert_ne!(
+                now_parity, last,
+                "round {round}: a rotation must flip even/odd"
+            );
+        }
+        last = now_parity;
+    }
+}
+
+#[test]
+fn a_code_replaced_while_the_person_typed_it_still_pairs_during_the_grace() {
+    let start = Instant::now();
+    let mut sender = RotatingSender::new(start).unwrap();
+    let typed = sender.code().unwrap();
+    let t = start + CODE_LIFETIME + Duration::from_secs(5);
+    sender.tick(t).unwrap();
+    assert_ne!(sender.code().unwrap(), typed, "a new code is showing");
+
+    // The new laptop says which code it holds (even or odd) and gets that code's message 1.
+    let msg1 = sender.message_1_for(parity_of(&typed)).unwrap().to_vec();
+    assert!(attempt(&mut sender, &typed, &msg1, t).is_ok());
+}
+
+#[test]
+fn after_the_grace_only_the_code_shown_now_can_be_asked_for() {
+    let start = Instant::now();
+    let mut sender = RotatingSender::new(start).unwrap();
+    let typed = sender.code().unwrap();
+    let t = start + CODE_LIFETIME + ROTATION_GRACE + Duration::from_millis(1);
+    sender.tick(t).unwrap();
+    assert!(sender.message_1_for(parity_of(&typed)).is_none());
+    let shown = sender.code().unwrap();
+    assert_eq!(sender.message_1_for(parity_of(&shown)), sender.message_1());
+}
+
+#[test]
+fn nothing_is_handed_out_while_paused_or_locked() {
+    let start = Instant::now();
+    let mut sender = RotatingSender::new(start).unwrap();
+    let code = sender.code().unwrap();
+    let wrong = if code == "000000" { "000002" } else { "000000" };
+    let msg1 = sender.message_1().unwrap().to_vec();
+    let _ = attempt(&mut sender, wrong, &msg1, start);
+    assert!(sender.message_1_for(0).is_none() && sender.message_1_for(1).is_none());
+}
+
+#[test]
+fn codes_stay_random_apart_from_the_last_digit() {
+    let start = Instant::now();
+    let mut sender = RotatingSender::new(start).unwrap();
+    let mut seen = [[false; 10]; 6];
+    let mut t = start;
+    for _ in 0..3000 {
+        for (i, c) in sender.code().unwrap().chars().enumerate() {
+            seen[i][c.to_digit(10).unwrap() as usize] = true;
+        }
+        t += CODE_LIFETIME;
+        sender.tick(t).unwrap();
+    }
+    assert!(
+        seen.iter().all(|pos| pos.iter().all(|&s| s)),
+        "every digit should appear in every position"
+    );
+}

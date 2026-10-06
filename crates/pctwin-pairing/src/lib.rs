@@ -4,7 +4,9 @@
 //! # How it works
 //!
 //! 1. The sender (old laptop) shows a six-digit [`PairingCode`]. [`RotatingSender`] replaces it
-//!    every minute; the previous code keeps a short grace period. Each code carries a random
+//!    every minute; the previous code keeps a short grace period. Codes alternate between an even
+//!    and an odd last digit, so the receiver can name which live code it holds
+//!    ([`PairingCode::parity`], [`RotatingSender::message_1_for`]) at the cost of one bit. Each code carries a random
 //!    session tag in the messages, so a reply is matched to the code it was made from and a stray
 //!    reply never burns the current code.
 //! 2. Each code gets exactly one attempt. Failed attempts are budgeted: after each failure the
@@ -185,14 +187,24 @@ impl PairingCode {
     /// Generates a uniformly random code from the operating system's secure random source.
     pub fn generate() -> Result<Self, PairingError> {
         // Rejection sampling: 4_294_000_000 is the largest multiple of 1_000_000 below 2^32.
-        const LIMIT: u32 = 4_294_000_000;
+        Self::generate_from(4_294_000_000, |n| n % 1_000_000)
+    }
+
+    /// Generates a random code whose last digit is even (`parity` 0) or odd (`parity` 1).
+    fn generate_with_parity(parity: u8) -> Result<Self, PairingError> {
+        let parity = u32::from(parity & 1);
+        // Rejection sampling: 4_294_500_000 is the largest multiple of 500_000 below 2^32.
+        Self::generate_from(4_294_500_000, |n| (n % 500_000) * 2 + parity)
+    }
+
+    fn generate_from(limit: u32, to_value: impl Fn(u32) -> u32) -> Result<Self, PairingError> {
         loop {
             let mut bytes = [0u8; 4];
             getrandom::fill(&mut bytes).map_err(|_| PairingError::Random)?;
             let n = u32::from_le_bytes(bytes);
             bytes.zeroize();
-            if n < LIMIT {
-                let mut value = n % 1_000_000;
+            if n < limit {
+                let mut value = to_value(n);
                 let mut digits = [b'0'; 6];
                 for slot in digits.iter_mut().rev() {
                     // `value % 10` is always 0..=9, so the cast cannot truncate.
@@ -230,6 +242,12 @@ impl PairingCode {
     /// The six digits, for display on the sender.
     pub fn digits(&self) -> String {
         self.digits.iter().map(|&d| d as char).collect()
+    }
+
+    /// 0 if the last digit is even, 1 if odd. Not secret: the receiver sends it so the sender
+    /// can pick the matching live code.
+    pub fn parity(&self) -> u8 {
+        (self.digits[5] - b'0') & 1
     }
 
     fn password(&self) -> Password {
@@ -664,8 +682,8 @@ struct SenderEntry {
 }
 
 impl SenderEntry {
-    fn new(now: Instant) -> Result<Self, PairingError> {
-        let code = PairingCode::generate()?;
+    fn new(now: Instant, parity: u8) -> Result<Self, PairingError> {
+        let code = PairingCode::generate_with_parity(parity)?;
         let (session, msg1) = SenderSession::start(&code, now);
         Ok(Self {
             code,
@@ -680,12 +698,19 @@ impl RotatingSender {
     /// Creates the first code at time `now`.
     pub fn new(now: Instant) -> Result<Self, PairingError> {
         Ok(Self {
-            current: SenderEntry::new(now)?,
+            current: SenderEntry::new(now, 0)?,
             previous: None,
             failures: 0,
             blocked_until: None,
             locked: false,
         })
+    }
+
+    /// A fresh entry to replace the current code: the opposite even/odd of any code still in its
+    /// grace period, so the two live codes can always be told apart.
+    fn replacement(&self, now: Instant) -> Result<SenderEntry, PairingError> {
+        let other = self.previous.as_ref().unwrap_or(&self.current);
+        SenderEntry::new(now, 1 - other.code.parity())
     }
 
     /// What the sender should show right now (call [`tick`](Self::tick) first).
@@ -711,6 +736,20 @@ impl RotatingSender {
         self.is_open().then_some(self.current.msg1.as_slice())
     }
 
+    /// Message 1 for the live code with this even/odd last digit: the code shown now, or the one
+    /// replaced within the grace period. `None` if there is no such code, or while cooling down or
+    /// locked. Call [`tick`](Self::tick) first.
+    pub fn message_1_for(&self, parity: u8) -> Option<&[u8]> {
+        if !self.is_open() {
+            return None;
+        }
+        [Some(&self.current), self.previous.as_ref()]
+            .into_iter()
+            .flatten()
+            .find(|e| e.code.parity() == parity)
+            .map(|e| e.msg1.as_slice())
+    }
+
     /// When the code shown now will be replaced, for the on-screen countdown.
     pub fn expires_at(&self) -> Instant {
         self.current.started + CODE_LIFETIME
@@ -734,11 +773,12 @@ impl RotatingSender {
                 return Ok(false);
             }
             self.blocked_until = None;
-            self.current = SenderEntry::new(now)?;
+            self.current = self.replacement(now)?;
             rotated = true;
         }
         if now >= self.current.started + CODE_LIFETIME {
-            let old = std::mem::replace(&mut self.current, SenderEntry::new(now)?);
+            let fresh = SenderEntry::new(now, 1 - self.current.code.parity())?;
+            let old = std::mem::replace(&mut self.current, fresh);
             self.previous = Some(old);
             rotated = true;
         }
@@ -754,7 +794,7 @@ impl RotatingSender {
 
     /// Starts again after a lockout. Only call this when the person on the sender asks to.
     pub fn unlock(&mut self, now: Instant) -> Result<(), PairingError> {
-        self.current = SenderEntry::new(now)?;
+        self.current = SenderEntry::new(now, 1 - self.current.code.parity())?;
         self.previous = None;
         self.failures = 0;
         self.blocked_until = None;
@@ -779,7 +819,8 @@ impl RotatingSender {
         }
         let id = peek_session_id(msg2)?;
         let used = if id == self.current.session.id {
-            std::mem::replace(&mut self.current, SenderEntry::new(now)?)
+            let fresh = self.replacement(now)?;
+            std::mem::replace(&mut self.current, fresh)
         } else {
             match self.previous.take() {
                 Some(p) if id == p.session.id => p,
