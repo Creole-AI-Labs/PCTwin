@@ -4,7 +4,7 @@
 name: Close external pull requests
 
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] reviewed: never checks out or runs PR code; only comments and closes
     types: [opened, reopened]
 
 permissions: {}
