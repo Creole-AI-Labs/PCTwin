@@ -1,0 +1,17 @@
+# OSV-Scanner accepted exceptions. Each expires on 6 January 2027 so it must be reviewed again.
+# Reasons are recorded in deny.toml next to the matching RustSec ids.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+ignoreUntil = 2027-01-06
+reason = "glib 0.18 from Tauri's Linux GTK 3 stack; cannot upgrade ourselves; VariantStrIter unused"
+
+[[IgnoredVulns]]
+id = "GHSA-wrw7-89jp-8q8g"
+ignoreUntil = 2027-01-06
+reason = "Same glib advisory as RUSTSEC-2024-0429"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2027-01-06
+reason = "proc-macro-error unmaintained; build-time only via Tauri's GTK 3 macros"
