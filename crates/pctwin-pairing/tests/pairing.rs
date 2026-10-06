@@ -14,7 +14,7 @@
 
 use pctwin_pairing::{
     CODE_LIFETIME, MATCH_NUMBER_RANGE, MAX_MESSAGE_LEN, PROTOCOL_VERSION, Paired, PairingCode,
-    PairingError, ReceiverSession, SenderSession,
+    PairingError, ROTATION_GRACE, ReceiverSession, SenderSession,
 };
 use std::time::{Duration, Instant};
 
@@ -213,13 +213,12 @@ fn typed_codes_ignore_spaces_and_reject_anything_else() {
 }
 
 #[test]
-fn code_expires_after_two_minutes() {
-    assert_eq!(CODE_LIFETIME, Duration::from_secs(120));
+fn code_expires_after_its_lifetime_and_grace() {
     let code = PairingCode::generate().unwrap();
     let start = Instant::now();
     let (sender, msg1) = SenderSession::start(&code, start);
     let (_receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
-    let late = start + CODE_LIFETIME + Duration::from_millis(1);
+    let late = start + CODE_LIFETIME + ROTATION_GRACE + Duration::from_millis(1);
     assert!(matches!(
         sender.receive(&msg2, late),
         Err(PairingError::Expired)
@@ -232,7 +231,11 @@ fn code_just_inside_its_lifetime_still_works() {
     let start = Instant::now();
     let (sender, msg1) = SenderSession::start(&code, start);
     let (_receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
-    assert!(sender.receive(&msg2, start + CODE_LIFETIME).is_ok());
+    assert!(
+        sender
+            .receive(&msg2, start + CODE_LIFETIME + ROTATION_GRACE)
+            .is_ok()
+    );
 }
 
 // ---------- attacks ----------

@@ -3,7 +3,10 @@
 //!
 //! # How it works
 //!
-//! 1. The sender (old laptop) generates a six-digit [`PairingCode`] and shows it.
+//! 1. The sender (old laptop) shows a six-digit [`PairingCode`]. [`RotatingSender`] replaces it
+//!    every minute and after any attempt; the previous code keeps a short grace period. Each code
+//!    has a random session tag carried in the messages, so a reply is always matched to the code
+//!    it was made from and a stray reply never burns the current code.
 //! 2. SPAKE2 (Ed25519 group, asymmetric roles) turns the code into a shared secret that an
 //!    eavesdropper cannot use to test guesses offline. A wrong code yields a different secret.
 //! 3. A Noise `NNpsk0` handshake builds the encrypted link with fresh ephemeral keys
@@ -36,8 +39,10 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Version of the pairing protocol carried in every message.
 pub const PROTOCOL_VERSION: u8 = 1;
-/// How long a code stays valid after it is shown.
-pub const CODE_LIFETIME: Duration = Duration::from_secs(120);
+/// How long a code is shown before it is replaced.
+pub const CODE_LIFETIME: Duration = Duration::from_secs(60);
+/// How long a replaced code still works, for someone who was typing it when it changed.
+pub const ROTATION_GRACE: Duration = Duration::from_secs(15);
 /// Largest pairing message accepted, in bytes.
 pub const MAX_MESSAGE_LEN: usize = 512;
 /// Range of the match number shown during confirmation.
@@ -45,6 +50,7 @@ pub const MATCH_NUMBER_RANGE: RangeInclusive<u8> = 10..=99;
 
 const NOISE_PARAMS: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 const SPAKE2_MSG_LEN: usize = 33;
+const SESSION_ID_LEN: usize = 8;
 const ID_SENDER: &[u8] = b"pctwin/v1/sender";
 const ID_RECEIVER: &[u8] = b"pctwin/v1/receiver";
 const PROLOGUE_LABEL: &[u8] = b"pctwin/v1/pairing-prologue";
@@ -66,6 +72,8 @@ pub enum PairingError {
     InvalidCode,
     #[error("the code has expired; show a new code")]
     Expired,
+    #[error("that code is no longer active; type the code shown now")]
+    UnknownSession,
     #[error("the other laptop uses a different PCTwin version ({0})")]
     UnsupportedVersion(u8),
     #[error("a pairing message was not in the expected form")]
@@ -152,6 +160,7 @@ impl fmt::Debug for PairingCode {
 
 /// Sender side, after showing the code and sending message 1.
 pub struct SenderSession {
+    id: [u8; SESSION_ID_LEN],
     spake: Spake2<Ed25519Group>,
     spake_a: Vec<u8>,
     deadline: Instant,
@@ -159,18 +168,29 @@ pub struct SenderSession {
 
 impl SenderSession {
     /// Starts pairing with the given code at time `now`. Returns message 1 to send.
+    /// The code is accepted until `now + CODE_LIFETIME + ROTATION_GRACE`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operating system's secure random source fails, as SPAKE2 itself does.
     pub fn start(code: &PairingCode, now: Instant) -> (Self, Vec<u8>) {
+        let mut id = [0u8; SESSION_ID_LEN];
+        #[allow(clippy::expect_used)]
+        getrandom::fill(&mut id).expect("operating system random source failed");
         let (spake, spake_a) = Spake2::<Ed25519Group>::start_a(
             &code.password(),
             &Identity::new(ID_SENDER),
             &Identity::new(ID_RECEIVER),
         );
-        let msg1 = frame(KIND_SPAKE_A, &spake_a);
+        let mut payload = id.to_vec();
+        payload.extend_from_slice(&spake_a);
+        let msg1 = frame(KIND_SPAKE_A, &payload);
         (
             Self {
+                id,
                 spake,
                 spake_a,
-                deadline: now + CODE_LIFETIME,
+                deadline: now + CODE_LIFETIME + ROTATION_GRACE,
             },
             msg1,
         )
@@ -187,17 +207,21 @@ impl SenderSession {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg2, KIND_SPAKE_B_NOISE_1)?;
-        if payload.len() <= SPAKE2_MSG_LEN {
+        if payload.len() <= SESSION_ID_LEN + SPAKE2_MSG_LEN {
             return Err(PairingError::Malformed);
         }
-        let (spake_b, noise_1) = payload.split_at(SPAKE2_MSG_LEN);
+        let (id, rest) = payload.split_at(SESSION_ID_LEN);
+        if id != self.id {
+            return Err(PairingError::UnknownSession);
+        }
+        let (spake_b, noise_1) = rest.split_at(SPAKE2_MSG_LEN);
         let key = Zeroizing::new(
             self.spake
                 .finish(spake_b)
                 .map_err(|_| PairingError::HandshakeFailed)?,
         );
         let psk = derive_psk(&key)?;
-        let prologue = prologue(&self.spake_a, spake_b);
+        let prologue = prologue(&self.id, &self.spake_a, spake_b);
         let mut hs = noise_builder(&psk, &prologue)?
             .build_responder()
             .map_err(|_| PairingError::HandshakeFailed)?;
@@ -262,10 +286,11 @@ pub struct ReceiverSession {
 impl ReceiverSession {
     /// Handles message 1 using the typed code. Returns the session and message 2 to send.
     pub fn respond(code: &PairingCode, msg1: &[u8]) -> Result<(Self, Vec<u8>), PairingError> {
-        let spake_a = parse_frame(msg1, KIND_SPAKE_A)?;
-        if spake_a.len() != SPAKE2_MSG_LEN {
+        let payload = parse_frame(msg1, KIND_SPAKE_A)?;
+        if payload.len() != SESSION_ID_LEN + SPAKE2_MSG_LEN {
             return Err(PairingError::Malformed);
         }
+        let (id, spake_a) = payload.split_at(SESSION_ID_LEN);
         let (spake, spake_b) = Spake2::<Ed25519Group>::start_b(
             &code.password(),
             &Identity::new(ID_SENDER),
@@ -277,7 +302,7 @@ impl ReceiverSession {
                 .map_err(|_| PairingError::HandshakeFailed)?,
         );
         let psk = derive_psk(&key)?;
-        let prologue = prologue(spake_a, &spake_b);
+        let prologue = prologue(id, spake_a, &spake_b);
         let mut hs = noise_builder(&psk, &prologue)?
             .build_initiator()
             .map_err(|_| PairingError::HandshakeFailed)?;
@@ -286,7 +311,8 @@ impl ReceiverSession {
         let written = hs
             .write_message(&[], &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
-        let mut payload = spake_b;
+        let mut payload = id.to_vec();
+        payload.extend_from_slice(&spake_b);
         payload.extend_from_slice(&buf[..written]);
         Ok((Self { hs }, frame(KIND_SPAKE_B_NOISE_1, &payload)))
     }
@@ -394,6 +420,110 @@ impl Transport {
     }
 }
 
+/// The sender's changing code: a new code every [`CODE_LIFETIME`] and after any attempt, with
+/// the previous code still accepted for [`ROTATION_GRACE`]. Each code gets exactly one attempt.
+pub struct RotatingSender {
+    current: SenderEntry,
+    previous: Option<SenderEntry>,
+}
+
+struct SenderEntry {
+    code: PairingCode,
+    session: SenderSession,
+    msg1: Vec<u8>,
+    started: Instant,
+}
+
+impl SenderEntry {
+    fn new(now: Instant) -> Result<Self, PairingError> {
+        let code = PairingCode::generate()?;
+        let (session, msg1) = SenderSession::start(&code, now);
+        Ok(Self {
+            code,
+            session,
+            msg1,
+            started: now,
+        })
+    }
+}
+
+impl RotatingSender {
+    /// Creates the first code at time `now`.
+    pub fn new(now: Instant) -> Result<Self, PairingError> {
+        Ok(Self {
+            current: SenderEntry::new(now)?,
+            previous: None,
+        })
+    }
+
+    /// The code to show now.
+    pub fn code(&self) -> String {
+        self.current.code.digits()
+    }
+
+    /// Message 1 for the code shown now, to send to a receiver.
+    pub fn message_1(&self) -> &[u8] {
+        &self.current.msg1
+    }
+
+    /// When the code shown now will be replaced, for the on-screen countdown.
+    pub fn expires_at(&self) -> Instant {
+        self.current.started + CODE_LIFETIME
+    }
+
+    /// Advances to time `now`: replaces the code when its minute is up and forgets a previous
+    /// code once its grace period ends. Returns `true` if a new code is now showing.
+    pub fn tick(&mut self, now: Instant) -> Result<bool, PairingError> {
+        let mut rotated = false;
+        if now >= self.current.started + CODE_LIFETIME {
+            let old = std::mem::replace(&mut self.current, SenderEntry::new(now)?);
+            self.previous = Some(old);
+            rotated = true;
+        }
+        if self
+            .previous
+            .as_ref()
+            .is_some_and(|p| now >= p.started + CODE_LIFETIME + ROTATION_GRACE)
+        {
+            self.previous = None;
+        }
+        Ok(rotated)
+    }
+
+    /// Handles message 2 at time `now`. A reply for an unknown or expired code is rejected
+    /// without using up the current code. A reply for a known code uses up that code's single
+    /// attempt; if it was the current code, a new code is shown straight away.
+    pub fn receive(
+        &mut self,
+        msg2: &[u8],
+        now: Instant,
+    ) -> Result<(SenderAwaitingConfirmation, Vec<u8>), PairingError> {
+        self.tick(now)?;
+        let id = peek_session_id(msg2)?;
+        if id == self.current.session.id {
+            let used = std::mem::replace(&mut self.current, SenderEntry::new(now)?);
+            return used.session.receive(msg2, now);
+        }
+        match self.previous.take() {
+            Some(used) if id == used.session.id => used.session.receive(msg2, now),
+            other => {
+                self.previous = other;
+                Err(PairingError::UnknownSession)
+            }
+        }
+    }
+}
+
+fn peek_session_id(msg2: &[u8]) -> Result<[u8; SESSION_ID_LEN], PairingError> {
+    let payload = parse_frame(msg2, KIND_SPAKE_B_NOISE_1)?;
+    let id = payload
+        .get(..SESSION_ID_LEN)
+        .ok_or(PairingError::Malformed)?;
+    let mut out = [0u8; SESSION_ID_LEN];
+    out.copy_from_slice(id);
+    Ok(out)
+}
+
 macro_rules! redacted_debug {
     ($($t:ty),*) => {$(
         impl fmt::Debug for $t {
@@ -404,6 +534,7 @@ macro_rules! redacted_debug {
     )*};
 }
 redacted_debug!(
+    RotatingSender,
     SenderSession,
     SenderAwaitingConfirmation,
     ReceiverSession,
@@ -433,10 +564,13 @@ fn parse_frame(msg: &[u8], expected_kind: u8) -> Result<&[u8], PairingError> {
     Ok(&msg[2..])
 }
 
-fn prologue(spake_a: &[u8], spake_b: &[u8]) -> Vec<u8> {
-    let mut p = Vec::with_capacity(PROLOGUE_LABEL.len() + 1 + spake_a.len() + spake_b.len());
+fn prologue(session_id: &[u8], spake_a: &[u8], spake_b: &[u8]) -> Vec<u8> {
+    let mut p = Vec::with_capacity(
+        PROLOGUE_LABEL.len() + 1 + session_id.len() + spake_a.len() + spake_b.len(),
+    );
     p.extend_from_slice(PROLOGUE_LABEL);
     p.push(PROTOCOL_VERSION);
+    p.extend_from_slice(session_id);
     p.extend_from_slice(spake_a);
     p.extend_from_slice(spake_b);
     p
