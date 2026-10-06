@@ -359,12 +359,15 @@ fn more_invisible_characters_are_refused() {
         "Ada\u{1160}",
         "Ada\u{17B4}",
         "Ada\u{17B5}",
-        "Ada\u{A0}laptop", // no-break space looks like a space but is not one
-        "Ada\u{2007}laptop",
+        "Ada\u{2007}laptop", // figure space looks like a space but is not one
     ] {
         assert!(Label::named(bad).is_err(), "{bad:?}");
     }
-    // Arriving from the network, a trailing space is not tidy and is refused.
+    // Arriving from the network, pasted spaces and a trailing space are not tidy and are refused.
+    assert_eq!(
+        Label::from_txt(&[("v", "1"), ("n", "Ada\u{A0}laptop")]),
+        None
+    );
     assert_eq!(Label::from_txt(&[("v", "1"), ("n", "Ada ")]), None);
 }
 
@@ -408,4 +411,79 @@ fn a_name_that_looks_short_but_is_huge_underneath_is_refused() {
     assert!(Label::named(&heavy).is_err());
     // The same with fewer letters fits.
     assert!(Label::named(&"x\u{301}\u{301}\u{301}\u{301}".repeat(20)).is_ok());
+}
+
+#[test]
+fn more_punctuation_people_type_is_accepted() {
+    for name in [
+        "【办公室】",
+        "《我的电脑》",
+        "「旧」电脑",
+        "电脑；旧",
+        "～电脑～",
+        "价格￥",
+        "नमस्ते।",
+        "राम॥",
+        "حاسوب؛ قديم",
+    ] {
+        assert_eq!(
+            Label::named(name).unwrap(),
+            Label::Named(name.into()),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn pasted_spaces_become_ordinary_spaces_when_typed() {
+    assert_eq!(
+        Label::named("«\u{A0}Bureau\u{A0}»").unwrap(),
+        Label::Named("« Bureau »".into())
+    );
+    assert_eq!(
+        Label::named("Zoé\u{202F}!").unwrap(),
+        Label::Named("Zoé !".into())
+    );
+    assert_eq!(
+        Label::named("我的\u{3000}电脑").unwrap(),
+        Label::Named("我的 电脑".into())
+    );
+}
+
+#[test]
+fn spaces_count_toward_the_limit() {
+    let fits = format!("{}aa", "a ".repeat(15)); // 32 visible, spaces included
+    assert_eq!(fits.chars().count(), MAX_NAME_CHARS);
+    assert!(Label::named(&fits).is_ok());
+    let too_long = format!("{}a", "a ".repeat(16)); // 33 visible
+    assert!(Label::named(&too_long).is_err());
+}
+
+/// A name of exactly `bytes` bytes (28 visible letters), built from letters carrying marks.
+fn name_of_bytes(bytes: usize) -> String {
+    let mut s = "x\u{301}\u{301}\u{301}\u{301}".repeat(26); // 234 bytes
+    s.push_str("x\u{301}\u{301}"); // 239
+    s.push(if bytes == 240 { 'x' } else { '\u{e9}' }); // 240, or 241 with é
+    assert_eq!(s.len(), bytes);
+    s
+}
+
+#[test]
+fn the_size_limit_is_exactly_240_bytes() {
+    assert!(Label::named(&name_of_bytes(240)).is_ok());
+    assert!(Label::named(&name_of_bytes(241)).is_err());
+    assert!(Label::from_txt(&[("v", "1"), ("n", &name_of_bytes(240))]).is_some());
+    assert!(Label::from_txt(&[("v", "1"), ("n", &name_of_bytes(241))]).is_none());
+}
+
+#[test]
+fn lookalike_dots_are_refused() {
+    for bad in [
+        "Ada\u{2024}com",
+        "Ada\u{2025}",
+        "Ada\u{FF0E}x",
+        "Ada\u{2027}x",
+    ] {
+        assert!(Label::named(bad).is_err(), "{bad:?}");
+    }
 }

@@ -65,7 +65,15 @@ const EXTRA_PUNCTUATION: &[char] = &[
     '\u{060C}', '\u{061F}', // Arabic comma and question mark
     '\u{0970}', // Devanagari abbreviation sign
     '\u{0F0B}', // Tibetan syllable mark
+    '\u{3010}', '\u{3011}', '\u{300A}', '\u{300B}', '\u{300C}',
+    '\u{300D}', // 【】《》「」
+    '\u{FF1B}', '\u{FF5E}', '\u{FFE5}', // full-width ; ~ and yen sign
+    '\u{0964}', '\u{0965}', // Devanagari danda and double danda
+    '\u{061B}', // Arabic semicolon
 ];
+/// Spaces that look like a normal space and arrive when text is pasted (no-break, narrow no-break,
+/// ideographic). When typed they become ordinary spaces; from the network they are refused.
+const PASTED_SPACES: [char; 3] = ['\u{00A0}', '\u{202F}', '\u{3000}'];
 
 /// Label colours, as translation keys. Shown with the animal's picture and its name, never as
 /// colour alone.
@@ -231,7 +239,10 @@ impl Label {
     /// between words) and accents are put in the standard form; then the name must pass the
     /// allow-list described at the top of this module.
     pub fn named(typed: &str) -> Result<Self, DiscoveryError> {
-        let composed: String = typed.nfc().collect();
+        let composed: String = typed
+            .nfc()
+            .map(|c| if PASTED_SPACES.contains(&c) { ' ' } else { c })
+            .collect();
         // Only spaces and tabs are tidied; line breaks and other spacing characters are refused.
         let name = composed
             .split([' ', '\t'])

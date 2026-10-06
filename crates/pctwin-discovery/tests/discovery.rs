@@ -274,3 +274,15 @@ fn an_old_laptop_whose_announcement_turns_invalid_drops_out_of_the_list() {
         "{found:?}"
     );
 }
+
+#[test]
+fn the_longest_name_allowed_can_be_announced_and_found() {
+    let mut name = "x\u{301}\u{301}\u{301}\u{301}".repeat(26);
+    name.push_str("x\u{301}\u{301}x");
+    assert_eq!(name.len(), 240);
+    let label = Label::named(&name).unwrap();
+    let old = Discovery::new().unwrap();
+    let _announcing = old.announce(&label, 47_138).unwrap();
+    let found = Discovery::new().unwrap().browse(WAIT).unwrap();
+    assert_eq!(find(&found, &label).len(), 1);
+}
