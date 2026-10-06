@@ -678,3 +678,140 @@ fn only_local_network_addresses_are_served() {
         );
     }
 }
+
+// ---------- fairness: a misbehaving device cannot keep a real one from pairing ----------
+
+/// How one misbehaving device at 127.0.0.2 uses each connection.
+#[derive(Clone, Copy, Debug)]
+enum Misbehaviour {
+    HangUpJustBeforeTheLimit,
+    SendANoticeInsteadOfAReply,
+    StallAfterHello,
+    SendABadHello,
+    ReplyForAnotherSession,
+    AskForAnExpiredCode,
+}
+
+async fn misbehave_once(addr: std::net::SocketAddr, how: Misbehaviour, parity: u8) {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.2:0".parse().unwrap()).unwrap();
+    let Ok(mut raw) = socket.connect(addr).await else {
+        return;
+    };
+    let hello_parity = match how {
+        Misbehaviour::SendABadHello => 9,
+        Misbehaviour::AskForAnExpiredCode => 1 - parity,
+        _ => parity,
+    };
+    if raw
+        .write_all(&[KIND_HELLO, 0, 1, hello_parity])
+        .await
+        .is_err()
+    {
+        return;
+    }
+    let mut header = [0u8; 3];
+    if raw.read_exact(&mut header).await.is_err() || header[0] != KIND_PAIRING {
+        return; // refused, told expired, or closed
+    }
+    let mut msg1 = vec![0u8; u16::from_be_bytes([header[1], header[2]]) as usize];
+    if raw.read_exact(&mut msg1).await.is_err() {
+        return;
+    }
+    match how {
+        Misbehaviour::HangUpJustBeforeTheLimit => {
+            tokio::time::sleep(Duration::from_millis(350)).await;
+        }
+        Misbehaviour::SendANoticeInsteadOfAReply => {
+            let _ = raw.write_all(&[KIND_PAUSED, 0, 0]).await;
+        }
+        Misbehaviour::ReplyForAnotherSession => {
+            msg1[1] = 2;
+            msg1[2] ^= 0xff;
+            let mut frame = vec![KIND_PAIRING];
+            frame.extend((msg1.len() as u16).to_be_bytes());
+            frame.extend(&msg1);
+            let _ = raw.write_all(&frame).await;
+        }
+        _ => {}
+    }
+    let mut sink = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_millis(600), raw.read_to_end(&mut sink)).await;
+}
+
+/// The misbehaving device reconnects as fast as it can; the real device must still pair soon.
+async fn real_device_pairs_despite(how: Misbehaviour) {
+    let config = LinkConfig {
+        silence_penalty: Duration::from_secs(30),
+        ..fast()
+    };
+    let (host, sender) = host_with(config).await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let parity = code.parity();
+    let serving = tokio::spawn({
+        let sender = sender.clone();
+        async move { host.next_peer(&sender).await.map(|p| p.choices()) }
+    });
+    // Eight connections at once, each reconnecting as soon as it is dropped or refused, so the
+    // slot is always contended.
+    let pests: Vec<_> = (0..8)
+        .map(|_| {
+            tokio::spawn(async move {
+                loop {
+                    misbehave_once(addr, how, parity).await;
+                }
+            })
+        })
+        .collect();
+    tokio::time::sleep(Duration::from_millis(100)).await; // let it get going first
+
+    let started = Instant::now();
+    let paired = loop {
+        match connect(addr, &code, config).await {
+            Ok(guest) => break Some(guest),
+            Err(_) if started.elapsed() < Duration::from_secs(4) => {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            Err(_) => break None,
+        }
+    };
+    for p in pests {
+        p.abort();
+    }
+    let guest = paired.unwrap_or_else(|| panic!("{how:?} kept the real device out for 4 s"));
+    let choices = serving.await.unwrap().unwrap();
+    assert!(choices.contains(&guest.match_number()));
+    assert_eq!(sender.lock().unwrap().failed_attempts(), 0, "{how:?}");
+}
+
+#[tokio::test]
+async fn hanging_up_just_before_the_limit_cannot_keep_a_real_device_out() {
+    real_device_pairs_despite(Misbehaviour::HangUpJustBeforeTheLimit).await;
+}
+
+#[tokio::test]
+async fn sending_notices_cannot_keep_a_real_device_out() {
+    real_device_pairs_despite(Misbehaviour::SendANoticeInsteadOfAReply).await;
+}
+
+#[tokio::test]
+async fn stalling_after_hello_cannot_keep_a_real_device_out() {
+    real_device_pairs_despite(Misbehaviour::StallAfterHello).await;
+}
+
+#[tokio::test]
+async fn bad_hellos_cannot_keep_a_real_device_out() {
+    real_device_pairs_despite(Misbehaviour::SendABadHello).await;
+}
+
+#[tokio::test]
+async fn replies_for_other_sessions_cannot_keep_a_real_device_out() {
+    real_device_pairs_despite(Misbehaviour::ReplyForAnotherSession).await;
+}
+
+#[tokio::test]
+async fn asking_again_and_again_for_an_expired_code_cannot_keep_a_real_device_out() {
+    // Not penalised (it looks honest), but each answer is immediate, so the slot is never held.
+    real_device_pairs_despite(Misbehaviour::AskForAnExpiredCode).await;
+}
