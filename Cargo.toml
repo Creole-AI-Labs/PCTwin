@@ -22,3 +22,7 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# Optimise dependencies (crypto especially) in dev builds so tests run quickly.
+[profile.dev.package."*"]
+opt-level = 2
