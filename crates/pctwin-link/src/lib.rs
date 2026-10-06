@@ -15,7 +15,7 @@
 //!   already typed the code, so a real new laptop answers at once. Every attempt that fails is
 //!   classified where it fails. Only two outcomes are treated as honest: a wrong code (the person
 //!   may have mistyped; it counts against the failure budget instead) and a code that is no longer
-//!   live. Everything else, including silence, hanging up and sending the host a status notice,
+//!   live (once per address in ten seconds: a person told so types the new code). Everything else, including silence, hanging up and sending the host a status notice,
 //!   refuses that address for [`LinkConfig::silence_penalty`].
 //! - Devices are told at once when the old laptop is busy, pausing after a wrong code, locked, or
 //!   when their code was wrong or has expired, instead of being left to time out. The host keeps
@@ -35,7 +35,8 @@
 //!   addresses too, so the app should listen only on the chosen Wi-Fi interface's own address.
 //! - While the person is choosing the number, the host is not accepting: devices that connect then
 //!   wait in the operating system's queue and are served on the next [`Host::next_peer`] call.
-//! - [`Link::recv`] waits as long as it takes; the app decides how long a quiet link may last.
+//! - [`Link::recv`] waits as long as it takes. Cancelling it closes the link, so the app should
+//!   keep one receive running rather than wrapping each one in a timeout.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -78,6 +79,8 @@ const NOTICE_LINGER: Duration = Duration::from_secs(1);
 const MAX_REFUSALS: usize = 64;
 /// Most addresses remembered as penalised.
 const MAX_PENALISED: usize = 1024;
+/// One expired-code answer per address in this window is honest; a second costs the penalty.
+const EXPIRED_WINDOW: Duration = Duration::from_secs(10);
 /// Pause after the operating system refuses to accept a connection (for example, out of handles).
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 
@@ -181,6 +184,11 @@ pub struct Host {
     config: LinkConfig,
     refusals: Arc<Semaphore>,
     penalised: Mutex<HashMap<IpAddr, Instant>>,
+    /// When each address was last told its code had expired.
+    expired: Mutex<HashMap<IpAddr, Instant>>,
+    /// Which peer addresses are served: always [`is_local_peer`], except in this crate's own
+    /// tests, which run over loopback and need to see the rule applied.
+    allowed: fn(IpAddr) -> bool,
 }
 
 impl Host {
@@ -192,6 +200,8 @@ impl Host {
             config,
             refusals: Arc::new(Semaphore::new(MAX_REFUSALS)),
             penalised: Mutex::new(HashMap::new()),
+            expired: Mutex::new(HashMap::new()),
+            allowed: is_local_peer,
         })
     }
 
@@ -263,6 +273,17 @@ impl Host {
                     blame: Blame::Address,
                     ..
                 }) => self.penalise(peer.ip()),
+                // A person told their code expired types the new one; asking again for a dead
+                // code soon after is not honest any more. (Wrong codes are already limited by the
+                // pause and the safety stop.)
+                Err(Failure {
+                    error: LinkError::Pairing(PairingError::Expired),
+                    blame: Blame::Honest,
+                }) => {
+                    if self.expired_again(peer.ip()) {
+                        self.penalise(peer.ip());
+                    }
+                }
                 Err(Failure {
                     blame: Blame::Honest,
                     ..
@@ -271,11 +292,25 @@ impl Host {
         }
     }
 
+    /// Records an expired-code answer for `ip`; true if it already had one within
+    /// [`EXPIRED_WINDOW`].
+    fn expired_again(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut map = self.expired.lock().unwrap_or_else(PoisonError::into_inner);
+        map.retain(|_, at| now.duration_since(*at) < EXPIRED_WINDOW);
+        let key = penalty_key(ip);
+        let again = map.contains_key(&key);
+        if map.len() < MAX_PENALISED {
+            map.insert(key, now);
+        }
+        again
+    }
+
     /// Accepts one connection from the local network. Connections from elsewhere are closed at
     /// once; an accept error (for example, out of handles) pauses briefly and is not fatal.
     async fn accept_local(&self) -> Option<(TcpStream, SocketAddr)> {
         match self.listener.accept().await {
-            Ok((stream, peer)) if is_local_peer(peer.ip()) => Some((stream, peer)),
+            Ok((stream, peer)) if (self.allowed)(peer.ip()) => Some((stream, peer)),
             Ok(_) => None,
             Err(_) => {
                 tokio::time::sleep(ACCEPT_BACKOFF).await;
@@ -436,8 +471,9 @@ impl GuestPending {
 }
 
 /// A paired, encrypted link. Every message is sealed; anything altered, replayed or forged is
-/// rejected. After any failure the link is closed for good, since a half-sent or half-read frame
-/// would leave the stream out of step.
+/// rejected. A half-sent or half-read frame would leave the stream out of step, so the link is
+/// closed for good after any failure, and also if a [`send`](Self::send) or [`recv`](Self::recv)
+/// is cancelled before it finishes (for example by a timeout around it).
 pub struct Link {
     paired: Paired,
     stream: TcpStream,
@@ -447,22 +483,27 @@ pub struct Link {
 
 impl Link {
     /// Seals and sends one message. Fails with [`LinkError::Timeout`] if the other laptop stops
-    /// reading.
+    /// reading. A message too large to seal is refused without harming the link.
     pub async fn send(&mut self, data: &[u8]) -> Result<(), LinkError> {
         if self.broken {
             return Err(LinkError::Closed);
         }
         let sealed = self.paired.transport_mut().seal(data)?;
+        // Marked broken until the frame is fully written, so a cancelled send cannot be reused.
+        self.broken = true;
         let sent = write_frame(&mut self.stream, KIND_DATA, &sealed, self.send_timeout).await;
         self.broken = sent.is_err();
         sent
     }
 
-    /// Receives and opens one message. Waits as long as it takes; wrap in a timeout if needed.
+    /// Receives and opens one message. Waits as long as it takes. Cancelling it (for example
+    /// with a timeout) closes the link, since part of a frame may already have been read.
     pub async fn recv(&mut self) -> Result<Zeroizing<Vec<u8>>, LinkError> {
         if self.broken {
             return Err(LinkError::Closed);
         }
+        // Marked broken until a whole frame is read and opened, so a cancelled read cannot be reused.
+        self.broken = true;
         let opened = async {
             let (kind, body) = read_frame(&mut self.stream, MAX_DATA_LEN).await?;
             if kind != KIND_DATA {
@@ -635,5 +676,58 @@ async fn read_from_host(stream: &mut TcpStream, wait: Duration) -> Result<Vec<u8
         KIND_LOCKED => Err(PairingError::Locked.into()),
         KIND_WRONG_CODE => Err(PairingError::HandshakeFailed.into()),
         _ => Err(LinkError::Unexpected),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(s: &str) -> IpAddr {
+        penalty_key(s.parse().unwrap())
+    }
+
+    #[test]
+    fn ipv6_penalties_cover_the_whole_64_and_nothing_wider() {
+        // A device can pick any address inside its /64, so the penalty must cover all of them.
+        assert_eq!(key("fd00:1:2:3::1"), key("fd00:1:2:3:ffff:ffff:ffff:fffe"));
+        assert_eq!(key("fe80::1"), key("fe80::abcd:1234"));
+        // A neighbouring /64 is a different network and is not penalised with it.
+        assert_ne!(key("fd00:1:2:3::1"), key("fd00:1:2:4::1"));
+        assert_eq!(
+            key("fd00:1:2:3::1"),
+            "fd00:1:2:3::".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn ipv4_penalties_are_per_address_including_mapped_forms() {
+        assert_eq!(key("192.168.1.7"), "192.168.1.7".parse::<IpAddr>().unwrap());
+        assert_ne!(key("192.168.1.7"), key("192.168.1.8"));
+        // The same IPv4 device seen through an IPv6 socket is the same address.
+        assert_eq!(key("::ffff:192.168.1.7"), key("192.168.1.7"));
+    }
+
+    #[tokio::test]
+    async fn devices_the_rule_does_not_allow_are_closed_without_a_word() {
+        let mut host = Host::bind("127.0.0.1:0".parse().unwrap(), LinkConfig::default())
+            .await
+            .unwrap();
+        // Loopback stands in for an address outside the local network.
+        host.allowed = |_| false;
+        let addr = host.local_addr().unwrap();
+        let sender = Mutex::new(RotatingSender::new(Instant::now()).unwrap());
+        let serving = async { host.next_peer(&sender).await };
+        let outsider = async {
+            let mut raw = TcpStream::connect(addr).await.unwrap();
+            let _ = raw.write_all(&[KIND_HELLO, 0, 1, 0]).await;
+            let mut reply = Vec::new();
+            let _ = tokio::time::timeout(Duration::from_secs(2), raw.read_to_end(&mut reply)).await;
+            reply
+        };
+        tokio::select! {
+            _ = serving => panic!("an outsider must never be served"),
+            reply = outsider => assert!(reply.is_empty(), "no notice, nothing at all"),
+        }
     }
 }
