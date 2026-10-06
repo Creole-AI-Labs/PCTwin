@@ -6,9 +6,10 @@
 //! 1. sender   -> receiver : message 1 (SPAKE2 A)
 //! 2. receiver -> sender   : message 2 (SPAKE2 B + Noise handshake 1)
 //! 3. sender   -> receiver : message 3 (Noise handshake 2)
-//! 4. the receiver shows one number; the sender shows three and the person picks the match
+//! 4. receiver -> sender   : message 4 (reveals the value committed to in message 2)
+//! 5. the receiver shows one number; the sender shows three and the person picks the match
 //!    on the sender
-//! 5. sender   -> receiver : message 4 (sealed approval)
+//! 6. sender   -> receiver : message 5 (sealed approval)
 //! ```
 //!
 //! Only after the right pick on the sender do both sides get the encrypted transport.
@@ -26,13 +27,14 @@ fn pair_with(
 ) -> Result<(Paired, Paired), PairingError> {
     let now = Instant::now();
     let (sender, msg1) = SenderSession::start(sender_code, now);
-    let (receiver, msg2) = ReceiverSession::respond(typed, &msg1)?;
-    let (sender_choosing, msg3) = sender.receive(&msg2, now)?;
-    let waiting = receiver.receive(&msg3, now)?;
+    let (receiver, msg2) = ReceiverSession::respond(typed, &msg1, Instant::now())?;
+    let (sender_waiting, msg3) = sender.receive(&msg2, now)?;
+    let (waiting, msg4) = receiver.receive(&msg3, now)?;
+    let sender_choosing = sender_waiting.receive_reveal(&msg4, now)?;
     // The person reads the new laptop's number and picks it on the old laptop.
     let shown = waiting.match_number();
-    let (sender_paired, msg4) = sender_choosing.choose(shown, now)?;
-    let receiver_paired = waiting.receive_approval(&msg4, now)?;
+    let (sender_paired, msg5) = sender_choosing.choose(shown, now)?;
+    let receiver_paired = waiting.receive_approval(&msg5, now)?;
     Ok((sender_paired, receiver_paired))
 }
 
@@ -48,9 +50,31 @@ fn correct_code_and_correct_pick_pairs() {
 fn up_to_choice(code: &PairingCode) -> (SenderChoosing, ReceiverAwaitingApproval) {
     let now = Instant::now();
     let (sender, msg1) = SenderSession::start(code, now);
-    let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
-    let (choosing, msg3) = sender.receive(&msg2, now).unwrap();
-    (choosing, receiver.receive(&msg3, now).unwrap())
+    let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
+    let (sender_waiting, msg3) = sender.receive(&msg2, now).unwrap();
+    let (waiting, msg4) = receiver.receive(&msg3, now).unwrap();
+    (sender_waiting.receive_reveal(&msg4, now).unwrap(), waiting)
+}
+
+#[test]
+fn a_reveal_from_another_session_does_not_cancel_the_sender() {
+    let code = PairingCode::generate().unwrap();
+    let now = Instant::now();
+    let (s1, m1a) = SenderSession::start(&code, now);
+    let (r1, m2a) = ReceiverSession::respond(&code, &m1a, now).unwrap();
+    let (s1_waiting, m3a) = s1.receive(&m2a, now).unwrap();
+    let (_r1_waiting, honest_reveal) = r1.receive(&m3a, now).unwrap();
+    // A reveal from another session is sealed under other keys: junk, so the wait continues.
+    let (s2, m1b) = SenderSession::start(&code, now);
+    let (r2, m2b) = ReceiverSession::respond(&code, &m1b, now).unwrap();
+    let (_s2_waiting, m3b) = s2.receive(&m2b, now).unwrap();
+    let (_r2_waiting, other_reveal) = r2.receive(&m3b, now).unwrap();
+    let s1_waiting = s1_waiting
+        .receive_reveal(&other_reveal, now)
+        .unwrap_err()
+        .into_retry()
+        .expect("a reveal from another session is junk");
+    assert!(s1_waiting.receive_reveal(&honest_reveal, now).is_ok());
 }
 
 #[test]
@@ -125,7 +149,7 @@ fn receiver_rejects_a_forged_or_tampered_approval() {
         .unwrap_err()
         .into_retry()
         .expect("a tampered approval is junk, not a cancel");
-    assert!(r.receive_approval(b"\x01\x04approved", now).is_err());
+    assert!(r.receive_approval(b"\x01\x05approved", now).is_err());
 }
 
 #[test]
@@ -223,7 +247,7 @@ fn code_expires_after_its_lifetime_and_grace() {
     let code = PairingCode::generate().unwrap();
     let start = Instant::now();
     let (sender, msg1) = SenderSession::start(&code, start);
-    let (_receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
+    let (_receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
     let late = start + CODE_LIFETIME + ROTATION_GRACE + Duration::from_millis(1);
     assert!(matches!(
         sender.receive(&msg2, late),
@@ -236,7 +260,7 @@ fn code_just_inside_its_lifetime_still_works() {
     let code = PairingCode::generate().unwrap();
     let start = Instant::now();
     let (sender, msg1) = SenderSession::start(&code, start);
-    let (_receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
+    let (_receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
     assert!(
         sender
             .receive(&msg2, start + CODE_LIFETIME + ROTATION_GRACE)
@@ -261,8 +285,12 @@ fn a_session_allows_exactly_one_attempt() {
     let code = PairingCode::parse("111111").unwrap();
     let now = Instant::now();
     let (sender, msg1) = SenderSession::start(&code, now);
-    let (_r, bad) =
-        ReceiverSession::respond(&PairingCode::parse("222222").unwrap(), &msg1).unwrap();
+    let (_r, bad) = ReceiverSession::respond(
+        &PairingCode::parse("222222").unwrap(),
+        &msg1,
+        Instant::now(),
+    )
+    .unwrap();
     assert!(sender.receive(&bad, now).is_err());
     // `sender` has been moved; a fresh code and session are required.
 }
@@ -282,7 +310,7 @@ fn reflected_first_message_is_rejected() {
 fn receiver_rejects_its_own_message_reflected() {
     let code = PairingCode::generate().unwrap();
     let (_sender, msg1) = SenderSession::start(&code, Instant::now());
-    let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
+    let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
     assert!(receiver.receive(&msg2, Instant::now()).is_err());
 }
 
@@ -292,7 +320,8 @@ fn replayed_messages_from_an_old_session_are_rejected() {
     let now = Instant::now();
     // Old session, fully recorded by an eavesdropper.
     let (old_sender, old_msg1) = SenderSession::start(&code, now);
-    let (old_receiver, old_msg2) = ReceiverSession::respond(&code.clone(), &old_msg1).unwrap();
+    let (old_receiver, old_msg2) =
+        ReceiverSession::respond(&code.clone(), &old_msg1, Instant::now()).unwrap();
     let (_, old_msg3) = old_sender.receive(&old_msg2, now).unwrap();
     old_receiver.receive(&old_msg3, now).unwrap();
 
@@ -302,7 +331,8 @@ fn replayed_messages_from_an_old_session_are_rejected() {
 
     // Replaying old message 3 to a new receiver fails.
     let (_s, new_msg1) = SenderSession::start(&code, now);
-    let (new_receiver, _) = ReceiverSession::respond(&code.clone(), &new_msg1).unwrap();
+    let (new_receiver, _) =
+        ReceiverSession::respond(&code.clone(), &new_msg1, Instant::now()).unwrap();
     assert!(new_receiver.receive(&old_msg3, now).is_err());
 }
 
@@ -311,10 +341,11 @@ fn tampering_with_any_byte_of_message_2_or_3_is_detected() {
     let code = PairingCode::generate().unwrap();
     let now = Instant::now();
     let (_, msg1) = SenderSession::start(&code, now);
-    let (_, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
+    let (_, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
     for i in 0..msg2.len() {
         let (sender, msg1b) = SenderSession::start(&code, now);
-        let (_, mut fresh2) = ReceiverSession::respond(&code.clone(), &msg1b).unwrap();
+        let (_, mut fresh2) =
+            ReceiverSession::respond(&code.clone(), &msg1b, Instant::now()).unwrap();
         fresh2[i] ^= 0x01;
         assert!(
             sender.receive(&fresh2, now).is_err(),
@@ -324,14 +355,14 @@ fn tampering_with_any_byte_of_message_2_or_3_is_detected() {
     let _ = msg2;
 
     let (sender, msg1) = SenderSession::start(&code, now);
-    let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
+    let (receiver, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
     let (_, msg3) = sender.receive(&msg2, now).unwrap();
     for i in 0..msg3.len() {
         let mut bad = msg3.clone();
         bad[i] ^= 0x01;
         // Each attempt needs a fresh receiver because receive consumes it.
         let (s2, m1) = SenderSession::start(&code, now);
-        let (r2, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
+        let (r2, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
         let (_, mut m3) = s2.receive(&m2, now).unwrap();
         m3[i] ^= 0x01;
         assert!(
@@ -361,12 +392,13 @@ fn a_man_in_the_middle_without_the_code_cannot_pair_with_either_side() {
 
     // Leg 1: attacker pretends to be the receiver to the real sender.
     let (sender, msg1) = SenderSession::start(&real, now);
-    let (_att_r, att_msg2) = ReceiverSession::respond(&attacker_guess, &msg1).unwrap();
+    let (_att_r, att_msg2) =
+        ReceiverSession::respond(&attacker_guess, &msg1, Instant::now()).unwrap();
     assert!(sender.receive(&att_msg2, now).is_err());
 
     // Leg 2: attacker pretends to be the sender to the real receiver.
     let (att_s, att_msg1) = SenderSession::start(&attacker_guess, now);
-    let (receiver, msg2) = ReceiverSession::respond(&real, &att_msg1).unwrap();
+    let (receiver, msg2) = ReceiverSession::respond(&real, &att_msg1, Instant::now()).unwrap();
     assert!(
         att_s.receive(&msg2, now).is_err(),
         "attacker cannot complete the handshake"
@@ -396,7 +428,7 @@ fn wrong_protocol_version_is_reported() {
     let (_, mut msg1) = SenderSession::start(&code, Instant::now());
     msg1[0] = PROTOCOL_VERSION + 1;
     assert!(matches!(
-        ReceiverSession::respond(&code.clone(), &msg1),
+        ReceiverSession::respond(&code.clone(), &msg1, Instant::now()),
         Err(PairingError::UnsupportedVersion(v)) if v == PROTOCOL_VERSION + 1
     ));
 }
@@ -406,16 +438,16 @@ fn oversized_and_truncated_messages_are_rejected_without_panicking() {
     let code = PairingCode::generate().unwrap();
     let now = Instant::now();
     let huge = vec![PROTOCOL_VERSION; MAX_MESSAGE_LEN + 1];
-    assert!(ReceiverSession::respond(&code, &huge).is_err());
+    assert!(ReceiverSession::respond(&code, &huge, Instant::now()).is_err());
     let (_, msg1) = SenderSession::start(&code, now);
     for len in 0..msg1.len() {
         assert!(
-            ReceiverSession::respond(&code, &msg1[..len]).is_err(),
+            ReceiverSession::respond(&code, &msg1[..len], Instant::now()).is_err(),
             "accepted {len}-byte prefix"
         );
     }
     let (sender, msg1) = SenderSession::start(&code, now);
-    let (_, msg2) = ReceiverSession::respond(&code.clone(), &msg1).unwrap();
+    let (_, msg2) = ReceiverSession::respond(&code.clone(), &msg1, Instant::now()).unwrap();
     assert!(sender.receive(&msg2[..msg2.len() - 1], now).is_err());
 }
 
@@ -432,7 +464,7 @@ fn random_garbage_never_panics() {
                 (seed & 0xff) as u8
             })
             .collect();
-        let _ = ReceiverSession::respond(&code, &bytes);
+        let _ = ReceiverSession::respond(&code, &bytes, Instant::now());
         let (sender, _) = SenderSession::start(&code, Instant::now());
         let _ = sender.receive(&bytes, Instant::now());
     }

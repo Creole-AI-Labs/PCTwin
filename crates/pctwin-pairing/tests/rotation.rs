@@ -15,7 +15,7 @@ fn attempt(
     now: Instant,
 ) -> Result<(), PairingError> {
     let typed = PairingCode::parse(code).unwrap();
-    let (_receiver, msg2) = ReceiverSession::respond(&typed, msg1)?;
+    let (_receiver, msg2) = ReceiverSession::respond(&typed, msg1, Instant::now())?;
     sender.receive(&msg2, now).map(|_| ())
 }
 
@@ -164,9 +164,12 @@ fn a_reply_for_an_unknown_session_does_not_burn_the_current_code() {
     let mut stranger = RotatingSender::new(now).unwrap();
     let stranger_code = stranger.code().unwrap();
     let stranger_msg1 = stranger.message_1().unwrap().to_vec();
-    let (_r, foreign_msg2) =
-        ReceiverSession::respond(&PairingCode::parse(&stranger_code).unwrap(), &stranger_msg1)
-            .unwrap();
+    let (_r, foreign_msg2) = ReceiverSession::respond(
+        &PairingCode::parse(&stranger_code).unwrap(),
+        &stranger_msg1,
+        Instant::now(),
+    )
+    .unwrap();
     assert!(matches!(
         sender.receive(&foreign_msg2, now),
         Err(PairingError::UnknownSession)

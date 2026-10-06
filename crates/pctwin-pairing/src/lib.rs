@@ -17,13 +17,17 @@
 //! 4. A Noise `NNpsk0` handshake builds the encrypted link with fresh ephemeral keys
 //!    (forward secrecy). The SPAKE2 secret is the pre-shared key; the protocol version, the session
 //!    tag and both SPAKE2 messages are bound in as the Noise prologue.
-//! 5. Both sides derive a two-digit match number from the final handshake hash. The receiver
-//!    (new laptop) shows it; the sender (old laptop) offers three numbers (the right one and two
+//! 5. Both sides derive a two-digit match number from the final handshake hash and a random
+//!    value the receiver locked in with a hash commitment inside message 2 and reveals only after
+//!    the sender's last handshake message (message 4). Because neither side can see the other's
+//!    final input before fixing its own, nobody in the middle can try keys until the two laptops
+//!    happen to show the same number; each attempt is a blind 1-in-90 guess. The receiver
+//!    (new laptop) shows the number; the sender (old laptop) offers three numbers (the right one and two
 //!    random decoys) and the person picks, on the old laptop, the one shown on the new laptop.
 //! 6. Only that pick on the old laptop unlocks it: nothing the other side sends can, so someone
 //!    who knows the code still cannot reach the old laptop's files without the person at the old
-//!    laptop choosing the right number. The sender then seals an approval to the receiver, which
-//!    unlocks the receiver. Only then does either side get a usable [`Paired`] link.
+//!    laptop choosing the right number. The sender then seals an approval (message 5) to the
+//!    receiver, which unlocks the receiver. Only then does either side get a usable [`Paired`] link.
 //!
 //! Every message carries the protocol version and a message kind, and is size-limited. Malformed
 //! input returns an error instead of panicking. Messages that fail before authentication hand the
@@ -34,6 +38,8 @@
 //! - The human decision protects the sender, which holds the files. Someone who knows the code can
 //!   pose as a sender and be approved by a receiver; the receiver's safety gate and the person's
 //!   review of the plan then guard what that fake sender offers.
+//! - Someone who knows the code and sits between both laptops wins only if two independent
+//!   numbers collide (1 in 90 per attempt), and each attempt needs the person to type a code again.
 //! - `spake2` states it has had no independent audit and is probably not constant-time; `snow`
 //!   has had no formal audit. Neither zeroizes its internal secrets on drop.
 //! - Session tags are public, so anyone who sees message 1 can spend that code's single attempt
@@ -49,7 +55,7 @@ use std::time::{Duration, Instant};
 
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use snow::{Builder, HandshakeState, TransportState};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -62,6 +68,8 @@ pub const CODE_LIFETIME: Duration = Duration::from_secs(60);
 pub const ROTATION_GRACE: Duration = Duration::from_secs(15);
 /// How long either side waits, after the handshake, for the person's pick and the approval.
 pub const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(180);
+/// How long the receiver waits for message 3 after sending message 2.
+pub const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Failed attempts in a row before pairing locks until the person on the sender starts again.
 pub const MAX_FAILED_ATTEMPTS: u32 = 5;
 /// Largest pairing message accepted, in bytes.
@@ -78,13 +86,18 @@ const PROLOGUE_LABEL: &[u8] = b"pctwin/v1/pairing-prologue";
 const PSK_SALT: &[u8] = b"pctwin/v1/pairing-psk";
 const MATCH_SALT: &[u8] = b"pctwin/v1/match-number";
 const APPROVE_LABEL: &[u8] = b"pctwin/v1/approved";
+const COMMIT_LABEL: &[u8] = b"pctwin/v1/number-commitment";
+const NONCE_LEN: usize = 32;
+const COMMIT_LEN: usize = 32;
+const MAX_CHOICE_DRAWS: u32 = 64;
 const AEAD_TAG_LEN: usize = 16;
 const NOISE_MAX: usize = 65_535;
 
 const KIND_SPAKE_A: u8 = 1;
 const KIND_SPAKE_B_NOISE_1: u8 = 2;
 const KIND_NOISE_2: u8 = 3;
-const KIND_APPROVE: u8 = 4;
+const KIND_REVEAL: u8 = 4;
+const KIND_APPROVE: u8 = 5;
 
 /// Why pairing or the encrypted link failed. Messages say what to do, not which byte was wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -269,12 +282,12 @@ impl SenderSession {
     }
 
     /// Handles message 2 at time `now`. Consumes the session: a code gets exactly one attempt.
-    /// Returns the three numbers to offer the person on the sender, and message 3 to send.
+    /// Returns the state waiting for the receiver's reveal, and message 3 to send.
     pub fn receive(
         self,
         msg2: &[u8],
         now: Instant,
-    ) -> Result<(SenderChoosing, Vec<u8>), PairingError> {
+    ) -> Result<(SenderAwaitingReveal, Vec<u8>), PairingError> {
         if now > self.deadline {
             return Err(PairingError::Expired);
         }
@@ -303,25 +316,75 @@ impl SenderSession {
         let read = hs
             .read_message(noise_1, &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
-        if read != 0 {
-            return Err(PairingError::Malformed);
-        }
+        let commitment: [u8; COMMIT_LEN] = buf[..read]
+            .try_into()
+            .map_err(|_| PairingError::Malformed)?;
         let written = hs
             .write_message(&[], &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
         let msg3 = frame(KIND_NOISE_2, &buf[..written]);
 
-        let (transport, correct) = finish_handshake(hs)?;
-        let choices = offer_choices(correct)?;
+        let (transport, handshake_hash) = finish_handshake(hs)?;
         Ok((
-            SenderChoosing {
+            SenderAwaitingReveal {
                 transport,
-                correct,
-                choices,
+                handshake_hash,
+                commitment,
                 deadline: now + CONFIRMATION_TIMEOUT,
             },
             msg3,
         ))
+    }
+}
+
+/// Sender side, after message 3, waiting for the receiver to reveal the value it committed to.
+pub struct SenderAwaitingReveal {
+    transport: TransportState,
+    handshake_hash: Vec<u8>,
+    commitment: [u8; COMMIT_LEN],
+    deadline: Instant,
+}
+
+impl SenderAwaitingReveal {
+    /// When the sender stops waiting for the reveal.
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    /// Handles message 4 at time `now`. Returns the three numbers to offer the person. Junk,
+    /// truncated or forged messages hand the waiting state back; a reveal that does not match the
+    /// receiver's commitment, or a missed deadline, ends the pairing.
+    pub fn receive_reveal(
+        mut self,
+        msg4: &[u8],
+        now: Instant,
+    ) -> Result<SenderChoosing, Rejected<Self>> {
+        if now > self.deadline {
+            return Err(Rejected::end(PairingError::Expired));
+        }
+        let payload = match parse_frame(msg4, KIND_REVEAL) {
+            Ok(p) => p,
+            Err(e) => return Err(Rejected::keep(e, self)),
+        };
+        let mut buf = Zeroizing::new(vec![0u8; payload.len()]);
+        // A message that fails authentication does not advance the transport's nonce.
+        let read = match self.transport.read_message(payload, &mut buf) {
+            Ok(n) => n,
+            Err(_) => return Err(Rejected::keep(PairingError::HandshakeFailed, self)),
+        };
+        let nonce = &buf[..read];
+        // The commitment covers the exact bytes, so a reveal of any other length fails here too.
+        if commit_to(nonce) != self.commitment {
+            return Err(Rejected::end(PairingError::HandshakeFailed));
+        }
+        let correct = match_number(&self.handshake_hash, nonce).map_err(Rejected::end)?;
+        let choices = offer_choices(correct).map_err(Rejected::end)?;
+        Ok(SenderChoosing {
+            transport: self.transport,
+            correct,
+            choices,
+            deadline: self.deadline,
+        })
     }
 }
 
@@ -346,7 +409,7 @@ impl SenderChoosing {
     }
 
     /// Records the person's pick at time `now`. The right number unlocks the sender and returns
-    /// message 4, the sealed approval for the receiver. Any other number, or a pick after the
+    /// message 5, the sealed approval for the receiver. Any other number, or a pick after the
     /// deadline, cancels pairing. To cancel without picking (for example when none of the three
     /// numbers matches the receiver), drop this value.
     pub fn choose(mut self, picked: u8, now: Instant) -> Result<(Paired, Vec<u8>), PairingError> {
@@ -363,12 +426,12 @@ impl SenderChoosing {
             .transport
             .write_message(&plain, &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
-        let msg4 = frame(KIND_APPROVE, &buf[..written]);
+        let msg5 = frame(KIND_APPROVE, &buf[..written]);
         Ok((
             Paired {
                 transport: Transport(self.transport),
             },
-            msg4,
+            msg5,
         ))
     }
 }
@@ -376,11 +439,18 @@ impl SenderChoosing {
 /// Receiver side, after the person typed the code and message 2 was sent.
 pub struct ReceiverSession {
     hs: HandshakeState,
+    nonce: Zeroizing<[u8; NONCE_LEN]>,
+    deadline: Instant,
 }
 
 impl ReceiverSession {
-    /// Handles message 1 using the typed code. Returns the session and message 2 to send.
-    pub fn respond(code: &PairingCode, msg1: &[u8]) -> Result<(Self, Vec<u8>), PairingError> {
+    /// Handles message 1 using the typed code at time `now`. Returns the session and message 2
+    /// to send. Message 2 carries a commitment to a fresh random value, revealed in message 4.
+    pub fn respond(
+        code: &PairingCode,
+        msg1: &[u8],
+        now: Instant,
+    ) -> Result<(Self, Vec<u8>), PairingError> {
         let payload = parse_frame(msg1, KIND_SPAKE_A)?;
         if payload.len() != SESSION_ID_LEN + SPAKE2_MSG_LEN {
             return Err(PairingError::Malformed);
@@ -403,24 +473,37 @@ impl ReceiverSession {
             .build_initiator()
             .map_err(|_| PairingError::HandshakeFailed)?;
 
+        let mut nonce = Zeroizing::new([0u8; NONCE_LEN]);
+        getrandom::fill(nonce.as_mut()).map_err(|_| PairingError::Random)?;
         let mut buf = [0u8; 128];
         let written = hs
-            .write_message(&[], &mut buf)
+            .write_message(&commit_to(nonce.as_ref()), &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
         let mut payload = id.to_vec();
         payload.extend_from_slice(&spake_b);
         payload.extend_from_slice(&buf[..written]);
-        Ok((Self { hs }, frame(KIND_SPAKE_B_NOISE_1, &payload)))
+        Ok((
+            Self {
+                hs,
+                nonce,
+                deadline: now + REPLY_TIMEOUT,
+            },
+            frame(KIND_SPAKE_B_NOISE_1, &payload),
+        ))
     }
 
-    /// Handles message 3 at time `now`. Returns the number to show on the receiver. Any message that fails
+    /// Handles message 3 at time `now`. Returns the number to show on the receiver and message 4
+    /// (the reveal) to send. Message 3 after [`REPLY_TIMEOUT`] ends the pairing. Any message that fails
     /// before the handshake completes (junk, truncated, forged) hands the session back: `snow`
     /// restores its handshake state on a failed read, so the genuine message 3 still works.
     pub fn receive(
         mut self,
         msg3: &[u8],
         now: Instant,
-    ) -> Result<ReceiverAwaitingApproval, Rejected<Self>> {
+    ) -> Result<(ReceiverAwaitingApproval, Vec<u8>), Rejected<Self>> {
+        if now > self.deadline {
+            return Err(Rejected::end(PairingError::Expired));
+        }
         let payload = match parse_frame(msg3, KIND_NOISE_2) {
             Ok(p) => p,
             Err(e) => return Err(Rejected::keep(e, self)),
@@ -433,12 +516,21 @@ impl ReceiverSession {
         if read != 0 {
             return Err(Rejected::end(PairingError::Malformed));
         }
-        let (transport, match_number) = finish_handshake(self.hs).map_err(Rejected::end)?;
-        Ok(ReceiverAwaitingApproval {
-            transport,
-            match_number,
-            deadline: now + CONFIRMATION_TIMEOUT,
-        })
+        let (mut transport, handshake_hash) = finish_handshake(self.hs).map_err(Rejected::end)?;
+        let match_number =
+            match_number(&handshake_hash, self.nonce.as_ref()).map_err(Rejected::end)?;
+        let mut sealed = [0u8; NONCE_LEN + AEAD_TAG_LEN];
+        let written = transport
+            .write_message(self.nonce.as_ref(), &mut sealed)
+            .map_err(|_| Rejected::end(PairingError::HandshakeFailed))?;
+        Ok((
+            ReceiverAwaitingApproval {
+                transport,
+                match_number,
+                deadline: now + CONFIRMATION_TIMEOUT,
+            },
+            frame(KIND_REVEAL, &sealed[..written]),
+        ))
     }
 }
 
@@ -460,14 +552,14 @@ impl ReceiverAwaitingApproval {
         self.deadline
     }
 
-    /// Handles message 4 at time `now`. Succeeds only for a genuine approval from this session
+    /// Handles message 5 at time `now`. Succeeds only for a genuine approval from this session
     /// carrying the receiver's own number. Junk, truncated or forged messages hand the waiting
     /// state back; a wrong number, a malformed approval or a missed deadline ends the pairing.
-    pub fn receive_approval(mut self, msg4: &[u8], now: Instant) -> Result<Paired, Rejected<Self>> {
+    pub fn receive_approval(mut self, msg5: &[u8], now: Instant) -> Result<Paired, Rejected<Self>> {
         if now > self.deadline {
             return Err(Rejected::end(PairingError::Expired));
         }
-        let payload = match parse_frame(msg4, KIND_APPROVE) {
+        let payload = match parse_frame(msg5, KIND_APPROVE) {
             Ok(p) => p,
             Err(e) => return Err(Rejected::keep(e, self)),
         };
@@ -677,7 +769,7 @@ impl RotatingSender {
         &mut self,
         msg2: &[u8],
         now: Instant,
-    ) -> Result<(SenderChoosing, Vec<u8>), PairingError> {
+    ) -> Result<(SenderAwaitingReveal, Vec<u8>), PairingError> {
         self.tick(now)?;
         if self.locked {
             return Err(PairingError::Locked);
@@ -748,6 +840,7 @@ macro_rules! redacted_debug {
 redacted_debug!(
     RotatingSender,
     SenderSession,
+    SenderAwaitingReveal,
     SenderChoosing,
     ReceiverSession,
     ReceiverAwaitingApproval,
@@ -822,20 +915,32 @@ fn noise_builder<'a>(psk: &'a [u8; 32], prologue: &'a [u8]) -> Result<Builder<'a
         .map_err(|_| PairingError::HandshakeFailed)
 }
 
-fn finish_handshake(hs: HandshakeState) -> Result<(TransportState, u8), PairingError> {
+fn finish_handshake(hs: HandshakeState) -> Result<(TransportState, Vec<u8>), PairingError> {
     if !hs.is_handshake_finished() {
         return Err(PairingError::HandshakeFailed);
     }
-    let number = match_number(hs.get_handshake_hash())?;
+    let handshake_hash = hs.get_handshake_hash().to_vec();
     let transport = hs
         .into_transport_mode()
         .map_err(|_| PairingError::HandshakeFailed)?;
-    Ok((transport, number))
+    Ok((transport, handshake_hash))
 }
 
-fn match_number(handshake_hash: &[u8]) -> Result<u8, PairingError> {
+/// Hash commitment to the receiver's random value (the same idea as Bluetooth numeric comparison
+/// and ZRTP): binding because SHA-256 resists collisions, hiding because the value is 32 random bytes.
+fn commit_to(nonce: &[u8]) -> [u8; COMMIT_LEN] {
+    let mut h = Sha256::new();
+    h.update(COMMIT_LABEL);
+    h.update(nonce);
+    h.finalize().into()
+}
+
+fn match_number(handshake_hash: &[u8], nonce: &[u8]) -> Result<u8, PairingError> {
+    let mut ikm = Zeroizing::new(Vec::with_capacity(handshake_hash.len() + nonce.len()));
+    ikm.extend_from_slice(handshake_hash);
+    ikm.extend_from_slice(nonce);
     let mut out = [0u8; 8];
-    Hkdf::<Sha256>::new(Some(MATCH_SALT), handshake_hash)
+    Hkdf::<Sha256>::new(Some(MATCH_SALT), &ikm)
         .expand(b"match number", &mut out)
         .map_err(|_| PairingError::HandshakeFailed)?;
     Ok(number_in_range(u64::from_le_bytes(out)))
@@ -858,7 +963,14 @@ fn random_u64() -> Result<u64, PairingError> {
 fn offer_choices(correct: u8) -> Result<[u8; 3], PairingError> {
     let mut choices = [correct, 0, 0];
     let mut filled = 1;
+    let mut draws = 0;
+    // Each draw collides with probability at most 2/90, so the cap is only reached if the
+    // random source is broken; it keeps this loop finite even then.
     while filled < 3 {
+        draws += 1;
+        if draws > MAX_CHOICE_DRAWS {
+            return Err(PairingError::Random);
+        }
         let candidate = number_in_range(random_u64()?);
         if !choices[..filled].contains(&candidate) {
             choices[filled] = candidate;
@@ -902,7 +1014,8 @@ mod tests {
         let failures = s.failed_attempts();
 
         let typed = PairingCode::parse(&old_code).expect("parse");
-        let (_r, msg2) = ReceiverSession::respond(&typed, &old_msg1).expect("respond");
+        let (_r, msg2) =
+            ReceiverSession::respond(&typed, &old_msg1, Instant::now()).expect("respond");
         assert!(matches!(s.receive(&msg2, t), Err(PairingError::Locked)));
         assert_eq!(
             s.failed_attempts(),

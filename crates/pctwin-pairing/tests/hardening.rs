@@ -1,5 +1,6 @@
 //! Regression tests for the findings of the fresh-context security review (Security Design Part J).
-//! F1: only a person's pick on the sender (old laptop) can unlock it; approvals are checked.
+//! F1: only a person's pick on the sender (old laptop) can unlock it; approvals are checked;
+//!     nobody in the middle can steer the number (commit, then reveal).
 //! F2: failed attempts are budgeted: pauses, then a lockout until the person starts again.
 //! F4: junk messages must not cancel a pairing in progress; waiting times out.
 //! F9: degenerate SPAKE2 points are rejected.
@@ -9,10 +10,10 @@ use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
 use pctwin_pairing::{
     CONFIRMATION_TIMEOUT, MATCH_NUMBER_RANGE, MAX_FAILED_ATTEMPTS, PairingCode, PairingError,
-    ReceiverAwaitingApproval, ReceiverSession, RotatingSender, SenderChoosing, SenderSession,
-    SenderStatus,
+    REPLY_TIMEOUT, ReceiverAwaitingApproval, ReceiverSession, RotatingSender, SenderAwaitingReveal,
+    SenderChoosing, SenderSession, SenderStatus,
 };
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use std::time::{Duration, Instant};
 
@@ -39,18 +40,48 @@ fn prologue(id: &[u8], spake_a: &[u8], spake_b: &[u8]) -> Vec<u8> {
     p
 }
 
-fn match_number_of(handshake_hash: &[u8]) -> u8 {
+fn match_number_of(handshake_hash: &[u8], nonce: &[u8]) -> u8 {
+    let mut ikm = handshake_hash.to_vec();
+    ikm.extend(nonce);
     let mut okm = [0u8; 8];
-    Hkdf::<Sha256>::new(Some(b"pctwin/v1/match-number"), handshake_hash)
+    Hkdf::<Sha256>::new(Some(b"pctwin/v1/match-number"), &ikm)
         .expand(b"match number", &mut okm)
         .unwrap();
     10 + (u64::from_le_bytes(okm) % 90) as u8
 }
 
+fn commit_to(nonce: &[u8]) -> Vec<u8> {
+    let mut h = Sha256::new();
+    h.update(b"pctwin/v1/number-commitment");
+    h.update(nonce);
+    h.finalize().to_vec()
+}
+
+fn sealed(tr: &mut snow::TransportState, kind: u8, plain: &[u8]) -> Vec<u8> {
+    let mut out = [0u8; 128];
+    let k = tr.write_message(plain, &mut out).unwrap();
+    let mut m = vec![1u8, kind];
+    m.extend(&out[..k]);
+    m
+}
+
 /// An attacker who knows the code reimplements the RECEIVER from the public protocol and also
-/// computes the match number from its own handshake, exactly as the Skeptic's bypass did.
+/// computes the match number itself, exactly as the Skeptic's bypass did.
 /// Returns the sender's choosing state and the number the attacker computed.
 fn raw_receiver(sender: &mut RotatingSender, now: Instant) -> (SenderChoosing, u8) {
+    let nonce = [5u8; 32];
+    let (waiting, mut tr, hash) = raw_receiver_committed(sender, &nonce, now);
+    let reveal = sealed(&mut tr, 4, &nonce);
+    let choosing = waiting.receive_reveal(&reveal, now).unwrap();
+    (choosing, match_number_of(&hash, &nonce))
+}
+
+/// The hand-built receiver up to message 3, having committed to `nonce` in message 2.
+fn raw_receiver_committed(
+    sender: &mut RotatingSender,
+    nonce: &[u8],
+    now: Instant,
+) -> (SenderAwaitingReveal, snow::TransportState, Vec<u8>) {
     let code = sender.code().unwrap();
     let m1 = sender.message_1().unwrap().to_vec();
     let id = m1[2..10].to_vec();
@@ -70,15 +101,15 @@ fn raw_receiver(sender: &mut RotatingSender, now: Instant) -> (SenderChoosing, u
         .build_initiator()
         .unwrap();
     let mut buf = [0u8; 128];
-    let n = hs.write_message(&[], &mut buf).unwrap();
+    let n = hs.write_message(&commit_to(nonce), &mut buf).unwrap();
     let mut m2 = vec![1u8, 2];
     m2.extend(&id);
     m2.extend(&spake_b);
     m2.extend(&buf[..n]);
-    let (choosing, m3) = sender.receive(&m2, now).unwrap();
+    let (waiting, m3) = sender.receive(&m2, now).unwrap();
     hs.read_message(&m3[2..], &mut buf).unwrap();
-    let computed = match_number_of(hs.get_handshake_hash());
-    (choosing, computed)
+    let hash = hs.get_handshake_hash().to_vec();
+    (waiting, hs.into_transport_mode().unwrap(), hash)
 }
 
 /// An attacker who knows the code reimplements the SENDER, so it can seal any approval it likes.
@@ -93,7 +124,8 @@ fn raw_sender(code: &str, now: Instant) -> (ReceiverAwaitingApproval, snow::Tran
     let mut m1 = vec![1u8, 1];
     m1.extend(id);
     m1.extend(&spake_a);
-    let (receiver, m2) = ReceiverSession::respond(&PairingCode::parse(code).unwrap(), &m1).unwrap();
+    let (receiver, m2) =
+        ReceiverSession::respond(&PairingCode::parse(code).unwrap(), &m1, Instant::now()).unwrap();
     let spake_b = &m2[10..43];
     let noise_1 = &m2[43..];
     let psk = psk_from(&st.finish(spake_b).unwrap());
@@ -110,16 +142,78 @@ fn raw_sender(code: &str, now: Instant) -> (ReceiverAwaitingApproval, snow::Tran
     let n = hs.write_message(&[], &mut buf).unwrap();
     let mut m3 = vec![1u8, 3];
     m3.extend(&buf[..n]);
-    let waiting = receiver.receive(&m3, now).unwrap();
+    let (waiting, _reveal) = receiver.receive(&m3, now).unwrap();
     (waiting, hs.into_transport_mode().unwrap())
 }
 
+fn receiver_number_after(receiver: ReceiverSession, m3: &[u8], now: Instant) -> u8 {
+    receiver.receive(m3, now).unwrap().0.match_number()
+}
+
 fn sealed_approval(tr: &mut snow::TransportState, plain: &[u8]) -> Vec<u8> {
-    let mut out = [0u8; 64];
-    let k = tr.write_message(plain, &mut out).unwrap();
-    let mut m4 = vec![1u8, 4];
-    m4.extend(&out[..k]);
-    m4
+    sealed(tr, 5, plain)
+}
+
+/// A code-holder sitting between the laptops plays the sender to the real new laptop and tries
+/// fresh ephemeral keys for message 3 until its own copy of the handshake predicts `target`.
+/// Returns the number the real new laptop then shows.
+fn grind_receiver_towards(target: u8, now: Instant) -> u8 {
+    let code = PairingCode::generate().unwrap().digits();
+    let id = [9u8; 8];
+    let (st, spake_a) = Spake2::<Ed25519Group>::start_a(
+        &Password::new(code.as_bytes()),
+        &Identity::new(b"pctwin/v1/sender"),
+        &Identity::new(b"pctwin/v1/receiver"),
+    );
+    let mut m1 = vec![1u8, 1];
+    m1.extend(id);
+    m1.extend(&spake_a);
+    let (receiver, m2) =
+        ReceiverSession::respond(&PairingCode::parse(&code).unwrap(), &m1, Instant::now()).unwrap();
+    let spake_b = &m2[10..43];
+    let noise_1 = &m2[43..];
+    let psk = psk_from(&st.finish(spake_b).unwrap());
+    let pro = prologue(&id, &spake_a, spake_b);
+    let mut buf = [0u8; 256];
+    let mut best = None;
+    for _ in 0..2000 {
+        let mut hs = snow::Builder::new(NOISE.parse().unwrap())
+            .psk(0, &psk)
+            .unwrap()
+            .prologue(&pro)
+            .unwrap()
+            .build_responder()
+            .unwrap();
+        hs.read_message(noise_1, &mut buf).unwrap();
+        let n = hs.write_message(&[], &mut buf).unwrap();
+        let mut m3 = vec![1u8, 3];
+        m3.extend(&buf[..n]);
+        // The best the attacker can do: predict from the handshake alone (the formula before
+        // the fix). The receiver's committed value is hidden until after message 3.
+        if match_number_of(hs.get_handshake_hash(), &[]) == target {
+            best = Some(m3);
+            break;
+        }
+        best.get_or_insert(m3);
+    }
+    let m3 = best.unwrap();
+    receiver_number_after(receiver, &m3, now)
+}
+
+#[test]
+fn a_code_holder_in_the_middle_cannot_steer_the_number_the_new_laptop_shows() {
+    // Found by the Skeptic: the sender's key comes last, so a fake sender could try keys until
+    // the new laptop shows the number the real old laptop offers. Each try must now be a blind
+    // guess: about 1 in 90.
+    let target = 42;
+    let trials = 40;
+    let hits = (0..trials)
+        .filter(|_| grind_receiver_towards(target, Instant::now()) == target)
+        .count();
+    assert!(
+        hits < 8,
+        "the fake sender steered the number in {hits} of {trials} tries"
+    );
 }
 
 #[test]
@@ -129,6 +223,58 @@ fn control_the_hand_built_receiver_completes_the_handshake_and_knows_the_number(
     let mut sender = RotatingSender::new(now).unwrap();
     let (choosing, computed) = raw_receiver(&mut sender, now);
     assert!(choosing.choices().contains(&computed));
+}
+
+#[test]
+fn a_reveal_that_does_not_match_the_commitment_ends_pairing() {
+    // A fake new laptop cannot pick its random value after seeing the old laptop's key.
+    let now = Instant::now();
+    let mut sender = RotatingSender::new(now).unwrap();
+    let (waiting, mut tr, _hash) = raw_receiver_committed(&mut sender, &[5u8; 32], now);
+    let reveal = sealed(&mut tr, 4, &[6u8; 32]);
+    let rejected = waiting.receive_reveal(&reveal, now).unwrap_err();
+    assert_eq!(rejected.error(), PairingError::HandshakeFailed);
+    assert!(rejected.into_retry().is_none());
+}
+
+#[test]
+fn a_reveal_of_the_wrong_length_ends_pairing() {
+    for len in [0usize, 31, 33, 64] {
+        let now = Instant::now();
+        let mut sender = RotatingSender::new(now).unwrap();
+        let (waiting, mut tr, _hash) = raw_receiver_committed(&mut sender, &[5u8; 32], now);
+        let reveal = sealed(&mut tr, 4, &vec![5u8; len]);
+        let rejected = waiting.receive_reveal(&reveal, now).unwrap_err();
+        assert!(
+            rejected.into_retry().is_none(),
+            "{len}-byte reveal accepted"
+        );
+    }
+}
+
+#[test]
+fn junk_reveals_do_not_cancel_the_sender_and_late_reveals_are_refused() {
+    let now = Instant::now();
+    let mut sender = RotatingSender::new(now).unwrap();
+    let nonce = [5u8; 32];
+    let (mut waiting, mut tr, _hash) = raw_receiver_committed(&mut sender, &nonce, now);
+    let reveal = sealed(&mut tr, 4, &nonce);
+    for junk in [vec![], vec![1u8], vec![1, 5, 0], vec![1, 4, 0, 0], {
+        let mut f = reveal.clone();
+        let last = f.len() - 1;
+        f[last] ^= 1;
+        f
+    }] {
+        waiting = waiting
+            .receive_reveal(&junk, now)
+            .unwrap_err()
+            .into_retry()
+            .expect("junk must hand the waiting state back");
+    }
+    assert_eq!(waiting.deadline(), now + CONFIRMATION_TIMEOUT);
+    let late = waiting.deadline() + Duration::from_millis(1);
+    let rejected = waiting.receive_reveal(&reveal, late).unwrap_err();
+    assert_eq!(rejected.error(), PairingError::Expired);
 }
 
 #[test]
@@ -148,9 +294,9 @@ fn knowing_the_number_does_not_unlock_the_sender_without_a_person_picking_on_it(
         let real_receiver_number = {
             let code = PairingCode::generate().unwrap();
             let (s, m1) = SenderSession::start(&code, now);
-            let (r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
+            let (r, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
             let (_c, m3) = s.receive(&m2, now).unwrap();
-            r.receive(&m3, now).unwrap().match_number()
+            r.receive(&m3, now).unwrap().0.match_number()
         };
         if choosing.choices().contains(&real_receiver_number) {
             matched += 1;
@@ -237,7 +383,9 @@ fn burn_one(sender: &mut RotatingSender, now: Instant) -> PairingError {
     let code = sender.code().unwrap();
     let msg1 = sender.message_1().unwrap().to_vec();
     let wrong = if code == "000000" { "000001" } else { "000000" };
-    let (_r, msg2) = ReceiverSession::respond(&PairingCode::parse(wrong).unwrap(), &msg1).unwrap();
+    let (_r, msg2) =
+        ReceiverSession::respond(&PairingCode::parse(wrong).unwrap(), &msg1, Instant::now())
+            .unwrap();
     sender.receive(&msg2, now).unwrap_err()
 }
 
@@ -263,7 +411,9 @@ fn five_failures_lock_pairing_until_the_person_starts_again() {
     assert_eq!(sender.failed_attempts(), 0);
     let code = sender.code().unwrap();
     let msg1 = sender.message_1().unwrap().to_vec();
-    let (_r, msg2) = ReceiverSession::respond(&PairingCode::parse(&code).unwrap(), &msg1).unwrap();
+    let (_r, msg2) =
+        ReceiverSession::respond(&PairingCode::parse(&code).unwrap(), &msg1, Instant::now())
+            .unwrap();
     assert!(sender.receive(&msg2, t).is_ok());
 }
 
@@ -276,8 +426,12 @@ fn replies_while_locked_or_cooling_down_are_refused_without_counting() {
     assert_eq!(sender.failed_attempts(), 1);
 
     // During the one-second pause, any reply is refused and nothing more is counted.
-    let (_r, msg2) =
-        ReceiverSession::respond(&PairingCode::parse("123456").unwrap(), &stale).unwrap();
+    let (_r, msg2) = ReceiverSession::respond(
+        &PairingCode::parse("123456").unwrap(),
+        &stale,
+        Instant::now(),
+    )
+    .unwrap();
     assert!(matches!(
         sender.receive(&msg2, now + Duration::from_millis(500)),
         Err(PairingError::CoolingDown)
@@ -293,8 +447,12 @@ fn an_online_guesser_gets_at_most_five_tries_before_a_person_must_act() {
     for _ in 0..1000 {
         sender.tick(t).unwrap();
         if let Some(msg1) = sender.message_1().map(<[u8]>::to_vec) {
-            let (_r, msg2) =
-                ReceiverSession::respond(&PairingCode::parse("000000").unwrap(), &msg1).unwrap();
+            let (_r, msg2) = ReceiverSession::respond(
+                &PairingCode::parse("000000").unwrap(),
+                &msg1,
+                Instant::now(),
+            )
+            .unwrap();
             if sender.receive(&msg2, t).is_err() {
                 tries += 1;
             }
@@ -314,7 +472,9 @@ fn a_successful_pairing_resets_the_failure_count() {
     sender.tick(t).unwrap();
     let code = sender.code().unwrap();
     let msg1 = sender.message_1().unwrap().to_vec();
-    let (_r, msg2) = ReceiverSession::respond(&PairingCode::parse(&code).unwrap(), &msg1).unwrap();
+    let (_r, msg2) =
+        ReceiverSession::respond(&PairingCode::parse(&code).unwrap(), &msg1, Instant::now())
+            .unwrap();
     sender.receive(&msg2, t).unwrap();
     assert_eq!(sender.failed_attempts(), 0);
 }
@@ -326,8 +486,12 @@ fn replies_naming_unknown_codes_never_count_as_failures() {
     let other = RotatingSender::new(now).unwrap();
     let foreign = other.message_1().unwrap().to_vec();
     for _ in 0..20 {
-        let (_r, msg2) =
-            ReceiverSession::respond(&PairingCode::parse("111111").unwrap(), &foreign).unwrap();
+        let (_r, msg2) = ReceiverSession::respond(
+            &PairingCode::parse("111111").unwrap(),
+            &foreign,
+            Instant::now(),
+        )
+        .unwrap();
         assert!(matches!(
             sender.receive(&msg2, now),
             Err(PairingError::UnknownSession)
@@ -341,11 +505,25 @@ fn replies_naming_unknown_codes_never_count_as_failures() {
 fn up_to_approval(now: Instant) -> (ReceiverAwaitingApproval, Vec<u8>) {
     let code = PairingCode::generate().unwrap();
     let (s, m1) = SenderSession::start(&code, now);
-    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
-    let (choosing, m3) = s.receive(&m2, now).unwrap();
-    let waiting = r.receive(&m3, now).unwrap();
-    let (_p, m4) = choosing.choose(waiting.match_number(), now).unwrap();
-    (waiting, m4)
+    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
+    let (sender_waiting, m3) = s.receive(&m2, now).unwrap();
+    let (waiting, reveal) = r.receive(&m3, now).unwrap();
+    let choosing = sender_waiting.receive_reveal(&reveal, now).unwrap();
+    let (_p, approval) = choosing.choose(waiting.match_number(), now).unwrap();
+    (waiting, approval)
+}
+
+#[test]
+fn message_3_after_the_reply_timeout_is_refused() {
+    let now = Instant::now();
+    let code = PairingCode::generate().unwrap();
+    let (s, m1) = SenderSession::start(&code, now);
+    let (r, m2) = ReceiverSession::respond(&code, &m1, now).unwrap();
+    let (_w, m3) = s.receive(&m2, now).unwrap();
+    let late = now + REPLY_TIMEOUT + Duration::from_millis(1);
+    let rejected = r.receive(&m3, late).unwrap_err();
+    assert_eq!(rejected.error(), PairingError::Expired);
+    assert!(rejected.into_retry().is_none());
 }
 
 #[test]
@@ -364,7 +542,7 @@ fn junk_approvals_do_not_cancel_the_wait() {
             forged[last] ^= 1;
             forged
         },
-        vec![1, 4].into_iter().chain([0xaa; 40]).collect(),
+        vec![1, 5].into_iter().chain([0xaa; 40]).collect(),
     ];
     for j in junk {
         let rejected = waiting.receive_approval(&j, now).unwrap_err();
@@ -399,9 +577,11 @@ fn a_pick_on_the_sender_after_its_deadline_is_refused() {
     let now = Instant::now();
     let code = PairingCode::generate().unwrap();
     let (s, m1) = SenderSession::start(&code, now);
-    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
-    let (choosing, m3) = s.receive(&m2, now).unwrap();
-    let number = r.receive(&m3, now).unwrap().match_number();
+    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
+    let (sender_waiting, m3) = s.receive(&m2, now).unwrap();
+    let (waiting, reveal) = r.receive(&m3, now).unwrap();
+    let choosing = sender_waiting.receive_reveal(&reveal, now).unwrap();
+    let number = waiting.match_number();
     assert_eq!(choosing.deadline(), now + CONFIRMATION_TIMEOUT);
     let late = choosing.deadline() + Duration::from_millis(1);
     assert!(matches!(
@@ -415,7 +595,7 @@ fn a_malformed_message_3_does_not_cancel_the_receiver() {
     let now = Instant::now();
     let code = PairingCode::generate().unwrap();
     let (s, m1) = SenderSession::start(&code, now);
-    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
+    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
     let (_choosing, m3) = s.receive(&m2, now).unwrap();
 
     let mut r = r;
@@ -434,7 +614,7 @@ fn well_framed_junk_message_3_does_not_cancel_the_receiver() {
     let now = Instant::now();
     let code = PairingCode::generate().unwrap();
     let (s, m1) = SenderSession::start(&code, now);
-    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
+    let (r, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
     let (_choosing, m3) = s.receive(&m2, now).unwrap();
 
     // Correct version and kind, then junk of every length up to a full-size message 3 and beyond.
@@ -507,7 +687,7 @@ fn receiver_rejects_degenerate_points_from_the_sender() {
     for p in bad {
         assert!(
             matches!(
-                ReceiverSession::respond(&code, &with_point(&m1, 11, p)),
+                ReceiverSession::respond(&code, &with_point(&m1, 11, p), Instant::now()),
                 Err(PairingError::InvalidKey)
             ),
             "point {p:02x?} was not rejected by the point check"
@@ -522,7 +702,7 @@ fn sender_rejects_degenerate_points_from_the_receiver() {
     // Message 2 layout: version, kind, 8-byte session tag, 'B', 32-byte point, Noise message.
     for p in small_order_points() {
         let (s, m1) = SenderSession::start(&code, now);
-        let (_r, m2) = ReceiverSession::respond(&code.clone(), &m1).unwrap();
+        let (_r, m2) = ReceiverSession::respond(&code.clone(), &m1, Instant::now()).unwrap();
         assert!(
             matches!(
                 s.receive(&with_point(&m2, 11, p), now),
