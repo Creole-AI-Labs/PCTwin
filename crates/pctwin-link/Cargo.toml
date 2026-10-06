@@ -10,7 +10,7 @@ publish.workspace = true
 [dependencies]
 pctwin-pairing = { path = "../pctwin-pairing" }
 thiserror = "2.0.21"
-tokio = { version = "1.53.2", features = ["io-util", "net", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 zeroize = "1.9.0"
 
 [dev-dependencies]
