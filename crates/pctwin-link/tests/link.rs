@@ -569,10 +569,15 @@ async fn a_wrong_code_fails_for_the_guest_and_counts_as_one_guess() {
     let addr = host.local_addr().unwrap();
     let wrong = wrong_code_for(&sender);
     let serving = spawn_host(host, sender.clone());
+    let started = Instant::now();
     let err = connect(addr, &wrong, fast()).await.unwrap_err();
     assert!(
         matches!(err, LinkError::Pairing(PairingError::HandshakeFailed)),
         "a mistyped code says so plainly; got {err:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(300),
+        "told at once"
     );
     assert_eq!(sender.lock().unwrap().failed_attempts(), 1);
     serving.abort();
@@ -641,10 +646,15 @@ async fn a_code_that_is_no_longer_live_is_reported_as_expired() {
     let stale = PairingCode::parse(&format!("{}{other_last}", &shown[..5])).unwrap();
     let serving = spawn_host(host, sender.clone());
 
+    let started = Instant::now();
     let err = connect(addr, &stale, fast()).await.unwrap_err();
     assert!(
         matches!(err, LinkError::Pairing(PairingError::Expired)),
         "got {err:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(300),
+        "told at once"
     );
     assert_eq!(sender.lock().unwrap().failed_attempts(), 0, "not a guess");
     serving.abort();
@@ -793,6 +803,26 @@ async fn a_failed_receive_closes_the_link_for_both_directions() {
         Err(LinkError::Closed)
     ));
     assert!(matches!(guest_link.recv().await, Err(LinkError::Closed)));
+}
+
+#[tokio::test]
+async fn a_cancelled_send_closes_the_link_for_both_directions() {
+    let (mut host_link, _guest_link) = paired_links().await; // the guest never reads
+    let big = vec![0u8; 60_000];
+    // Fill the buffers, then give up on a send part-way, as an app timeout would.
+    let mut cancelled = false;
+    for _ in 0..200 {
+        if tokio::time::timeout(Duration::from_millis(50), host_link.send(&big))
+            .await
+            .is_err()
+        {
+            cancelled = true;
+            break;
+        }
+    }
+    assert!(cancelled, "a send was left half-done");
+    assert!(matches!(host_link.send(b"x").await, Err(LinkError::Closed)));
+    assert!(matches!(host_link.recv().await, Err(LinkError::Closed)));
 }
 
 // ---------- only the local network ----------
