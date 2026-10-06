@@ -4,33 +4,46 @@
 //! # How it works
 //!
 //! 1. The sender (old laptop) shows a six-digit [`PairingCode`]. [`RotatingSender`] replaces it
-//!    every minute and after any attempt; the previous code keeps a short grace period. Each code
-//!    has a random session tag carried in the messages, so a reply is always matched to the code
-//!    it was made from and a stray reply never burns the current code.
-//! 2. SPAKE2 (Ed25519 group, asymmetric roles) turns the code into a shared secret that an
-//!    eavesdropper cannot use to test guesses offline. A wrong code yields a different secret.
-//! 3. A Noise `NNpsk0` handshake builds the encrypted link with fresh ephemeral keys
-//!    (forward secrecy). The SPAKE2 secret is mixed in as the pre-shared key, and the protocol
-//!    version, both roles and both SPAKE2 messages are bound in as the Noise prologue.
-//! 4. Both sides derive a two-digit match number from the final handshake hash. The sender shows
-//!    it; the receiver offers three numbers (the right one and two random decoys). The person
-//!    picks the one shown on the sender. A wrong pick cancels the pairing.
-//! 5. Only after the right pick does the receiver send a sealed confirmation, and only then do
-//!    either side get a usable [`Paired`] link.
+//!    every minute; the previous code keeps a short grace period. Each code carries a random
+//!    session tag in the messages, so a reply is matched to the code it was made from and a stray
+//!    reply never burns the current code.
+//! 2. Each code gets exactly one attempt. Failed attempts are budgeted: after each failure the
+//!    sender pauses before showing a new code (1, 2, 4, 8 seconds), and after
+//!    [`MAX_FAILED_ATTEMPTS`] failures in a row pairing locks until the person on the sender
+//!    chooses to start again ([`RotatingSender::unlock`]).
+//! 3. SPAKE2 (Ed25519 group, asymmetric roles) turns the code into a shared secret that an
+//!    eavesdropper cannot use to test guesses offline. Degenerate (small-order or mixed-torsion)
+//!    SPAKE2 points are rejected before use.
+//! 4. A Noise `NNpsk0` handshake builds the encrypted link with fresh ephemeral keys
+//!    (forward secrecy). The SPAKE2 secret is the pre-shared key; the protocol version, the session
+//!    tag and both SPAKE2 messages are bound in as the Noise prologue.
+//! 5. Both sides derive a two-digit match number from the final handshake hash. The sender shows
+//!    it; the receiver offers three numbers (the right one and two random decoys) and the person
+//!    picks the one on the sender's screen.
+//! 6. The receiver seals the picked number into its confirmation. The sender accepts only a
+//!    confirmation carrying its own number, so skipping the comparison does not work even for
+//!    someone who knows the code. Only then does either side get a usable [`Paired`] link.
 //!
-//! Every message carries the protocol version and a message kind, and is size-limited.
-//! Malformed input returns an error; it never panics.
+//! Every message carries the protocol version and a message kind, and is size-limited. Malformed
+//! input returns an error instead of panicking. Messages that fail before authentication hand the
+//! waiting state back ([`Rejected`]), so junk cannot cancel a pairing in progress.
 //!
 //! # Known limits
 //!
-//! The `spake2` crate states it has had no independent audit and is probably not constant-time;
-//! `snow` has had no formal audit. The one-attempt, two-minute code limits online guessing but
-//! does not remove those implementation risks. See the Security Design, "Honest gaps".
+//! - `spake2` states it has had no independent audit and is probably not constant-time; `snow`
+//!   has had no formal audit. Neither zeroizes its internal secrets on drop.
+//! - Session tags are public, so anyone who sees message 1 can spend that code's single attempt
+//!   with a junk reply (and repeated junk replies trigger the lockout). Binding attempts to one
+//!   network connection belongs to the transport layer.
+//! - Time is supplied by the caller. `Instant` does not count suspend on every platform, so the
+//!   app must rotate the code when the laptop wakes from sleep.
+//! - Starting a session panics if the operating system's random source fails, as SPAKE2 does.
 
 use std::fmt;
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
 
+use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
 use sha2::Sha256;
 use snow::{Builder, HandshakeState, TransportState};
@@ -43,6 +56,10 @@ pub const PROTOCOL_VERSION: u8 = 1;
 pub const CODE_LIFETIME: Duration = Duration::from_secs(60);
 /// How long a replaced code still works, for someone who was typing it when it changed.
 pub const ROTATION_GRACE: Duration = Duration::from_secs(15);
+/// How long the sender waits for the receiver's confirmation after the handshake.
+pub const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(180);
+/// Failed attempts in a row before pairing locks until the person on the sender starts again.
+pub const MAX_FAILED_ATTEMPTS: u32 = 5;
 /// Largest pairing message accepted, in bytes.
 pub const MAX_MESSAGE_LEN: usize = 512;
 /// Range of the match number shown during confirmation.
@@ -56,7 +73,7 @@ const ID_RECEIVER: &[u8] = b"pctwin/v1/receiver";
 const PROLOGUE_LABEL: &[u8] = b"pctwin/v1/pairing-prologue";
 const PSK_SALT: &[u8] = b"pctwin/v1/pairing-psk";
 const MATCH_SALT: &[u8] = b"pctwin/v1/match-number";
-const CONFIRM_PAYLOAD: &[u8] = b"pctwin/v1/confirmed";
+const CONFIRM_LABEL: &[u8] = b"pctwin/v1/confirmed";
 const AEAD_TAG_LEN: usize = 16;
 const NOISE_MAX: usize = 65_535;
 
@@ -74,6 +91,10 @@ pub enum PairingError {
     Expired,
     #[error("that code is no longer active; type the code shown now")]
     UnknownSession,
+    #[error("too many tries; wait a moment for a new code")]
+    CoolingDown,
+    #[error("too many tries; start again on the old laptop")]
+    Locked,
     #[error("the other laptop uses a different PCTwin version ({0})")]
     UnsupportedVersion(u8),
     #[error("a pairing message was not in the expected form")]
@@ -88,6 +109,51 @@ pub enum PairingError {
     TooLarge,
     #[error("received data failed its integrity check")]
     Transport,
+}
+
+/// A failed step. When the failure happened before anything was authenticated (for example a
+/// junk or truncated message), the waiting state is handed back so pairing can continue.
+pub struct Rejected<S> {
+    error: PairingError,
+    retry: Option<Box<S>>,
+}
+
+impl<S> Rejected<S> {
+    fn keep(error: PairingError, state: S) -> Self {
+        Self {
+            error,
+            retry: Some(Box::new(state)),
+        }
+    }
+
+    fn end(error: PairingError) -> Self {
+        Self { error, retry: None }
+    }
+
+    /// Why the step failed.
+    pub fn error(&self) -> PairingError {
+        self.error
+    }
+
+    /// The waiting state, if the failure did not end the pairing.
+    pub fn into_retry(self) -> Option<S> {
+        self.retry.map(|b| *b)
+    }
+}
+
+impl<S> From<Rejected<S>> for PairingError {
+    fn from(r: Rejected<S>) -> Self {
+        r.error
+    }
+}
+
+impl<S> fmt::Debug for Rejected<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Rejected")
+            .field("error", &self.error)
+            .field("can_retry", &self.retry.is_some())
+            .finish()
+    }
 }
 
 /// A six-digit, one-time pairing code. Its digits are wiped from memory when dropped.
@@ -215,6 +281,7 @@ impl SenderSession {
             return Err(PairingError::UnknownSession);
         }
         let (spake_b, noise_1) = rest.split_at(SPAKE2_MSG_LEN);
+        check_spake_point(spake_b)?;
         let key = Zeroizing::new(
             self.spake
                 .finish(spake_b)
@@ -243,6 +310,7 @@ impl SenderSession {
             SenderAwaitingConfirmation {
                 transport,
                 match_number,
+                deadline: now + CONFIRMATION_TIMEOUT,
             },
             msg3,
         ))
@@ -253,6 +321,7 @@ impl SenderSession {
 pub struct SenderAwaitingConfirmation {
     transport: TransportState,
     match_number: u8,
+    deadline: Instant,
 }
 
 impl SenderAwaitingConfirmation {
@@ -261,20 +330,46 @@ impl SenderAwaitingConfirmation {
         self.match_number
     }
 
-    /// Handles message 4. Only a genuine confirmation from this session unlocks the link.
-    pub fn receive_confirmation(mut self, msg4: &[u8]) -> Result<Paired, PairingError> {
-        let payload = parse_frame(msg4, KIND_CONFIRM)?;
-        let mut buf = vec![0u8; payload.len()];
-        let read = self
-            .transport
-            .read_message(payload, &mut buf)
-            .map_err(|_| PairingError::HandshakeFailed)?;
-        if &buf[..read] != CONFIRM_PAYLOAD {
-            return Err(PairingError::HandshakeFailed);
+    /// When the sender stops waiting for confirmation.
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+
+    /// Handles message 4 at time `now`. Succeeds only for a genuine confirmation from this session
+    /// carrying the sender's own number. Junk, truncated or forged messages hand the waiting state
+    /// back; a wrong number or a missed deadline ends the pairing.
+    pub fn receive_confirmation(
+        mut self,
+        msg4: &[u8],
+        now: Instant,
+    ) -> Result<Paired, Rejected<Self>> {
+        if now > self.deadline {
+            return Err(Rejected::end(PairingError::Expired));
         }
-        Ok(Paired {
-            transport: Transport(self.transport),
-        })
+        let payload = match parse_frame(msg4, KIND_CONFIRM) {
+            Ok(p) => p,
+            Err(e) => return Err(Rejected::keep(e, self)),
+        };
+        let mut buf = Zeroizing::new(vec![0u8; payload.len()]);
+        // A message that fails authentication does not advance the transport's nonce, so the
+        // waiting state stays usable for the genuine confirmation.
+        let read = match self.transport.read_message(payload, &mut buf) {
+            Ok(n) => n,
+            Err(_) => return Err(Rejected::keep(PairingError::HandshakeFailed, self)),
+        };
+        let plain = &buf[..read];
+        match plain.split_last() {
+            Some((&picked, label)) if label == CONFIRM_LABEL => {
+                if picked == self.match_number {
+                    Ok(Paired {
+                        transport: Transport(self.transport),
+                    })
+                } else {
+                    Err(Rejected::end(PairingError::WrongNumber))
+                }
+            }
+            _ => Err(Rejected::end(PairingError::HandshakeFailed)),
+        }
     }
 }
 
@@ -291,6 +386,7 @@ impl ReceiverSession {
             return Err(PairingError::Malformed);
         }
         let (id, spake_a) = payload.split_at(SESSION_ID_LEN);
+        check_spake_point(spake_a)?;
         let (spake, spake_b) = Spake2::<Ed25519Group>::start_b(
             &code.password(),
             &Identity::new(ID_SENDER),
@@ -317,19 +413,23 @@ impl ReceiverSession {
         Ok((Self { hs }, frame(KIND_SPAKE_B_NOISE_1, &payload)))
     }
 
-    /// Handles message 3. Returns the three numbers to offer the person.
-    pub fn receive(mut self, msg3: &[u8]) -> Result<ReceiverChoosing, PairingError> {
-        let payload = parse_frame(msg3, KIND_NOISE_2)?;
+    /// Handles message 3. Returns the three numbers to offer the person. A message that is not a
+    /// well-formed message 3 hands the session back; a message 3 that fails the handshake ends it.
+    pub fn receive(mut self, msg3: &[u8]) -> Result<ReceiverChoosing, Rejected<Self>> {
+        let payload = match parse_frame(msg3, KIND_NOISE_2) {
+            Ok(p) => p,
+            Err(e) => return Err(Rejected::keep(e, self)),
+        };
         let mut buf = [0u8; 128];
         let read = self
             .hs
             .read_message(payload, &mut buf)
-            .map_err(|_| PairingError::HandshakeFailed)?;
+            .map_err(|_| Rejected::end(PairingError::HandshakeFailed))?;
         if read != 0 {
-            return Err(PairingError::Malformed);
+            return Err(Rejected::end(PairingError::Malformed));
         }
-        let (transport, correct) = finish_handshake(self.hs)?;
-        let choices = offer_choices(correct)?;
+        let (transport, correct) = finish_handshake(self.hs).map_err(Rejected::end)?;
+        let choices = offer_choices(correct).map_err(Rejected::end)?;
         Ok(ReceiverChoosing {
             transport,
             correct,
@@ -351,16 +451,18 @@ impl ReceiverChoosing {
         self.choices
     }
 
-    /// Records the person's pick. The right number unlocks the link and returns message 4 to
-    /// send; any other number cancels pairing.
+    /// Records the person's pick. The right number unlocks the link and returns message 4, which
+    /// carries the pick sealed for the sender to check. Any other number cancels pairing.
     pub fn choose(mut self, picked: u8) -> Result<(Paired, Vec<u8>), PairingError> {
         if picked != self.correct {
             return Err(PairingError::WrongNumber);
         }
+        let mut plain = CONFIRM_LABEL.to_vec();
+        plain.push(picked);
         let mut buf = [0u8; 64];
         let written = self
             .transport
-            .write_message(CONFIRM_PAYLOAD, &mut buf)
+            .write_message(&plain, &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
         let msg4 = frame(KIND_CONFIRM, &buf[..written]);
         Ok((
@@ -406,11 +508,12 @@ impl Transport {
     }
 
     /// Decrypts one message, rejecting anything altered, replayed out of order or forged.
-    pub fn open(&mut self, sealed: &[u8]) -> Result<Vec<u8>, PairingError> {
+    /// The plaintext is wiped from memory when the returned buffer is dropped.
+    pub fn open(&mut self, sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>, PairingError> {
         if sealed.len() > NOISE_MAX {
             return Err(PairingError::TooLarge);
         }
-        let mut out = vec![0u8; sealed.len()];
+        let mut out = Zeroizing::new(vec![0u8; sealed.len()]);
         let read = self
             .0
             .read_message(sealed, &mut out)
@@ -420,11 +523,25 @@ impl Transport {
     }
 }
 
-/// The sender's changing code: a new code every [`CODE_LIFETIME`] and after any attempt, with
-/// the previous code still accepted for [`ROTATION_GRACE`]. Each code gets exactly one attempt.
+/// What the sender should show right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SenderStatus {
+    /// Show the code and a countdown to `code_expires_at`.
+    Showing { code_expires_at: Instant },
+    /// A failed attempt; no code is shown until `until`.
+    CoolingDown { until: Instant },
+    /// Too many failed attempts; the person on the sender must choose to start again.
+    Locked,
+}
+
+/// The sender's changing code: a new code every [`CODE_LIFETIME`], the previous code still
+/// accepted for [`ROTATION_GRACE`], exactly one attempt per code, and a failure budget.
 pub struct RotatingSender {
     current: SenderEntry,
     previous: Option<SenderEntry>,
+    failures: u32,
+    blocked_until: Option<Instant>,
+    locked: bool,
 }
 
 struct SenderEntry {
@@ -453,17 +570,33 @@ impl RotatingSender {
         Ok(Self {
             current: SenderEntry::new(now)?,
             previous: None,
+            failures: 0,
+            blocked_until: None,
+            locked: false,
         })
     }
 
-    /// The code to show now.
-    pub fn code(&self) -> String {
-        self.current.code.digits()
+    /// What the sender should show right now (call [`tick`](Self::tick) first).
+    pub fn status(&self) -> SenderStatus {
+        if self.locked {
+            SenderStatus::Locked
+        } else if let Some(until) = self.blocked_until {
+            SenderStatus::CoolingDown { until }
+        } else {
+            SenderStatus::Showing {
+                code_expires_at: self.current.started + CODE_LIFETIME,
+            }
+        }
     }
 
-    /// Message 1 for the code shown now, to send to a receiver.
-    pub fn message_1(&self) -> &[u8] {
-        &self.current.msg1
+    /// The code to show, or `None` while cooling down or locked.
+    pub fn code(&self) -> Option<String> {
+        self.is_open().then(|| self.current.code.digits())
+    }
+
+    /// Message 1 for the code shown now, or `None` while cooling down or locked.
+    pub fn message_1(&self) -> Option<&[u8]> {
+        self.is_open().then_some(self.current.msg1.as_slice())
     }
 
     /// When the code shown now will be replaced, for the on-screen countdown.
@@ -471,10 +604,27 @@ impl RotatingSender {
         self.current.started + CODE_LIFETIME
     }
 
-    /// Advances to time `now`: replaces the code when its minute is up and forgets a previous
-    /// code once its grace period ends. Returns `true` if a new code is now showing.
+    /// Failed attempts in a row so far.
+    pub fn failed_attempts(&self) -> u32 {
+        self.failures
+    }
+
+    /// Advances to time `now`: ends a finished cool-down with a fresh code, replaces the code
+    /// when its minute is up, and forgets a previous code once its grace period ends.
+    /// Returns `true` if a new code is now showing.
     pub fn tick(&mut self, now: Instant) -> Result<bool, PairingError> {
+        if self.locked {
+            return Ok(false);
+        }
         let mut rotated = false;
+        if let Some(until) = self.blocked_until {
+            if now < until {
+                return Ok(false);
+            }
+            self.blocked_until = None;
+            self.current = SenderEntry::new(now)?;
+            rotated = true;
+        }
         if now >= self.current.started + CODE_LIFETIME {
             let old = std::mem::replace(&mut self.current, SenderEntry::new(now)?);
             self.previous = Some(old);
@@ -490,26 +640,68 @@ impl RotatingSender {
         Ok(rotated)
     }
 
-    /// Handles message 2 at time `now`. A reply for an unknown or expired code is rejected
-    /// without using up the current code. A reply for a known code uses up that code's single
-    /// attempt; if it was the current code, a new code is shown straight away.
+    /// Starts again after a lockout. Only call this when the person on the sender asks to.
+    pub fn unlock(&mut self, now: Instant) -> Result<(), PairingError> {
+        self.current = SenderEntry::new(now)?;
+        self.previous = None;
+        self.failures = 0;
+        self.blocked_until = None;
+        self.locked = false;
+        Ok(())
+    }
+
+    /// Handles message 2 at time `now`. Replies are refused without using anything up while
+    /// cooling down or locked, and when they are malformed or name an unknown code. A reply for a
+    /// known code uses up that code's single attempt; a failure counts against the budget.
     pub fn receive(
         &mut self,
         msg2: &[u8],
         now: Instant,
     ) -> Result<(SenderAwaitingConfirmation, Vec<u8>), PairingError> {
         self.tick(now)?;
-        let id = peek_session_id(msg2)?;
-        if id == self.current.session.id {
-            let used = std::mem::replace(&mut self.current, SenderEntry::new(now)?);
-            return used.session.receive(msg2, now);
+        if self.locked {
+            return Err(PairingError::Locked);
         }
-        match self.previous.take() {
-            Some(used) if id == used.session.id => used.session.receive(msg2, now),
-            other => {
-                self.previous = other;
-                Err(PairingError::UnknownSession)
+        if self.blocked_until.is_some() {
+            return Err(PairingError::CoolingDown);
+        }
+        let id = peek_session_id(msg2)?;
+        let used = if id == self.current.session.id {
+            std::mem::replace(&mut self.current, SenderEntry::new(now)?)
+        } else {
+            match self.previous.take() {
+                Some(p) if id == p.session.id => p,
+                other => {
+                    self.previous = other;
+                    return Err(PairingError::UnknownSession);
+                }
             }
+        };
+        match used.session.receive(msg2, now) {
+            Ok(done) => {
+                self.failures = 0;
+                Ok(done)
+            }
+            Err(e) => {
+                self.record_failure(now);
+                Err(e)
+            }
+        }
+    }
+
+    fn is_open(&self) -> bool {
+        !self.locked && self.blocked_until.is_none()
+    }
+
+    fn record_failure(&mut self, now: Instant) {
+        self.failures = self.failures.saturating_add(1);
+        if self.failures >= MAX_FAILED_ATTEMPTS {
+            self.locked = true;
+            self.blocked_until = None;
+        } else {
+            // 1, 2, 4, 8 seconds for failures 1 to 4.
+            let pause = Duration::from_secs(1u64 << (self.failures - 1).min(16));
+            self.blocked_until = Some(now + pause);
         }
     }
 }
@@ -562,6 +754,22 @@ fn parse_frame(msg: &[u8], expected_kind: u8) -> Result<&[u8], PairingError> {
         return Err(PairingError::Malformed);
     }
     Ok(&msg[2..])
+}
+
+/// Rejects SPAKE2 messages whose point is not a valid, prime-order-subgroup Ed25519 point.
+/// Honest messages are always in the prime-order subgroup and never small-order.
+fn check_spake_point(msg: &[u8]) -> Result<(), PairingError> {
+    let encoded: [u8; 32] = msg
+        .get(1..SPAKE2_MSG_LEN)
+        .and_then(|b| b.try_into().ok())
+        .ok_or(PairingError::Malformed)?;
+    let point = CompressedEdwardsY(encoded)
+        .decompress()
+        .ok_or(PairingError::HandshakeFailed)?;
+    if point.is_small_order() || !point.is_torsion_free() {
+        return Err(PairingError::HandshakeFailed);
+    }
+    Ok(())
 }
 
 fn prologue(session_id: &[u8], spake_a: &[u8], spake_b: &[u8]) -> Vec<u8> {
@@ -644,4 +852,45 @@ fn offer_choices(correct: u8) -> Result<[u8; 3], PairingError> {
         choices.swap(i, j);
     }
     Ok(choices)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The match number is only secret because the pre-shared key is mixed in at the very start
+    /// of the handshake. If the pattern ever stops being `psk0`, this must fail loudly.
+    #[test]
+    fn noise_pattern_mixes_the_psk_first() {
+        assert_eq!(NOISE_PARAMS, "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s");
+    }
+
+    #[test]
+    fn backoff_doubles_then_locks() {
+        let now = Instant::now();
+        let mut s = RotatingSender::new(now).expect("sender");
+        let mut pauses = Vec::new();
+        for _ in 0..MAX_FAILED_ATTEMPTS {
+            s.record_failure(now);
+            pauses.push(s.status());
+        }
+        assert_eq!(
+            pauses,
+            vec![
+                SenderStatus::CoolingDown {
+                    until: now + Duration::from_secs(1)
+                },
+                SenderStatus::CoolingDown {
+                    until: now + Duration::from_secs(2)
+                },
+                SenderStatus::CoolingDown {
+                    until: now + Duration::from_secs(4)
+                },
+                SenderStatus::CoolingDown {
+                    until: now + Duration::from_secs(8)
+                },
+                SenderStatus::Locked,
+            ]
+        );
+    }
 }

@@ -30,7 +30,7 @@ fn pair_with(
     // The person reads the sender's number and picks it on the receiver.
     let shown = sender_waiting.match_number();
     let (receiver_paired, msg4) = choosing.choose(shown)?;
-    let sender_paired = sender_waiting.receive_confirmation(&msg4)?;
+    let sender_paired = sender_waiting.receive_confirmation(&msg4, now)?;
     Ok((sender_paired, receiver_paired))
 }
 
@@ -119,10 +119,13 @@ fn sender_rejects_a_forged_or_tampered_confirmation() {
     let (_rp, mut msg4) = r.choose(n).unwrap();
     let last = msg4.len() - 1;
     msg4[last] ^= 0x01;
-    assert!(s.receive_confirmation(&msg4).is_err());
+    assert!(s.receive_confirmation(&msg4, Instant::now()).is_err());
 
     let (s2, _r2) = up_to_choice(&code);
-    assert!(s2.receive_confirmation(b"confirmed").is_err());
+    assert!(
+        s2.receive_confirmation(b"\x01\x04confirmed", Instant::now())
+            .is_err()
+    );
 }
 
 #[test]
@@ -132,7 +135,10 @@ fn a_confirmation_from_another_session_is_rejected() {
     let n1 = s1.match_number();
     let (_p, msg4_from_1) = r1.choose(n1).unwrap();
     let (s2, _r2) = up_to_choice(&code);
-    assert!(s2.receive_confirmation(&msg4_from_1).is_err());
+    assert!(
+        s2.receive_confirmation(&msg4_from_1, Instant::now())
+            .is_err()
+    );
 }
 
 #[test]
@@ -144,11 +150,14 @@ fn transport_works_both_ways_after_pairing() {
         .seal(b"hello from the old laptop")
         .unwrap();
     assert_eq!(
-        b.transport_mut().open(&sealed).unwrap(),
+        b.transport_mut().open(&sealed).unwrap().as_slice(),
         b"hello from the old laptop"
     );
     let back = b.transport_mut().seal(b"and back").unwrap();
-    assert_eq!(a.transport_mut().open(&back).unwrap(), b"and back");
+    assert_eq!(
+        a.transport_mut().open(&back).unwrap().as_slice(),
+        b"and back"
+    );
 }
 
 #[test]
