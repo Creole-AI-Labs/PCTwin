@@ -180,3 +180,78 @@ async fn an_old_laptop_with_no_reachable_address_is_reported_unreachable() {
     let err = connect_to(&found, &code, config()).await.unwrap_err();
     assert!(matches!(err, LinkError::Unreachable), "got {err:?}");
 }
+
+/// A listener that counts connections, standing in for a second address.
+async fn counting_listener() -> (SocketAddr, Arc<std::sync::atomic::AtomicUsize>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = count.clone();
+    tokio::spawn(async move {
+        while let Ok((_s, _)) = listener.accept().await {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+    (addr, count)
+}
+
+#[tokio::test]
+async fn once_an_address_answers_no_other_address_is_ever_tried() {
+    let code = PairingCode::parse("123456").unwrap();
+    // The first address accepts and hangs up, or accepts and says nothing.
+    for hang_up in [true, false] {
+        let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let first_addr = first.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((s, _)) = first.accept().await {
+                if hang_up {
+                    drop(s);
+                } else {
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        drop(s);
+                    });
+                }
+            }
+        });
+        let (second_addr, contacted) = counting_listener().await;
+        let chosen = Found {
+            label: unique("answers"),
+            addrs: vec![first_addr, second_addr],
+            same_label_nearby: false,
+        };
+        let quick = LinkConfig {
+            step_timeout: Duration::from_millis(500),
+            ..config()
+        };
+        let err = within(connect_to(&chosen, &code, quick)).await.unwrap_err();
+        assert!(!matches!(err, LinkError::Unreachable), "got {err:?}");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            contacted.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "hang_up={hang_up}: the second address must never be contacted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn pairing_works_after_a_shuffle() {
+    let mut old = OldLaptop::start(unique("before shuffle"), config())
+        .await
+        .unwrap();
+    let after = unique("after shuffle");
+    old.relabel(after.clone()).unwrap();
+    let sender = sender();
+    let code = shown_code(&sender);
+    let found = search(WAIT).await.unwrap();
+    let chosen = mine(&found, &after)[0].clone();
+    let guest = tokio::spawn(async move { connect_to(&chosen, &code, config()).await });
+    let pending_host = within(old.next_peer(&sender)).await.unwrap();
+    let pending_guest = guest.await.unwrap().unwrap();
+    assert!(
+        pending_host
+            .choices()
+            .contains(&pending_guest.match_number())
+    );
+}

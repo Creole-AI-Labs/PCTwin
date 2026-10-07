@@ -29,7 +29,6 @@ pub enum SessionError {
 
 /// The old laptop while it is pairing: listening and announcing its label.
 pub struct OldLaptop {
-    // Field order matters: the announcement says goodbye before discovery shuts down.
     announcement: Announcement,
     discovery: Discovery,
     host: Host,
@@ -37,8 +36,10 @@ pub struct OldLaptop {
 }
 
 impl OldLaptop {
-    /// Starts listening on every local interface (outsiders are refused by the link) and announces
-    /// `label` with the listening port.
+    /// Starts listening on every interface and announces `label` with the listening port. Peers outside
+    /// the local network are refused by the link; devices on other private networks this laptop is on
+    /// (a VPN, a virtual machine) can still reach the port while pairing, and still need the code and
+    /// the person's pick. Binding only the Wi-Fi interface is a known follow-up.
     pub async fn start(label: Label, config: LinkConfig) -> Result<Self, SessionError> {
         let any: SocketAddr = SocketAddr::from(([0, 0, 0, 0], 0));
         let host = Host::bind(any, config)
@@ -60,7 +61,8 @@ impl OldLaptop {
         &self.label
     }
 
-    /// Announces a different label (Shuffle or Change name). The previous one is withdrawn first.
+    /// Announces a different label (Shuffle or Change name) and withdraws the previous one. For about a
+    /// third of a second a search may still list both (multicast DNS's goodbye delay).
     pub fn relabel(&mut self, label: Label) -> Result<(), SessionError> {
         let port = self.host.local_addr().map_err(SessionError::Listen)?.port();
         let fresh = self.discovery.announce(&label, port)?;

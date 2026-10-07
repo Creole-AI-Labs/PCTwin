@@ -1070,3 +1070,38 @@ async fn asking_again_and_again_for_an_expired_code_cannot_keep_a_real_device_ou
 async fn a_code_holder_dawdling_at_every_step_cannot_keep_a_real_device_out() {
     real_device_pairs_despite(Misbehaviour::DawdleWithTheCode).await;
 }
+
+#[tokio::test]
+async fn a_refused_connection_is_reported_unreachable_even_when_it_takes_a_while() {
+    // On Windows a refused connection takes about two seconds; allow for it.
+    let spare = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = spare.local_addr().unwrap();
+    drop(spare);
+    let patient = LinkConfig {
+        connect_timeout: Duration::from_secs(8),
+        ..fast()
+    };
+    let code = PairingCode::parse("123456").unwrap();
+    let err = connect(addr, &code, patient).await.unwrap_err();
+    assert!(matches!(err, LinkError::Unreachable), "got {err:?}");
+}
+
+#[tokio::test]
+async fn the_connect_limit_not_the_step_limit_decides_how_long_an_address_may_take() {
+    // An address that never answers (reserved for documentation, not routed).
+    let silent: std::net::SocketAddr = "192.0.2.1:9".parse().unwrap();
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(20),
+        connect_timeout: Duration::from_millis(300),
+        ..fast()
+    };
+    let code = PairingCode::parse("123456").unwrap();
+    let started = Instant::now();
+    let err = connect(silent, &code, config).await.unwrap_err();
+    assert!(matches!(err, LinkError::Unreachable), "got {err:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+}

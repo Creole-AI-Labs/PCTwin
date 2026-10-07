@@ -487,3 +487,14 @@ fn lookalike_dots_are_refused() {
         assert!(Label::named(bad).is_err(), "{bad:?}");
     }
 }
+
+#[test]
+fn lookalike_punctuation_from_other_scripts_counts_as_the_same() {
+    let key = |s: &str| Label::named(s).unwrap().comparison_key();
+    assert_eq!(key("PC।"), key("PC|"));
+    assert_eq!(key("PC॥"), key("PC||"));
+    assert_eq!(key("《PC》"), key("«PC»"));
+    assert_eq!(key("PC؛ old"), key("PC; old"));
+    assert_eq!(key("PC¥"), key("PC￥"));
+    assert!(Label::named("PC ¥").is_ok());
+}

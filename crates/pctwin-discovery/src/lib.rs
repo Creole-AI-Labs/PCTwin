@@ -67,7 +67,7 @@ const EXTRA_PUNCTUATION: &[char] = &[
     '\u{0F0B}', // Tibetan syllable mark
     '\u{3010}', '\u{3011}', '\u{300A}', '\u{300B}', '\u{300C}',
     '\u{300D}', // 【】《》「」
-    '\u{FF1B}', '\u{FF5E}', '\u{FFE5}', // full-width ; ~ and yen sign
+    '\u{FF1B}', '\u{FF5E}', '\u{FFE5}', '\u{00A5}', // full-width ; ~ and yen sign, yen sign
     '\u{0964}', '\u{0965}', // Devanagari danda and double danda
     '\u{061B}', // Arabic semicolon
 ];
@@ -262,7 +262,8 @@ impl Label {
         match self {
             Self::Picked { colour, animal } => format!("picked:{colour}:{animal}"),
             Self::Named(name) => {
-                let lower: String = name
+                let folded: String = name.chars().map(fold_lookalike).collect();
+                let lower: String = folded
                     .nfkc()
                     .filter(|c| !JOINERS.contains(c))
                     .flat_map(char::to_lowercase)
@@ -324,6 +325,19 @@ impl Label {
             colour: u8::try_from(n / ANIMALS.len()).unwrap_or(0),
             animal: u8::try_from(n % ANIMALS.len()).unwrap_or(0),
         }
+    }
+}
+
+/// Punctuation from other scripts that looks like other punctuation, folded so lookalike names are
+/// flagged as the same.
+fn fold_lookalike(c: char) -> String {
+    match c {
+        '\u{0964}' => "|".into(),        // danda
+        '\u{0965}' => "||".into(),       // double danda
+        '\u{300A}' => "\u{00AB}".into(), // 《 as «
+        '\u{300B}' => "\u{00BB}".into(), // 》 as »
+        '\u{061B}' => ";".into(),        // Arabic semicolon
+        other => other.to_string(),
     }
 }
 
