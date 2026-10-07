@@ -2,15 +2,18 @@
 //! or reach each other, work out the likely reason and the fix, in plain words.
 //!
 //! Probes ([`probe`]) look at this laptop: its network connections, whether it can hear its own
-//! local-discovery announcement, whether sending to the discovery group is blocked (how a denied
-//! macOS Local Network permission shows), and on Windows whether a network is set to Public. The
-//! rules ([`diagnose`]) turn that [`Evidence`] into [`Finding`]s.
+//! local-discovery announcement, whether sending to the discovery group is refused (one way a
+//! denied macOS Local Network permission shows), and on Windows whether a network is set to
+//! Public. The rules ([`diagnose`]) turn that [`Evidence`] into [`Finding`]s.
 //!
-//! Each finding is [`Certainty::Sure`] only when the evidence leaves no doubt; otherwise it is
-//! [`Certainty::Likely`] and the screen offers the fix for every likely cause instead of one
-//! confident guess. Evidence the probes could not gather is `None` and is never treated as a
-//! problem. Messages are translation keys ([`Cause::message_key`], [`Cause::fix_key`]); the
-//! screens hold the reviewed wording.
+//! The doctor only says [`Certainty::Sure`] when the laptop has no network address of any kind.
+//! Everything else is [`Certainty::Likely`], and the screen offers the fix for every likely cause
+//! instead of one confident guess. Evidence the probes could not gather is `None` and is never
+//! treated as a problem; evidence that discovery works (the old laptop was found, or this laptop
+//! hears itself) rules out the discovery causes. A connection only counts when it has a usable
+//! address, so built-in adapters that only carry internal link-local addresses (such as the
+//! `utun` adapters every Mac has) are never mistaken for a VPN. Messages are translation keys
+//! ([`Cause::message_key`], [`Cause::fix_key`]); the screens hold the reviewed wording.
 
 use std::net::IpAddr;
 
@@ -49,6 +52,8 @@ impl Interface {
     pub fn new(name: &str, ip: IpAddr) -> Self {
         let kind = if ip.is_loopback() {
             InterfaceKind::Loopback
+        } else if is_vpn_address(ip) {
+            InterfaceKind::Vpn
         } else {
             kind_from_name(name)
         };
@@ -59,8 +64,9 @@ impl Interface {
         }
     }
 
-    fn connects_to_a_network(&self) -> bool {
-        self.kind == InterfaceKind::Network && is_usable_address(self.ip)
+    /// Carries an address that means it is actually connected somewhere.
+    fn is_live(&self) -> bool {
+        self.kind != InterfaceKind::Loopback && is_usable_address(self.ip)
     }
 }
 
@@ -77,8 +83,14 @@ const VPN_WORDS: &[&str] = &[
     "globalprotect",
     "fortinet",
     "ipsec",
+    "mullvad",
+    "cloudflarewarp",
+    "warp",
+    "hamachi",
+    "proton",
+    "nebula",
 ];
-const VPN_PREFIXES: &[&str] = &["utun", "wg", "tun", "ppp", "tap", "ipsec"];
+const VPN_PREFIXES: &[&str] = &["utun", "wg", "tun", "ppp", "tap", "ipsec", "zt"];
 const VIRTUAL_WORDS: &[&str] = &[
     "vethernet",
     "vmware",
@@ -88,15 +100,22 @@ const VIRTUAL_WORDS: &[&str] = &[
     "wsl",
     "vboxnet",
     "parallels",
+    "npcap",
+    "bluetooth",
+    "local area connection*",
 ];
 const VIRTUAL_PREFIXES: &[&str] = &[
-    "br-", "veth", "bridge", "virbr", "vmnet", "awdl", "llw", "anpi",
+    "br-", "veth", "bridge", "virbr", "vmnet", "awdl", "llw", "anpi", "lxcbr", "lxdbr", "incusbr",
+    "podman", "cni", "flannel", "cilium", "gif", "stf",
 ];
 
 fn kind_from_name(name: &str) -> InterfaceKind {
     let n = name.to_lowercase();
     if n.contains("loopback") {
         InterfaceKind::Loopback
+    } else if n.contains("vethernet") && n.contains("external") {
+        // A Hyper-V external switch carries the laptop's real network.
+        InterfaceKind::Network
     } else if VPN_WORDS.iter().any(|w| n.contains(w))
         || VPN_PREFIXES.iter().any(|p| n.starts_with(p))
     {
@@ -110,8 +129,13 @@ fn kind_from_name(name: &str) -> InterfaceKind {
     }
 }
 
+/// 100.64.0.0/10, the shared address range overlay VPNs such as Tailscale use.
+fn is_vpn_address(ip: IpAddr) -> bool {
+    matches!(ip, IpAddr::V4(v4) if v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
+}
+
 /// An address that means the laptop is actually on a network: not loopback, not a self-assigned
-/// link-local address (which is what a laptop gets when no network answered), not unspecified.
+/// link-local address (what a laptop gets when no network answered), not unspecified.
 fn is_usable_address(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => !(v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()),
@@ -130,7 +154,8 @@ pub enum NetworkProfile {
 /// What the probes saw. `None` means "could not tell" and is never treated as a problem.
 #[derive(Debug, Clone, Default)]
 pub struct Evidence {
-    pub interfaces: Vec<Interface>,
+    /// This laptop's interface addresses, or `None` if they could not be listed.
+    pub interfaces: Option<Vec<Interface>>,
     /// Whether this laptop heard its own local-discovery announcement.
     pub hears_itself: Option<bool>,
     /// Whether sending to the local-discovery group was refused by the system.
@@ -147,7 +172,7 @@ pub struct Evidence {
 pub enum Cause {
     /// This laptop is not connected to any network.
     NotConnected,
-    /// macOS is not allowing PCTwin to talk to devices on the local network.
+    /// macOS may not be allowing PCTwin to talk to devices on the local network.
     MacLocalNetworkDenied,
     /// Something on this laptop (a firewall or security software) stops local discovery.
     DiscoveryBlockedOnThisLaptop,
@@ -217,28 +242,37 @@ pub struct Diagnosis {
 
 /// Turns what the probes saw into findings.
 pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
-    let sure = |cause| Finding {
-        cause,
-        certainty: Certainty::Sure,
-    };
-    let likely = |cause| Finding {
-        cause,
-        certainty: Certainty::Likely,
-    };
+    let finding = |cause, certainty| Finding { cause, certainty };
+    let likely = |cause| finding(cause, Certainty::Likely);
 
-    if !e.interfaces.iter().any(Interface::connects_to_a_network) {
-        // Nothing else is worth guessing at until the laptop is connected.
-        return Diagnosis {
-            findings: vec![sure(Cause::NotConnected)],
-            suggest_phone_hotspot: false,
-        };
+    if let Some(interfaces) = &e.interfaces {
+        let live: Vec<&Interface> = interfaces.iter().filter(|i| i.is_live()).collect();
+        if live.is_empty() {
+            // No address of any kind: the one thing the doctor can be sure of.
+            return Diagnosis {
+                findings: vec![finding(Cause::NotConnected, Certainty::Sure)],
+                suggest_phone_hotspot: false,
+            };
+        }
+        if !live.iter().any(|i| i.kind == InterfaceKind::Network) {
+            // Only VPN or virtual connections: probably not on a real network.
+            return Diagnosis {
+                findings: vec![likely(Cause::NotConnected)],
+                suggest_phone_hotspot: false,
+            };
+        }
     }
 
     let mut findings = Vec::new();
-    if e.is_macos && e.multicast_send_blocked == Some(true) {
-        findings.push(sure(Cause::MacLocalNetworkDenied));
-    } else if e.hears_itself == Some(false) {
-        findings.push(likely(Cause::DiscoveryBlockedOnThisLaptop));
+    // Discovery works if the old laptop was found or this laptop hears itself.
+    // (A search result only means something on the new laptop.)
+    let found_some = role == Role::NewLaptop && matches!(e.old_laptops_found, Some(n) if n > 0);
+    if !found_some && e.hears_itself != Some(true) {
+        if e.is_macos && e.multicast_send_blocked == Some(true) {
+            findings.push(likely(Cause::MacLocalNetworkDenied));
+        } else if e.hears_itself == Some(false) {
+            findings.push(likely(Cause::DiscoveryBlockedOnThisLaptop));
+        }
     }
     for (name, profile) in &e.windows_profiles {
         if *profile == NetworkProfile::Public && kind_from_name(name) == InterfaceKind::Network {
@@ -247,17 +281,12 @@ pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
     }
 
     if role == Role::NewLaptop && e.old_laptops_found == Some(0) {
-        let vpns: Vec<String> = e
-            .interfaces
-            .iter()
-            .filter(|i| i.kind == InterfaceKind::Vpn)
-            .map(|i| i.name.clone())
-            .fold(Vec::new(), |mut names, n| {
-                if !names.contains(&n) {
-                    names.push(n);
-                }
-                names
-            });
+        let mut vpns: Vec<String> = Vec::new();
+        for i in e.interfaces.iter().flatten() {
+            if i.kind == InterfaceKind::Vpn && i.is_live() && !vpns.contains(&i.name) {
+                vpns.push(i.name.clone());
+            }
+        }
         if !vpns.is_empty() {
             findings.push(likely(Cause::VpnOn(vpns)));
         }
@@ -269,7 +298,6 @@ pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
         }
     }
 
-    // Findings are added surest first: only the checks above can be Sure.
     let suggest_phone_hotspot = findings.iter().any(|f| {
         matches!(
             f.cause,
@@ -283,7 +311,7 @@ pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
 }
 
 /// Reads `alias|Category` lines as printed by the Windows probe. Lines that are not exactly that
-/// are skipped.
+/// are skipped. The category is after the last `|`, so a name may itself contain `|`.
 pub fn parse_windows_profiles(output: &str) -> Vec<(String, NetworkProfile)> {
     output
         .lines()
@@ -304,6 +332,7 @@ pub fn parse_windows_profiles(output: &str) -> Vec<(String, NetworkProfile)> {
 /// Probes that look at this laptop. Each returns "could not tell" rather than failing.
 pub mod probe {
     use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+    use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
     use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -312,63 +341,64 @@ pub mod probe {
 
     /// A service type used only for this check, so other laptops never list it.
     const CHECK_SERVICE: &str = "_pctwin-check._tcp.local.";
+    /// Longest wait for the Windows profile check.
+    const WINDOWS_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-    /// This laptop's interface addresses.
-    pub fn interfaces() -> Vec<Interface> {
-        if_addrs::get_if_addrs()
-            .map(|list| {
-                list.iter()
-                    .map(|i| Interface::new(&i.name, i.ip()))
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// This laptop's interface addresses, or `None` if they could not be listed.
+    pub fn interfaces() -> Option<Vec<Interface>> {
+        if_addrs::get_if_addrs().ok().map(|list| {
+            list.iter()
+                .map(|i| Interface::new(&i.name, i.ip()))
+                .collect()
+        })
     }
 
     /// Whether this laptop hears its own local-discovery announcement within `wait`. `Some(false)`
-    /// if discovery cannot start or the announcement never comes back.
+    /// only when the announcement went out and never came back; `None` if the check could not run.
     pub fn hears_itself(wait: Duration) -> Option<bool> {
-        let Ok(daemon) = ServiceDaemon::new() else {
-            return Some(false);
-        };
+        let daemon = ServiceDaemon::new().ok()?;
+        let heard = listen_for_self(&daemon, wait);
+        let _ = daemon.shutdown();
+        heard
+    }
+
+    fn listen_for_self(daemon: &ServiceDaemon, wait: Duration) -> Option<bool> {
         let mut tag = [0u8; 8];
         getrandom::fill(&mut tag).ok()?;
         let tag: String = tag.iter().map(|b| format!("{b:02x}")).collect();
         let instance = format!("pctwin-check-{tag}");
-        let heard = (|| {
-            let info = ServiceInfo::new(
-                CHECK_SERVICE,
-                &instance,
-                &format!("{instance}.local."),
-                "",
-                9,
-                &[("v", "1")][..],
-            )
-            .ok()?
-            .enable_addr_auto();
-            let fullname = info.get_fullname().to_string();
-            daemon.register(info).ok()?;
-            let events = daemon.browse(CHECK_SERVICE).ok()?;
-            let deadline = Instant::now() + wait;
-            let mut heard = false;
-            while let Ok(event) =
-                events.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        let info = ServiceInfo::new(
+            CHECK_SERVICE,
+            &instance,
+            &format!("{instance}.local."),
+            "",
+            9,
+            &[("v", "1")][..],
+        )
+        .ok()?
+        .enable_addr_auto();
+        let fullname = info.get_fullname().to_string();
+        let events = daemon.browse(CHECK_SERVICE).ok()?;
+        daemon.register(info).ok()?;
+        let deadline = Instant::now() + wait;
+        let mut heard = false;
+        while let Ok(event) =
+            events.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            if let ServiceEvent::ServiceResolved(found) = event
+                && found.get_fullname() == fullname
             {
-                if let ServiceEvent::ServiceResolved(found) = event
-                    && found.get_fullname() == fullname
-                {
-                    heard = true;
-                    break;
-                }
+                heard = true;
+                break;
             }
-            let _ = daemon.unregister(&fullname);
-            Some(heard)
-        })();
-        let _ = daemon.shutdown();
-        Some(heard.unwrap_or(false))
+        }
+        let _ = daemon.unregister(&fullname);
+        Some(heard)
     }
 
-    /// Whether the system refuses a send to the local-discovery group, which is how a denied macOS
-    /// Local Network permission shows. `None` if the check itself could not run.
+    /// Whether the system refuses a send to the local-discovery group. A denied macOS Local Network
+    /// permission is one cause of that. `None` if the check itself could not run or the answer is
+    /// ambiguous (such as no IPv4 route on an IPv6-only network).
     pub fn multicast_send_blocked() -> Option<bool> {
         let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)).ok()?;
         // A minimal, well-formed DNS query with no questions: harmless to every listener.
@@ -379,34 +409,51 @@ pub mod probe {
         ) {
             Ok(_) => Some(false),
             Err(e) => match e.kind() {
-                std::io::ErrorKind::HostUnreachable
-                | std::io::ErrorKind::NetworkUnreachable
-                | std::io::ErrorKind::PermissionDenied => Some(true),
+                std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::PermissionDenied => {
+                    Some(true)
+                }
                 _ => None,
             },
         }
     }
 
-    /// Windows network names and how Windows treats each. Empty on other systems or on failure.
+    /// Windows network names and how Windows treats each. Empty on other systems, on failure, or
+    /// if the check takes longer than a few seconds.
     pub fn windows_profiles() -> Vec<(String, NetworkProfile)> {
         if !cfg!(windows) {
             return Vec::new();
         }
-        let output = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }",
-            ])
-            .output();
-        match output {
-            Ok(out) if out.status.success() => {
+        let mut command = std::process::Command::new("powershell");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            // UTF-8 output so names in any language arrive intact.
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+             Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }",
+        ]);
+        hide_console_window(&mut command);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(command.output());
+        });
+        match rx.recv_timeout(WINDOWS_PROBE_TIMEOUT) {
+            Ok(Ok(out)) if out.status.success() => {
                 super::parse_windows_profiles(&String::from_utf8_lossy(&out.stdout))
             }
             _ => Vec::new(),
         }
     }
+
+    #[cfg(windows)]
+    fn hide_console_window(command: &mut std::process::Command) {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[cfg(not(windows))]
+    fn hide_console_window(_command: &mut std::process::Command) {}
 
     /// Runs every probe. `old_laptops_found` is the new laptop's last search result.
     pub fn gather(role: Role, old_laptops_found: Option<usize>) -> Evidence {

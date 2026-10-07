@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use pctwin_doctor::{
-    Cause, Certainty, Evidence, Interface, InterfaceKind, NetworkProfile, Role, diagnose,
+    Cause, Certainty, Evidence, Finding, Interface, InterfaceKind, NetworkProfile, Role, diagnose,
 };
 
 fn iface(name: &str, ip: &str) -> Interface {
@@ -14,10 +14,10 @@ fn iface(name: &str, ip: &str) -> Interface {
 /// A laptop on ordinary home Wi-Fi where everything works.
 fn healthy() -> Evidence {
     Evidence {
-        interfaces: vec![
+        interfaces: Some(vec![
             iface("Wi-Fi", "192.168.1.20"),
             iface("Loopback", "127.0.0.1"),
-        ],
+        ]),
         hears_itself: Some(true),
         multicast_send_blocked: Some(false),
         windows_profiles: vec![("Wi-Fi".into(), NetworkProfile::Private)],
@@ -83,28 +83,29 @@ fn a_healthy_laptop_gets_no_findings() {
 }
 
 #[test]
-fn no_real_network_connection_is_certain_and_comes_first() {
+fn only_virtual_connections_mean_probably_not_connected() {
     let mut e = healthy();
-    e.interfaces = vec![
+    e.interfaces = Some(vec![
         iface("Loopback", "127.0.0.1"),
         iface("vEthernet (WSL)", "172.29.48.1"),
-    ];
+    ]);
     e.old_laptops_found = Some(0);
     let found = causes(&e, Role::NewLaptop);
-    assert_eq!(found[0], (Cause::NotConnected, Certainty::Sure));
-    // Nothing else is guessed at when the laptop simply isn't connected.
+    assert_eq!(found[0], (Cause::NotConnected, Certainty::Likely));
+    // Nothing else is guessed at when the laptop isn't on a real network.
     assert_eq!(found.len(), 1, "{found:?}");
 }
 
 #[test]
-fn a_denied_mac_local_network_permission_is_certain() {
+fn a_refused_send_on_a_mac_points_at_the_local_network_permission() {
     let mut e = healthy();
     e.is_macos = true;
     e.multicast_send_blocked = Some(true);
     e.hears_itself = Some(false);
     e.old_laptops_found = Some(0);
     let found = causes(&e, Role::NewLaptop);
-    assert_eq!(found[0], (Cause::MacLocalNetworkDenied, Certainty::Sure));
+    // The same refusal can appear before the person answers the prompt, so only Likely.
+    assert_eq!(found[0], (Cause::MacLocalNetworkDenied, Certainty::Likely));
     assert!(
         !found
             .iter()
@@ -149,7 +150,10 @@ fn a_public_windows_network_is_flagged_on_either_laptop() {
 #[test]
 fn a_running_vpn_is_named() {
     let mut e = healthy();
-    e.interfaces.push(iface("Tailscale", "100.101.2.3"));
+    e.interfaces
+        .as_mut()
+        .unwrap()
+        .push(iface("Tailscale", "100.101.2.3"));
     e.old_laptops_found = Some(0);
     let found = causes(&e, Role::NewLaptop);
     // The VPN explains it, so the general guesses are not added.
@@ -162,7 +166,10 @@ fn a_running_vpn_is_named() {
 #[test]
 fn a_vpn_alone_is_not_blamed_when_the_old_laptop_was_found() {
     let mut e = healthy();
-    e.interfaces.push(iface("Tailscale", "100.101.2.3"));
+    e.interfaces
+        .as_mut()
+        .unwrap()
+        .push(iface("Tailscale", "100.101.2.3"));
     assert!(causes(&e, Role::NewLaptop).is_empty());
 }
 
@@ -194,14 +201,14 @@ fn the_phone_hotspot_is_offered_whenever_the_network_may_be_the_problem() {
     // Not when the laptop just isn't connected, or everything is fine.
     assert!(!diagnose(&healthy(), Role::NewLaptop).suggest_phone_hotspot);
     let mut offline = healthy();
-    offline.interfaces = vec![iface("Loopback", "127.0.0.1")];
+    offline.interfaces = Some(vec![iface("Loopback", "127.0.0.1")]);
     assert!(!diagnose(&offline, Role::NewLaptop).suggest_phone_hotspot);
 }
 
 #[test]
 fn unknown_evidence_is_never_treated_as_a_problem() {
     let e = Evidence {
-        interfaces: vec![iface("Wi-Fi", "192.168.1.20")],
+        interfaces: Some(vec![iface("Wi-Fi", "192.168.1.20")]),
         hears_itself: None,
         multicast_send_blocked: None,
         windows_profiles: vec![],
@@ -209,6 +216,13 @@ fn unknown_evidence_is_never_treated_as_a_problem() {
         is_macos: true,
     };
     assert!(diagnose(&e, Role::NewLaptop).findings.is_empty());
+    // Knowing nothing at all is not "not connected".
+    for role in [Role::OldLaptop, Role::NewLaptop] {
+        assert!(
+            diagnose(&Evidence::default(), role).findings.is_empty(),
+            "{role:?}"
+        );
+    }
 }
 
 #[test]
@@ -222,7 +236,10 @@ fn the_old_laptop_is_never_told_that_nothing_was_found() {
 fn a_self_assigned_address_means_not_connected() {
     // What a laptop gets when no network answered it.
     let mut e = healthy();
-    e.interfaces = vec![iface("Wi-Fi", "169.254.12.7"), iface("Wi-Fi", "fe80::1")];
+    e.interfaces = Some(vec![
+        iface("Wi-Fi", "169.254.12.7"),
+        iface("Wi-Fi", "fe80::1"),
+    ]);
     assert_eq!(
         causes(&e, Role::NewLaptop),
         vec![(Cause::NotConnected, Certainty::Sure)]
@@ -244,4 +261,230 @@ fn the_mac_permission_is_only_blamed_on_a_mac() {
         causes(&e, Role::OldLaptop),
         vec![(Cause::DiscoveryBlockedOnThisLaptop, Certainty::Likely)]
     );
+}
+
+#[test]
+fn a_stock_mac_with_its_built_in_utun_adapters_is_not_told_a_vpn_is_on() {
+    let mut e = healthy();
+    e.is_macos = true;
+    e.interfaces = Some(vec![
+        iface("en0", "192.168.1.23"),
+        iface("utun0", "fe80::1"),
+        iface("utun1", "fe80::2"),
+        iface("utun2", "fe80::3"),
+        iface("utun3", "fe80::4"),
+        iface("lo0", "127.0.0.1"),
+    ]);
+    e.old_laptops_found = Some(0);
+    let found = causes(&e, Role::NewLaptop);
+    assert!(
+        !found.iter().any(|(c, _)| matches!(c, Cause::VpnOn(_))),
+        "{found:?}"
+    );
+    assert_eq!(found[0], (Cause::OldLaptopNotPairing, Certainty::Likely));
+}
+
+#[test]
+fn a_vpn_with_two_addresses_is_named_once_and_the_hotspot_offered() {
+    let mut e = healthy();
+    e.interfaces
+        .as_mut()
+        .unwrap()
+        .push(iface("Tailscale", "100.101.2.3"));
+    e.interfaces
+        .as_mut()
+        .unwrap()
+        .push(iface("Tailscale", "fd7a:115c:a1e0::1"));
+    e.old_laptops_found = Some(0);
+    let d = diagnose(&e, Role::NewLaptop);
+    assert_eq!(
+        d.findings,
+        vec![Finding {
+            cause: Cause::VpnOn(vec!["Tailscale".into()]),
+            certainty: Certainty::Likely
+        }]
+    );
+    assert!(d.suggest_phone_hotspot);
+}
+
+#[test]
+fn a_shared_overlay_address_is_recognised_as_a_vpn_whatever_its_name() {
+    assert_eq!(iface("Ethernet 3", "100.64.0.7").kind, InterfaceKind::Vpn);
+    assert_eq!(
+        iface("Ethernet 3", "100.128.0.7").kind,
+        InterfaceKind::Network
+    );
+}
+
+#[test]
+fn a_local_cause_is_shown_alone_without_the_general_list() {
+    let mut e = healthy();
+    e.windows_profiles = vec![("Wi-Fi".into(), NetworkProfile::Public)];
+    e.old_laptops_found = Some(0);
+    assert_eq!(
+        causes(&e, Role::NewLaptop),
+        vec![(
+            Cause::WindowsPublicNetwork("Wi-Fi".into()),
+            Certainty::Likely
+        )]
+    );
+}
+
+#[test]
+fn when_the_old_laptop_was_found_discovery_is_not_blamed() {
+    let mut e = healthy();
+    e.hears_itself = Some(false);
+    e.is_macos = true;
+    e.multicast_send_blocked = Some(true);
+    e.old_laptops_found = Some(2);
+    assert!(causes(&e, Role::NewLaptop).is_empty());
+}
+
+#[test]
+fn more_adapter_names_are_classified() {
+    let kind = |n: &str, ip: &str| iface(n, ip).kind;
+    for vpn in [
+        "Mullvad",
+        "CloudflareWARP",
+        "Hamachi",
+        "zt5u4y6",
+        "mullvad-wg",
+        "proton0",
+        "nebula1",
+    ] {
+        assert_eq!(kind(vpn, "10.6.0.2"), InterfaceKind::Vpn, "{vpn}");
+    }
+    for virt in [
+        "lxcbr0",
+        "lxdbr0",
+        "incusbr0",
+        "podman0",
+        "cni0",
+        "flannel.1",
+        "cilium_host",
+        "Local Area Connection* 10",
+        "Bluetooth Network Connection",
+    ] {
+        assert_eq!(kind(virt, "10.0.3.1"), InterfaceKind::Virtual, "{virt}");
+    }
+    assert_ne!(
+        kind("Npcap Loopback Adapter", "10.0.3.1"),
+        InterfaceKind::Network
+    );
+    assert_eq!(
+        kind("vEthernet (External Switch)", "192.168.1.9"),
+        InterfaceKind::Network
+    );
+    assert_eq!(kind("Wi-Fi 2", "192.168.1.9"), InterfaceKind::Network);
+}
+
+/// Checks the doctor's honesty rules over many combinations of evidence.
+#[test]
+fn the_doctor_is_honest_across_every_combination_of_evidence() {
+    let interface_sets: Vec<Option<Vec<Interface>>> = vec![
+        None,
+        Some(vec![]),
+        Some(vec![iface("Wi-Fi", "169.254.3.3")]),
+        Some(vec![iface("vEthernet (WSL)", "172.29.48.1")]),
+        Some(vec![iface("Wi-Fi", "192.168.1.5")]),
+        Some(vec![iface("en0", "192.168.1.5"), iface("utun0", "fe80::1")]),
+        Some(vec![
+            iface("Wi-Fi", "192.168.1.5"),
+            iface("Tailscale", "100.70.0.1"),
+        ]),
+    ];
+    let opts = [None, Some(true), Some(false)];
+    let profiles = [vec![], vec![("Wi-Fi".to_string(), NetworkProfile::Public)]];
+    let found = [None, Some(0), Some(2)];
+    let mut checked = 0;
+    for interfaces in &interface_sets {
+        for hears in opts {
+            for blocked in opts {
+                for prof in &profiles {
+                    for f in found {
+                        for mac in [false, true] {
+                            for role in [Role::OldLaptop, Role::NewLaptop] {
+                                let e = Evidence {
+                                    interfaces: interfaces.clone(),
+                                    hears_itself: hears,
+                                    multicast_send_blocked: blocked,
+                                    windows_profiles: prof.clone(),
+                                    old_laptops_found: f,
+                                    is_macos: mac,
+                                };
+                                let d = diagnose(&e, role);
+                                let has = |c: &Cause| d.findings.iter().any(|x| &x.cause == c);
+                                let no_address = matches!(interfaces, Some(list)
+                                    if list.iter().all(|i| i.ip.is_loopback()
+                                        || i.ip.to_string().starts_with("169.254")
+                                        || i.ip.to_string().starts_with("fe80")));
+                                // Sure only when there is no address at all.
+                                for x in &d.findings {
+                                    if x.certainty == Certainty::Sure {
+                                        assert!(
+                                            no_address && x.cause == Cause::NotConnected,
+                                            "{e:?}"
+                                        );
+                                    }
+                                }
+                                // Not knowing the interfaces never means "not connected".
+                                if interfaces.is_none() {
+                                    assert!(!has(&Cause::NotConnected), "{e:?}");
+                                }
+                                // "Not connected" stands alone.
+                                if has(&Cause::NotConnected) {
+                                    assert_eq!(d.findings.len(), 1, "{e:?}");
+                                }
+                                // Discovery that demonstrably works is never blamed.
+                                // (A search result only counts on the new laptop.)
+                                let found_some =
+                                    role == Role::NewLaptop && matches!(f, Some(n) if n > 0);
+                                if hears == Some(true) || found_some {
+                                    assert!(!has(&Cause::MacLocalNetworkDenied), "{e:?}");
+                                    assert!(!has(&Cause::DiscoveryBlockedOnThisLaptop), "{e:?}");
+                                }
+                                // A Mac permission is only ever suspected on a Mac.
+                                if !mac {
+                                    assert!(!has(&Cause::MacLocalNetworkDenied), "{e:?}");
+                                }
+                                // Only the new laptop, and only after an empty search, hears these.
+                                let search_empty = role == Role::NewLaptop && f == Some(0);
+                                for c in [
+                                    Cause::OldLaptopNotPairing,
+                                    Cause::DifferentNetworks,
+                                    Cause::GuestNetworkHidesDevices,
+                                ] {
+                                    if has(&c) {
+                                        assert!(search_empty, "{e:?}");
+                                    }
+                                }
+                                if d.findings
+                                    .iter()
+                                    .any(|x| matches!(x.cause, Cause::VpnOn(_)))
+                                {
+                                    assert!(search_empty, "{e:?}");
+                                }
+                                // An empty search on a connected new laptop always gets an answer.
+                                if search_empty && !has(&Cause::NotConnected) {
+                                    assert!(!d.findings.is_empty(), "{e:?}");
+                                }
+                                // A link-local-only utun never counts as a VPN.
+                                if matches!(interfaces, Some(l) if l.iter().any(|i| i.name == "utun0"))
+                                {
+                                    assert!(
+                                        !d.findings
+                                            .iter()
+                                            .any(|x| matches!(x.cause, Cause::VpnOn(_))),
+                                        "{e:?}"
+                                    );
+                                }
+                                checked += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(checked, 7 * 3 * 3 * 2 * 3 * 2 * 2);
 }
