@@ -98,21 +98,21 @@ pub fn people_from_profile_list(output: &str, me: &Path) -> Vec<Person> {
             .trim()
             .replace("%SystemDrive%", &system_drive)
             .replace("%systemdrive%", &system_drive);
-        let home = PathBuf::from(path);
+        let home = PathBuf::from(&path);
         people.push(Person {
-            suggested_name: last_name(&home),
+            // Windows paths are split by Windows rules on any system, so the list can be read
+            // anywhere (on the new laptop, or in tests on a Mac).
+            suggested_name: path
+                .rsplit(['\\', '/'])
+                .next()
+                .unwrap_or_default()
+                .to_string(),
             is_me: same_place(&home, me),
             account_id: id,
             home,
         });
     }
     people
-}
-
-fn last_name(home: &Path) -> String {
-    home.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
 }
 
 /// macOS: `dscl . -readall /Users NFSHomeDirectory RealName UniqueID`. Records are separated by

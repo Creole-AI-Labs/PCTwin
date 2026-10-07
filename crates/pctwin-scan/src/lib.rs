@@ -12,10 +12,15 @@
 //!   that are only in the cloud are counted but never downloaded, links are never followed, and
 //!   whatever can't be read is listed. [`Size`] is honest when another person's folder can't be
 //!   read without their permission.
+//! - [`scan_folder`] turns one special folder into move-record items: every file and folder with
+//!   its permanent ID, owner and real place; macOS packages as one item; what can't be read or is
+//!   only in the cloud is recorded as left out with the reason; photos, videos, music and documents
+//!   are counted for the after-move check.
 
 mod folders;
 mod measure;
 mod people;
+mod scan;
 
 pub use folders::{
     Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders,
@@ -27,3 +32,4 @@ pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
+pub use scan::{Counts, Scan, scan_folder};
