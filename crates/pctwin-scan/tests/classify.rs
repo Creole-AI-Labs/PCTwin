@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use pctwin_record::{CloudProvider, Storage};
 use pctwin_scan::{Facts, classify};
 
+#[cfg(windows)]
 fn other(drive: &str) -> Storage {
     Storage::OtherDrive {
         drive: drive.into(),

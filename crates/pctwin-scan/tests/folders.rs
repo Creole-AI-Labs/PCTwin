@@ -3,6 +3,7 @@
 //! are, and a folder that isn't there is reported missing, never guessed.
 
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::process::Command;
 
 use pctwin_record::FolderRole;

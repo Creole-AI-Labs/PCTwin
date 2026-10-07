@@ -2,6 +2,10 @@
 //! process with its own settings. Kept apart from the other folder tests because the Windows check
 //! briefly changes the user's folder settings.
 
+// The Mac has no settings a test can safely change to move a folder; its folders are checked
+// in folders.rs.
+#![cfg(not(target_os = "macos"))]
+
 use std::path::Path;
 use std::process::Command;
 // ---------- folders moved elsewhere, checked in a separate process ----------
