@@ -14,6 +14,10 @@
 //!   gets its real name only once every announced byte has arrived; an unfinished file is removed.
 //!   Nothing is overwritten: a taken name becomes `name (2).ext`, found in constant time even when
 //!   thousands of files share a name.
+//! - [`Destinations`] is the table of approved places (each person's folders, a shared folder, a
+//!   chosen drive, an offload drive). The old laptop can only name an entry; an unknown label is
+//!   refused, labels are never used as paths, and another person's account is opened only through
+//!   the admin helper.
 //!
 //! Received files are data: nothing here runs, opens or interprets their contents.
 
@@ -25,7 +29,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use cap_std::ambient_authority;
-use cap_std::fs::{Dir, File, OpenOptions};
+pub use cap_std::fs::Dir;
+use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
 /// Longest single file or folder name, in bytes (the limit on every supported system).
@@ -334,6 +339,14 @@ pub enum GateError {
     TooManyClashes,
     #[error("the file should be {announced} bytes but {received} arrived")]
     SizeMismatch { announced: u64, received: u64 },
+    #[error("that place on the new laptop was not approved")]
+    UnknownDestination,
+    #[error("that place on the new laptop is already approved")]
+    DuplicateDestination,
+    #[error("a place's label must be 1 to 64 plain letters, numbers, '-', '_' or '.'")]
+    BadDestinationId,
+    #[error("another person's account can only be opened through the administrator helper")]
+    NeedsAdminHelper,
     #[error("writing failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -380,10 +393,17 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 impl Destination {
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
-        Ok(Self {
-            root: Dir::open_ambient_dir(path, ambient_authority())?,
+        Ok(Self::from_dir(Dir::open_ambient_dir(
+            path,
+            ambient_authority(),
+        )?))
+    }
+
+    fn from_dir(root: Dir) -> Self {
+        Self {
+            root,
             clash_hints: Mutex::new(ClashHints::default()),
-        })
+        }
     }
 
     /// Starts receiving a file at `path` (inside the approved folder) that must be exactly
@@ -503,6 +523,111 @@ fn claim_by_reservation(dir: &Dir, name: &str, temp: &str) -> Result<bool, GateE
 /// folder in the way as "access denied", so the name itself is checked too.
 fn is_taken(dir: &Dir, name: &str, e: &io::Error) -> bool {
     e.kind() == io::ErrorKind::AlreadyExists || dir.symlink_metadata(name).is_ok()
+}
+
+/// What kind of place an approved destination is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Approved {
+    /// The signed-in person's own folders.
+    MyFolders,
+    /// A folder shared by everyone on the new laptop.
+    SharedFolder,
+    /// A drive the person chose.
+    ChosenDrive,
+    /// A drive for things kept off the new laptop.
+    OffloadDrive,
+    /// Another person's account, identified by the system's account ID. Opened only through the
+    /// admin helper ([`Destinations::approve_through_helper`]).
+    AnotherAccount { account_id: String },
+}
+
+/// Longest destination label, in bytes.
+const MAX_DESTINATION_ID_BYTES: usize = 64;
+/// Longest system account ID accepted, in bytes.
+const MAX_ACCOUNT_ID_BYTES: usize = 256;
+
+/// The only places on the new laptop that anything is written to. The old laptop names an entry
+/// by its label; the label is only looked up here and never used as a path.
+#[derive(Default)]
+pub struct Destinations {
+    entries: HashMap<String, (Approved, Destination)>,
+}
+
+impl Destinations {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Approves the folder at `path` under the label `id`. Another person's account is refused
+    /// here; it needs [`approve_through_helper`](Self::approve_through_helper).
+    pub fn approve(&mut self, id: &str, place: Approved, path: &Path) -> Result<(), GateError> {
+        if matches!(place, Approved::AnotherAccount { .. }) {
+            return Err(GateError::NeedsAdminHelper);
+        }
+        self.check_new(id)?;
+        let destination = Destination::open(path)?;
+        self.entries.insert(id.to_string(), (place, destination));
+        Ok(())
+    }
+
+    /// Approves another person's account folder, opened by the admin helper and handed over as a
+    /// directory handle. Only the admin helper connection may call this.
+    pub fn approve_through_helper(
+        &mut self,
+        id: &str,
+        account_id: &str,
+        root: Dir,
+    ) -> Result<(), GateError> {
+        if account_id.is_empty()
+            || account_id.len() > MAX_ACCOUNT_ID_BYTES
+            || account_id.chars().any(char::is_control)
+        {
+            return Err(GateError::BadDestinationId);
+        }
+        self.check_new(id)?;
+        let place = Approved::AnotherAccount {
+            account_id: account_id.to_string(),
+        };
+        self.entries
+            .insert(id.to_string(), (place, Destination::from_dir(root)));
+        Ok(())
+    }
+
+    /// The approved place labelled `id`, or [`GateError::UnknownDestination`].
+    pub fn get(&self, id: &str) -> Result<&Destination, GateError> {
+        self.entries
+            .get(id)
+            .map(|(_, destination)| destination)
+            .ok_or(GateError::UnknownDestination)
+    }
+
+    /// What kind of place `id` is.
+    pub fn place(&self, id: &str) -> Result<&Approved, GateError> {
+        self.entries
+            .get(id)
+            .map(|(place, _)| place)
+            .ok_or(GateError::UnknownDestination)
+    }
+
+    /// Every approved label, to tell the old laptop where it may send things.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.entries.keys().map(String::as_str)
+    }
+
+    fn check_new(&self, id: &str) -> Result<(), GateError> {
+        let plain = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
+        if id.is_empty()
+            || id.len() > MAX_DESTINATION_ID_BYTES
+            || !id.chars().all(plain)
+            || id.chars().all(|c| c == '.')
+        {
+            return Err(GateError::BadDestinationId);
+        }
+        if self.entries.contains_key(id) {
+            return Err(GateError::DuplicateDestination);
+        }
+        Ok(())
+    }
 }
 
 fn open_or_create_folder(parent: &Dir, name: &str) -> Result<Dir, GateError> {
