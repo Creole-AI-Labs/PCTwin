@@ -10,7 +10,7 @@
 //!   and reserved names such as `CON` are renamed, repeating until the name is stable. Every
 //!   change is reported as a [`NameChange`], and the name as sent is kept for the report.
 //! - [`Destination`] writes only inside an approved folder, through a cap-std directory handle, so
-//!   a link cannot redirect a write elsewhere. A file is written under a hidden temporary name and
+//!   a link cannot redirect a write elsewhere. A file is written under a temporary `.pctwin-` name and
 //!   gets its real name only once every announced byte has arrived; an unfinished file is removed.
 //!   Nothing is overwritten: a taken name becomes `name (2).ext`, found in constant time even when
 //!   thousands of files share a name.
@@ -18,6 +18,7 @@
 //! Received files are data: nothing here runs, opens or interprets their contents.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasher, RandomState};
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,6 +38,10 @@ pub const MAX_PATH_BYTES: usize = 4096;
 const MAX_CLASH_ATTEMPTS: u32 = 100_000;
 /// An extension longer than this is treated as part of the name when shortening or numbering.
 const MAX_EXTENSION_BYTES: usize = 16;
+/// Longest stem treated as a possible short-name alias.
+const MAX_ALIAS_STEM_CHARS: usize = 16;
+/// Most clash hints remembered; past this they are forgotten and rebuilt.
+const MAX_CLASH_HINTS: usize = 1 << 20;
 
 /// Why a path from the old laptop was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -174,26 +179,26 @@ pub fn convert_name(name: &str, platform: Platform) -> Converted {
             changes.push(c);
         }
     };
-    if platform == Platform::Windows {
+    let windows = platform == Platform::Windows;
+    if windows {
+        // No later step adds a forbidden character, so this runs once.
         let replaced: String = name.chars().map(windows_safe_char).collect();
         if replaced != name {
             note(NameChange::ForbiddenCharacters, &mut changes);
             name = replaced;
         }
-        if looks_like_short_name(&name) {
-            note(NameChange::ShortNameAlias, &mut changes);
-            name = mark_after_stem(&name);
-        }
     }
-    // Each step can undo another (shortening can expose a trailing space, renaming can lengthen),
-    // so repeat until nothing changes. Every step only shrinks or marks once, so this ends fast.
+    // Each step can undo another (shortening can expose a trailing space, trimming can expose a
+    // reserved name or an alias), so every step runs on every pass until nothing changes. Marks go
+    // right after the stem, near the start, where shortening never cuts them off, so this settles
+    // within a few passes.
     for _ in 0..8 {
         let before = name.clone();
         if name.len() > MAX_COMPONENT_BYTES {
             name = shorten(&name, MAX_COMPONENT_BYTES);
             note(NameChange::Shortened, &mut changes);
         }
-        if platform == Platform::Windows {
+        if windows {
             let trimmed = name.trim_end_matches(['.', ' ']);
             if trimmed.len() != name.len() {
                 note(NameChange::TrailingDotsOrSpaces, &mut changes);
@@ -205,6 +210,10 @@ pub fn convert_name(name: &str, platform: Platform) -> Converted {
             }
             if is_windows_reserved(&name) {
                 note(NameChange::ReservedName, &mut changes);
+                name = mark_after_stem(&name);
+            }
+            if looks_like_short_name(&name) {
+                note(NameChange::ShortNameAlias, &mut changes);
                 name = mark_after_stem(&name);
             }
         }
@@ -243,17 +252,22 @@ fn split_stem(name: &str) -> (&str, &str) {
     }
 }
 
-/// Adds `_` right after the stem: `CON.txt` → `CON_.txt`.
+/// The stem without the trailing spaces Windows ignores when it looks a name up.
+fn checked_stem(name: &str) -> &str {
+    split_stem(name).0.trim_end_matches(' ')
+}
+
+/// Adds `_` right after the stem's text: `CON.txt` → `CON_.txt`, `CON  .txt` → `CON_  .txt`.
 fn mark_after_stem(name: &str) -> String {
-    let (stem, rest) = split_stem(name);
-    format!("{stem}_{rest}")
+    let at = checked_stem(name).len();
+    format!("{}_{}", &name[..at], &name[at..])
 }
 
 /// `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0`–`COM9`, `LPT0`–`LPT9` (and the
 /// superscript-digit forms), whatever the case and extension. Windows ignores trailing spaces in
 /// the stem when it checks.
 fn is_windows_reserved(name: &str) -> bool {
-    let stem = split_stem(name).0.trim_end_matches(' ').to_uppercase();
+    let stem = checked_stem(name).to_uppercase();
     if matches!(
         stem.as_str(),
         "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
@@ -269,14 +283,18 @@ fn is_windows_reserved(name: &str) -> bool {
 }
 
 /// `LONGFO~1`, `PROGRA~2.TXT`: up to six characters, a tilde and digits, an extension of up to
-/// three. Windows may resolve such a name to an existing long-named file or folder.
+/// three. Windows may resolve such a name to an existing long-named file or folder. Real aliases
+/// are at most eight characters; up to [`MAX_ALIAS_STEM_CHARS`] are caught, to be safe while
+/// keeping the mark near the start of the name.
 fn looks_like_short_name(name: &str) -> bool {
-    let (stem, rest) = split_stem(name);
+    let stem = checked_stem(name);
+    let (_, rest) = split_stem(name);
     let ext = rest.strip_prefix('.').unwrap_or(rest);
     let Some((base, digits)) = stem.rsplit_once('~') else {
         return false;
     };
-    (1..=6).contains(&base.chars().count())
+    stem.chars().count() <= MAX_ALIAS_STEM_CHARS
+        && (1..=6).contains(&base.chars().count())
         && !digits.is_empty()
         && digits.chars().all(|c| c.is_ascii_digit())
         && ext.chars().count() <= 3
@@ -323,8 +341,37 @@ pub enum GateError {
 /// An approved folder on the new laptop. Everything written goes inside it.
 pub struct Destination {
     root: Dir,
-    /// The next number to try for each name in each folder, so clashes are found in constant time.
-    next_number: Mutex<HashMap<String, u32>>,
+    /// Where to start numbering the next clash of a name in a folder, so thousands of clashes
+    /// stay fast. Only a hint: the exact name is always tried first and every name is claimed
+    /// without replacing anything, so a wrong or shared hint can only skip numbers.
+    clash_hints: Mutex<ClashHints>,
+}
+
+/// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
+/// as the same lands on one key. Entries exist only for names that clashed, and are capped.
+#[derive(Default)]
+struct ClashHints {
+    hasher: RandomState,
+    next: HashMap<u64, u32>,
+}
+
+impl ClashHints {
+    fn key(&self, folder: &str, name: &str) -> u64 {
+        let fold = |s: &str| -> String {
+            s.chars()
+                .flat_map(char::to_uppercase)
+                .flat_map(char::to_lowercase)
+                .collect()
+        };
+        self.hasher.hash_one((fold(folder), fold(name)))
+    }
+
+    fn remember(&mut self, key: u64, next: u32) {
+        if self.next.len() >= MAX_CLASH_HINTS {
+            self.next.clear();
+        }
+        self.next.insert(key, next);
+    }
 }
 
 /// Distinguishes temporary names created by this process.
@@ -335,12 +382,12 @@ impl Destination {
     pub fn open(path: &Path) -> io::Result<Self> {
         Ok(Self {
             root: Dir::open_ambient_dir(path, ambient_authority())?,
-            next_number: Mutex::new(HashMap::new()),
+            clash_hints: Mutex::new(ClashHints::default()),
         })
     }
 
     /// Starts receiving a file at `path` (inside the approved folder) that must be exactly
-    /// `announced` bytes. It is written under a hidden temporary name; [`IncomingFile::finish`]
+    /// `announced` bytes. It is written under a temporary `.pctwin-` name; [`IncomingFile::finish`]
     /// gives it its real name.
     pub fn create_file<'d>(
         &'d self,
@@ -387,40 +434,75 @@ impl Destination {
         name: &str,
         temp: &str,
     ) -> Result<(String, bool), GateError> {
-        let key = format!("{folder}\u{0}{}", name.to_lowercase());
-        let mut next = self
-            .next_number
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let start = next.get(&key).copied().unwrap_or(1);
+        if claim(dir, name, temp)? {
+            return Ok((name.to_string(), false));
+        }
+        let hints = || {
+            self.clash_hints
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+        };
+        let key = hints().key(folder, name);
+        let start = hints().next.get(&key).copied().unwrap_or(2).max(2);
         let (stem, ext) = split_extension(name);
-        let mut reserve = OpenOptions::new();
-        reserve.write(true).create_new(true);
         for attempt in start..start.saturating_add(MAX_CLASH_ATTEMPTS) {
-            let candidate = if attempt == 1 {
-                name.to_string()
-            } else {
-                let suffix = format!(" ({attempt}){ext}");
-                format!(
-                    "{}{suffix}",
-                    cut_to(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len()))
-                )
-            };
-            // Reserve the name first (this never replaces anything), then move the finished
-            // file onto the reservation.
-            match dir.open_with(&candidate, &reserve) {
-                Ok(placeholder) => {
-                    drop(placeholder);
-                    next.insert(key, attempt + 1);
-                    dir.rename(temp, dir, &candidate)?;
-                    return Ok((candidate, attempt > 1));
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e.into()),
+            let suffix = format!(" ({attempt}){ext}");
+            let candidate = format!(
+                "{}{suffix}",
+                cut_to(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len()))
+            );
+            if claim(dir, &candidate, temp)? {
+                hints().remember(key, attempt + 1);
+                return Ok((candidate, true));
             }
         }
         Err(GateError::TooManyClashes)
     }
+}
+
+/// Gives the finished file `temp` the name `name` if nothing has it, never replacing anything.
+/// Returns `false` when the name is taken. On failure nothing is left under `name`.
+fn claim(dir: &Dir, name: &str, temp: &str) -> Result<bool, GateError> {
+    // A hard link makes the whole file appear under its name at once, or not at all.
+    match dir.hard_link(temp, dir, name) {
+        Ok(()) => {
+            // If another program holds the temporary name, it stays behind as a copy; the file
+            // under its real name is complete either way.
+            let _ = dir.remove_file(temp);
+            Ok(true)
+        }
+        Err(e) if is_taken(dir, name, &e) => Ok(false),
+        // Some drives (FAT, exFAT) have no hard links.
+        Err(_) => claim_by_reservation(dir, name, temp),
+    }
+}
+
+/// For drives without hard links: reserve the name (never replacing anything), then move the
+/// finished file onto the reservation. On failure the reservation is removed.
+fn claim_by_reservation(dir: &Dir, name: &str, temp: &str) -> Result<bool, GateError> {
+    let mut reserve = OpenOptions::new();
+    reserve.write(true).create_new(true);
+    match dir.open_with(name, &reserve) {
+        Ok(placeholder) => {
+            drop(placeholder);
+            match dir.rename(temp, dir, name) {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    // Never leave the empty reservation under the real name.
+                    let _ = dir.remove_file(name);
+                    Err(e.into())
+                }
+            }
+        }
+        Err(e) if is_taken(dir, name, &e) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Whether a failed claim failed because something already has the name. Windows reports a
+/// folder in the way as "access denied", so the name itself is checked too.
+fn is_taken(dir: &Dir, name: &str, e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::AlreadyExists || dir.symlink_metadata(name).is_ok()
 }
 
 fn open_or_create_folder(parent: &Dir, name: &str) -> Result<Dir, GateError> {
@@ -437,7 +519,7 @@ fn open_or_create_folder(parent: &Dir, name: &str) -> Result<Dir, GateError> {
     Ok(parent.open_dir(name)?)
 }
 
-/// Creates a hidden temporary file in `dir` that no other name uses.
+/// Creates a temporary `.pctwin-` file in `dir` that no other name uses.
 fn create_temp_file(dir: &Dir) -> Result<(File, String), GateError> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -547,5 +629,54 @@ impl Write for IncomingFile<'_> {
             Some(file) => file.flush(),
             None => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The fallback for drives without hard links (FAT, exFAT) cannot be reached through
+    //! [`Destination`] on the test machines' disks, so it is checked directly.
+    use super::*;
+
+    fn folder() -> (tempfile::TempDir, Dir) {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+        (root, dir)
+    }
+
+    #[test]
+    fn the_reservation_moves_the_finished_file_onto_its_name() {
+        let (root, dir) = folder();
+        std::fs::write(root.path().join("t.part"), b"abc").unwrap();
+        assert!(claim_by_reservation(&dir, "photo.jpg", "t.part").unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join("photo.jpg")).unwrap(),
+            b"abc"
+        );
+        assert!(!root.path().join("t.part").exists());
+    }
+
+    #[test]
+    fn a_failed_move_leaves_nothing_under_the_real_name() {
+        let (root, dir) = folder();
+        // The temporary file vanished (another program deleted it).
+        assert!(claim_by_reservation(&dir, "doc.pdf", "gone.part").is_err());
+        assert!(!root.path().join("doc.pdf").exists());
+    }
+
+    #[test]
+    fn a_taken_name_is_reported_as_taken_and_left_alone() {
+        let (root, dir) = folder();
+        std::fs::write(root.path().join("t.part"), b"new").unwrap();
+        std::fs::write(root.path().join("notes.txt"), b"mine").unwrap();
+        std::fs::create_dir(root.path().join("Notes")).unwrap();
+        assert!(!claim_by_reservation(&dir, "notes.txt", "t.part").unwrap());
+        assert!(!claim_by_reservation(&dir, "Notes", "t.part").unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join("notes.txt")).unwrap(),
+            b"mine"
+        );
+        assert!(root.path().join("Notes").is_dir());
+        assert_eq!(std::fs::read(root.path().join("t.part")).unwrap(), b"new");
     }
 }

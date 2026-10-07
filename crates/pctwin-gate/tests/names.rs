@@ -148,3 +148,76 @@ fn renaming_a_reserved_name_at_the_length_limit_still_fits() {
     assert!(changes.contains(&NameChange::ReservedName));
     assert!(!name.ends_with('.') && !name.ends_with(' '));
 }
+
+// ---------- from the Skeptic's review of the redesign ----------
+
+#[test]
+fn short_name_aliases_with_trailing_spaces_or_dots_are_still_renamed() {
+    // Windows trims these before it looks the name up, so they reach the same folder.
+    for input in [
+        "LONGFO~1 ",
+        "LONGFO~1 . ",
+        "longfo~1  ",
+        "LONGFO~1. .",
+        "LONGFO~1 .txt",
+    ] {
+        let (name, changes) = win(input);
+        assert!(
+            changes.contains(&NameChange::ShortNameAlias),
+            "{input:?} -> {name:?}"
+        );
+        assert!(
+            !win(&name).1.contains(&NameChange::ShortNameAlias),
+            "{input:?} -> {name:?} still looks like an alias"
+        );
+    }
+}
+
+#[test]
+fn reserved_names_padded_to_the_length_limit_still_fit() {
+    for reserved in ["CON", "NUL", "COM1", "lpt9"] {
+        let input = format!("{reserved}{}.txt", " ".repeat(251 - reserved.len()));
+        assert_eq!(input.len(), MAX_COMPONENT_BYTES);
+        let (name, changes) = win(&input);
+        assert!(
+            name.len() <= MAX_COMPONENT_BYTES,
+            "{reserved}: {}",
+            name.len()
+        );
+        assert!(changes.contains(&NameChange::ReservedName));
+        assert_eq!(win(&name).0, name, "{reserved}: not settled");
+    }
+}
+
+proptest! {
+    #[test]
+    fn tricky_windows_names_settle_in_one_conversion(
+        stem in prop::sample::select(vec!["CON", "nul", "COM1", "LPT\u{B9}", "LONGFO~1", "a~12", "x", "AUX"]),
+        pad in 0usize..260,
+        tail in "[ .]{0,3}",
+        ext in prop::option::of("[a-z]{1,4}"),
+        suffix in "[ .]{0,3}",
+    ) {
+        let ext = ext.map(|e| format!(".{e}")).unwrap_or_default();
+        let name = format!("{stem}{}{tail}{ext}{suffix}", " ".repeat(pad));
+        let once = convert_name(&name, Platform::Windows);
+        prop_assert!(once.name.len() <= MAX_COMPONENT_BYTES, "{}", once.name.len());
+        let twice = convert_name(&once.name, Platform::Windows);
+        prop_assert_eq!(&twice.name, &once.name);
+        prop_assert!(twice.changes.is_empty(), "{:?}", twice.changes);
+    }
+}
+
+#[test]
+fn long_alias_like_names_still_fit_and_settle() {
+    for digits in [1usize, 8, 100, 253, 300] {
+        let input = format!("a~{}", "1".repeat(digits));
+        let (name, _) = win(&input);
+        assert!(
+            name.len() <= MAX_COMPONENT_BYTES,
+            "{digits}: {}",
+            name.len()
+        );
+        assert_eq!(win(&name).0, name, "{digits}: not settled");
+    }
+}

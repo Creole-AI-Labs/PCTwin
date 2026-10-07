@@ -264,3 +264,122 @@ fn shortening_never_leaves_a_trailing_space_on_windows() {
         "{written:?}"
     );
 }
+
+// ---------- from the Skeptic's review of the redesign ----------
+
+#[test]
+fn folder_names_differing_only_in_case_do_not_slow_numbering() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let started = std::time::Instant::now();
+    // Each spelling is a different folder on Linux and the same folder on Windows and Mac.
+    // Before the fix, 500 spellings took over a minute on Windows.
+    for mask in 0u32..600 {
+        let folder: String = "abcdefghijk"
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if mask & (1 << i) != 0 {
+                    c.to_ascii_uppercase()
+                } else {
+                    c
+                }
+            })
+            .collect();
+        write(&dest, &format!("{folder}/a.txt"), b"x").unwrap();
+    }
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(45),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn the_same_name_in_two_folders_is_numbered_separately() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    for _ in 0..3 {
+        write(&dest, "A/a.txt", b"x").unwrap();
+    }
+    assert_eq!(write(&dest, "B/a.txt", b"x").unwrap(), "B/a.txt");
+    assert_eq!(write(&dest, "B/a.txt", b"x").unwrap(), "B/a (2).txt");
+}
+
+#[test]
+fn two_files_can_be_in_transfer_in_one_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut one = dest.create_file(&path("one.txt"), 3).unwrap();
+    let mut two = dest.create_file(&path("two.txt"), 3).unwrap();
+    one.write_all(b"111").unwrap();
+    two.write_all(b"222").unwrap();
+    two.finish().unwrap();
+    one.finish().unwrap();
+    assert_eq!(std::fs::read(root.path().join("one.txt")).unwrap(), b"111");
+    assert_eq!(std::fs::read(root.path().join("two.txt")).unwrap(), b"222");
+}
+
+#[test]
+fn a_file_named_like_an_existing_folder_gets_a_number() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("Notes")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut file = dest.create_file(&path("Notes"), 1).unwrap();
+    file.write_all(b"x").unwrap();
+    let done = file.finish().unwrap();
+    assert_eq!(done.final_path, "Notes (2)");
+    assert!(done.changes.contains(&NameChange::NameClash));
+    assert!(root.path().join("Notes").is_dir());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn names_differing_only_in_case_are_not_clashes_where_the_disk_keeps_case() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    write(&dest, "Readme.md", b"1").unwrap();
+    let mut file = dest.create_file(&path("README.md"), 1).unwrap();
+    file.write_all(b"2").unwrap();
+    let done = file.finish().unwrap();
+    assert_eq!(done.final_path, "README.md");
+    assert!(!done.changes.contains(&NameChange::NameClash));
+}
+
+/// Another program (antivirus, a sync tool) holds the unfinished file open. Whatever happens, an
+/// empty or partial file never appears under the real name.
+#[cfg(windows)]
+#[test]
+fn a_file_held_open_by_another_program_never_leaves_an_empty_file_behind() {
+    use std::os::windows::fs::OpenOptionsExt;
+    // Shares reading and writing but not deleting, as antivirus and sync tools often do.
+    const READ_AND_WRITE_NOT_DELETE: u32 = 1 | 2;
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut file = dest.create_file(&path("photo.jpg"), 3).unwrap();
+    file.write_all(b"abc").unwrap();
+    let part = std::fs::read_dir(root.path())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|e| e == "part"))
+        .unwrap();
+    let holder = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(READ_AND_WRITE_NOT_DELETE)
+        .open(&part)
+        .unwrap();
+    match file.finish() {
+        Ok(done) => assert_eq!(
+            std::fs::read(root.path().join(&done.final_path)).unwrap(),
+            b"abc"
+        ),
+        Err(_) => assert!(
+            !root.path().join("photo.jpg").exists(),
+            "an empty file was left"
+        ),
+    }
+    drop(holder);
+    let again = write(&dest, "photo.jpg", b"abc").unwrap();
+    let real = std::fs::read(root.path().join("photo.jpg")).unwrap();
+    assert_eq!(real, b"abc", "{again}");
+}
