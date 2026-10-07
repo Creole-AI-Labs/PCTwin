@@ -125,7 +125,7 @@ fn is_within(path: &Path, root: &Path) -> bool {
     !r.is_empty() && p.len() >= r.len() && p[..r.len()] == r[..]
 }
 
-fn same_place(a: &Path, b: &Path) -> bool {
+pub(crate) fn same_place(a: &Path, b: &Path) -> bool {
     parts(a) == parts(b)
 }
 
