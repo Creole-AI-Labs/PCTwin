@@ -160,3 +160,107 @@ fn a_link_named_like_the_file_is_not_followed() {
     assert_ne!(written, "note.txt", "the link's name is treated as taken");
     assert_eq!(std::fs::read(&target).unwrap(), b"keep");
 }
+
+// ---------- from the fresh-context security review ----------
+
+#[test]
+fn thousands_of_files_with_one_name_are_numbered_quickly() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let started = std::time::Instant::now();
+    // Before the fix, 1,000 same-name files took over two minutes.
+    for _ in 0..1_000 {
+        write(&dest, "a.txt", b"x").unwrap();
+    }
+    assert!(root.path().join("a (1000).txt").exists());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn an_unfinished_or_short_file_leaves_nothing_behind() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    {
+        let mut file = dest.create_file(&path("big.bin"), 100).unwrap();
+        file.write_all(&[0u8; 40]).unwrap();
+        // Dropped mid-transfer.
+    }
+    let mut file = dest.create_file(&path("big.bin"), 100).unwrap();
+    file.write_all(&[0u8; 40]).unwrap();
+    assert!(file.finish().is_err());
+    let left: Vec<_> = std::fs::read_dir(root.path()).unwrap().collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn a_file_only_appears_under_its_name_once_complete() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut file = dest.create_file(&path("photo.jpg"), 3).unwrap();
+    file.write_all(b"abc").unwrap();
+    assert!(
+        !root.path().join("photo.jpg").exists(),
+        "not before it is finished"
+    );
+    file.finish().unwrap();
+    assert_eq!(
+        std::fs::read(root.path().join("photo.jpg")).unwrap(),
+        b"abc"
+    );
+}
+
+#[test]
+fn the_report_keeps_the_name_as_sent() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut file = dest.create_file(&path("Notes/May?.txt"), 1).unwrap();
+    file.write_all(b"x").unwrap();
+    let done = file.finish().unwrap();
+    assert_eq!(done.sent_path, "Notes/May?.txt");
+}
+
+#[test]
+fn a_long_extension_still_gets_a_clash_number() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let name = format!("a.{}", "e".repeat(252));
+    let first = write(&dest, &name, b"1").unwrap();
+    let second = write(&dest, &name, b"2").unwrap();
+    assert_ne!(first, second);
+    assert!(second.len() <= pctwin_gate::MAX_COMPONENT_BYTES);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_short_name_alias_never_lands_inside_an_existing_folder() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("Long Folder Name")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut file = dest.create_file(&path("LONGFO~1/their.txt"), 1).unwrap();
+    file.write_all(b"x").unwrap();
+    let done = file.finish().unwrap();
+    assert!(done.changes.contains(&NameChange::ShortNameAlias));
+    assert!(!root.path().join("Long Folder Name/their.txt").exists());
+    assert!(
+        root.path().join(&done.final_path).exists(),
+        "{}",
+        done.final_path
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn shortening_never_leaves_a_trailing_space_on_windows() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let name = format!("{} :", "a".repeat(253));
+    let written = write(&dest, &name, b"x").unwrap();
+    assert!(
+        !written.ends_with(' ') && !written.ends_with('.'),
+        "{written:?}"
+    );
+}

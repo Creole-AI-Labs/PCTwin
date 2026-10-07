@@ -3,18 +3,25 @@
 //! - [`IncomingPath::parse`] checks every path the old laptop sends. Paths are relative to an
 //!   approved folder, use `/` between folders, and anything that could climb out (`..`, an
 //!   absolute path, empty or `.` parts, NUL) is refused. Sizes and depth are capped. Names are
-//!   stored in one Unicode form (NFC), so the same accented name never appears twice.
-//! - [`convert_name`] makes a name storable on the target system (Engineering Plan 9.6): on
-//!   Windows, forbidden characters become lookalikes, reserved names such as `CON` are renamed and
-//!   trailing dots and spaces are trimmed. Every change is reported as a [`NameChange`].
+//!   held in one Unicode form (NFC), so the same accented name never appears twice.
+//! - [`convert_name`] makes a name storable on the target system (Engineering Plan 9.6). On
+//!   Windows: forbidden characters become lookalikes, names that look like short-name aliases
+//!   (`LONGFO~1`) are renamed, over-long names are shortened, trailing dots and spaces are trimmed
+//!   and reserved names such as `CON` are renamed, repeating until the name is stable. Every
+//!   change is reported as a [`NameChange`], and the name as sent is kept for the report.
 //! - [`Destination`] writes only inside an approved folder, through a cap-std directory handle, so
-//!   a link or a race cannot redirect a write elsewhere. It never overwrites (a taken name becomes
-//!   `name (2).ext`) and each file must receive exactly the number of bytes announced.
+//!   a link cannot redirect a write elsewhere. A file is written under a hidden temporary name and
+//!   gets its real name only once every announced byte has arrived; an unfinished file is removed.
+//!   Nothing is overwritten: a taken name becomes `name (2).ext`, found in constant time even when
+//!   thousands of files share a name.
 //!
 //! Received files are data: nothing here runs, opens or interprets their contents.
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, File, OpenOptions};
@@ -26,8 +33,10 @@ pub const MAX_COMPONENT_BYTES: usize = 255;
 pub const MAX_DEPTH: usize = 128;
 /// Longest whole path accepted, in bytes.
 pub const MAX_PATH_BYTES: usize = 4096;
-/// Most alternative names tried before giving up on a clash.
-const MAX_CLASH_ATTEMPTS: u32 = 9_999;
+/// Most alternative names tried for one file before giving up on a clash.
+const MAX_CLASH_ATTEMPTS: u32 = 100_000;
+/// An extension longer than this is treated as part of the name when shortening or numbering.
+const MAX_EXTENSION_BYTES: usize = 16;
 
 /// Why a path from the old laptop was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -54,7 +63,10 @@ pub enum PathError {
 
 /// A path from the old laptop that stays inside the approved folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IncomingPath(Vec<String>);
+pub struct IncomingPath {
+    original: String,
+    components: Vec<String>,
+}
 
 impl IncomingPath {
     /// Checks a `/`-separated path relative to the approved folder.
@@ -88,12 +100,21 @@ impl IncomingPath {
                 return Err(PathError::TooDeep);
             }
         }
-        Ok(Self(components))
+        Ok(Self {
+            original: path.to_string(),
+            components,
+        })
     }
 
-    /// The folder and file names, outermost first.
+    /// The folder and file names as the old laptop sent them (composed), outermost first. These
+    /// are not yet safe to use as names on this system: write through [`Destination`].
     pub fn components(&self) -> &[String] {
-        &self.0
+        &self.components
+    }
+
+    /// The path exactly as the old laptop sent it, for the report and a later move back.
+    pub fn original(&self) -> &str {
+        &self.original
     }
 }
 
@@ -125,6 +146,9 @@ pub enum NameChange {
     ForbiddenCharacters,
     /// A name the system reserves (such as `CON`) was renamed.
     ReservedName,
+    /// A name that looks like a Windows short-name alias (such as `LONGFO~1`) was renamed, so it
+    /// cannot land inside an existing folder or file with a longer name.
+    ShortNameAlias,
     /// Trailing dots or spaces were removed.
     TrailingDotsOrSpaces,
     /// The name was shortened to fit.
@@ -145,33 +169,51 @@ pub struct Converted {
 pub fn convert_name(name: &str, platform: Platform) -> Converted {
     let mut name: String = name.nfc().collect();
     let mut changes = Vec::new();
+    let note = |c: NameChange, changes: &mut Vec<NameChange>| {
+        if !changes.contains(&c) {
+            changes.push(c);
+        }
+    };
     if platform == Platform::Windows {
         let replaced: String = name.chars().map(windows_safe_char).collect();
         if replaced != name {
-            changes.push(NameChange::ForbiddenCharacters);
+            note(NameChange::ForbiddenCharacters, &mut changes);
             name = replaced;
         }
-        let trimmed = name.trim_end_matches(['.', ' ']);
-        if trimmed.len() != name.len() {
-            changes.push(NameChange::TrailingDotsOrSpaces);
-            name = if trimmed.is_empty() {
-                "_".to_string()
-            } else {
-                trimmed.to_string()
-            };
-        }
-        if is_windows_reserved(&name) {
-            changes.push(NameChange::ReservedName);
-            let stem_end = name.find('.').unwrap_or(name.len());
-            name.insert(stem_end, '_');
+        if looks_like_short_name(&name) {
+            note(NameChange::ShortNameAlias, &mut changes);
+            name = mark_after_stem(&name);
         }
     }
-    if name.len() > MAX_COMPONENT_BYTES {
-        name = shorten(&name, MAX_COMPONENT_BYTES);
-        changes.push(NameChange::Shortened);
-    }
-    if name.is_empty() {
-        name = "_".to_string();
+    // Each step can undo another (shortening can expose a trailing space, renaming can lengthen),
+    // so repeat until nothing changes. Every step only shrinks or marks once, so this ends fast.
+    for _ in 0..8 {
+        let before = name.clone();
+        if name.len() > MAX_COMPONENT_BYTES {
+            name = shorten(&name, MAX_COMPONENT_BYTES);
+            note(NameChange::Shortened, &mut changes);
+        }
+        if platform == Platform::Windows {
+            let trimmed = name.trim_end_matches(['.', ' ']);
+            if trimmed.len() != name.len() {
+                note(NameChange::TrailingDotsOrSpaces, &mut changes);
+                name = if trimmed.is_empty() {
+                    "_".to_string()
+                } else {
+                    trimmed.to_string()
+                };
+            }
+            if is_windows_reserved(&name) {
+                note(NameChange::ReservedName, &mut changes);
+                name = mark_after_stem(&name);
+            }
+        }
+        if name.is_empty() {
+            name = "_".to_string();
+        }
+        if name == before {
+            break;
+        }
     }
     Converted { name, changes }
 }
@@ -193,15 +235,25 @@ fn windows_safe_char(c: char) -> char {
     }
 }
 
-/// `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM1`–`COM9`, `LPT1`–`LPT9` (and the
-/// superscript-digit forms), whatever the case and extension.
+/// The part before the first dot, and the rest.
+fn split_stem(name: &str) -> (&str, &str) {
+    match name.find('.') {
+        Some(i) => (&name[..i], &name[i..]),
+        None => (name, ""),
+    }
+}
+
+/// Adds `_` right after the stem: `CON.txt` → `CON_.txt`.
+fn mark_after_stem(name: &str) -> String {
+    let (stem, rest) = split_stem(name);
+    format!("{stem}_{rest}")
+}
+
+/// `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0`–`COM9`, `LPT0`–`LPT9` (and the
+/// superscript-digit forms), whatever the case and extension. Windows ignores trailing spaces in
+/// the stem when it checks.
 fn is_windows_reserved(name: &str) -> bool {
-    let stem = name
-        .split('.')
-        .next()
-        .unwrap_or("")
-        .trim_end()
-        .to_uppercase();
+    let stem = split_stem(name).0.trim_end_matches(' ').to_uppercase();
     if matches!(
         stem.as_str(),
         "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
@@ -213,21 +265,44 @@ fn is_windows_reserved(name: &str) -> bool {
     let rest: Vec<char> = chars.collect();
     (prefix == "COM" || prefix == "LPT")
         && rest.len() == 1
-        && matches!(rest[0], '1'..='9' | '\u{B9}' | '\u{B2}' | '\u{B3}')
+        && matches!(rest[0], '0'..='9' | '\u{B9}' | '\u{B2}' | '\u{B3}')
+}
+
+/// `LONGFO~1`, `PROGRA~2.TXT`: up to six characters, a tilde and digits, an extension of up to
+/// three. Windows may resolve such a name to an existing long-named file or folder.
+fn looks_like_short_name(name: &str) -> bool {
+    let (stem, rest) = split_stem(name);
+    let ext = rest.strip_prefix('.').unwrap_or(rest);
+    let Some((base, digits)) = stem.rsplit_once('~') else {
+        return false;
+    };
+    (1..=6).contains(&base.chars().count())
+        && !digits.is_empty()
+        && digits.chars().all(|c| c.is_ascii_digit())
+        && ext.chars().count() <= 3
+        && !ext.contains('.')
+}
+
+/// The name split for shortening and numbering: a short final extension is kept whole.
+fn split_extension(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(i) if i > 0 && name.len() - i <= MAX_EXTENSION_BYTES => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    }
 }
 
 /// Shortens `name` to at most `max` bytes, keeping its extension and whole characters.
 fn shorten(name: &str, max: usize) -> String {
-    let (stem, ext) = match name.rfind('.') {
-        Some(i) if i > 0 && name.len() - i <= 16 => (&name[..i], &name[i..]),
-        _ => (name, ""),
-    };
-    let budget = max.saturating_sub(ext.len());
-    let mut cut = budget.min(stem.len());
-    while !stem.is_char_boundary(cut) {
+    let (stem, ext) = split_extension(name);
+    format!("{}{ext}", cut_to(stem, max.saturating_sub(ext.len())))
+}
+
+fn cut_to(s: &str, max: usize) -> &str {
+    let mut cut = max.min(s.len());
+    while !s.is_char_boundary(cut) {
         cut -= 1;
     }
-    format!("{}{ext}", &stem[..cut])
+    &s[..cut]
 }
 
 /// Why a file could not be written.
@@ -248,23 +323,30 @@ pub enum GateError {
 /// An approved folder on the new laptop. Everything written goes inside it.
 pub struct Destination {
     root: Dir,
+    /// The next number to try for each name in each folder, so clashes are found in constant time.
+    next_number: Mutex<HashMap<String, u32>>,
 }
+
+/// Distinguishes temporary names created by this process.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl Destination {
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
         Ok(Self {
             root: Dir::open_ambient_dir(path, ambient_authority())?,
+            next_number: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Creates a new file at `path` (inside the approved folder) that must receive exactly
-    /// `announced` bytes. Names are made storable on this system; a taken name gets a number.
-    pub fn create_file(
-        &self,
+    /// Starts receiving a file at `path` (inside the approved folder) that must be exactly
+    /// `announced` bytes. It is written under a hidden temporary name; [`IncomingFile::finish`]
+    /// gives it its real name.
+    pub fn create_file<'d>(
+        &'d self,
         path: &IncomingPath,
         announced: u64,
-    ) -> Result<IncomingFile, GateError> {
+    ) -> Result<IncomingFile<'d>, GateError> {
         let host = Platform::host();
         let (file_name, folders) = path
             .components()
@@ -281,17 +363,63 @@ impl Destination {
         }
         let converted = convert_name(file_name, host);
         changes.extend(converted.changes.iter().copied());
-        let (file, name) = create_new_file(&dir, &converted.name, &mut changes)?;
-        shown.push(name);
+        let (file, temp_name) = create_temp_file(&dir)?;
         Ok(IncomingFile {
-            file,
+            destination: self,
+            dir,
+            file: Some(file),
+            temp_name: Some(temp_name),
             announced,
             received: 0,
-            finished: Finished {
-                final_path: shown.join("/"),
-                changes,
-            },
+            folder: shown.join("/"),
+            name: converted.name,
+            sent_path: path.original().to_string(),
+            changes,
         })
+    }
+
+    /// Gives the finished temporary file a real name that nothing else uses, never replacing
+    /// another file. Returns the name used.
+    fn claim_name(
+        &self,
+        dir: &Dir,
+        folder: &str,
+        name: &str,
+        temp: &str,
+    ) -> Result<(String, bool), GateError> {
+        let key = format!("{folder}\u{0}{}", name.to_lowercase());
+        let mut next = self
+            .next_number
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let start = next.get(&key).copied().unwrap_or(1);
+        let (stem, ext) = split_extension(name);
+        let mut reserve = OpenOptions::new();
+        reserve.write(true).create_new(true);
+        for attempt in start..start.saturating_add(MAX_CLASH_ATTEMPTS) {
+            let candidate = if attempt == 1 {
+                name.to_string()
+            } else {
+                let suffix = format!(" ({attempt}){ext}");
+                format!(
+                    "{}{suffix}",
+                    cut_to(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len()))
+                )
+            };
+            // Reserve the name first (this never replaces anything), then move the finished
+            // file onto the reservation.
+            match dir.open_with(&candidate, &reserve) {
+                Ok(placeholder) => {
+                    drop(placeholder);
+                    next.insert(key, attempt + 1);
+                    dir.rename(temp, dir, &candidate)?;
+                    return Ok((candidate, attempt > 1));
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(GateError::TooManyClashes)
     }
 }
 
@@ -309,32 +437,15 @@ fn open_or_create_folder(parent: &Dir, name: &str) -> Result<Dir, GateError> {
     Ok(parent.open_dir(name)?)
 }
 
-/// Creates `name` without ever replacing anything; a taken name becomes `stem (2).ext` and so on.
-fn create_new_file(
-    dir: &Dir,
-    name: &str,
-    changes: &mut Vec<NameChange>,
-) -> Result<(File, String), GateError> {
+/// Creates a hidden temporary file in `dir` that no other name uses.
+fn create_temp_file(dir: &Dir) -> Result<(File, String), GateError> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
-    let (stem, ext) = match name.rfind('.') {
-        Some(i) if i > 0 => (&name[..i], &name[i..]),
-        _ => (name, ""),
-    };
-    for attempt in 1..=MAX_CLASH_ATTEMPTS {
-        let candidate = if attempt == 1 {
-            name.to_string()
-        } else {
-            let suffix = format!(" ({attempt}){ext}");
-            shorten_stem(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len())) + &suffix
-        };
-        match dir.open_with(&candidate, &options) {
-            Ok(file) => {
-                if attempt > 1 {
-                    changes.push(NameChange::NameClash);
-                }
-                return Ok((file, candidate));
-            }
+    for _ in 0..64 {
+        let n = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let name = format!(".pctwin-{}-{n}.part", std::process::id());
+        match dir.open_with(&name, &options) {
+            Ok(file) => return Ok((file, name)),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         }
@@ -342,33 +453,35 @@ fn create_new_file(
     Err(GateError::TooManyClashes)
 }
 
-fn shorten_stem(stem: &str, max: usize) -> String {
-    let mut cut = max.min(stem.len());
-    while !stem.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    stem[..cut].to_string()
-}
-
 /// Where a file ended up and what was changed on the way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finished {
     /// The path inside the approved folder, with `/` between folders.
     pub final_path: String,
+    /// The path as the old laptop sent it.
+    pub sent_path: String,
     pub changes: Vec<NameChange>,
 }
 
 /// A file being received. Writing more than announced fails; [`finish`](Self::finish) checks the
-/// whole file arrived.
-pub struct IncomingFile {
-    file: File,
+/// whole file arrived and only then gives it its real name. Dropping it unfinished removes it.
+pub struct IncomingFile<'d> {
+    destination: &'d Destination,
+    dir: Dir,
+    /// Closed before renaming or removing: Windows refuses either while the file is open.
+    file: Option<File>,
+    temp_name: Option<String>,
     announced: u64,
     received: u64,
-    finished: Finished,
+    folder: String,
+    name: String,
+    sent_path: String,
+    changes: Vec<NameChange>,
 }
 
-impl IncomingFile {
-    /// Checks every announced byte arrived and makes sure it is on disk.
+impl IncomingFile<'_> {
+    /// Checks every announced byte arrived, makes sure it is on disk, and gives the file its real
+    /// name. On any failure the partial file is removed.
     pub fn finish(mut self) -> Result<Finished, GateError> {
         if self.received != self.announced {
             return Err(GateError::SizeMismatch {
@@ -376,13 +489,42 @@ impl IncomingFile {
                 received: self.received,
             });
         }
-        self.file.flush()?;
-        self.file.sync_all()?;
-        Ok(self.finished)
+        let file = self.file.take().ok_or(GateError::Conflict)?;
+        file.sync_all()?;
+        drop(file);
+        let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
+        let (name, clashed) =
+            self.destination
+                .claim_name(&self.dir, &self.folder, &self.name, &temp)?;
+        // The file now has its real name; nothing is left to clean up.
+        self.temp_name = None;
+        if clashed {
+            self.changes.push(NameChange::NameClash);
+        }
+        let final_path = if self.folder.is_empty() {
+            name
+        } else {
+            format!("{}/{name}", self.folder)
+        };
+        Ok(Finished {
+            final_path,
+            sent_path: std::mem::take(&mut self.sent_path),
+            changes: std::mem::take(&mut self.changes),
+        })
     }
 }
 
-impl Write for IncomingFile {
+impl Drop for IncomingFile<'_> {
+    fn drop(&mut self) {
+        // Unfinished or failed: never leave a partial file behind.
+        drop(self.file.take());
+        if let Some(temp) = self.temp_name.take() {
+            let _ = self.dir.remove_file(temp);
+        }
+    }
+}
+
+impl Write for IncomingFile<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let room = self.announced - self.received;
         if buf.len() as u64 > room {
@@ -391,12 +533,19 @@ impl Write for IncomingFile {
                 "more data than the old laptop announced",
             ));
         }
-        let n = self.file.write(buf)?;
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("the file is already closed"))?;
+        let n = file.write(buf)?;
         self.received += n as u64;
         Ok(n)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.file.flush()
+        match self.file.as_mut() {
+            Some(file) => file.flush(),
+            None => Ok(()),
+        }
     }
 }

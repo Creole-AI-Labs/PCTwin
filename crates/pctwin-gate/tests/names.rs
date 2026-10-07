@@ -48,16 +48,7 @@ fn windows_reserved_names_are_renamed_whatever_their_case_or_extension() {
         assert!(changes.contains(&NameChange::ReservedName), "{input:?}");
     }
     // Close but not reserved.
-    for ok in [
-        "CONSOLE",
-        "com10",
-        "LPT0x",
-        "auxiliary.txt",
-        "COM0",
-        "LPT0",
-        "COMX",
-        "LPTA",
-    ] {
+    for ok in ["CONSOLE", "com10", "LPT0x", "auxiliary.txt", "COMX", "LPTA"] {
         assert_eq!(win(ok).0, ok);
     }
 }
@@ -108,4 +99,52 @@ proptest! {
         let composed: String = s.nfc().collect();
         prop_assert_eq!(c.changes.is_empty(), *n == composed);
     }
+}
+
+#[test]
+fn com0_lpt0_and_trailing_space_or_dot_reserved_forms_are_renamed() {
+    for input in ["COM0", "LPT0", "lpt0.log", "CON ", "NUL.", "AUX .txt"] {
+        let (name, changes) = win(input);
+        assert!(
+            changes.contains(&NameChange::ReservedName),
+            "{input:?} -> {name:?}"
+        );
+    }
+    // Windows only ignores ASCII spaces, so an ideographic space is a real character.
+    assert!(!win("CON\u{3000}").1.contains(&NameChange::ReservedName));
+}
+
+#[test]
+fn names_that_look_like_short_name_aliases_are_renamed_on_windows() {
+    for input in ["LONGFO~1", "PROGRA~2.TXT", "a~1", "ABCDEF~12.c"] {
+        let (name, changes) = win(input);
+        assert!(
+            changes.contains(&NameChange::ShortNameAlias),
+            "{input:?} -> {name:?}"
+        );
+        assert_ne!(name, input);
+    }
+    for ok in ["notes~draft", "ABCDEFG~1", "file~.txt", "LONGFO~1.html"] {
+        assert!(!win(ok).1.contains(&NameChange::ShortNameAlias), "{ok:?}");
+    }
+    assert_eq!(convert_name("LONGFO~1", Platform::Linux).name, "LONGFO~1");
+}
+
+#[test]
+fn shortening_and_trimming_settle_on_a_clean_name() {
+    let (name, changes) = win(&format!("{} :", "a".repeat(253)));
+    assert!(name.len() <= MAX_COMPONENT_BYTES);
+    assert!(!name.ends_with(' ') && !name.ends_with('.'), "{name:?}");
+    assert!(changes.contains(&NameChange::Shortened));
+}
+
+#[test]
+fn renaming_a_reserved_name_at_the_length_limit_still_fits() {
+    // "CON." plus 251 letters is exactly 255 bytes; the reserved-name mark adds one more.
+    let input = format!("CON.{}", "x".repeat(251));
+    assert_eq!(input.len(), MAX_COMPONENT_BYTES);
+    let (name, changes) = win(&input);
+    assert!(name.len() <= MAX_COMPONENT_BYTES, "{}", name.len());
+    assert!(changes.contains(&NameChange::ReservedName));
+    assert!(!name.ends_with('.') && !name.ends_with(' '));
 }
