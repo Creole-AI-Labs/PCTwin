@@ -45,6 +45,8 @@ const MAX_CLASH_ATTEMPTS: u32 = 100_000;
 const MAX_EXTENSION_BYTES: usize = 16;
 /// Longest stem treated as a possible short-name alias.
 const MAX_ALIAS_STEM_CHARS: usize = 16;
+/// Longest clash number added to a name: ` (4294967295)`.
+const MAX_NUMBER_BYTES: usize = 13;
 /// Most clash hints remembered; past this they are forgotten and rebuilt.
 const MAX_CLASH_HINTS: usize = 1 << 20;
 
@@ -462,9 +464,15 @@ impl Destination {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
         };
-        let key = hints().key(folder, name);
-        let start = hints().next.get(&key).copied().unwrap_or(2).max(2);
         let (stem, ext) = split_extension(name);
+        // Numbered names are tried on the stem cut to leave room for the number, so long names
+        // that share that start compete for the same numbers: file the hint under the cut stem.
+        let base = cut_to(
+            stem,
+            MAX_COMPONENT_BYTES.saturating_sub(ext.len() + MAX_NUMBER_BYTES),
+        );
+        let key = hints().key(folder, &format!("{base}{ext}"));
+        let start = hints().next.get(&key).copied().unwrap_or(2).max(2);
         for attempt in start..start.saturating_add(MAX_CLASH_ATTEMPTS) {
             let suffix = format!(" ({attempt}){ext}");
             let candidate = format!(

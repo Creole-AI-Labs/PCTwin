@@ -383,3 +383,26 @@ fn a_file_held_open_by_another_program_never_leaves_an_empty_file_behind() {
     let real = std::fs::read(root.path().join("photo.jpg")).unwrap();
     assert_eq!(real, b"abc", "{again}");
 }
+
+#[test]
+fn long_names_that_shorten_to_the_same_start_do_not_slow_numbering() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let shared = "s".repeat(247);
+    let names: Vec<String> = (0..400).map(|i| format!("{shared}{i:03}.txt")).collect();
+    for name in &names {
+        write(&dest, name, b"x").unwrap();
+    }
+    let started = std::time::Instant::now();
+    // Each second copy is numbered on the shortened start the names share. Before the fix every
+    // name searched again from 2, so 600 names took over two minutes.
+    for name in &names {
+        let written = write(&dest, name, b"x").unwrap();
+        assert!(written.len() <= pctwin_gate::MAX_COMPONENT_BYTES);
+    }
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
+    );
+}
