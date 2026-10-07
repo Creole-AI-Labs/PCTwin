@@ -16,12 +16,19 @@
 //!   its permanent ID, owner and real place; macOS packages as one item; what can't be read or is
 //!   only in the cloud is recorded as left out with the reason; photos, videos, music and documents
 //!   are counted for the after-move check.
+//! - [`list_drives`] lists every real drive with its type and what that type can keep ([`Keeps`]),
+//!   and finds another installed system by its own marker files, so the running system is never
+//!   assumed to own every drive.
 
+mod drives;
 mod folders;
 mod measure;
 mod people;
 mod scan;
 
+pub use drives::{
+    CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
+};
 pub use folders::{
     Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders,
 };
