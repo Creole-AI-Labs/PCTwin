@@ -79,7 +79,17 @@ pub fn scan_folder(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Path)
                 scan.unreadable.push(path);
                 continue;
             };
-            if kind.is_symlink() {
+            if is_clutter(&name) {
+                // The system's own clutter: recorded so the report can account for it, never
+                // moved, never counted, and never looked inside.
+                let (kind, size) = if kind.is_dir() {
+                    (ItemKind::Folder, 0)
+                } else {
+                    (ItemKind::File, meta.len())
+                };
+                scan.items
+                    .push(make(kind, size, left_out(LeftOutReason::System)));
+            } else if kind.is_symlink() {
                 scan.links += 1;
             } else if kind.is_dir() {
                 if let Some(package) = package_kind(&name) {
@@ -117,6 +127,29 @@ pub fn scan_folder(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Path)
         }
     }
     scan
+}
+
+/// Files and folders the system makes for itself: folder thumbnails and settings, the recycle bin
+/// and Trash, search and version indexes, Office's temporary lock files and the `._` files macOS
+/// leaves on other drives. Backup and migration tools skip these too.
+fn is_clutter(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "thumbs.db"
+            | "ehthumbs.db"
+            | "desktop.ini"
+            | ".ds_store"
+            | "$recycle.bin"
+            | "system volume information"
+            | ".trash"
+            | ".trashes"
+            | ".spotlight-v100"
+            | ".fseventsd"
+            | ".temporaryitems"
+            | ".documentrevisions-v100"
+    ) || lower.starts_with("~$")
+        || lower.starts_with("._")
 }
 
 fn left_out(reason: LeftOutReason) -> Inclusion {

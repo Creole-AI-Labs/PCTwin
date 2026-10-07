@@ -120,7 +120,7 @@ fn parts(path: &Path) -> Vec<String> {
 
 /// Whether `path` is `root` or inside it, whole name by whole name (`OneDriveOld` is not inside
 /// `OneDrive`).
-fn is_within(path: &Path, root: &Path) -> bool {
+pub(crate) fn is_within(path: &Path, root: &Path) -> bool {
     let (p, r) = (parts(path), parts(root));
     !r.is_empty() && p.len() >= r.len() && p[..r.len()] == r[..]
 }

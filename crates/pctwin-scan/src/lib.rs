@@ -19,9 +19,12 @@
 //! - [`list_drives`] lists every real drive with its type and what that type can keep ([`Keeps`]),
 //!   and finds another installed system by its own marker files, so the running system is never
 //!   assumed to own every drive.
+//! - [`scan_this_laptop`] puts it together: the people with honest sizes, the signed-in person's
+//!   special folders and the shared one, and the drives, in one move record.
 
 mod drives;
 mod folders;
+mod laptop;
 mod measure;
 mod people;
 mod scan;
@@ -32,6 +35,7 @@ pub use drives::{
 pub use folders::{
     Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders,
 };
+pub use laptop::{LaptopScan, PersonSummary, ScanError, build_scan, scan_this_laptop};
 pub use measure::{
     Measure, Size, cloud_only_mac, cloud_only_windows, is_icloud_stub_name, measure,
 };
