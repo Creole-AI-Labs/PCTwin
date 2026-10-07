@@ -291,7 +291,73 @@ fn plain_place(role: FolderRole, facts: &Facts) -> PathBuf {
     }
 }
 
-fn reported(role: FolderRole) -> Option<PathBuf> {
+/// What the system says about one special folder.
+#[derive(Debug)]
+enum Answer {
+    At(PathBuf),
+    /// Deliberately switched off (Linux user-dirs points it at the home folder).
+    SwitchedOff,
+    /// The system has nothing to say (Linux without user-dirs settings).
+    NotSet,
+}
+
+fn reported(role: FolderRole, facts: &Facts) -> Answer {
+    match system_path(role) {
+        Some(p) if role != FolderRole::Home && same_place(&p, &facts.home) => Answer::SwitchedOff,
+        Some(p) => Answer::At(p),
+        // The dirs library reports a switched-off folder the same way as an unset one, so the
+        // Linux settings file is read to tell them apart.
+        None if switched_off_on_linux(role, &facts.home) => Answer::SwitchedOff,
+        None => Answer::NotSet,
+    }
+}
+
+/// The Linux user-dirs key for a role (`XDG_<KEY>_DIR`).
+fn user_dirs_key(role: FolderRole) -> Option<&'static str> {
+    Some(match role {
+        FolderRole::Desktop => "DESKTOP",
+        FolderRole::Documents => "DOCUMENTS",
+        FolderRole::Downloads => "DOWNLOAD",
+        FolderRole::Pictures => "PICTURES",
+        FolderRole::Music => "MUSIC",
+        FolderRole::Videos => "VIDEOS",
+        FolderRole::Public => "PUBLICSHARE",
+        _ => return None,
+    })
+}
+
+fn switched_off_on_linux(role: FolderRole, home: &Path) -> bool {
+    if cfg!(any(windows, target_os = "macos")) {
+        return false;
+    }
+    let Some(key) = user_dirs_key(role) else {
+        return false;
+    };
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join(".config"));
+    std::fs::read(config.join("user-dirs.dirs"))
+        .is_ok_and(|bytes| switched_off_in(&String::from_utf8_lossy(&bytes), key, home))
+}
+
+/// Whether the user-dirs text points `XDG_<key>_DIR` at the home folder, which the user-dirs
+/// rules define as "switched off".
+fn switched_off_in(text: &str, key: &str, home: &Path) -> bool {
+    let name = format!("XDG_{key}_DIR");
+    text.lines().any(|line| {
+        let Some((k, v)) = line.split_once('=') else {
+            return false;
+        };
+        if k.trim() != name {
+            return false;
+        }
+        let v = v.trim().trim_matches('"');
+        v == "$HOME" || v == "$HOME/" || same_place(Path::new(v), home)
+    })
+}
+
+fn system_path(role: FolderRole) -> Option<PathBuf> {
     match role {
         FolderRole::Home => dirs::home_dir(),
         FolderRole::Desktop => dirs::desktop_dir(),
@@ -310,18 +376,17 @@ pub fn find_special_folders() -> Vec<FolderLookup> {
     let facts = facts_from_system();
     ROLES
         .iter()
-        .map(|&role| look_up(role, reported(role), &facts))
+        .map(|&role| look_up(role, reported(role, &facts), &facts))
         .collect()
 }
 
-fn look_up(role: FolderRole, reported: Option<PathBuf>, facts: &Facts) -> FolderLookup {
+fn look_up(role: FolderRole, answer: Answer, facts: &Facts) -> FolderLookup {
     let plain = plain_place(role, facts);
-    let path = match reported {
-        // Linux user-dirs uses the home folder itself to mean "no such folder".
-        Some(p) if role != FolderRole::Home && same_place(&p, &facts.home) => None,
-        Some(p) => Some(p),
+    let path = match answer {
+        Answer::At(p) => Some(p),
+        Answer::SwitchedOff => None,
         // Not configured at all (Linux without user-dirs): the plain name, only if it exists.
-        None => Some(plain.clone()),
+        Answer::NotSet => Some(plain.clone()),
     };
     match path {
         Some(path) if path.is_dir() => {
@@ -395,33 +460,50 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir(home.path().join("Documents")).unwrap();
         let f = facts(home.path());
+        let missing = FolderLookup::Missing {
+            role: FolderRole::Documents,
+        };
         // The plain Documents folder exists, but the system says Documents is elsewhere.
         let named = home.path().join("Gone");
         assert_eq!(
-            look_up(FolderRole::Documents, Some(named), &f),
-            FolderLookup::Missing {
-                role: FolderRole::Documents
-            }
+            look_up(FolderRole::Documents, Answer::At(named), &f),
+            missing
         );
-        // Set to the home folder itself: no such folder.
+        // Switched off: no such folder, even though the plain one exists.
         assert_eq!(
-            look_up(FolderRole::Documents, Some(home.path().to_path_buf()), &f),
-            FolderLookup::Missing {
-                role: FolderRole::Documents
-            }
+            look_up(FolderRole::Documents, Answer::SwitchedOff, &f),
+            missing
         );
         // Not configured at all: the plain folder, because it exists.
         assert!(matches!(
-            look_up(FolderRole::Documents, None, &f),
+            look_up(FolderRole::Documents, Answer::NotSet, &f),
             FolderLookup::Found(FoundFolder { moved: false, .. })
         ));
         assert_eq!(
-            look_up(FolderRole::Pictures, None, &f),
+            look_up(FolderRole::Pictures, Answer::NotSet, &f),
             FolderLookup::Missing {
                 role: FolderRole::Pictures
             }
         );
     }
+
+    #[test]
+    fn a_user_dirs_entry_pointing_at_home_means_switched_off() {
+        let home = Path::new("/home/ada");
+        let text = "# written by xdg-user-dirs-update\nXDG_DESKTOP_DIR=\"$HOME/\"\nXDG_MUSIC_DIR=\"$HOME\"\nXDG_VIDEOS_DIR=\"/home/ada\"\nXDG_DOCUMENTS_DIR=\"$HOME/Dokumente\"\n";
+        assert!(switched_off_in(text, "DESKTOP", home));
+        assert!(switched_off_in(text, "MUSIC", home));
+        assert!(switched_off_in(text, "VIDEOS", home));
+        assert!(!switched_off_in(text, "DOCUMENTS", home));
+        // Not mentioned at all is "not set", not "switched off".
+        assert!(!switched_off_in(text, "PICTURES", home));
+        assert!(!switched_off_in(
+            "XDG_DESKTOP_DIRX=\"$HOME/\"",
+            "DESKTOP",
+            home
+        ));
+    }
+
     #[test]
     fn onedrive_folders_are_read_from_reg_output() {
         let output = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\OneDrive\\Accounts\\Personal\r\n    UserFolder    REG_SZ    C:\\Users\\Ada\\OneDrive\r\n\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\OneDrive\\Accounts\\Business1\r\n    UserFolder    REG_EXPAND_SZ    C:\\Users\\Ada\\OneDrive - Contoso\r\n    UserFolderOld    REG_SZ    C:\\Old\r\n    UserFolder    REG_SZ    \r\nEnd of search: 3 match(es) found.\r\n";
