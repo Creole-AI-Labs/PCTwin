@@ -428,6 +428,11 @@ pub mod probe {
     /// if the check takes longer than [`WINDOWS_PROBE_TIMEOUT`] (then the check is stopped): the
     /// doctor treats that as "could not tell", never as "no Public network".
     pub fn windows_profiles() -> Option<Vec<(String, NetworkProfile)>> {
+        windows_profiles_within(WINDOWS_PROBE_TIMEOUT)
+    }
+
+    /// [`windows_profiles`] with a chosen time limit.
+    pub fn windows_profiles_within(limit: Duration) -> Option<Vec<(String, NetworkProfile)>> {
         if !cfg!(windows) {
             return None;
         }
@@ -439,7 +444,7 @@ pub mod probe {
                 "-Command",
                 WINDOWS_PROBE_SCRIPT,
             ],
-            WINDOWS_PROBE_TIMEOUT,
+            limit,
         )
         .map(|text| super::parse_windows_profiles(&text))
     }

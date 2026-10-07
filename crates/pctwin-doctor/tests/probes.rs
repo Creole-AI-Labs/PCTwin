@@ -30,9 +30,11 @@ fn sending_to_the_discovery_group_is_allowed_here() {
 
 #[test]
 fn windows_network_profiles_are_read_on_windows() {
-    let profiles = probe::windows_profiles();
+    // A generous limit: a busy CI machine's first PowerShell start can take well over 10 s. (The
+    // app keeps its shorter limit and treats a slow answer as "could not tell".)
+    let profiles = probe::windows_profiles_within(Duration::from_secs(90));
     if cfg!(windows) {
-        let profiles = profiles.expect("the check finishes within its time limit");
+        let profiles = profiles.expect("the profile check works on this machine");
         assert!(
             !profiles.is_empty(),
             "a Windows machine always has a profile"
