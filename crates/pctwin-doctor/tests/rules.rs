@@ -240,6 +240,7 @@ fn a_self_assigned_address_means_not_connected() {
         iface("Wi-Fi", "169.254.12.7"),
         iface("Wi-Fi", "fe80::1"),
     ]);
+    e.old_laptops_found = Some(0);
     assert_eq!(
         causes(&e, Role::NewLaptop),
         vec![(Cause::NotConnected, Certainty::Sure)]
@@ -308,12 +309,21 @@ fn a_vpn_with_two_addresses_is_named_once_and_the_hotspot_offered() {
 }
 
 #[test]
-fn a_shared_overlay_address_is_recognised_as_a_vpn_whatever_its_name() {
-    assert_eq!(iface("Ethernet 3", "100.64.0.7").kind, InterfaceKind::Vpn);
-    assert_eq!(
-        iface("Ethernet 3", "100.128.0.7").kind,
-        InterfaceKind::Network
-    );
+fn shared_carrier_addresses_are_not_mistaken_for_a_vpn() {
+    // Hotel, carrier and satellite networks use 100.64/10 too; only the name says VPN.
+    assert_eq!(iface("Wi-Fi", "100.64.0.7").kind, InterfaceKind::Network);
+    assert_eq!(iface("Tailscale", "100.101.2.3").kind, InterfaceKind::Vpn);
+}
+
+#[test]
+fn a_found_old_laptop_is_never_followed_by_not_connected() {
+    // A direct cable gives only self-assigned addresses, yet the laptops see each other.
+    let mut e = healthy();
+    e.interfaces = Some(vec![iface("Ethernet", "169.254.10.2")]);
+    e.old_laptops_found = Some(1);
+    assert!(causes(&e, Role::NewLaptop).is_empty());
+    e.interfaces = Some(vec![iface("vEthernet (WSL)", "172.29.48.1")]);
+    assert!(causes(&e, Role::NewLaptop).is_empty());
 }
 
 #[test]

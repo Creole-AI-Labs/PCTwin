@@ -52,8 +52,6 @@ impl Interface {
     pub fn new(name: &str, ip: IpAddr) -> Self {
         let kind = if ip.is_loopback() {
             InterfaceKind::Loopback
-        } else if is_vpn_address(ip) {
-            InterfaceKind::Vpn
         } else {
             kind_from_name(name)
         };
@@ -127,11 +125,6 @@ fn kind_from_name(name: &str) -> InterfaceKind {
     } else {
         InterfaceKind::Network
     }
-}
-
-/// 100.64.0.0/10, the shared address range overlay VPNs such as Tailscale use.
-fn is_vpn_address(ip: IpAddr) -> bool {
-    matches!(ip, IpAddr::V4(v4) if v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
 }
 
 /// An address that means the laptop is actually on a network: not loopback, not a self-assigned
@@ -244,8 +237,13 @@ pub struct Diagnosis {
 pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
     let finding = |cause, certainty| Finding { cause, certainty };
     let likely = |cause| finding(cause, Certainty::Likely);
+    // Discovery works if the old laptop was found or this laptop hears itself.
+    // (A search result only means something on the new laptop.)
+    let found_some = role == Role::NewLaptop && matches!(e.old_laptops_found, Some(n) if n > 0);
 
-    if let Some(interfaces) = &e.interfaces {
+    // Finding the old laptop proves a working connection, whatever the addresses look like (a
+    // direct cable gives only self-assigned addresses).
+    if let Some(interfaces) = e.interfaces.as_ref().filter(|_| !found_some) {
         let live: Vec<&Interface> = interfaces.iter().filter(|i| i.is_live()).collect();
         if live.is_empty() {
             // No address of any kind: the one thing the doctor can be sure of.
@@ -264,9 +262,6 @@ pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
     }
 
     let mut findings = Vec::new();
-    // Discovery works if the old laptop was found or this laptop hears itself.
-    // (A search result only means something on the new laptop.)
-    let found_some = role == Role::NewLaptop && matches!(e.old_laptops_found, Some(n) if n > 0);
     if !found_some && e.hears_itself != Some(true) {
         if e.is_macos && e.multicast_send_blocked == Some(true) {
             findings.push(likely(Cause::MacLocalNetworkDenied));
@@ -342,7 +337,7 @@ pub mod probe {
     /// A service type used only for this check, so other laptops never list it.
     const CHECK_SERVICE: &str = "_pctwin-check._tcp.local.";
     /// Longest wait for the Windows profile check.
-    const WINDOWS_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+    pub const WINDOWS_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
     /// This laptop's interface addresses, or `None` if they could not be listed.
     pub fn interfaces() -> Option<Vec<Interface>> {
@@ -408,47 +403,89 @@ pub mod probe {
             SocketAddrV4::new(Ipv4Addr::new(224, 0, 0, 251), 5353),
         ) {
             Ok(_) => Some(false),
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::PermissionDenied => {
-                    Some(true)
-                }
-                _ => None,
-            },
+            Err(e) => send_error_means_blocked(e.kind()),
         }
     }
 
-    /// Windows network names and how Windows treats each. Empty on other systems, on failure, or
-    /// if the check takes longer than a few seconds.
-    pub fn windows_profiles() -> Vec<(String, NetworkProfile)> {
-        if !cfg!(windows) {
-            return Vec::new();
+    /// Which send errors mean "the system refused": only a refusal, not a missing route.
+    pub fn send_error_means_blocked(kind: std::io::ErrorKind) -> Option<bool> {
+        match kind {
+            std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::PermissionDenied => {
+                Some(true)
+            }
+            _ => None,
         }
-        let mut command = std::process::Command::new("powershell");
-        command.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            // UTF-8 output so names in any language arrive intact.
-            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-             Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }",
-        ]);
+    }
+
+    /// The PowerShell script the Windows probe runs. It asks for UTF-8 output so names in any
+    /// language arrive intact.
+    pub const WINDOWS_PROBE_SCRIPT: &str = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }";
+    /// Windows process flag that stops the probe opening a console window.
+    pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// Windows network names and how Windows treats each. `None` on other systems, on failure, or
+    /// if the check takes longer than [`WINDOWS_PROBE_TIMEOUT`] (then the check is stopped): the
+    /// doctor treats that as "could not tell", never as "no Public network".
+    pub fn windows_profiles() -> Option<Vec<(String, NetworkProfile)>> {
+        if !cfg!(windows) {
+            return None;
+        }
+        run_check(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                WINDOWS_PROBE_SCRIPT,
+            ],
+            WINDOWS_PROBE_TIMEOUT,
+        )
+        .map(|text| super::parse_windows_profiles(&text))
+    }
+
+    /// Runs a system check and returns what it printed, or `None` if it failed or took longer than
+    /// `limit` (then it is stopped, never left running).
+    pub fn run_check(program: &str, args: &[&str], limit: Duration) -> Option<String> {
+        let mut command = std::process::Command::new(program);
+        command
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
         hide_console_window(&mut command);
+        let mut child = command.spawn().ok()?;
+        // Read the output on its own thread so a full pipe can never stall the check.
+        let mut stdout = child.stdout.take()?;
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(command.output());
+            let mut text = String::new();
+            let _ = std::io::Read::read_to_string(&mut stdout, &mut text);
+            let _ = tx.send(text);
         });
-        match rx.recv_timeout(WINDOWS_PROBE_TIMEOUT) {
-            Ok(Ok(out)) if out.status.success() => {
-                super::parse_windows_profiles(&String::from_utf8_lossy(&out.stdout))
+        let deadline = Instant::now() + limit;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let text = rx.recv_timeout(Duration::from_secs(1)).ok()?;
+                    return status.success().then_some(text);
+                }
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+                _ => {
+                    // Too slow or unreadable: stop it rather than leave it running.
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
             }
-            _ => Vec::new(),
         }
     }
 
     #[cfg(windows)]
     fn hide_console_window(command: &mut std::process::Command) {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
@@ -461,7 +498,7 @@ pub mod probe {
             interfaces: interfaces(),
             hears_itself: hears_itself(Duration::from_secs(3)),
             multicast_send_blocked: multicast_send_blocked(),
-            windows_profiles: windows_profiles(),
+            windows_profiles: windows_profiles().unwrap_or_default(),
             old_laptops_found: if role == Role::NewLaptop {
                 old_laptops_found
             } else {
