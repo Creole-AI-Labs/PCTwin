@@ -1,0 +1,21 @@
+[package]
+name = "pctwin-scan"
+description = "Scanning the old laptop: where each special folder really is, and what is in it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+pctwin-record = { path = "../pctwin-record" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

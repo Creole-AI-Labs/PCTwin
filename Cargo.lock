@@ -2874,6 +2874,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-scan"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "pctwin-record",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "pctwin-session"
 version = "0.1.0"
 dependencies = [
