@@ -30,6 +30,12 @@
 //!    who knows the code still cannot reach the old laptop's files without the person at the old
 //!    laptop choosing the right number. The sender then seals an approval (message 5) to the
 //!    receiver, which unlocks the receiver. Only then does either side get a usable [`Paired`] link.
+//! 7. Extra lanes need no new code: the new laptop opens one with [`Paired::open_lane`] on a new
+//!    connection, and the old laptop accepts it with [`Paired::accept_lane`]. Each lane runs its
+//!    own Noise `NNpsk0` handshake with fresh ephemeral keys, so every lane has its own keys and
+//!    counters; its pre-shared key is derived (HKDF) from the pairing's key, the final handshake
+//!    hash and the lane number. Numbers are used once, and the old laptop uses a lane only after
+//!    a sealed confirmation proves the opener is live.
 //!
 //! Every message carries the protocol version and a message kind, and is size-limited. Malformed
 //! input returns an error instead of panicking. Messages that fail before authentication hand the
@@ -51,6 +57,7 @@
 //!   app must rotate the code when the laptop wakes from sleep.
 //! - Starting a session panics if the operating system's random source fails, as SPAKE2 does.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::ops::RangeInclusive;
 use std::time::{Duration, Instant};
@@ -78,6 +85,8 @@ pub const MAX_FAILED_ATTEMPTS: u32 = 5;
 pub const MAX_MESSAGE_LEN: usize = 512;
 /// Range of the match number shown during confirmation.
 pub const MATCH_NUMBER_RANGE: RangeInclusive<u8> = 10..=99;
+/// Most extra lanes one paired session may open (numbers 1 to this, each used once).
+pub const MAX_LANE_OPENINGS: u32 = 256;
 
 const NOISE_PARAMS: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 const SPAKE2_MSG_LEN: usize = 33;
@@ -89,6 +98,11 @@ const PSK_SALT: &[u8] = b"pctwin/v1/pairing-psk";
 const MATCH_SALT: &[u8] = b"pctwin/v1/match-number";
 const APPROVE_LABEL: &[u8] = b"pctwin/v1/approved";
 const COMMIT_LABEL: &[u8] = b"pctwin/v1/number-commitment";
+const LANE_SECRET_SALT: &[u8] = b"pctwin/v1/lane-secret";
+const LANE_PSK_SALT: &[u8] = b"pctwin/v1/lane-psk";
+const LANE_PROLOGUE_LABEL: &[u8] = b"pctwin/v1/lane-prologue";
+const LANE_READY_LABEL: &[u8] = b"pctwin/v1/lane-ready";
+const LANE_NUMBER_LEN: usize = 4;
 const NONCE_LEN: usize = 32;
 const COMMIT_LEN: usize = 32;
 const MAX_CHOICE_DRAWS: u32 = 64;
@@ -100,6 +114,9 @@ const KIND_SPAKE_B_NOISE_1: u8 = 2;
 const KIND_NOISE_2: u8 = 3;
 const KIND_REVEAL: u8 = 4;
 const KIND_APPROVE: u8 = 5;
+const KIND_LANE_1: u8 = 6;
+const KIND_LANE_2: u8 = 7;
+const KIND_LANE_3: u8 = 8;
 
 /// Why pairing or the encrypted link failed. Messages say what to do, not which byte was wrong.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -130,6 +147,8 @@ pub enum PairingError {
     TooLarge,
     #[error("received data failed its integrity check")]
     Transport,
+    #[error("an extra connection was refused; the move carries on over the others")]
+    LaneRefused,
 }
 
 /// A failed step. When the failure happened before anything was authenticated (for example a
@@ -343,9 +362,11 @@ impl SenderSession {
         let msg3 = frame(KIND_NOISE_2, &buf[..written]);
 
         let (transport, handshake_hash) = finish_handshake(hs)?;
+        let lane_secret = derive_lane_secret(&psk, &handshake_hash)?;
         Ok((
             SenderAwaitingReveal {
                 transport,
+                lane_secret,
                 handshake_hash,
                 commitment,
                 deadline: now + CONFIRMATION_TIMEOUT,
@@ -358,6 +379,7 @@ impl SenderSession {
 /// Sender side, after message 3, waiting for the receiver to reveal the value it committed to.
 pub struct SenderAwaitingReveal {
     transport: TransportState,
+    lane_secret: Zeroizing<[u8; 32]>,
     handshake_hash: Vec<u8>,
     commitment: [u8; COMMIT_LEN],
     deadline: Instant,
@@ -399,6 +421,7 @@ impl SenderAwaitingReveal {
         let choices = offer_choices(correct).map_err(Rejected::end)?;
         Ok(SenderChoosing {
             transport: self.transport,
+            lane_secret: self.lane_secret,
             correct,
             choices,
             deadline: self.deadline,
@@ -410,6 +433,7 @@ impl SenderAwaitingReveal {
 /// This pick, made on the sender, is the only thing that unlocks the sender.
 pub struct SenderChoosing {
     transport: TransportState,
+    lane_secret: Zeroizing<[u8; 32]>,
     correct: u8,
     choices: [u8; 3],
     deadline: Instant,
@@ -446,9 +470,7 @@ impl SenderChoosing {
             .map_err(|_| PairingError::HandshakeFailed)?;
         let msg5 = frame(KIND_APPROVE, &buf[..written]);
         Ok((
-            Paired {
-                transport: Transport(self.transport),
-            },
+            Paired::new(Transport(self.transport), self.lane_secret, false),
             msg5,
         ))
     }
@@ -457,6 +479,7 @@ impl SenderChoosing {
 /// Receiver side, after the person typed the code and message 2 was sent.
 pub struct ReceiverSession {
     hs: HandshakeState,
+    psk: Zeroizing<[u8; 32]>,
     nonce: Zeroizing<[u8; NONCE_LEN]>,
     deadline: Instant,
 }
@@ -503,6 +526,7 @@ impl ReceiverSession {
         Ok((
             Self {
                 hs,
+                psk,
                 nonce,
                 deadline: now + REPLY_TIMEOUT,
             },
@@ -535,6 +559,7 @@ impl ReceiverSession {
             return Err(Rejected::end(PairingError::Malformed));
         }
         let (mut transport, handshake_hash) = finish_handshake(self.hs).map_err(Rejected::end)?;
+        let lane_secret = derive_lane_secret(&self.psk, &handshake_hash).map_err(Rejected::end)?;
         let match_number =
             match_number(&handshake_hash, self.nonce.as_ref()).map_err(Rejected::end)?;
         let mut sealed = [0u8; NONCE_LEN + AEAD_TAG_LEN];
@@ -544,6 +569,7 @@ impl ReceiverSession {
         Ok((
             ReceiverAwaitingApproval {
                 transport,
+                lane_secret,
                 match_number,
                 deadline: now + CONFIRMATION_TIMEOUT,
             },
@@ -555,6 +581,7 @@ impl ReceiverSession {
 /// Receiver side, showing its number and waiting for the sender's approval.
 pub struct ReceiverAwaitingApproval {
     transport: TransportState,
+    lane_secret: Zeroizing<[u8; 32]>,
     match_number: u8,
     deadline: Instant,
 }
@@ -592,9 +619,11 @@ impl ReceiverAwaitingApproval {
         match plain.split_last() {
             Some((&picked, label)) if label == APPROVE_LABEL => {
                 if picked == self.match_number {
-                    Ok(Paired {
-                        transport: Transport(self.transport),
-                    })
+                    Ok(Paired::new(
+                        Transport(self.transport),
+                        self.lane_secret,
+                        true,
+                    ))
                 } else {
                     Err(Rejected::end(PairingError::WrongNumber))
                 }
@@ -607,12 +636,181 @@ impl ReceiverAwaitingApproval {
 /// A confirmed pairing with its encrypted link.
 pub struct Paired {
     transport: Transport,
+    lane_secret: Zeroizing<[u8; 32]>,
+    opens_lanes: bool,
+    next_lane: u32,
+    used_lanes: BTreeSet<u32>,
 }
 
 impl Paired {
+    fn new(transport: Transport, lane_secret: Zeroizing<[u8; 32]>, opens_lanes: bool) -> Self {
+        Self {
+            transport,
+            lane_secret,
+            opens_lanes,
+            next_lane: 1,
+            used_lanes: BTreeSet::new(),
+        }
+    }
+
     /// The encrypted link to the other laptop.
     pub fn transport_mut(&mut self) -> &mut Transport {
         &mut self.transport
+    }
+
+    /// New laptop: starts an extra lane at time `now`, returning lane message 1 to send on a new
+    /// connection to the old laptop. Each call uses the next lane number, never one used before,
+    /// even if that lane failed. Only the new laptop opens lanes.
+    pub fn open_lane(&mut self, now: Instant) -> Result<(LaneOpening, Vec<u8>), PairingError> {
+        if !self.opens_lanes || self.next_lane > MAX_LANE_OPENINGS {
+            return Err(PairingError::LaneRefused);
+        }
+        let lane = self.next_lane;
+        self.next_lane += 1;
+        let psk = derive_lane_psk(&self.lane_secret, lane)?;
+        let prologue = lane_prologue(lane);
+        let mut hs = noise_builder(&psk, &prologue)?
+            .build_initiator()
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        let mut buf = [0u8; 128];
+        let written = hs
+            .write_message(&[], &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        let mut payload = lane.to_be_bytes().to_vec();
+        payload.extend_from_slice(&buf[..written]);
+        Ok((
+            LaneOpening {
+                hs,
+                lane,
+                deadline: now + REPLY_TIMEOUT,
+            },
+            frame(KIND_LANE_1, &payload),
+        ))
+    }
+
+    /// Old laptop: handles lane message 1 from a new connection at time `now`, returning lane
+    /// message 2. Refuses lane numbers outside 1 to [`MAX_LANE_OPENINGS`] and any number already
+    /// used. A number is spent only once its message proves the session's keys, so junk from a
+    /// stranger never uses one up. The lane is usable only after [`LaneAccepting::confirm`].
+    pub fn accept_lane(
+        &mut self,
+        msg1: &[u8],
+        now: Instant,
+    ) -> Result<(LaneAccepting, Vec<u8>), PairingError> {
+        if self.opens_lanes {
+            return Err(PairingError::LaneRefused);
+        }
+        let payload = parse_frame(msg1, KIND_LANE_1)?;
+        let (number, noise_1) = payload
+            .split_at_checked(LANE_NUMBER_LEN)
+            .ok_or(PairingError::Malformed)?;
+        let lane = u32::from_be_bytes(number.try_into().map_err(|_| PairingError::Malformed)?);
+        if !(1..=MAX_LANE_OPENINGS).contains(&lane) || self.used_lanes.contains(&lane) {
+            return Err(PairingError::LaneRefused);
+        }
+        let psk = derive_lane_psk(&self.lane_secret, lane)?;
+        let prologue = lane_prologue(lane);
+        let mut hs = noise_builder(&psk, &prologue)?
+            .build_responder()
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        let mut buf = [0u8; 128];
+        let read = hs
+            .read_message(noise_1, &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        if read != 0 {
+            return Err(PairingError::Malformed);
+        }
+        // The message proved the session's keys: this number is spent, even if the lane never
+        // completes, so a copy of the message cannot open a second lane.
+        self.used_lanes.insert(lane);
+        let written = hs
+            .write_message(&[], &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        let (transport, _) = finish_handshake(hs)?;
+        Ok((
+            LaneAccepting {
+                transport,
+                lane,
+                deadline: now + REPLY_TIMEOUT,
+            },
+            frame(KIND_LANE_2, &buf[..written]),
+        ))
+    }
+}
+
+/// New laptop, waiting for the old laptop's lane message 2.
+pub struct LaneOpening {
+    hs: HandshakeState,
+    lane: u32,
+    deadline: Instant,
+}
+
+impl LaneOpening {
+    /// This lane's number.
+    pub fn lane(&self) -> u32 {
+        self.lane
+    }
+
+    /// Handles lane message 2 at time `now`. Returns the lane's encrypted link and lane message
+    /// 3, the sealed confirmation the old laptop needs before it uses the lane.
+    pub fn receive(
+        mut self,
+        msg2: &[u8],
+        now: Instant,
+    ) -> Result<(Transport, Vec<u8>), PairingError> {
+        if now > self.deadline {
+            return Err(PairingError::Expired);
+        }
+        let payload = parse_frame(msg2, KIND_LANE_2)?;
+        let mut buf = [0u8; 128];
+        let read = self
+            .hs
+            .read_message(payload, &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        if read != 0 {
+            return Err(PairingError::Malformed);
+        }
+        let (mut transport, _) = finish_handshake(self.hs)?;
+        let mut plain = LANE_READY_LABEL.to_vec();
+        plain.extend_from_slice(&self.lane.to_be_bytes());
+        let written = transport
+            .write_message(&plain, &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        Ok((Transport(transport), frame(KIND_LANE_3, &buf[..written])))
+    }
+}
+
+/// Old laptop, waiting for the new laptop's lane message 3.
+pub struct LaneAccepting {
+    transport: TransportState,
+    lane: u32,
+    deadline: Instant,
+}
+
+impl LaneAccepting {
+    /// This lane's number.
+    pub fn lane(&self) -> u32 {
+        self.lane
+    }
+
+    /// Handles lane message 3 at time `now`. Only a confirmation sealed under this lane's fresh
+    /// keys and naming this lane makes it usable; a copied lane message 1 cannot produce one.
+    pub fn confirm(mut self, msg3: &[u8], now: Instant) -> Result<Transport, PairingError> {
+        if now > self.deadline {
+            return Err(PairingError::Expired);
+        }
+        let payload = parse_frame(msg3, KIND_LANE_3)?;
+        let mut buf = Zeroizing::new(vec![0u8; payload.len()]);
+        let read = self
+            .transport
+            .read_message(payload, &mut buf)
+            .map_err(|_| PairingError::HandshakeFailed)?;
+        let mut expected = LANE_READY_LABEL.to_vec();
+        expected.extend_from_slice(&self.lane.to_be_bytes());
+        if buf[..read] != expected[..] {
+            return Err(PairingError::HandshakeFailed);
+        }
+        Ok(Transport(self.transport))
     }
 }
 
@@ -888,6 +1086,8 @@ redacted_debug!(
     ReceiverSession,
     ReceiverAwaitingApproval,
     Paired,
+    LaneOpening,
+    LaneAccepting,
     Transport
 );
 
@@ -946,6 +1146,38 @@ fn derive_psk(spake_key: &[u8]) -> Result<Zeroizing<[u8; 32]>, PairingError> {
         .expand(b"noise psk", psk.as_mut())
         .map_err(|_| PairingError::HandshakeFailed)?;
     Ok(psk)
+}
+
+/// The secret extra lanes are made from: the pairing's pre-shared key, bound to this session's
+/// final handshake hash so it belongs to exactly this pairing.
+fn derive_lane_secret(
+    psk: &[u8; 32],
+    handshake_hash: &[u8],
+) -> Result<Zeroizing<[u8; 32]>, PairingError> {
+    let mut info = b"lane secret".to_vec();
+    info.extend_from_slice(handshake_hash);
+    let mut secret = Zeroizing::new([0u8; 32]);
+    Hkdf::<Sha256>::new(Some(LANE_SECRET_SALT), psk)
+        .expand(&info, secret.as_mut())
+        .map_err(|_| PairingError::HandshakeFailed)?;
+    Ok(secret)
+}
+
+fn derive_lane_psk(lane_secret: &[u8; 32], lane: u32) -> Result<Zeroizing<[u8; 32]>, PairingError> {
+    let mut info = b"lane psk".to_vec();
+    info.extend_from_slice(&lane.to_be_bytes());
+    let mut psk = Zeroizing::new([0u8; 32]);
+    Hkdf::<Sha256>::new(Some(LANE_PSK_SALT), lane_secret)
+        .expand(&info, psk.as_mut())
+        .map_err(|_| PairingError::HandshakeFailed)?;
+    Ok(psk)
+}
+
+fn lane_prologue(lane: u32) -> Vec<u8> {
+    let mut p = LANE_PROLOGUE_LABEL.to_vec();
+    p.push(PROTOCOL_VERSION);
+    p.extend_from_slice(&lane.to_be_bytes());
+    p
 }
 
 fn noise_builder<'a>(psk: &'a [u8; 32], prologue: &'a [u8]) -> Result<Builder<'a>, PairingError> {
@@ -1035,6 +1267,64 @@ mod tests {
 
     /// The match number is only secret because the pre-shared key is mixed in at the very start
     /// of the handshake. If the pattern ever stops being `psk0`, this must fail loudly.
+    fn hex(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    }
+
+    /// Pinned values (checked against an independent HKDF-SHA256 in Python): the lane secret
+    /// binds the handshake hash, and both the lane key and the prologue bind the lane number.
+    #[test]
+    fn lane_keys_are_pinned() {
+        let secret = derive_lane_secret(&[7u8; 32], b"handshake hash").unwrap();
+        assert_eq!(
+            hex(secret.as_ref()),
+            "90c35398ec5ae10d7d7dc2131a8bd9e5b6e6f3212d17b611e20dbc5ef36364e9"
+        );
+        assert_eq!(
+            hex(derive_lane_psk(&[9u8; 32], 3).unwrap().as_ref()),
+            "aa6569257aa2f9d091fb80e7a189165f1b8dc314d98f99e29fd1111dff15a5f4"
+        );
+        assert_eq!(
+            hex(&lane_prologue(3)),
+            "70637477696e2f76312f6c616e652d70726f6c6f6775650100000003"
+        );
+        let other = derive_lane_secret(&[7u8; 32], b"another hash").unwrap();
+        assert_ne!(secret.as_ref(), other.as_ref());
+    }
+
+    /// A confirmation sealed under the lane's own keys but naming another lane is refused.
+    #[test]
+    fn a_confirmation_naming_another_lane_is_refused() {
+        let code = PairingCode::generate().unwrap();
+        let now = Instant::now();
+        let (sender, msg1) = SenderSession::start(&code, now);
+        let (receiver, msg2) = ReceiverSession::respond(&code, &msg1, now).unwrap();
+        let (sender_waiting, msg3) = sender.receive(&msg2, now).unwrap();
+        let (waiting, msg4) = receiver.receive(&msg3, now).unwrap();
+        let choosing = sender_waiting.receive_reveal(&msg4, now).unwrap();
+        let (mut old, msg5) = choosing.choose(waiting.match_number(), now).unwrap();
+        let mut new = waiting.receive_approval(&msg5, now).unwrap();
+
+        let (mut opening, l1) = new.open_lane(now).unwrap();
+        let (accepting, l2) = old.accept_lane(&l1, now).unwrap();
+        let mut buf = [0u8; 128];
+        opening
+            .hs
+            .read_message(parse_frame(&l2, KIND_LANE_2).unwrap(), &mut buf)
+            .unwrap();
+        let mut transport = opening.hs.into_transport_mode().unwrap();
+        let mut wrong = LANE_READY_LABEL.to_vec();
+        wrong.extend_from_slice(&2u32.to_be_bytes());
+        let n = transport.write_message(&wrong, &mut buf).unwrap();
+        assert_eq!(
+            accepting
+                .confirm(&frame(KIND_LANE_3, &buf[..n]), now)
+                .map(|_| ())
+                .unwrap_err(),
+            PairingError::HandshakeFailed
+        );
+    }
+
     #[test]
     fn noise_pattern_mixes_the_psk_first() {
         assert_eq!(NOISE_PARAMS, "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s");
