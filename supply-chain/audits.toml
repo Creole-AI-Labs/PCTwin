@@ -1,0 +1,8 @@
+
+# cargo-vet audits file
+
+[[audits.fs_at]]
+who = "PCTwin maintainers; to be confirmed in the Part J review"
+criteria = "safe-to-deploy"
+version = "0.2.1"
+notes = "Reviewed 8 Oct 2026 for PCTwin's one use: FileExt::delete_by_handle on a std File opened by PCTwin with DELETE access. Read every unsafe block in src/win.rs and src/win/sugar.rs (22 + 4): SetFileInformationByHandle with FileDispositionInfoEx (DELETE|POSIX_SEMANTICS|IGNORE_READONLY), FileDispositionInfo and FileBasicInfo, each with a correctly sized, initialised struct and a live owned handle; NtCreateFile with zeroed OBJECT_ATTRIBUTES and a NUL-terminated UNICODE_STRING bounded by UNICODE_STRING_MAX_CHARS; the symlink-creation reparse buffer (an align_to_mut with a checked head; its own TODO notes alignment) and the read_dir entry parsing (trusts the kernel's offsets) are not used by PCTwin and were read, not exercised. No build script, no network, no file access beyond the caller's handles and paths. Unix code (nix/libc) not used by PCTwin."
