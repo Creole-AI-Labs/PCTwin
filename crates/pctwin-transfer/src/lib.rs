@@ -665,6 +665,12 @@ impl<'d> Assembly<'d> {
     }
 
     /// How many blocks are written so far.
+    /// Keeps the partly received file on disk for the journal to continue after a restart
+    /// (dropping the assembly instead removes it).
+    pub fn persist(self) {
+        self.file.persist();
+    }
+
     pub fn blocks_done(&self) -> u64 {
         self.done.done_count()
     }

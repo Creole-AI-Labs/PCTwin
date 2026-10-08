@@ -515,3 +515,56 @@ async fn a_restored_file_is_never_continued_with_another_description() {
         0
     );
 }
+
+#[tokio::test]
+async fn quitting_keeps_every_partly_received_file_for_the_next_start() {
+    let w = world();
+    let mut receiver = w.receiver();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    let (mut a, mut b) = mem_pair(Some(300));
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    let entry = w.journal.unfinished().unwrap()[0].id;
+    // A normal quit: the session ends, nothing leaked.
+    drop(receiver);
+    drop(sender);
+    let rec = recover(&w.journal, &w.table).unwrap();
+    assert_eq!(rec.resumable, [entry]);
+    let mut receiver = w.receiver();
+    assert_eq!(receiver.restore().unwrap(), 1);
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    send_all(&mut sender, &mut receiver).await;
+    assert!(sender.blocks_sent() < 100, "{}", sender.blocks_sent());
+    assert_eq!(
+        std::fs::read(w.mine.path().join("Videos/big.bin")).unwrap(),
+        w.data
+    );
+}
+
+#[tokio::test]
+async fn cancelling_records_every_unfinished_file_failed_and_removes_its_partial_file() {
+    let w = world();
+    let mut receiver = w.receiver();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    let (mut a, mut b) = mem_pair(Some(300));
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    let entry = w.journal.unfinished().unwrap()[0].id;
+    receiver.cancel("you cancelled the move");
+    match w.journal.entry(entry).unwrap().unwrap().state {
+        State::Failed { why, .. } => assert_eq!(why, "you cancelled the move"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        std::fs::read_dir(w.mine.path().join("Videos"))
+            .unwrap()
+            .count(),
+        0
+    );
+}

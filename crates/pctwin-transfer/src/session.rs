@@ -1225,6 +1225,20 @@ impl<'d> ReceiverSession<'d> {
     /// Records in the journal the blocks written since the last checkpoint, for every file being
     /// received (done by itself every few dozen blocks, and at each new connection). Best effort:
     /// a checkpoint that does not get through only means those blocks are sent again.
+    /// Cancels the move on this side: every file not finished is recorded failed with `why` and
+    /// its partly received file removed. (Simply dropping the session instead keeps them, for the
+    /// move to continue after the app starts again.)
+    pub fn cancel(mut self, why: &str) {
+        self.checkpoint();
+        let journal = self.journal;
+        for s in self.streams.values_mut().chain(self.restored.values_mut()) {
+            if let Some(assembly) = s.assembly.take() {
+                drop(assembly);
+                let _ = journal.failed(s.entry, why);
+            }
+        }
+    }
+
     pub fn checkpoint(&mut self) {
         let journal = self.journal;
         for s in self.streams.values_mut().chain(self.restored.values_mut()) {
@@ -1778,6 +1792,22 @@ impl<'d> ReceiverSession<'d> {
             .staged(entry, &assembly.temp_path(), &made)
             .map_err(Start::Record)?;
         Ok((assembly, entry))
+    }
+}
+
+impl Drop for ReceiverSession<'_> {
+    /// The app quitting (or the session ending any other way but [`cancel`](Self::cancel)):
+    /// every partly received file the journal knows is kept on disk, with its blocks checkpointed,
+    /// so the move continues after the app starts again. Nothing is thrown away by ending.
+    fn drop(&mut self) {
+        self.checkpoint();
+        for s in self.streams.values_mut().chain(self.restored.values_mut()) {
+            if s.failure.is_none()
+                && let Some(assembly) = s.assembly.take()
+            {
+                assembly.persist();
+            }
+        }
     }
 }
 

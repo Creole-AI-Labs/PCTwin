@@ -1591,6 +1591,13 @@ impl<'d> IncomingFile<'d> {
         self.received += part.len;
     }
 
+    /// Closes it and keeps the partly received file on disk under its temporary name, for the
+    /// journal to continue after a restart (dropping it instead removes it).
+    pub fn persist(mut self) {
+        drop(self.file.take());
+        self.temp_name = None;
+    }
+
     /// Bytes that have arrived so far, each counted once.
     pub fn written(&self) -> u64 {
         self.received
