@@ -2954,6 +2954,7 @@ dependencies = [
  "pctwin-link",
  "pctwin-pairing",
  "pctwin-record",
+ "pctwin-scan",
  "proptest",
  "tempfile",
  "thiserror 2.0.21",

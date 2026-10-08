@@ -20,12 +20,18 @@
 //!   [`PIECE_MAX`] and are rejoined by [`PieceBuffer`], never past the largest block.
 //! - [`SenderSession`] and [`ReceiverSession`] run a whole move over a [`Channel`] (the paired
 //!   link): up to 32 MiB unconfirmed at a time, every block receipted, and after a drop each file
-//!   continues from exactly where it stopped on the next connection.
+//!   continues from exactly where it stopped on the next connection. Copies keep the original's
+//!   modified time.
+//! - [`landing_for`] decides where each item goes: the new laptop's own folder for its role,
+//!   a "from your old laptop" folder when it has none, or left to the cloud service both laptops
+//!   use for that folder.
 
+mod landing;
 mod message;
 mod queue;
 mod session;
 
+pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use queue::{Scheduler, Tier, plan_order};
 pub use session::{
@@ -358,7 +364,19 @@ impl<'d> Assembly<'d> {
                 "the file's description does not add up".into(),
             ));
         }
-        let file = destination.create_file(path, header.size)?;
+        let mut file = destination.create_file(path, header.size)?;
+        // The copy keeps the original's modified time, so a later check can tell it is unchanged.
+        if let Some(ns) = header.stamp.modified_ns {
+            let at = std::time::Duration::from_nanos(ns.unsigned_abs());
+            let time = if ns >= 0 {
+                std::time::UNIX_EPOCH.checked_add(at)
+            } else {
+                std::time::UNIX_EPOCH.checked_sub(at)
+            };
+            if let Some(time) = time {
+                file.keep_modified_time(time);
+            }
+        }
         Ok(Self {
             file,
             header,

@@ -267,7 +267,7 @@ impl From<ItemPath> for Vec<ItemName> {
 }
 
 /// What a folder is for, whatever it is called and wherever it really is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FolderRole {
     Home,

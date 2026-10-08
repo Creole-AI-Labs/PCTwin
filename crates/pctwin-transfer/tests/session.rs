@@ -228,6 +228,17 @@ async fn every_file_arrives_in_its_approved_place() {
         assert_eq!(s.outcome(id(n)), Some(&SendOutcome::Arrived), "{n}");
     }
     assert_eq!(s.blocks_sent(), total_blocks(&l));
+    // Copies keep the original's modified time.
+    for (src, dst) in [
+        (&l.files[0].0, l.new_mine.path().join("Documents/small.bin")),
+        (&l.files[1].0, l.new_shared.path().join("Public/medium.bin")),
+        (&l.files[2].0, l.new_mine.path().join("Videos/big.bin")),
+    ] {
+        assert_eq!(
+            std::fs::metadata(src).unwrap().modified().unwrap(),
+            std::fs::metadata(dst).unwrap().modified().unwrap()
+        );
+    }
     let r = receiver.lock().await;
     assert!(
         matches!(r.outcome(id(2)), Some(ReceiveOutcome::Finished(f)) if f.final_path == "Videos/big.bin")

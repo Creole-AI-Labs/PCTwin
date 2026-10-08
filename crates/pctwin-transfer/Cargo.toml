@@ -13,6 +13,7 @@ blake3 = "1.8"
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-link = { version = "0.1.0", path = "../pctwin-link" }
 pctwin-record = { version = "0.1.0", path = "../pctwin-record" }
+pctwin-scan = { version = "0.1.0", path = "../pctwin-scan" }
 thiserror = "2.0.21"
 zstd = { version = "0.13", default-features = false }
 
