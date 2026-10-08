@@ -17,6 +17,8 @@ use pctwin_transfer::{
 };
 use tokio::sync::{Mutex, mpsc};
 
+mod common;
+
 type Hook = Box<dyn FnMut() + Send>;
 
 /// One end of an in-memory connection. Cutting it breaks both ends like a dropped Wi-Fi link:
@@ -177,6 +179,14 @@ fn jobs(l: &Laptops) -> Vec<SendJob> {
     ]
 }
 
+/// The plan the person approved: exactly the three files, at their sizes.
+fn plan(l: &Laptops) -> pctwin_transfer::Allowance {
+    let files: Vec<(ItemId, u64)> = (0..3u8)
+        .map(|n| (id(n), l.files[n as usize].1.len() as u64))
+        .collect();
+    common::approved(&files)
+}
+
 fn total_blocks(l: &Laptops) -> u64 {
     l.files
         .iter()
@@ -220,7 +230,7 @@ async fn every_file_arrives_in_its_approved_place() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     assert_arrived(&l);
     let s = sender.lock().await;
@@ -251,7 +261,7 @@ async fn never_more_than_the_in_flight_limit_is_unconfirmed() {
     let table = table(&l);
     let limit: u64 = 256 * 1024;
     let mut sender = SenderSession::new(jobs(&l), 2).with_in_flight_limit(limit);
-    let mut receiver = ReceiverSession::new(&table);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
     let (mut a, mut b) = mem_pair();
     let most = a.most_unconfirmed.clone();
     let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
@@ -279,7 +289,7 @@ async fn a_dropped_connection_continues_each_file_from_where_it_stopped() {
         let l = laptops();
         let table = table(&l);
         let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-        let receiver = Mutex::new(ReceiverSession::new(&table));
+        let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
         let (mut a, b) = mem_pair();
         a.cut_at = Some(cut);
         assert_eq!(
@@ -321,7 +331,7 @@ async fn a_file_changed_during_the_break_is_sent_again_whole() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 1));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     let (mut a, b) = mem_pair();
     a.cut_at = Some(30);
     let _ = run_both(&sender, &receiver, (a, b)).await;
@@ -341,7 +351,7 @@ async fn a_file_changed_while_being_sent_arrives_whole_and_current() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 1));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     let (mut a, b) = mem_pair();
     // Part way through the big file, another program rewrites it (same size, new contents).
     let big = l.files[2].0.clone();
@@ -374,7 +384,7 @@ async fn a_file_for_a_place_that_was_not_approved_fails_on_its_own() {
     let mut jobs = jobs(&l);
     jobs[1].destination = "somewhere-else".into();
     let sender = Mutex::new(SenderSession::new(jobs, 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     let s = sender.lock().await;
     assert_eq!(s.outcome(id(0)), Some(&SendOutcome::Arrived));
@@ -390,7 +400,7 @@ async fn a_source_file_that_cannot_be_read_fails_on_its_own() {
     let mut jobs = jobs(&l);
     jobs[0].source = Path::new("does-not-exist.bin").to_path_buf();
     let sender = Mutex::new(SenderSession::new(jobs, 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     let s = sender.lock().await;
     assert!(matches!(s.outcome(id(0)), Some(SendOutcome::Failed(_))));
@@ -430,7 +440,7 @@ async fn a_move_runs_over_a_real_paired_link() {
     let mut new_link = pending_guest.approval().await.unwrap();
 
     let mut sender = SenderSession::new(jobs(&l), 2);
-    let mut receiver = ReceiverSession::new(&table);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
     let (sent, received) = tokio::time::timeout(Duration::from_secs(60), async {
         tokio::join!(sender.run(&mut old_link), receiver.run(&mut new_link))
     })
@@ -449,7 +459,7 @@ async fn a_file_the_new_laptop_already_has_is_not_copied_again() {
     std::fs::create_dir_all(l.new_shared.path().join("Public")).unwrap();
     std::fs::write(l.new_shared.path().join("Public/medium.bin"), &l.files[1].1).unwrap();
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     let s = sender.lock().await;
     assert_eq!(s.outcome(id(1)), Some(&SendOutcome::AlreadyThere));
@@ -475,7 +485,7 @@ async fn a_different_file_with_the_same_name_and_size_is_kept_and_the_new_one_co
     let theirs = pattern(300_000, 555);
     std::fs::write(l.new_shared.path().join("Public/medium.bin"), &theirs).unwrap();
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     assert_eq!(
         sender.lock().await.outcome(id(1)),
@@ -496,7 +506,7 @@ async fn a_file_removed_soon_after_copying_is_reported_not_copied() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table));
+    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     // Security software removes one copy, and another is cut short.
     std::fs::remove_file(l.new_mine.path().join("Documents/small.bin")).unwrap();
@@ -536,7 +546,7 @@ async fn three_blocks_then_a_drop<'d>(
     l: &Laptops,
     table: &'d Destinations,
 ) -> (ReceiverSession<'d>, Header, Vec<Block>) {
-    let mut receiver = ReceiverSession::new(table);
+    let mut receiver = ReceiverSession::new(table, plan(l));
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
@@ -649,4 +659,60 @@ async fn an_old_laptop_continues_only_a_file_that_matches_what_is_here() {
         failed
     );
     assert_eq!(r.continued(), 0);
+}
+
+/// Every file and folder under `dir`, temporary ones included.
+fn everything_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            out.extend(everything_under(&p));
+        }
+        out.push(p);
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_new_laptop_starts_only_what_the_approved_plan_allows() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let honest = fs.header().clone();
+    // The same file, announced as 1 TiB: far more than the plan allows for it.
+    let mut huge = honest.clone();
+    huge.size = 1 << 40;
+    huge.block_size = 16 * 1024 * 1024;
+    huge.block_count = huge.size.div_ceil(huge.block_size);
+    let (mut old, mut new) = mem_pair();
+    let failed = |stream| Message::FileDone { stream, ok: false };
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // Not part of the plan at all.
+        let mut stranger = start(&honest, 0, id(9));
+        if let Message::StartFile { stream, .. } = &mut stranger {
+            *stream = 5;
+        }
+        say(&mut old, &stranger).await;
+        assert_eq!(hear(&mut old).await, failed(5));
+        // In the plan, but announced far bigger than approved.
+        say(&mut old, &start(&huge, 0, id(2))).await;
+        assert_eq!(hear(&mut old).await, failed(0));
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    // Nothing was created or reserved for either.
+    assert!(everything_under(l.new_mine.path()).is_empty());
+    assert!(
+        matches!(receiver.outcome(id(2)), Some(ReceiveOutcome::Failed(why)) if why.contains("grew"))
+    );
+    assert!(
+        matches!(receiver.outcome(id(9)), Some(ReceiveOutcome::Failed(why)) if why.contains("plan"))
+    );
 }

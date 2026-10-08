@@ -33,6 +33,7 @@
 //! - [`BlockMap`] records which blocks of a file are done, as runs joined when they touch, and is
 //!   what a resume message carries.
 
+mod allowance;
 mod blockmap;
 mod landing;
 mod lanes;
@@ -42,6 +43,7 @@ mod reading;
 mod sections;
 mod session;
 
+pub use allowance::{Allowance, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanes::{LaneTuner, MAX_LANES};
@@ -435,6 +437,9 @@ impl<'d> Assembly<'d> {
             ));
         }
         let mut file = destination.create_file(path, header.size)?;
+        // Reserve the whole size now, so a full disk shows at the start. Callers check the size
+        // against the approved plan first. A drive that cannot reserve still copies.
+        file.reserve()?;
         // The copy keeps the original's modified time, so a later check can tell it is unchanged.
         if let Some(ns) = header.stamp.modified_ns {
             let at = std::time::Duration::from_nanos(ns.unsigned_abs());

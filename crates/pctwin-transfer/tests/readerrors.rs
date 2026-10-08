@@ -17,6 +17,8 @@ use pctwin_transfer::{
 };
 use tokio::sync::mpsc;
 
+mod common;
+
 struct Mem {
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -165,10 +167,11 @@ async fn run(
     table
         .approve("me", Approved::MyFolders, l.new.path())
         .unwrap();
+    let files: Vec<(ItemId, u64)> = jobs.iter().map(|j| (j.item, 200_000)).collect();
     let mut sender = SenderSession::new(jobs, 2)
         .with_opener(faulty)
         .with_read_plan(plan);
-    let mut receiver = ReceiverSession::new(&table);
+    let mut receiver = ReceiverSession::new(&table, common::approved(&files));
     let (mut a, mut b) = mem_pair();
     let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))

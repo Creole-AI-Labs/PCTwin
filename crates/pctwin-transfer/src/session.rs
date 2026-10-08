@@ -9,7 +9,9 @@ use pctwin_record::ItemId;
 use crate::message::{Message, PieceBuffer, split_into_pieces};
 use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
-use crate::{Assembly, Block, FileSender, FsOpener, Opener, ResumeTicket, Trailer, TransferError};
+use crate::{
+    Allowance, Assembly, Block, FileSender, FsOpener, Opener, ResumeTicket, Trailer, TransferError,
+};
 use pctwin_scan::ReadPlan;
 
 /// Why the files not yet read were left: reading stopped to protect a failing drive.
@@ -576,11 +578,12 @@ struct Incoming<'d> {
     same: Option<String>,
 }
 
-/// The new laptop's side of a move. Every file lands through the safety gate in one of the
-/// approved destinations. Keeps what it has across dropped connections: call [`run`](Self::run)
+/// The new laptop's side of a move. A file starts only if the approved plan allows it (see
+/// [`Allowance`]); every file lands through the safety gate in one of the approved destinations. Keeps what it has across dropped connections: call [`run`](Self::run)
 /// again with a new connection to continue.
 pub struct ReceiverSession<'d> {
     table: &'d Destinations,
+    allowance: Allowance,
     streams: BTreeMap<u32, Incoming<'d>>,
     done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
     continued: u64,
@@ -589,9 +592,11 @@ pub struct ReceiverSession<'d> {
 }
 
 impl<'d> ReceiverSession<'d> {
-    pub fn new(table: &'d Destinations) -> Self {
+    /// Receives into the places in `table`, only what `allowance` (the approved plan) allows.
+    pub fn new(table: &'d Destinations, allowance: Allowance) -> Self {
         Self {
             table,
+            allowance,
             streams: BTreeMap::new(),
             done: BTreeMap::new(),
             continued: 0,
@@ -688,6 +693,9 @@ impl<'d> ReceiverSession<'d> {
                     let same = self.same_file(&destination, &path, size);
                     let started = if resumed_done > 0 {
                         Err("the new laptop has no place to continue from".to_string())
+                    } else if let Err(refused) = self.allowance.admit(item, size) {
+                        // Checked before anything is created or reserved on this laptop.
+                        Err(refused.to_string())
                     } else {
                         self.start(&destination, &path, header)
                     };
