@@ -54,6 +54,8 @@ const MAX_NUMBER_BYTES: usize = 13;
 /// Most separate parts of one file at a time. Sections of a move stay far below this (blocks are
 /// at least 128 KiB and parts that touch are joined); it stops scattered tiny writes filling memory.
 pub const MAX_FILE_PARTS: usize = 4096;
+/// Largest file any supported system stores (signed 64-bit file offsets).
+const MAX_FILE_BYTES: u64 = i64::MAX as u64;
 /// Most clash hints remembered; past this they are forgotten and rebuilt.
 const MAX_CLASH_HINTS: usize = 1 << 20;
 
@@ -722,12 +724,14 @@ fn reserve_outcome(result: io::Result<()>) -> Result<bool, GateError> {
     match result {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == io::ErrorKind::Unsupported => Ok(false),
+        // Windows answers a size beyond what the drive can hold with "invalid parameter".
         Err(e)
             if matches!(
                 e.kind(),
                 io::ErrorKind::StorageFull
                     | io::ErrorKind::FileTooLarge
                     | io::ErrorKind::QuotaExceeded
+                    | io::ErrorKind::InvalidInput
             ) =>
         {
             Err(GateError::NoSpace)
@@ -793,6 +797,10 @@ impl IncomingFile<'_> {
         if self.announced == 0 {
             return Ok(true);
         }
+        // No system stores a file this big; refuse before asking the drive.
+        if self.announced > MAX_FILE_BYTES {
+            return Err(GateError::NoSpace);
+        }
         let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
         // On Windows the reservation lasts while the file is open; it stays open until finish.
         let result = fs4::FileExt::allocate(&file, self.announced);
@@ -850,6 +858,8 @@ impl IncomingFile<'_> {
     /// Checks every announced byte arrived, makes sure it is on disk, and gives the file its real
     /// name. On any failure the partial file is removed.
     pub fn finish(mut self) -> Result<Finished, GateError> {
+        // The count of bytes that arrived decides, never the file's length: a reserved file is
+        // already full length, with zeros where nothing has arrived yet.
         if self.received != self.announced {
             return Err(GateError::SizeMismatch {
                 announced: self.announced,
@@ -934,7 +944,12 @@ mod tests {
             reserve_outcome(Err(io::Error::from(K::Unsupported))),
             Ok(false)
         ));
-        for full in [K::StorageFull, K::FileTooLarge, K::QuotaExceeded] {
+        for full in [
+            K::StorageFull,
+            K::FileTooLarge,
+            K::QuotaExceeded,
+            K::InvalidInput,
+        ] {
             assert!(matches!(
                 reserve_outcome(Err(io::Error::from(full))),
                 Err(GateError::NoSpace)

@@ -189,11 +189,14 @@ fn space_for_the_whole_file_can_be_reserved_first() {
 fn a_file_too_big_for_the_disk_is_refused_at_the_start_and_leaves_nothing() {
     let root = tempfile::tempdir().unwrap();
     let dest = Destination::open(root.path()).unwrap();
-    // 1 PiB: more than any test machine has free.
-    let mut f = dest.create_file(&path("huge.bin"), 1 << 50).unwrap();
-    assert!(!matches!(f.reserve(), Ok(true)));
-    drop(f);
-    assert!(names(root.path()).is_empty());
+    // 1 PiB is more than any test machine has free; the others are more than any drive can hold.
+    for size in [1u64 << 50, 1 << 62, 1 << 63, u64::MAX] {
+        let mut f = dest.create_file(&path("huge.bin"), size).unwrap();
+        let r = f.reserve();
+        assert!(matches!(r, Err(GateError::NoSpace)), "{size}: {r:?}");
+        drop(f);
+        assert!(names(root.path()).is_empty());
+    }
 }
 
 #[test]
