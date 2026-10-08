@@ -23,9 +23,13 @@
 //!   special folders and the shared one, and the drives, in one move record. Progress is saved
 //!   after each folder ([`ScanState`]) so a restart resumes, and [`changes_between`] tells a later
 //!   scan what was added, removed or changed.
+//! - [`system_drive_health`] reads the old drive's health from what each system reports to a
+//!   normal user (never guessed; no answer is Unknown), and [`ReadPlan`] reads a weak drive
+//!   carefully.
 
 mod drives;
 mod folders;
+mod health;
 mod laptop;
 mod measure;
 mod people;
@@ -37,6 +41,10 @@ pub use drives::{
 };
 pub use folders::{
     Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders,
+};
+pub use health::{
+    Health, ReadPlan, health_from_diskutil, health_from_get_physical_disk, health_from_udisks,
+    system_drive_health,
 };
 pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
