@@ -1120,12 +1120,20 @@ fn open_folder(path: &Path) -> io::Result<std::fs::File> {
     }
 }
 
+/// Characters a stored name never has on this system. On Windows a `:` would name a hidden stream
+/// of a file and a `\` is another separator (stored names never have either: they are converted to
+/// lookalikes); on Linux and macOS both are ordinary name characters.
+#[cfg(windows)]
+const NOT_IN_A_NAME: &[char] = &['\\', ':', '\0'];
+#[cfg(not(windows))]
+const NOT_IN_A_NAME: &[char] = &['\0'];
+
 /// The parts of a stored path (as the gate gave it), refusing anything that could climb out.
 fn stored_parts(stored: &str) -> io::Result<Vec<&str>> {
     let parts: Vec<&str> = stored.split('/').collect();
     if parts
         .iter()
-        .any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['\\', ':', '\0']))
+        .any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(NOT_IN_A_NAME))
     {
         return Err(invalid("not a stored path"));
     }

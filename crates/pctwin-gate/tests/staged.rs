@@ -519,3 +519,33 @@ fn a_path_through_a_junction_is_never_given_for_the_trash() {
         b"theirs"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn names_with_colons_and_backslashes_land_on_systems_that_allow_them() {
+    let (root, dest) = setup();
+    for (n, sent) in ["Notes/12:30 notes.txt", r"Notes/a\b.txt"]
+        .iter()
+        .enumerate()
+    {
+        let tag = format!("t-{n}");
+        let mut file = dest.create_file_tagged(&path(sent), 1, &tag).unwrap();
+        file.write_all(b"x").unwrap();
+        let done = file.finish().unwrap();
+        assert_eq!(&done.final_path, sent);
+        assert_eq!(dest.look(sent).unwrap(), Some(1));
+        let id = dest.stat(sent).unwrap().unwrap().id;
+        assert!(dest.ambient_path(sent, id).is_ok());
+    }
+    assert!(root.path().join("Notes/12:30 notes.txt").is_file());
+}
+
+#[cfg(windows)]
+#[test]
+fn on_windows_a_stored_path_never_names_a_stream_or_another_separator() {
+    let (_root, dest) = setup();
+    for stored in ["a.txt:hidden", r"d\a.txt", "C:a.txt"] {
+        assert!(dest.look(stored).is_err(), "{stored}");
+        assert!(dest.remove_temp(stored).is_err(), "{stored}");
+    }
+}
