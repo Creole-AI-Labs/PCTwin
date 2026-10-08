@@ -12,6 +12,10 @@
 //! - [`Destination`] writes only inside an approved folder, through a cap-std directory handle, so
 //!   a link cannot redirect a write elsewhere. A file is written under a temporary `.pctwin-` name and
 //!   gets its real name only once every announced byte has arrived; an unfinished file is removed.
+//!   A big file sent over several lanes is written in sections at their place
+//!   ([`IncomingFile::write_at`]); the gate keeps exactly which bytes arrived, refuses anything
+//!   outside the announced size or written twice, and can reserve the whole size first
+//!   ([`IncomingFile::reserve`]).
 //!   Nothing is overwritten: a taken name becomes `name (2).ext`, found in constant time even when
 //!   thousands of files share a name.
 //! - [`Destinations`] is the table of approved places (each person's folders, a shared folder, a
@@ -21,9 +25,9 @@
 //!
 //! Received files are data: nothing here runs, opens or interprets their contents.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasher, RandomState};
-use std::io::{self, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -47,6 +51,9 @@ const MAX_EXTENSION_BYTES: usize = 16;
 const MAX_ALIAS_STEM_CHARS: usize = 16;
 /// Longest clash number added to a name: ` (4294967295)`.
 const MAX_NUMBER_BYTES: usize = 13;
+/// Most separate parts of one file at a time. Sections of a move stay far below this (blocks are
+/// at least 128 KiB and parts that touch are joined); it stops scattered tiny writes filling memory.
+pub const MAX_FILE_PARTS: usize = 4096;
 /// Most clash hints remembered; past this they are forgotten and rebuilt.
 const MAX_CLASH_HINTS: usize = 1 << 20;
 
@@ -349,6 +356,14 @@ pub enum GateError {
     BadDestinationId,
     #[error("another person's account can only be opened through the administrator helper")]
     NeedsAdminHelper,
+    #[error("the old laptop sent data for a place outside the file it announced")]
+    OutsideFile,
+    #[error("the old laptop sent part of a file again")]
+    Overlap,
+    #[error("the old laptop sent a file in too many scattered pieces")]
+    TooScattered,
+    #[error("there is not enough free space on the new laptop for this file")]
+    NoSpace,
     #[error("writing failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -440,6 +455,8 @@ impl Destination {
             temp_name: Some(temp_name),
             announced,
             received: 0,
+            cursor: 0,
+            arrived: BTreeMap::new(),
             folder: shown.join("/"),
             name: converted.name,
             sent_path: path.original().to_string(),
@@ -699,6 +716,26 @@ fn open_or_create_folder(parent: &Dir, name: &str) -> Result<Dir, GateError> {
     Ok(parent.open_dir(name)?)
 }
 
+/// What a space reservation's result means: reserved, not possible on this drive (the copy goes
+/// ahead), or not enough space.
+fn reserve_outcome(result: io::Result<()>) -> Result<bool, GateError> {
+    match result {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::Unsupported => Ok(false),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::StorageFull
+                    | io::ErrorKind::FileTooLarge
+                    | io::ErrorKind::QuotaExceeded
+            ) =>
+        {
+            Err(GateError::NoSpace)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Creates a temporary `.pctwin-` file in `dir` that no other name uses.
 fn create_temp_file(dir: &Dir) -> Result<(File, String), GateError> {
     let mut options = OpenOptions::new();
@@ -734,7 +771,12 @@ pub struct IncomingFile<'d> {
     file: Option<File>,
     temp_name: Option<String>,
     announced: u64,
+    /// Bytes that have arrived, each counted once (the parts in `arrived` never overlap).
     received: u64,
+    /// Where the next in-order write goes.
+    cursor: u64,
+    /// The parts of the file that have arrived, as start to end, joined when they touch.
+    arrived: BTreeMap<u64, u64>,
     folder: String,
     name: String,
     sent_path: String,
@@ -744,6 +786,61 @@ pub struct IncomingFile<'d> {
 }
 
 impl IncomingFile<'_> {
+    /// Reserves disk space for the whole announced size now, so a full disk shows at the start
+    /// rather than partway through (the approach rclone takes). Returns `false` when this drive
+    /// cannot reserve space (some USB and network drives); the file can still be written.
+    pub fn reserve(&mut self) -> Result<bool, GateError> {
+        if self.announced == 0 {
+            return Ok(true);
+        }
+        let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
+        // On Windows the reservation lasts while the file is open; it stays open until finish.
+        let result = fs4::FileExt::allocate(&file, self.announced);
+        self.file = Some(File::from_std(file));
+        reserve_outcome(result)
+    }
+
+    /// Writes `buf` at `offset` (a section of a file sent over several lanes). Refused if any of
+    /// it falls outside the announced size or on bytes that already arrived, so every byte is
+    /// written once and counted once. Parts that touch are joined; a write that would leave more
+    /// than [`MAX_FILE_PARTS`] separate parts is refused, so scattered tiny writes cannot fill
+    /// memory.
+    pub fn write_at(&mut self, offset: u64, buf: &[u8]) -> Result<(), GateError> {
+        let end = offset
+            .checked_add(buf.len() as u64)
+            .filter(|end| *end <= self.announced)
+            .ok_or(GateError::OutsideFile)?;
+        if buf.is_empty() {
+            return Ok(());
+        }
+        let before = self.arrived.range(..=offset).next_back();
+        if before.is_some_and(|(_, e)| *e > offset)
+            || self.arrived.range(offset..end).next().is_some()
+        {
+            return Err(GateError::Overlap);
+        }
+        let joins_before = before.filter(|(_, e)| **e == offset).map(|(s, _)| *s);
+        let joins_after = self.arrived.get(&end).copied();
+        if joins_before.is_none() && joins_after.is_none() && self.arrived.len() >= MAX_FILE_PARTS {
+            return Err(GateError::TooScattered);
+        }
+        let file = self.file.as_mut().ok_or(GateError::Conflict)?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(buf)?;
+        if joins_after.is_some() {
+            self.arrived.remove(&end);
+        }
+        self.arrived
+            .insert(joins_before.unwrap_or(offset), joins_after.unwrap_or(end));
+        self.received += buf.len() as u64;
+        Ok(())
+    }
+
+    /// Bytes that have arrived so far, each counted once.
+    pub fn written(&self) -> u64 {
+        self.received
+    }
+
     /// Gives the finished file this modified time, so it keeps the original's (and a later check
     /// can tell it is unchanged).
     pub fn keep_modified_time(&mut self, time: std::time::SystemTime) {
@@ -801,21 +898,17 @@ impl Drop for IncomingFile<'_> {
 }
 
 impl Write for IncomingFile<'_> {
+    /// Writes in order, after the previous in-order write, with the same checks as
+    /// [`IncomingFile::write_at`].
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let room = self.announced - self.received;
-        if buf.len() as u64 > room {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "more data than the old laptop announced",
-            ));
+        match self.write_at(self.cursor, buf) {
+            Ok(()) => {
+                self.cursor += buf.len() as u64;
+                Ok(buf.len())
+            }
+            Err(GateError::Io(e)) => Err(e),
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
         }
-        let file = self
-            .file
-            .as_mut()
-            .ok_or_else(|| io::Error::other("the file is already closed"))?;
-        let n = file.write(buf)?;
-        self.received += n as u64;
-        Ok(n)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -829,8 +922,29 @@ impl Write for IncomingFile<'_> {
 #[cfg(test)]
 mod tests {
     //! The fallback for drives without hard links (FAT, exFAT) cannot be reached through
-    //! [`Destination`] on the test machines' disks, so it is checked directly.
+    //! [`Destination`] on the test machines' disks, so it is checked directly. So is what a space
+    //! reservation's error means, since the test machines' disks can all reserve.
     use super::*;
+
+    #[test]
+    fn a_drive_that_cannot_reserve_lets_the_copy_go_ahead_and_a_full_one_does_not() {
+        use io::ErrorKind as K;
+        assert!(matches!(reserve_outcome(Ok(())), Ok(true)));
+        assert!(matches!(
+            reserve_outcome(Err(io::Error::from(K::Unsupported))),
+            Ok(false)
+        ));
+        for full in [K::StorageFull, K::FileTooLarge, K::QuotaExceeded] {
+            assert!(matches!(
+                reserve_outcome(Err(io::Error::from(full))),
+                Err(GateError::NoSpace)
+            ));
+        }
+        assert!(matches!(
+            reserve_outcome(Err(io::Error::from(K::PermissionDenied))),
+            Err(GateError::Io(_))
+        ));
+    }
 
     fn folder() -> (tempfile::TempDir, Dir) {
         let root = tempfile::tempdir().unwrap();
