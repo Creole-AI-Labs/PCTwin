@@ -1,13 +1,20 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pctwin_gate::{Destinations, Finished, IncomingPath};
 use pctwin_record::ItemId;
 
 use crate::message::{Message, PieceBuffer, split_into_pieces};
 use crate::queue::{Scheduler, Tier};
-use crate::{Assembly, Block, FileSender, ResumeTicket, Trailer, TransferError};
+use crate::reading::{ReadBudget, is_drive_error};
+use crate::{Assembly, Block, FileSender, FsOpener, Opener, ResumeTicket, Trailer, TransferError};
+use pctwin_scan::ReadPlan;
+
+/// Why the files not yet read were left: reading stopped to protect a failing drive.
+const STOPPED: &str =
+    "not read: the old drive kept failing, so PCTwin stopped reading it to protect it";
 
 /// How much may be sent before the receiver confirms it (as Syncthing does): enough to keep the
 /// connection busy, small enough that memory stays bounded.
@@ -97,6 +104,8 @@ enum SendState {
         retry: bool,
         /// Why it failed on this side, if it did.
         failure: Option<String>,
+        /// It could not be read; try it once more after everything else.
+        later: bool,
     },
     Done(SendOutcome),
 }
@@ -113,6 +122,14 @@ pub struct SenderSession {
     in_flight_limit: u64,
     /// Files found identical on the new laptop, to tell it to skip.
     skips: Vec<u32>,
+    /// Files half-sent when reading stopped, to tell the new laptop to drop.
+    aborts: Vec<u32>,
+    opener: Arc<dyn Opener>,
+    budget: ReadBudget,
+    /// Files that could not be read, waiting for one more try after everything else.
+    later: Vec<u32>,
+    /// Files already given their second try.
+    retried: HashSet<u32>,
 }
 
 impl SenderSession {
@@ -134,6 +151,11 @@ impl SenderSession {
             blocks_sent: 0,
             in_flight_limit: IN_FLIGHT_BYTES,
             skips: Vec::new(),
+            aborts: Vec::new(),
+            opener: Arc::new(FsOpener),
+            budget: ReadBudget::for_plan(ReadPlan::Normal),
+            later: Vec::new(),
+            retried: HashSet::new(),
         }
     }
 
@@ -141,6 +163,23 @@ impl SenderSession {
     pub fn with_in_flight_limit(mut self, bytes: u64) -> Self {
         self.in_flight_limit = bytes.max(1);
         self
+    }
+
+    /// Reads files through `opener` (for example, a snapshot of files in use).
+    pub fn with_opener(mut self, opener: Arc<dyn Opener>) -> Self {
+        self.opener = opener;
+        self
+    }
+
+    /// How carefully to read the old drive (from its health check).
+    pub fn with_read_plan(mut self, plan: ReadPlan) -> Self {
+        self.budget = ReadBudget::for_plan(plan);
+        self
+    }
+
+    /// Whether reading stopped because the old drive kept failing.
+    pub fn stopped_reading(&self) -> bool {
+        self.budget.stopped()
     }
 
     /// Blocks sent so far, over every connection.
@@ -173,6 +212,26 @@ impl SenderSession {
                 self.scheduler.finished(self.jobs[i].item);
                 self.states[i] = SendState::Done(SendOutcome::AlreadyThere);
             }
+            for stream in std::mem::take(&mut self.aborts) {
+                let i = stream as usize;
+                if let SendState::Open { reader, .. } = &self.states[i] {
+                    let stamp_after = reader.header().stamp;
+                    send(
+                        ch,
+                        &Message::EndFile {
+                            stream,
+                            stamp_after,
+                            changed: true,
+                        },
+                    )
+                    .await?;
+                    self.states[i] = SendState::Ended {
+                        retry: false,
+                        failure: Some(STOPPED.into()),
+                        later: false,
+                    };
+                }
+            }
             if in_flight.iter().sum::<u64>() >= self.in_flight_limit {
                 let m = recv(ch).await?;
                 self.answer(m, &mut in_flight)?;
@@ -195,6 +254,13 @@ impl SenderSession {
                     if waiting || !in_flight.is_empty() {
                         let m = recv(ch).await?;
                         self.answer(m, &mut in_flight)?;
+                    } else if !self.later.is_empty() && !self.budget.stopped() {
+                        // Everything readable is done: one more try for what could not be read.
+                        for stream in std::mem::take(&mut self.later) {
+                            self.retried.insert(stream);
+                            let job = &self.jobs[stream as usize];
+                            self.scheduler.push(job.item, job.tier);
+                        }
                     } else {
                         break;
                     }
@@ -223,8 +289,13 @@ impl SenderSession {
             if matches!(self.states[i], SendState::Done(_)) {
                 continue;
             }
+            if self.later.contains(&stream) {
+                // Still waiting for its second try at the end.
+                continue;
+            }
+            let opener = self.opener.clone();
             let picked_up = tickets.get(&stream).and_then(|ticket| {
-                FileSender::open(&job.source, Some(ticket), job.compressible)
+                FileSender::open_with(&*opener, &job.source, Some(ticket), job.compressible)
                     .ok()
                     .map(|reader| SendState::Open {
                         reader,
@@ -251,7 +322,7 @@ impl SenderSession {
         let i = stream as usize;
         let job = self.jobs[i].clone();
         if matches!(self.states[i], SendState::Waiting) {
-            match FileSender::open(&job.source, None, job.compressible) {
+            match FileSender::open_with(&*self.opener, &job.source, None, job.compressible) {
                 Ok(reader) => {
                     self.states[i] = SendState::Open {
                         reader,
@@ -261,8 +332,15 @@ impl SenderSession {
                     }
                 }
                 Err(e) => {
-                    self.states[i] = SendState::Done(SendOutcome::Failed(e.to_string()));
+                    let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
                     self.scheduler.finished(job.item);
+                    self.states[i] = if drive && self.read_failed(stream) {
+                        // One more try after everything else.
+                        self.later.push(stream);
+                        SendState::Waiting
+                    } else {
+                        SendState::Done(SendOutcome::Failed(e.to_string()))
+                    };
                     return Ok(true);
                 }
             }
@@ -299,6 +377,7 @@ impl SenderSession {
         let stamp = reader.header().stamp;
         match reader.next_block() {
             Ok(Some(block)) => {
+                self.budget.read_ok();
                 let wire = block.encode();
                 for piece in split_into_pieces(stream, &wire) {
                     send(ch, &piece).await?;
@@ -323,16 +402,22 @@ impl SenderSession {
                     },
                 )
                 .await?;
+                // On a weak drive each file is read only once: a file that changed is not read again.
+                let changed = trailer.changed_while_read();
+                let again = changed && self.budget.try_again_later();
                 self.states[i] = SendState::Ended {
-                    retry: trailer.changed_while_read(),
-                    failure: None,
+                    retry: again,
+                    failure: (changed && !again).then(|| "it changed while being read".to_string()),
+                    later: false,
                 };
                 self.scheduler.finished(job.item);
                 Ok(true)
             }
             Err(e) => {
                 // Tell the new laptop to drop what it has of this file.
-                let retry = matches!(e, TransferError::ChangedWhileRead);
+                let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
+                let retry =
+                    matches!(e, TransferError::ChangedWhileRead) && self.budget.try_again_later();
                 send(
                     ch,
                     &Message::EndFile {
@@ -342,11 +427,13 @@ impl SenderSession {
                     },
                 )
                 .await?;
+                self.scheduler.finished(job.item);
+                let later = drive && self.read_failed(stream);
                 self.states[i] = SendState::Ended {
                     retry,
-                    failure: (!retry).then(|| e.to_string()),
+                    failure: (!retry && !later).then(|| e.to_string()),
+                    later,
                 };
-                self.scheduler.finished(job.item);
                 Ok(true)
             }
         }
@@ -382,6 +469,36 @@ impl SenderSession {
         }
     }
 
+    /// Counts a drive read error for `stream`. Returns true when the file gets one more try after
+    /// everything else; when errors come in a row, stops reading altogether.
+    fn read_failed(&mut self, stream: u32) -> bool {
+        if self.budget.read_failed() {
+            self.stop_reading();
+            return false;
+        }
+        self.budget.try_again_later() && !self.retried.contains(&stream)
+    }
+
+    /// The drive keeps failing: read nothing more. Files not yet read are reported as such, and
+    /// files half-sent are dropped on the new laptop.
+    fn stop_reading(&mut self) {
+        self.scheduler = Scheduler::new(self.capacity);
+        self.later.clear();
+        for (i, state) in self.states.iter_mut().enumerate() {
+            match state {
+                SendState::Waiting => *state = SendState::Done(SendOutcome::Failed(STOPPED.into())),
+                SendState::Open { announced, .. } => {
+                    if *announced {
+                        self.aborts.push(u32::try_from(i).unwrap_or(u32::MAX));
+                    } else {
+                        *state = SendState::Done(SendOutcome::Failed(STOPPED.into()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn done(&mut self, stream: u32, ok: bool) {
         let i = stream as usize;
         let Some(job) = self.jobs.get(i) else { return };
@@ -389,6 +506,11 @@ impl SenderSession {
         let tier = job.tier;
         let state = std::mem::replace(&mut self.states[i], SendState::Waiting);
         self.states[i] = match (state, ok) {
+            (SendState::Ended { later: true, .. }, _) => {
+                // It could not be read: one more try after everything else.
+                self.later.push(stream);
+                SendState::Waiting
+            }
             (SendState::Ended { failure: None, .. }, true) => SendState::Done(SendOutcome::Arrived),
             (SendState::Ended { retry: true, .. }, false) => {
                 // It changed while being read: send the whole file again.

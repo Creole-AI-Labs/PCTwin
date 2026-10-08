@@ -29,11 +29,13 @@
 mod landing;
 mod message;
 mod queue;
+mod reading;
 mod session;
 
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use queue::{Scheduler, Tier, plan_order};
+pub use reading::{ReadBudget, is_drive_error};
 pub use session::{
     Channel, ChannelError, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
 };
@@ -244,9 +246,36 @@ impl Block {
     }
 }
 
+/// A file being read on the old laptop: its bytes and its size and modified time.
+pub trait Source: Read + Seek + Send {
+    fn stamp(&mut self) -> io::Result<Stamp>;
+}
+
+impl Source for File {
+    fn stamp(&mut self) -> io::Result<Stamp> {
+        Ok(Stamp::of(&self.metadata()?))
+    }
+}
+
+/// Opens files on the old laptop. [`FsOpener`] opens them directly; another opener can read from
+/// elsewhere (a snapshot of files in use, or a test that makes chosen files fail).
+pub trait Opener: Send + Sync {
+    fn open(&self, path: &Path) -> io::Result<Box<dyn Source>>;
+}
+
+/// Opens files directly from the disk.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FsOpener;
+
+impl Opener for FsOpener {
+    fn open(&self, path: &Path) -> io::Result<Box<dyn Source>> {
+        Ok(Box::new(File::open(path)?))
+    }
+}
+
 /// Reads one file once, in order, as blocks.
 pub struct FileSender {
-    file: File,
+    file: Box<dyn Source>,
     header: Header,
     next: u64,
     compressible: bool,
@@ -262,8 +291,18 @@ impl FileSender {
         resume: Option<&ResumeTicket>,
         compressible: bool,
     ) -> Result<Self, TransferError> {
-        let mut file = File::open(path)?;
-        let stamp = Stamp::of(&file.metadata()?);
+        Self::open_with(&FsOpener, path, resume, compressible)
+    }
+
+    /// As [`open`](Self::open), reading through `opener`.
+    pub fn open_with(
+        opener: &dyn Opener,
+        path: &Path,
+        resume: Option<&ResumeTicket>,
+        compressible: bool,
+    ) -> Result<Self, TransferError> {
+        let mut file = opener.open(path)?;
+        let stamp = file.stamp()?;
         let (block_size, next) = match resume {
             Some(ticket) => {
                 if ticket.stamp != stamp {
@@ -326,8 +365,8 @@ impl FileSender {
     }
 
     /// After the last block: whether the file stayed the same while it was read.
-    pub fn finish(self) -> Result<Trailer, TransferError> {
-        let stamp_after = Stamp::of(&self.file.metadata()?);
+    pub fn finish(mut self) -> Result<Trailer, TransferError> {
+        let stamp_after = self.file.stamp()?;
         Ok(Trailer {
             changed: self.changed || stamp_after != self.header.stamp,
             stamp_after,
