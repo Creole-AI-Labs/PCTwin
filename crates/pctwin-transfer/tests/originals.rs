@@ -5,7 +5,6 @@
 //! same size and the same modified time as when it was read.
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -52,25 +51,7 @@ fn bytes(len: usize, seed: u8) -> Vec<u8> {
         .collect()
 }
 
-/// The identity of a file, worked out here independently of the crate under test.
-#[cfg(unix)]
-fn identity_of(path: &Path) -> FileId {
-    use std::os::unix::fs::MetadataExt;
-    let m = std::fs::metadata(path).unwrap();
-    FileId {
-        volume: m.dev(),
-        index: m.ino(),
-    }
-}
-
-#[cfg(windows)]
-fn identity_of(path: &Path) -> FileId {
-    let info = winapi_util::file::information(File::open(path).unwrap()).unwrap();
-    FileId {
-        volume: info.volume_serial_number(),
-        index: info.file_index(),
-    }
-}
+use common::identity_of;
 
 fn modified_ns(path: &Path) -> i64 {
     std::fs::metadata(path)

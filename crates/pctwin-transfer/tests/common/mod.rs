@@ -48,3 +48,26 @@ pub fn journal() -> &'static pctwin_journal::Journal {
         pctwin_journal::Journal::open(&dir.path().join("journal.redb")).unwrap(),
     ))
 }
+
+/// Which file this is on its drive, worked out here independently of the crate under test.
+#[allow(dead_code)]
+#[cfg(unix)]
+pub fn identity_of(path: &std::path::Path) -> pctwin_journal::FileId {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(path).unwrap();
+    pctwin_journal::FileId {
+        volume: m.dev(),
+        index: m.ino(),
+    }
+}
+
+/// Which file this is on its drive, worked out here independently of the crate under test.
+#[allow(dead_code)]
+#[cfg(windows)]
+pub fn identity_of(path: &std::path::Path) -> pctwin_journal::FileId {
+    let info = winapi_util::file::information(std::fs::File::open(path).unwrap()).unwrap();
+    pctwin_journal::FileId {
+        volume: info.volume_serial_number(),
+        index: info.file_index(),
+    }
+}

@@ -186,7 +186,7 @@ impl World {
                 },
                 block_size,
                 source_modified_ns: self.modified_ns(),
-                source_file: None,
+                source_file: Some(common::identity_of(&self.source)),
                 partial_keep: Default::default(),
                 place: Some(FileId {
                     volume: place.volume,
