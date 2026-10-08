@@ -369,10 +369,19 @@ impl FileSender {
         if self.next >= self.header.block_count {
             return Ok(None);
         }
-        // Each block is read from its own place, so skipping done blocks needs no bookkeeping.
+        let block = self.block_at(self.next)?;
+        self.next += 1;
+        Ok(Some(block))
+    }
+
+    /// Reads block `index` from its own place in the file (lanes send sections in any order).
+    pub fn block_at(&mut self, index: u64) -> Result<Block, TransferError> {
+        if index >= self.header.block_count {
+            return Err(TransferError::Damaged("a block outside the file".into()));
+        }
         self.file
-            .seek(SeekFrom::Start(self.next * self.header.block_size))?;
-        let len = block_len(&self.header, self.next);
+            .seek(SeekFrom::Start(index * self.header.block_size))?;
+        let len = block_len(&self.header, index);
         let mut data = vec![0u8; len];
         if let Err(e) = self.file.read_exact(&mut data) {
             if e.kind() == io::ErrorKind::UnexpectedEof {
@@ -390,14 +399,12 @@ impl FileSender {
         } else {
             None
         };
-        let block = Block {
-            index: self.next,
+        Ok(Block {
+            index,
             data,
             hash,
             packed,
-        };
-        self.next += 1;
-        Ok(Some(block))
+        })
     }
 
     /// After the last block: whether the file stayed the same while it was read.

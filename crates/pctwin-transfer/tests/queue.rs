@@ -291,3 +291,39 @@ fn your_own_essentials_come_after_what_you_asked_for_and_before_the_general_ones
     assert_eq!(tiers[1], Tier::Personal);
     assert!(Tier::AskedFirst { rank: 0 } < Tier::Personal && Tier::Personal < Tier::Essential);
 }
+
+fn sid(n: u8) -> ItemId {
+    ItemId::from_hex(&format!("{n:02x}{}", "0".repeat(30))).unwrap()
+}
+
+#[test]
+fn lanes_see_every_file_in_flight_most_important_first_taking_turns() {
+    let mut s = Scheduler::new(3);
+    s.push(sid(1), Tier::Rest);
+    s.push(sid(2), Tier::Rest);
+    s.push(sid(3), Tier::Essential);
+    s.push(sid(4), Tier::Rest);
+    // Three in flight: the essential one first, then the two others taking turns at the front.
+    let a = s.in_flight();
+    let b = s.in_flight();
+    assert_eq!(a.len(), 3);
+    assert_eq!(a[0], sid(3));
+    assert_eq!(b[0], sid(3));
+    assert_ne!(a[1], b[1]);
+    assert_eq!(
+        a[1..].iter().collect::<std::collections::BTreeSet<_>>(),
+        b[1..].iter().collect::<std::collections::BTreeSet<_>>()
+    );
+    assert!(!a.contains(&sid(4)), "only three at once");
+    // A file asked for during the move joins at once, at the front.
+    s.ask_first(&[sid(4)]);
+    let c = s.in_flight();
+    assert_eq!(c[0], sid(4));
+    assert_eq!(c.len(), 4);
+    // Finished files leave.
+    s.finished(sid(4));
+    s.finished(sid(3));
+    let d = s.in_flight();
+    assert_eq!(d.len(), 2);
+    assert!(!d.contains(&sid(3)) && !d.contains(&sid(4)));
+}

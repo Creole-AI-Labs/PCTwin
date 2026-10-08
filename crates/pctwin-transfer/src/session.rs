@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
@@ -10,10 +10,12 @@ use pctwin_record::ItemId;
 use crate::message::{Message, PieceBuffer, split_into_pieces};
 use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
+use crate::sections::FileSections;
 use crate::{
     Allowance, Assembly, Block, FileSender, FsOpener, Opener, ResumeTicket, Trailer, TransferError,
 };
 use pctwin_scan::ReadPlan;
+use tokio::sync::Notify;
 
 /// Why the files not yet read were left: reading stopped to protect a failing drive.
 const STOPPED: &str =
@@ -96,13 +98,16 @@ enum SendState {
     Waiting,
     Open {
         reader: FileSender,
+        /// Which lane sends which blocks; done blocks (from a resume) are already marked.
+        sections: FileSections,
+        /// The start was sent on this connection.
         announced: bool,
         /// How many blocks the new laptop's resume ticket said it had (0 for a fresh start).
         resumed_done: u64,
         /// The new laptop answered the start (nothing identical there), so blocks may go.
         cleared: bool,
     },
-    /// The last block was sent; waiting for the new laptop's answer.
+    /// The end was sent; waiting for the new laptop's answer.
     Ended {
         /// Send the whole file again if the answer is no (it changed while being read).
         retry: bool,
@@ -114,56 +119,97 @@ enum SendState {
     Done(SendOutcome),
 }
 
+/// What a lane does next.
+enum Work {
+    /// Send this block (its wire form) of this file.
+    Send { stream: u32, wire: Vec<u8> },
+    /// Nothing to send now.
+    Wait,
+}
+
 /// The old laptop's side of a move. Keeps its place across dropped connections: call
-/// [`run`](Self::run) again with a new connection to continue.
+/// [`run`](Self::run) or [`run_lanes`](Self::run_lanes) again with a new connection to continue.
+///
+/// Each attempt at a file has its own stream number: a file started again (it changed while
+/// being read) gets a new one, so a block of the old attempt still travelling on another lane can
+/// never land in the new one. A file continued after a drop keeps its stream.
 pub struct SenderSession {
     jobs: Vec<SendJob>,
+    /// Per job.
     states: Vec<SendState>,
-    by_item: HashMap<ItemId, u32>,
+    /// Per job: the stream of its current attempt.
+    streams: Vec<u32>,
+    /// Stream to job, for current attempts only.
+    job_of: HashMap<u32, usize>,
+    next_stream: u32,
+    by_item: HashMap<ItemId, usize>,
     scheduler: Scheduler,
     capacity: usize,
     blocks_sent: u64,
     in_flight_limit: u64,
-    /// Files found identical on the new laptop, to tell it to skip.
-    skips: Vec<u32>,
-    /// Files half-sent when reading stopped, to tell the new laptop to drop.
-    aborts: Vec<u32>,
+    /// Jobs found identical on the new laptop, to tell it to skip.
+    skips: Vec<usize>,
+    /// Ends to send on the main connection (a file finished, or failed partway).
+    ends: Vec<Message>,
     opener: Arc<dyn Opener>,
     budget: ReadBudget,
-    /// Files that could not be read, waiting for one more try after everything else.
-    later: Vec<u32>,
-    /// Files already given their second try.
-    retried: HashSet<u32>,
+    /// Jobs that could not be read, waiting for one more try after everything else.
+    later: Vec<usize>,
+    /// Jobs already given their second try.
+    retried: HashSet<usize>,
+    /// Per lane (0 is the main connection): blocks sent and not yet confirmed, oldest first, as
+    /// (stream, block, bytes). Receipts come back in order on the lane that carried the block.
+    lanes: Vec<VecDeque<(u32, u32, u64)>>,
+    /// Bytes sent and not yet confirmed, over every lane.
+    in_flight: u64,
+    /// Something changed that other lanes may be waiting for.
+    dirty: bool,
+    /// Jobs opened at least once: opening one again starts a new attempt on a new stream.
+    attempted: HashSet<usize>,
 }
 
 impl SenderSession {
-    /// `jobs` in the order planned; `capacity` files take turns at once.
+    /// `jobs` in the order planned; `capacity` files are in flight at once (give at least one per
+    /// lane, so every lane has something to send).
     pub fn new(jobs: Vec<SendJob>, capacity: usize) -> Self {
         let mut scheduler = Scheduler::new(capacity);
         let mut by_item = HashMap::new();
         for (i, job) in jobs.iter().enumerate() {
             scheduler.push(job.item, job.tier);
-            by_item.insert(job.item, u32::try_from(i).unwrap_or(u32::MAX));
+            by_item.insert(job.item, i);
         }
         let states = jobs.iter().map(|_| SendState::Waiting).collect();
+        let streams: Vec<u32> = (0..jobs.len())
+            .map(|i| u32::try_from(i).unwrap_or(u32::MAX))
+            .collect();
+        let job_of = streams.iter().enumerate().map(|(i, s)| (*s, i)).collect();
+        let next_stream = u32::try_from(jobs.len()).unwrap_or(u32::MAX);
         Self {
             jobs,
             states,
+            streams,
+            job_of,
+            next_stream,
             by_item,
             scheduler,
             capacity,
             blocks_sent: 0,
             in_flight_limit: IN_FLIGHT_BYTES,
             skips: Vec::new(),
-            aborts: Vec::new(),
+            ends: Vec::new(),
             opener: Arc::new(FsOpener),
             budget: ReadBudget::for_plan(ReadPlan::Normal),
             later: Vec::new(),
             retried: HashSet::new(),
+            lanes: Vec::new(),
+            in_flight: 0,
+            dirty: false,
+            attempted: HashSet::new(),
         }
     }
 
-    /// Sends at most `bytes` before the new laptop confirms them (32 MiB unless set).
+    /// Sends at most `bytes` (over every lane together) before the new laptop confirms them
+    /// (32 MiB unless set).
     pub fn with_in_flight_limit(mut self, bytes: u64) -> Self {
         self.in_flight_limit = bytes.max(1);
         self
@@ -186,283 +232,498 @@ impl SenderSession {
         self.budget.stopped()
     }
 
-    /// Blocks sent so far, over every connection.
+    /// Blocks sent so far, over every connection and lane.
     pub fn blocks_sent(&self) -> u64 {
         self.blocks_sent
     }
 
     pub fn outcome(&self, item: ItemId) -> Option<&SendOutcome> {
-        let i = *self.by_item.get(&item)? as usize;
-        match &self.states[i] {
+        match &self.states[*self.by_item.get(&item)?] {
             SendState::Done(o) => Some(o),
             _ => None,
         }
     }
 
-    /// The person asked for these to move first, during the move.
+    /// The person asked for these to move first, during the move; every lane follows at once.
     pub fn ask_first(&mut self, items: &[ItemId]) {
         self.scheduler.ask_first(items);
     }
 
     /// Sends everything not yet done over `ch`. Returns when every file is answered for, or with
     /// [`TransferError::ConnectionDropped`] (call again with a new connection to continue).
-    pub async fn run(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
-        self.resume(ch).await?;
-        let mut in_flight: VecDeque<u64> = VecDeque::new();
-        loop {
-            for stream in std::mem::take(&mut self.skips) {
-                send(ch, &Message::Skip { stream }).await?;
-                let i = stream as usize;
-                self.scheduler.finished(self.jobs[i].item);
-                self.states[i] = SendState::Done(SendOutcome::AlreadyThere);
-            }
-            for stream in std::mem::take(&mut self.aborts) {
-                let i = stream as usize;
-                if let SendState::Open { reader, .. } = &self.states[i] {
-                    let stamp_after = reader.header().stamp;
-                    send(
-                        ch,
-                        &Message::EndFile {
-                            stream,
-                            stamp_after,
-                            changed: true,
-                        },
-                    )
-                    .await?;
-                    self.states[i] = SendState::Ended {
-                        retry: false,
-                        failure: Some(STOPPED.into()),
-                        later: false,
-                    };
-                }
-            }
-            if in_flight.iter().sum::<u64>() >= self.in_flight_limit {
-                let m = recv(ch).await?;
-                self.answer(m, &mut in_flight)?;
-                continue;
-            }
-            match self.scheduler.next_turn() {
-                Some(item) => {
-                    let stream = self.by_item[&item];
-                    if !self.step(stream, ch, &mut in_flight).await? {
-                        // This file waits for the new laptop's answer; listen for it.
-                        let m = recv(ch).await?;
-                        self.answer(m, &mut in_flight)?;
+    pub async fn run<C: Channel>(&mut self, ch: &mut C) -> Result<(), TransferError> {
+        self.run_lanes(ch, &mut [] as &mut [C]).await
+    }
+
+    /// Sends everything not yet done over the main connection `main` and any extra `lanes` to
+    /// the same new laptop. Starts, ends and skips go on the main connection; blocks go on every
+    /// lane, a big file's sections over several at once, most important files first. A lane that
+    /// drops gives its unconfirmed blocks back to be sent on the others; if the main connection
+    /// drops, call again with a new one to continue.
+    pub async fn run_lanes<C: Channel>(
+        &mut self,
+        main: &mut C,
+        lanes: &mut [C],
+    ) -> Result<(), TransferError> {
+        self.resume(main).await?;
+        self.lanes = (0..=lanes.len()).map(|_| VecDeque::new()).collect();
+        self.in_flight = 0;
+        let state = RefCell::new(self);
+        let changed = Notify::new();
+        // Extra lanes still running.
+        let alive = Cell::new(lanes.len());
+        let main_loop = async {
+            loop {
+                // Registered before looking, so a change made meanwhile is not missed.
+                let wake = changed.notified();
+                // The state is never borrowed across a wait, so every lane can take its turn.
+                let control = state.borrow_mut().control();
+                if !control.is_empty() {
+                    for m in &control {
+                        send(main, m).await?;
                     }
+                    changed.notify_waiters();
+                    continue;
                 }
-                None => {
-                    let waiting = self
-                        .states
-                        .iter()
-                        .any(|s| matches!(s, SendState::Ended { .. }));
-                    if waiting || !in_flight.is_empty() {
-                        let m = recv(ch).await?;
-                        self.answer(m, &mut in_flight)?;
-                    } else if !self.later.is_empty() && !self.budget.stopped() {
-                        // Everything readable is done: one more try for what could not be read.
-                        for stream in std::mem::take(&mut self.later) {
-                            self.retried.insert(stream);
-                            let job = &self.jobs[stream as usize];
-                            self.scheduler.push(job.item, job.tier);
+                let work = state.borrow_mut().work(0);
+                if state.borrow_mut().take_dirty() {
+                    changed.notify_waiters();
+                }
+                if let Work::Send { stream, wire } = work {
+                    for piece in split_into_pieces(stream, &wire) {
+                        send(main, &piece).await?;
+                    }
+                    continue;
+                }
+                if state.borrow().has_control() {
+                    // An end or skip was queued (a block could not be read): send it first.
+                    continue;
+                }
+                if state.borrow().awaiting_main() {
+                    // A reply is owed on this connection, so waiting for it cannot hang.
+                    let m = recv(main).await?;
+                    state.borrow_mut().answer(0, m)?;
+                    changed.notify_waiters();
+                } else if state.borrow().all_done() {
+                    break;
+                } else if alive.get() > 0 {
+                    // Other lanes are still at work: wait until one of them changes something.
+                    wake.await;
+                } else {
+                    // Nothing is owed and no lane is left to change anything: waiting would
+                    // never end, so say so rather than hang.
+                    return Err(protocol("the move stopped making progress"));
+                }
+            }
+            // Ending the main loop ends the extra lanes with it.
+            send(main, &Message::AllSent).await?;
+            Ok(())
+        };
+        let extra = futures_util::future::join_all(lanes.iter_mut().enumerate().map(|(n, ch)| {
+            let (state, changed, alive) = (&state, &changed, &alive);
+            let lane = n + 1;
+            async move {
+                loop {
+                    let wake = changed.notified();
+                    let work = state.borrow_mut().work(lane);
+                    if state.borrow_mut().take_dirty() {
+                        changed.notify_waiters();
+                    }
+                    let lane_ok = match work {
+                        Work::Send { stream, wire } => {
+                            let mut sent = true;
+                            for piece in split_into_pieces(stream, &wire) {
+                                if send(ch, &piece).await.is_err() {
+                                    sent = false;
+                                    break;
+                                }
+                            }
+                            sent
                         }
-                    } else {
-                        break;
+                        Work::Wait if !state.borrow().lanes[lane].is_empty() => {
+                            // Receipts are owed on this lane, so waiting for one cannot hang.
+                            match recv(ch).await {
+                                Ok(m) => {
+                                    let answered = state.borrow_mut().answer(lane, m).is_ok();
+                                    changed.notify_waiters();
+                                    answered
+                                }
+                                Err(_) => false,
+                            }
+                        }
+                        Work::Wait => {
+                            wake.await;
+                            true
+                        }
+                    };
+                    if !lane_ok {
+                        // Dropped, or answered out of turn: this lane is closed and its
+                        // unconfirmed blocks go to the others.
+                        state.borrow_mut().lane_lost(lane);
+                        alive.set(alive.get() - 1);
+                        changed.notify_waiters();
+                        return;
                     }
                 }
             }
+        }));
+        tokio::pin!(main_loop);
+        tokio::pin!(extra);
+        tokio::select! {
+            done = &mut main_loop => done,
+            _ = &mut extra => main_loop.await,
         }
-        send(ch, &Message::AllSent).await
     }
 
     /// Reads what the new laptop already has and picks each file up from there.
     async fn resume(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
-        let mut tickets: BTreeMap<u32, ResumeTicket> = BTreeMap::new();
+        let mut tickets: BTreeMap<usize, ResumeTicket> = BTreeMap::new();
         loop {
             match recv(ch).await? {
                 Message::ResumeFrom { stream, ticket } => {
-                    tickets.insert(stream, ticket);
+                    if let Some(&job) = self.job_of.get(&stream) {
+                        tickets.insert(job, ticket);
+                    }
                 }
-                Message::FileDone { stream, ok } => self.done(stream, ok),
+                Message::FileDone { stream, ok } => {
+                    if let Some(&job) = self.job_of.get(&stream) {
+                        self.done(job, ok);
+                    }
+                }
                 Message::Ready => break,
                 _ => return Err(protocol("expected the new laptop's resume list")),
             }
         }
         self.scheduler = Scheduler::new(self.capacity);
-        for (i, job) in self.jobs.iter().enumerate() {
-            let stream = u32::try_from(i).unwrap_or(u32::MAX);
-            if matches!(self.states[i], SendState::Done(_)) {
+        self.ends.clear();
+        self.skips.clear();
+        for job in 0..self.jobs.len() {
+            if matches!(self.states[job], SendState::Done(_)) || self.later.contains(&job) {
+                // Done, or still waiting for its second try at the end.
                 continue;
             }
-            if self.later.contains(&stream) {
-                // Still waiting for its second try at the end.
-                continue;
-            }
-            let opener = self.opener.clone();
-            let picked_up = tickets.get(&stream).and_then(|ticket| {
-                FileSender::open_with(&*opener, &job.source, Some(ticket), job.compressible)
-                    .ok()
-                    .map(|reader| SendState::Open {
-                        reader,
-                        announced: false,
-                        resumed_done: ticket.done.done_count(),
-                        cleared: false,
-                    })
+            let picked_up = tickets.get(&job).and_then(|ticket| {
+                let j = &self.jobs[job];
+                let reader =
+                    FileSender::open_with(&*self.opener, &j.source, Some(ticket), j.compressible)
+                        .ok()?;
+                let sections = sections_for(reader.header(), &ticket.done.to_bools())?;
+                Some(SendState::Open {
+                    reader,
+                    sections,
+                    announced: false,
+                    resumed_done: ticket.done.done_count(),
+                    cleared: false,
+                })
             });
             // Without a ticket, or if the file changed since, it starts again from the beginning.
-            self.states[i] = picked_up.unwrap_or(SendState::Waiting);
-            self.scheduler.push(job.item, job.tier);
+            self.states[job] = picked_up.unwrap_or(SendState::Waiting);
+            self.scheduler
+                .push(self.jobs[job].item, self.jobs[job].tier);
         }
         Ok(())
     }
 
-    /// Sends this file's next message. Returns false when it is waiting for the new laptop's
-    /// answer to its start.
-    async fn step(
-        &mut self,
-        stream: u32,
-        ch: &mut impl Channel,
-        in_flight: &mut VecDeque<u64>,
-    ) -> Result<bool, TransferError> {
-        let i = stream as usize;
-        let job = self.jobs[i].clone();
-        if matches!(self.states[i], SendState::Waiting) {
-            match FileSender::open_with(&*self.opener, &job.source, None, job.compressible) {
-                Ok(reader) => {
-                    self.states[i] = SendState::Open {
-                        reader,
-                        announced: false,
-                        resumed_done: 0,
-                        cleared: false,
-                    }
-                }
-                Err(e) => {
-                    let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
-                    self.scheduler.finished(job.item);
-                    self.states[i] = if drive && self.read_failed(stream) {
-                        // One more try after everything else.
-                        self.later.push(stream);
-                        SendState::Waiting
-                    } else {
-                        SendState::Done(SendOutcome::Failed(e.to_string()))
-                    };
-                    return Ok(true);
-                }
+    /// Messages for the main connection: skips, ends, and starts of the files now in flight.
+    fn control(&mut self) -> Vec<Message> {
+        let mut out = Vec::new();
+        for job in std::mem::take(&mut self.skips) {
+            out.push(Message::Skip {
+                stream: self.streams[job],
+            });
+            self.scheduler.finished(self.jobs[job].item);
+            self.states[job] = SendState::Done(SendOutcome::AlreadyThere);
+        }
+        out.append(&mut self.ends);
+        // A file ends once every block is confirmed, so the new laptop has them all first.
+        for job in 0..self.states.len() {
+            let complete = matches!(
+                &self.states[job],
+                SendState::Open { sections, cleared: true, .. } if sections.is_done()
+            );
+            if complete
+                && let SendState::Open { reader, .. } =
+                    std::mem::replace(&mut self.states[job], SendState::Waiting)
+            {
+                out.push(self.end(job, reader));
             }
         }
-        let SendState::Open {
-            reader,
-            announced,
-            resumed_done,
-            cleared,
-        } = &mut self.states[i]
-        else {
-            self.scheduler.finished(job.item);
-            return Ok(true);
-        };
-        if !*announced {
-            send(
-                ch,
-                &Message::StartFile {
-                    stream,
-                    item: job.item,
-                    destination: job.destination.clone(),
-                    path: job.path.clone(),
+        // Everything readable is done: one more try for what could not be read.
+        let idle = !self
+            .states
+            .iter()
+            .any(|s| matches!(s, SendState::Open { .. } | SendState::Ended { .. }))
+            && self.in_flight == 0;
+        if idle && !self.later.is_empty() && !self.budget.stopped() {
+            for job in std::mem::take(&mut self.later) {
+                self.retried.insert(job);
+                self.scheduler
+                    .push(self.jobs[job].item, self.jobs[job].tier);
+            }
+        }
+        // Files that fail to open free their place at once, so keep filling until those in
+        // flight are open.
+        let mut in_flight = self.scheduler.in_flight();
+        loop {
+            let mut freed = false;
+            for item in &in_flight {
+                let job = self.by_item[item];
+                if matches!(self.states[job], SendState::Waiting) {
+                    self.open(job);
+                    freed |= !matches!(self.states[job], SendState::Open { .. });
+                }
+            }
+            if !freed {
+                break;
+            }
+            in_flight = self.scheduler.in_flight();
+        }
+        for item in in_flight {
+            let job = self.by_item[&item];
+            if let SendState::Open {
+                reader,
+                announced,
+                resumed_done,
+                ..
+            } = &mut self.states[job]
+                && !*announced
+            {
+                *announced = true;
+                let j = &self.jobs[job];
+                out.push(Message::StartFile {
+                    stream: self.streams[job],
+                    item: j.item,
+                    destination: j.destination.clone(),
+                    path: j.path.clone(),
                     header: reader.header().clone(),
                     resumed_done: *resumed_done,
-                },
-            )
-            .await?;
-            *announced = true;
-            return Ok(true);
-        }
-        if !*cleared {
-            return Ok(false);
-        }
-        let stamp = reader.header().stamp;
-        match reader.next_block() {
-            Ok(Some(block)) => {
-                self.budget.read_ok();
-                let wire = block.encode();
-                for piece in split_into_pieces(stream, &wire) {
-                    send(ch, &piece).await?;
-                }
-                self.blocks_sent += 1;
-                in_flight.push_back(wire.len() as u64);
-                Ok(true)
+                });
             }
-            Ok(None) => {
-                let SendState::Open { reader, .. } =
-                    std::mem::replace(&mut self.states[i], SendState::Waiting)
-                else {
-                    return Ok(true);
+        }
+        out
+    }
+
+    /// Opens a waiting file for a new attempt, with a new stream.
+    fn open(&mut self, job: usize) {
+        let j = &self.jobs[job];
+        let opened = FileSender::open_with(&*self.opener, &j.source, None, j.compressible)
+            .and_then(|reader| {
+                let sections = sections_for(reader.header(), &[])
+                    .ok_or_else(|| TransferError::Damaged("the file is too big to send".into()))?;
+                Ok((reader, sections))
+            });
+        match opened {
+            Ok((reader, sections)) => {
+                self.new_stream(job);
+                self.states[job] = SendState::Open {
+                    reader,
+                    sections,
+                    announced: false,
+                    resumed_done: 0,
+                    cleared: false,
                 };
-                let trailer = reader.finish()?;
-                send(
-                    ch,
-                    &Message::EndFile {
-                        stream,
-                        stamp_after: trailer.stamp_after,
-                        changed: trailer.changed_while_read(),
-                    },
-                )
-                .await?;
-                // On a weak drive each file is read only once: a file that changed is not read again.
-                let changed = trailer.changed_while_read();
-                let again = changed && self.budget.try_again_later();
-                self.states[i] = SendState::Ended {
-                    retry: again,
-                    failure: (changed && !again).then(|| "it changed while being read".to_string()),
-                    later: false,
-                };
-                self.scheduler.finished(job.item);
-                Ok(true)
             }
             Err(e) => {
-                // Tell the new laptop to drop what it has of this file.
                 let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
-                let retry =
-                    matches!(e, TransferError::ChangedWhileRead) && self.budget.try_again_later();
-                send(
-                    ch,
-                    &Message::EndFile {
-                        stream,
-                        stamp_after: stamp,
-                        changed: true,
-                    },
-                )
-                .await?;
-                self.scheduler.finished(job.item);
-                let later = drive && self.read_failed(stream);
-                self.states[i] = SendState::Ended {
-                    retry,
-                    failure: (!retry && !later).then(|| e.to_string()),
-                    later,
+                self.scheduler.finished(j.item);
+                self.states[job] = if drive && self.read_failed(job) {
+                    // One more try after everything else.
+                    self.later.push(job);
+                    SendState::Waiting
+                } else {
+                    SendState::Done(SendOutcome::Failed(e.to_string()))
                 };
-                Ok(true)
             }
         }
     }
 
-    fn answer(&mut self, m: Message, in_flight: &mut VecDeque<u64>) -> Result<(), TransferError> {
+    /// Gives `job` a new stream when it is opened again, so nothing of an earlier attempt can
+    /// land in this one.
+    fn new_stream(&mut self, job: usize) {
+        if !self.attempted.insert(job) {
+            self.job_of.remove(&self.streams[job]);
+            let stream = self.next_stream;
+            self.next_stream = self.next_stream.saturating_add(1);
+            self.streams[job] = stream;
+            self.job_of.insert(stream, job);
+        }
+    }
+
+    /// Every block of `job` is confirmed: its end, after checking it did not change while read.
+    fn end(&mut self, job: usize, reader: FileSender) -> Message {
+        let stream = self.streams[job];
+        let stamp = reader.header().stamp;
+        self.scheduler.finished(self.jobs[job].item);
+        match reader.finish() {
+            Ok(trailer) => {
+                // On a weak drive each file is read only once: a file that changed is not read again.
+                let changed = trailer.changed_while_read();
+                let again = changed && self.budget.try_again_later();
+                self.states[job] = SendState::Ended {
+                    retry: again,
+                    failure: (changed && !again).then(|| "it changed while being read".to_string()),
+                    later: false,
+                };
+                Message::EndFile {
+                    stream,
+                    stamp_after: trailer.stamp_after,
+                    changed,
+                }
+            }
+            Err(e) => {
+                self.states[job] = SendState::Ended {
+                    retry: false,
+                    failure: Some(e.to_string()),
+                    later: false,
+                };
+                Message::EndFile {
+                    stream,
+                    stamp_after: stamp,
+                    changed: true,
+                }
+            }
+        }
+    }
+
+    /// The next block for `lane`: from the most important file in flight that has one for it
+    /// (a section this lane holds, a part no lane holds, or the back half of a big section).
+    fn work(&mut self, lane: usize) -> Work {
+        if self.budget.stopped() || self.in_flight >= self.in_flight_limit {
+            return Work::Wait;
+        }
+        let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
+        for item in self.scheduler.in_flight() {
+            let job = self.by_item[&item];
+            let stream = self.streams[job];
+            let SendState::Open {
+                reader,
+                sections,
+                cleared: true,
+                ..
+            } = &mut self.states[job]
+            else {
+                continue;
+            };
+            let next = sections.next_block(lane_no).or_else(|| {
+                sections.claim(lane_no)?;
+                sections.next_block(lane_no)
+            });
+            let Some(b) = next else {
+                continue;
+            };
+            match reader.block_at(u64::from(b)) {
+                Ok(block) => {
+                    self.budget.read_ok();
+                    let wire = block.encode();
+                    let bytes = wire.len() as u64;
+                    self.lanes[lane].push_back((stream, b, bytes));
+                    self.in_flight += bytes;
+                    self.blocks_sent += 1;
+                    return Work::Send { stream, wire };
+                }
+                Err(e) => self.read_error(job, e),
+            }
+        }
+        Work::Wait
+    }
+
+    /// A block of `job` could not be read: tell the new laptop to drop what it has of it.
+    fn read_error(&mut self, job: usize, e: TransferError) {
+        self.dirty = true;
+        let SendState::Open { reader, .. } = &self.states[job] else {
+            return;
+        };
+        let stamp = reader.header().stamp;
+        let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
+        let retry = matches!(e, TransferError::ChangedWhileRead) && self.budget.try_again_later();
+        self.ends.push(Message::EndFile {
+            stream: self.streams[job],
+            stamp_after: stamp,
+            changed: true,
+        });
+        self.scheduler.finished(self.jobs[job].item);
+        // Ended first, so stopping reading (if this was one error too many) leaves it be.
+        self.states[job] = SendState::Ended {
+            retry,
+            failure: None,
+            later: false,
+        };
+        let later = drive && self.read_failed(job);
+        self.states[job] = SendState::Ended {
+            retry,
+            failure: (!retry && !later).then(|| e.to_string()),
+            later,
+        };
+    }
+
+    /// Whether ends or skips are waiting to go on the main connection.
+    fn has_control(&self) -> bool {
+        !self.ends.is_empty() || !self.skips.is_empty()
+    }
+
+    fn take_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
+    }
+
+    /// Whether a reply is owed on the main connection: an answer to a start or an end, or a
+    /// receipt for a block it carried.
+    fn awaiting_main(&self) -> bool {
+        !self.lanes[0].is_empty()
+            || self.states.iter().any(|s| {
+                matches!(
+                    s,
+                    SendState::Open {
+                        announced: true,
+                        cleared: false,
+                        ..
+                    } | SendState::Ended { .. }
+                )
+            })
+    }
+
+    /// Every file answered for, nothing in flight, and nothing left to try again.
+    fn all_done(&self) -> bool {
+        self.in_flight == 0
+            && self.ends.is_empty()
+            && self.skips.is_empty()
+            && self.states.iter().all(|s| matches!(s, SendState::Done(_)))
+    }
+
+    /// Handles a message from the new laptop on `lane`. Extra lanes carry only receipts.
+    fn answer(&mut self, lane: usize, m: Message) -> Result<(), TransferError> {
         match m {
             Message::Receipt { .. } => {
-                in_flight.pop_front();
-                Ok(())
-            }
-            Message::FileDone { stream, ok } => {
-                self.done(stream, ok);
-                Ok(())
-            }
-            Message::Have { stream, same_size } => {
-                let i = stream as usize;
-                let source = self.jobs.get(i).map(|j| j.source.clone());
-                if let (Some(SendState::Open { cleared, .. }), Some(source)) =
-                    (self.states.get_mut(i), source)
+                let (stream, block, bytes) = self.lanes[lane]
+                    .pop_front()
+                    .ok_or_else(|| protocol("a receipt for nothing sent"))?;
+                self.in_flight -= bytes;
+                // Only the current attempt counts; a receipt for an earlier one frees room only.
+                if let Some(&job) = self.job_of.get(&stream)
+                    && let SendState::Open { sections, .. } = &mut self.states[job]
                 {
+                    let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
+                    // In order per lane, as sent; a mismatch can only mean the new laptop
+                    // failed the file, which it reports when the file ends.
+                    let _ = sections.confirmed(lane_no, block);
+                }
+                Ok(())
+            }
+            Message::FileDone { stream, ok } if lane == 0 => {
+                if let Some(&job) = self.job_of.get(&stream) {
+                    self.done(job, ok);
+                }
+                Ok(())
+            }
+            Message::Have { stream, same_size } if lane == 0 => {
+                let Some(&job) = self.job_of.get(&stream) else {
+                    return Ok(());
+                };
+                let source = self.jobs[job].source.clone();
+                if let SendState::Open { cleared, .. } = &mut self.states[job] {
                     let identical = same_size
                         .is_some_and(|theirs| hash_file(&source).is_ok_and(|mine| mine == theirs));
                     if identical {
-                        self.skips.push(stream);
+                        self.skips.push(job);
                     } else {
                         *cleared = true;
                     }
@@ -473,46 +734,70 @@ impl SenderSession {
         }
     }
 
-    /// Counts a drive read error for `stream`. Returns true when the file gets one more try after
+    /// `lane` dropped: what it sent and was not confirmed goes back to be sent on the others.
+    fn lane_lost(&mut self, lane: usize) {
+        let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
+        for (_, _, bytes) in self.lanes[lane].drain(..) {
+            self.in_flight -= bytes;
+        }
+        for state in &mut self.states {
+            if let SendState::Open { sections, .. } = state {
+                sections.lane_lost(lane_no);
+            }
+        }
+    }
+
+    /// Counts a drive read error for `job`. Returns true when the file gets one more try after
     /// everything else; when errors come in a row, stops reading altogether.
-    fn read_failed(&mut self, stream: u32) -> bool {
+    fn read_failed(&mut self, job: usize) -> bool {
         if self.budget.read_failed() {
             self.stop_reading();
             return false;
         }
-        self.budget.try_again_later() && !self.retried.contains(&stream)
+        self.budget.try_again_later() && !self.retried.contains(&job)
     }
 
     /// The drive keeps failing: read nothing more. Files not yet read are reported as such, and
     /// files half-sent are dropped on the new laptop.
     fn stop_reading(&mut self) {
+        self.dirty = true;
         self.scheduler = Scheduler::new(self.capacity);
         self.later.clear();
-        for (i, state) in self.states.iter_mut().enumerate() {
+        for (job, state) in self.states.iter_mut().enumerate() {
             match state {
                 SendState::Waiting => *state = SendState::Done(SendOutcome::Failed(STOPPED.into())),
-                SendState::Open { announced, .. } => {
-                    if *announced {
-                        self.aborts.push(u32::try_from(i).unwrap_or(u32::MAX));
-                    } else {
-                        *state = SendState::Done(SendOutcome::Failed(STOPPED.into()));
-                    }
+                SendState::Open {
+                    announced: true,
+                    reader,
+                    ..
+                } => {
+                    self.ends.push(Message::EndFile {
+                        stream: self.streams[job],
+                        stamp_after: reader.header().stamp,
+                        changed: true,
+                    });
+                    *state = SendState::Ended {
+                        retry: false,
+                        failure: Some(STOPPED.into()),
+                        later: false,
+                    };
+                }
+                SendState::Open { .. } => {
+                    *state = SendState::Done(SendOutcome::Failed(STOPPED.into()));
                 }
                 _ => {}
             }
         }
     }
 
-    fn done(&mut self, stream: u32, ok: bool) {
-        let i = stream as usize;
-        let Some(job) = self.jobs.get(i) else { return };
-        let item = job.item;
-        let tier = job.tier;
-        let state = std::mem::replace(&mut self.states[i], SendState::Waiting);
-        self.states[i] = match (state, ok) {
+    fn done(&mut self, job: usize, ok: bool) {
+        let item = self.jobs[job].item;
+        let tier = self.jobs[job].tier;
+        let state = std::mem::replace(&mut self.states[job], SendState::Waiting);
+        self.states[job] = match (state, ok) {
             (SendState::Ended { later: true, .. }, _) => {
                 // It could not be read: one more try after everything else.
-                self.later.push(stream);
+                self.later.push(job);
                 SendState::Waiting
             }
             (SendState::Ended { failure: None, .. }, true) => SendState::Done(SendOutcome::Arrived),
@@ -537,6 +822,13 @@ impl SenderSession {
             }
         };
     }
+}
+
+/// The section plan for a file, with blocks already done marked; `None` for a file with more
+/// blocks than a plan can count (far past any real file).
+fn sections_for(header: &crate::Header, done: &[bool]) -> Option<FileSections> {
+    let blocks = u32::try_from(header.block_count).ok()?;
+    Some(FileSections::new(blocks, header.block_size, done))
 }
 
 /// The BLAKE3 fingerprint of a whole file.

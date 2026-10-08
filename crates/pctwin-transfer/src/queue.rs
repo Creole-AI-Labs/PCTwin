@@ -158,12 +158,7 @@ impl Scheduler {
 
     /// The file whose next piece goes now, or `None` when everything is done.
     pub fn next_turn(&mut self) -> Option<ItemId> {
-        while !self.waiting.is_empty()
-            && (self.active.len() < self.capacity || self.waiting[0].1 < self.best_active())
-        {
-            let next = self.waiting.remove(0);
-            self.active.push(next);
-        }
+        self.promote();
         let best = self.best_active();
         let candidates: Vec<ItemId> = self
             .active
@@ -177,6 +172,45 @@ impl Scheduler {
         let pick = candidates[self.turn % candidates.len()];
         self.turn = self.turn.wrapping_add(1);
         Some(pick)
+    }
+
+    /// Every file in flight, most important first. Files equally important take turns at the
+    /// front, so free lanes spread over them; a more important file joins at once.
+    pub fn in_flight(&mut self) -> Vec<ItemId> {
+        self.promote();
+        let mut active = self.active.clone();
+        // Stable: equally important files keep their order before turning.
+        active.sort_by_key(|(_, tier)| *tier);
+        let mut out = Vec::with_capacity(active.len());
+        let mut start = 0;
+        while start < active.len() {
+            let tier = active[start].1;
+            let end = active[start..]
+                .iter()
+                .position(|(_, t)| *t != tier)
+                .map_or(active.len(), |k| start + k);
+            let group = &active[start..end];
+            let first = self.turn % group.len();
+            out.extend(
+                group[first..]
+                    .iter()
+                    .chain(&group[..first])
+                    .map(|(i, _)| *i),
+            );
+            start = end;
+        }
+        self.turn = self.turn.wrapping_add(1);
+        out
+    }
+
+    /// Brings waiting files in flight: up to the capacity, and a more important file at once.
+    fn promote(&mut self) {
+        while !self.waiting.is_empty()
+            && (self.active.len() < self.capacity || self.waiting[0].1 < self.best_active())
+        {
+            let next = self.waiting.remove(0);
+            self.active.push(next);
+        }
     }
 
     /// The file is fully sent (or given up on).
