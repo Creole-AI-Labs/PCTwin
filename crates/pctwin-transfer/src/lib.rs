@@ -25,14 +25,18 @@
 //! - [`landing_for`] decides where each item goes: the new laptop's own folder for its role,
 //!   a "from your old laptop" folder when it has none, or left to the cloud service both laptops
 //!   use for that folder.
+//! - [`LaneTuner`] decides how many lanes (connections, up to [`MAX_LANES`]) a move uses: one more
+//!   only while total speed rises by at least 10%, looked at again when the network changes.
 
 mod landing;
+mod lanes;
 mod message;
 mod queue;
 mod reading;
 mod session;
 
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
+pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
