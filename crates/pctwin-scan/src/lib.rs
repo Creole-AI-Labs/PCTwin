@@ -63,6 +63,7 @@ pub use people::{
 pub use scan::{Counts, Scan, Stamp, scan_folder};
 pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
 pub use usage::{
-    Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials, read_usage,
-    recent_from_lnk_dir, recent_from_mdfind, recent_from_xbel,
+    Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials,
+    pinned_from_finder_favourites, pinned_from_quick_access, read_usage, recent_from_lnk_dir,
+    recent_from_mdfind, recent_from_xbel,
 };

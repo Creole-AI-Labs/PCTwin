@@ -18,8 +18,9 @@ pub struct Usage {
     pub pinned: Vec<PathBuf>,
 }
 
-/// Reads the signed-in person's usage records: Windows Recent Items; macOS Spotlight's
-/// last-opened dates; Linux's recently-used list and file-manager bookmarks. Anything missing or
+/// Reads the signed-in person's usage records: Windows Recent Items and Quick Access pins;
+/// macOS Spotlight's last-opened dates and Finder favourites; Linux's recently-used list and
+/// file-manager bookmarks. Anything missing or
 /// switched off simply gives nothing.
 pub fn read_usage(home: &Path) -> Usage {
     let mut usage = Usage::default();
@@ -27,6 +28,11 @@ pub fn read_usage(home: &Path) -> Usage {
         if let Some(appdata) = std::env::var_os("APPDATA") {
             let dir = PathBuf::from(appdata).join(r"Microsoft\Windows\Recent");
             usage.recent = recent_from_lnk_dir(&dir);
+            let quick =
+                dir.join(r"AutomaticDestinations\f01b4d95cf55d32a.automaticDestinations-ms");
+            if let Ok(bytes) = std::fs::read(quick) {
+                usage.pinned = pinned_from_quick_access(&bytes);
+            }
         }
     } else if cfg!(target_os = "macos") {
         let out = std::process::Command::new("mdfind")
@@ -40,6 +46,15 @@ pub fn read_usage(home: &Path) -> Usage {
             .into_iter()
             .map(|p| (p, None))
             .collect();
+        let lists = home.join("Library/Application Support/com.apple.sharedfilelist");
+        let favourites = ["sfl3", "sfl2"]
+            .iter()
+            .find_map(|ext| {
+                std::fs::read(lists.join(format!("com.apple.LSSharedFileList.FavoriteItems.{ext}")))
+                    .ok()
+            })
+            .unwrap_or_default();
+        usage.pinned = pinned_from_finder_favourites(&favourites);
     } else {
         let data = std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -247,4 +262,162 @@ pub fn personal_essentials(
         }
     }
     out
+}
+
+/// Most entries read from a Quick Access list (it holds a few hundred at most).
+const MAX_DEST_ENTRIES: u32 = 10_000;
+
+/// Windows: the folders pinned to Quick Access, in their pinned order. They are kept in the jump
+/// list `f01b4d95cf55d32a.automaticDestinations-ms`: a compound file whose `DestList` stream has
+/// one entry per item, each with a pin status (-1 for a recent item, else its place among the
+/// pinned) and its path (layout as documented by libyal's dtformats). Anything damaged gives
+/// nothing.
+pub fn pinned_from_quick_access(bytes: &[u8]) -> Vec<PathBuf> {
+    let Ok(mut file) = cfb::CompoundFile::open(std::io::Cursor::new(bytes)) else {
+        return Vec::new();
+    };
+    let mut list = Vec::new();
+    let read = file
+        .open_stream("DestList")
+        .and_then(|mut s| std::io::Read::read_to_end(&mut s, &mut list));
+    if read.is_err() {
+        return Vec::new();
+    }
+    pinned_in_destlist(&list)
+}
+
+fn pinned_in_destlist(d: &[u8]) -> Vec<PathBuf> {
+    let le32 = |at: usize| -> Option<u32> {
+        d.get(at..at.checked_add(4)?)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+    };
+    let (Some(version), Some(count)) = (le32(0), le32(4)) else {
+        return Vec::new();
+    };
+    // Version 1 entries are 114 bytes before the path; later ones 130, with 4 more after it.
+    let (fixed, trailing) = if version >= 2 { (130, 4) } else { (114, 0) };
+    let mut pinned: Vec<(u32, PathBuf)> = Vec::new();
+    let mut at = 32usize;
+    for _ in 0..count.min(MAX_DEST_ENTRIES) {
+        let Some(entry) = at.checked_add(fixed).and_then(|end| d.get(at..end)) else {
+            break;
+        };
+        let pin = i32::from_le_bytes([entry[108], entry[109], entry[110], entry[111]]);
+        let chars = usize::from(u16::from_le_bytes([entry[fixed - 2], entry[fixed - 1]]));
+        let start = at + fixed;
+        let Some(raw) = start
+            .checked_add(chars * 2)
+            .and_then(|end| d.get(start..end))
+        else {
+            break;
+        };
+        let wide: Vec<u16> = raw
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes(*c))
+            .collect();
+        at = start + chars * 2 + trailing;
+        if let Ok(place) = u32::try_from(pin) {
+            pinned.push((place, path_from_wide(&wide)));
+        }
+    }
+    pinned.sort_by_key(|(place, _)| *place);
+    pinned.into_iter().map(|(_, p)| p).collect()
+}
+
+/// A Windows path as stored (UTF-16, which may hold unpaired surrogates), kept exact on Windows.
+fn path_from_wide(wide: &[u16]) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        PathBuf::from(std::ffi::OsString::from_wide(wide))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from(String::from_utf16_lossy(wide))
+    }
+}
+
+/// How deep a Finder favourites list is searched for bookmarks.
+const MAX_ARCHIVE_DEPTH: usize = 32;
+
+/// macOS: the folders in the Finder sidebar's Favourites. They are kept as bookmarks inside a
+/// keyed archive (`com.apple.LSSharedFileList.FavoriteItems.sfl3`, or `.sfl2` on older systems);
+/// each bookmark's path components are read (layout as documented by mac_alias). Anything damaged
+/// gives nothing.
+pub fn pinned_from_finder_favourites(bytes: &[u8]) -> Vec<PathBuf> {
+    let Ok(archive) = plist::Value::from_reader(std::io::Cursor::new(bytes)) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    collect_bookmarks(&archive, 0, &mut found);
+    found
+}
+
+fn collect_bookmarks(value: &plist::Value, depth: usize, found: &mut Vec<PathBuf>) {
+    if depth > MAX_ARCHIVE_DEPTH {
+        return;
+    }
+    match value {
+        plist::Value::Data(d) if d.starts_with(b"book") => {
+            if let Some(path) = bookmark_path(d) {
+                found.push(path);
+            }
+        }
+        plist::Value::Array(items) => {
+            for item in items {
+                collect_bookmarks(item, depth + 1, found);
+            }
+        }
+        plist::Value::Dictionary(map) => {
+            for item in map.values() {
+                collect_bookmarks(item, depth + 1, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The target path held in a bookmark: the array of path components under key 0x1004 in its first
+/// table of contents. Every offset is checked before it is used.
+fn bookmark_path(d: &[u8]) -> Option<PathBuf> {
+    let le32 = |at: usize| -> Option<usize> {
+        d.get(at..at.checked_add(4)?)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .and_then(|v| usize::try_from(v).ok())
+    };
+    // Offsets are from the end of the header, whose size is at byte 12.
+    let base = le32(12)?;
+    let toc = base.checked_add(le32(base)?)?;
+    if le32(toc.checked_add(4)?)? != 0xffff_fffe {
+        return None;
+    }
+    let count = le32(toc.checked_add(16)?)?.min(4096);
+    let path_record = (0..count).find_map(|i| {
+        let entry = toc.checked_add(20)?.checked_add(i.checked_mul(12)?)?;
+        (le32(entry)? == 0x1004).then(|| le32(entry + 4))?
+    })?;
+    let array = base.checked_add(path_record)?;
+    let (length, kind) = (le32(array)?, le32(array.checked_add(4)?)?);
+    if kind != 0x0601 {
+        return None;
+    }
+    let mut path = PathBuf::from("/");
+    for i in 0..(length / 4).min(256) {
+        let record = base.checked_add(le32(array.checked_add(8 + i * 4)?)?)?;
+        let (len, kind) = (le32(record)?, le32(record.checked_add(4)?)?);
+        if kind != 0x0101 {
+            return None;
+        }
+        let start = record.checked_add(8)?;
+        let text = std::str::from_utf8(d.get(start..start.checked_add(len)?)?).ok()?;
+        if text.is_empty() || text.contains('/') || text == ".." {
+            return None;
+        }
+        path.push(text);
+    }
+    Some(path)
 }

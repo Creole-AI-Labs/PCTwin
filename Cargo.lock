@@ -3206,9 +3206,12 @@ dependencies = [
 name = "pctwin-scan"
 version = "0.1.0"
 dependencies = [
+ "cfb",
  "dirs",
  "lnk",
  "pctwin-record",
+ "plist",
+ "proptest",
  "roxmltree",
  "serde",
  "serde_json",
