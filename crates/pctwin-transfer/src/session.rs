@@ -94,7 +94,8 @@ enum SendState {
     Open {
         reader: FileSender,
         announced: bool,
-        from_block: u64,
+        /// How many blocks the new laptop's resume ticket said it had (0 for a fresh start).
+        resumed_done: u64,
         /// The new laptop answered the start (nothing identical there), so blocks may go.
         cleared: bool,
     },
@@ -300,7 +301,7 @@ impl SenderSession {
                     .map(|reader| SendState::Open {
                         reader,
                         announced: false,
-                        from_block: ticket.next_block,
+                        resumed_done: ticket.done.done_count(),
                         cleared: false,
                     })
             });
@@ -327,7 +328,7 @@ impl SenderSession {
                     self.states[i] = SendState::Open {
                         reader,
                         announced: false,
-                        from_block: 0,
+                        resumed_done: 0,
                         cleared: false,
                     }
                 }
@@ -348,7 +349,7 @@ impl SenderSession {
         let SendState::Open {
             reader,
             announced,
-            from_block,
+            resumed_done,
             cleared,
         } = &mut self.states[i]
         else {
@@ -364,7 +365,7 @@ impl SenderSession {
                     destination: job.destination.clone(),
                     path: job.path.clone(),
                     header: reader.header().clone(),
-                    from_block: *from_block,
+                    resumed_done: *resumed_done,
                 },
             )
             .await?;
@@ -608,10 +609,7 @@ impl<'d> ReceiverSession<'d> {
         self.streams
             .values()
             .filter(|s| {
-                s.failure.is_none()
-                    && s.assembly
-                        .as_ref()
-                        .is_some_and(|a| a.resume_ticket().next_block > 0)
+                s.failure.is_none() && s.assembly.as_ref().is_some_and(|a| a.blocks_done() > 0)
             })
             .count() as u64
     }
@@ -659,15 +657,17 @@ impl<'d> ReceiverSession<'d> {
                     destination,
                     path,
                     header,
-                    from_block,
+                    resumed_done,
                 } => {
                     self.done.remove(&stream);
-                    let continuing = from_block > 0
+                    // The old laptop continues from this side's ticket, which never claims more
+                    // than is here (it may carry only the earliest runs).
+                    let continuing = resumed_done > 0
                         && self.streams.get(&stream).is_some_and(|s| {
                             s.item == item
                                 && s.assembly
                                     .as_ref()
-                                    .is_some_and(|a| a.resume_ticket().next_block == from_block)
+                                    .is_some_and(|a| resumed_done <= a.blocks_done())
                         });
                     if continuing {
                         self.continued += 1;
@@ -686,7 +686,7 @@ impl<'d> ReceiverSession<'d> {
                     let block_size = header.block_size;
                     let size = header.size;
                     let same = self.same_file(&destination, &path, size);
-                    let started = if from_block > 0 {
+                    let started = if resumed_done > 0 {
                         Err("the new laptop has no place to continue from".to_string())
                     } else {
                         self.start(&destination, &path, header)
@@ -727,17 +727,11 @@ impl<'d> ReceiverSession<'d> {
                     let Some(s) = self.streams.get_mut(&stream) else {
                         // Pieces of a file never started: nothing to keep, but still answered.
                         if last {
-                            send(
-                                ch,
-                                &Message::Receipt {
-                                    stream,
-                                    next_block: 0,
-                                },
-                            )
-                            .await?;
+                            send(ch, &Message::Receipt { stream, block: 0 }).await?;
                         }
                         continue;
                     };
+                    let mut written = 0;
                     match s.buffer.add(&bytes, last) {
                         Ok(Some(whole)) if s.failure.is_none() => {
                             let accepted = Block::decode(&whole, s.block_size).and_then(|b| {
@@ -746,10 +740,13 @@ impl<'d> ReceiverSession<'d> {
                                     .ok_or_else(|| protocol("no file open"))?
                                     .accept(b)
                             });
-                            if let Err(e) = accepted {
-                                s.failure = Some(e.to_string());
-                                // Dropping the assembly removes the partial file.
-                                s.assembly = None;
+                            match accepted {
+                                Ok(receipt) => written = receipt.block,
+                                Err(e) => {
+                                    s.failure = Some(e.to_string());
+                                    // Dropping the assembly removes the partial file.
+                                    s.assembly = None;
+                                }
                             }
                         }
                         Ok(_) => {}
@@ -759,11 +756,14 @@ impl<'d> ReceiverSession<'d> {
                         }
                     }
                     if last {
-                        let next_block = s
-                            .assembly
-                            .as_ref()
-                            .map_or(0, |a| a.resume_ticket().next_block);
-                        send(ch, &Message::Receipt { stream, next_block }).await?;
+                        send(
+                            ch,
+                            &Message::Receipt {
+                                stream,
+                                block: written,
+                            },
+                        )
+                        .await?;
                     }
                 }
                 Message::EndFile {

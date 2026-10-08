@@ -158,7 +158,7 @@ fn a_block_larger_than_announced_is_refused_however_it_is_packed() {
 }
 
 #[test]
-fn blocks_out_of_order_or_twice_are_refused_without_harm() {
+fn blocks_arrive_in_any_order_and_one_sent_twice_is_written_once() {
     let src = tempfile::tempdir().unwrap();
     let dst = tempfile::tempdir().unwrap();
     let bytes = mixed_content(400_000);
@@ -173,19 +173,44 @@ fn blocks_out_of_order_or_twice_are_refused_without_harm() {
     .unwrap();
     let b0 = sender.next_block().unwrap().unwrap();
     let b1 = sender.next_block().unwrap().unwrap();
-    assert!(matches!(
-        assembly.accept(b1.clone()),
-        Err(TransferError::OutOfOrder { .. })
-    ));
-    assert_eq!(assembly.accept(b0.clone()).unwrap().next_block, 1);
-    assert!(matches!(
-        assembly.accept(b0),
-        Err(TransferError::OutOfOrder { .. })
-    ));
-    assert_eq!(assembly.accept(b1).unwrap().next_block, 2);
+    // Sections on different lanes: block 1 may come first.
+    assert_eq!(assembly.accept(b1.clone()).unwrap().block, 1);
+    assert_eq!(assembly.accept(b0.clone()).unwrap().block, 0);
+    // Sent again (it was left off a resume message): confirmed, not written twice.
+    assert_eq!(assembly.accept(b0).unwrap().block, 0);
+    assert_eq!(assembly.resume_ticket().done.done_count(), 2);
     send_all(&mut sender, &mut assembly);
     assembly.finish(sender.finish().unwrap()).unwrap();
     assert_eq!(std::fs::read(dst.path().join("a.bin")).unwrap(), bytes);
+}
+
+#[test]
+fn a_block_outside_the_file_is_refused() {
+    let src = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir().unwrap();
+    let path = source(src.path(), "a.bin", &mixed_content(400_000));
+    let sender = FileSender::open(&path, None, true).unwrap();
+    let count = sender.header().block_count;
+    let dest = Destination::open(dst.path()).unwrap();
+    let mut assembly = Assembly::start(
+        &dest,
+        &IncomingPath::parse("a.bin").unwrap(),
+        sender.header().clone(),
+    )
+    .unwrap();
+    // A correctly fingerprinted block numbered just past the end.
+    let data = vec![7u8; 1000];
+    let mut wire = vec![1u8, 0];
+    wire.extend_from_slice(&count.to_be_bytes());
+    wire.extend_from_slice(&1000u32.to_be_bytes());
+    wire.extend_from_slice(blake3::hash(&data).as_bytes());
+    wire.extend_from_slice(&data);
+    let block = Block::decode(&wire, MIN_BLOCK).unwrap();
+    assert!(matches!(
+        assembly.accept(block),
+        Err(TransferError::Damaged(_))
+    ));
+    assert_eq!(assembly.resume_ticket().done.done_count(), 0);
 }
 
 #[test]
@@ -238,7 +263,7 @@ fn a_dropped_connection_resumes_from_the_exact_block() {
     drop(first); // the connection drops
 
     let ticket = assembly.resume_ticket();
-    assert_eq!(ticket.next_block, 3);
+    assert_eq!(ticket.done.done_count(), 3);
     let mut again = FileSender::open(&path, Some(&ticket), true).unwrap();
     let next = again.next_block().unwrap().unwrap();
     assert_eq!(next.index(), 3);
@@ -246,6 +271,71 @@ fn a_dropped_connection_resumes_from_the_exact_block() {
     send_all(&mut again, &mut assembly);
     assembly.finish(again.finish().unwrap()).unwrap();
     assert_eq!(std::fs::read(dst.path().join("big.bin")).unwrap(), bytes);
+}
+
+#[test]
+fn a_resume_sends_only_the_blocks_still_missing_wherever_they_are() {
+    let src = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir().unwrap();
+    let bytes = mixed_content(2 * 1024 * 1024);
+    let path = source(src.path(), "big.bin", &bytes);
+    let dest = Destination::open(dst.path()).unwrap();
+    let mut first = FileSender::open(&path, None, true).unwrap();
+    let count = first.header().block_count;
+    assert!(count >= 10);
+    let mut assembly = Assembly::start(
+        &dest,
+        &IncomingPath::parse("big.bin").unwrap(),
+        first.header().clone(),
+    )
+    .unwrap();
+    // Two sections were under way: blocks 0 to 2, and 6 and 7.
+    let all: Vec<Block> = std::iter::from_fn(|| first.next_block().unwrap()).collect();
+    for b in [0, 1, 2, 6, 7] {
+        assembly.accept(all[b].clone()).unwrap();
+    }
+    drop(first);
+    let ticket = assembly.resume_ticket();
+    let mut again = FileSender::open(&path, Some(&ticket), true).unwrap();
+    let mut sent = Vec::new();
+    while let Some(b) = again.next_block().unwrap() {
+        sent.push(b.index());
+        assembly.accept(b).unwrap();
+    }
+    let expected: Vec<u64> = (3..6).chain(8..count).collect();
+    assert_eq!(sent, expected);
+    assembly.finish(again.finish().unwrap()).unwrap();
+    assert_eq!(std::fs::read(dst.path().join("big.bin")).unwrap(), bytes);
+}
+
+#[test]
+fn a_resume_ticket_that_does_not_fit_the_file_is_refused_without_crashing() {
+    let src = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir().unwrap();
+    let path = source(src.path(), "big.bin", &mixed_content(1024 * 1024));
+    let dest = Destination::open(dst.path()).unwrap();
+    let first = FileSender::open(&path, None, true).unwrap();
+    let assembly = Assembly::start(
+        &dest,
+        &IncomingPath::parse("big.bin").unwrap(),
+        first.header().clone(),
+    )
+    .unwrap();
+    let good = assembly.resume_ticket();
+    // The old laptop decides the block size itself; a ticket naming another is refused.
+    for block_size in [0, 1, good.block_size / 2, good.block_size * 2, u64::MAX] {
+        let mut t = good.clone();
+        t.block_size = block_size;
+        assert!(
+            FileSender::open(&path, Some(&t), true).is_err(),
+            "{block_size}"
+        );
+    }
+    // A map for a different number of blocks.
+    let mut t = good.clone();
+    t.done = pctwin_transfer::BlockMap::new(good.done.count() + 1);
+    assert!(FileSender::open(&path, Some(&t), true).is_err());
+    assert!(FileSender::open(&path, Some(&good), true).is_ok());
 }
 
 #[test]
@@ -369,5 +459,5 @@ fn a_genuine_block_of_the_wrong_length_for_its_place_is_refused() {
         assembly.accept(block),
         Err(TransferError::Damaged(_))
     ));
-    assert_eq!(assembly.resume_ticket().next_block, 0);
+    assert_eq!(assembly.resume_ticket().done.done_count(), 0);
 }

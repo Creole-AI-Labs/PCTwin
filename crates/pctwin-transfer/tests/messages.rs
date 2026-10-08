@@ -4,8 +4,8 @@
 
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    Header, MAX_BLOCK, Message, PIECE_MAX, PieceBuffer, ResumeTicket, Stamp, TransferError,
-    split_into_pieces,
+    BlockMap, Header, MAX_BLOCK, Message, PIECE_MAX, PieceBuffer, ResumeTicket, Stamp,
+    TransferError, split_into_pieces,
 };
 
 fn id() -> ItemId {
@@ -17,6 +17,15 @@ fn stamp() -> Stamp {
         size: 5_000_000,
         modified_ns: Some(1_800_000_000_123_456_789),
     }
+}
+
+/// A file of 39 blocks with 0 to 11 and 20 done.
+fn map() -> BlockMap {
+    let mut m = BlockMap::new(39);
+    for b in (0..12).chain(20..21) {
+        m.insert(b).unwrap();
+    }
+    m
 }
 
 fn all_kinds() -> Vec<Message> {
@@ -32,7 +41,7 @@ fn all_kinds() -> Vec<Message> {
                 block_count: 39,
                 stamp: stamp(),
             },
-            from_block: 0,
+            resumed_done: 0,
         },
         Message::Piece {
             stream: 7,
@@ -54,12 +63,12 @@ fn all_kinds() -> Vec<Message> {
         },
         Message::Receipt {
             stream: 7,
-            next_block: 12,
+            block: 12,
         },
         Message::ResumeFrom {
             stream: 7,
             ticket: ResumeTicket {
-                next_block: 12,
+                done: map(),
                 block_size: 131_072,
                 stamp: stamp(),
             },
@@ -89,6 +98,25 @@ fn every_message_survives_the_trip() {
         assert!(wire.len() <= u16::MAX as usize);
         assert_eq!(Message::decode(&wire).unwrap(), m);
     }
+}
+
+#[test]
+fn the_most_scattered_resume_message_fits_the_link() {
+    let mut m = BlockMap::new(1 << 20);
+    for b in (0..1 << 20).step_by(2) {
+        m.insert(b).unwrap();
+    }
+    let wire = Message::ResumeFrom {
+        stream: 7,
+        ticket: ResumeTicket {
+            done: m,
+            block_size: 131_072,
+            stamp: stamp(),
+        },
+    }
+    .encode();
+    assert!(wire.len() <= 60 * 1024, "{}", wire.len());
+    assert!(Message::decode(&wire).is_ok());
 }
 
 #[test]
@@ -159,7 +187,7 @@ fn paths_and_labels_must_be_text_within_limits() {
             block_count: 0,
             stamp: stamp(),
         },
-        from_block: 0,
+        resumed_done: 0,
     };
     assert!(Message::decode(&start("me", "a".repeat(4096)).encode()).is_ok());
     assert!(Message::decode(&start("me", "a".repeat(4097)).encode()).is_err());

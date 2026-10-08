@@ -1,6 +1,6 @@
 use pctwin_record::ItemId;
 
-use crate::{Header, MAX_BLOCK, ResumeTicket, Stamp, TransferError};
+use crate::{BlockMap, Header, MAX_BLOCK, ResumeTicket, Stamp, TransferError};
 
 /// The largest piece of a block in one link message, leaving room for the message's own fields
 /// within the link's 64 KiB limit.
@@ -15,7 +15,8 @@ const MAX_WIRE_BLOCK: usize = 46 + MAX_BLOCK as usize;
 /// One message of a transfer. `stream` tells files in flight apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
-    /// Sender: a file starts (or continues, from `from_block`).
+    /// Sender: a file starts, or continues after a drop (`resumed_done` is how many blocks the
+    /// new laptop's resume ticket said it had; 0 for a fresh start).
     StartFile {
         stream: u32,
         item: ItemId,
@@ -24,7 +25,7 @@ pub enum Message {
         /// The path inside that destination.
         path: String,
         header: Header,
-        from_block: u64,
+        resumed_done: u64,
     },
     /// Sender: part of a block; `last` ends the block.
     Piece {
@@ -38,8 +39,8 @@ pub enum Message {
         stamp_after: Stamp,
         changed: bool,
     },
-    /// Receiver: the next block wanted.
-    Receipt { stream: u32, next_block: u64 },
+    /// Receiver: this block is written.
+    Receipt { stream: u32, block: u64 },
     /// Receiver, after a new connection: continue this file from here.
     ResumeFrom { stream: u32, ticket: ResumeTicket },
     /// Receiver: the file is finished under its real name (`ok`), or was not.
@@ -80,13 +81,13 @@ impl Message {
                 destination,
                 path,
                 header,
-                from_block,
+                resumed_done,
             } => {
                 w.push(START);
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.extend_from_slice(&item_bytes(item));
                 put_header(&mut w, header);
-                w.extend_from_slice(&from_block.to_be_bytes());
+                w.extend_from_slice(&resumed_done.to_be_bytes());
                 put_text(&mut w, destination);
                 put_text(&mut w, path);
             }
@@ -110,17 +111,20 @@ impl Message {
                 put_stamp(&mut w, stamp_after);
                 w.push(u8::from(*changed));
             }
-            Message::Receipt { stream, next_block } => {
+            Message::Receipt { stream, block } => {
                 w.push(RECEIPT);
                 w.extend_from_slice(&stream.to_be_bytes());
-                w.extend_from_slice(&next_block.to_be_bytes());
+                w.extend_from_slice(&block.to_be_bytes());
             }
             Message::ResumeFrom { stream, ticket } => {
                 w.push(RESUME);
                 w.extend_from_slice(&stream.to_be_bytes());
-                w.extend_from_slice(&ticket.next_block.to_be_bytes());
                 w.extend_from_slice(&ticket.block_size.to_be_bytes());
                 put_stamp(&mut w, &ticket.stamp);
+                let map = ticket.done.encode();
+                // A map's wire form is at most a few tens of KiB, which fits in a u32.
+                w.extend_from_slice(&u32::try_from(map.len()).unwrap_or(u32::MAX).to_be_bytes());
+                w.extend_from_slice(&map);
             }
             Message::FileDone { stream, ok } => {
                 w.push(DONE);
@@ -164,7 +168,7 @@ impl Message {
             START => {
                 let item = r.item()?;
                 let header = r.header()?;
-                let from_block = r.u64()?;
+                let resumed_done = r.u64()?;
                 let destination = r.text(MAX_LABEL)?;
                 let path = r.text(MAX_PATH)?;
                 Message::StartFile {
@@ -173,7 +177,7 @@ impl Message {
                     destination,
                     path,
                     header,
-                    from_block,
+                    resumed_done,
                 }
             }
             PIECE => {
@@ -195,14 +199,14 @@ impl Message {
             },
             RECEIPT => Message::Receipt {
                 stream,
-                next_block: r.u64()?,
+                block: r.u64()?,
             },
             RESUME => Message::ResumeFrom {
                 stream,
                 ticket: ResumeTicket {
-                    next_block: r.u64()?,
                     block_size: r.u64()?,
                     stamp: r.stamp()?,
+                    done: r.map()?,
                 },
             },
             DONE => Message::FileDone {
@@ -377,6 +381,12 @@ impl<'a> Reader<'a> {
             block_count: self.u64()?,
             stamp: self.stamp()?,
         })
+    }
+
+    fn map(&mut self) -> Result<BlockMap, TransferError> {
+        // The map's own reader refuses more runs than a ticket carries.
+        let len = self.u32()? as usize;
+        BlockMap::decode(self.take(len)?)
     }
 
     fn text(&mut self, max: usize) -> Result<String, TransferError> {

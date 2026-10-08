@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use pctwin_gate::{Approved, Destinations};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    Channel, ChannelError, Message, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
-    SenderSession, Tier, block_size_for,
+    Block, Channel, ChannelError, FileSender, Header, Message, ReceiveOutcome, ReceiverSession,
+    SendJob, SendOutcome, SenderSession, Tier, block_size_for, split_into_pieces,
 };
 use tokio::sync::{Mutex, mpsc};
 
@@ -519,4 +519,134 @@ async fn a_file_removed_soon_after_copying_is_reported_not_copied() {
     ));
     // Checking again finds nothing new.
     assert!(r.recheck().is_empty());
+}
+
+/// The test plays the old laptop itself, sending exactly the messages it chooses.
+async fn say(ch: &mut Mem, m: &Message) {
+    ch.send(&m.encode()).await.unwrap();
+}
+
+async fn hear(ch: &mut Mem) -> Message {
+    Message::decode(&ch.recv().await.unwrap()).unwrap()
+}
+
+/// A new laptop that received blocks 2, 0 and 1 of the big file (in that order, as sections over
+/// lanes may arrive) before the connection dropped. Each receipt names the block just written.
+async fn three_blocks_then_a_drop<'d>(
+    l: &Laptops,
+    table: &'d Destinations,
+) -> (ReceiverSession<'d>, Header, Vec<Block>) {
+    let mut receiver = ReceiverSession::new(table);
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &start(&header, 0, id(2))).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 0, .. }
+        ));
+        for b in [2usize, 0, 1] {
+            for piece in split_into_pieces(0, &blocks[b].encode()) {
+                say(&mut old, &piece).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::Receipt {
+                    stream: 0,
+                    block: b as u64
+                }
+            );
+        }
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    assert!(r.is_err(), "the connection dropped");
+    (receiver, header, blocks)
+}
+
+fn start(header: &Header, resumed_done: u64, item: ItemId) -> Message {
+    Message::StartFile {
+        stream: 0,
+        item,
+        destination: "me".into(),
+        path: "Videos/big.bin".into(),
+        header: header.clone(),
+        resumed_done,
+    }
+}
+
+/// On the next connection the old laptop asks to continue: the new laptop says what it has, then
+/// answers the start. Returns that answer.
+async fn continue_with(
+    receiver: &mut ReceiverSession<'_>,
+    header: &Header,
+    claim: Message,
+) -> Message {
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        match hear(&mut old).await {
+            Message::ResumeFrom { stream: 0, ticket } => {
+                assert_eq!(ticket.done.done_count(), 3);
+                assert!((0..3).all(|b| ticket.done.contains(b)));
+                assert_eq!(ticket.block_size, header.block_size);
+            }
+            other => panic!("expected the resume ticket, got {other:?}"),
+        }
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &claim).await;
+        let answer = hear(&mut old).await;
+        old.cut.store(true, Ordering::SeqCst);
+        answer
+    };
+    let (answer, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    answer
+}
+
+#[tokio::test]
+async fn an_old_laptop_continues_only_a_file_that_matches_what_is_here() {
+    let l = laptops();
+    let table = table(&l);
+    let failed = Message::FileDone {
+        stream: 0,
+        ok: false,
+    };
+    // Honest: the same file, continuing from what the ticket said.
+    let (mut r, header, _) = three_blocks_then_a_drop(&l, &table).await;
+    let answer = continue_with(&mut r, &header, start(&header, 3, id(2))).await;
+    assert!(
+        matches!(
+            answer,
+            Message::Have {
+                stream: 0,
+                same_size: None
+            }
+        ),
+        "{answer:?}"
+    );
+    assert_eq!(r.continued(), 1);
+    // Claiming more blocks than are here: not continued.
+    let (mut r, header, _) = three_blocks_then_a_drop(&l, &table).await;
+    assert_eq!(
+        continue_with(&mut r, &header, start(&header, 1000, id(2))).await,
+        failed
+    );
+    assert_eq!(r.continued(), 0);
+    // Continuing under this stream, but for another file: not continued.
+    let (mut r, header, _) = three_blocks_then_a_drop(&l, &table).await;
+    assert_eq!(
+        continue_with(&mut r, &header, start(&header, 3, id(7))).await,
+        failed
+    );
+    assert_eq!(r.continued(), 0);
 }

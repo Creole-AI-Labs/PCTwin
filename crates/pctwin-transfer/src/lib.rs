@@ -54,7 +54,7 @@ pub use session::{
 };
 
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use pctwin_gate::{Destination, Finished, GateError, IncomingFile, IncomingPath};
@@ -159,18 +159,19 @@ impl Trailer {
     }
 }
 
-/// What the receiver has so far, so a new connection continues from the right block.
+/// What the receiver has so far, so a new connection sends only the blocks still missing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResumeTicket {
-    pub next_block: u64,
+    /// The blocks already written (possibly only the earliest runs: see [`MAX_TICKET_RUNS`]).
+    pub done: BlockMap,
     pub block_size: u64,
     pub stamp: Stamp,
 }
 
-/// The receiver's answer to each block.
+/// The receiver's answer to each block: this block is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Receipt {
-    pub next_block: u64,
+    pub block: u64,
 }
 
 /// One block of a file, with the fingerprint of its contents.
@@ -286,11 +287,13 @@ impl Opener for FsOpener {
     }
 }
 
-/// Reads one file once, in order, as blocks.
+/// Reads one file once, in order, as blocks, skipping blocks the receiver already has.
 pub struct FileSender {
     file: Box<dyn Source>,
     header: Header,
     next: u64,
+    /// Blocks the receiver already has (from a resume ticket).
+    skip: BlockMap,
     compressible: bool,
     changed: bool,
 }
@@ -316,25 +319,33 @@ impl FileSender {
     ) -> Result<Self, TransferError> {
         let mut file = opener.open(path)?;
         let stamp = file.stamp()?;
-        let (block_size, next) = match resume {
+        // The block size is always this laptop's own choice, never taken from the ticket.
+        let block_size = block_size_for(stamp.size);
+        let block_count = stamp.size.div_ceil(block_size);
+        let skip = match resume {
             Some(ticket) => {
                 if ticket.stamp != stamp {
                     return Err(TransferError::ChangedSince);
                 }
-                file.seek(SeekFrom::Start(ticket.next_block * ticket.block_size))?;
-                (ticket.block_size, ticket.next_block)
+                if ticket.block_size != block_size || ticket.done.count() != block_count {
+                    return Err(TransferError::Damaged(
+                        "the resume ticket does not fit the file".into(),
+                    ));
+                }
+                ticket.done.clone()
             }
-            None => (block_size_for(stamp.size), 0),
+            None => BlockMap::new(block_count),
         };
         Ok(Self {
             file,
             header: Header {
                 size: stamp.size,
                 block_size,
-                block_count: stamp.size.div_ceil(block_size),
+                block_count,
                 stamp,
             },
-            next,
+            next: 0,
+            skip,
             compressible,
             changed: false,
         })
@@ -346,9 +357,15 @@ impl FileSender {
 
     /// The next block, or `None` after the last one.
     pub fn next_block(&mut self) -> Result<Option<Block>, TransferError> {
+        while self.next < self.header.block_count && self.skip.contains(self.next) {
+            self.next += 1;
+        }
         if self.next >= self.header.block_count {
             return Ok(None);
         }
+        // Each block is read from its own place, so skipping done blocks needs no bookkeeping.
+        self.file
+            .seek(SeekFrom::Start(self.next * self.header.block_size))?;
         let len = block_len(&self.header, self.next);
         let mut data = vec![0u8; len];
         if let Err(e) = self.file.read_exact(&mut data) {
@@ -394,11 +411,12 @@ fn block_len(header: &Header, index: u64) -> usize {
     usize::try_from(len).unwrap_or(usize::MAX)
 }
 
-/// Receives one file's blocks, in order, through the safety gate.
+/// Receives one file's blocks, in any order (sections may come over several lanes), through the
+/// safety gate, writing each at its place.
 pub struct Assembly<'d> {
     file: IncomingFile<'d>,
     header: Header,
-    next: u64,
+    done: BlockMap,
 }
 
 impl<'d> Assembly<'d> {
@@ -429,20 +447,19 @@ impl<'d> Assembly<'d> {
                 file.keep_modified_time(time);
             }
         }
-        Ok(Self {
-            file,
-            header,
-            next: 0,
-        })
+        let done = BlockMap::new(header.block_count);
+        Ok(Self { file, header, done })
     }
 
-    /// Checks and writes the next block; any other block is refused and changes nothing.
+    /// Checks a block and writes it at its place. A block already written (sent again because a
+    /// resume message carried only part of the map) is confirmed without writing; a damaged block,
+    /// or one outside the file, is refused and changes nothing.
     pub fn accept(&mut self, block: Block) -> Result<Receipt, TransferError> {
-        if block.index != self.next || self.next >= self.header.block_count {
-            return Err(TransferError::OutOfOrder {
-                expected: self.next,
-                got: block.index,
-            });
+        if block.index >= self.header.block_count {
+            return Err(TransferError::Damaged("a block outside the file".into()));
+        }
+        if self.done.contains(block.index) {
+            return Ok(Receipt { block: block.index });
         }
         if block.data.len() != block_len(&self.header, block.index) {
             return Err(TransferError::Damaged("wrong length for its place".into()));
@@ -450,20 +467,25 @@ impl<'d> Assembly<'d> {
         if blake3::hash(&block.data).as_bytes() != &block.hash {
             return Err(TransferError::Damaged("fingerprint does not match".into()));
         }
-        self.file.write_all(&block.data)?;
-        self.next += 1;
-        Ok(Receipt {
-            next_block: self.next,
-        })
+        self.file
+            .write_at(block.index * self.header.block_size, &block.data)?;
+        // In range and not yet done (both checked above), so this always marks it.
+        let _ = self.done.insert(block.index);
+        Ok(Receipt { block: block.index })
     }
 
-    /// Where a new connection should continue.
+    /// What a new connection needs to know to send only the blocks still missing.
     pub fn resume_ticket(&self) -> ResumeTicket {
         ResumeTicket {
-            next_block: self.next,
+            done: self.done.clone(),
             block_size: self.header.block_size,
             stamp: self.header.stamp,
         }
+    }
+
+    /// How many blocks are written so far.
+    pub fn blocks_done(&self) -> u64 {
+        self.done.done_count()
     }
 
     /// Gives the file its real name, only if every block arrived and the file did not change while
@@ -472,9 +494,9 @@ impl<'d> Assembly<'d> {
         if trailer.changed || trailer.stamp_after != self.header.stamp {
             return Err(TransferError::ChangedWhileRead);
         }
-        if self.next != self.header.block_count {
+        if !self.done.is_full() {
             return Err(TransferError::Incomplete {
-                received: self.next,
+                received: self.done.done_count(),
                 expected: self.header.block_count,
             });
         }
