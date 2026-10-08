@@ -595,7 +595,10 @@ mod unix {
 #[test]
 fn pctwin_s_own_names_are_refused() {
     let (root, dest) = setup();
-    for name in [pctwin_gate::temp_name("ab-1"), ".pctwin-undo-1-2".to_string()] {
+    for name in [
+        pctwin_gate::temp_name("ab-1"),
+        ".pctwin-undo-1-2".to_string(),
+    ] {
         put(&root, &format!("Docs/{name}"), b"x");
         let file = id(&dest, &format!("Docs/{name}"));
         let r = dest.remove_if_unchanged(&format!("Docs/{name}"), file, |_| Ok(true));

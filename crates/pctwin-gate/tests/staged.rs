@@ -865,3 +865,25 @@ fn a_free_name_is_found_without_making_anything() {
     );
     assert!(dest.free_name_at("../a.txt").is_err());
 }
+
+#[test]
+fn a_checked_file_found_again_after_a_restart_is_never_removed_by_being_dropped() {
+    let (root, dest) = setup();
+    let mut file = dest
+        .create_file_tagged(&path("Docs/a.txt"), 3, "ab-1")
+        .unwrap();
+    file.write_all(b"abc").unwrap();
+    let temp = file.temp_path();
+    file.seal().unwrap().persist();
+    // Found again, then dropped without a name (an early return, an error on the way).
+    drop(dest.reopen_sealed(&path("Docs/a.txt"), &temp).unwrap());
+    assert_eq!(std::fs::read(root.path().join(&temp)).unwrap(), b"abc");
+    // A file being received for the first time is still removed when dropped unsealed.
+    let mut fresh = dest
+        .create_file_tagged(&path("Docs/b.txt"), 3, "ab-2")
+        .unwrap();
+    fresh.write_all(b"abc").unwrap();
+    let fresh_temp = fresh.temp_path();
+    drop(fresh.seal().unwrap());
+    assert!(!root.path().join(&fresh_temp).exists());
+}

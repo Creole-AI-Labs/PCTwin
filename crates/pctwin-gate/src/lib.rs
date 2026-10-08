@@ -1011,7 +1011,8 @@ impl Destination {
 
     /// After a restart: the sealed temporary file at the stored path `temp` (every byte checked
     /// and on disk before the crash), to give the real name a file sent as `sent` gets. Only a
-    /// regular file with a PCTwin temporary name is accepted.
+    /// regular file with a PCTwin temporary name is accepted. Dropped without a name, it is kept
+    /// (never removed), so no early return can lose a checked copy.
     pub fn reopen_sealed<'d>(
         &'d self,
         sent: &IncomingPath,
@@ -1048,6 +1049,9 @@ impl Destination {
             name,
             sent_path: sent.original().to_string(),
             changes,
+            // A checked copy found again after a restart: never thrown away by being dropped,
+            // whichever way naming it ends (the journal's clean-up decides).
+            kept_if_dropped: true,
         })
     }
 
@@ -2178,6 +2182,7 @@ impl<'d> IncomingFile<'d> {
             name: std::mem::take(&mut self.name),
             sent_path: std::mem::take(&mut self.sent_path),
             changes: std::mem::take(&mut self.changes),
+            kept_if_dropped: false,
         })
     }
 }
@@ -2200,6 +2205,8 @@ pub struct Sealed<'d> {
     name: String,
     sent_path: String,
     changes: Vec<NameChange>,
+    /// Kept, not removed, if dropped without a name.
+    kept_if_dropped: bool,
 }
 
 impl<'d> Sealed<'d> {
@@ -2318,7 +2325,11 @@ const MAX_CLAIM_RACES: u32 = 64;
 
 impl Drop for Sealed<'_> {
     fn drop(&mut self) {
-        // Never given its real name: never leave it behind.
+        // Never given its real name: never leave it behind (unless it is a checked copy found
+        // again after a restart).
+        if self.kept_if_dropped {
+            return;
+        }
         if let Some(temp) = self.temp.take() {
             let _ = self.dir.remove_file(temp);
         }

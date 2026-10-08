@@ -156,6 +156,9 @@ fn finish(
 /// Said of a file that changed after recovery last read it.
 const CHANGED_NOW: &str = "the copy was interrupted as it finished, and the file changed before PCTwin could confirm it; it was kept as it is";
 
+/// Said of a checked file that was removed after recovery last read it.
+const GONE_NOW: &str = "the copy was interrupted as it finished, and the checked copy was removed before PCTwin could confirm it";
+
 /// What proving a file just now found.
 enum Proof {
     Proven(pctwin_gate::Stat),
@@ -231,37 +234,26 @@ fn name<'d>(
         } => (*file, fingerprint),
         _ => return Ok(Naming::Cannot(NOT_NAMED.into())),
     };
+    // A reopened sealed file is kept if dropped, so every early return below keeps it.
     match prove(dest, entry, temp, recorded, fingerprint) {
         Proof::Proven(_) => {}
-        Proof::CannotLook(why) => {
-            sealed.persist();
-            return Ok(Naming::NotNow(why));
-        }
-        Proof::Gone | Proof::Changed => {
-            sealed.persist();
-            return Ok(Naming::Cannot(CHANGED_NOW.into()));
-        }
+        Proof::CannotLook(why) => return Ok(Naming::NotNow(why)),
+        Proof::Gone => return Ok(Naming::Cannot(GONE_NOW.into())),
+        Proof::Changed => return Ok(Naming::Cannot(CHANGED_NOW.into())),
     }
     // A name lost in the crash is free again, so it is the one found first.
     for _ in 0..MAX_NAME_TRIES {
         let next = match sealed.next_name() {
             Ok(n) => n,
-            Err(e) => {
-                sealed.persist();
-                return Ok(Naming::NotNow(reason(&e)));
-            }
+            Err(e) => return Ok(Naming::NotNow(reason(&e))),
         };
         journal.applied(entry.id, &next)?;
         match sealed.claim_as(&next) {
             Claim::Named(claimed) => return Ok(Naming::Named(claimed)),
             Claim::Taken(back) => sealed = back,
-            Claim::Failed(e, back) => {
-                back.persist();
-                return Ok(Naming::NotNow(reason(&e)));
-            }
+            Claim::Failed(e, _) => return Ok(Naming::NotNow(reason(&e))),
         }
     }
-    sealed.persist();
     Ok(Naming::NotNow(NOT_NAMED.into()))
 }
 
