@@ -575,6 +575,21 @@ pub struct BinSettings {
     pub deletes_at_once: bool,
     /// The most the drive's Recycle Bin holds; a bigger file would be deleted at once.
     pub max_bytes: Option<u64>,
+    /// The settings could not be read for this drive for certain (two drives share its number),
+    /// so nothing is assumed.
+    pub unknown: bool,
+}
+
+/// The plain reason for a drive whose Recycle Bin settings could not be read for certain.
+pub const BIN_UNKNOWN: &str =
+    "PCTwin cannot tell how this drive's Recycle Bin is set, so it was kept";
+
+/// The size Windows gives a drive's Recycle Bin unless set otherwise: a tenth of the first 40 GB,
+/// and a twentieth of the rest (Windows Vista and later, from the drive's size).
+pub fn default_bin_bytes(drive_bytes: u64) -> u64 {
+    const FIRST: u64 = 40 * 1024 * 1024 * 1024;
+    let first = drive_bytes.min(FIRST);
+    first / 10 + (drive_bytes - first) / 20
 }
 
 /// The plain reason for a Recycle Bin set to delete files instead of keeping them.
@@ -586,6 +601,9 @@ pub const TOO_BIG_FOR_BIN: &str = "it is too big for this drive's Recycle Bin, s
 /// Whether, by these settings, a file of `size` bytes would be kept by the Recycle Bin (Windows
 /// deletes it outright otherwise, even when asked to allow undo).
 pub fn bin_keeps(settings: &BinSettings, size: u64) -> Result<(), String> {
+    if settings.unknown {
+        return Err(BIN_UNKNOWN.into());
+    }
     if settings.turned_off || settings.deletes_at_once {
         return Err(BIN_TURNED_OFF.into());
     }
@@ -599,7 +617,7 @@ pub fn bin_keeps(settings: &BinSettings, size: u64) -> Result<(), String> {
 /// policy that turns it off, and the drive's own "delete at once" and size settings (kept per
 /// drive under the drive's volume name, matched to the drive by its volume number).
 #[cfg(windows)]
-fn bin_settings(volume: u64) -> BinSettings {
+fn bin_settings(volume: u64, drive_bytes: u64) -> BinSettings {
     use winreg::RegKey;
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     let on = |key: &RegKey, name: &str| key.get_value::<u32, _>(name).is_ok_and(|v| v != 0);
@@ -610,28 +628,39 @@ fn bin_settings(volume: u64) -> BinSettings {
                 .open_subkey(policy)
                 .is_ok_and(|k| on(&k, "NoRecycleFiles"))
         }),
+        // Unless the drive has its own settings: the size Windows gives it by default.
+        max_bytes: Some(default_bin_bytes(drive_bytes)),
         ..BinSettings::default()
     };
     let volumes = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume";
     let Ok(all) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(volumes) else {
         return settings;
     };
-    for name in all.enum_keys().flatten() {
-        let root = std::path::PathBuf::from(format!(r"\\?\Volume{name}\"));
-        let same_drive = open_volume(&root)
-            .and_then(|f| winapi_util::file::information(&f))
-            .is_ok_and(|info| info.volume_serial_number() == volume);
-        if !same_drive {
-            continue;
+    // The drive's own settings, found by its number; two drives with one number cannot be told
+    // apart, so then nothing is assumed.
+    let mine: Vec<String> = all
+        .enum_keys()
+        .flatten()
+        .filter(|name| {
+            let root = std::path::PathBuf::from(format!(r"\\?\Volume{name}\"));
+            open_volume(&root)
+                .and_then(|f| winapi_util::file::information(&f))
+                .is_ok_and(|info| info.volume_serial_number() == volume)
+        })
+        .collect();
+    match mine.as_slice() {
+        [] => {}
+        [name] => {
+            if let Ok(key) = all.open_subkey(name) {
+                settings.deletes_at_once = on(&key, "NukeOnDelete");
+                if let Ok(mb) = key.get_value::<u32, _>("MaxCapacity") {
+                    settings.max_bytes = Some(u64::from(mb) * 1024 * 1024);
+                }
+            } else {
+                settings.unknown = true;
+            }
         }
-        if let Ok(key) = all.open_subkey(&name) {
-            settings.deletes_at_once = on(&key, "NukeOnDelete");
-            settings.max_bytes = key
-                .get_value::<u32, _>("MaxCapacity")
-                .ok()
-                .map(|mb| u64::from(mb) * 1024 * 1024);
-        }
-        break;
+        _ => settings.unknown = true,
     }
     settings
 }
@@ -673,12 +702,13 @@ impl Bin for SystemBin {
         #[cfg(windows)]
         {
             recycle_bin_for(&self.drives, path)?;
+            let drive_bytes = drive_of(&self.drives, path).map_or(0, |d| d.total_bytes);
             let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
             let size = file.metadata().map_err(|e| e.to_string())?.len();
             let volume = winapi_util::file::information(&file)
                 .map_err(|e| e.to_string())?
                 .volume_serial_number();
-            bin_keeps(&bin_settings(volume), size)
+            bin_keeps(&bin_settings(volume, drive_bytes), size)
         }
         #[cfg(not(windows))]
         {

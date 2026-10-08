@@ -939,6 +939,26 @@ fn a_recycle_bin_set_to_delete_or_too_small_never_gets_the_file() {
     };
     assert!(bin_keeps(&small, 1000).is_ok());
     assert_eq!(bin_keeps(&small, 1001), Err(TOO_BIG_FOR_BIN.to_string()));
+    // Settings that cannot be read for certain (two drives share a number): kept.
+    let unknown = BinSettings {
+        unknown: true,
+        ..BinSettings::default()
+    };
+    assert_eq!(
+        bin_keeps(&unknown, 1),
+        Err(pctwin_transfer::BIN_UNKNOWN.to_string())
+    );
+}
+
+#[test]
+fn a_drive_without_its_own_settings_has_the_recycle_bin_windows_gives_by_default() {
+    use pctwin_transfer::default_bin_bytes;
+    const GB: u64 = 1024 * 1024 * 1024;
+    // A tenth of the first 40 GB, a twentieth of the rest.
+    assert_eq!(default_bin_bytes(10 * GB), GB);
+    assert_eq!(default_bin_bytes(40 * GB), 4 * GB);
+    assert_eq!(default_bin_bytes(240 * GB), 4 * GB + 10 * GB);
+    assert_eq!(default_bin_bytes(0), 0);
 }
 
 /// Reads this laptop's real Recycle Bin settings (nothing is put in the Recycle Bin).
