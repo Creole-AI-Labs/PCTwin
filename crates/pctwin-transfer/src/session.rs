@@ -25,6 +25,12 @@ const STOPPED: &str =
 /// connection busy, small enough that memory stays bounded.
 const IN_FLIGHT_BYTES: u64 = 32 * 1024 * 1024;
 
+/// Most files the new laptop keeps open (started and not ended) at once. The old laptop keeps far
+/// fewer in flight; the limit stops one that starts files and never finishes them from holding
+/// space for all of them. (rsync and others time out the connection, not each file, so a paused
+/// move or a slow old drive never loses a file to a timer.)
+pub const MAX_OPEN_FILES: usize = 64;
+
 /// The connection dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the connection dropped")]
@@ -1052,6 +1058,8 @@ impl<'d> ReceiverSession<'d> {
                 let same = self.same_file(&destination, &path, size);
                 let started = if resumed_done > 0 {
                     Err("the new laptop has no place to continue from".to_string())
+                } else if self.streams.len() >= MAX_OPEN_FILES {
+                    Err("the old laptop started too many files at once".to_string())
                 } else if let Err(refused) = self.allowance.admit(item, size) {
                     // Checked before anything is created or reserved on this laptop.
                     Err(refused.to_string())
@@ -1062,10 +1070,12 @@ impl<'d> ReceiverSession<'d> {
                     Ok(a) => (Some(a), None),
                     Err(why) => (None, Some(why)),
                 };
-                if let Some(why) = &failure {
+                if let Some(why) = failure {
+                    // Nothing is kept for a file refused at its start, so it holds no place.
                     self.done
-                        .insert(stream, (item, ReceiveOutcome::Failed(why.clone())));
+                        .insert(stream, (item, ReceiveOutcome::Failed(why)));
                     replies.push(Message::FileDone { stream, ok: false });
+                    return Ok((replies, false));
                 } else {
                     // Every start is answered: here is a same-size file's fingerprint, or
                     // nothing like it is here.

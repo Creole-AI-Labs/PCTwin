@@ -1053,3 +1053,103 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
         l.files[2].1
     );
 }
+
+#[tokio::test]
+async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
+    // A plan of many small files; a hostile old laptop starts them all and never finishes any,
+    // which would keep space reserved for every one.
+    let l = laptops();
+    let table = table(&l);
+    let n = pctwin_transfer::MAX_OPEN_FILES as u8 + 1;
+    let files: Vec<(ItemId, u64)> = (0..n).map(|k| (id(k), 1000)).collect();
+    let mut receiver = ReceiverSession::new(&table, common::approved(&files));
+    let header = |size| Header {
+        size,
+        block_size: 131_072,
+        block_count: 1,
+        stamp: pctwin_transfer::Stamp {
+            size,
+            modified_ns: None,
+        },
+    };
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        for k in 0..n {
+            let mut m = start(&header(1000), 0, id(k));
+            if let Message::StartFile { stream, path, .. } = &mut m {
+                *stream = u32::from(k);
+                *path = format!("Documents/f{k}.bin");
+            }
+            say(&mut old, &m).await;
+            let answer = hear(&mut old).await;
+            if k + 1 < n {
+                assert!(matches!(answer, Message::Have { .. }), "{k}: {answer:?}");
+            } else {
+                assert_eq!(
+                    answer,
+                    Message::FileDone {
+                        stream: u32::from(k),
+                        ok: false
+                    }
+                );
+            }
+        }
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    assert!(matches!(
+        receiver.outcome(id(n - 1)),
+        Some(ReceiveOutcome::Failed(why)) if why.contains("too many")
+    ));
+    // Nothing was created for the one refused.
+    let made = everything_under(l.new_mine.path())
+        .iter()
+        .filter(|p| p.is_file())
+        .count();
+    assert_eq!(made, usize::from(n) - 1);
+}
+
+#[tokio::test]
+async fn files_refused_at_their_start_do_not_count_toward_the_open_limit() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // Many files the plan does not have: each refused, and each holding nothing.
+        for k in 0..(pctwin_transfer::MAX_OPEN_FILES as u32 + 6) {
+            let mut m = start(&header, 0, id(200));
+            if let Message::StartFile { stream, .. } = &mut m {
+                *stream = 100 + k;
+            }
+            say(&mut old, &m).await;
+            assert_eq!(
+                hear(&mut old).await,
+                Message::FileDone {
+                    stream: 100 + k,
+                    ok: false
+                }
+            );
+        }
+        // A file of the plan still starts.
+        say(&mut old, &start(&header, 0, id(2))).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 0, .. }
+        ));
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+}

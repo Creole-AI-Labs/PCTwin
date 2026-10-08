@@ -56,7 +56,8 @@ pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
-    Channel, ChannelError, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
+    Channel, ChannelError, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
+    SenderSession,
 };
 
 use std::fs::File;
