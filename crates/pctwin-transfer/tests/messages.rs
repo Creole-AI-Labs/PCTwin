@@ -67,6 +67,7 @@ fn all_kinds() -> Vec<Message> {
         },
         Message::ResumeFrom {
             stream: 7,
+            item: ItemId::from_hex("0f0e0d0c0b0a09080706050403020100").unwrap(),
             ticket: ResumeTicket {
                 done: map(),
                 block_size: 131_072,
@@ -109,6 +110,7 @@ fn the_most_scattered_resume_message_fits_the_link() {
     }
     let wire = Message::ResumeFrom {
         stream: 7,
+        item: ItemId::from_hex("0f0e0d0c0b0a09080706050403020100").unwrap(),
         ticket: ResumeTicket {
             done: m,
             block_size: 131_072,

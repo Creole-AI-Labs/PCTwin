@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use pctwin_gate::{Approved, Destination, Destinations, Finished, IncomingPath};
-use pctwin_journal::{Actor, FileId, JournalError, Landed, Ledger, Permission, PlannedWrite};
+use pctwin_journal::{
+    Actor, FileId, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
+};
 use pctwin_record::ItemId;
 
 use crate::message::{BLOCK_WIRE_OVERHEAD, Message, split_into_pieces};
@@ -400,8 +402,10 @@ impl SenderSession {
         let mut tickets: BTreeMap<usize, ResumeTicket> = BTreeMap::new();
         loop {
             match recv(ch).await? {
-                Message::ResumeFrom { stream, ticket } => {
-                    if let Some(&job) = self.job_of.get(&stream) {
+                // By the file, never by stream number: either app may have restarted since, and
+                // stream numbers start again with each.
+                Message::ResumeFrom { item, ticket, .. } => {
+                    if let Some(&job) = self.by_item.get(&item) {
                         tickets.insert(job, ticket);
                     }
                 }
@@ -1053,6 +1057,9 @@ struct Incoming<'d> {
     item: ItemId,
     /// Its entry in the change journal.
     entry: u64,
+    /// Blocks written and not yet checkpointed in the journal, and batches checkpointed so far.
+    pending: Vec<(u64, [u8; 32])>,
+    batches: u32,
     assembly: Option<Assembly<'d>>,
     block_size: u64,
     failure: Option<String>,
@@ -1083,6 +1090,8 @@ pub struct ReceiverSession<'d> {
     /// A same-size file already here, to fingerprint before answering a start (off the loop).
     to_fingerprint: Option<(u32, std::fs::File)>,
     streams: BTreeMap<u32, Incoming<'d>>,
+    /// Files picked up again after the app restarted, waiting for the old laptop to continue them.
+    restored: BTreeMap<ItemId, Incoming<'d>>,
     done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
     continued: u64,
     /// For each finished file: its destination and size, to check again after copying.
@@ -1108,6 +1117,7 @@ impl<'d> ReceiverSession<'d> {
             refused: BTreeMap::new(),
             to_fingerprint: None,
             streams: BTreeMap::new(),
+            restored: BTreeMap::new(),
             done: BTreeMap::new(),
             continued: 0,
             landed: BTreeMap::new(),
@@ -1128,10 +1138,98 @@ impl<'d> ReceiverSession<'d> {
     pub fn partway(&self) -> u64 {
         self.streams
             .values()
+            .chain(self.restored.values())
             .filter(|s| {
                 s.failure.is_none() && s.assembly.as_ref().is_some_and(|a| a.blocks_done() > 0)
             })
             .count() as u64
+    }
+
+    /// After the app restarts (and [`recover`](crate::recover) ran): picks up again every file the
+    /// journal has partly received from this plan's old laptop, so the old laptop continues each
+    /// from what is really here. A file no longer in the approved plan is ended as failed and its
+    /// partial file removed. Returns how many were picked up.
+    pub fn restore(&mut self) -> Result<u64, TransferError> {
+        let mut picked = 0;
+        for e in self.journal.unfinished().map_err(record)? {
+            let State::Staged { temp } = &e.state else {
+                continue;
+            };
+            let w = &e.write;
+            if w.source_laptop != self.allowance.source_laptop()
+                || self.restored.contains_key(&w.item)
+                || self.streams.values().any(|s| s.item == w.item)
+            {
+                continue;
+            }
+            let table: &'d Destinations = self.table;
+            // A place not reachable now is left for later.
+            let Ok(dest) = table.get(&w.destination) else {
+                continue;
+            };
+            let here = dest.folder_identity("").ok().flatten().map(file_id);
+            if w.place.is_some() && here != w.place {
+                continue;
+            }
+            if let Err(refusal) = self.allowance.admit(w.item, w.size) {
+                self.journal
+                    .failed(e.id, &refusal.to_string())
+                    .map_err(record)?;
+                let _ = dest.remove_temp(temp);
+                continue;
+            }
+            let header = crate::Header {
+                size: w.size,
+                block_size: w.block_size,
+                block_count: w.size.div_ceil(w.block_size.max(1)),
+                stamp: crate::Stamp {
+                    size: w.size,
+                    modified_ns: w.source_modified_ns,
+                },
+            };
+            let claimed = self.journal.blocks(e.id).map_err(record)?;
+            let resumed = IncomingPath::parse(&w.path)
+                .map_err(|e| e.to_string())
+                .and_then(|path| {
+                    Assembly::resume(dest, &path, temp, header, &claimed).map_err(|e| e.to_string())
+                });
+            match resumed {
+                Ok(assembly) => {
+                    self.restored.insert(
+                        w.item,
+                        Incoming {
+                            item: w.item,
+                            entry: e.id,
+                            pending: Vec::new(),
+                            batches: 0,
+                            block_size: w.block_size,
+                            assembly: Some(assembly),
+                            failure: None,
+                            destination: w.destination.clone(),
+                            size: w.size,
+                            same: None,
+                        },
+                    );
+                    picked += 1;
+                }
+                Err(why) => {
+                    self.allowance.ended(w.item, false);
+                    self.journal.failed(e.id, &why).map_err(record)?;
+                    let _ = dest.remove_temp(temp);
+                }
+            }
+        }
+        Ok(picked)
+    }
+
+    /// Records in the journal the blocks written since the last checkpoint, for every file being
+    /// received (done by itself every few dozen blocks, and at each new connection). Best effort:
+    /// a checkpoint that does not get through only means those blocks are sent again.
+    pub fn checkpoint(&mut self) {
+        let journal = self.journal;
+        for s in self.streams.values_mut().chain(self.restored.values_mut()) {
+            flush_checkpoint(journal, s, true);
+        }
     }
 
     pub fn outcome(&self, item: ItemId) -> Option<ReceiveOutcome> {
@@ -1226,6 +1324,7 @@ impl<'d> ReceiverSession<'d> {
 
     /// What this side already has, then `Ready`.
     fn hello(&mut self) -> Vec<Message> {
+        self.checkpoint();
         let dropped: Vec<u32> = self
             .streams
             .iter()
@@ -1242,6 +1341,16 @@ impl<'d> ReceiverSession<'d> {
             if let Some(a) = &s.assembly {
                 list.push(Message::ResumeFrom {
                     stream: *stream,
+                    item: s.item,
+                    ticket: a.resume_ticket(),
+                });
+            }
+        }
+        for (item, s) in &self.restored {
+            if let Some(a) = &s.assembly {
+                list.push(Message::ResumeFrom {
+                    stream: 0,
+                    item: *item,
                     ticket: a.resume_ticket(),
                 });
             }
@@ -1286,7 +1395,24 @@ impl<'d> ReceiverSession<'d> {
                                 .as_ref()
                                 .is_some_and(|a| resumed_done <= a.blocks_done())
                     });
-                if continuing {
+                // A file picked up again after the app restarted, continued by the old laptop with
+                // exactly the description it started with (else it starts again).
+                let restored = !continuing
+                    && resumed_done > 0
+                    && self.restored.get(&item).is_some_and(|s| {
+                        s.assembly.as_ref().is_some_and(|a| {
+                            resumed_done <= a.blocks_done() && *a.header() == header
+                        })
+                    });
+                if restored && let Some(s) = self.restored.remove(&item) {
+                    if let Some(old) = self.streams.remove(&stream) {
+                        self.allowance.ended(old.item, false);
+                        drop(old.assembly);
+                        let _ = self.journal.failed(old.entry, "it was started again");
+                    }
+                    self.streams.insert(stream, s);
+                }
+                if continuing || restored {
                     self.continued += 1;
                     replies.push(Message::Have {
                         stream,
@@ -1303,13 +1429,16 @@ impl<'d> ReceiverSession<'d> {
                     .filter(|(k, s)| **k == stream || s.item == item)
                     .map(|(k, _)| *k)
                     .collect();
-                for k in replaced {
-                    if let Some(old) = self.streams.remove(&k) {
-                        self.allowance.ended(old.item, false);
-                        // Its partial file is removed with it (already failed if it had failed).
-                        drop(old.assembly);
-                        let _ = self.journal.failed(old.entry, "it was started again");
-                    }
+                let olds: Vec<Incoming<'d>> = replaced
+                    .into_iter()
+                    .filter_map(|k| self.streams.remove(&k))
+                    .chain(self.restored.remove(&item))
+                    .collect();
+                for old in olds {
+                    self.allowance.ended(old.item, false);
+                    // Its partial file is removed with it (already failed if it had failed).
+                    drop(old.assembly);
+                    let _ = self.journal.failed(old.entry, "it was started again");
                 }
                 let block_size = header.block_size;
                 let size = header.size;
@@ -1354,6 +1483,8 @@ impl<'d> ReceiverSession<'d> {
                     Incoming {
                         item,
                         entry,
+                        pending: Vec::new(),
+                        batches: 0,
                         assembly: Some(assembly),
                         block_size,
                         failure: None,
@@ -1490,17 +1621,25 @@ impl<'d> ReceiverSession<'d> {
     /// Checks and writes one whole block of an open file; returns its number, or `None` if it was
     /// refused (then the file fails and its partial copy is removed).
     fn write_block(&mut self, stream: u32, whole: &[u8]) -> Option<u64> {
+        let journal = self.journal;
         let s = self.streams.get_mut(&stream)?;
         let accepted = Block::decode(whole, s.block_size).and_then(|b| {
-            s.assembly
+            let hash = b.hash;
+            let receipt = s
+                .assembly
                 .as_mut()
                 .ok_or_else(|| protocol("no file open"))?
-                .accept(b)
+                .accept(b)?;
+            Ok((receipt, hash))
         });
         match accepted {
-            Ok(receipt) => {
+            Ok((receipt, hash)) => {
                 self.written
                     .fetch_add(whole.len() as u64, Ordering::Relaxed);
+                s.pending.push((receipt.block, hash));
+                if s.pending.len() >= CHECKPOINT_BLOCKS {
+                    flush_checkpoint(journal, s, false);
+                }
                 Some(receipt.block)
             }
             Err(e) => {
@@ -1640,6 +1779,25 @@ impl<'d> ReceiverSession<'d> {
             .map_err(Start::Record)?;
         Ok((assembly, entry))
     }
+}
+
+/// Blocks written before they are checkpointed in the journal together.
+const CHECKPOINT_BLOCKS: usize = 64;
+/// Every this many checkpoints, one is made durable at once (the others ride on the journal's next
+/// durable step), so a long file's checkpoints never pile up only in memory.
+const DURABLE_EVERY: u32 = 16;
+
+/// Records a file's blocks written since its last checkpoint. Best effort: if it does not get
+/// through, those blocks are only sent again after a restart.
+fn flush_checkpoint(journal: &dyn Ledger, s: &mut Incoming<'_>, durable: bool) {
+    if s.pending.is_empty() || s.assembly.is_none() {
+        s.pending.clear();
+        return;
+    }
+    s.batches = s.batches.wrapping_add(1);
+    let durable = durable || s.batches.is_multiple_of(DURABLE_EVERY);
+    let _ = journal.checkpoint(s.entry, &s.pending, durable);
+    s.pending.clear();
 }
 
 /// Who a shared folder's files are for.

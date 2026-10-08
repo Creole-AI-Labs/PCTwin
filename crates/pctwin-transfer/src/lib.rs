@@ -488,6 +488,35 @@ fn block_len(header: &Header, index: u64) -> usize {
     usize::try_from(len).unwrap_or(usize::MAX)
 }
 
+/// Refuses a file description that does not add up. The block size is always the one the old
+/// laptop must use for this size, so a file can never be sent in tiny blocks that would fill
+/// memory.
+fn check_header(header: &Header) -> Result<(), TransferError> {
+    if header.block_size != block_size_for(header.size)
+        || header.block_count != header.size.div_ceil(header.block_size)
+    {
+        return Err(TransferError::Damaged(
+            "the file's description does not add up".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The copy keeps the original's modified time, so a later check can tell it is unchanged.
+fn keep_original_time(file: &mut IncomingFile<'_>, header: &Header) {
+    if let Some(ns) = header.stamp.modified_ns {
+        let at = std::time::Duration::from_nanos(ns.unsigned_abs());
+        let time = if ns >= 0 {
+            std::time::UNIX_EPOCH.checked_add(at)
+        } else {
+            std::time::UNIX_EPOCH.checked_sub(at)
+        };
+        if let Some(time) = time {
+            file.keep_modified_time(time);
+        }
+    }
+}
+
 /// Receives one file's blocks, in any order (sections may come over several lanes), through the
 /// safety gate, writing each at its place.
 pub struct Assembly<'d> {
@@ -525,15 +554,7 @@ impl<'d> Assembly<'d> {
         header: Header,
         tag: Option<&str>,
     ) -> Result<Self, TransferError> {
-        // The block size is always the one the old laptop must use for this size, so a file can
-        // never be sent in tiny blocks that would fill memory.
-        if header.block_size != block_size_for(header.size)
-            || header.block_count != header.size.div_ceil(header.block_size)
-        {
-            return Err(TransferError::Damaged(
-                "the file's description does not add up".into(),
-            ));
-        }
+        check_header(&header)?;
         let mut file = match tag {
             Some(tag) => destination.create_file_tagged(path, header.size, tag)?,
             None => destination.create_file(path, header.size)?,
@@ -541,18 +562,7 @@ impl<'d> Assembly<'d> {
         // Reserve the whole size now, so a full disk shows at the start. Callers check the size
         // against the approved plan first. A drive that cannot reserve still copies.
         file.reserve()?;
-        // The copy keeps the original's modified time, so a later check can tell it is unchanged.
-        if let Some(ns) = header.stamp.modified_ns {
-            let at = std::time::Duration::from_nanos(ns.unsigned_abs());
-            let time = if ns >= 0 {
-                std::time::UNIX_EPOCH.checked_add(at)
-            } else {
-                std::time::UNIX_EPOCH.checked_sub(at)
-            };
-            if let Some(time) = time {
-                file.keep_modified_time(time);
-            }
-        }
+        keep_original_time(&mut file, &header);
         let done = BlockMap::new(header.block_count);
         Ok(Self {
             file,
@@ -560,6 +570,50 @@ impl<'d> Assembly<'d> {
             done,
             hashes: std::collections::BTreeMap::new(),
         })
+    }
+
+    /// After the app restarts: picks a partly received file up again from its temporary file
+    /// `temp`. `claimed` are the blocks the journal says landed, with their fingerprints; each
+    /// counts only if its bytes in the file match its fingerprint (the bytes may never have reached
+    /// the disk), and the rest are sent again.
+    pub fn resume(
+        destination: &'d Destination,
+        path: &IncomingPath,
+        temp: &str,
+        header: Header,
+        claimed: &[(u64, [u8; 32])],
+    ) -> Result<Self, TransferError> {
+        check_header(&header)?;
+        let mut file = destination.reopen_incoming(path, temp, header.size)?;
+        file.reserve()?;
+        keep_original_time(&mut file, &header);
+        let mut done = BlockMap::new(header.block_count);
+        let mut hashes = std::collections::BTreeMap::new();
+        let mut buf = Vec::new();
+        for (block, hash) in claimed {
+            if *block >= header.block_count || done.contains(*block) {
+                continue;
+            }
+            buf.resize(block_len(&header, *block), 0);
+            let at = block * header.block_size;
+            if file.read_at(at, &mut buf).is_err() || blake3::hash(&buf).as_bytes() != hash {
+                continue;
+            }
+            file.count_arrived(at, buf.len() as u64)?;
+            let _ = done.insert(*block);
+            hashes.insert(*block, *hash);
+        }
+        Ok(Self {
+            file,
+            header,
+            done,
+            hashes,
+        })
+    }
+
+    /// The file's description, as it started.
+    pub fn header(&self) -> &Header {
+        &self.header
     }
 
     /// Where its temporary file is (stored path inside the destination).

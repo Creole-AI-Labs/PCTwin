@@ -348,3 +348,73 @@ fn a_link_in_place_of_a_temporary_file_is_never_followed() {
     assert!(!dest.remove_temp(".pctwin-t-1.part").unwrap());
     assert!(outside.path().join("secret").exists());
 }
+
+#[test]
+fn a_partly_received_file_is_reopened_and_only_checked_bytes_count_as_arrived() {
+    let (root, dest) = setup();
+    std::fs::create_dir(root.path().join("d")).unwrap();
+    std::fs::write(root.path().join("d/.pctwin-t-1.part"), b"abcdef").unwrap();
+    let mut file = dest
+        .reopen_incoming(&path("d/a.txt"), "d/.pctwin-t-1.part", 10)
+        .unwrap();
+    assert_eq!(file.temp_path(), "d/.pctwin-t-1.part");
+    assert!(file.created_folders().is_empty());
+    // Nothing counts until checked.
+    assert_eq!(file.written(), 0);
+    let mut back = [0u8; 3];
+    file.read_at(2, &mut back).unwrap();
+    assert_eq!(&back, b"cde");
+    file.count_arrived(0, 6).unwrap();
+    assert_eq!(file.written(), 6);
+    // Counted bytes are never counted or written twice; nothing outside the file.
+    assert!(matches!(file.count_arrived(5, 1), Err(GateError::Overlap)));
+    assert!(matches!(file.write_at(4, b"x"), Err(GateError::Overlap)));
+    assert!(matches!(
+        file.count_arrived(8, 3),
+        Err(GateError::OutsideFile)
+    ));
+    file.write_at(6, b"ghij").unwrap();
+    let done = file.finish().unwrap();
+    assert_eq!(done.final_path, "d/a.txt");
+    assert_eq!(
+        std::fs::read(root.path().join("d/a.txt")).unwrap(),
+        b"abcdefghij"
+    );
+}
+
+#[test]
+fn reopening_refuses_anything_but_a_pctwin_temporary_file_no_longer_than_announced() {
+    let (root, dest) = setup();
+    std::fs::write(root.path().join("a.txt"), b"mine").unwrap();
+    std::fs::write(root.path().join(".pctwin-t-1.part"), b"0123456789").unwrap();
+    std::fs::create_dir(root.path().join(".pctwin-t-2.part")).unwrap();
+    for (stored, announced) in [
+        ("a.txt", 10),
+        (".pctwin-t-1.part", 9),
+        (".pctwin-t-2.part", 10),
+        (".pctwin-t-3.part", 10),
+        ("../.pctwin-t-1.part", 10),
+    ] {
+        assert!(
+            dest.reopen_incoming(&path("b.txt"), stored, announced)
+                .is_err(),
+            "{stored:?}"
+        );
+    }
+    assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"mine");
+    assert_eq!(
+        std::fs::read(root.path().join(".pctwin-t-1.part")).unwrap(),
+        b"0123456789"
+    );
+}
+
+#[test]
+fn a_reopened_file_dropped_unfinished_is_removed() {
+    let (root, dest) = setup();
+    std::fs::write(root.path().join(".pctwin-t-1.part"), b"abc").unwrap();
+    let file = dest
+        .reopen_incoming(&path("a.txt"), ".pctwin-t-1.part", 5)
+        .unwrap();
+    drop(file);
+    assert!(names(root.path()).is_empty());
+}

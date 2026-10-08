@@ -473,3 +473,62 @@ fn clean_up_progress_and_leftovers_are_kept_across_reopening() {
     assert_eq!(j.swept_upto().unwrap(), 9);
     assert_eq!(j.leftovers().unwrap(), [5, 8]);
 }
+
+#[test]
+fn landed_blocks_are_checkpointed_while_a_file_is_received_and_cleared_once_it_is_whole() {
+    let (_d, j) = journal();
+    let a = j.plan(&planned(1)).unwrap();
+    let b = j.plan(&planned(2)).unwrap();
+    // Only while a file's temporary file exists.
+    assert!(matches!(
+        j.checkpoint(a, &[(0, [1; 32])], true),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    j.staged(a, ".pctwin-a.part", &[]).unwrap();
+    j.staged(b, ".pctwin-b.part", &[]).unwrap();
+    j.checkpoint(a, &[(3, [3; 32]), (0, [1; 32])], false)
+        .unwrap();
+    j.checkpoint(a, &[(1, [2; 32]), (0, [1; 32])], true)
+        .unwrap();
+    j.checkpoint(b, &[(0, [9; 32])], true).unwrap();
+    assert_eq!(
+        j.blocks(a).unwrap(),
+        [(0, [1; 32]), (1, [2; 32]), (3, [3; 32])]
+    );
+    // Whole: the fingerprint is all that is needed from here.
+    j.verified(a, [7; 32]).unwrap();
+    assert!(j.blocks(a).unwrap().is_empty());
+    assert!(matches!(
+        j.checkpoint(a, &[(4, [4; 32])], true),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    assert_eq!(j.blocks(b).unwrap(), [(0, [9; 32])]);
+    j.failed(b, "x").unwrap();
+    assert!(j.blocks(b).unwrap().is_empty());
+}
+
+#[test]
+fn a_file_started_again_loses_the_checkpoints_of_its_earlier_attempt() {
+    let (_d, j) = journal();
+    let first = j.plan(&planned(1)).unwrap();
+    j.staged(first, ".pctwin-1.part", &[]).unwrap();
+    j.checkpoint(first, &[(0, [1; 32])], true).unwrap();
+    let again = j.plan(&planned(1)).unwrap();
+    assert!(j.blocks(first).unwrap().is_empty());
+    assert!(j.blocks(again).unwrap().is_empty());
+}
+
+#[test]
+fn checkpoints_written_durably_survive_reopening() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    let id = {
+        let j = Journal::open(&path).unwrap();
+        let id = j.plan(&planned(1)).unwrap();
+        j.staged(id, ".pctwin-1.part", &[]).unwrap();
+        j.checkpoint(id, &[(5, [5; 32])], true).unwrap();
+        id
+    };
+    let j = Journal::open(&path).unwrap();
+    assert_eq!(j.blocks(id).unwrap(), [(5, [5; 32])]);
+}

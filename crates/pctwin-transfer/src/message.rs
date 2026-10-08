@@ -43,8 +43,13 @@ pub enum Message {
     },
     /// Receiver: this block is written.
     Receipt { stream: u32, block: u64 },
-    /// Receiver, after a new connection: continue this file from here.
-    ResumeFrom { stream: u32, ticket: ResumeTicket },
+    /// Receiver, after a new connection: continue this file (`item`; `stream` as it was, 0 after
+    /// the new laptop's app restarted) from here.
+    ResumeFrom {
+        stream: u32,
+        item: ItemId,
+        ticket: ResumeTicket,
+    },
     /// Receiver: the file is finished under its real name (`ok`), or was not.
     FileDone { stream: u32, ok: bool },
     /// Receiver, at the start of each connection: everything it already has has been listed
@@ -122,9 +127,14 @@ impl Message {
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.extend_from_slice(&block.to_be_bytes());
             }
-            Message::ResumeFrom { stream, ticket } => {
+            Message::ResumeFrom {
+                stream,
+                item,
+                ticket,
+            } => {
                 w.push(RESUME);
                 w.extend_from_slice(&stream.to_be_bytes());
+                w.extend_from_slice(&item_bytes(item));
                 w.extend_from_slice(&ticket.block_size.to_be_bytes());
                 put_stamp(&mut w, &ticket.stamp);
                 let map = ticket.done.encode();
@@ -213,6 +223,7 @@ impl Message {
             },
             RESUME => Message::ResumeFrom {
                 stream,
+                item: r.item()?,
                 ticket: ResumeTicket {
                     block_size: r.u64()?,
                     stamp: r.stamp()?,

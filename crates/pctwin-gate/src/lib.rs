@@ -27,7 +27,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{BuildHasher, RandomState};
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -485,7 +485,7 @@ impl Destination {
             Some(tag) => {
                 let name = temp_name(tag);
                 let mut options = OpenOptions::new();
-                options.write(true).create_new(true);
+                options.read(true).write(true).create_new(true);
                 (dir.open_with(&name, &options)?, name)
             }
             None => create_temp_file(&dir)?,
@@ -596,6 +596,61 @@ impl Destination {
             }
         };
         Ok(Some(identity(&dir.into_std_file())?.0))
+    }
+
+    /// After a restart: the partly received temporary file at the stored path `temp`, opened again
+    /// to continue it, for a file sent as `sent` of exactly `announced` bytes. Nothing in it counts
+    /// as arrived until the caller checks it ([`IncomingFile::count_arrived`]). Only a regular file
+    /// with a PCTwin temporary name no longer than `announced` is accepted; dropping it unfinished
+    /// removes it, as for any file being received.
+    pub fn reopen_incoming<'d>(
+        &'d self,
+        sent: &IncomingPath,
+        temp: &str,
+        announced: u64,
+    ) -> Result<IncomingFile<'d>, GateError> {
+        let not_temp = || GateError::Io(invalid("not a PCTwin temporary file"));
+        let (dir, temp_name) = self.open_stored_folder(temp)?.ok_or_else(not_temp)?;
+        let meta = dir.symlink_metadata(temp_name).map_err(|_| not_temp())?;
+        if !is_temp_name(temp_name) || !meta.is_file() {
+            return Err(not_temp());
+        }
+        if meta.len() > announced {
+            return Err(GateError::OutsideFile);
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        let file = dir.open_with(temp_name, &options)?;
+        let host = Platform::host();
+        let mut changes: Vec<NameChange> = Vec::new();
+        for part in sent.components() {
+            for c in convert_name(part, host).changes {
+                if !changes.contains(&c) {
+                    changes.push(c);
+                }
+            }
+        }
+        let name = sent
+            .components()
+            .last()
+            .map(|n| convert_name(n, host).name)
+            .ok_or(GateError::Path(PathError::Empty))?;
+        Ok(IncomingFile {
+            destination: self,
+            dir,
+            file: Some(file),
+            temp_name: Some(temp_name.to_string()),
+            announced,
+            received: 0,
+            cursor: 0,
+            arrived: BTreeMap::new(),
+            folder: temp.rsplit_once('/').map_or("", |(f, _)| f).to_string(),
+            name,
+            sent_path: sent.original().to_string(),
+            changes,
+            modified: None,
+            created: Vec::new(),
+        })
     }
 
     /// After a restart: the sealed temporary file at the stored path `temp` (every byte checked
@@ -1070,6 +1125,15 @@ fn create_temp_file(dir: &Dir) -> Result<(File, String), GateError> {
     Err(GateError::TooManyClashes)
 }
 
+/// A part of a file about to be counted as arrived: where its joined run starts, where it ends,
+/// the end of the run it joins after it (if any), and its length.
+struct NewPart {
+    start: u64,
+    end: u64,
+    joined_end: Option<u64>,
+    len: u64,
+}
+
 /// Where a file ended up and what was changed on the way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finished {
@@ -1130,12 +1194,46 @@ impl<'d> IncomingFile<'d> {
     /// than [`MAX_FILE_PARTS`] separate parts is refused, so scattered tiny writes cannot fill
     /// memory.
     pub fn write_at(&mut self, offset: u64, buf: &[u8]) -> Result<(), GateError> {
+        let Some(part) = self.new_part(offset, buf.len() as u64)? else {
+            return Ok(());
+        };
+        let file = self.file.as_mut().ok_or(GateError::Conflict)?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.write_all(buf)?;
+        self.count(part);
+        Ok(())
+    }
+
+    /// After a restart: counts `len` bytes at `offset`, already in the reopened file and checked
+    /// by the caller against their fingerprint, as arrived, without writing them. The same checks
+    /// as [`write_at`](Self::write_at): inside the announced size, never counted twice.
+    pub fn count_arrived(&mut self, offset: u64, len: u64) -> Result<(), GateError> {
+        if let Some(part) = self.new_part(offset, len)? {
+            self.count(part);
+        }
+        Ok(())
+    }
+
+    /// Reads back `buf.len()` bytes at `offset` of the file being received (to check what a
+    /// reopened file holds).
+    pub fn read_at(&mut self, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+        let file = self
+            .file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("the file is closed"))?;
+        file.seek(SeekFrom::Start(offset))?;
+        file.read_exact(buf)
+    }
+
+    /// Checks `len` bytes at `offset` are inside the file, not already arrived, and do not
+    /// scatter the file into too many parts; `None` for nothing at all.
+    fn new_part(&self, offset: u64, len: u64) -> Result<Option<NewPart>, GateError> {
         let end = offset
-            .checked_add(buf.len() as u64)
+            .checked_add(len)
             .filter(|end| *end <= self.announced)
             .ok_or(GateError::OutsideFile)?;
-        if buf.is_empty() {
-            return Ok(());
+        if len == 0 {
+            return Ok(None);
         }
         let before = self.arrived.range(..=offset).next_back();
         if before.is_some_and(|(_, e)| *e > offset)
@@ -1148,16 +1246,21 @@ impl<'d> IncomingFile<'d> {
         if joins_before.is_none() && joins_after.is_none() && self.arrived.len() >= MAX_FILE_PARTS {
             return Err(GateError::TooScattered);
         }
-        let file = self.file.as_mut().ok_or(GateError::Conflict)?;
-        file.seek(SeekFrom::Start(offset))?;
-        file.write_all(buf)?;
-        if joins_after.is_some() {
-            self.arrived.remove(&end);
+        Ok(Some(NewPart {
+            start: joins_before.unwrap_or(offset),
+            end,
+            joined_end: joins_after,
+            len,
+        }))
+    }
+
+    fn count(&mut self, part: NewPart) {
+        if part.joined_end.is_some() {
+            self.arrived.remove(&part.end);
         }
         self.arrived
-            .insert(joins_before.unwrap_or(offset), joins_after.unwrap_or(end));
-        self.received += buf.len() as u64;
-        Ok(())
+            .insert(part.start, part.joined_end.unwrap_or(part.end));
+        self.received += part.len;
     }
 
     /// Bytes that have arrived so far, each counted once.

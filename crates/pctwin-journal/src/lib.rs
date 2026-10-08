@@ -44,6 +44,8 @@ const OPEN_ITEMS: TableDefinition<&str, u64> = TableDefinition::new("open-items"
 const FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("folders");
 /// Entries whose temporary file could not be removed yet.
 const LEFTOVERS: TableDefinition<u64, ()> = TableDefinition::new("leftovers");
+/// Each landed block's fingerprint, while its file is being received: (entry, block).
+const BLOCKS: TableDefinition<(u64, u64), [u8; 32]> = TableDefinition::new("blocks");
 
 const JOURNAL_ID: &str = "journal-id";
 const NEXT_ID: &str = "next-id";
@@ -281,6 +283,7 @@ impl Journal {
             tx.open_table(OPEN_ITEMS).map_err(storage)?;
             tx.open_table(FOLDERS).map_err(storage)?;
             tx.open_table(LEFTOVERS).map_err(storage)?;
+            tx.open_table(BLOCKS).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -322,6 +325,10 @@ impl Journal {
                     write_entry(&mut entries, &old)?;
                     let mut unfinished = tx.open_table(UNFINISHED).map_err(storage)?;
                     unfinished.remove(earlier).map_err(storage)?;
+                    let mut blocks = tx.open_table(BLOCKS).map_err(storage)?;
+                    blocks
+                        .retain_in((earlier, 0)..=(earlier, u64::MAX), |_, _| false)
+                        .map_err(storage)?;
                 }
             }
             let entry = Entry {
@@ -372,6 +379,51 @@ impl Journal {
                 Ok(())
             },
         )
+    }
+
+    /// Blocks of a file being received have landed (block number and fingerprint), so after a
+    /// restart it can continue from them. Only checkpoints, written in batches: a `durable` one is
+    /// on disk when this returns; others are made durable by the next durable step, and if the
+    /// laptop stops first they are simply lost (those blocks are sent again). After a restart every
+    /// block is checked against its fingerprint in the file before it counts, because the file's
+    /// bytes may not have reached the disk even when the checkpoint did.
+    pub fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), JournalError> {
+        let mut tx = self.db.begin_write().map_err(storage)?;
+        if !durable {
+            tx.set_durability(redb::Durability::None).map_err(storage)?;
+        }
+        {
+            let entries = tx.open_table(ENTRIES).map_err(storage)?;
+            let entry = read_entry(&entries, id)?;
+            if !matches!(entry.state, State::Staged { .. }) {
+                return Err(JournalError::OutOfOrder {
+                    from: entry.state.name(),
+                    to: "checkpoint",
+                });
+            }
+            let mut table = tx.open_table(BLOCKS).map_err(storage)?;
+            for (block, hash) in blocks {
+                table.insert((id, *block), hash).map_err(storage)?;
+            }
+        }
+        tx.commit().map_err(storage)
+    }
+
+    /// The blocks checkpointed for entry `id`, in order (claims only: check each against the file).
+    pub fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(BLOCKS).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in table.range((id, 0)..=(id, u64::MAX)).map_err(storage)? {
+            let (k, v) = row.map_err(storage)?;
+            out.push((k.value().1, v.value()));
+        }
+        Ok(out)
     }
 
     /// Every byte arrived and was checked, the file did not change while it was read, and it was
@@ -483,6 +535,13 @@ impl Journal {
             })?;
             write_entry(&mut entries, &entry)?;
             drop(entries);
+            // Block checkpoints are only for continuing a file not yet complete.
+            if !matches!(entry.state, State::Staged { .. }) {
+                let mut blocks = tx.open_table(BLOCKS).map_err(storage)?;
+                blocks
+                    .retain_in((id, 0)..=(id, u64::MAX), |_, _| false)
+                    .map_err(storage)?;
+            }
             if entry.state.is_finished() {
                 let mut unfinished = tx.open_table(UNFINISHED).map_err(storage)?;
                 unfinished.remove(id).map_err(storage)?;
@@ -615,6 +674,14 @@ pub trait Ledger {
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
+    fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), JournalError>;
+    fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError>;
+    fn unfinished(&self) -> Result<Vec<Entry>, JournalError>;
 }
 
 impl Ledger for Journal {
@@ -646,6 +713,20 @@ impl Ledger for Journal {
     }
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
         Journal::failed(self, id, why)
+    }
+    fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), JournalError> {
+        Journal::checkpoint(self, id, blocks, durable)
+    }
+    fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError> {
+        Journal::blocks(self, id)
+    }
+    fn unfinished(&self) -> Result<Vec<Entry>, JournalError> {
+        Journal::unfinished(self)
     }
 }
 

@@ -647,7 +647,9 @@ async fn continue_with(
     let (mut old, mut new) = mem_pair();
     let script = async {
         match hear(&mut old).await {
-            Message::ResumeFrom { stream: 0, ticket } => {
+            Message::ResumeFrom {
+                stream: 0, ticket, ..
+            } => {
                 assert_eq!(ticket.done.done_count(), 3);
                 assert!((0..3).all(|b| ticket.done.contains(b)));
                 assert_eq!(ticket.block_size, header.block_size);

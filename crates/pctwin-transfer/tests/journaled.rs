@@ -418,6 +418,21 @@ struct Breaks<'j> {
 }
 
 impl Ledger for Breaks<'_> {
+    fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), JournalError> {
+        self.check("checkpoint")?;
+        self.inner.checkpoint(id, blocks, durable)
+    }
+    fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError> {
+        self.inner.blocks(id)
+    }
+    fn unfinished(&self) -> Result<Vec<pctwin_journal::Entry>, JournalError> {
+        self.inner.unfinished()
+    }
     fn temp_tag(&self, id: u64) -> String {
         self.inner.temp_tag(id)
     }
