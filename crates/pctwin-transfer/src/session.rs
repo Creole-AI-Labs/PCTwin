@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
@@ -569,7 +570,6 @@ pub enum ReceiveOutcome {
 struct Incoming<'d> {
     item: ItemId,
     assembly: Option<Assembly<'d>>,
-    buffer: PieceBuffer,
     block_size: u64,
     failure: Option<String>,
     destination: String,
@@ -625,14 +625,79 @@ impl<'d> ReceiverSession<'d> {
 
     /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
     /// again with a new connection to continue).
-    pub async fn run(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
+    pub async fn run<C: Channel>(&mut self, ch: &mut C) -> Result<(), TransferError> {
+        self.run_lanes(ch, &mut [] as &mut [C]).await
+    }
+
+    /// Receives over the main connection `main` and any extra `lanes` to the same old laptop.
+    /// Files are started, ended and skipped only on the main connection; extra lanes carry only
+    /// blocks (as pieces) and their receipts, and each lane rejoins its own pieces. A lane that
+    /// drops or sends anything but pieces is closed and the move carries on over the others; if
+    /// the main connection drops, call again with a new one to continue.
+    pub async fn run_lanes<C: Channel>(
+        &mut self,
+        main: &mut C,
+        lanes: &mut [C],
+    ) -> Result<(), TransferError> {
+        let state = RefCell::new(self);
         // Say what is already here, so the old laptop continues from there.
+        let hello = state.borrow_mut().hello();
+        for m in &hello {
+            send(main, m).await?;
+        }
+        let main_loop = async {
+            // A block cut off by a drop is sent again whole: pieces start afresh each run.
+            let mut pieces: HashMap<u32, PieceBuffer> = HashMap::new();
+            loop {
+                let m = recv(main).await?;
+                // Never held across a wait, so every lane can take its turn.
+                let (replies, finished) = state.borrow_mut().handle(m, &mut pieces)?;
+                for r in &replies {
+                    send(main, r).await?;
+                }
+                if finished {
+                    return Ok(());
+                }
+            }
+        };
+        let extra = futures_util::future::join_all(lanes.iter_mut().map(|ch| {
+            let state = &state;
+            async move {
+                let mut pieces: HashMap<u32, PieceBuffer> = HashMap::new();
+                loop {
+                    let Ok(Message::Piece {
+                        stream,
+                        last,
+                        bytes,
+                    }) = recv(ch).await
+                    else {
+                        // Dropped, or not a piece: this lane is closed.
+                        return;
+                    };
+                    let receipt = state.borrow_mut().piece(&mut pieces, stream, last, &bytes);
+                    if let Some(r) = receipt
+                        && send(ch, &r).await.is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }));
+        tokio::pin!(main_loop);
+        tokio::pin!(extra);
+        tokio::select! {
+            done = &mut main_loop => done,
+            // Every extra lane closed: carry on over the main connection alone.
+            _ = &mut extra => main_loop.await,
+        }
+    }
+
+    /// What this side already has, then `Ready`.
+    fn hello(&mut self) -> Vec<Message> {
         self.streams
             .retain(|_, s| s.assembly.is_some() && s.failure.is_none());
         let mut list = Vec::new();
-        for (stream, s) in &mut self.streams {
-            // A block cut off by the drop is sent again whole.
-            s.buffer = PieceBuffer::default();
+        for (stream, s) in &self.streams {
             if let Some(a) = &s.assembly {
                 list.push(Message::ResumeFrom {
                     stream: *stream,
@@ -649,169 +714,176 @@ impl<'d> ReceiverSession<'d> {
                 ),
             });
         }
-        for m in &list {
-            send(ch, m).await?;
-        }
-        send(ch, &Message::Ready).await?;
+        list.push(Message::Ready);
+        list
+    }
 
-        loop {
-            match recv(ch).await? {
-                Message::StartFile {
-                    stream,
-                    item,
-                    destination,
-                    path,
-                    header,
-                    resumed_done,
-                } => {
-                    self.done.remove(&stream);
-                    // The old laptop continues from this side's ticket, which never claims more
-                    // than is here (it may carry only the earliest runs).
-                    let continuing = resumed_done > 0
-                        && self.streams.get(&stream).is_some_and(|s| {
-                            s.item == item
-                                && s.assembly
-                                    .as_ref()
-                                    .is_some_and(|a| resumed_done <= a.blocks_done())
-                        });
-                    if continuing {
-                        self.continued += 1;
-                        send(
-                            ch,
-                            &Message::Have {
-                                stream,
-                                same_size: None,
-                            },
-                        )
-                        .await?;
-                        continue;
-                    }
-                    // A fresh start replaces anything kept (the partial file is removed).
-                    self.streams.remove(&stream);
-                    let block_size = header.block_size;
-                    let size = header.size;
-                    let same = self.same_file(&destination, &path, size);
-                    let started = if resumed_done > 0 {
-                        Err("the new laptop has no place to continue from".to_string())
-                    } else if let Err(refused) = self.allowance.admit(item, size) {
-                        // Checked before anything is created or reserved on this laptop.
-                        Err(refused.to_string())
-                    } else {
-                        self.start(&destination, &path, header)
-                    };
-                    let (assembly, failure) = match started {
-                        Ok(a) => (Some(a), None),
-                        Err(why) => (None, Some(why)),
-                    };
-                    if let Some(why) = &failure {
-                        self.done
-                            .insert(stream, (item, ReceiveOutcome::Failed(why.clone())));
-                        send(ch, &Message::FileDone { stream, ok: false }).await?;
-                    } else {
-                        // Every start is answered: here is a same-size file's fingerprint, or
-                        // nothing like it is here.
-                        let same_size = same.as_ref().map(|(_, hash)| *hash);
-                        send(ch, &Message::Have { stream, same_size }).await?;
-                    }
-                    self.streams.insert(
+    /// Handles one message from the main connection: the replies to send, and whether the old
+    /// laptop has sent everything.
+    fn handle(
+        &mut self,
+        m: Message,
+        pieces: &mut HashMap<u32, PieceBuffer>,
+    ) -> Result<(Vec<Message>, bool), TransferError> {
+        let mut replies = Vec::new();
+        match m {
+            Message::StartFile {
+                stream,
+                item,
+                destination,
+                path,
+                header,
+                resumed_done,
+            } => {
+                self.done.remove(&stream);
+                // The old laptop continues from this side's ticket, which never claims more
+                // than is here (it may carry only the earliest runs).
+                let continuing = resumed_done > 0
+                    && self.streams.get(&stream).is_some_and(|s| {
+                        s.item == item
+                            && s.assembly
+                                .as_ref()
+                                .is_some_and(|a| resumed_done <= a.blocks_done())
+                    });
+                if continuing {
+                    self.continued += 1;
+                    replies.push(Message::Have {
                         stream,
-                        Incoming {
-                            item,
-                            assembly,
-                            buffer: PieceBuffer::default(),
-                            block_size,
-                            failure,
-                            destination,
-                            size,
-                            same: same.map(|(stored, _)| stored),
-                        },
-                    );
+                        same_size: None,
+                    });
+                    return Ok((replies, false));
                 }
-                Message::Piece {
+                // A fresh start replaces anything kept (the partial file is removed).
+                self.streams.remove(&stream);
+                let block_size = header.block_size;
+                let size = header.size;
+                let same = self.same_file(&destination, &path, size);
+                let started = if resumed_done > 0 {
+                    Err("the new laptop has no place to continue from".to_string())
+                } else if let Err(refused) = self.allowance.admit(item, size) {
+                    // Checked before anything is created or reserved on this laptop.
+                    Err(refused.to_string())
+                } else {
+                    self.start(&destination, &path, header)
+                };
+                let (assembly, failure) = match started {
+                    Ok(a) => (Some(a), None),
+                    Err(why) => (None, Some(why)),
+                };
+                if let Some(why) = &failure {
+                    self.done
+                        .insert(stream, (item, ReceiveOutcome::Failed(why.clone())));
+                    replies.push(Message::FileDone { stream, ok: false });
+                } else {
+                    // Every start is answered: here is a same-size file's fingerprint, or
+                    // nothing like it is here.
+                    let same_size = same.as_ref().map(|(_, hash)| *hash);
+                    replies.push(Message::Have { stream, same_size });
+                }
+                self.streams.insert(
                     stream,
-                    last,
-                    bytes,
-                } => {
-                    let Some(s) = self.streams.get_mut(&stream) else {
-                        // Pieces of a file never started: nothing to keep, but still answered.
-                        if last {
-                            send(ch, &Message::Receipt { stream, block: 0 }).await?;
-                        }
-                        continue;
+                    Incoming {
+                        item,
+                        assembly,
+                        block_size,
+                        failure,
+                        destination,
+                        size,
+                        same: same.map(|(stored, _)| stored),
+                    },
+                );
+            }
+            Message::Piece {
+                stream,
+                last,
+                bytes,
+            } => {
+                if let Some(r) = self.piece(pieces, stream, last, &bytes) {
+                    replies.push(r);
+                }
+            }
+            Message::EndFile {
+                stream,
+                stamp_after,
+                changed,
+            } => {
+                let Some(s) = self.streams.remove(&stream) else {
+                    replies.push(Message::FileDone { stream, ok: false });
+                    return Ok((replies, false));
+                };
+                let outcome = match (s.assembly, s.failure) {
+                    (Some(a), None) => match a.finish(Trailer::new(stamp_after, changed)) {
+                        Ok(f) => ReceiveOutcome::Finished(f),
+                        Err(e) => ReceiveOutcome::Failed(e.to_string()),
+                    },
+                    (_, Some(why)) => ReceiveOutcome::Failed(why),
+                    (None, None) => ReceiveOutcome::Failed("no file open".into()),
+                };
+                let ok = matches!(outcome, ReceiveOutcome::Finished(_));
+                if ok {
+                    self.landed.insert(stream, (s.destination.clone(), s.size));
+                }
+                self.done.insert(stream, (s.item, outcome));
+                replies.push(Message::FileDone { stream, ok });
+            }
+            Message::Skip { stream } => {
+                // Identical to what is here: drop the partial copy and keep the original.
+                if let Some(s) = self.streams.remove(&stream) {
+                    let outcome = match s.same {
+                        Some(stored) => ReceiveOutcome::AlreadyThere(stored),
+                        None => ReceiveOutcome::Failed("skipped".into()),
                     };
-                    let mut written = 0;
-                    match s.buffer.add(&bytes, last) {
-                        Ok(Some(whole)) if s.failure.is_none() => {
-                            let accepted = Block::decode(&whole, s.block_size).and_then(|b| {
-                                s.assembly
-                                    .as_mut()
-                                    .ok_or_else(|| protocol("no file open"))?
-                                    .accept(b)
-                            });
-                            match accepted {
-                                Ok(receipt) => written = receipt.block,
-                                Err(e) => {
-                                    s.failure = Some(e.to_string());
-                                    // Dropping the assembly removes the partial file.
-                                    s.assembly = None;
-                                }
-                            }
-                        }
-                        Ok(_) => {}
+                    self.done.insert(stream, (s.item, outcome));
+                }
+            }
+            Message::AllSent => return Ok((replies, true)),
+            _ => return Err(protocol("unexpected message from the old laptop")),
+        }
+        Ok((replies, false))
+    }
+
+    /// Adds a piece that came on one lane (with that lane's own `pieces`); when it ends a block,
+    /// checks and writes the block and returns the receipt naming it. Every block's last piece is
+    /// answered, even for a file that failed or was never started.
+    fn piece(
+        &mut self,
+        pieces: &mut HashMap<u32, PieceBuffer>,
+        stream: u32,
+        last: bool,
+        bytes: &[u8],
+    ) -> Option<Message> {
+        let buffer = pieces.entry(stream).or_default();
+        let whole = buffer.add(bytes, last);
+        let mut written = 0;
+        if let Some(s) = self.streams.get_mut(&stream) {
+            match whole {
+                Ok(Some(whole)) if s.failure.is_none() => {
+                    let accepted = Block::decode(&whole, s.block_size).and_then(|b| {
+                        s.assembly
+                            .as_mut()
+                            .ok_or_else(|| protocol("no file open"))?
+                            .accept(b)
+                    });
+                    match accepted {
+                        Ok(receipt) => written = receipt.block,
                         Err(e) => {
                             s.failure = Some(e.to_string());
+                            // Dropping the assembly removes the partial file.
                             s.assembly = None;
                         }
                     }
-                    if last {
-                        send(
-                            ch,
-                            &Message::Receipt {
-                                stream,
-                                block: written,
-                            },
-                        )
-                        .await?;
-                    }
                 }
-                Message::EndFile {
-                    stream,
-                    stamp_after,
-                    changed,
-                } => {
-                    let Some(s) = self.streams.remove(&stream) else {
-                        send(ch, &Message::FileDone { stream, ok: false }).await?;
-                        continue;
-                    };
-                    let outcome = match (s.assembly, s.failure) {
-                        (Some(a), None) => match a.finish(Trailer::new(stamp_after, changed)) {
-                            Ok(f) => ReceiveOutcome::Finished(f),
-                            Err(e) => ReceiveOutcome::Failed(e.to_string()),
-                        },
-                        (_, Some(why)) => ReceiveOutcome::Failed(why),
-                        (None, None) => ReceiveOutcome::Failed("no file open".into()),
-                    };
-                    let ok = matches!(outcome, ReceiveOutcome::Finished(_));
-                    if ok {
-                        self.landed.insert(stream, (s.destination.clone(), s.size));
-                    }
-                    self.done.insert(stream, (s.item, outcome));
-                    send(ch, &Message::FileDone { stream, ok }).await?;
+                Ok(_) => {}
+                Err(e) => {
+                    s.failure = Some(e.to_string());
+                    s.assembly = None;
                 }
-                Message::Skip { stream } => {
-                    // Identical to what is here: drop the partial copy and keep the original.
-                    if let Some(s) = self.streams.remove(&stream) {
-                        let outcome = match s.same {
-                            Some(stored) => ReceiveOutcome::AlreadyThere(stored),
-                            None => ReceiveOutcome::Failed("skipped".into()),
-                        };
-                        self.done.insert(stream, (s.item, outcome));
-                    }
-                }
-                Message::AllSent => return Ok(()),
-                _ => return Err(protocol("unexpected message from the old laptop")),
             }
         }
+        last.then_some(Message::Receipt {
+            stream,
+            block: written,
+        })
     }
 
     /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path

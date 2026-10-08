@@ -716,3 +716,340 @@ async fn the_new_laptop_starts_only_what_the_approved_plan_allows() {
         matches!(receiver.outcome(id(9)), Some(ReceiveOutcome::Failed(why)) if why.contains("plan"))
     );
 }
+
+/// Sends `blocks` (by index) of stream 0 over `lanes` together: one piece at a time from each lane
+/// in turn, so pieces of different blocks of the same file are interleaved in time.
+async fn interleave(lanes: &mut [&mut Mem], plan: &[Vec<usize>], blocks: &[Block]) {
+    let mut queues: Vec<Vec<Message>> = plan
+        .iter()
+        .map(|bs| {
+            bs.iter()
+                .flat_map(|b| split_into_pieces(0, &blocks[*b].encode()))
+                .collect()
+        })
+        .collect();
+    for q in &mut queues {
+        q.reverse();
+    }
+    while queues.iter().any(|q| !q.is_empty()) {
+        for (lane, q) in lanes.iter_mut().zip(&mut queues) {
+            if let Some(m) = q.pop() {
+                say(lane, &m).await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let n = blocks.len();
+    assert!(n >= 12);
+    let (mut old, mut new) = mem_pair();
+    let (mut old2, new2) = mem_pair();
+    let (mut old3, new3) = mem_pair();
+    let mut extra = [new2, new3];
+    // Main sends the middle, lane 2 the start, lane 3 the end: three sections at once.
+    let plan_of = vec![
+        (n / 3..2 * n / 3).collect::<Vec<_>>(),
+        (0..n / 3).collect(),
+        (2 * n / 3..n).collect(),
+    ];
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &start(&header, 0, id(2))).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 0, .. }
+        ));
+        interleave(&mut [&mut old, &mut old2, &mut old3], &plan_of, &blocks).await;
+        // Each lane's receipts come back on that lane, in the order it sent, naming each block.
+        for (lane, sent) in [&mut old, &mut old2, &mut old3].into_iter().zip(&plan_of) {
+            for b in sent {
+                assert_eq!(
+                    hear(lane).await,
+                    Message::Receipt {
+                        stream: 0,
+                        block: *b as u64
+                    }
+                );
+            }
+        }
+        say(
+            &mut old,
+            &Message::EndFile {
+                stream: 0,
+                stamp_after: header.stamp,
+                changed: false,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(
+        std::fs::read(l.new_mine.path().join("Videos/big.bin")).unwrap(),
+        l.files[2].1
+    );
+}
+
+#[tokio::test]
+async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main_lane() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let (mut old, mut new) = mem_pair();
+    let (mut old2, new2) = mem_pair();
+    let mut extra = [new2];
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &start(&header, 0, id(2))).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 0, .. }
+        ));
+        // Lane 2 sends blocks 0 and 1 whole and half of block 2, then drops.
+        for b in [0usize, 1] {
+            for piece in split_into_pieces(0, &blocks[b].encode()) {
+                say(&mut old2, &piece).await;
+            }
+        }
+        let pieces = split_into_pieces(0, &blocks[2].encode());
+        assert!(pieces.len() >= 2);
+        say(&mut old2, &pieces[0]).await;
+        for b in [0u64, 1] {
+            assert_eq!(
+                hear(&mut old2).await,
+                Message::Receipt {
+                    stream: 0,
+                    block: b
+                }
+            );
+        }
+        old2.cut.store(true, Ordering::SeqCst);
+        // Everything not confirmed goes on the main lane, starting with the cut-off block.
+        for (b, block) in blocks.iter().enumerate().skip(2) {
+            for piece in split_into_pieces(0, &block.encode()) {
+                say(&mut old, &piece).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::Receipt {
+                    stream: 0,
+                    block: b as u64
+                }
+            );
+        }
+        say(
+            &mut old,
+            &Message::EndFile {
+                stream: 0,
+                stamp_after: header.stamp,
+                changed: false,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(
+        std::fs::read(l.new_mine.path().join("Videos/big.bin")).unwrap(),
+        l.files[2].1
+    );
+}
+
+#[tokio::test]
+async fn an_extra_lane_cannot_start_end_or_skip_files() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let (mut old, mut new) = mem_pair();
+    let (mut old2, new2) = mem_pair();
+    let mut extra = [new2];
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // A start on an extra lane is refused there: that lane is closed and nothing starts.
+        say(&mut old2, &start(&header, 0, id(2))).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Had it started, block 1 sent now would be written and named in the receipt.
+        for piece in split_into_pieces(0, &blocks[1].encode()) {
+            say(&mut old, &piece).await;
+        }
+        assert_eq!(
+            hear(&mut old).await,
+            Message::Receipt {
+                stream: 0,
+                block: 0
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert!(receiver.outcome(id(2)).is_none());
+    assert!(everything_under(l.new_mine.path()).is_empty());
+}
+
+#[tokio::test]
+async fn pieces_for_a_file_never_started_are_still_answered() {
+    // Otherwise the old laptop would wait for those receipts for ever.
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let block = fs.next_block().unwrap().unwrap();
+    let (mut old, mut new) = mem_pair();
+    let (mut old2, new2) = mem_pair();
+    let mut extra = [new2];
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        for lane in [&mut old, &mut old2] {
+            for piece in split_into_pieces(9, &block.encode()) {
+                say(lane, &piece).await;
+            }
+            assert_eq!(
+                hear(lane).await,
+                Message::Receipt {
+                    stream: 9,
+                    block: 0
+                }
+            );
+        }
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert!(everything_under(l.new_mine.path()).is_empty());
+}
+
+#[tokio::test]
+async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let n = blocks.len();
+    let (mut old, mut new) = mem_pair();
+    let (mut old2, new2) = mem_pair();
+    let (mut old3, new3) = mem_pair();
+    let mut extra = [new2, new3];
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &start(&header, 0, id(2))).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 0, .. }
+        ));
+        // Lane 2 is part way through block 0 ...
+        let first = split_into_pieces(0, &blocks[0].encode());
+        let (last, before) = first.split_last().unwrap();
+        for piece in before {
+            say(&mut old2, piece).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // ... when lane 3 sends the last block whole.
+        for piece in split_into_pieces(0, &blocks[n - 1].encode()) {
+            say(&mut old3, &piece).await;
+        }
+        assert_eq!(
+            hear(&mut old3).await,
+            Message::Receipt {
+                stream: 0,
+                block: (n - 1) as u64
+            }
+        );
+        say(&mut old2, last).await;
+        assert_eq!(
+            hear(&mut old2).await,
+            Message::Receipt {
+                stream: 0,
+                block: 0
+            }
+        );
+        for (b, block) in blocks.iter().enumerate().take(n - 1).skip(1) {
+            for piece in split_into_pieces(0, &block.encode()) {
+                say(&mut old, &piece).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::Receipt {
+                    stream: 0,
+                    block: b as u64
+                }
+            );
+        }
+        say(
+            &mut old,
+            &Message::EndFile {
+                stream: 0,
+                stamp_after: header.stamp,
+                changed: false,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(
+        std::fs::read(l.new_mine.path().join("Videos/big.bin")).unwrap(),
+        l.files[2].1
+    );
+}
