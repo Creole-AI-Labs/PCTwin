@@ -46,8 +46,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use pctwin_pairing::{
-    MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval, ReceiverSession,
-    RotatingSender, SenderChoosing, SenderStatus,
+    LaneKeys, MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval,
+    ReceiverSession, RotatingSender, SenderChoosing, SenderStatus, Transport,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -72,6 +72,7 @@ const KIND_PAUSED: u8 = 5;
 const KIND_EXPIRED: u8 = 6;
 const KIND_LOCKED: u8 = 7;
 const KIND_WRONG_CODE: u8 = 8;
+const KIND_LANE: u8 = 9;
 const HEADER_LEN: usize = 3;
 const MAX_DATA_LEN: usize = u16::MAX as usize;
 const SESSION_TAG: std::ops::Range<usize> = 2..10;
@@ -403,12 +404,7 @@ impl HostPending {
     pub async fn choose(mut self, picked: u8, now: Instant) -> Result<Link, LinkError> {
         let (paired, approval) = self.choosing.choose(picked, now)?;
         write_frame(&mut self.stream, KIND_PAIRING, &approval, self.send_timeout).await?;
-        Ok(Link {
-            paired,
-            stream: self.stream,
-            send_timeout: self.send_timeout,
-            broken: false,
-        })
+        Ok(Link::new(paired, self.stream, self.peer, self.send_timeout))
     }
 }
 
@@ -439,6 +435,7 @@ pub async fn connect(
     Ok(GuestPending {
         waiting,
         stream,
+        host: addr,
         send_timeout: wait,
     })
 }
@@ -447,6 +444,7 @@ pub async fn connect(
 pub struct GuestPending {
     waiting: ReceiverAwaitingApproval,
     stream: TcpStream,
+    host: SocketAddr,
     send_timeout: Duration,
 }
 
@@ -472,12 +470,7 @@ impl GuestPending {
             .waiting
             .receive_approval(&approval, Instant::now())
             .map_err(PairingError::from)?;
-        Ok(Link {
-            paired,
-            stream: self.stream,
-            send_timeout: self.send_timeout,
-            broken: false,
-        })
+        Ok(Link::new(paired, self.stream, self.host, self.send_timeout))
     }
 }
 
@@ -486,20 +479,47 @@ impl GuestPending {
 /// closed for good after any failure, and also if a [`send`](Self::send) or [`recv`](Self::recv)
 /// is cancelled before it finishes (for example by a timeout around it).
 pub struct Link {
-    paired: Paired,
+    transport: Transport,
+    /// On the main link only, until the app takes them: the keys for extra lanes.
+    lanes: Option<LaneKeys>,
     stream: TcpStream,
+    peer: SocketAddr,
     send_timeout: Duration,
     broken: bool,
 }
 
 impl Link {
+    fn new(paired: Paired, stream: TcpStream, peer: SocketAddr, send_timeout: Duration) -> Self {
+        let (transport, lanes) = paired.into_parts();
+        Self {
+            transport,
+            lanes: Some(lanes),
+            stream,
+            peer,
+            send_timeout,
+            broken: false,
+        }
+    }
+
+    /// The other laptop's address: where the new laptop opens lanes, and the only address the old
+    /// laptop accepts them from.
+    pub fn peer_addr(&self) -> SocketAddr {
+        self.peer
+    }
+
+    /// The keys for extra lanes, handed out once (from the main link only), so the app can open
+    /// or accept lanes while this link carries the move.
+    pub fn take_lane_keys(&mut self) -> Option<LaneKeys> {
+        self.lanes.take()
+    }
+
     /// Seals and sends one message. Fails with [`LinkError::Timeout`] if the other laptop stops
     /// reading. A message too large to seal is refused without harming the link.
     pub async fn send(&mut self, data: &[u8]) -> Result<(), LinkError> {
         if self.broken {
             return Err(LinkError::Closed);
         }
-        let sealed = self.paired.transport_mut().seal(data)?;
+        let sealed = self.transport.seal(data)?;
         // Marked broken until the frame is fully written, so a cancelled send cannot be reused.
         self.broken = true;
         let sent = write_frame(&mut self.stream, KIND_DATA, &sealed, self.send_timeout).await;
@@ -520,7 +540,7 @@ impl Link {
             if kind != KIND_DATA {
                 return Err(LinkError::Unexpected);
             }
-            Ok(self.paired.transport_mut().open(&body)?)
+            Ok(self.transport.open(&body)?)
         }
         .await;
         self.broken = opened.is_err();
@@ -537,7 +557,105 @@ macro_rules! redacted_debug {
         }
     )*};
 }
-redacted_debug!(Host, HostPending, GuestPending, Link);
+redacted_debug!(Host, HostPending, GuestPending, Link, LaneListener);
+
+/// New laptop: opens an extra lane to the old laptop at `addr` (the main link's
+/// [`Link::peer_addr`]), with no new code: the lane's own short handshake proves both laptops hold
+/// this pairing's keys. Each try uses the next lane number, even if it fails; a refusal means
+/// stop opening lanes and carry on over the ones already open.
+pub async fn open_lane(
+    addr: SocketAddr,
+    keys: &mut LaneKeys,
+    config: LinkConfig,
+) -> Result<Link, LinkError> {
+    let wait = config.step_timeout;
+    let mut stream = tokio::time::timeout(config.connect_timeout, TcpStream::connect(addr))
+        .await
+        .map_err(|_| LinkError::Unreachable)?
+        .map_err(|_| LinkError::Unreachable)?;
+    let (opening, msg1) = keys.open_lane(Instant::now())?;
+    write_frame(&mut stream, KIND_LANE, &msg1, wait).await?;
+    let msg2 = match read_timed(&mut stream, wait).await? {
+        (KIND_LANE, body) => body,
+        (KIND_BUSY, _) => return Err(LinkError::Busy),
+        _ => return Err(LinkError::Unexpected),
+    };
+    let (transport, msg3) = opening.receive(&msg2, Instant::now())?;
+    write_frame(&mut stream, KIND_LANE, &msg3, wait).await?;
+    Ok(Link {
+        transport,
+        lanes: None,
+        stream,
+        peer: addr,
+        send_timeout: wait,
+        broken: false,
+    })
+}
+
+/// Old laptop, during the move: accepts extra lanes from the paired new laptop, one handshake at a
+/// time. Connections from any other address are closed without a word; a device trying to pair is
+/// told the old laptop is busy; a connection that sends anything but a genuine lane, or nothing
+/// within the step limit, is dropped and the next one served.
+pub struct LaneListener {
+    host: Host,
+    keys: LaneKeys,
+    peer: IpAddr,
+}
+
+impl Host {
+    /// After pairing: serve extra lanes for the move, from the paired laptop at `peer` only.
+    pub fn into_lanes(self, keys: LaneKeys, peer: SocketAddr) -> LaneListener {
+        LaneListener {
+            host: self,
+            keys,
+            peer: penalty_key(peer.ip()),
+        }
+    }
+}
+
+impl LaneListener {
+    /// Waits for the next genuine lane and returns it.
+    pub async fn accept(&mut self) -> Result<Link, LinkError> {
+        loop {
+            let Some((mut stream, from)) = self.host.accept_local().await else {
+                continue;
+            };
+            if penalty_key(from.ip()) != self.peer {
+                // Not the paired laptop: nothing is read or said.
+                continue;
+            }
+            let wait = self.host.config.step_timeout;
+            let keys = &mut self.keys;
+            let attempt = async {
+                let msg1 = match read_timed(&mut stream, wait).await? {
+                    (KIND_LANE, body) => body,
+                    (KIND_HELLO, _) => {
+                        notify(&mut stream, KIND_BUSY).await;
+                        return Err(LinkError::Busy);
+                    }
+                    _ => return Err(LinkError::Unexpected),
+                };
+                let (accepting, msg2) = keys.accept_lane(&msg1, Instant::now())?;
+                write_frame(&mut stream, KIND_LANE, &msg2, wait).await?;
+                let msg3 = match read_timed(&mut stream, wait).await? {
+                    (KIND_LANE, body) => body,
+                    _ => return Err(LinkError::Unexpected),
+                };
+                Ok(accepting.confirm(&msg3, Instant::now())?)
+            };
+            if let Ok(transport) = attempt.await {
+                return Ok(Link {
+                    transport,
+                    lanes: None,
+                    stream,
+                    peer: from,
+                    send_timeout: wait,
+                    broken: false,
+                });
+            }
+        }
+    }
+}
 
 fn lock(sender: &Mutex<RotatingSender>) -> MutexGuard<'_, RotatingSender> {
     // Every update to the sender completes before its lock is released, so its state is

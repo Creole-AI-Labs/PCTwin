@@ -1105,3 +1105,119 @@ async fn the_connect_limit_not_the_step_limit_decides_how_long_an_address_may_ta
         started.elapsed()
     );
 }
+
+// ---------- extra lanes ----------
+
+/// Pairs over loopback: (old laptop's link, new laptop's link, the old laptop's listener).
+async fn paired_with_host() -> (pctwin_link::Link, pctwin_link::Link, Host) {
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let guest = tokio::spawn(async move { connect(addr, &code, fast()).await.unwrap() });
+    let pending_host = host.next_peer(&sender).await.unwrap();
+    let pending_guest = guest.await.unwrap();
+    let shown = pending_guest.match_number();
+    let old = pending_host.choose(shown, Instant::now()).await.unwrap();
+    let new = pending_guest.approval().await.unwrap();
+    (old, new, host)
+}
+
+const KIND_LANE: u8 = 9;
+
+#[tokio::test]
+async fn extra_lanes_open_beside_the_main_link_without_a_new_code() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    assert!(old.take_lane_keys().is_none(), "handed out once");
+    let mut lanes = host.into_lanes(old_keys, old.peer_addr());
+    let addr = new.peer_addr();
+    let opening = async {
+        let mut a = pctwin_link::open_lane(addr, &mut new_keys, fast())
+            .await
+            .unwrap();
+        let mut b = pctwin_link::open_lane(addr, &mut new_keys, fast())
+            .await
+            .unwrap();
+        a.send(b"on lane a").await.unwrap();
+        b.send(b"on lane b").await.unwrap();
+        (a, b)
+    };
+    let accepting = async {
+        let x = lanes.accept().await.unwrap();
+        let y = lanes.accept().await.unwrap();
+        (x, y)
+    };
+    let ((mut a, _b), (mut x, mut y)) = tokio::join!(opening, accepting);
+    assert_eq!(x.recv().await.unwrap().as_slice(), b"on lane a");
+    assert_eq!(y.recv().await.unwrap().as_slice(), b"on lane b");
+    x.send(b"back").await.unwrap();
+    assert_eq!(a.recv().await.unwrap().as_slice(), b"back");
+    // The main link carries on beside them.
+    old.send(b"main").await.unwrap();
+    assert_eq!(new.recv().await.unwrap().as_slice(), b"main");
+}
+
+#[tokio::test]
+async fn lanes_are_accepted_only_from_the_paired_laptops_address() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    // The listener is told the paired laptop is elsewhere: the genuine lane from here is refused.
+    let elsewhere: std::net::SocketAddr = "192.168.1.50:9".parse().unwrap();
+    let mut lanes = host.into_lanes(old_keys, elsewhere);
+    let addr = new.peer_addr();
+    let accepting = async { lanes.accept().await };
+    let opening = pctwin_link::open_lane(addr, &mut new_keys, fast());
+    tokio::select! {
+        _ = accepting => panic!("a lane from another address must never be accepted"),
+        r = opening => assert!(r.is_err()),
+    }
+}
+
+#[tokio::test]
+async fn a_pairing_attempt_during_the_move_is_told_busy() {
+    let (mut old, _new, host) = paired_with_host().await;
+    let old_keys = old.take_lane_keys().unwrap();
+    let peer = old.peer_addr();
+    let addr = host.local_addr().unwrap();
+    let mut lanes = host.into_lanes(old_keys, peer);
+    let serving = async { lanes.accept().await };
+    let asking = async {
+        let mut raw = TcpStream::connect(addr).await.unwrap();
+        raw.write_all(&[KIND_HELLO, 0, 1, 0]).await.unwrap();
+        read_frame(&mut raw).await.0
+    };
+    tokio::select! {
+        _ = serving => panic!("nothing should be accepted"),
+        kind = asking => assert_eq!(kind, KIND_BUSY),
+    }
+}
+
+#[tokio::test]
+async fn junk_and_silence_are_dropped_and_the_next_genuine_lane_still_opens() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let addr = new.peer_addr();
+    let mut lanes = host.into_lanes(old_keys, old.peer_addr());
+    let accepting = async { lanes.accept().await.unwrap() };
+    let trying = async {
+        // A lane message that is not one, then a connection that says nothing at all.
+        let mut junk = TcpStream::connect(addr).await.unwrap();
+        junk.write_all(&[KIND_LANE, 0, 5, 1, 6, 0, 0, 0])
+            .await
+            .unwrap();
+        let mut rest = Vec::new();
+        let _ = junk.read_to_end(&mut rest).await;
+        let _silent = TcpStream::connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        // Neither used up a lane number: the first genuine lane is lane 1, and it opens.
+        pctwin_link::open_lane(addr, &mut new_keys, fast())
+            .await
+            .unwrap()
+    };
+    let (mut accepted, mut opened) = tokio::join!(accepting, trying);
+    opened.send(b"through").await.unwrap();
+    assert_eq!(accepted.recv().await.unwrap().as_slice(), b"through");
+}
