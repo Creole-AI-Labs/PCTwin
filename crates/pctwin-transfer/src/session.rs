@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use pctwin_gate::{Approved, Destination, Destinations, Finished, IncomingPath};
+use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, IncomingPath};
 use pctwin_journal::{
     Actor, FileId, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
 };
@@ -1830,6 +1830,11 @@ fn flush_checkpoint(journal: &dyn Ledger, s: &mut Incoming<'_>, durable: bool) {
     s.pending.clear();
 }
 
+/// Said of a checked file that could not be given its name just now.
+const FINISHED_LATER: &str = "PCTwin finishes it the next time it starts";
+/// Said of a file gone the moment it got its name.
+const REMOVED_AT_ONCE: &str = "it was removed as soon as it was copied, often by security software";
+
 /// Who a shared folder's files are for.
 const EVERYONE: &str = "everyone";
 
@@ -1869,8 +1874,12 @@ fn land(
         journal.failed(entry, &why).map_err(record)?;
         Ok(ReceiveOutcome::Failed(why))
     };
-    let size = assembly.header.size;
-    let modified_ns = assembly.header.stamp.modified_ns;
+    // Checked and on disk: from here only success or recovery ends it, never a throw-away. A
+    // file that cannot be named now is kept for recovery to finish at the next start.
+    let later = |sealed: pctwin_gate::Sealed<'_>, why: &dyn std::fmt::Display| {
+        sealed.persist();
+        Ok(ReceiveOutcome::Failed(format!("{why}; {FINISHED_LATER}")))
+    };
     let (mut sealed, fingerprint) = match assembly.seal(trailer) {
         Ok(sealed) => sealed,
         Err(e) => return fail(e.to_string()),
@@ -1880,40 +1889,42 @@ fn land(
     journal
         .verified(entry, fingerprint, sealed_as)
         .map_err(record)?;
-    let mut claimed = None;
-    for _ in 0..MAX_NAME_TRIES {
+    let mut tries = 0;
+    let claimed = loop {
+        tries += 1;
+        if tries > MAX_NAME_TRIES {
+            return later(sealed, &pctwin_gate::GateError::TooManyClashes);
+        }
         let name = match sealed.next_name() {
             Ok(name) => name,
-            Err(e) => return fail(e.to_string()),
+            Err(e) => return later(sealed, &e),
         };
         journal.applied(entry, &name).map_err(record)?;
         match sealed.claim_as(&name) {
-            Ok(Ok(c)) => {
-                claimed = Some(c);
-                break;
-            }
+            Claim::Named(c) => break c,
             // Another program took the name first: another name, recorded first again.
-            Ok(Err(back)) => sealed = back,
-            Err(e) => return fail(e.to_string()),
+            Claim::Taken(back) => sealed = back,
+            Claim::Failed(e, back) => return later(back, &e),
         }
+    };
+    // Committed while the temporary name still holds the file, then the temporary name goes.
+    match dest.stat(&claimed.finished().final_path) {
+        Ok(Some(stat)) => {
+            journal
+                .committed(
+                    entry,
+                    Landed {
+                        size: stat.len,
+                        modified_ns: stat.modified.map(crate::nanos),
+                        file: Some(file_id(stat.id)),
+                    },
+                )
+                .map_err(record)?;
+            Ok(ReceiveOutcome::Finished(claimed.keep()))
+        }
+        // Gone the moment it got its name: never reported copied.
+        Ok(None) => fail(REMOVED_AT_ONCE.into()),
+        // Could not look just now: recovery finishes it (the journal has its name).
+        Err(e) => Ok(ReceiveOutcome::Failed(format!("{e}; {FINISHED_LATER}"))),
     }
-    let Some(claimed) = claimed else {
-        return fail(pctwin_gate::GateError::TooManyClashes.to_string());
-    };
-    let finished = claimed.keep();
-    let landed = match dest.stat(&finished.final_path) {
-        Ok(Some(stat)) => Landed {
-            size: stat.len,
-            modified_ns: stat.modified.map(crate::nanos),
-            file: Some(file_id(stat.id)),
-        },
-        // What was written, as far as this side knows it.
-        _ => Landed {
-            size,
-            modified_ns,
-            file: None,
-        },
-    };
-    journal.committed(entry, landed).map_err(record)?;
-    Ok(ReceiveOutcome::Finished(finished))
 }

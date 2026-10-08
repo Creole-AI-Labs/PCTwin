@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use pctwin_gate::{Claimed, Destination, Destinations, IncomingPath, temp_name};
+use pctwin_gate::{Claim, Claimed, Destination, Destinations, IncomingPath, temp_name};
 use pctwin_journal::recovery::{self, Action, Look, Seen};
 use pctwin_journal::{Entry, FileId, Journal, JournalError, Landed, State};
 
@@ -87,69 +87,102 @@ fn finish(
         Ok(dest) => dest,
         Err(why) => return Ok(Finish::Left(why)),
     };
-    let final_path = match (&entry.state, action) {
-        (State::Applied { final_path, .. }, Action::Commit) => final_path.clone(),
+    let committed = |stat: pctwin_gate::Stat| -> Result<(), JournalError> {
+        journal.committed(
+            entry.id,
+            Landed {
+                size: stat.len,
+                modified_ns: stat.modified.map(crate::nanos),
+                file: Some(FileId {
+                    volume: stat.id.volume,
+                    index: stat.id.index,
+                }),
+            },
+        )
+    };
+    let claimed = match (&entry.state, action) {
+        (State::Applied { final_path, .. }, Action::Commit) => {
+            return match dest.stat(final_path) {
+                Ok(Some(stat)) => {
+                    committed(stat)?;
+                    Ok(Finish::Committed)
+                }
+                Ok(None) => Ok(Finish::Left("its file could not be found just now".into())),
+                Err(e) => Ok(Finish::Left(e.to_string())),
+            };
+        }
         (_, Action::Commit) => return Ok(Finish::Failed(NOT_NAMED.into())),
         (_, _) => match name(journal, dest, entry)? {
-            Ok(claimed) => claimed.keep().final_path,
-            Err(why) => return Ok(Finish::Failed(why)),
+            Naming::Named(claimed) => claimed,
+            Naming::NotNow(why) => return Ok(Finish::Left(why)),
+            Naming::Cannot(why) => return Ok(Finish::Failed(why)),
         },
     };
-    match dest.stat(&final_path) {
+    // Committed while the temporary name still holds the file, then the temporary name goes.
+    match dest.stat(&claimed.finished().final_path) {
         Ok(Some(stat)) => {
-            journal.committed(
-                entry.id,
-                Landed {
-                    size: stat.len,
-                    modified_ns: stat.modified.map(crate::nanos),
-                    file: Some(FileId {
-                        volume: stat.id.volume,
-                        index: stat.id.index,
-                    }),
-                },
-            )?;
+            committed(stat)?;
+            claimed.keep();
             Ok(Finish::Committed)
         }
+        Ok(None) => Ok(Finish::Failed(
+            "it was removed as soon as it was given its name, often by security software".into(),
+        )),
         // It has its name in the journal; the next recovery looks again.
-        Ok(None) => Ok(Finish::Left("its file could not be found just now".into())),
         Err(e) => Ok(Finish::Left(e.to_string())),
     }
 }
 
+/// How naming a recovered file ended.
+enum Naming<'d> {
+    Named(Claimed<'d>),
+    /// Not now (the drive, say): kept, sealed, for the next start.
+    NotNow(String),
+    /// It cannot be: its temporary file is not one that can be named.
+    Cannot(String),
+}
+
 /// Gives a verified file its real name, recording each name in the journal before the file gets
-/// it. `Err` is why it could not be named.
+/// it. A file that cannot be named now is kept as it is, never thrown away.
 fn name<'d>(
     journal: &Journal,
     dest: &'d Destination,
     entry: &Entry,
-) -> Result<Result<Claimed<'d>, String>, JournalError> {
+) -> Result<Naming<'d>, JournalError> {
     let temp = match &entry.state {
         State::Verified { temp, .. } | State::Applied { temp, .. } => temp,
-        _ => return Ok(Err(NOT_NAMED.into())),
+        _ => return Ok(Naming::Cannot(NOT_NAMED.into())),
     };
     let reason = |e: &dyn std::fmt::Display| format!("{NOT_NAMED} ({e})");
     let sent = match IncomingPath::parse(&entry.write.path) {
         Ok(p) => p,
-        Err(e) => return Ok(Err(reason(&e))),
+        Err(e) => return Ok(Naming::Cannot(reason(&e))),
     };
     let mut sealed = match dest.reopen_sealed(&sent, temp) {
         Ok(s) => s,
-        Err(e) => return Ok(Err(reason(&e))),
+        Err(e) => return Ok(Naming::Cannot(reason(&e))),
     };
     // A name lost in the crash is free again, so it is the one found first.
     for _ in 0..MAX_NAME_TRIES {
         let next = match sealed.next_name() {
             Ok(n) => n,
-            Err(e) => return Ok(Err(reason(&e))),
+            Err(e) => {
+                sealed.persist();
+                return Ok(Naming::NotNow(reason(&e)));
+            }
         };
         journal.applied(entry.id, &next)?;
         match sealed.claim_as(&next) {
-            Ok(Ok(claimed)) => return Ok(Ok(claimed)),
-            Ok(Err(back)) => sealed = back,
-            Err(e) => return Ok(Err(reason(&e))),
+            Claim::Named(claimed) => return Ok(Naming::Named(claimed)),
+            Claim::Taken(back) => sealed = back,
+            Claim::Failed(e, back) => {
+                back.persist();
+                return Ok(Naming::NotNow(reason(&e)));
+            }
         }
     }
-    Ok(Err(NOT_NAMED.into()))
+    sealed.persist();
+    Ok(Naming::NotNow(NOT_NAMED.into()))
 }
 
 /// Most names tried when other programs keep taking the free one first.

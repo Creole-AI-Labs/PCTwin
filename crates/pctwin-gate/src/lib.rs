@@ -1700,18 +1700,29 @@ impl<'d> Sealed<'d> {
     /// and makes sure the name is on disk. If something took that name meanwhile, the file comes
     /// back unchanged (`Err`) to try [`next_name`](Self::next_name) again. Where the drive has hard
     /// links the temporary name stays until [`Claimed::keep`].
-    pub fn claim_as(mut self, stored: &str) -> Result<Result<Claimed<'d>, Self>, GateError> {
-        let name = self.name_in_folder(stored)?;
-        let temp = self.temp.clone().ok_or(GateError::Conflict)?;
+    pub fn claim_as(mut self, stored: &str) -> Claim<'d> {
+        let name = match self.name_in_folder(stored) {
+            Ok(name) => name,
+            Err(e) => return Claim::Failed(e, self),
+        };
+        let Some(temp) = self.temp.clone() else {
+            return Claim::Failed(GateError::Conflict, self);
+        };
         let folder_path = || self.destination.folder_path(&self.dir, &self.folder);
-        let Some(linked) = claim(&self.dir, &name, &temp, &folder_path)? else {
-            return Ok(Err(self));
+        let linked = match claim(&self.dir, &name, &temp, &folder_path) {
+            Ok(Some(linked)) => linked,
+            Ok(None) => return Claim::Taken(self),
+            Err(e) => return Claim::Failed(e, self),
         };
         self.temp = None;
         flush_name(&self.dir, &name);
-        Ok(Ok(
-            self.claimed(name, (linked == Linked::Hard).then_some(temp))
-        ))
+        Claim::Named(self.claimed(name, (linked == Linked::Hard).then_some(temp)))
+    }
+
+    /// Keeps the sealed file on disk under its temporary name for the journal to finish later
+    /// (after a restart); dropping it instead removes it.
+    pub fn persist(mut self) {
+        self.temp = None;
     }
 
     /// Which file it is on its drive, to record before it gets its real name: after a crash only
@@ -1731,9 +1742,10 @@ impl<'d> Sealed<'d> {
         // Each try fails only if another program took the free name in between.
         for _ in 0..MAX_CLAIM_RACES {
             let name = sealed.next_name()?;
-            match sealed.claim_as(&name)? {
-                Ok(claimed) => return Ok(claimed),
-                Err(back) => sealed = back,
+            match sealed.claim_as(&name) {
+                Claim::Named(claimed) => return Ok(claimed),
+                Claim::Taken(back) => sealed = back,
+                Claim::Failed(e, _) => return Err(e),
             }
         }
         Err(GateError::TooManyClashes)
@@ -1765,6 +1777,17 @@ impl<'d> Sealed<'d> {
             _destination: std::marker::PhantomData,
         }
     }
+}
+
+/// How giving a sealed file its real name ended. The sealed file always comes back unless it got
+/// its name, so a failure never throws a checked file away.
+pub enum Claim<'d> {
+    /// It has its real name.
+    Named(Claimed<'d>),
+    /// Something took that name first: try another.
+    Taken(Sealed<'d>),
+    /// It could not be named now (the drive, say); it is still there, sealed.
+    Failed(GateError, Sealed<'d>),
 }
 
 /// Most times a free name is taken by another program between finding it and claiming it before

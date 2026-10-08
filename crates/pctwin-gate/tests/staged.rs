@@ -7,14 +7,14 @@
 
 use std::io::Write;
 
-use pctwin_gate::{Destination, GateError, IncomingPath, NameChange, temp_name};
+use pctwin_gate::{Claim, Destination, GateError, IncomingPath, NameChange, temp_name};
 
 fn landed(dest: &Destination, sent: &str, temp: &str) -> String {
     let sealed = dest.reopen_sealed(&path(sent), temp).unwrap();
     let name = sealed.next_name().unwrap();
-    match sealed.claim_as(&name).unwrap() {
-        Ok(claimed) => claimed.keep().final_path,
-        Err(_) => panic!("taken"),
+    match sealed.claim_as(&name) {
+        Claim::Named(claimed) => claimed.keep().final_path,
+        _ => panic!("not named"),
     }
 }
 
@@ -108,7 +108,7 @@ fn the_real_name_is_found_first_then_claimed_and_both_names_stay_until_kept() {
     // Found, not taken: the journal records it before the file gets it.
     assert_eq!(sealed.next_name().unwrap(), "d/a.txt");
     assert!(!root.path().join("d/a.txt").exists());
-    let Ok(claimed) = sealed.claim_as("d/a.txt").unwrap() else {
+    let Claim::Named(claimed) = sealed.claim_as("d/a.txt") else {
         panic!("taken")
     };
     assert_eq!(claimed.finished().final_path, "d/a.txt");
@@ -132,13 +132,13 @@ fn a_name_taken_after_it_was_found_is_never_replaced_and_the_file_comes_back() {
     assert_eq!(name, "a.txt");
     // Another program takes the name in between.
     std::fs::write(root.path().join("a.txt"), b"mine").unwrap();
-    let Err(sealed) = sealed.claim_as(&name).unwrap() else {
+    let Claim::Taken(sealed) = sealed.claim_as(&name) else {
         panic!("replaced a file")
     };
     assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"mine");
     let name = sealed.next_name().unwrap();
     assert_eq!(name, "a (2).txt");
-    let Ok(claimed) = sealed.claim_as(&name).unwrap() else {
+    let Claim::Named(claimed) = sealed.claim_as(&name) else {
         panic!("taken")
     };
     assert!(claimed.finished().changes.contains(&NameChange::NameClash));
@@ -157,14 +157,28 @@ fn a_file_is_only_ever_named_inside_its_own_folder() {
         let mut file = dest.create_file_tagged(&path("d/a.txt"), 1, "t-1").unwrap();
         file.write_all(b"x").unwrap();
         let sealed = file.seal().unwrap();
-        assert!(
-            sealed.claim_as(elsewhere).is_err(),
-            "named outside its folder: {elsewhere:?}"
+        let Claim::Failed(_, sealed) = sealed.claim_as(elsewhere) else {
+            panic!("named outside its folder: {elsewhere:?}")
+        };
+        // Refused, and the checked file comes back as it was.
+        assert_eq!(
+            names(&root.path().join("d")),
+            [".pctwin-t-1.part"],
+            "{elsewhere:?}"
         );
-        // Refused: the unnamed file is removed, nothing else appears.
-        assert!(names(&root.path().join("d")).is_empty(), "{elsewhere:?}");
         assert_eq!(names(root.path()), ["d"], "{elsewhere:?}");
+        drop(sealed);
+        assert!(names(&root.path().join("d")).is_empty(), "{elsewhere:?}");
     }
+}
+
+#[test]
+fn a_sealed_file_kept_for_later_stays_under_its_temporary_name() {
+    let (root, dest) = setup();
+    let mut file = dest.create_file_tagged(&path("a.txt"), 1, "t-1").unwrap();
+    file.write_all(b"x").unwrap();
+    file.seal().unwrap().persist();
+    assert_eq!(names(root.path()), [".pctwin-t-1.part"]);
 }
 
 #[test]
@@ -229,7 +243,7 @@ fn an_empty_file_at_the_name_is_someone_else_s_and_is_never_replaced() {
     let sealed = dest
         .reopen_sealed(&path("a.txt"), ".pctwin-t-1.part")
         .unwrap();
-    let Err(sealed) = sealed.claim_as("a.txt").unwrap() else {
+    let Claim::Taken(sealed) = sealed.claim_as("a.txt") else {
         panic!("replaced an empty file")
     };
     assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"");
@@ -244,7 +258,7 @@ fn a_sealed_file_has_one_identity_until_it_lands_and_keeps_it_under_its_name() {
     let sealed = file.seal().unwrap();
     let id = sealed.identity().unwrap();
     assert_eq!(dest.stat(".pctwin-t-1.part").unwrap().unwrap().id, id);
-    let Ok(claimed) = sealed.claim_as("a.txt").unwrap() else {
+    let Claim::Named(claimed) = sealed.claim_as("a.txt") else {
         panic!("taken")
     };
     claimed.keep();

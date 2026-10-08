@@ -564,9 +564,13 @@ async fn a_journal_that_fails_only_at_the_last_step_leaves_the_file_for_recovery
     };
     // Its temporary file is named after the journal and the entry, so recovery knows it.
     assert_eq!(temp, &pctwin_gate::temp_name(&w.journal.temp_tag(e.id)));
+    // Not yet committed, so the temporary name still holds the file (it goes only once the
+    // journal has the commit).
+    assert!(w.mine.path().join(temp).exists());
     let r = pctwin_transfer::recover(&w.journal, &w.table).unwrap();
     assert_eq!(r.committed, [e.id]);
     assert_eq!(std::fs::read(w.mine.path().join("a.txt")).unwrap(), data);
+    assert!(!w.mine.path().join(temp).exists());
 }
 
 /// Damages the first block's piece, then cuts the connection before the old laptop can end the
