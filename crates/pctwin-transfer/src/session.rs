@@ -14,8 +14,11 @@ use crate::sections::FileSections;
 use crate::{
     Allowance, Assembly, Block, FileSender, FsOpener, Opener, ResumeTicket, Trailer, TransferError,
 };
+use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use pctwin_scan::ReadPlan;
 use tokio::sync::Notify;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Why the files not yet read were left: reading stopped to protect a failing drive.
 const STOPPED: &str =
@@ -258,26 +261,37 @@ impl SenderSession {
     /// Sends everything not yet done over `ch`. Returns when every file is answered for, or with
     /// [`TransferError::ConnectionDropped`] (call again with a new connection to continue).
     pub async fn run<C: Channel>(&mut self, ch: &mut C) -> Result<(), TransferError> {
-        self.run_lanes(ch, &mut [] as &mut [C]).await
+        self.run_lanes(ch, Vec::<C>::new()).await
     }
 
-    /// Sends everything not yet done over the main connection `main` and any extra `lanes` to
-    /// the same new laptop. Starts, ends and skips go on the main connection; blocks go on every
-    /// lane, a big file's sections over several at once, most important files first. A lane that
-    /// drops gives its unconfirmed blocks back to be sent on the others; if the main connection
-    /// drops, call again with a new one to continue.
+    /// Sends everything not yet done over the main connection `main` and the extra `lanes` to
+    /// the same new laptop. See [`run_joining`](Self::run_joining).
     pub async fn run_lanes<C: Channel>(
         &mut self,
         main: &mut C,
-        lanes: &mut [C],
+        lanes: Vec<C>,
+    ) -> Result<(), TransferError> {
+        self.run_joining(main, &mut inbox_of(lanes)).await
+    }
+
+    /// Sends everything not yet done over the main connection `main`, with extra lanes to the same
+    /// new laptop joining through `joining` at any time during the move. Starts, ends and skips go
+    /// on the main connection; blocks go on every lane, a big file's sections over several at
+    /// once, most important files first. A lane that drops gives its unconfirmed blocks back to be
+    /// sent on the others; if the main connection drops, call again with a new one to continue.
+    /// Lanes end with the move.
+    pub async fn run_joining<C: Channel>(
+        &mut self,
+        main: &mut C,
+        joining: &mut UnboundedReceiver<C>,
     ) -> Result<(), TransferError> {
         self.resume(main).await?;
-        self.lanes = (0..=lanes.len()).map(|_| VecDeque::new()).collect();
+        self.lanes = vec![VecDeque::new()];
         self.in_flight = 0;
         let state = RefCell::new(self);
         let changed = Notify::new();
         // Extra lanes still running.
-        let alive = Cell::new(lanes.len());
+        let alive = Cell::new(0usize);
         let main_loop = async {
             loop {
                 // Registered before looking, so a change made meanwhile is not missed.
@@ -288,6 +302,15 @@ impl SenderSession {
                     for m in &control {
                         send(main, m).await?;
                     }
+                    changed.notify_waiters();
+                    continue;
+                }
+                if state.borrow().awaiting_answer_to_start() {
+                    // A started file waits for the new laptop's answer before any lane may send
+                    // it, so that answer is read first rather than after this lane runs out of
+                    // blocks. It is owed, so waiting for it cannot hang.
+                    let m = recv(main).await?;
+                    state.borrow_mut().answer(0, m)?;
                     changed.notify_waiters();
                     continue;
                 }
@@ -325,59 +348,30 @@ impl SenderSession {
             send(main, &Message::AllSent).await?;
             Ok(())
         };
-        let extra = futures_util::future::join_all(lanes.iter_mut().enumerate().map(|(n, ch)| {
-            let (state, changed, alive) = (&state, &changed, &alive);
-            let lane = n + 1;
-            async move {
-                loop {
-                    let wake = changed.notified();
-                    let work = state.borrow_mut().work(lane);
-                    if state.borrow_mut().take_dirty() {
-                        changed.notify_waiters();
-                    }
-                    let lane_ok = match work {
-                        Work::Send { stream, wire } => {
-                            let mut sent = true;
-                            for piece in split_into_pieces(stream, &wire) {
-                                if send(ch, &piece).await.is_err() {
-                                    sent = false;
-                                    break;
-                                }
-                            }
-                            sent
+        let extra = async {
+            let mut running = FuturesUnordered::new();
+            let mut open = true;
+            loop {
+                tokio::select! {
+                    joined = joining.recv(), if open => match joined {
+                        Some(ch) => {
+                            let lane = state.borrow_mut().add_lane();
+                            alive.set(alive.get() + 1);
+                            running.push(send_lane(&state, &changed, &alive, lane, ch));
+                            changed.notify_waiters();
                         }
-                        Work::Wait if !state.borrow().lanes[lane].is_empty() => {
-                            // Receipts are owed on this lane, so waiting for one cannot hang.
-                            match recv(ch).await {
-                                Ok(m) => {
-                                    let answered = state.borrow_mut().answer(lane, m).is_ok();
-                                    changed.notify_waiters();
-                                    answered
-                                }
-                                Err(_) => false,
-                            }
-                        }
-                        Work::Wait => {
-                            wake.await;
-                            true
-                        }
-                    };
-                    if !lane_ok {
-                        // Dropped, or answered out of turn: this lane is closed and its
-                        // unconfirmed blocks go to the others.
-                        state.borrow_mut().lane_lost(lane);
-                        alive.set(alive.get() - 1);
-                        changed.notify_waiters();
-                        return;
-                    }
+                        None => open = false,
+                    },
+                    Some(()) = running.next(), if !running.is_empty() => {}
+                    else => break,
                 }
             }
-        }));
+        };
         tokio::pin!(main_loop);
         tokio::pin!(extra);
         tokio::select! {
             done = &mut main_loop => done,
-            _ = &mut extra => main_loop.await,
+            () = &mut extra => main_loop.await,
         }
     }
 
@@ -662,9 +656,29 @@ impl SenderSession {
         };
     }
 
+    /// Whether a file was started on this connection and the new laptop has not answered yet.
+    fn awaiting_answer_to_start(&self) -> bool {
+        self.states.iter().any(|s| {
+            matches!(
+                s,
+                SendState::Open {
+                    announced: true,
+                    cleared: false,
+                    ..
+                }
+            )
+        })
+    }
+
     /// Whether ends or skips are waiting to go on the main connection.
     fn has_control(&self) -> bool {
         !self.ends.is_empty() || !self.skips.is_empty()
+    }
+
+    /// A lane joined: its number.
+    fn add_lane(&mut self) -> usize {
+        self.lanes.push(VecDeque::new());
+        self.lanes.len() - 1
     }
 
     fn take_dirty(&mut self) -> bool {
@@ -830,6 +844,91 @@ impl SenderSession {
     }
 }
 
+/// One extra lane of the old laptop: asks the shared plan for blocks and sends them, reads
+/// receipts only when they are owed, and otherwise sleeps until another lane changes something.
+/// If it drops or is answered out of turn, its unconfirmed blocks go back to the others.
+async fn send_lane<C: Channel>(
+    state: &RefCell<&mut SenderSession>,
+    changed: &Notify,
+    alive: &Cell<usize>,
+    lane: usize,
+    mut ch: C,
+) {
+    loop {
+        let wake = changed.notified();
+        let work = state.borrow_mut().work(lane);
+        if state.borrow_mut().take_dirty() {
+            changed.notify_waiters();
+        }
+        let lane_ok = match work {
+            Work::Send { stream, wire } => {
+                let mut sent = true;
+                for piece in split_into_pieces(stream, &wire) {
+                    if send(&mut ch, &piece).await.is_err() {
+                        sent = false;
+                        break;
+                    }
+                }
+                sent
+            }
+            Work::Wait if !state.borrow().lanes[lane].is_empty() => {
+                // Receipts are owed on this lane, so waiting for one cannot hang.
+                match recv(&mut ch).await {
+                    Ok(m) => {
+                        let answered = state.borrow_mut().answer(lane, m).is_ok();
+                        changed.notify_waiters();
+                        answered
+                    }
+                    Err(_) => false,
+                }
+            }
+            Work::Wait => {
+                wake.await;
+                true
+            }
+        };
+        if !lane_ok {
+            state.borrow_mut().lane_lost(lane);
+            alive.set(alive.get() - 1);
+            changed.notify_waiters();
+            return;
+        }
+    }
+}
+
+/// One extra lane of the new laptop: rejoins its own pieces, writes each whole block and answers
+/// it on this lane. Closed if it drops or sends anything but pieces.
+async fn receive_lane<C: Channel>(state: &RefCell<&mut ReceiverSession<'_>>, mut ch: C) {
+    let mut pieces: HashMap<u32, PieceBuffer> = HashMap::new();
+    loop {
+        let Ok(Message::Piece {
+            stream,
+            last,
+            bytes,
+        }) = recv(&mut ch).await
+        else {
+            // Dropped, or not a piece: this lane is closed.
+            return;
+        };
+        let receipt = state.borrow_mut().piece(&mut pieces, stream, last, &bytes);
+        if let Some(r) = receipt
+            && send(&mut ch, &r).await.is_err()
+        {
+            return;
+        }
+    }
+}
+
+/// Lanes given all at once, as an inbox that then closes.
+fn inbox_of<C>(lanes: Vec<C>) -> UnboundedReceiver<C> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    for lane in lanes {
+        // The receiving end is held here, so nothing is lost.
+        let _ = tx.send(lane);
+    }
+    rx
+}
+
 /// The section plan for a file, with blocks already done marked; `None` for a file with more
 /// blocks than a plan can count (far past any real file).
 fn sections_for(header: &crate::Header, done: &[bool]) -> Option<FileSections> {
@@ -924,18 +1023,29 @@ impl<'d> ReceiverSession<'d> {
     /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
     /// again with a new connection to continue).
     pub async fn run<C: Channel>(&mut self, ch: &mut C) -> Result<(), TransferError> {
-        self.run_lanes(ch, &mut [] as &mut [C]).await
+        self.run_lanes(ch, Vec::<C>::new()).await
     }
 
-    /// Receives over the main connection `main` and any extra `lanes` to the same old laptop.
-    /// Files are started, ended and skipped only on the main connection; extra lanes carry only
-    /// blocks (as pieces) and their receipts, and each lane rejoins its own pieces. A lane that
-    /// drops or sends anything but pieces is closed and the move carries on over the others; if
-    /// the main connection drops, call again with a new one to continue.
+    /// Receives over the main connection `main` and the extra `lanes` to the same old laptop.
+    /// See [`run_joining`](Self::run_joining).
     pub async fn run_lanes<C: Channel>(
         &mut self,
         main: &mut C,
-        lanes: &mut [C],
+        lanes: Vec<C>,
+    ) -> Result<(), TransferError> {
+        self.run_joining(main, &mut inbox_of(lanes)).await
+    }
+
+    /// Receives over the main connection `main`, with extra lanes from the same old laptop
+    /// joining through `joining` at any time during the move. Files are started, ended and
+    /// skipped only on the main connection; extra lanes carry only blocks (as pieces) and their
+    /// receipts, and each lane rejoins its own pieces. A lane that drops or sends anything but
+    /// pieces is closed and the move carries on over the others; if the main connection drops,
+    /// call again with a new one to continue. Lanes end with the move.
+    pub async fn run_joining<C: Channel>(
+        &mut self,
+        main: &mut C,
+        joining: &mut UnboundedReceiver<C>,
     ) -> Result<(), TransferError> {
         let state = RefCell::new(self);
         // Say what is already here, so the old laptop continues from there.
@@ -958,35 +1068,26 @@ impl<'d> ReceiverSession<'d> {
                 }
             }
         };
-        let extra = futures_util::future::join_all(lanes.iter_mut().map(|ch| {
-            let state = &state;
-            async move {
-                let mut pieces: HashMap<u32, PieceBuffer> = HashMap::new();
-                loop {
-                    let Ok(Message::Piece {
-                        stream,
-                        last,
-                        bytes,
-                    }) = recv(ch).await
-                    else {
-                        // Dropped, or not a piece: this lane is closed.
-                        return;
-                    };
-                    let receipt = state.borrow_mut().piece(&mut pieces, stream, last, &bytes);
-                    if let Some(r) = receipt
-                        && send(ch, &r).await.is_err()
-                    {
-                        return;
-                    }
+        let extra = async {
+            let mut running = FuturesUnordered::new();
+            let mut open = true;
+            loop {
+                tokio::select! {
+                    joined = joining.recv(), if open => match joined {
+                        Some(ch) => running.push(receive_lane(&state, ch)),
+                        None => open = false,
+                    },
+                    Some(()) = running.next(), if !running.is_empty() => {}
+                    else => break,
                 }
             }
-        }));
+        };
         tokio::pin!(main_loop);
         tokio::pin!(extra);
         tokio::select! {
             done = &mut main_loop => done,
-            // Every extra lane closed: carry on over the main connection alone.
-            _ = &mut extra => main_loop.await,
+            // Every extra lane closed and no more can join: carry on over the main connection.
+            () = &mut extra => main_loop.await,
         }
     }
 

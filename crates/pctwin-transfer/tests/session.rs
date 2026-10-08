@@ -753,7 +753,7 @@ async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
     let (mut old, mut new) = mem_pair();
     let (mut old2, new2) = mem_pair();
     let (mut old3, new3) = mem_pair();
-    let mut extra = [new2, new3];
+    let extra = [new2, new3];
     // Main sends the middle, lane 2 the start, lane 3 the end: three sections at once.
     let plan_of = vec![
         (n / 3..2 * n / 3).collect::<Vec<_>>(),
@@ -799,7 +799,7 @@ async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
         say(&mut old, &Message::AllSent).await;
     };
     let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
     })
     .await
     .expect("hung");
@@ -820,7 +820,7 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
     let (mut old, mut new) = mem_pair();
     let (mut old2, new2) = mem_pair();
-    let mut extra = [new2];
+    let extra = [new2];
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
         say(&mut old, &start(&header, 0, id(2))).await;
@@ -879,7 +879,7 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
         say(&mut old, &Message::AllSent).await;
     };
     let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
     })
     .await
     .expect("hung");
@@ -899,7 +899,7 @@ async fn an_extra_lane_cannot_start_end_or_skip_files() {
     let header = fs.header().clone();
     let (mut old, mut new) = mem_pair();
     let (mut old2, new2) = mem_pair();
-    let mut extra = [new2];
+    let extra = [new2];
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
     let script = async {
@@ -921,7 +921,7 @@ async fn an_extra_lane_cannot_start_end_or_skip_files() {
         say(&mut old, &Message::AllSent).await;
     };
     let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
     })
     .await
     .expect("hung");
@@ -940,7 +940,7 @@ async fn pieces_for_a_file_never_started_are_still_answered() {
     let block = fs.next_block().unwrap().unwrap();
     let (mut old, mut new) = mem_pair();
     let (mut old2, new2) = mem_pair();
-    let mut extra = [new2];
+    let extra = [new2];
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
         for lane in [&mut old, &mut old2] {
@@ -958,7 +958,7 @@ async fn pieces_for_a_file_never_started_are_still_answered() {
         say(&mut old, &Message::AllSent).await;
     };
     let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
     })
     .await
     .expect("hung");
@@ -978,7 +978,7 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
     let (mut old, mut new) = mem_pair();
     let (mut old2, new2) = mem_pair();
     let (mut old3, new3) = mem_pair();
-    let mut extra = [new2, new3];
+    let extra = [new2, new3];
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
         say(&mut old, &start(&header, 0, id(2))).await;
@@ -1043,7 +1043,7 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
         say(&mut old, &Message::AllSent).await;
     };
     let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, &mut extra))
+        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
     })
     .await
     .expect("hung");

@@ -186,12 +186,12 @@ fn connections(extra: usize) -> (Mem, Vec<Mem>, Mem, Vec<Mem>) {
 async fn run(
     sender: &mut SenderSession,
     receiver: &mut ReceiverSession<'_>,
-    (mut old_main, mut old_lanes, mut new_main, mut new_lanes): (Mem, Vec<Mem>, Mem, Vec<Mem>),
+    (mut old_main, old_lanes, mut new_main, new_lanes): (Mem, Vec<Mem>, Mem, Vec<Mem>),
 ) -> (bool, bool) {
     let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
         tokio::join!(
-            sender.run_lanes(&mut old_main, &mut old_lanes),
-            receiver.run_lanes(&mut new_main, &mut new_lanes)
+            sender.run_lanes(&mut old_main, old_lanes),
+            receiver.run_lanes(&mut new_main, new_lanes)
         )
     })
     .await
@@ -234,9 +234,17 @@ async fn an_extra_lane_that_drops_mid_move_loses_nothing() {
     let mut sender = SenderSession::new(jobs(&l), 4);
     let mut receiver = ReceiverSession::new(&table, plan(&l));
     let mut conns = connections(2);
-    // Lane 1 drops after carrying a few hundred pieces (some blocks unconfirmed).
-    conns.1[0].cut_at = Some(400);
+    // The extra lanes drop after carrying some pieces (some blocks unconfirmed). Which lane gets
+    // work varies, so both are set to drop; at least one really does.
+    for lane in &mut conns.1 {
+        lane.cut_at = Some(60);
+    }
+    let dropped: Vec<_> = conns.1.iter().map(|m| m.cut.clone()).collect();
     assert_eq!(run(&mut sender, &mut receiver, conns).await, (true, true));
+    assert!(
+        dropped.iter().any(|d| d.load(Ordering::SeqCst)),
+        "a lane really dropped"
+    );
     assert_arrived(&l);
     // The blocks the lane had not had confirmed were really sent again on the others.
     assert!(sender.blocks_sent() > total_blocks(&l));
@@ -249,7 +257,8 @@ async fn the_main_connection_dropping_is_picked_up_again_over_new_lanes() {
     let mut sender = SenderSession::new(jobs(&l), 4);
     let mut receiver = ReceiverSession::new(&table, plan(&l));
     let mut conns = connections(2);
-    conns.0.cut_at = Some(30);
+    // Early, while the big file is still on its way (the main connection's 8th message).
+    conns.0.cut_at = Some(8);
     // Every lane goes with it, as when the Wi-Fi drops.
     let cut = conns.0.cut.clone();
     for lane in &mut conns.1 {
@@ -282,8 +291,9 @@ async fn a_file_changed_while_sent_over_lanes_arrives_whole_and_current() {
     let big = l.files[0].0.clone();
     let newer = pattern(80 * MIB, 99);
     let written = newer.clone();
-    conns.1[0].hook = Some((
-        60,
+    // On the main connection, which always carries blocks.
+    conns.0.hook = Some((
+        8,
         Box::new(move || {
             std::fs::write(&big, &written).unwrap();
             let f = std::fs::OpenOptions::new().write(true).open(&big).unwrap();
@@ -337,4 +347,57 @@ async fn one_lane_and_several_lanes_move_the_same_files() {
     for n in 0..4u8 {
         assert_eq!(sender2.outcome(id(n)).cloned(), one[&n]);
     }
+}
+
+#[tokio::test]
+async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
+    // Many small files, so there is always work left for a lane that joins late.
+    let old = tempfile::tempdir().unwrap();
+    let files: Vec<(PathBuf, Vec<u8>)> = (0..40u32)
+        .map(|i| {
+            let p = old.path().join(format!("f{i}.bin"));
+            let bytes = pattern(300_000, i + 1);
+            std::fs::write(&p, &bytes).unwrap();
+            (p, bytes)
+        })
+        .collect();
+    let l = Laptops {
+        _old: old,
+        new: tempfile::tempdir().unwrap(),
+        files,
+    };
+    let table = table(&l);
+    let mut sender = SenderSession::new(jobs(&l), 8);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old_main, mut new_main) = pair();
+    let (old_in, mut old_joining) = mpsc::unbounded_channel();
+    let (new_in, mut new_joining) = mpsc::unbounded_channel();
+    let (old_lane, new_lane) = pair();
+    let carried = old_lane.streams.clone();
+    // The lane is opened while the move is under way: at the main connection's 20th message.
+    let mut lanes = Some((old_lane, new_lane));
+    old_main.hook = Some((
+        20,
+        Box::new(move || {
+            if let Some((o, n)) = lanes.take() {
+                new_in.send(n).unwrap();
+                old_in.send(o).unwrap();
+            }
+        }),
+    ));
+    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(
+            sender.run_joining(&mut old_main, &mut old_joining),
+            receiver.run_joining(&mut new_main, &mut new_joining)
+        )
+    })
+    .await
+    .expect("the move hung");
+    s.unwrap();
+    r.unwrap();
+    assert_arrived(&l);
+    assert!(
+        !carried.lock().unwrap().is_empty(),
+        "the late lane carried nothing"
+    );
 }
