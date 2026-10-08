@@ -3151,6 +3151,7 @@ dependencies = [
  "cap-std",
  "fs4",
  "proptest",
+ "rustix",
  "tempfile",
  "thiserror 2.0.21",
  "unicode-normalization",

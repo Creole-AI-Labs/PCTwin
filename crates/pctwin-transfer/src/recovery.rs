@@ -45,7 +45,7 @@ pub fn recover(journal: &Journal, table: &Destinations) -> Result<Recovered, Jou
             }
             Action::Resume => done.resumable.push(entry.id),
             Action::Leave(why) => done.left.push((entry.id, why)),
-            Action::Name | Action::TakeReservation | Action::Commit => {
+            Action::Name | Action::Commit => {
                 match finish(journal, &look, entry, &decision.action)? {
                     Finish::Committed => done.committed.push(entry.id),
                     Finish::Failed(why) => {
@@ -90,7 +90,7 @@ fn finish(
     let final_path = match (&entry.state, action) {
         (State::Applied { final_path, .. }, Action::Commit) => final_path.clone(),
         (_, Action::Commit) => return Ok(Finish::Failed(NOT_NAMED.into())),
-        (_, _) => match name(journal, dest, entry, action)? {
+        (_, _) => match name(journal, dest, entry)? {
             Ok(claimed) => claimed.keep().final_path,
             Err(why) => return Ok(Finish::Failed(why)),
         },
@@ -122,13 +122,9 @@ fn name<'d>(
     journal: &Journal,
     dest: &'d Destination,
     entry: &Entry,
-    action: &Action,
 ) -> Result<Result<Claimed<'d>, String>, JournalError> {
-    let (temp, applied) = match &entry.state {
-        State::Verified { temp, .. } => (temp, None),
-        State::Applied {
-            temp, final_path, ..
-        } => (temp, Some(final_path)),
+    let temp = match &entry.state {
+        State::Verified { temp, .. } | State::Applied { temp, .. } => temp,
         _ => return Ok(Err(NOT_NAMED.into())),
     };
     let reason = |e: &dyn std::fmt::Display| format!("{NOT_NAMED} ({e})");
@@ -140,11 +136,6 @@ fn name<'d>(
         Ok(s) => s,
         Err(e) => return Ok(Err(reason(&e))),
     };
-    if let Some(final_path) = applied
-        && matches!(action, Action::TakeReservation)
-    {
-        return Ok(sealed.take_reservation(final_path).map_err(|e| reason(&e)));
-    }
     // A name lost in the crash is free again, so it is the one found first.
     for _ in 0..MAX_NAME_TRIES {
         let next = match sealed.next_name() {
@@ -260,11 +251,15 @@ impl Look for DiskLook<'_> {
         Ok(found.as_ref() == Some(fingerprint))
     }
 
-    fn same_file(&self, entry: &Entry, a: &str, b: &str) -> Result<bool, String> {
+    fn identity(&self, entry: &Entry, stored: &str) -> Result<Option<FileId>, String> {
         let dest = self.destination(entry)?;
-        let a = dest.stat(a).map_err(|e| e.to_string())?;
-        let b = dest.stat(b).map_err(|e| e.to_string())?;
-        Ok(matches!((a, b), (Some(a), Some(b)) if a.id == b.id))
+        Ok(dest
+            .stat(stored)
+            .map_err(|e| e.to_string())?
+            .map(|s| FileId {
+                volume: s.id.volume,
+                index: s.id.index,
+            }))
     }
 
     fn temp_path(&self, entry: &Entry, folder: Option<&str>) -> Option<String> {

@@ -368,6 +368,8 @@ pub enum GateError {
     NoSpace,
     #[error("a temporary name's tag must be 1 to 64 of a-z, 0-9 and '-'")]
     BadTag,
+    #[error("this drive cannot give the file its name without risking another file")]
+    NoSafeName,
     #[error("writing failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -643,7 +645,9 @@ impl Destination {
             wanted.push(part);
         }
         let real = std::fs::canonicalize(&wanted)?;
-        if real != wanted {
+        // Part by part, as the drive compares names: a folder the person already had may be
+        // spelled differently on the disk ("Docs") from how it was sent ("docs").
+        if !same_spelling(&real, &wanted) {
             return Err(io::Error::other("the path leads somewhere else"));
         }
         if !std::fs::symlink_metadata(&real)?.is_file() {
@@ -751,6 +755,32 @@ impl Destination {
             sent_path: sent.original().to_string(),
             changes,
         })
+    }
+
+    /// The full path of the folder `folder` (a stored path, held as `dir`): its canonical path,
+    /// which has no link or junction in it, proven to be that very folder by its identity.
+    /// Refused for a place opened through the admin helper (it has no path).
+    fn folder_path(&self, dir: &Dir, folder: &str) -> io::Result<std::path::PathBuf> {
+        let root = self
+            .root_path
+            .as_ref()
+            .ok_or_else(|| io::Error::other("this place has no path"))?;
+        let parts = if folder.is_empty() {
+            Vec::new()
+        } else {
+            stored_parts(folder)?
+        };
+        let real_root = std::fs::canonicalize(root)?;
+        let mut wanted = real_root.clone();
+        for part in &parts {
+            wanted.push(part);
+        }
+        let real = std::fs::canonicalize(&wanted)?;
+        let held = identity(&dir.try_clone()?.into_std_file())?.0;
+        if identity(&open_folder(&real)?)?.0 != held {
+            return Err(io::Error::other("a different folder is there now"));
+        }
+        Ok(real)
     }
 
     /// Opens the folder of the stored path `stored` without following links or creating
@@ -867,21 +897,90 @@ fn name_taken(dir: &Dir, name: &str) -> io::Result<bool> {
 enum Linked {
     /// A second name for the same file: the temporary name is still there until it is kept.
     Hard,
-    /// Moved onto a reservation (drives without hard links): the temporary name is gone.
+    /// Moved onto its name (drives without hard links): the temporary name is gone.
     Moved,
 }
 
+/// Where a folder held by a handle is, as a full path, for the one system call that takes paths
+/// (Windows' no-replace move). Worked out only when needed.
+type FolderPath<'a> = &'a dyn Fn() -> io::Result<std::path::PathBuf>;
+
 /// Gives the finished file `temp` the name `name` if nothing has it, never replacing anything.
-/// Returns `None` when the name is taken. On failure nothing is left under `name`.
-fn claim(dir: &Dir, name: &str, temp: &str) -> Result<Option<Linked>, GateError> {
+/// Returns `None` when the name is taken. Nothing is ever put under `name` but the whole file: a
+/// hard link where the drive has them, else a move the drive itself refuses if the name exists.
+/// No placeholder is ever made, so no empty file is ever left under a real name.
+fn claim(
+    dir: &Dir,
+    name: &str,
+    temp: &str,
+    folder_path: FolderPath<'_>,
+) -> Result<Option<Linked>, GateError> {
     // A hard link makes the whole file appear under its name at once, or not at all. The
     // temporary name stays until the journal has recorded the real one.
     match dir.hard_link(temp, dir, name) {
         Ok(()) => Ok(Some(Linked::Hard)),
         Err(e) if is_taken(dir, name, &e) => Ok(None),
         // Some drives (FAT, exFAT) have no hard links.
-        Err(_) => Ok(claim_by_reservation(dir, name, temp)?.then_some(Linked::Moved)),
+        Err(_) => Ok(rename_no_replace(dir, temp, name, folder_path)?.then_some(Linked::Moved)),
     }
+}
+
+/// Moves `temp` onto `name` in `dir` only if nothing has `name`; the drive checks and moves in one
+/// step, so another file can never be replaced. `Ok(false)` when the name is taken. Refused where
+/// the system cannot do this (the file is then not named rather than named unsafely).
+#[cfg(unix)]
+fn rename_no_replace(
+    dir: &Dir,
+    temp: &str,
+    name: &str,
+    _folder_path: FolderPath<'_>,
+) -> Result<bool, GateError> {
+    use rustix::fs::{RenameFlags, renameat_with};
+    use rustix::io::Errno;
+    // renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS.
+    match renameat_with(dir, temp, dir, name, RenameFlags::NOREPLACE) {
+        Ok(()) => Ok(true),
+        Err(Errno::EXIST) => Ok(false),
+        Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => Err(GateError::NoSafeName),
+        Err(e) => Err(GateError::Io(e.into())),
+    }
+}
+
+/// Windows: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (through `tempfile`, which wraps it
+/// safely), on the folder's full path, proven to be the folder held.
+#[cfg(windows)]
+fn rename_no_replace(
+    _dir: &Dir,
+    temp: &str,
+    name: &str,
+    folder_path: FolderPath<'_>,
+) -> Result<bool, GateError> {
+    let folder = folder_path().map_err(|_| GateError::NoSafeName)?;
+    let mut from = tempfile::TempPath::try_from_path(folder.join(temp))?;
+    // Never removed by `tempfile`, whatever happens.
+    from.disable_cleanup(true);
+    match from.persist_noclobber(folder.join(name)) {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            let taken = e.error.kind() == io::ErrorKind::AlreadyExists
+                || matches!(e.error.raw_os_error(), Some(80 | 183));
+            if taken {
+                Ok(false)
+            } else {
+                Err(GateError::Io(e.error))
+            }
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn rename_no_replace(
+    _dir: &Dir,
+    _temp: &str,
+    _name: &str,
+    _folder_path: FolderPath<'_>,
+) -> Result<bool, GateError> {
+    Err(GateError::NoSafeName)
 }
 
 /// Which file or folder this is on its drive: the drive's number and the file's number on it.
@@ -984,6 +1083,43 @@ fn invalid(why: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, why.to_string())
 }
 
+/// Whether two full paths name the same place part by part: the way this system's drives compare
+/// names (Windows and macOS drives ignore capital letters and accent forms; Linux compares
+/// exactly), so a folder whose name on the disk is spelled differently from how it was sent is
+/// still the same folder.
+fn same_spelling(a: &Path, b: &Path) -> bool {
+    let parts = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| {
+                let name = c.as_os_str().to_string_lossy();
+                if cfg!(any(windows, target_os = "macos")) {
+                    name.nfc().collect::<String>().to_lowercase()
+                } else {
+                    name.into_owned()
+                }
+            })
+            .collect()
+    };
+    parts(a) == parts(b)
+}
+
+/// Opens a folder by its full path to read its identity (Windows needs backup semantics to open
+/// a folder at all).
+fn open_folder(path: &Path) -> io::Result<std::fs::File> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(0x0200_0000)
+            .open(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::File::open(path)
+    }
+}
+
 /// The parts of a stored path (as the gate gave it), refusing anything that could climb out.
 fn stored_parts(stored: &str) -> io::Result<Vec<&str>> {
     let parts: Vec<&str> = stored.split('/').collect();
@@ -994,28 +1130,6 @@ fn stored_parts(stored: &str) -> io::Result<Vec<&str>> {
         return Err(invalid("not a stored path"));
     }
     Ok(parts)
-}
-
-/// For drives without hard links: reserve the name (never replacing anything), then move the
-/// finished file onto the reservation. On failure the reservation is removed.
-fn claim_by_reservation(dir: &Dir, name: &str, temp: &str) -> Result<bool, GateError> {
-    let mut reserve = OpenOptions::new();
-    reserve.write(true).create_new(true);
-    match dir.open_with(name, &reserve) {
-        Ok(placeholder) => {
-            drop(placeholder);
-            match dir.rename(temp, dir, name) {
-                Ok(()) => Ok(true),
-                Err(e) => {
-                    // Never leave the empty reservation under the real name.
-                    let _ = dir.remove_file(name);
-                    Err(e.into())
-                }
-            }
-        }
-        Err(e) if is_taken(dir, name, &e) => Ok(false),
-        Err(e) => Err(e.into()),
-    }
 }
 
 /// Whether a failed claim failed because something already has the name. Windows reports a
@@ -1426,7 +1540,8 @@ impl<'d> Sealed<'d> {
     pub fn claim_as(mut self, stored: &str) -> Result<Result<Claimed<'d>, Self>, GateError> {
         let name = self.name_in_folder(stored)?;
         let temp = self.temp.clone().ok_or(GateError::Conflict)?;
-        let Some(linked) = claim(&self.dir, &name, &temp)? else {
+        let folder_path = || self.destination.folder_path(&self.dir, &self.folder);
+        let Some(linked) = claim(&self.dir, &name, &temp, &folder_path)? else {
             return Ok(Err(self));
         };
         self.temp = None;
@@ -1436,20 +1551,14 @@ impl<'d> Sealed<'d> {
         ))
     }
 
-    /// For a drive without hard links, after a crash: the real name `stored` holds only the empty
-    /// reservation made for this file just before the crash, so the file is moved onto it. Refused
-    /// unless what is there is an empty regular file.
-    pub fn take_reservation(mut self, stored: &str) -> Result<Claimed<'d>, GateError> {
-        let name = self.name_in_folder(stored)?;
-        let temp = self.temp.clone().ok_or(GateError::Conflict)?;
-        let meta = self.dir.symlink_metadata(&name)?;
-        if !meta.is_file() || meta.len() != 0 {
-            return Err(GateError::Conflict);
-        }
-        self.dir.rename(&temp, &self.dir, &name)?;
-        self.temp = None;
-        flush_name(&self.dir, &name);
-        Ok(self.claimed(name, None))
+    /// Which file it is on its drive, to record before it gets its real name: after a crash only
+    /// this very file is ever taken as it.
+    pub fn identity(&self) -> io::Result<FileId> {
+        let temp = self
+            .temp
+            .as_deref()
+            .ok_or_else(|| io::Error::other("no file"))?;
+        Ok(identity(&self.dir.open(temp)?.into_std())?.0)
     }
 
     /// Gives the file a real name that nothing else uses, never replacing another file (without
@@ -1606,11 +1715,15 @@ mod tests {
         (root, dir)
     }
 
+    fn path_of(root: &tempfile::TempDir) -> impl Fn() -> io::Result<std::path::PathBuf> + '_ {
+        move || std::fs::canonicalize(root.path())
+    }
+
     #[test]
-    fn the_reservation_moves_the_finished_file_onto_its_name() {
+    fn without_hard_links_the_whole_file_is_moved_onto_its_name() {
         let (root, dir) = folder();
         std::fs::write(root.path().join("t.part"), b"abc").unwrap();
-        assert!(claim_by_reservation(&dir, "photo.jpg", "t.part").unwrap());
+        assert!(rename_no_replace(&dir, "t.part", "photo.jpg", &path_of(&root)).unwrap());
         assert_eq!(
             std::fs::read(root.path().join("photo.jpg")).unwrap(),
             b"abc"
@@ -1622,23 +1735,83 @@ mod tests {
     fn a_failed_move_leaves_nothing_under_the_real_name() {
         let (root, dir) = folder();
         // The temporary file vanished (another program deleted it).
-        assert!(claim_by_reservation(&dir, "doc.pdf", "gone.part").is_err());
+        assert!(rename_no_replace(&dir, "gone.part", "doc.pdf", &path_of(&root)).is_err());
         assert!(!root.path().join("doc.pdf").exists());
     }
 
     #[test]
-    fn a_taken_name_is_reported_as_taken_and_left_alone() {
+    fn a_taken_name_is_reported_as_taken_and_everything_is_left_alone() {
         let (root, dir) = folder();
         std::fs::write(root.path().join("t.part"), b"new").unwrap();
         std::fs::write(root.path().join("notes.txt"), b"mine").unwrap();
+        // Even an empty file is someone's: never replaced.
+        std::fs::write(root.path().join("empty.txt"), b"").unwrap();
         std::fs::create_dir(root.path().join("Notes")).unwrap();
-        assert!(!claim_by_reservation(&dir, "notes.txt", "t.part").unwrap());
-        assert!(!claim_by_reservation(&dir, "Notes", "t.part").unwrap());
+        for taken in ["notes.txt", "empty.txt", "Notes"] {
+            assert!(
+                !rename_no_replace(&dir, "t.part", taken, &path_of(&root)).unwrap(),
+                "{taken}"
+            );
+        }
         assert_eq!(
             std::fs::read(root.path().join("notes.txt")).unwrap(),
             b"mine"
         );
+        assert_eq!(std::fs::read(root.path().join("empty.txt")).unwrap(), b"");
         assert!(root.path().join("Notes").is_dir());
         assert_eq!(std::fs::read(root.path().join("t.part")).unwrap(), b"new");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn without_a_proven_folder_path_nothing_is_moved() {
+        let (root, dir) = folder();
+        std::fs::write(root.path().join("t.part"), b"abc").unwrap();
+        let no_path = || -> io::Result<std::path::PathBuf> { Err(io::Error::other("none")) };
+        assert!(matches!(
+            rename_no_replace(&dir, "t.part", "a.txt", &no_path),
+            Err(GateError::NoSafeName)
+        ));
+        assert!(root.path().join("t.part").exists());
+        assert!(!root.path().join("a.txt").exists());
+    }
+
+    #[test]
+    fn a_folder_s_full_path_is_given_only_for_the_very_folder_held() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("a/b")).unwrap();
+        std::fs::create_dir(root.path().join("c")).unwrap();
+        let dest = Destination::open(root.path()).unwrap();
+        let b = dest.root.open_dir("a").unwrap().open_dir("b").unwrap();
+        let path = dest.folder_path(&b, "a/b").unwrap();
+        assert_eq!(
+            path,
+            std::fs::canonicalize(root.path().join("a/b")).unwrap()
+        );
+        assert_eq!(
+            dest.folder_path(&dest.root, "").unwrap(),
+            std::fs::canonicalize(root.path()).unwrap()
+        );
+        // Another folder than the one held, or a path that climbs: refused.
+        assert!(dest.folder_path(&b, "c").is_err());
+        assert!(dest.folder_path(&b, "a/../a/b").is_err());
+        // A place with no path (opened through the admin helper): refused.
+        let held = Destination::from_dir(dest.root.try_clone().unwrap());
+        assert!(held.folder_path(&b, "a/b").is_err());
+    }
+
+    #[test]
+    fn paths_are_compared_part_by_part_as_the_drive_compares_names() {
+        use std::path::Path;
+        assert!(same_spelling(Path::new("/a/b/c"), Path::new("/a/b/c")));
+        assert!(!same_spelling(Path::new("/a/b/c"), Path::new("/a/bc")));
+        assert!(!same_spelling(Path::new("/a/b"), Path::new("/a/b/c")));
+        // Composed and decomposed accents are the same name.
+        assert!(same_spelling(
+            Path::new("/a/Caf\u{e9}"),
+            Path::new("/a/Cafe\u{301}")
+        ));
+        let case = same_spelling(Path::new("/a/Docs"), Path::new("/a/docs"));
+        assert_eq!(case, cfg!(any(windows, target_os = "macos")));
     }
 }

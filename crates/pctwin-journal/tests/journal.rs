@@ -62,7 +62,7 @@ fn a_write_goes_through_every_step_and_is_read_back_after_reopening() {
         let j = Journal::open(&path).unwrap();
         let id = j.plan(&planned(1)).unwrap();
         j.staged(id, ".pctwin-77-1.part", &[]).unwrap();
-        j.verified(id, [7; 32]).unwrap();
+        j.verified(id, [7; 32], None).unwrap();
         j.applied(id, "Documents/f1.txt").unwrap();
         j.committed(id, landed()).unwrap();
         id
@@ -105,7 +105,7 @@ fn steps_cannot_be_skipped_repeated_or_undone() {
     let id = j.plan(&planned(1)).unwrap();
     // Skipping ahead.
     assert!(matches!(
-        j.verified(id, [1; 32]),
+        j.verified(id, [1; 32], None),
         Err(JournalError::OutOfOrder { .. })
     ));
     assert!(matches!(
@@ -122,7 +122,7 @@ fn steps_cannot_be_skipped_repeated_or_undone() {
         j.staged(id, ".pctwin-2.part", &[]),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.verified(id, [1; 32]).unwrap();
+    j.verified(id, [1; 32], None).unwrap();
     j.applied(id, "Documents/f1.txt").unwrap();
     j.committed(id, landed()).unwrap();
     // A finished write stays finished.
@@ -148,7 +148,7 @@ fn a_write_can_fail_at_any_unfinished_step_and_says_why() {
     j.failed(a, "not part of the plan").unwrap();
     let b = j.plan(&planned(2)).unwrap();
     j.staged(b, ".pctwin-b.part", &[]).unwrap();
-    j.verified(b, [2; 32]).unwrap();
+    j.verified(b, [2; 32], None).unwrap();
     j.failed(b, "disk full").unwrap();
     for (id, why) in [(a, "not part of the plan"), (b, "disk full")] {
         match j.entry(id).unwrap().unwrap().state {
@@ -293,7 +293,7 @@ fn a_name_is_recorded_before_the_file_gets_it_and_can_move_on_if_taken() {
         j.applied(id, "d/f1.txt"),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.verified(id, [3; 32]).unwrap();
+    j.verified(id, [3; 32], None).unwrap();
     j.applied(id, "d/f1.txt").unwrap();
     assert_eq!(
         j.entry(id).unwrap().unwrap().state,
@@ -301,6 +301,7 @@ fn a_name_is_recorded_before_the_file_gets_it_and_can_move_on_if_taken() {
             temp: "d/.pctwin-x.part".into(),
             final_path: "d/f1.txt".into(),
             fingerprint: [3; 32],
+            file: None,
         }
     );
     // Something took that name first: another name, still before the file gets it.
@@ -330,7 +331,7 @@ fn an_identical_file_already_there_is_recorded_as_existing_never_as_written() {
     j.existing(b, "Documents/f2.txt").unwrap();
     let c = j.plan(&planned(3)).unwrap();
     j.staged(c, ".pctwin-c.part", &[]).unwrap();
-    j.verified(c, [1; 32]).unwrap();
+    j.verified(c, [1; 32], None).unwrap();
     assert!(matches!(
         j.existing(c, "x"),
         Err(JournalError::OutOfOrder { .. })
@@ -376,7 +377,7 @@ fn only_one_unfinished_write_of_a_file_at_a_time() {
     assert_eq!(open, [theirs, again]);
     // A finished write is history: starting the file again leaves it as it was.
     j.staged(again, ".pctwin-2.part", &[]).unwrap();
-    j.verified(again, [1; 32]).unwrap();
+    j.verified(again, [1; 32], None).unwrap();
     j.applied(again, "f1.txt").unwrap();
     j.committed(again, landed()).unwrap();
     let later = j.plan(&planned(1)).unwrap();
@@ -395,7 +396,7 @@ fn unfinished_writes_stay_listed_until_finished_however_they_finish() {
     j.existing(ids[1], "f").unwrap();
     for id in [ids[2], ids[3]] {
         j.staged(id, ".pctwin-t.part", &[]).unwrap();
-        j.verified(id, [0; 32]).unwrap();
+        j.verified(id, [0; 32], None).unwrap();
         j.applied(id, "f").unwrap();
     }
     j.committed(ids[2], landed()).unwrap();
@@ -496,7 +497,7 @@ fn landed_blocks_are_checkpointed_while_a_file_is_received_and_cleared_once_it_i
         [(0, [1; 32]), (1, [2; 32]), (3, [3; 32])]
     );
     // Whole: the fingerprint is all that is needed from here.
-    j.verified(a, [7; 32]).unwrap();
+    j.verified(a, [7; 32], None).unwrap();
     assert!(j.blocks(a).unwrap().is_empty());
     assert!(matches!(
         j.checkpoint(a, &[(4, [4; 32])], true),
@@ -545,7 +546,7 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     ));
     j.staged(id, "Docs/.pctwin-t.part", &[("Docs".into(), None)])
         .unwrap();
-    j.verified(id, [1; 32]).unwrap();
+    j.verified(id, [1; 32], None).unwrap();
     j.applied(id, "Docs/f1.txt").unwrap();
     j.committed(id, landed()).unwrap();
     let before = j.entry(id).unwrap().unwrap();

@@ -449,9 +449,9 @@ impl Ledger for Breaks<'_> {
         self.check("staged")?;
         self.inner.staged(id, temp, made)
     }
-    fn verified(&self, id: u64, fp: [u8; 32]) -> Result<(), JournalError> {
+    fn verified(&self, id: u64, fp: [u8; 32], file: Option<FileId>) -> Result<(), JournalError> {
         self.check("verified")?;
-        self.inner.verified(id, fp)
+        self.inner.verified(id, fp, file)
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         self.check("applied")?;

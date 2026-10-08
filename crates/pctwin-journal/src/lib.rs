@@ -152,10 +152,12 @@ pub enum State {
         temp: String,
     },
     /// Every byte arrived and was checked, the file did not change while it was read, and it is
-    /// flushed to disk under its temporary name. `fingerprint` is the whole file's.
+    /// flushed to disk under its temporary name. `fingerprint` is the whole file's; `file` is
+    /// which file it is on its drive, so after a crash only this very file is ever taken as it.
     Verified {
         temp: String,
         fingerprint: [u8; 32],
+        file: Option<FileId>,
     },
     /// The real name it is getting, recorded before it gets it (never replacing another file).
     /// If something took that name first, it moves on to another name.
@@ -163,6 +165,7 @@ pub enum State {
         temp: String,
         final_path: String,
         fingerprint: [u8; 32],
+        file: Option<FileId>,
     },
     Committed {
         final_path: String,
@@ -468,8 +471,13 @@ impl Journal {
     }
 
     /// Every byte arrived and was checked, the file did not change while it was read, and it was
-    /// flushed to disk; `fingerprint` is the whole file's.
-    pub fn verified(&self, id: u64, fingerprint: [u8; 32]) -> Result<(), JournalError> {
+    /// flushed to disk; `fingerprint` is the whole file's, `file` its identity on its drive.
+    pub fn verified(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+    ) -> Result<(), JournalError> {
         self.step(
             id,
             "verified",
@@ -477,6 +485,7 @@ impl Journal {
                 State::Staged { temp } => Some(State::Verified {
                     temp: temp.clone(),
                     fingerprint,
+                    file,
                 }),
                 _ => None,
             },
@@ -491,13 +500,21 @@ impl Journal {
             id,
             "applied",
             |s| match s {
-                State::Verified { temp, fingerprint }
+                State::Verified {
+                    temp,
+                    fingerprint,
+                    file,
+                }
                 | State::Applied {
-                    temp, fingerprint, ..
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
                 } => Some(State::Applied {
                     temp: temp.clone(),
                     final_path: final_path.into(),
                     fingerprint: *fingerprint,
+                    file: *file,
                 }),
                 _ => None,
             },
@@ -779,7 +796,12 @@ pub trait Ledger {
         temp: &str,
         made: &[(String, Option<FileId>)],
     ) -> Result<(), JournalError>;
-    fn verified(&self, id: u64, fingerprint: [u8; 32]) -> Result<(), JournalError>;
+    fn verified(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+    ) -> Result<(), JournalError>;
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError>;
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
@@ -809,8 +831,13 @@ impl Ledger for Journal {
     ) -> Result<(), JournalError> {
         Journal::staged(self, id, temp, made)
     }
-    fn verified(&self, id: u64, fingerprint: [u8; 32]) -> Result<(), JournalError> {
-        Journal::verified(self, id, fingerprint)
+    fn verified(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+    ) -> Result<(), JournalError> {
+        Journal::verified(self, id, fingerprint, file)
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         Journal::applied(self, id, final_path)

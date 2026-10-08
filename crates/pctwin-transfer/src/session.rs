@@ -1845,7 +1845,11 @@ fn land(
         Ok(sealed) => sealed,
         Err(e) => return fail(e.to_string()),
     };
-    journal.verified(entry, fingerprint).map_err(record)?;
+    // Which file it is, so after a crash only this very file is ever taken as it.
+    let sealed_as = sealed.identity().ok().map(file_id);
+    journal
+        .verified(entry, fingerprint, sealed_as)
+        .map_err(record)?;
     let mut claimed = None;
     for _ in 0..MAX_NAME_TRIES {
         let name = match sealed.next_name() {

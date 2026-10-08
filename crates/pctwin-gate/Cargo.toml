@@ -14,7 +14,13 @@ thiserror = "2.0.21"
 unicode-normalization = "0.1.25"
 
 [target.'cfg(windows)'.dependencies]
+# MoveFileExW without replacing, wrapped safely, for drives without hard links.
+tempfile = "3"
 winapi-util = "0.1.11"
+
+[target.'cfg(unix)'.dependencies]
+# renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links.
+rustix = { version = "1.1", features = ["fs"] }
 
 [dev-dependencies]
 proptest = "1.11.0"

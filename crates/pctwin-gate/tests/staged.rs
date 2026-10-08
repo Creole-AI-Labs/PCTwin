@@ -222,25 +222,34 @@ fn reopening_refuses_anything_but_a_pctwin_temporary_file() {
 }
 
 #[test]
-fn an_empty_reservation_left_by_a_crash_is_taken_and_nothing_else_is() {
+fn an_empty_file_at_the_name_is_someone_else_s_and_is_never_replaced() {
     let (root, dest) = setup();
     std::fs::write(root.path().join(".pctwin-t-1.part"), b"data").unwrap();
-    std::fs::write(root.path().join("a.txt"), b"mine").unwrap();
+    std::fs::write(root.path().join("a.txt"), b"").unwrap();
     let sealed = dest
         .reopen_sealed(&path("a.txt"), ".pctwin-t-1.part")
         .unwrap();
-    // Not empty: a person's file, never replaced.
-    assert!(sealed.take_reservation("a.txt").is_err());
-    assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"mine");
-    std::fs::write(root.path().join(".pctwin-t-2.part"), b"data").unwrap();
-    std::fs::write(root.path().join("b.txt"), b"").unwrap();
-    let sealed = dest
-        .reopen_sealed(&path("b.txt"), ".pctwin-t-2.part")
-        .unwrap();
-    let done = sealed.take_reservation("b.txt").unwrap().keep();
-    assert_eq!(done.final_path, "b.txt");
-    assert_eq!(std::fs::read(root.path().join("b.txt")).unwrap(), b"data");
-    assert!(!root.path().join(".pctwin-t-2.part").exists());
+    let Err(sealed) = sealed.claim_as("a.txt").unwrap() else {
+        panic!("replaced an empty file")
+    };
+    assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"");
+    assert_eq!(sealed.next_name().unwrap(), "a (2).txt");
+}
+
+#[test]
+fn a_sealed_file_has_one_identity_until_it_lands_and_keeps_it_under_its_name() {
+    let (root, dest) = setup();
+    let mut file = dest.create_file_tagged(&path("a.txt"), 2, "t-1").unwrap();
+    file.write_all(b"hi").unwrap();
+    let sealed = file.seal().unwrap();
+    let id = sealed.identity().unwrap();
+    assert_eq!(dest.stat(".pctwin-t-1.part").unwrap().unwrap().id, id);
+    let Ok(claimed) = sealed.claim_as("a.txt").unwrap() else {
+        panic!("taken")
+    };
+    claimed.keep();
+    assert_eq!(dest.stat("a.txt").unwrap().unwrap().id, id);
+    assert!(!root.path().join(".pctwin-t-1.part").exists());
 }
 
 #[test]

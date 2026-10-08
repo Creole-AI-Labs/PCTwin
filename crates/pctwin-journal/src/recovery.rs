@@ -13,15 +13,17 @@
 //!   in it are checked again against their fingerprints before any is counted.
 //! - **Verified**: its complete file is checked again against the whole file's fingerprint, then
 //!   given its real name (never replacing anything) and committed.
-//! - **Applied**: the name it was getting is looked at. Its own file there (the same file as its
-//!   temporary one, or, with the temporary one gone, a file with exactly its fingerprint) is
-//!   committed; a name another file took is passed over for a new one; a lost name is given again.
+//! - **Applied**: the name it was getting is looked at. Only its own file there is committed:
+//!   the very file it sealed (by identity on its drive) with exactly its fingerprint. Any other
+//!   file at that name, however alike (an empty one, or a copy of the same contents), is someone
+//!   else's and is passed over for a new name; a lost name is given again from the temporary
+//!   file. A file at the name that cannot be proven its own is never taken and never replaced.
 //! - Anything whose place cannot be looked at now (a drive not plugged in, a folder that is not
 //!   the approved one) is left exactly as it is for next time.
 
 use std::collections::HashSet;
 
-use crate::{Entry, State};
+use crate::{Entry, FileId, State};
 
 /// What recovery found at a stored path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,8 +44,8 @@ pub trait Look {
     /// Whether the file at `stored` is exactly `entry`'s size with this fingerprint (reads all of
     /// it). `Err` if it could not be read.
     fn matches(&self, entry: &Entry, stored: &str, fingerprint: &[u8; 32]) -> Result<bool, String>;
-    /// Whether the files at `a` and `b` are the same file (two names of it), by identity.
-    fn same_file(&self, entry: &Entry, a: &str, b: &str) -> Result<bool, String>;
+    /// Which file is at `stored` (its identity on its drive), if a file is there.
+    fn identity(&self, entry: &Entry, stored: &str) -> Result<Option<FileId>, String>;
     /// The stored path of `entry`'s temporary file in `folder`, or (no folder given) in the folder
     /// its path lands in. `None` if that cannot be worked out.
     fn temp_path(&self, entry: &Entry, folder: Option<&str>) -> Option<String>;
@@ -61,9 +63,6 @@ pub enum Action {
     /// Its checked, complete file gets its real name (the name applied, if still free, else a new
     /// one recorded first), then it is committed.
     Name,
-    /// The name applied holds only the empty reservation made for it just before the crash (drives
-    /// without hard links): the file is moved onto it, then committed.
-    TakeReservation,
     /// It has its real name and the file there is proven to be it: committed.
     Commit,
 }
@@ -113,6 +112,16 @@ pub fn decide(entry: &Entry, look: &impl Look) -> Action {
         look.matches(entry, stored, fingerprint)
             .map_err(|why| leave(&why))
     };
+    // Whether the file at `stored` is the very file it sealed. Without a recorded identity (a drive
+    // that gives none) nothing can be proven its own.
+    let own = |stored: &str, file: Option<FileId>| -> Result<bool, Action> {
+        let Some(file) = file else {
+            return Ok(false);
+        };
+        look.identity(entry, stored)
+            .map(|found| found == Some(file))
+            .map_err(|why| leave(&why))
+    };
     match &entry.state {
         State::Planned => Action::Fail(BEFORE.into()),
         State::Staged { temp } => match look.look(entry, temp) {
@@ -121,10 +130,20 @@ pub fn decide(entry: &Entry, look: &impl Look) -> Action {
             Seen::File { len } if len <= size => Action::Resume,
             Seen::File { .. } => Action::Fail(CHANGED.into()),
         },
-        State::Verified { temp, fingerprint } => match look.look(entry, temp) {
+        State::Verified {
+            temp,
+            fingerprint,
+            file,
+        } => match look.look(entry, temp) {
             Seen::Missing => Action::Fail(NOT_CONFIRMED.into()),
             Seen::CannotLook(why) => leave(&why),
-            Seen::File { len } => match proven(temp, len, fingerprint) {
+            Seen::File { len } => match own(temp, *file).and_then(|mine| {
+                if mine {
+                    proven(temp, len, fingerprint)
+                } else {
+                    Ok(false)
+                }
+            }) {
                 Ok(true) => Action::Name,
                 Ok(false) => Action::Fail(CHANGED.into()),
                 Err(left) => left,
@@ -134,41 +153,46 @@ pub fn decide(entry: &Entry, look: &impl Look) -> Action {
             temp,
             final_path,
             fingerprint,
-        } => match (look.look(entry, final_path), look.look(entry, temp)) {
-            (Seen::CannotLook(why), _) | (_, Seen::CannotLook(why)) => leave(&why),
-            (Seen::File { len: at_name }, Seen::File { len: temp_len }) => {
-                match look.same_file(entry, final_path, temp) {
-                    Err(why) => leave(&why),
-                    // It got its name just before the crash.
-                    Ok(true) => match proven(final_path, at_name, fingerprint) {
-                        Ok(true) => Action::Commit,
-                        Ok(false) => Action::Fail(CHANGED_KEPT.into()),
-                        Err(left) => left,
-                    },
-                    // Another file has the name: its own reservation if empty, else someone
-                    // else's, never taken.
-                    Ok(false) => match proven(temp, temp_len, fingerprint) {
-                        Ok(true) if at_name == 0 => Action::TakeReservation,
-                        Ok(true) => Action::Name,
-                        Ok(false) => Action::Fail(CHANGED.into()),
-                        Err(left) => left,
-                    },
+            file,
+        } => {
+            let at_name = match look.look(entry, final_path) {
+                Seen::CannotLook(why) => return leave(&why),
+                Seen::Missing => None,
+                Seen::File { len } => Some(len),
+            };
+            // Its own file at the name: the very file it sealed, then exactly its fingerprint.
+            if let Some(len) = at_name {
+                match own(final_path, *file) {
+                    Err(left) => return left,
+                    Ok(true) => {
+                        return match proven(final_path, len, fingerprint) {
+                            Ok(true) => Action::Commit,
+                            Ok(false) => Action::Fail(CHANGED_KEPT.into()),
+                            Err(left) => left,
+                        };
+                    }
+                    // Someone else's file, however alike: never taken, never replaced.
+                    Ok(false) => {}
                 }
             }
-            // The temporary name was removed after the file got its real name.
-            (Seen::File { len }, Seen::Missing) => match proven(final_path, len, fingerprint) {
-                Ok(true) => Action::Commit,
-                Ok(false) => Action::Fail(CHANGED_KEPT.into()),
-                Err(left) => left,
-            },
-            // The name was lost (or never given): give it again.
-            (Seen::Missing, Seen::File { len }) => match proven(temp, len, fingerprint) {
-                Ok(true) => Action::Name,
-                Ok(false) => Action::Fail(CHANGED.into()),
-                Err(left) => left,
-            },
-            (Seen::Missing, Seen::Missing) => Action::Fail(LOST.into()),
-        },
+            // Not named yet (or the name was lost, or taken): name it from its temporary file.
+            match look.look(entry, temp) {
+                Seen::CannotLook(why) => leave(&why),
+                Seen::Missing if at_name.is_some() => Action::Fail(NOT_CONFIRMED.into()),
+                Seen::Missing => Action::Fail(LOST.into()),
+                Seen::File { len } => match own(temp, *file).and_then(|mine| {
+                    if mine {
+                        proven(temp, len, fingerprint)
+                    } else {
+                        Ok(false)
+                    }
+                }) {
+                    Ok(true) => Action::Name,
+                    Ok(false) => Action::Fail(CHANGED.into()),
+                    Err(left) => left,
+                },
+            }
+        }
         State::Committed { .. } | State::Existing { .. } | State::Failed { .. } => {
             Action::Fail("already finished".into())
         }

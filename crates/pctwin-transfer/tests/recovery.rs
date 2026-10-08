@@ -103,7 +103,18 @@ impl World {
 
     fn verified(&self, n: u8, bytes: &[u8], on_disk: Option<&[u8]>) -> u64 {
         let id = self.staged(n, bytes, on_disk);
-        self.journal.verified(id, fp(bytes)).unwrap();
+        // The file it sealed: its temporary file as it is (or none, if there is none).
+        let sealed = self
+            .table
+            .get("me")
+            .unwrap()
+            .stat(&self.temp(id))
+            .unwrap()
+            .map(|s| FileId {
+                volume: s.id.volume,
+                index: s.id.index,
+            });
+        self.journal.verified(id, fp(bytes), sealed).unwrap();
         id
     }
 
@@ -331,15 +342,69 @@ fn a_name_another_file_took_is_left_to_it_and_another_is_used() {
 }
 
 #[test]
-fn an_empty_reservation_at_its_name_is_taken() {
+fn an_empty_file_at_its_name_is_never_taken() {
     let w = world();
     let bytes = data(4000);
     let id = w.applied(1, &bytes, "Docs/f1.txt");
+    // A person's own empty file, made while the app was down.
     w.put("Docs/f1.txt", b"");
+    let dest = w.table.get("me").unwrap();
+    let theirs = dest.stat("Docs/f1.txt").unwrap().unwrap().id;
     recover(&w.journal, &w.table).unwrap();
-    assert_eq!(committed_at(&w.state(id)), Some("Docs/f1.txt"));
+    assert_eq!(committed_at(&w.state(id)), Some("Docs/f1 (2).txt"));
+    assert_eq!(w.read("Docs/f1.txt").unwrap(), b"");
+    assert_eq!(dest.stat("Docs/f1.txt").unwrap().unwrap().id, theirs);
+    assert_eq!(w.read("Docs/f1 (2).txt").unwrap(), bytes);
+}
+
+#[test]
+fn another_write_s_committed_empty_file_at_the_name_is_never_replaced() {
+    let w = world();
+    let bytes = data(4000);
+    // A crashed after recording its name, before claiming it.
+    let a = w.applied(1, &bytes, "Docs/f1.txt");
+    // Meanwhile B (an empty file sent under the same name) landed there and was committed.
+    w.put("Docs/f1.txt", b"");
+    let b = w.plan(2, 0);
+    let bt = w.temp(b);
+    w.journal.staged(b, &bt, &[]).unwrap();
+    w.journal.verified(b, fp(b""), None).unwrap();
+    w.journal.applied(b, "Docs/f1.txt").unwrap();
+    let dest = w.table.get("me").unwrap();
+    let st = dest.stat("Docs/f1.txt").unwrap().unwrap();
+    let landed_as = FileId {
+        volume: st.id.volume,
+        index: st.id.index,
+    };
+    w.journal
+        .committed(
+            b,
+            pctwin_journal::Landed {
+                size: 0,
+                modified_ns: None,
+                file: Some(landed_as),
+            },
+        )
+        .unwrap();
+    recover(&w.journal, &w.table).unwrap();
+    assert_eq!(w.read("Docs/f1.txt").unwrap(), b"");
+    assert_eq!(dest.stat("Docs/f1.txt").unwrap().unwrap().id, st.id);
+    assert_eq!(committed_at(&w.state(a)), Some("Docs/f1 (2).txt"));
+}
+
+#[test]
+fn a_person_s_identical_copy_at_the_name_is_never_adopted_as_the_move_s_own() {
+    let w = world();
+    let bytes = data(4000);
+    let id = w.applied(1, &bytes, "Docs/f1.txt");
+    // The temporary file is gone and a copy with exactly its contents sits at the name: nothing
+    // proves it is the file the move sealed, so it is not committed (undo would take it).
+    std::fs::remove_file(w.root.join(w.temp(id))).unwrap();
+    w.put("Docs/f1.txt", &bytes);
+    let r = recover(&w.journal, &w.table).unwrap();
+    assert!(r.committed.is_empty());
+    assert!(matches!(w.state(id), State::Failed { .. }));
     assert_eq!(w.read("Docs/f1.txt").unwrap(), bytes);
-    assert_eq!(w.names(), ["f1.txt"]);
 }
 
 #[test]

@@ -126,7 +126,7 @@ impl World {
         let fp = fingerprint_reader(&mut &bytes[..], size, block_size_for(size))
             .unwrap()
             .unwrap();
-        self.journal.verified(id, fp).unwrap();
+        self.journal.verified(id, fp, None).unwrap();
         self.journal.applied(id, stored).unwrap();
         std::fs::write(self.root.join(stored), bytes).unwrap();
         let stat = dest.stat(stored).unwrap().unwrap();
@@ -576,4 +576,42 @@ fn a_different_folder_under_the_same_label_is_never_undone() {
         outcome_of(&undo(&w.journal, &w.table, &bin).unwrap(), "a.txt"),
         UndoOutcome::Trashed
     );
+}
+
+#[test]
+fn a_file_in_a_folder_spelled_otherwise_on_the_disk_is_still_undone() {
+    let w = world();
+    let bin = FakeBin::new();
+    // The person's own "Docs"; the old laptop sent "docs/a.txt". On drives that ignore capital
+    // letters the file lands in "Docs", and is recorded as sent.
+    std::fs::create_dir(w.root.join("Docs")).unwrap();
+    let case_blind = w.root.join("docs").exists();
+    w.moved(1, "docs/a.txt", b"aaaa", &[]);
+    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    if case_blind {
+        assert_eq!(outcome_of(&r, "docs/a.txt"), UndoOutcome::Trashed);
+        assert!(!w.root.join("Docs/a.txt").exists());
+        assert!(w.root.join("Docs").exists(), "the person's folder stays");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_junction_put_in_place_of_a_folder_is_never_followed_by_undo() {
+    let w = world();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("victim.txt"), b"outside-original").unwrap();
+    w.moved(1, "jn/victim.txt", b"outside-original", &["jn"]);
+    std::fs::remove_dir_all(w.root.join("jn")).unwrap();
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(w.root.join("jn"))
+        .arg(outside.path())
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    let bin = FakeBin::new();
+    undo(&w.journal, &w.table, &bin).unwrap();
+    assert!(outside.path().join("victim.txt").exists());
+    assert!(bin.taken.borrow().is_empty());
 }
