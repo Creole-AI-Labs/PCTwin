@@ -27,12 +27,16 @@
 //!   use for that folder.
 //! - [`LaneTuner`] decides how many lanes (connections, up to [`MAX_LANES`]) a move uses: one more
 //!   only while total speed rises by at least 10%, looked at again when the network changes.
+//! - [`FileSections`] splits a big file across lanes: each section runs in order on one lane, and
+//!   a free lane takes the back half of the section with the most left (never below twice
+//!   [`MIN_SECTION_BYTES`]). Done blocks are kept block by block for resume.
 
 mod landing;
 mod lanes;
 mod message;
 mod queue;
 mod reading;
+mod sections;
 mod session;
 
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
@@ -40,6 +44,7 @@ pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
+pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
     Channel, ChannelError, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
 };

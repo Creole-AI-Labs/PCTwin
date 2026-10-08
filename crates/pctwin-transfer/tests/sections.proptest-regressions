@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 47efd1a9be226b5d60c3f0d7c71b6228bcc9e2e010e12854e0671c68d5366358 # shrinks to mib = 66, resumed = [], ops = []
+cc a31144d41ee77f9f56c9158c451eb80c44a04f4e66d8add7299d041309faf006 # shrinks to mib = 3, resumed = [false, false, false, false, false, true, false, true, false, false, false, false, false, false, false, true, false, true, false], ops = []
+cc 4e044ecd152fe6fad7f0f2b36f03c61b4f4942cd4f54112b3319d2cf907b3bc6 # shrinks to mib = 1, resumed = [false], ops = [Claim(4), Send(4, 1), Lose(4)]
