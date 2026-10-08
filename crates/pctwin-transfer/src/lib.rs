@@ -30,6 +30,8 @@
 //! - [`FileSections`] splits a big file across lanes: each section runs in order on one lane, and
 //!   a free lane takes the back half of the section with the most left (never below twice
 //!   [`MIN_SECTION_BYTES`]). Done blocks are kept block by block for resume.
+//! - [`Progress`] gives one progress figure and one time left for the whole move, from every
+//!   lane's receipts, with the speed smoothed over about the last 20 seconds.
 //! - [`BlockMap`] records which blocks of a file are done, as runs joined when they touch, and is
 //!   what a resume message carries.
 
@@ -38,6 +40,7 @@ mod blockmap;
 mod landing;
 mod lanes;
 mod message;
+mod progress;
 mod queue;
 mod reading;
 mod sections;
@@ -48,6 +51,7 @@ pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
+pub use progress::{Progress, TimeLeft};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
