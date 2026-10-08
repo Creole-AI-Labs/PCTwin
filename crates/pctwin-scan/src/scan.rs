@@ -19,10 +19,36 @@ pub struct Scan {
     pub links: u64,
     /// Folders and files that could not be read.
     pub unreadable: Vec<PathBuf>,
+    /// Size and modified time of each file, to tell later what changed.
+    pub stamps: Vec<(ItemId, Stamp)>,
+}
+
+/// What a later scan compares to tell whether a file changed (as Syncthing and rsync do).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+pub struct Stamp {
+    pub size: u64,
+    /// Nanoseconds since 1970, when the system gives it.
+    pub modified_ns: Option<i64>,
+}
+
+impl Stamp {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        let modified_ns =
+            meta.modified()
+                .ok()
+                .map(|t| match t.duration_since(std::time::UNIX_EPOCH) {
+                    Ok(d) => i64::try_from(d.as_nanos()).unwrap_or(i64::MAX),
+                    Err(e) => -i64::try_from(e.duration().as_nanos()).unwrap_or(i64::MAX),
+                });
+        Self {
+            size: meta.len(),
+            modified_ns,
+        }
+    }
 }
 
 /// What matters to people, counted at scan time so the new laptop can be checked after the move.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct Counts {
     pub photos: u64,
     pub videos: u64,
@@ -122,7 +148,11 @@ pub fn scan_folder(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Path)
                     Inclusion::Included
                 };
                 let size = if stub { 0 } else { meta.len() };
-                scan.items.push(make(ItemKind::File, size, inclusion));
+                let item = make(ItemKind::File, size, inclusion);
+                if !stub {
+                    scan.stamps.push((item.id, Stamp::of(&meta)));
+                }
+                scan.items.push(item);
             }
         }
     }

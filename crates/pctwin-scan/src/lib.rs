@@ -20,7 +20,9 @@
 //!   and finds another installed system by its own marker files, so the running system is never
 //!   assumed to own every drive.
 //! - [`scan_this_laptop`] puts it together: the people with honest sizes, the signed-in person's
-//!   special folders and the shared one, and the drives, in one move record.
+//!   special folders and the shared one, and the drives, in one move record. Progress is saved
+//!   after each folder ([`ScanState`]) so a restart resumes, and [`changes_between`] tells a later
+//!   scan what was added, removed or changed.
 
 mod drives;
 mod folders;
@@ -28,6 +30,7 @@ mod laptop;
 mod measure;
 mod people;
 mod scan;
+mod state;
 
 pub use drives::{
     CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
@@ -35,7 +38,9 @@ pub use drives::{
 pub use folders::{
     Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders,
 };
-pub use laptop::{LaptopScan, PersonSummary, ScanError, build_scan, scan_this_laptop};
+pub use laptop::{
+    Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
+};
 pub use measure::{
     Measure, Size, cloud_only_mac, cloud_only_windows, is_icloud_stub_name, measure,
 };
@@ -43,4 +48,5 @@ pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
-pub use scan::{Counts, Scan, scan_folder};
+pub use scan::{Counts, Scan, Stamp, scan_folder};
+pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
