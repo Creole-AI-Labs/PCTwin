@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use pctwin_gate::{Destinations, Finished, IncomingPath};
 use pctwin_record::ItemId;
 
-use crate::message::{Message, PieceBuffer, split_into_pieces};
+use crate::message::{BLOCK_WIRE_OVERHEAD, Message, split_into_pieces};
 use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
@@ -34,6 +34,14 @@ const IN_FLIGHT_BYTES: u64 = 32 * 1024 * 1024;
 /// space for all of them. (rsync and others time out the connection, not each file, so a paused
 /// move or a slow old drive never loses a file to a timer.)
 pub const MAX_OPEN_FILES: usize = 64;
+
+/// Files not in the plan whose refusals are remembered (for the report); beyond this they are
+/// still refused, just not remembered.
+const MAX_REMEMBERED_REFUSALS: usize = 1024;
+
+/// One connection's partial block on the new laptop: which file it belongs to, and its pieces so
+/// far.
+type Slot = Option<(u32, Vec<u8>)>;
 
 /// The connection dropped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -900,7 +908,7 @@ async fn send_lane<C: Channel>(
 /// One extra lane of the new laptop: rejoins its own pieces, writes each whole block and answers
 /// it on this lane. Closed if it drops or sends anything but pieces.
 async fn receive_lane<C: Channel>(state: &RefCell<&mut ReceiverSession<'_>>, mut ch: C) {
-    let mut pieces: HashMap<u32, PieceBuffer> = HashMap::new();
+    let mut slot: Slot = None;
     loop {
         let Ok(Message::Piece {
             stream,
@@ -911,7 +919,10 @@ async fn receive_lane<C: Channel>(state: &RefCell<&mut ReceiverSession<'_>>, mut
             // Dropped, or not a piece: this lane is closed.
             return;
         };
-        let receipt = state.borrow_mut().piece(&mut pieces, stream, last, &bytes);
+        let Ok(receipt) = state.borrow_mut().piece(&mut slot, stream, last, &bytes) else {
+            // Pieces of two blocks mixed: this lane is closed.
+            return;
+        };
         if let Some(r) = receipt
             && send(&mut ch, &r).await.is_err()
         {
@@ -984,6 +995,8 @@ pub struct ReceiverSession<'d> {
     allowance: Allowance,
     /// Bytes of blocks written so far, readable while the move runs (for the lane driver).
     written: Arc<AtomicU64>,
+    /// Why a file's start was refused, kept per file (bounded).
+    refused: BTreeMap<ItemId, String>,
     streams: BTreeMap<u32, Incoming<'d>>,
     done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
     continued: u64,
@@ -998,6 +1011,7 @@ impl<'d> ReceiverSession<'d> {
             table,
             allowance,
             written: Arc::new(AtomicU64::new(0)),
+            refused: BTreeMap::new(),
             streams: BTreeMap::new(),
             done: BTreeMap::new(),
             continued: 0,
@@ -1025,8 +1039,16 @@ impl<'d> ReceiverSession<'d> {
             .count() as u64
     }
 
-    pub fn outcome(&self, item: ItemId) -> Option<&ReceiveOutcome> {
-        self.done.values().find(|(i, _)| *i == item).map(|(_, o)| o)
+    pub fn outcome(&self, item: ItemId) -> Option<ReceiveOutcome> {
+        self.done
+            .values()
+            .find(|(i, _)| *i == item)
+            .map(|(_, o)| o.clone())
+            .or_else(|| {
+                self.refused
+                    .get(&item)
+                    .map(|why| ReceiveOutcome::Failed(why.clone()))
+            })
     }
 
     /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
@@ -1064,11 +1086,11 @@ impl<'d> ReceiverSession<'d> {
         }
         let main_loop = async {
             // A block cut off by a drop is sent again whole: pieces start afresh each run.
-            let mut pieces: HashMap<u32, PieceBuffer> = HashMap::new();
+            let mut slot: Slot = None;
             loop {
                 let m = recv(main).await?;
                 // Never held across a wait, so every lane can take its turn.
-                let (replies, finished) = state.borrow_mut().handle(m, &mut pieces)?;
+                let (replies, finished) = state.borrow_mut().handle(m, &mut slot)?;
                 for r in &replies {
                     send(main, r).await?;
                 }
@@ -1102,8 +1124,17 @@ impl<'d> ReceiverSession<'d> {
 
     /// What this side already has, then `Ready`.
     fn hello(&mut self) -> Vec<Message> {
-        self.streams
-            .retain(|_, s| s.assembly.is_some() && s.failure.is_none());
+        let dropped: Vec<u32> = self
+            .streams
+            .iter()
+            .filter(|(_, s)| s.assembly.is_none() || s.failure.is_some())
+            .map(|(k, _)| *k)
+            .collect();
+        for k in dropped {
+            if let Some(old) = self.streams.remove(&k) {
+                self.allowance.ended(old.item, false);
+            }
+        }
         let mut list = Vec::new();
         for (stream, s) in &self.streams {
             if let Some(a) = &s.assembly {
@@ -1131,7 +1162,7 @@ impl<'d> ReceiverSession<'d> {
     fn handle(
         &mut self,
         m: Message,
-        pieces: &mut HashMap<u32, PieceBuffer>,
+        slot: &mut Slot,
     ) -> Result<(Vec<Message>, bool), TransferError> {
         let mut replies = Vec::new();
         match m {
@@ -1161,44 +1192,58 @@ impl<'d> ReceiverSession<'d> {
                     });
                     return Ok((replies, false));
                 }
-                // A fresh start replaces anything kept (the partial file is removed).
-                self.streams.remove(&stream);
+                // A fresh start replaces anything kept on this stream, and any attempt at the same
+                // file still open on another (one attempt at a file at a time). Partial files are
+                // removed.
+                let replaced: Vec<u32> = self
+                    .streams
+                    .iter()
+                    .filter(|(k, s)| **k == stream || s.item == item)
+                    .map(|(k, _)| *k)
+                    .collect();
+                for k in replaced {
+                    if let Some(old) = self.streams.remove(&k) {
+                        self.allowance.ended(old.item, false);
+                    }
+                }
                 let block_size = header.block_size;
                 let size = header.size;
-                let same = self.same_file(&destination, &path, size);
-                let started = if resumed_done > 0 {
+                // The plan is checked before anything is read, created or reserved here.
+                let admitted = if resumed_done > 0 {
                     Err("the new laptop has no place to continue from".to_string())
                 } else if self.streams.len() >= MAX_OPEN_FILES {
                     Err("the old laptop started too many files at once".to_string())
-                } else if let Err(refused) = self.allowance.admit(item, size) {
-                    // Checked before anything is created or reserved on this laptop.
-                    Err(refused.to_string())
                 } else {
-                    self.start(&destination, &path, header)
+                    self.allowance.admit(item, size).map_err(|r| r.to_string())
                 };
-                let (assembly, failure) = match started {
-                    Ok(a) => (Some(a), None),
-                    Err(why) => (None, Some(why)),
-                };
-                if let Some(why) = failure {
-                    // Nothing is kept for a file refused at its start, so it holds no place.
-                    self.done
-                        .insert(stream, (item, ReceiveOutcome::Failed(why)));
+                if let Err(why) = admitted {
+                    // Kept per file, not per start, so refusals cannot pile up.
+                    self.refuse(item, why);
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
-                } else {
-                    // Every start is answered: here is a same-size file's fingerprint, or
-                    // nothing like it is here.
-                    let same_size = same.as_ref().map(|(_, hash)| *hash);
-                    replies.push(Message::Have { stream, same_size });
                 }
+                let same = self.same_file(&destination, &path, size);
+                let assembly = match self.start(&destination, &path, header) {
+                    Ok(a) => a,
+                    Err(why) => {
+                        self.allowance.ended(item, false);
+                        self.done
+                            .insert(stream, (item, ReceiveOutcome::Failed(why)));
+                        replies.push(Message::FileDone { stream, ok: false });
+                        return Ok((replies, false));
+                    }
+                };
+                // Every start is answered: here is a same-size file's fingerprint, or nothing
+                // like it is here.
+                let same_size = same.as_ref().map(|(_, hash)| *hash);
+                replies.push(Message::Have { stream, same_size });
                 self.streams.insert(
                     stream,
                     Incoming {
                         item,
-                        assembly,
+                        assembly: Some(assembly),
                         block_size,
-                        failure,
+                        failure: None,
                         destination,
                         size,
                         same: same.map(|(stored, _)| stored),
@@ -1210,7 +1255,7 @@ impl<'d> ReceiverSession<'d> {
                 last,
                 bytes,
             } => {
-                if let Some(r) = self.piece(pieces, stream, last, &bytes) {
+                if let Some(r) = self.piece(slot, stream, last, &bytes)? {
                     replies.push(r);
                 }
             }
@@ -1232,6 +1277,7 @@ impl<'d> ReceiverSession<'d> {
                     (None, None) => ReceiveOutcome::Failed("no file open".into()),
                 };
                 let ok = matches!(outcome, ReceiveOutcome::Finished(_));
+                self.allowance.ended(s.item, ok);
                 if ok {
                     self.landed.insert(stream, (s.destination.clone(), s.size));
                 }
@@ -1245,6 +1291,9 @@ impl<'d> ReceiverSession<'d> {
                         Some(stored) => ReceiveOutcome::AlreadyThere(stored),
                         None => ReceiveOutcome::Failed("skipped".into()),
                     };
+                    // Already there: spent, like a file that landed.
+                    self.allowance
+                        .ended(s.item, matches!(outcome, ReceiveOutcome::AlreadyThere(_)));
                     self.done.insert(stream, (s.item, outcome));
                 }
             }
@@ -1254,52 +1303,96 @@ impl<'d> ReceiverSession<'d> {
         Ok((replies, false))
     }
 
-    /// Adds a piece that came on one lane (with that lane's own `pieces`); when it ends a block,
-    /// checks and writes the block and returns the receipt naming it. Every block's last piece is
-    /// answered, even for a file that failed or was never started.
+    /// Adds a piece that came on one connection (with that connection's own `slot`); when it ends
+    /// a block, checks and writes the block and returns the receipt naming it. Pieces are kept
+    /// only for a file that is open, never past its block size, and only one block at a time per
+    /// connection: an honest old laptop sends each block's pieces together, so pieces of two
+    /// blocks mixed are refused (the connection ends) rather than held. Every block's last piece
+    /// is answered, even for a file that is not open, so the old laptop's count stays right.
     fn piece(
         &mut self,
-        pieces: &mut HashMap<u32, PieceBuffer>,
+        slot: &mut Slot,
         stream: u32,
         last: bool,
         bytes: &[u8],
-    ) -> Option<Message> {
-        let buffer = pieces.entry(stream).or_default();
-        let whole = buffer.add(bytes, last);
+    ) -> Result<Option<Message>, TransferError> {
+        if slot.as_ref().is_some_and(|(held, _)| *held != stream) {
+            return Err(protocol(
+                "pieces of two blocks were mixed on one connection",
+            ));
+        }
         let mut written = 0;
-        if let Some(s) = self.streams.get_mut(&stream) {
-            match whole {
-                Ok(Some(whole)) if s.failure.is_none() => {
-                    let size = whole.len() as u64;
-                    let accepted = Block::decode(&whole, s.block_size).and_then(|b| {
-                        s.assembly
-                            .as_mut()
-                            .ok_or_else(|| protocol("no file open"))?
-                            .accept(b)
-                    });
-                    match accepted {
-                        Ok(receipt) => {
-                            written = receipt.block;
-                            self.written.fetch_add(size, Ordering::Relaxed);
-                        }
-                        Err(e) => {
-                            s.failure = Some(e.to_string());
-                            // Dropping the assembly removes the partial file.
-                            s.assembly = None;
-                        }
+        let open = self
+            .streams
+            .get(&stream)
+            .filter(|s| s.failure.is_none() && s.assembly.is_some())
+            .map(|s| s.block_size);
+        match open {
+            // Not open (never started, refused, ended or failed): nothing is kept.
+            None => *slot = None,
+            Some(block_size) => {
+                let limit = usize::try_from(block_size)
+                    .unwrap_or(usize::MAX)
+                    .saturating_add(BLOCK_WIRE_OVERHEAD);
+                let buffer = &mut slot.get_or_insert_with(|| (stream, Vec::new())).1;
+                if buffer.len().saturating_add(bytes.len()) > limit {
+                    *slot = None;
+                    self.fail_stream(stream, "a block grew past its size".into());
+                } else {
+                    buffer.extend_from_slice(bytes);
+                    if last {
+                        let whole = slot.take().map(|(_, b)| b).unwrap_or_default();
+                        written = self.write_block(stream, &whole);
                     }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    s.failure = Some(e.to_string());
-                    s.assembly = None;
                 }
             }
         }
-        last.then_some(Message::Receipt {
+        Ok(last.then_some(Message::Receipt {
             stream,
             block: written,
-        })
+        }))
+    }
+
+    /// Checks and writes one whole block of an open file; returns its number (0 if refused, in
+    /// which case the file fails and its partial copy is removed).
+    fn write_block(&mut self, stream: u32, whole: &[u8]) -> u64 {
+        let Some(s) = self.streams.get_mut(&stream) else {
+            return 0;
+        };
+        let accepted = Block::decode(whole, s.block_size).and_then(|b| {
+            s.assembly
+                .as_mut()
+                .ok_or_else(|| protocol("no file open"))?
+                .accept(b)
+        });
+        match accepted {
+            Ok(receipt) => {
+                self.written
+                    .fetch_add(whole.len() as u64, Ordering::Relaxed);
+                receipt.block
+            }
+            Err(e) => {
+                self.fail_stream(stream, e.to_string());
+                0
+            }
+        }
+    }
+
+    /// The file on `stream` failed: its partial copy is removed (it ends when the old laptop ends
+    /// it, and reports why).
+    fn fail_stream(&mut self, stream: u32, why: String) {
+        if let Some(s) = self.streams.get_mut(&stream) {
+            s.failure = Some(why);
+            s.assembly = None;
+        }
+    }
+
+    /// Records why a start was refused, once per file (and for a bounded number of files not in
+    /// the plan), so refusals cannot pile up.
+    fn refuse(&mut self, item: ItemId, why: String) {
+        if self.refused.len() < MAX_REMEMBERED_REFUSALS || self.refused.contains_key(&item) {
+            self.refused.insert(item, why);
+        }
     }
 
     /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path

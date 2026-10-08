@@ -1153,3 +1153,380 @@ async fn files_refused_at_their_start_do_not_count_toward_the_open_limit() {
     .await
     .expect("hung");
 }
+
+/// The small file (one block), started on `stream`.
+fn small_start(l: &Laptops, stream: u32) -> (Message, Vec<Block>) {
+    let mut fs = FileSender::open(&l.files[0].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let start = Message::StartFile {
+        stream,
+        item: id(0),
+        destination: "me".into(),
+        path: "Documents/small.bin".into(),
+        header,
+        resumed_done: 0,
+    };
+    (start, blocks)
+}
+
+/// Sends a whole small file on `stream` and ends it; returns the answer to the end.
+async fn send_small(old: &mut Mem, l: &Laptops, stream: u32) -> Message {
+    let (start, blocks) = small_start(l, stream);
+    say(old, &start).await;
+    match hear(old).await {
+        Message::Have { .. } => {}
+        refused => return refused,
+    }
+    for piece in split_into_pieces(stream, &blocks[0].encode()) {
+        say(old, &piece).await;
+    }
+    let _receipt = hear(old).await;
+    let Message::StartFile { header, .. } = start else {
+        unreachable!()
+    };
+    say(
+        old,
+        &Message::EndFile {
+            stream,
+            stamp_after: header.stamp,
+            changed: false,
+        },
+    )
+    .await;
+    hear(old).await
+}
+
+fn files_under(dir: &Path) -> usize {
+    everything_under(dir).iter().filter(|p| p.is_file()).count()
+}
+
+#[tokio::test]
+async fn an_approved_file_lands_once_however_often_it_is_started() {
+    // The review's repro: the same approved file started again and again on new streams.
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        assert_eq!(
+            send_small(&mut old, &l, 0).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        for k in 1..14u32 {
+            assert_eq!(
+                send_small(&mut old, &l, 100 + k).await,
+                Message::FileDone {
+                    stream: 100 + k,
+                    ok: false
+                },
+                "start {k}"
+            );
+        }
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(files_under(l.new_mine.path()), 1, "one copy, not fourteen");
+}
+
+#[tokio::test]
+async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // Started on several streams without ever finishing: each replaces the one before,
+        // and after a few tries the file is refused.
+        let mut answers = Vec::new();
+        for k in 0..(pctwin_transfer::MAX_ATTEMPTS + 2) {
+            let (start, _) = small_start(&l, 10 + k);
+            say(&mut old, &start).await;
+            answers.push(hear(&mut old).await);
+        }
+        let started = answers
+            .iter()
+            .filter(|a| matches!(a, Message::Have { .. }))
+            .count();
+        assert_eq!(
+            started,
+            pctwin_transfer::MAX_ATTEMPTS as usize,
+            "{answers:?}"
+        );
+        // Only one partial file is ever kept.
+        assert!(files_under(l.new_mine.path()) <= 1);
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Failed(why)) if why.contains("kept changing")
+    ));
+}
+
+#[tokio::test]
+async fn pieces_of_two_files_mixed_on_one_connection_end_it() {
+    // An honest old laptop sends each block's pieces together; mixing them is refused rather
+    // than buffered.
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        let (start, blocks) = small_start(&l, 0);
+        say(&mut old, &start).await;
+        let _have = hear(&mut old).await;
+        let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+        let big = fs.next_block().unwrap().unwrap();
+        say(&mut old, &self::start(fs.header(), 0, id(2)).clone()).await;
+        let pieces = split_into_pieces(0, &big.encode());
+        say(&mut old, &pieces[0]).await;
+        // A piece of another stream while that block is half sent.
+        say(&mut old, &split_into_pieces(7, &blocks[0].encode())[0]).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    assert!(r.is_err(), "mixing pieces must end the connection");
+}
+
+#[tokio::test]
+async fn pieces_for_a_file_that_is_not_open_are_answered_and_not_kept() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // Thousands of pieces for a stream never started, the last one ending a "block".
+        for _ in 0..2000 {
+            say(
+                &mut old,
+                &Message::Piece {
+                    stream: 77,
+                    last: false,
+                    bytes: vec![0; 1000],
+                },
+            )
+            .await;
+        }
+        say(
+            &mut old,
+            &Message::Piece {
+                stream: 77,
+                last: true,
+                bytes: vec![0; 10],
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::Receipt {
+                stream: 77,
+                block: 0
+            }
+        );
+        // A real file still goes through.
+        assert_eq!(
+            send_small(&mut old, &l, 0).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+}
+
+#[tokio::test]
+async fn refused_starts_do_not_pile_up_in_what_the_new_laptop_remembers() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        for k in 0..300u32 {
+            let mut m = start(&header, 0, id(200));
+            if let Message::StartFile { stream, .. } = &mut m {
+                *stream = 1000 + k;
+            }
+            say(&mut old, &m).await;
+            let _refused = hear(&mut old).await;
+        }
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    // On the next connection, the new laptop's list of what it has does not repeat them.
+    let (mut old, mut new) = mem_pair();
+    let listing = async {
+        let mut said = 0;
+        loop {
+            match hear(&mut old).await {
+                Message::Ready => break,
+                _ => said += 1,
+            }
+        }
+        old.cut.store(true, Ordering::SeqCst);
+        said
+    };
+    let (said, _) = tokio::join!(listing, receiver.run(&mut new));
+    assert_eq!(said, 0);
+}
+
+#[tokio::test]
+async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        let (start, _) = small_start(&l, 0);
+        let Message::StartFile { header, .. } = &start else {
+            unreachable!()
+        };
+        let stamp = header.stamp;
+        let block_size = header.block_size as usize;
+        say(&mut old, &start).await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        // Pieces past the file's own block size, never ending.
+        let mut sent = 0;
+        while sent <= block_size + 46 {
+            say(
+                &mut old,
+                &Message::Piece {
+                    stream: 0,
+                    last: false,
+                    bytes: vec![0; 60 * 1024],
+                },
+            )
+            .await;
+            sent += 60 * 1024;
+        }
+        // The overflowing block was dropped at once, so this connection is free for the next
+        // block: a real block of another file goes straight through.
+        let mut medium = FileSender::open(&l.files[1].0, None, true).unwrap();
+        let mut m = self::start(medium.header(), 0, id(1));
+        if let Message::StartFile { stream, path, .. } = &mut m {
+            *stream = 1;
+            *path = "Public/medium.bin".into();
+        }
+        say(&mut old, &m).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 1, .. }
+        ));
+        let first = medium.next_block().unwrap().unwrap();
+        for piece in split_into_pieces(1, &first.encode()) {
+            say(&mut old, &piece).await;
+        }
+        assert_eq!(
+            hear(&mut old).await,
+            Message::Receipt {
+                stream: 1,
+                block: 0
+            }
+        );
+        say(
+            &mut old,
+            &Message::EndFile {
+                stream: 0,
+                stamp_after: stamp,
+                changed: false,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: false
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    // Nothing of the overflowed file was left behind.
+    assert!(!l.new_mine.path().join("Documents/small.bin").exists());
+    // The only file is the second file's partial copy.
+    assert_eq!(files_under(l.new_mine.path()), 1);
+}
+
+#[tokio::test]
+async fn a_file_found_already_there_is_spent_too() {
+    let l = laptops();
+    let table = table(&l);
+    // An identical copy is already on the new laptop.
+    let there = l.new_mine.path().join("Documents");
+    std::fs::create_dir_all(&there).unwrap();
+    std::fs::write(there.join("small.bin"), &l.files[0].1).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        let (start, _) = small_start(&l, 0);
+        say(&mut old, &start).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have {
+                same_size: Some(_),
+                ..
+            }
+        ));
+        say(&mut old, &Message::Skip { stream: 0 }).await;
+        // Started again on another stream: refused, it is already there.
+        let (again, _) = small_start(&l, 5);
+        say(&mut old, &again).await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 5,
+                ok: false
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(files_under(l.new_mine.path()), 1);
+}

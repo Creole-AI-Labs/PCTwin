@@ -9,8 +9,10 @@ pub const PIECE_MAX: usize = 60 * 1024;
 const MAX_PATH: usize = 4096;
 /// The longest destination label (as the safety gate allows).
 const MAX_LABEL: usize = 64;
+/// A block's own header on the wire, before its contents.
+pub(crate) const BLOCK_WIRE_OVERHEAD: usize = 46;
 /// A whole block on the wire: the block's own header plus its largest contents.
-const MAX_WIRE_BLOCK: usize = 46 + MAX_BLOCK as usize;
+const MAX_WIRE_BLOCK: usize = BLOCK_WIRE_OVERHEAD + MAX_BLOCK as usize;
 
 /// One message of a transfer. `stream` tells files in flight apart.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -146,13 +146,15 @@ fn a_file_sent_again_counts_once_toward_the_total() {
     let f = item(1, 100 * MIB, ItemKind::File, Inclusion::Included);
     let r = record(vec![f.clone()]);
     let mut a = Allowance::from_record(&r, &r.approve().unwrap()).unwrap();
-    // It changed while being read and is sent again, many times.
-    for _ in 0..50 {
-        assert_eq!(a.admit(f.id, 100 * MIB), Ok(()));
-    }
+    // It changed while being read and is sent again (each attempt ends before the next).
+    assert_eq!(a.admit(f.id, 100 * MIB), Ok(()));
+    a.ended(f.id, false);
+    assert_eq!(a.admit(f.id, 100 * MIB), Ok(()));
+    a.ended(f.id, false);
     assert_eq!(a.started_bytes(), 100 * MIB);
     // Sent again bigger (still within its room): the larger size counts, once.
     assert_eq!(a.admit(f.id, 105 * MIB), Ok(()));
+    a.ended(f.id, false);
     assert_eq!(a.started_bytes(), 105 * MIB);
     assert_eq!(a.admit(f.id, 90 * MIB), Ok(()));
     assert_eq!(a.started_bytes(), 105 * MIB);
@@ -202,4 +204,38 @@ fn the_whole_move_may_reach_its_limit_exactly_and_no_further() {
     assert_eq!(a.admit(empty[64].id, MIB), Err(Refusal::OverTotal));
     // Nothing more was counted for the refused one.
     assert_eq!(a.started_bytes(), 1164 * MIB);
+}
+
+#[test]
+fn a_file_that_landed_is_spent_and_cannot_be_started_again() {
+    let f = item(1, MIB, ItemKind::File, Inclusion::Included);
+    let r = record(vec![f.clone()]);
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap()).unwrap();
+    assert_eq!(a.admit(f.id, MIB), Ok(()));
+    a.ended(f.id, true);
+    assert_eq!(a.admit(f.id, MIB), Err(Refusal::AlreadyMoved));
+}
+
+#[test]
+fn one_attempt_at_a_file_runs_at_a_time() {
+    let f = item(1, MIB, ItemKind::File, Inclusion::Included);
+    let r = record(vec![f.clone()]);
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap()).unwrap();
+    assert_eq!(a.admit(f.id, MIB), Ok(()));
+    assert_eq!(a.admit(f.id, MIB), Err(Refusal::AlreadyStarted));
+    // Once that attempt ends without landing, another may start.
+    a.ended(f.id, false);
+    assert_eq!(a.admit(f.id, MIB), Ok(()));
+}
+
+#[test]
+fn a_file_that_keeps_changing_gets_a_few_tries_then_is_reported() {
+    let f = item(1, MIB, ItemKind::File, Inclusion::Included);
+    let r = record(vec![f.clone()]);
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap()).unwrap();
+    for _ in 0..pctwin_transfer::MAX_ATTEMPTS {
+        assert_eq!(a.admit(f.id, MIB), Ok(()));
+        a.ended(f.id, false);
+    }
+    assert_eq!(a.admit(f.id, MIB), Err(Refusal::KeptChanging));
 }

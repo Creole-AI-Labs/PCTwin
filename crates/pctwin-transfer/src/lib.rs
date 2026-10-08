@@ -50,7 +50,7 @@ mod reading;
 mod sections;
 mod session;
 
-pub use allowance::{Allowance, Refusal};
+pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanedriver::{Closable, LaneDriver, OpenLane};
