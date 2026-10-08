@@ -564,16 +564,36 @@ fn on_windows_a_stored_path_never_names_a_stream_or_another_separator() {
     }
 }
 
+fn moved(m: &pctwin_gate::Moved) -> bool {
+    matches!(m, pctwin_gate::Moved::Moved { .. })
+}
+
+/// The staging folder a move of `from` uses (next to it).
+fn stage(from: &str) -> String {
+    let folder = from.rsplit_once('/').map_or("", |(f, _)| f);
+    let name = pctwin_gate::staging_name("t-1");
+    if folder.is_empty() {
+        name
+    } else {
+        format!("{folder}/{name}")
+    }
+}
+
 #[test]
-fn a_file_is_moved_aside_by_handle_only_if_it_is_still_the_same_file() {
+fn a_file_is_moved_aside_only_if_it_is_the_very_file_and_arrives_as_itself() {
     let (root, dest) = setup();
     std::fs::create_dir(root.path().join("d")).unwrap();
     std::fs::write(root.path().join("d/a.txt"), b"ours").unwrap();
     let ours = dest.stat("d/a.txt").unwrap().unwrap().id;
-    // Into a folder that is not there yet: made on the way.
+    // Into a folder that is not there yet: made on the way, and said so.
+    let m = dest
+        .move_file("d/a.txt", "Aside/d/a.txt", ours, &stage("d/a.txt"))
+        .unwrap();
     assert_eq!(
-        dest.move_file("d/a.txt", "Aside/d/a.txt", ours).unwrap(),
-        pctwin_gate::Moved::Moved
+        m,
+        pctwin_gate::Moved::Moved {
+            made: vec!["Aside".into(), "Aside/d".into()]
+        }
     );
     assert!(!root.path().join("d/a.txt").exists());
     assert_eq!(
@@ -581,12 +601,16 @@ fn a_file_is_moved_aside_by_handle_only_if_it_is_still_the_same_file() {
         b"ours"
     );
     assert_eq!(dest.stat("Aside/d/a.txt").unwrap().unwrap().id, ours);
+    // Nothing of the move is left behind.
+    assert_eq!(names(&root.path().join("d")), Vec::<String>::new());
     // Back again.
-    assert_eq!(
-        dest.move_file("Aside/d/a.txt", "d/a.txt", ours).unwrap(),
-        pctwin_gate::Moved::Moved
-    );
+    assert!(moved(
+        &dest
+            .move_file("Aside/d/a.txt", "d/a.txt", ours, &stage("Aside/d/a.txt"))
+            .unwrap()
+    ));
     assert_eq!(std::fs::read(root.path().join("d/a.txt")).unwrap(), b"ours");
+    assert_eq!(names(&root.path().join("Aside/d")), Vec::<String>::new());
 }
 
 #[test]
@@ -598,23 +622,234 @@ fn moving_never_replaces_and_never_moves_another_file() {
     let ours = dest.stat("a.txt").unwrap().unwrap().id;
     // Something already has the new name, even an empty file: nothing moves.
     assert_eq!(
-        dest.move_file("a.txt", "taken.txt", ours).unwrap(),
+        dest.move_file("a.txt", "taken.txt", ours, &stage("a.txt"))
+            .unwrap(),
         pctwin_gate::Moved::Taken
     );
     assert_eq!(std::fs::read(root.path().join("taken.txt")).unwrap(), b"");
     assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"ours");
+    // Into folders made for it, and back.
+    assert!(moved(
+        &dest
+            .move_file("a.txt", "New/Deeper/a.txt", ours, &stage("a.txt"))
+            .unwrap()
+    ));
+    assert!(moved(
+        &dest
+            .move_file(
+                "New/Deeper/a.txt",
+                "a.txt",
+                ours,
+                &stage("New/Deeper/a.txt")
+            )
+            .unwrap()
+    ));
     // Another file at the old name (the person's own, however alike): nothing moves.
     assert_eq!(
-        dest.move_file("b.txt", "elsewhere.txt", ours).unwrap(),
+        dest.move_file("b.txt", "elsewhere.txt", ours, &stage("b.txt"))
+            .unwrap(),
         pctwin_gate::Moved::NotThatFile
     );
     assert_eq!(
-        dest.move_file("gone.txt", "elsewhere.txt", ours).unwrap(),
+        dest.move_file("gone.txt", "elsewhere.txt", ours, &stage("gone.txt"))
+            .unwrap(),
         pctwin_gate::Moved::NotThatFile
     );
     assert!(!root.path().join("elsewhere.txt").exists());
-    assert!(dest.move_file("a.txt", "../out.txt", ours).is_err());
+    assert!(
+        dest.move_file("a.txt", "../out.txt", ours, &stage("a.txt"))
+            .is_err()
+    );
     assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"ours");
+}
+
+#[test]
+fn folders_made_for_a_move_that_did_not_happen_are_removed_again() {
+    let (root, dest) = setup();
+    std::fs::write(root.path().join("a.txt"), b"ours").unwrap();
+    std::fs::create_dir_all(root.path().join("Aside/x")).unwrap();
+    std::fs::write(root.path().join("Aside/x/a.txt"), b"theirs").unwrap();
+    let ours = dest.stat("a.txt").unwrap().unwrap().id;
+    // "Aside" was there; "Aside/y" is made for a move to a name that is free...
+    assert!(moved(
+        &dest
+            .move_file("a.txt", "Aside/y/a.txt", ours, &stage("a.txt"))
+            .unwrap()
+    ));
+    assert!(moved(
+        &dest
+            .move_file("Aside/y/a.txt", "a.txt", ours, &stage("Aside/y/a.txt"))
+            .unwrap()
+    ));
+    std::fs::remove_dir(root.path().join("Aside/y")).unwrap();
+    // ...and for one whose name is taken, the folders made are gone again.
+    std::fs::create_dir_all(root.path().join("Other")).unwrap();
+    std::fs::write(root.path().join("Other/a.txt"), b"z").unwrap();
+    assert_eq!(
+        dest.move_file("a.txt", "Other/a.txt", ours, &stage("a.txt"))
+            .unwrap(),
+        pctwin_gate::Moved::Taken
+    );
+    assert_eq!(
+        dest.move_file("b.txt", "Made/For/b.txt", ours, &stage("b.txt"))
+            .unwrap(),
+        pctwin_gate::Moved::NotThatFile
+    );
+    assert!(!root.path().join("Made").exists());
+    assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"ours");
+}
+
+#[cfg(windows)]
+#[test]
+fn moving_keeps_a_file_s_attributes_as_they_were() {
+    use std::os::windows::fs::MetadataExt;
+    let (root, dest) = setup();
+    let a = root.path().join("a.txt");
+    std::fs::write(&a, b"x").unwrap();
+    std::fs::write(root.path().join("taken.txt"), b"y").unwrap();
+    let ours = dest.stat("a.txt").unwrap().unwrap().id;
+    std::process::Command::new("attrib")
+        .args(["+R", "+H"])
+        .arg(&a)
+        .status()
+        .unwrap();
+    let before = std::fs::metadata(&a).unwrap().file_attributes();
+    assert_eq!(
+        dest.move_file("a.txt", "taken.txt", ours, &stage("a.txt"))
+            .unwrap(),
+        pctwin_gate::Moved::Taken
+    );
+    assert_eq!(std::fs::metadata(&a).unwrap().file_attributes(), before);
+    assert!(moved(
+        &dest
+            .move_file("a.txt", "moved.txt", ours, &stage("a.txt"))
+            .unwrap()
+    ));
+    assert_eq!(
+        std::fs::metadata(root.path().join("moved.txt"))
+            .unwrap()
+            .file_attributes(),
+        before
+    );
+    std::process::Command::new("attrib")
+        .args(["-R", "-H"])
+        .arg(root.path().join("moved.txt"))
+        .status()
+        .unwrap();
+}
+
+/// A person's program renames its own file over the name being moved, again and again, at every
+/// moment: whatever happens, the file that arrives is the expected one, and the person's file is
+/// never lost (never deleted, never left elsewhere).
+#[test]
+fn a_file_swapped_in_during_a_move_is_never_moved_or_lost() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (root, dest) = setup();
+    let mut wrong = 0;
+    for i in 0..300 {
+        let f = root.path().join("f.txt");
+        let p = root.path().join("person.txt");
+        let _ = std::fs::remove_dir_all(root.path().join("aside"));
+        let _ = std::fs::remove_file(&f);
+        std::fs::write(&f, b"PCTWIN").unwrap();
+        std::fs::write(&p, b"PERSON").unwrap();
+        let ours = dest.stat("f.txt").unwrap().unwrap().id;
+        let go = Arc::new(AtomicBool::new(false));
+        let go2 = go.clone();
+        let (p2, f2) = (p.clone(), f.clone());
+        let t = std::thread::spawn(move || {
+            while !go2.load(Ordering::Acquire) {}
+            for _ in 0..(i % 60) * 20 {
+                std::hint::spin_loop();
+            }
+            let _ = std::fs::rename(&p2, &f2);
+        });
+        go.store(true, Ordering::Release);
+        let r = dest.move_file("f.txt", "aside/f.txt", ours, &stage("f.txt"));
+        t.join().unwrap();
+        if let Ok(pctwin_gate::Moved::Moved { .. }) = r
+            && dest.stat("aside/f.txt").unwrap().unwrap().id != ours
+        {
+            wrong += 1;
+        }
+        // The person's file is somewhere a person would look: its own name, or the name it was
+        // renamed to.
+        let person_there = [p.clone(), f.clone()]
+            .iter()
+            .any(|x| std::fs::read(x).is_ok_and(|b| b == b"PERSON"));
+        let stranded = matches!(r, Ok(pctwin_gate::Moved::Stranded { .. }));
+        assert!(
+            person_there || stranded,
+            "iteration {i}: the person's file was lost"
+        );
+    }
+    assert_eq!(wrong, 0, "a different file was moved as the expected one");
+}
+
+#[test]
+fn a_move_cut_short_leaves_a_staging_folder_that_is_used_again_only_if_empty() {
+    let (root, dest) = setup();
+    std::fs::write(root.path().join("a.txt"), b"ours").unwrap();
+    let ours = dest.stat("a.txt").unwrap().unwrap().id;
+    let staging = stage("a.txt");
+    std::fs::create_dir(root.path().join(&staging)).unwrap();
+    assert!(moved(
+        &dest.move_file("a.txt", "b.txt", ours, &staging).unwrap()
+    ));
+    if cfg!(windows) {
+        // Not empty: never used.
+        std::fs::create_dir(root.path().join(&staging)).unwrap();
+        std::fs::write(root.path().join(&staging).join("x"), b"x").unwrap();
+        assert_eq!(
+            dest.move_file("b.txt", "c.txt", ours, &staging).unwrap(),
+            pctwin_gate::Moved::Unsafe
+        );
+        assert!(root.path().join("b.txt").exists());
+        // Folders made for a move that turns out unsafe are removed again.
+        assert_eq!(
+            dest.move_file("b.txt", "New/Deeper/c.txt", ours, &staging)
+                .unwrap(),
+            pctwin_gate::Moved::Unsafe
+        );
+        assert!(!root.path().join("New").exists());
+    }
+}
+
+#[test]
+fn pctwin_s_own_folder_moves_aside_for_a_file_or_link_in_its_way() {
+    let (root, dest) = setup();
+    assert_eq!(dest.own_folder("Undone").unwrap(), "Undone");
+    std::fs::create_dir(root.path().join("Undone")).unwrap();
+    assert_eq!(dest.own_folder("Undone").unwrap(), "Undone");
+    std::fs::remove_dir(root.path().join("Undone")).unwrap();
+    std::fs::write(root.path().join("Undone"), b"a file").unwrap();
+    assert_eq!(dest.own_folder("Undone").unwrap(), "Undone (2)");
+    assert!(dest.own_folder("a/b").is_err());
+    assert!(dest.own_folder("..").is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_junction_where_pctwin_s_own_folder_would_be_is_never_followed() {
+    let (root, dest) = setup();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("a.txt"), b"mine").unwrap();
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(root.path().join("Undone"))
+        .arg(outside.path())
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    assert_eq!(dest.own_folder("Undone").unwrap(), "Undone (2)");
+    let id = dest.stat("a.txt").unwrap().unwrap().id;
+    assert!(
+        dest.move_file("a.txt", "Undone/a.txt", id, &stage("a.txt"))
+            .is_err()
+    );
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+    assert!(root.path().join("a.txt").exists());
 }
 
 #[test]

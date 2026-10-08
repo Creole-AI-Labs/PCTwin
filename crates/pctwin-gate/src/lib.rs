@@ -604,91 +604,249 @@ impl Destination {
     }
 
     /// Moves the file at the stored path `from` to the stored path `to` in the same place (making
-    /// `to`'s folders if needed), by handle, only if the file at `from` is still the very file
-    /// `expect`, and never replacing anything. Where the drive cannot move without replacing, a
-    /// hard link then removing the old name does the same; where it can do neither, nothing moves.
-    pub fn move_file(&self, from: &str, to: &str, expect: FileId) -> Result<Moved, GateError> {
+    /// `to`'s folders if needed), only if it is the very file `expect`, and never replacing
+    /// anything. Nothing is ever removed by name: a name checked a moment earlier could be another
+    /// file's by now. Instead the move itself is checked: the file that arrives is compared with
+    /// `expect` and, if it is another file (swapped in at the last moment), it is put back.
+    ///
+    /// On Linux and macOS this is one move the drive refuses if `to` exists. On Windows (where no
+    /// safe call moves without replacing) the file is first moved into `staging`, a folder only
+    /// this move uses (a stored path next to `from`, named by the caller and recorded first, so a
+    /// crash in between can be traced), checked there, then given `to` by a hard link that never
+    /// replaces. Where the drive can do neither, nothing moves ([`Moved::Unsafe`]). Folders made
+    /// for `to` are removed again unless the file arrived.
+    pub fn move_file(
+        &self,
+        from: &str,
+        to: &str,
+        expect: FileId,
+        staging: &str,
+    ) -> Result<Moved, GateError> {
         let Some((from_dir, from_name)) = self.open_stored_folder(from)? else {
             return Ok(Moved::NotThatFile);
         };
-        let still = from_dir
-            .symlink_metadata(from_name)
-            .is_ok_and(|meta| meta.is_file())
-            && from_dir
-                .open(from_name)
-                .and_then(|f| identity(&f.into_std()))
-                .is_ok_and(|(id, _)| id == expect);
-        if !still {
+        if !is_the_file(&from_dir, from_name, expect) {
             return Ok(Moved::NotThatFile);
         }
         let to_parts = stored_parts(to)?;
         let (to_name, to_folders) = to_parts.split_last().ok_or_else(|| invalid("empty path"))?;
+        let mut made = Vec::new();
         let mut to_dir = self.root.try_clone()?;
+        let mut shown = Vec::new();
         for folder in to_folders {
-            to_dir = open_or_create_folder(&to_dir, folder)?.0;
-        }
-        let from_folder = from.rsplit_once('/').map_or("", |(f, _)| f);
-        let to_folder = to.rsplit_once('/').map_or("", |(f, _)| f);
-        let from_path = || self.folder_path(&from_dir, from_folder);
-        let to_path = || self.folder_path(&to_dir, to_folder);
-        let moved =
-            match move_no_replace(&from_dir, from_name, &to_dir, to_name, &from_path, &to_path) {
-                Ok(moved) => moved,
-                Err(GateError::NoSafeName) => match from_dir.hard_link(from_name, &to_dir, to_name)
-                {
-                    Ok(()) => {
-                        from_dir.remove_file(from_name)?;
-                        true
-                    }
-                    Err(e) if is_taken(&to_dir, to_name, &e) => false,
-                    Err(_) => return Err(GateError::NoSafeName),
-                },
-                Err(e) => return Err(e),
+            shown.push(*folder);
+            let found = open_or_create_folder(&to_dir, folder);
+            let (opened, created) = match found {
+                Ok(found) => found,
+                Err(e) => {
+                    drop(to_dir);
+                    self.unmake(&made);
+                    return Err(e);
+                }
             };
-        if !moved {
-            return Ok(Moved::Taken);
+            to_dir = opened;
+            if created {
+                made.push(shown.join("/"));
+            }
         }
-        flush_name(&to_dir, to_name);
-        sync_folder(&from_dir);
-        Ok(Moved::Moved)
+        let outcome = self.move_checked(
+            &from_dir, from, from_name, &to_dir, to, to_name, expect, staging,
+        );
+        match outcome {
+            Ok(Moved::Moved { .. }) => {
+                flush_name(&to_dir, to_name);
+                sync_folder(&from_dir);
+                Ok(Moved::Moved { made })
+            }
+            other => {
+                // Closed first: Windows keeps a folder that is open.
+                drop(to_dir);
+                self.unmake(&made);
+                other
+            }
+        }
     }
 
-    /// The name, in the folder `folder` (a stored path), of the very file `expect` of `len` bytes,
-    /// if it is there under any name (renamed by the person, say). Never follows a link.
-    pub fn find_in_folder(
-        &self,
-        folder: &str,
-        expect: FileId,
-        len: u64,
-    ) -> io::Result<Option<String>> {
-        let dir = if folder.is_empty() {
-            self.root.try_clone()?
-        } else {
-            let Some((parent, name)) = self.open_stored_folder(folder)? else {
-                return Ok(None);
-            };
-            if !parent.symlink_metadata(name).is_ok_and(|m| m.is_dir()) {
-                return Ok(None);
-            }
-            parent.open_dir(name)?
-        };
-        for entry in dir.entries()? {
-            let Ok(name) = entry?.file_name().into_string() else {
-                continue;
-            };
-            let candidate = dir
-                .symlink_metadata(&name)
-                .is_ok_and(|m| m.is_file() && m.len() == len);
-            if candidate
-                && dir
-                    .open(&name)
-                    .and_then(|f| identity(&f.into_std()))
-                    .is_ok_and(|(id, _)| id == expect)
-            {
-                return Ok(Some(name));
+    /// Removes folders this place made (stored paths, outermost first) again, deepest first, only
+    /// while they are empty.
+    fn unmake(&self, made: &[String]) {
+        for folder in made.iter().rev() {
+            if !matches!(self.remove_empty_folder(folder), Ok(true)) {
+                break;
             }
         }
-        Ok(None)
+    }
+
+    #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
+    fn move_checked(
+        &self,
+        from_dir: &Dir,
+        from: &str,
+        from_name: &str,
+        to_dir: &Dir,
+        to: &str,
+        to_name: &str,
+        expect: FileId,
+        _staging: &str,
+    ) -> Result<Moved, GateError> {
+        use rustix::fs::{RenameFlags, renameat_with};
+        use rustix::io::Errno;
+        // renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS.
+        match renameat_with(from_dir, from_name, to_dir, to_name, RenameFlags::NOREPLACE) {
+            Ok(()) => {}
+            Err(Errno::EXIST) => return Ok(Moved::Taken),
+            Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => return Ok(Moved::Unsafe),
+            Err(e) => return Err(GateError::Io(e.into())),
+        }
+        if is_the_file(to_dir, to_name, expect) {
+            return Ok(Moved::Moved { made: Vec::new() });
+        }
+        // Another file was swapped in at the last moment and moved instead: put it back.
+        let _ = from;
+        match renameat_with(to_dir, to_name, from_dir, from_name, RenameFlags::NOREPLACE) {
+            Ok(()) => Ok(Moved::NotThatFile),
+            Err(_) => Ok(Moved::Stranded { at: to.to_string() }),
+        }
+    }
+
+    #[cfg(windows)]
+    #[allow(clippy::too_many_arguments)]
+    fn move_checked(
+        &self,
+        from_dir: &Dir,
+        from: &str,
+        from_name: &str,
+        to_dir: &Dir,
+        to: &str,
+        to_name: &str,
+        expect: FileId,
+        staging: &str,
+    ) -> Result<Moved, GateError> {
+        let _ = to;
+        let from_folder = from.rsplit_once('/').map_or("", |(f, _)| f);
+        let (stage_folder, stage_name) = staging.rsplit_once('/').unwrap_or(("", staging));
+        if stage_folder != from_folder || !is_staging_name(stage_name) {
+            return Err(GateError::Io(invalid("not a staging folder for this file")));
+        }
+        // A folder only this move uses: nothing can be in it, so moving into it replaces nothing.
+        // Left by an earlier move cut short, it is used again only while it is an empty folder.
+        match from_dir.create_dir(stage_name) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                let empty = from_dir
+                    .symlink_metadata(stage_name)
+                    .is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink())
+                    && from_dir
+                        .read_dir(stage_name)
+                        .is_ok_and(|mut entries| entries.next().is_none());
+                if !empty {
+                    return Ok(Moved::Unsafe);
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+        let unstage = || {
+            let _ = from_dir.remove_dir(stage_name);
+        };
+        let Ok(folder) = self.folder_path(from_dir, from_folder) else {
+            unstage();
+            return Ok(Moved::Unsafe);
+        };
+        // std's rename leaves the file's attributes as they are.
+        if let Err(e) = std::fs::rename(
+            folder.join(from_name),
+            folder.join(stage_name).join(from_name),
+        ) {
+            unstage();
+            return Err(e.into());
+        }
+        let outcome = {
+            // Closed again before the folder is removed (Windows keeps an open folder).
+            let stage_dir = from_dir.open_dir(stage_name)?;
+            let put_back = |then: Moved| -> Moved {
+                match stage_dir.hard_link(from_name, from_dir, from_name) {
+                    Ok(()) => {
+                        let _ = stage_dir.remove_file(from_name);
+                        then
+                    }
+                    Err(_) => Moved::Stranded {
+                        at: format!("{staging}/{from_name}"),
+                    },
+                }
+            };
+            if !is_the_file(&stage_dir, from_name, expect) {
+                // Another file was swapped in at the last moment and moved instead.
+                put_back(Moved::NotThatFile)
+            } else {
+                match stage_dir.hard_link(from_name, to_dir, to_name) {
+                    Ok(()) => {
+                        // Only the name in the folder this move alone uses is removed.
+                        let _ = stage_dir.remove_file(from_name);
+                        Moved::Moved { made: Vec::new() }
+                    }
+                    Err(e) if is_taken(to_dir, to_name, &e) => put_back(Moved::Taken),
+                    // No hard links on this drive (FAT, exFAT): no way to name it without risk.
+                    Err(_) => put_back(Moved::Unsafe),
+                }
+            }
+        };
+        if !matches!(outcome, Moved::Stranded { .. }) {
+            unstage();
+        }
+        Ok(outcome)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    #[allow(clippy::too_many_arguments)]
+    fn move_checked(
+        &self,
+        _from_dir: &Dir,
+        _from: &str,
+        _from_name: &str,
+        _to_dir: &Dir,
+        _to: &str,
+        _to_name: &str,
+        _expect: FileId,
+        _staging: &str,
+    ) -> Result<Moved, GateError> {
+        Ok(Moved::Unsafe)
+    }
+
+    /// The name of PCTwin's own folder `name` at the top of this place: `name` itself if nothing
+    /// is there or it is a real folder, else the first numbered one (`name (2)`) that is, so a
+    /// file or link someone put there never blocks undo and is never followed.
+    pub fn own_folder(&self, name: &str) -> Result<String, GateError> {
+        let parts = stored_parts(name)?;
+        if parts.len() != 1 {
+            return Err(GateError::Io(invalid("not a single folder name")));
+        }
+        for attempt in 1..=MAX_OWN_FOLDER_TRIES {
+            let candidate = if attempt == 1 {
+                name.to_string()
+            } else {
+                format!("{name} ({attempt})")
+            };
+            match self.root.symlink_metadata(&candidate) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(candidate),
+                Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
+                    return Ok(candidate);
+                }
+                Ok(_) => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(GateError::TooManyClashes)
+    }
+
+    /// The full path a stored path would have (for asking the system Trash about a file that is
+    /// no longer there); `None` for a place with no path. Nothing is checked or followed.
+    pub fn path_of(&self, stored: &str) -> Option<std::path::PathBuf> {
+        let mut path = std::fs::canonicalize(self.root_path.as_ref()?).ok()?;
+        for part in stored_parts(stored).ok()? {
+            path.push(part);
+        }
+        Some(path)
     }
 
     /// The first stored path for `stored` that nothing uses now: `stored` itself, or a numbered
@@ -1027,33 +1185,21 @@ fn claim(
     }
 }
 
-/// Moves `temp` onto `name` in `dir` only if nothing has `name` (see [`move_no_replace`]).
+/// Moves PCTwin's own finished temporary file `temp` onto `name` in `dir` only if nothing has
+/// `name`; the drive checks and moves in one step, so another file can never be replaced.
+/// `Ok(false)` when the name is taken. Refused where the system cannot do this (the file is then
+/// not named rather than named unsafely). Only ever used for PCTwin's own temporary files.
+#[cfg(unix)]
 fn rename_no_replace(
     dir: &Dir,
     temp: &str,
     name: &str,
-    folder_path: FolderPath<'_>,
-) -> Result<bool, GateError> {
-    move_no_replace(dir, temp, dir, name, folder_path, folder_path)
-}
-
-/// Moves `from` in `from_dir` to `to` in `to_dir` (the same drive) only if nothing has `to`; the
-/// drive checks and moves in one step, so another file can never be replaced. `Ok(false)` when the
-/// name is taken. Refused where the system cannot do this (nothing is moved rather than moved
-/// unsafely).
-#[cfg(unix)]
-fn move_no_replace(
-    from_dir: &Dir,
-    from: &str,
-    to_dir: &Dir,
-    to: &str,
-    _from_path: FolderPath<'_>,
-    _to_path: FolderPath<'_>,
+    _folder_path: FolderPath<'_>,
 ) -> Result<bool, GateError> {
     use rustix::fs::{RenameFlags, renameat_with};
     use rustix::io::Errno;
     // renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS.
-    match renameat_with(from_dir, from, to_dir, to, RenameFlags::NOREPLACE) {
+    match renameat_with(dir, temp, dir, name, RenameFlags::NOREPLACE) {
         Ok(()) => Ok(true),
         Err(Errno::EXIST) => Ok(false),
         Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => Err(GateError::NoSafeName),
@@ -1062,22 +1208,20 @@ fn move_no_replace(
 }
 
 /// Windows: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (through `tempfile`, which wraps it
-/// safely), on the folders' full paths, each proven to be the folder held.
+/// safely; it also clears the temporary file's attributes, which are PCTwin's own), on the
+/// folder's full path, proven to be the folder held.
 #[cfg(windows)]
-fn move_no_replace(
-    _from_dir: &Dir,
-    from: &str,
-    _to_dir: &Dir,
-    to: &str,
-    from_path: FolderPath<'_>,
-    to_path: FolderPath<'_>,
+fn rename_no_replace(
+    _dir: &Dir,
+    temp: &str,
+    name: &str,
+    folder_path: FolderPath<'_>,
 ) -> Result<bool, GateError> {
-    let from_folder = from_path().map_err(|_| GateError::NoSafeName)?;
-    let to_folder = to_path().map_err(|_| GateError::NoSafeName)?;
-    let mut source = tempfile::TempPath::try_from_path(from_folder.join(from))?;
+    let folder = folder_path().map_err(|_| GateError::NoSafeName)?;
+    let mut source = tempfile::TempPath::try_from_path(folder.join(temp))?;
     // Never removed by `tempfile`, whatever happens.
     source.disable_cleanup(true);
-    match source.persist_noclobber(to_folder.join(to)) {
+    match source.persist_noclobber(folder.join(name)) {
         Ok(()) => Ok(true),
         Err(e) => {
             let taken = e.error.kind() == io::ErrorKind::AlreadyExists
@@ -1092,27 +1236,54 @@ fn move_no_replace(
 }
 
 #[cfg(not(any(unix, windows)))]
-fn move_no_replace(
-    _from_dir: &Dir,
-    _from: &str,
-    _to_dir: &Dir,
-    _to: &str,
-    _from_path: FolderPath<'_>,
-    _to_path: FolderPath<'_>,
+fn rename_no_replace(
+    _dir: &Dir,
+    _temp: &str,
+    _name: &str,
+    _folder_path: FolderPath<'_>,
 ) -> Result<bool, GateError> {
     Err(GateError::NoSafeName)
 }
 
 /// How moving a stored file ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Moved {
-    /// It is under its new name now.
-    Moved,
+    /// It is under its new name now; `made` are the folders made for it (stored paths, outermost
+    /// first), for whoever later tidies them away.
+    Moved { made: Vec<String> },
     /// Something already has the new name: nothing was moved.
     Taken,
-    /// The file there is not the one expected (or there is none): nothing was moved.
+    /// The file there is not the one expected (or there is none): nothing was moved (a file
+    /// swapped in at the last moment and moved by mistake was put back).
     NotThatFile,
+    /// This drive cannot move it without risking another file: nothing was moved.
+    Unsafe,
+    /// A file swapped in at the last moment was moved by mistake and could not be put back: it is
+    /// at `at` (a stored path), and nothing was lost.
+    Stranded { at: String },
 }
+
+/// Whether the regular file `name` in `dir` is the very file `expect`.
+fn is_the_file(dir: &Dir, name: &str, expect: FileId) -> bool {
+    dir.symlink_metadata(name).is_ok_and(|meta| meta.is_file())
+        && dir
+            .open(name)
+            .and_then(|f| identity(&f.into_std()))
+            .is_ok_and(|(id, _)| id == expect)
+}
+
+/// The name of a folder one move of PCTwin's uses for a moment: `.pctwin-move-<tag>`.
+pub fn staging_name(tag: &str) -> String {
+    format!(".pctwin-move-{tag}")
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_staging_name(name: &str) -> bool {
+    name.strip_prefix(".pctwin-move-").is_some_and(is_plain_tag)
+}
+
+/// Most numbered names tried for PCTwin's own folder.
+const MAX_OWN_FOLDER_TRIES: u32 = 100;
 
 /// Which file or folder this is on its drive: the drive's number and the file's number on it.
 /// Two names with the same identity are the same file. A file that is edited keeps its identity;

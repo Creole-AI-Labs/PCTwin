@@ -221,7 +221,16 @@ pub struct Entry {
 pub enum Undo {
     /// About to move this file (by identity) aside to `at` (a stored path in PCTwin's own folder),
     /// on its way to the Trash: recorded first, so after a crash undo knows where to look.
-    Aside { file: Option<FileId>, at: String },
+    Aside {
+        file: Option<FileId>,
+        at: String,
+        /// The folder its move uses for a moment (where it may be after a crash in between).
+        #[serde(default)]
+        staging: Option<String>,
+        /// The folders made for it aside, once it is there (only these are ever tidied away).
+        #[serde(default)]
+        made: Vec<String>,
+    },
     /// Done; never looked at again, unless it could not be done.
     Done { outcome: UndoOutcome },
 }

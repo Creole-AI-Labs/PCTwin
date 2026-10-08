@@ -34,6 +34,18 @@ pub trait Bin {
     fn can_take(&self, path: &Path) -> Result<(), String>;
     /// Moves the file at `path` to the Trash. Never deletes it: if it cannot be moved, it stays.
     fn put(&self, path: &Path) -> Result<(), String>;
+    /// Whether the Trash holds a file that was at `path` (`None`: it cannot tell), for undo cut
+    /// short between handing a file to the Trash and recording it.
+    fn holds(&self, path: &Path) -> Option<bool> {
+        let _ = path;
+        None
+    }
+    /// Whether the drive `path` is on tells files apart for good (a file's identity stays the same
+    /// and is never another file's). FAT and exFAT drives do not.
+    fn tells_files_apart(&self, path: &Path) -> bool {
+        let _ = path;
+        true
+    }
 }
 
 /// What undo did with one thing.
@@ -69,7 +81,8 @@ impl UndoReport {
 /// The plain reason for a file changed since the move.
 pub const CHANGED_SINCE: &str = "you changed this since the move, so it was kept";
 /// The plain reason for a file (or its folder) moved or renamed since the move.
-pub const MOVED_SINCE: &str = "it was moved or renamed since the move, so it was kept";
+pub const MOVED_SINCE: &str = "it is no longer where the move put it (moved, renamed or removed since), so it was left as it is";
+const NO_SAFE_MOVE: &str = "this drive cannot move it aside without risk, so it was kept";
 const NOT_REACHABLE: &str = "the place it is in could not be reached";
 const NOT_SAME_PLACE: &str = "the place it is in is not the same folder as during the move";
 const NOT_EMPTY: &str = "something is still in it";
@@ -182,9 +195,16 @@ struct Landing<'e> {
     size: u64,
     modified_ns: Option<i64>,
     block_size: u64,
+    /// Which file it is.
+    file: FileId,
 }
 
 impl Landing<'_> {
+    /// Whether `now` is the very file that landed (by identity, never by contents).
+    fn is_it(&self, now: &Stat) -> bool {
+        same(self.file, now.id)
+    }
+
     /// Whether the file at `stored` (as `now`) has exactly what landed: size, modified time, then
     /// fingerprint. `Err` if it could not be read.
     fn unchanged(&self, dest: &Destination, stored: &str, now: &Stat) -> Result<bool, String> {
@@ -241,35 +261,78 @@ fn undo_file(
             why: CANNOT_TELL.into(),
         });
     };
-    let landing = Landing {
-        final_path,
-        fingerprint,
-        size: landed.size,
-        modified_ns: landed.modified_ns,
-        block_size: entry.write.block_size,
+    let mover = Mover {
+        journal,
+        dest,
+        bin,
+        id: entry.id,
+        tag: journal.temp_tag(entry.id),
+        landing: Landing {
+            final_path,
+            fingerprint,
+            size: landed.size,
+            modified_ns: landed.modified_ns,
+            block_size: entry.write.block_size,
+            file: expected,
+        },
     };
-    // Cut short after moving it aside: carry on from there.
-    if let Some(Undo::Aside { at, .. }) = earlier {
+    // Cut short part of the way: carry on from wherever the very file is.
+    if let Some(Undo::Aside {
+        at, staging, made, ..
+    }) = earlier
+    {
         match dest.stat(at) {
-            Ok(Some(now)) => {
-                return finish_aside(journal, dest, bin, aside, entry.id, &landing, at, &now);
+            // Only the very file it moved aside counts; a lookalike put there is left alone.
+            Ok(Some(now)) if mover.landing.is_it(&now) => {
+                return mover.finish_aside(at, made, &now);
             }
-            Ok(None) => {}
+            Ok(_) => {}
             Err(e) => return not_done(e.to_string()),
+        }
+        if let Some(staging) = staging {
+            let name = final_path
+                .rsplit_once('/')
+                .map_or(final_path.as_str(), |(_, n)| n);
+            let staged = format!("{staging}/{name}");
+            if let Ok(Some(now)) = dest.stat(&staged)
+                && mover.landing.is_it(&now)
+            {
+                // Back where it was first, then on as usual.
+                match dest.move_file(&staged, final_path, now.id, &mover.staging_for(&staged)) {
+                    Ok(Moved::Moved { .. }) => {}
+                    _ => return not_done(format!("it is in {staged}")),
+                }
+            }
+        }
+        if matches!(dest.stat(final_path), Ok(None)) {
+            // Gone from where it was: the Trash has it, if the Trash can say so.
+            let in_trash = dest.path_of(at).and_then(|p| bin.holds(&p));
+            return done(if in_trash == Some(true) {
+                UndoOutcome::Trashed
+            } else {
+                UndoOutcome::Kept {
+                    why: MOVED_SINCE.into(),
+                }
+            });
         }
     }
     let now = match dest.stat(final_path) {
         Ok(Some(now)) => now,
-        Ok(None) => return done(missing(dest, final_path, expected, landed.size)),
+        // Not where the move put it: moved, renamed or removed since; nothing is done to it.
+        Ok(None) => {
+            return done(UndoOutcome::Kept {
+                why: MOVED_SINCE.into(),
+            });
+        }
         Err(e) => return not_done(e.to_string()),
     };
     // Another file has the name now (saved by writing a new copy, or made again): kept.
-    if !same(expected, now.id) {
+    if !mover.landing.is_it(&now) {
         return done(UndoOutcome::Kept {
             why: CHANGED_SINCE.into(),
         });
     }
-    match landing.unchanged(dest, final_path, &now) {
+    match mover.landing.unchanged(dest, final_path, &now) {
         Ok(true) => {}
         Ok(false) => {
             return done(UndoOutcome::Kept {
@@ -284,28 +347,34 @@ fn undo_file(
         Ok(path) => path,
         Err(e) => return not_done(e.to_string()),
     };
+    if !bin.tells_files_apart(&path) {
+        return done(UndoOutcome::Kept {
+            why: CANNOT_TELL.into(),
+        });
+    }
     if let Err(why) = bin.can_take(&path) {
         return done(UndoOutcome::Kept { why });
     }
-    // Moved aside by its handle into PCTwin's own folder, where it is recorded to go first.
+    // PCTwin's own folder (or a numbered one, if a file or link is in its way).
+    let own = match dest.own_folder(aside) {
+        Ok(own) => own,
+        Err(e) => return not_done(e.to_string()),
+    };
+    // Moved aside into it, where it is recorded to go first.
+    let staging = mover.staging_for(final_path);
     for _ in 0..MAX_ASIDE_TRIES {
-        let at = match dest.free_name_at(&format!("{aside}/{final_path}")) {
+        let at = match dest.free_name_at(&format!("{own}/{final_path}")) {
             Ok(at) => at,
             Err(e) => return not_done(e.to_string()),
         };
-        journal.record_undo(
-            entry.id,
-            &Undo::Aside {
-                file: Some(expected),
-                at: at.clone(),
-            },
-        )?;
-        match dest.move_file(final_path, &at, now.id) {
-            Ok(Moved::Moved) => {
+        mover.record_aside(&at, &staging, &[])?;
+        match dest.move_file(final_path, &at, now.id, &staging) {
+            Ok(Moved::Moved { made }) => {
+                mover.record_aside(&at, &staging, &made)?;
                 let Ok(Some(there)) = dest.stat(&at) else {
                     return not_done("it could not be found after moving it aside".into());
                 };
-                return finish_aside(journal, dest, bin, aside, entry.id, &landing, &at, &there);
+                return mover.finish_aside(&at, &made, &there);
             }
             Ok(Moved::Taken) => continue,
             // Swapped for another file since it was checked: that file is the person's.
@@ -314,100 +383,126 @@ fn undo_file(
                     why: CHANGED_SINCE.into(),
                 });
             }
+            Ok(Moved::Unsafe) => {
+                return done(UndoOutcome::Kept {
+                    why: NO_SAFE_MOVE.into(),
+                });
+            }
+            Ok(Moved::Stranded { at }) => {
+                return done(UndoOutcome::Kept {
+                    why: format!(
+                        "a file of yours was swapped in at the last moment and is kept in {at}"
+                    ),
+                });
+            }
             Err(e) => return not_done(e.to_string()),
         }
     }
     not_done("PCTwin's own folder kept having its names taken".into())
 }
 
-/// The file is aside at `at` (as `now`): checked again there, then handed to the Trash; changed
-/// in between (an edit through a program that had it open), or refused by the Trash, it goes back
-/// where it was.
-#[allow(clippy::too_many_arguments)]
-fn finish_aside(
-    journal: &Journal,
-    dest: &Destination,
-    bin: &dyn Bin,
-    aside: &str,
+/// One file's undo, moving it aside and on to the Trash.
+struct Mover<'a> {
+    journal: &'a Journal,
+    dest: &'a Destination,
+    bin: &'a dyn Bin,
     id: u64,
-    landing: &Landing<'_>,
-    at: &str,
-    now: &Stat,
-) -> Result<UndoOutcome, JournalError> {
-    let done = |outcome: UndoOutcome| -> Result<UndoOutcome, JournalError> {
-        journal.record_undo(
-            id,
+    /// Names the folder each of its moves uses for a moment.
+    tag: String,
+    landing: Landing<'a>,
+}
+
+impl Mover<'_> {
+    fn done(&self, outcome: UndoOutcome) -> Result<UndoOutcome, JournalError> {
+        self.journal.record_undo(
+            self.id,
             &Undo::Done {
                 outcome: outcome.clone(),
             },
         )?;
         Ok(outcome)
-    };
-    let back = |then: UndoOutcome| -> Result<UndoOutcome, JournalError> {
-        match dest.move_file(at, landing.final_path, now.id) {
-            Ok(Moved::Moved) => {
-                tidy_aside(dest, aside, at);
-                done(then)
-            }
-            // Its name was taken meanwhile: it stays in PCTwin's folder, and is said so.
-            _ => done(UndoOutcome::Kept {
-                why: format!("it was kept in {at}"),
-            }),
+    }
+
+    /// The folder a move of the file at `from` uses for a moment (next to it).
+    fn staging_for(&self, from: &str) -> String {
+        let name = pctwin_gate::staging_name(&self.tag);
+        match from.rsplit_once('/') {
+            Some((folder, _)) => format!("{folder}/{name}"),
+            None => name,
         }
-    };
-    match landing.unchanged(dest, at, now) {
-        Ok(true) => {}
-        Ok(false) => {
-            return back(UndoOutcome::Kept {
+    }
+
+    fn record_aside(&self, at: &str, staging: &str, made: &[String]) -> Result<(), JournalError> {
+        self.journal.record_undo(
+            self.id,
+            &Undo::Aside {
+                file: Some(self.landing.file),
+                at: at.to_string(),
+                staging: Some(staging.to_string()),
+                made: made.to_vec(),
+            },
+        )
+    }
+
+    /// The file is aside at `at` (as `now`): checked again there (the very file, unchanged), then
+    /// handed to the Trash; changed in between (an edit through a program that had it open), or
+    /// refused by the Trash, it goes back where it was.
+    fn finish_aside(
+        &self,
+        at: &str,
+        made: &[String],
+        now: &Stat,
+    ) -> Result<UndoOutcome, JournalError> {
+        let back = |then: UndoOutcome| -> Result<UndoOutcome, JournalError> {
+            match self
+                .dest
+                .move_file(at, self.landing.final_path, now.id, &self.staging_for(at))
+            {
+                Ok(Moved::Moved { .. }) => {
+                    self.tidy(made);
+                    self.done(then)
+                }
+                // Its name was taken meanwhile: it stays in PCTwin's folder, and is said so.
+                _ => self.done(UndoOutcome::Kept {
+                    why: format!("it was kept in {at}"),
+                }),
+            }
+        };
+        if !self.landing.is_it(now) {
+            // Not the very file it moved aside: never trashed, never moved.
+            return self.done(UndoOutcome::Kept {
                 why: CHANGED_SINCE.into(),
             });
         }
-        Err(why) => return back(UndoOutcome::NotDone { why }),
-    }
-    let path = match dest.ambient_path(at, now.id) {
-        Ok(path) => path,
-        Err(e) => return back(UndoOutcome::NotDone { why: e.to_string() }),
-    };
-    match bin.put(&path) {
-        Ok(()) => {
-            tidy_aside(dest, aside, at);
-            done(UndoOutcome::Trashed)
+        match self.landing.unchanged(self.dest, at, now) {
+            Ok(true) => {}
+            Ok(false) => {
+                return back(UndoOutcome::Kept {
+                    why: CHANGED_SINCE.into(),
+                });
+            }
+            Err(why) => return back(UndoOutcome::NotDone { why }),
         }
-        Err(why) => back(UndoOutcome::NotDone { why }),
-    }
-}
-
-/// Removes the folders of PCTwin's own folder that `at` was in, from the deepest, while empty.
-fn tidy_aside(dest: &Destination, aside: &str, at: &str) {
-    let mut folder = at;
-    while let Some((parent, _)) = folder.rsplit_once('/') {
-        if !matches!(dest.remove_empty_folder(parent), Ok(true)) || parent == aside {
-            break;
+        let path = match self.dest.ambient_path(at, now.id) {
+            Ok(path) => path,
+            Err(e) => return back(UndoOutcome::NotDone { why: e.to_string() }),
+        };
+        match self.bin.put(&path) {
+            Ok(()) => {
+                self.tidy(made);
+                self.done(UndoOutcome::Trashed)
+            }
+            Err(why) => back(UndoOutcome::NotDone { why }),
         }
-        folder = parent;
     }
-}
 
-/// The file is not at its name: moved or renamed since (kept, and said so), or gone.
-fn missing(dest: &Destination, final_path: &str, expected: FileId, len: u64) -> UndoOutcome {
-    let folder = final_path.rsplit_once('/').map_or("", |(f, _)| f);
-    let file = pctwin_gate::FileId {
-        volume: expected.volume,
-        index: expected.index,
-    };
-    match dest.folder_identity(folder) {
-        // Its folder is not there: moved or renamed (or removed) with what is in it.
-        Ok(None) => UndoOutcome::Kept {
-            why: MOVED_SINCE.into(),
-        },
-        Ok(Some(_)) => match dest.find_in_folder(folder, file, len) {
-            Ok(Some(_)) => UndoOutcome::Kept {
-                why: MOVED_SINCE.into(),
-            },
-            Ok(None) => UndoOutcome::AlreadyGone,
-            Err(e) => UndoOutcome::NotDone { why: e.to_string() },
-        },
-        Err(e) => UndoOutcome::NotDone { why: e.to_string() },
+    /// Removes the folders made for moving it aside (only those), deepest first, while empty.
+    fn tidy(&self, made: &[String]) {
+        for folder in made.iter().rev() {
+            if !matches!(self.dest.remove_empty_folder(folder), Ok(true)) {
+                break;
+            }
+        }
     }
 }
 
@@ -420,24 +515,7 @@ pub const NO_RECYCLE_BIN: &str = "this drive has no Recycle Bin, so it was kept"
 /// the one whose mount point holds the path, part by part (`C:\mnt\usb` is not `C:\mnt\usb2`).
 pub fn recycle_bin_for(drives: &[pctwin_scan::Drive], path: &Path) -> Result<(), String> {
     use pctwin_scan::FileSystem;
-    // A verbatim path (`\\?\C:\...`, as canonical paths are on Windows) names the same drive.
-    let parts = |p: &Path| -> Vec<String> {
-        let text = p.to_string_lossy();
-        let text = text.strip_prefix("\\\\?\\").unwrap_or(&text).to_lowercase();
-        text.split(['\\', '/'])
-            .filter(|c| !c.is_empty())
-            .map(str::to_string)
-            .collect()
-    };
-    let file = parts(path);
-    let drive = drives
-        .iter()
-        .filter(|d| {
-            let mount = parts(&d.mount);
-            !mount.is_empty() && file.len() > mount.len() && file.starts_with(&mount)
-        })
-        .max_by_key(|d| parts(&d.mount).len());
-    match drive {
+    match drive_of(drives, path) {
         Some(d)
             if !d.removable
                 && !d.read_only
@@ -447,6 +525,45 @@ pub fn recycle_bin_for(drives: &[pctwin_scan::Drive], path: &Path) -> Result<(),
         }
         _ => Err(NO_RECYCLE_BIN.into()),
     }
+}
+
+/// A path's folder names, the way drives compare them here (capital letters ignored on Windows
+/// and macOS), with a verbatim `\\?\` start left out.
+fn path_parts(p: &Path) -> Vec<String> {
+    let text = p.to_string_lossy();
+    let text = text.strip_prefix("\\\\?\\").unwrap_or(&text);
+    let text = if cfg!(any(windows, target_os = "macos")) {
+        text.to_lowercase()
+    } else {
+        text.to_string()
+    };
+    text.split(['\\', '/'])
+        .filter(|c| !c.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The drive (among `drives`) whose mount point holds `path`, by whole folder names.
+fn drive_of<'d>(drives: &'d [pctwin_scan::Drive], path: &Path) -> Option<&'d pctwin_scan::Drive> {
+    let file = path_parts(path);
+    drives
+        .iter()
+        .filter(|d| {
+            let mount = path_parts(&d.mount);
+            file.len() > mount.len() && file.starts_with(&mount)
+        })
+        .max_by_key(|d| path_parts(&d.mount).len())
+}
+
+/// Whether a file on a drive of this kind can be told apart from every other file for good. FAT
+/// and exFAT give a file a number from where its entry sits in its folder, so a file moved or made
+/// again may take another's number.
+pub fn tells_files_apart(drives: &[pctwin_scan::Drive], path: &Path) -> bool {
+    use pctwin_scan::FileSystem;
+    !matches!(
+        drive_of(drives, path).map(|d| &d.file_system),
+        Some(FileSystem::Fat32 | FileSystem::ExFat)
+    )
 }
 
 /// What this laptop's settings say about the Recycle Bin a file would go to.
@@ -567,6 +684,29 @@ impl Bin for SystemBin {
         {
             let _ = (&self.drives, path);
             Ok(())
+        }
+    }
+
+    fn tells_files_apart(&self, path: &Path) -> bool {
+        tells_files_apart(&self.drives, path)
+    }
+
+    fn holds(&self, path: &Path) -> Option<bool> {
+        #[cfg(any(windows, all(unix, not(target_os = "macos"))))]
+        {
+            let wanted = path_parts(path);
+            let items = trash::os_limited::list().ok()?;
+            Some(
+                items
+                    .iter()
+                    .any(|item| path_parts(&item.original_parent.join(&item.name)) == wanted),
+            )
+        }
+        #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+        {
+            // macOS's Trash cannot be listed.
+            let _ = path;
+            None
         }
     }
 

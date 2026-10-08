@@ -70,7 +70,7 @@ pub use session::{
 };
 pub use undo::{
     BIN_TURNED_OFF, Bin, BinSettings, CHANGED_SINCE, MOVED_SINCE, NO_RECYCLE_BIN, SystemBin,
-    TOO_BIG_FOR_BIN, UndoReport, Undone, bin_keeps, recycle_bin_for, undo,
+    TOO_BIG_FOR_BIN, UndoReport, Undone, bin_keeps, recycle_bin_for, tells_files_apart, undo,
 };
 
 use std::fs::File;

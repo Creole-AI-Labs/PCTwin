@@ -545,7 +545,9 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
             id,
             &Undo::Aside {
                 file: None,
-                at: "x".into()
+                at: "x".into(),
+                staging: None,
+                made: Vec::new(),
             }
         ),
         Err(JournalError::OutOfOrder { .. })
@@ -563,6 +565,8 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
             index: 2,
         }),
         at: "Undone/Docs/f1.txt".into(),
+        staging: Some("Docs/.pctwin-move-t".into()),
+        made: vec!["Undone".into()],
     };
     j.record_undo(id, &moving).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(moving));

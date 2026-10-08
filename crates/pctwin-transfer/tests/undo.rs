@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
-use pctwin_gate::{Approved, Destinations, temp_name};
+use pctwin_gate::{Approved, Destination, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_scan::{Drive, FileSystem};
@@ -24,6 +24,7 @@ struct FakeBin {
     refuse: Option<String>,
     fail_put: RefCell<u32>,
     taken: RefCell<Vec<PathBuf>>,
+    apart: bool,
 }
 
 impl FakeBin {
@@ -33,6 +34,7 @@ impl FakeBin {
             refuse: None,
             fail_put: RefCell::new(0),
             taken: RefCell::new(Vec::new()),
+            apart: true,
         }
     }
 }
@@ -53,6 +55,20 @@ impl Bin for FakeBin {
         std::fs::rename(path, self.dir.path().join(format!("{n}"))).map_err(|e| e.to_string())?;
         self.taken.borrow_mut().push(path.to_path_buf());
         Ok(())
+    }
+    fn holds(&self, path: &Path) -> Option<bool> {
+        let want = std::fs::canonicalize(path.parent()?)
+            .ok()?
+            .join(path.file_name()?);
+        Some(self.taken.borrow().iter().any(|p| {
+            p.parent()
+                .and_then(|d| std::fs::canonicalize(d).ok())
+                .zip(p.file_name())
+                .is_some_and(|(d, n)| d.join(n) == want)
+        }))
+    }
+    fn tells_files_apart(&self, _: &Path) -> bool {
+        self.apart
     }
 }
 
@@ -285,7 +301,12 @@ fn a_file_already_gone_is_reported_and_undo_goes_newest_first() {
     let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     let order: Vec<&str> = r.files.iter().map(|u| u.path.as_str()).collect();
     assert_eq!(order, ["second.txt", "first.txt"]);
-    assert_eq!(outcome_of(&r, "first.txt"), UndoOutcome::AlreadyGone);
+    assert_eq!(
+        outcome_of(&r, "first.txt"),
+        UndoOutcome::Kept {
+            why: pctwin_transfer::MOVED_SINCE.into()
+        }
+    );
     assert_eq!(outcome_of(&r, "second.txt"), UndoOutcome::Trashed);
 }
 
@@ -419,6 +440,8 @@ fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
             &Undo::Aside {
                 file: Some(id("a.txt")),
                 at: aside("a.txt"),
+                staging: None,
+                made: Vec::new(),
             },
         )
         .unwrap();
@@ -429,6 +452,9 @@ fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
             &Undo::Aside {
                 file: Some(id("b.txt")),
                 at: aside("b.txt"),
+                staging: None,
+                // Moved aside into PCTwin's folder, made for it.
+                made: vec![ASIDE.to_string()],
             },
         )
         .unwrap();
@@ -442,6 +468,8 @@ fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
             &Undo::Aside {
                 file: Some(id("c.txt")),
                 at: aside("c.txt"),
+                staging: None,
+                made: Vec::new(),
             },
         )
         .unwrap();
@@ -480,6 +508,8 @@ fn an_edit_made_while_a_file_is_aside_puts_it_back_where_it_was() {
                     index: s.id.index,
                 }),
                 at: at.clone(),
+                staging: None,
+                made: vec![ASIDE.to_string(), format!("{ASIDE}/Docs")],
             },
         )
         .unwrap();
@@ -549,7 +579,9 @@ fn on_windows_only_a_fixed_ntfs_or_refs_drive_counts_as_having_a_recycle_bin() {
     let ok = |p: &str| recycle_bin_for(&drives, Path::new(p)).is_ok();
     assert!(ok("C:\\Users\\me\\a.txt"));
     assert!(ok("\\\\?\\C:\\Users\\me\\a.txt"));
-    assert!(ok("c:\\users\\me\\a.txt"));
+    if cfg!(any(windows, target_os = "macos")) {
+        assert!(ok("c:\\users\\me\\a.txt"));
+    }
     assert!(ok("D:\\a.txt"));
     assert!(!ok("E:\\a.txt"), "a USB stick");
     assert!(!ok("F:\\a.txt"), "a removable NTFS drive");
@@ -783,13 +815,13 @@ fn a_file_or_folder_moved_or_renamed_since_is_kept_and_said_so() {
     };
     assert_eq!(outcome_of(&r, "A/b.txt"), moved);
     assert_eq!(outcome_of(&r, "C/d.txt"), moved);
-    assert_eq!(outcome_of(&r, "E/f.txt"), UndoOutcome::AlreadyGone);
+    assert_eq!(outcome_of(&r, "E/f.txt"), moved);
     assert!(w.exists("A-renamed/b.txt"));
     assert!(w.exists("C/d2.txt"));
     assert_eq!(
         r.not_undone().count(),
-        2 + 2,
-        "A/b.txt, C/d.txt, and folders C and E (not empty)"
+        3 + 2,
+        "the files A/b.txt, C/d.txt and E/f.txt, and folders C and E (not empty)"
     );
 }
 
@@ -881,7 +913,9 @@ fn a_drive_is_matched_by_whole_folder_names_not_by_the_start_of_a_name() {
     // "usb2" is a folder on C:, not on the stick mounted at "usb".
     assert!(ok("C:\\mnt\\usb2\\a.txt"));
     assert!(!ok("C:\\mnt\\usb\\a.txt"));
-    assert!(!ok("C:\\mnt\\USB\\a.txt"));
+    if cfg!(any(windows, target_os = "macos")) {
+        assert!(!ok("C:\\mnt\\USB\\a.txt"));
+    }
 }
 
 #[test]
@@ -924,4 +958,342 @@ fn the_real_recycle_bin_settings_are_read_and_answered_in_plain_words() {
         ),
     }
     assert!(path.exists());
+}
+
+#[test]
+fn a_lookalike_put_where_a_file_was_going_aside_is_never_trashed() {
+    let w = world();
+    let bin = FakeBin::new();
+    let e = w.moved(1, "Documents/a.pdf", b"aaaa", &[]);
+    let ours = w
+        .table
+        .get("me")
+        .unwrap()
+        .stat("Documents/a.pdf")
+        .unwrap()
+        .unwrap()
+        .id;
+    // Cut short after "about to move aside to <at>" was recorded...
+    let at = format!("{ASIDE}/Documents/a.pdf");
+    w.journal
+        .record_undo(
+            e,
+            &Undo::Aside {
+                file: Some(FileId {
+                    volume: ours.volume,
+                    index: ours.index,
+                }),
+                at: at.clone(),
+                staging: None,
+                made: Vec::new(),
+            },
+        )
+        .unwrap();
+    // ...then someone puts their own identical-looking file at that name.
+    std::fs::create_dir_all(w.root.join(ASIDE).join("Documents")).unwrap();
+    std::fs::write(w.root.join(&at), b"aaaa").unwrap();
+    let mtime = w.modified("Documents/a.pdf");
+    w.set_modified(&at, mtime);
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    // The move's own file is undone; the lookalike is never touched.
+    assert_eq!(outcome_of(&r, "Documents/a.pdf"), UndoOutcome::Trashed);
+    assert_eq!(std::fs::read(w.root.join(&at)).unwrap(), b"aaaa");
+    assert!(!w.exists("Documents/a.pdf"));
+    assert_eq!(bin.taken.borrow().len(), 1);
+    assert_ne!(bin.taken.borrow()[0], w.root.join(&at));
+}
+
+/// Swaps in the person's own byte-identical copy (same modified time) at every moment of undo.
+#[test]
+fn an_identical_copy_swapped_in_during_undo_is_never_trashed() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for i in 0..80u64 {
+        let w = world();
+        let bin = FakeBin::new();
+        w.moved(1, "Documents/a.pdf", b"aaaa", &[]);
+        let f = w.root.join("Documents/a.pdf");
+        let ours = w
+            .table
+            .get("me")
+            .unwrap()
+            .stat("Documents/a.pdf")
+            .unwrap()
+            .unwrap()
+            .id;
+        let mtime = std::fs::metadata(&f).unwrap().modified().unwrap();
+        let p = w.root.join("Documents/person-copy.tmp");
+        std::fs::write(&p, b"aaaa").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&p)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        let theirs = w
+            .table
+            .get("me")
+            .unwrap()
+            .stat("Documents/person-copy.tmp")
+            .unwrap()
+            .unwrap()
+            .id;
+        let go = Arc::new(AtomicBool::new(false));
+        let go2 = go.clone();
+        let (p2, f2) = (p.clone(), f.clone());
+        let t = std::thread::spawn(move || {
+            while !go2.load(Ordering::Acquire) {}
+            let t0 = std::time::Instant::now();
+            while t0.elapsed() < std::time::Duration::from_micros(i * 50) {
+                std::hint::spin_loop();
+            }
+            let _ = std::fs::rename(&p2, &f2);
+        });
+        go.store(true, Ordering::Release);
+        let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+        t.join().unwrap();
+        if matches!(r.files[0].outcome, UndoOutcome::Trashed) {
+            let dest = Destination::open(bin.dir.path()).unwrap();
+            let trashed = dest.stat("0").unwrap().unwrap().id;
+            assert_eq!(
+                trashed, ours,
+                "iteration {i}: the person's own copy was trashed"
+            );
+            assert_ne!(trashed, theirs);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn a_junction_or_file_in_the_way_of_pctwin_s_folder_never_blocks_or_misleads_undo() {
+    let w = world();
+    let bin = FakeBin::new();
+    let outside = tempfile::tempdir().unwrap();
+    w.moved(1, "Documents/a.pdf", b"aaaa", &[]);
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(w.root.join(ASIDE))
+        .arg(outside.path())
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "Documents/a.pdf"), UndoOutcome::Trashed);
+    assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+    // Its numbered folder, made for the move, is gone again.
+    assert!(!w.root.join(format!("{ASIDE} (2)")).exists());
+}
+
+#[test]
+fn a_file_put_where_pctwin_s_folder_would_be_never_blocks_undo() {
+    let w = world();
+    let bin = FakeBin::new();
+    w.moved(1, "a.txt", b"a", &[]);
+    std::fs::write(w.root.join(ASIDE), b"someone's file").unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Trashed);
+    assert_eq!(
+        std::fs::read(w.root.join(ASIDE)).unwrap(),
+        b"someone's file"
+    );
+}
+
+#[test]
+fn a_person_s_own_empty_folder_inside_pctwin_s_folder_is_never_tidied_away() {
+    let w = world();
+    let bin = FakeBin::new();
+    w.moved(1, "Docs/a.txt", b"a", &[]);
+    std::fs::create_dir_all(w.root.join(format!("{ASIDE}/Docs"))).unwrap();
+    std::fs::create_dir_all(w.root.join(format!("{ASIDE}/Mine"))).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "Docs/a.txt"), UndoOutcome::Trashed);
+    // Folders that were there before are not PCTwin's to remove.
+    assert!(w.root.join(format!("{ASIDE}/Docs")).is_dir());
+    assert!(w.root.join(format!("{ASIDE}/Mine")).is_dir());
+}
+
+#[test]
+fn a_file_moved_to_another_folder_is_kept_and_said_so() {
+    let w = world();
+    let bin = FakeBin::new();
+    w.moved(1, "Documents/Tax/a.pdf", b"aaaa", &["Documents/Tax"]);
+    std::fs::create_dir_all(w.root.join("Archive")).unwrap();
+    std::fs::rename(
+        w.root.join("Documents/Tax/a.pdf"),
+        w.root.join("Archive/a.pdf"),
+    )
+    .unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(
+        outcome_of(&r, "Documents/Tax/a.pdf"),
+        UndoOutcome::Kept {
+            why: pctwin_transfer::MOVED_SINCE.into()
+        }
+    );
+    assert!(w.exists("Archive/a.pdf"));
+}
+
+#[test]
+fn undo_cut_short_after_the_trash_took_a_file_says_trashed_only_if_the_trash_has_it() {
+    let w = world();
+    let bin = FakeBin::new();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let b = w.moved(2, "b.txt", b"b", &[]);
+    let id_of = |p: &str| {
+        let s = w.table.get("me").unwrap().stat(p).unwrap().unwrap();
+        FileId {
+            volume: s.id.volume,
+            index: s.id.index,
+        }
+    };
+    for (entry, name) in [(a, "a.txt"), (b, "b.txt")] {
+        let at = format!("{ASIDE}/{name}");
+        w.journal
+            .record_undo(
+                entry,
+                &Undo::Aside {
+                    file: Some(id_of(name)),
+                    at: at.clone(),
+                    staging: None,
+                    made: Vec::new(),
+                },
+            )
+            .unwrap();
+        std::fs::create_dir_all(w.root.join(ASIDE)).unwrap();
+        std::fs::rename(w.root.join(name), w.root.join(&at)).unwrap();
+    }
+    // a.txt: the Trash took it, then the crash. b.txt: the person moved it out of PCTwin's
+    // folder themselves.
+    bin.put(&w.root.join(format!("{ASIDE}/a.txt"))).unwrap();
+    std::fs::rename(
+        w.root.join(format!("{ASIDE}/b.txt")),
+        w.root.join("b-mine.txt"),
+    )
+    .unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Trashed);
+    assert_eq!(
+        outcome_of(&r, "b.txt"),
+        UndoOutcome::Kept {
+            why: pctwin_transfer::MOVED_SINCE.into()
+        }
+    );
+    assert!(w.exists("b-mine.txt"));
+}
+
+#[test]
+fn on_a_drive_that_cannot_tell_files_apart_nothing_is_undone_by_guess() {
+    let w = world();
+    let mut bin = FakeBin::new();
+    bin.apart = false;
+    w.moved(1, "a.txt", b"a", &[]);
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert!(
+        matches!(outcome_of(&r, "a.txt"), UndoOutcome::Kept { why } if why.contains("cannot tell"))
+    );
+    assert!(w.exists("a.txt"));
+}
+
+#[test]
+fn only_fat_and_exfat_drives_count_as_not_telling_files_apart() {
+    let drives = [
+        drive("/", FileSystem::Ext4, false),
+        drive("/media/stick", FileSystem::Fat32, true),
+        drive("/media/card", FileSystem::ExFat, true),
+    ];
+    assert!(pctwin_transfer::tells_files_apart(
+        &drives,
+        Path::new("/home/a.txt")
+    ));
+    assert!(!pctwin_transfer::tells_files_apart(
+        &drives,
+        Path::new("/media/stick/a.txt")
+    ));
+    assert!(!pctwin_transfer::tells_files_apart(
+        &drives,
+        Path::new("/media/card/a.txt")
+    ));
+    assert!(pctwin_transfer::tells_files_apart(
+        &drives,
+        Path::new("/media/cards/a.txt")
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn a_file_left_in_its_staging_folder_by_a_crash_is_picked_up_again() {
+    let w = world();
+    let bin = FakeBin::new();
+    let e = w.moved(1, "Docs/a.txt", b"aaaa", &[]);
+    let s = w
+        .table
+        .get("me")
+        .unwrap()
+        .stat("Docs/a.txt")
+        .unwrap()
+        .unwrap();
+    let staging = format!("Docs/{}", pctwin_gate::staging_name(&w.journal.temp_tag(e)));
+    w.journal
+        .record_undo(
+            e,
+            &Undo::Aside {
+                file: Some(FileId {
+                    volume: s.id.volume,
+                    index: s.id.index,
+                }),
+                at: format!("{ASIDE}/Docs/a.txt"),
+                staging: Some(staging.clone()),
+                made: Vec::new(),
+            },
+        )
+        .unwrap();
+    // The crash came between moving it into its staging folder and naming it aside.
+    std::fs::create_dir(w.root.join(&staging)).unwrap();
+    std::fs::rename(
+        w.root.join("Docs/a.txt"),
+        w.root.join(format!("{staging}/a.txt")),
+    )
+    .unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "Docs/a.txt"), UndoOutcome::Trashed);
+    assert_eq!(names_in(&w.root.join("Docs")), Vec::<String>::new());
+    assert_eq!(bin.taken.borrow().len(), 1);
+}
+
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+/// The app stops (here: a panic) at the very moment the Trash is asked to take the file.
+struct StopsAtPut;
+
+impl Bin for StopsAtPut {
+    fn can_take(&self, _: &Path) -> Result<(), String> {
+        Ok(())
+    }
+    fn put(&self, _: &Path) -> Result<(), String> {
+        panic!("the app stopped");
+    }
+}
+
+#[test]
+fn undo_cut_short_at_the_trash_tidies_the_folders_it_made_on_the_next_run() {
+    let w = world();
+    w.moved(1, "Docs/Tax/a.txt", b"a", &[]);
+    let stopped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        undo(&w.journal, &w.table, &StopsAtPut, ASIDE)
+    }));
+    assert!(stopped.is_err());
+    // Left aside, in folders made for it.
+    assert!(w.root.join(format!("{ASIDE}/Docs/Tax/a.txt")).is_file());
+    let bin = FakeBin::new();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "Docs/Tax/a.txt"), UndoOutcome::Trashed);
+    assert!(!w.root.join(ASIDE).exists());
 }
