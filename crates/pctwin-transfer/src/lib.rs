@@ -44,6 +44,7 @@ mod lanedriver;
 mod lanes;
 mod message;
 mod netlanes;
+mod original;
 mod partials;
 mod progress;
 mod queue;
@@ -60,6 +61,7 @@ pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use netlanes::{LinkLanes, accept_lanes};
+pub use original::{MAX_ORIGINALS_PER_REQUEST, OriginalNow, answer_originals, original_unchanged};
 pub use partials::{
     KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,
     expire_partials, partials,
@@ -71,7 +73,7 @@ pub use recovery::{Recovered, recover, recover_with};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
     Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob,
-    SendOutcome, SenderSession,
+    SendOutcome, SenderSession, check_originals, serve_originals,
 };
 pub use undo::{
     BIN_TURNED_OFF, BIN_UNKNOWN, Bin, BinSettings, CHANGED_SINCE, MOVED_SINCE, NO_RECYCLE_BIN,
@@ -201,7 +203,7 @@ pub struct Stamp {
 }
 
 impl Stamp {
-    fn of(meta: &std::fs::Metadata) -> Self {
+    pub(crate) fn of(meta: &std::fs::Metadata) -> Self {
         let modified_ns = meta.modified().ok().map(nanos);
         Self {
             size: meta.len(),
@@ -218,6 +220,10 @@ pub struct Header {
     pub block_count: u64,
     /// The file as it was when reading began.
     pub stamp: Stamp,
+    /// Which file on the old laptop this was, taken from the very handle it was read through
+    /// (`None` if the old laptop could not tell), so undo can later ask whether that same file
+    /// is still there unchanged.
+    pub source_file: Option<pctwin_journal::FileId>,
 }
 
 /// Sent after a file's last block.
@@ -345,11 +351,21 @@ impl Block {
 /// A file being read on the old laptop: its bytes and its size and modified time.
 pub trait Source: Read + Seek + Send {
     fn stamp(&mut self) -> io::Result<Stamp>;
+
+    /// Which file this is on its drive, from the open handle; `None` when a source cannot tell
+    /// (a snapshot, say), which only means undo will not remove the copy.
+    fn identity(&mut self) -> io::Result<Option<pctwin_journal::FileId>> {
+        Ok(None)
+    }
 }
 
 impl Source for File {
     fn stamp(&mut self) -> io::Result<Stamp> {
         Ok(Stamp::of(&self.metadata()?))
+    }
+
+    fn identity(&mut self) -> io::Result<Option<pctwin_journal::FileId>> {
+        original::file_identity(self).map(Some)
     }
 }
 
@@ -401,6 +417,7 @@ impl FileSender {
     ) -> Result<Self, TransferError> {
         let mut file = opener.open(path)?;
         let stamp = file.stamp()?;
+        let source_file = file.identity().ok().flatten();
         // The block size is always this laptop's own choice, never taken from the ticket.
         let block_size = block_size_for(stamp.size);
         let block_count = stamp.size.div_ceil(block_size);
@@ -425,6 +442,7 @@ impl FileSender {
                 block_size,
                 block_count,
                 stamp,
+                source_file,
             },
             next: 0,
             skip,

@@ -16,7 +16,8 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::{
-    Allowance, Assembly, Block, FileSender, FsOpener, Opener, ResumeTicket, Trailer, TransferError,
+    Allowance, Assembly, Block, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
+    OriginalNow, ResumeTicket, Trailer, TransferError, answer_originals,
 };
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -93,6 +94,90 @@ async fn recv(ch: &mut impl Channel) -> Result<Message, TransferError> {
 
 fn protocol(why: &str) -> TransferError {
     TransferError::Protocol(why.to_string())
+}
+
+/// New laptop, for undo: asks the old laptop, over the paired connection, what it sees now for
+/// each of `items`. Every item asked gets an answer in the result, and only an exact, single,
+/// well-formed answer counts: an item the old laptop skipped, answered twice, or answered with
+/// something else is `CannotLook` (never "confirmed"), and an answer for an item that was not
+/// asked is thrown away. A damaged or oversized message is an error. Long lists go in several
+/// requests of at most `MAX_ORIGINALS_PER_REQUEST`, so the old laptop must call
+/// [`serve_originals`] once for each.
+pub async fn check_originals(
+    ch: &mut impl Channel,
+    items: &[ItemId],
+) -> Result<HashMap<ItemId, OriginalNow>, TransferError> {
+    let mut seen = HashSet::new();
+    let unique: Vec<ItemId> = items.iter().copied().filter(|i| seen.insert(*i)).collect();
+    let mut result = HashMap::new();
+    for chunk in unique.chunks(MAX_ORIGINALS_PER_REQUEST) {
+        send(
+            ch,
+            &Message::CheckOriginals {
+                items: chunk.to_vec(),
+            },
+        )
+        .await?;
+        let Message::Originals { answers } = recv(ch).await? else {
+            return Err(protocol("expected the answer about the originals"));
+        };
+        result.extend(match_answers(chunk, answers));
+    }
+    Ok(result)
+}
+
+/// Pairs answers with the items that were asked, strictly. Anything not exactly one answer to a
+/// question that was asked becomes `CannotLook`.
+fn match_answers(
+    asked: &[ItemId],
+    answers: Vec<(ItemId, OriginalNow)>,
+) -> HashMap<ItemId, OriginalNow> {
+    let asked_set: HashSet<ItemId> = asked.iter().copied().collect();
+    let mut got: HashMap<ItemId, Option<OriginalNow>> = HashMap::new();
+    for (item, now) in answers {
+        if !asked_set.contains(&item) {
+            continue;
+        }
+        // A second answer for the same item spoils it: neither one is trusted.
+        match got.get_mut(&item) {
+            Some(slot) => *slot = None,
+            None => {
+                got.insert(item, Some(now));
+            }
+        }
+    }
+    asked
+        .iter()
+        .map(|item| {
+            let now = got
+                .get(item)
+                .copied()
+                .flatten()
+                .unwrap_or(OriginalNow::CannotLook);
+            (*item, now)
+        })
+        .collect()
+}
+
+/// Old laptop, for undo: answers one `CheckOriginals` request from what it sent (`sent`: item to
+/// source path). It looks only at files in `sent`, read-only, and changes nothing. Call it once
+/// per request, when no file is being sent on this connection.
+pub async fn serve_originals(
+    ch: &mut impl Channel,
+    sent: &HashMap<ItemId, PathBuf>,
+) -> Result<(), TransferError> {
+    let Message::CheckOriginals { items } = recv(ch).await? else {
+        return Err(protocol("expected a request about the originals"));
+    };
+    // Only the asked items' paths go to the worker; the new laptop never names a path.
+    let known: HashMap<ItemId, PathBuf> = items
+        .iter()
+        .filter_map(|i| sent.get(i).map(|p| (*i, p.clone())))
+        .collect();
+    let answers = tokio::task::spawn_blocking(move || answer_originals(&known, &items))
+        .await
+        .map_err(|_| protocol("the look at the originals failed"))?;
+    send(ch, &Message::Originals { answers }).await
 }
 
 /// One file the old laptop sends.
@@ -264,6 +349,14 @@ impl SenderSession {
     /// Blocks sent so far, over every connection and lane.
     pub fn blocks_sent(&self) -> u64 {
         self.blocks_sent
+    }
+
+    /// What this laptop sent, item to source path: the list [`serve_originals`] answers from.
+    pub fn sent_sources(&self) -> HashMap<ItemId, PathBuf> {
+        self.jobs
+            .iter()
+            .map(|j| (j.item, j.source.clone()))
+            .collect()
     }
 
     pub fn outcome(&self, item: ItemId) -> Option<&SendOutcome> {
@@ -1191,6 +1284,7 @@ impl<'d> ReceiverSession<'d> {
                     size: w.size,
                     modified_ns: w.source_modified_ns,
                 },
+                source_file: w.source_file,
             };
             let claimed = self.journal.blocks(e.id).map_err(record)?;
             let resumed = IncomingPath::parse(&w.path)
@@ -1776,7 +1870,7 @@ impl<'d> ReceiverSession<'d> {
             block_size: header.block_size,
             source_modified_ns: header.stamp.modified_ns,
             place: dest.folder_identity("").ok().flatten().map(file_id),
-            source_file: None,
+            source_file: header.source_file,
             partial_keep: self.allowance.partial_keep(),
         };
         let entry = self.journal.plan(&write).map_err(Start::Record)?;

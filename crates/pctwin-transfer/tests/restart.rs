@@ -464,6 +464,7 @@ async fn a_restored_file_is_never_continued_with_another_description() {
             size: SIZE as u64,
             modified_ns: w.modified_ns().map(|n| n + 1),
         },
+        source_file: None,
     };
     let (mut old, mut new) = mem_pair(None);
     let script = async {
@@ -657,6 +658,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
                     size: 10,
                     modified_ns: None,
                 },
+                source_file: None,
             },
             resumed_done: 0,
         };

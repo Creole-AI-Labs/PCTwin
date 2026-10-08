@@ -1107,6 +1107,7 @@ async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
             size,
             modified_ns: None,
         },
+        source_file: None,
     };
     let (mut old, mut new) = mem_pair();
     let script = async {

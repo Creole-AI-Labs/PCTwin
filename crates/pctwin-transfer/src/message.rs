@@ -1,6 +1,10 @@
+use pctwin_journal::FileId;
 use pctwin_record::ItemId;
 
-use crate::{BlockMap, Header, MAX_BLOCK, ResumeTicket, Stamp, TransferError};
+use crate::{
+    BlockMap, Header, MAX_BLOCK, MAX_ORIGINALS_PER_REQUEST, OriginalNow, ResumeTicket, Stamp,
+    TransferError,
+};
 
 /// The largest piece of a block in one link message, leaving room for the message's own fields
 /// within the link's 64 KiB limit.
@@ -68,6 +72,11 @@ pub enum Message {
     /// Receiver, in place of a receipt: that block was not written (the file failed, is not open,
     /// or belongs to an earlier attempt), so its file will not finish.
     Refused { stream: u32 },
+    /// New laptop to old, for undo: are these originals still there, unchanged? Read-only on the
+    /// old laptop, which answers only for files it sent. At most `MAX_ORIGINALS_PER_REQUEST`.
+    CheckOriginals { items: Vec<ItemId> },
+    /// Old laptop to new: what it sees now for each item asked.
+    Originals { answers: Vec<(ItemId, OriginalNow)> },
 }
 
 const START: u8 = 1;
@@ -81,6 +90,8 @@ const ALL_SENT: u8 = 8;
 const HAVE: u8 = 9;
 const SKIP: u8 = 10;
 const REFUSED: u8 = 11;
+const CHECK_ORIGINALS: u8 = 12;
+const ORIGINALS: u8 = 13;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -174,6 +185,25 @@ impl Message {
                 w.push(REFUSED);
                 w.extend_from_slice(&stream.to_be_bytes());
             }
+            Message::CheckOriginals { items } => {
+                w.push(CHECK_ORIGINALS);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                let count = u16::try_from(items.len()).unwrap_or(u16::MAX);
+                w.extend_from_slice(&count.to_be_bytes());
+                for item in items.iter().take(usize::from(count)) {
+                    w.extend_from_slice(&item_bytes(item));
+                }
+            }
+            Message::Originals { answers } => {
+                w.push(ORIGINALS);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                let count = u16::try_from(answers.len()).unwrap_or(u16::MAX);
+                w.extend_from_slice(&count.to_be_bytes());
+                for (item, now) in answers.iter().take(usize::from(count)) {
+                    w.extend_from_slice(&item_bytes(item));
+                    put_original(&mut w, now);
+                }
+            }
         }
         w
     }
@@ -248,6 +278,23 @@ impl Message {
             },
             SKIP => Message::Skip { stream },
             REFUSED => Message::Refused { stream },
+            CHECK_ORIGINALS if stream == 0 => {
+                let count = r.count()?;
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(r.item()?);
+                }
+                Message::CheckOriginals { items }
+            }
+            ORIGINALS if stream == 0 => {
+                let count = r.count()?;
+                let mut answers = Vec::with_capacity(count);
+                for _ in 0..count {
+                    let item = r.item()?;
+                    answers.push((item, r.original()?));
+                }
+                Message::Originals { answers }
+            }
             _ => return Err(damaged("unknown message")),
         };
         r.end()?;
@@ -315,6 +362,40 @@ fn put_header(w: &mut Vec<u8>, h: &Header) {
     w.extend_from_slice(&h.block_size.to_be_bytes());
     w.extend_from_slice(&h.block_count.to_be_bytes());
     put_stamp(w, &h.stamp);
+    put_file_id(w, h.source_file.as_ref());
+}
+
+fn put_file_id(w: &mut Vec<u8>, id: Option<&FileId>) {
+    match id {
+        Some(id) => {
+            w.push(1);
+            w.extend_from_slice(&id.volume.to_be_bytes());
+            w.extend_from_slice(&id.index.to_be_bytes());
+        }
+        None => w.push(0),
+    }
+}
+
+fn put_original(w: &mut Vec<u8>, now: &OriginalNow) {
+    match now {
+        OriginalNow::Present {
+            size,
+            modified_ns,
+            file,
+        } => {
+            w.push(0);
+            put_stamp(
+                w,
+                &Stamp {
+                    size: *size,
+                    modified_ns: *modified_ns,
+                },
+            );
+            put_file_id(w, file.as_ref());
+        }
+        OriginalNow::Missing => w.push(1),
+        OriginalNow::CannotLook => w.push(2),
+    }
 }
 
 fn put_stamp(w: &mut Vec<u8>, s: &Stamp) {
@@ -402,7 +483,45 @@ impl<'a> Reader<'a> {
             block_size: self.u64()?,
             block_count: self.u64()?,
             stamp: self.stamp()?,
+            source_file: self.file_id()?,
         })
+    }
+
+    fn file_id(&mut self) -> Result<Option<FileId>, TransferError> {
+        if self.flag()? {
+            Ok(Some(FileId {
+                volume: self.u64()?,
+                index: self.u64()?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// A count of items, refused above the per-request limit.
+    fn count(&mut self) -> Result<usize, TransferError> {
+        let b = self.take(2)?;
+        let n = usize::from(u16::from_be_bytes([b[0], b[1]]));
+        if n > MAX_ORIGINALS_PER_REQUEST {
+            return Err(damaged("too many items in one request"));
+        }
+        Ok(n)
+    }
+
+    fn original(&mut self) -> Result<OriginalNow, TransferError> {
+        match self.u8()? {
+            0 => {
+                let stamp = self.stamp()?;
+                Ok(OriginalNow::Present {
+                    size: stamp.size,
+                    modified_ns: stamp.modified_ns,
+                    file: self.file_id()?,
+                })
+            }
+            1 => Ok(OriginalNow::Missing),
+            2 => Ok(OriginalNow::CannotLook),
+            _ => Err(damaged("bad answer")),
+        }
     }
 
     fn map(&mut self) -> Result<BlockMap, TransferError> {

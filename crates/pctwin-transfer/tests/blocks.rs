@@ -481,6 +481,7 @@ fn a_file_described_in_any_other_block_size_than_its_own_is_refused() {
                 size,
                 modified_ns: None,
             },
+            source_file: None,
         };
         assert!(
             matches!(
