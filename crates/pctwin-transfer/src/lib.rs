@@ -12,6 +12,18 @@
 //!   new sender continue from exactly that block, unless the file changed in the meantime.
 //! - A file that changed while it was being read is never finished; the partial file is removed
 //!   and it is sent again.
+//! - [`plan_order`] sets the order things move in: what the person asked for first (Smart mode or
+//!   their own picks), then essentials, then the rest, newest first. [`Scheduler`] lets several
+//!   files take turns piece by piece so one huge file never holds up the rest, and starts a new
+//!   request at once.
+//! - [`Message`] is what travels over the encrypted link; blocks go as pieces of at most
+//!   [`PIECE_MAX`] and are rejoined by [`PieceBuffer`], never past the largest block.
+
+mod message;
+mod queue;
+
+pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
+pub use queue::{Scheduler, Tier, plan_order};
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};

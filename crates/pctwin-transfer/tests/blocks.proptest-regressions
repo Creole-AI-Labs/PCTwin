@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 0f31dd78cc3eecb79fb257acc5f08c0c45afc5ce340dd9ffdf7cd856ba15bf4e # shrinks to position = 1574, flip = 1
 cc 9b2349887e09c4d264b1a04916a6edbeae39c39d59735a913ca387e2c85a56cc # shrinks to position = 976, flip = 104
+cc 55cb02b99c394bb50be80ef81f87e7d570d79b26eff8feef6fc09e372430e67c # shrinks to position = 700, flip = 16

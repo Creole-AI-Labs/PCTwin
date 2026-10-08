@@ -2951,6 +2951,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "pctwin-gate",
+ "pctwin-record",
  "proptest",
  "tempfile",
  "thiserror 2.0.21",

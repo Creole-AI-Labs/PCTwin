@@ -321,19 +321,25 @@ proptest::proptest! {
         }
     }
 
-    /// A real block with any single byte changed is refused.
+    /// A real block with any single byte changed is refused, or still gives the exact original.
     #[test]
     fn any_changed_byte_is_caught(position in 0usize..2000, flip in 1u8..=255) {
         let src = tempfile::tempdir().unwrap();
         let path = source(src.path(), "a.txt", &vec![b'q'; 1500]);
         let mut sender = FileSender::open(&path, None, true).unwrap();
-        let mut wire = sender.next_block().unwrap().unwrap().encode();
+        let first = sender.next_block().unwrap().unwrap();
+        let original = Block::decode(&first.encode(), MIN_BLOCK).unwrap();
+        let mut wire = first.encode();
         let i = position % wire.len();
         // Changing the stated index alone still gives a valid block for another place, which the
         // receiver's order check refuses; every other byte must be caught here.
         if !(2..10).contains(&i) {
             wire[i] ^= flip;
-            proptest::prop_assert!(Block::decode(&wire, MIN_BLOCK).is_err());
+            // Either refused, or (for a byte in the packed form that does not change what it unpacks
+            // to) exactly the original contents: damaged data can never get through.
+            if let Ok(block) = Block::decode(&wire, MIN_BLOCK) {
+                proptest::prop_assert_eq!(block, original.clone());
+            }
         }
     }
 }
