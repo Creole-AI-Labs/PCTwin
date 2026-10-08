@@ -73,6 +73,13 @@ const KIND_EXPIRED: u8 = 6;
 const KIND_LOCKED: u8 = 7;
 const KIND_WRONG_CODE: u8 = 8;
 const KIND_LANE: u8 = 9;
+/// A quiet connection is probed after this long, every [`KEEPALIVE_INTERVAL`], up to
+/// [`KEEPALIVE_PROBES`] times: a laptop that went away (lid closed, out of Wi-Fi range) is noticed
+/// in about half a minute rather than the systems' default of up to two hours. The operating
+/// system answers probes itself, so a laptop busy reading a slow drive is never mistaken for gone.
+pub const KEEPALIVE_IDLE: Duration = Duration::from_secs(10);
+pub const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+pub const KEEPALIVE_PROBES: u32 = 4;
 const HEADER_LEN: usize = 3;
 const MAX_DATA_LEN: usize = u16::MAX as usize;
 const SESSION_TAG: std::ops::Range<usize> = 2..10;
@@ -318,7 +325,10 @@ impl Host {
     /// once; an accept error (for example, out of handles) pauses briefly and is not fatal.
     async fn accept_local(&self) -> Option<(TcpStream, SocketAddr)> {
         match self.listener.accept().await {
-            Ok((stream, peer)) if (self.allowed)(peer.ip()) => Some((stream, peer)),
+            Ok((stream, peer)) if (self.allowed)(peer.ip()) => {
+                keep_alive(&stream);
+                Some((stream, peer))
+            }
             Ok(_) => None,
             Err(_) => {
                 tokio::time::sleep(ACCEPT_BACKOFF).await;
@@ -423,6 +433,7 @@ pub async fn connect(
         .await
         .map_err(|_| LinkError::Unreachable)?
         .map_err(|_| LinkError::Unreachable)?;
+    keep_alive(&stream);
     write_frame(&mut stream, KIND_HELLO, &[code.parity()], wait).await?;
     let msg1 = read_from_host(&mut stream, wait).await?;
     let (receiver, msg2) = ReceiverSession::respond(code, &msg1, Instant::now())?;
@@ -507,6 +518,14 @@ impl Link {
         self.peer
     }
 
+    /// Whether the operating system is probing this connection while it is quiet (see
+    /// [`KEEPALIVE_IDLE`]), so a laptop that went away is noticed.
+    pub fn keeps_alive(&self) -> bool {
+        socket2::SockRef::from(&self.stream)
+            .keepalive()
+            .unwrap_or(false)
+    }
+
     /// The keys for extra lanes, handed out once (from the main link only), so the app can open
     /// or accept lanes while this link carries the move.
     pub fn take_lane_keys(&mut self) -> Option<LaneKeys> {
@@ -573,6 +592,7 @@ pub async fn open_lane(
         .await
         .map_err(|_| LinkError::Unreachable)?
         .map_err(|_| LinkError::Unreachable)?;
+    keep_alive(&stream);
     let (opening, msg1) = keys.open_lane(Instant::now())?;
     write_frame(&mut stream, KIND_LANE, &msg1, wait).await?;
     let msg2 = match read_timed(&mut stream, wait).await? {
@@ -655,6 +675,16 @@ impl LaneListener {
             }
         }
     }
+}
+
+/// Turns on the operating system's probing of a quiet connection. If a system refuses the
+/// settings, the connection still works; a lost laptop is then noticed only by its own timeouts.
+fn keep_alive(stream: &TcpStream) {
+    let probing = socket2::TcpKeepalive::new()
+        .with_time(KEEPALIVE_IDLE)
+        .with_interval(KEEPALIVE_INTERVAL)
+        .with_retries(KEEPALIVE_PROBES);
+    let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&probing);
 }
 
 fn lock(sender: &Mutex<RotatingSender>) -> MutexGuard<'_, RotatingSender> {

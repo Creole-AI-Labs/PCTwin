@@ -1221,3 +1221,22 @@ async fn junk_and_silence_are_dropped_and_the_next_genuine_lane_still_opens() {
     opened.send(b"through").await.unwrap();
     assert_eq!(accepted.recv().await.unwrap().as_slice(), b"through");
 }
+
+#[tokio::test]
+async fn every_connection_is_watched_so_a_dead_laptop_is_noticed() {
+    // The operating system probes a quiet connection (after 10 s, every 5 s, 4 tries), answering
+    // even while the app is busy reading a slow drive; a laptop that closed its lid or left the
+    // Wi-Fi is noticed in about half a minute instead of hours.
+    let (mut old, mut new, host) = paired_with_host().await;
+    assert!(old.keeps_alive() && new.keeps_alive());
+    let old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let addr = new.peer_addr();
+    let mut lanes = host.into_lanes(old_keys, old.peer_addr());
+    let (accepted, opened) = tokio::join!(
+        lanes.accept(),
+        pctwin_link::open_lane(addr, &mut new_keys, fast())
+    );
+    assert!(accepted.unwrap().keeps_alive());
+    assert!(opened.unwrap().keeps_alive());
+}

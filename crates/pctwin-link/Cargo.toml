@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 pctwin-pairing = { path = "../pctwin-pairing" }
+socket2 = { version = "0.6.5", features = ["all"] }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 zeroize = "1.9.0"
