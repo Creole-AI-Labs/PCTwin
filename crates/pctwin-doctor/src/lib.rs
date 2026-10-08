@@ -306,24 +306,16 @@ pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
 }
 
 /// Reads `alias|Category` lines as printed by the Windows probe. Lines that are not exactly that
-/// are skipped. The category is after the last `|`, so a name may itself contain `|`.
-pub fn parse_windows_profiles(output: &str) -> Vec<(String, NetworkProfile)> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let (alias, category) = line.trim().rsplit_once('|')?;
-            let profile = match category.trim() {
-                "Private" => NetworkProfile::Private,
-                "Public" => NetworkProfile::Public,
-                "DomainAuthenticated" => NetworkProfile::Domain,
-                _ => return None,
-            };
-            let alias = alias.trim();
-            (!alias.is_empty()).then(|| (alias.to_string(), profile))
-        })
-        .collect()
+/// How Windows numbers a network's category (`MSFT_NetConnectionProfile.NetworkCategory`):
+/// 0 Public, 1 Private, 2 Domain. Anything else is not guessed at.
+pub fn profile_from_category(category: u32) -> Option<NetworkProfile> {
+    match category {
+        0 => Some(NetworkProfile::Public),
+        1 => Some(NetworkProfile::Private),
+        2 => Some(NetworkProfile::Domain),
+        _ => None,
+    }
 }
-
 /// Probes that look at this laptop. Each returns "could not tell" rather than failing.
 pub mod probe {
     use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
@@ -417,11 +409,7 @@ pub mod probe {
         }
     }
 
-    /// The PowerShell script the Windows probe runs. It asks for UTF-8 output so names in any
-    /// language arrive intact.
-    pub const WINDOWS_PROBE_SCRIPT: &str = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-         Get-NetConnectionProfile | ForEach-Object { $_.InterfaceAlias + '|' + $_.NetworkCategory }";
-    /// Windows process flag that stops the probe opening a console window.
+    /// Windows process flag that stops a system check opening a console window.
     pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     /// Windows network names and how Windows treats each. `None` on other systems, on failure, or
@@ -433,20 +421,53 @@ pub mod probe {
 
     /// [`windows_profiles`] with a chosen time limit.
     pub fn windows_profiles_within(limit: Duration) -> Option<Vec<(String, NetworkProfile)>> {
-        if !cfg!(windows) {
-            return None;
+        // Asked of Windows directly (the WMI class PowerShell's Get-NetConnectionProfile reads),
+        // on a thread of its own so its COM set-up never touches the app's threads; a slow answer
+        // is "could not tell".
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(windows::profiles());
+        });
+        rx.recv_timeout(limit).ok().flatten()
+    }
+
+    #[cfg(windows)]
+    mod windows {
+        use serde::Deserialize;
+
+        use crate::{NetworkProfile, profile_from_category};
+
+        #[derive(Deserialize)]
+        #[serde(rename = "MSFT_NetConnectionProfile")]
+        #[serde(rename_all = "PascalCase")]
+        struct ConnectionProfile {
+            interface_alias: String,
+            network_category: u32,
         }
-        run_check(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                WINDOWS_PROBE_SCRIPT,
-            ],
-            limit,
-        )
-        .map(|text| super::parse_windows_profiles(&text))
+
+        pub fn profiles() -> Option<Vec<(String, NetworkProfile)>> {
+            let wmi = wmi::WMIConnection::with_namespace_path("ROOT\\StandardCimv2").ok()?;
+            let found: Vec<ConnectionProfile> = wmi.query().ok()?;
+            Some(
+                found
+                    .into_iter()
+                    .filter(|p| !p.interface_alias.trim().is_empty())
+                    .filter_map(|p| {
+                        Some((
+                            p.interface_alias,
+                            profile_from_category(p.network_category)?,
+                        ))
+                    })
+                    .collect(),
+            )
+        }
+    }
+
+    #[cfg(not(windows))]
+    mod windows {
+        pub fn profiles() -> Option<Vec<(String, crate::NetworkProfile)>> {
+            None
+        }
     }
 
     /// Runs a system check and returns what it printed, or `None` if it failed or took longer than

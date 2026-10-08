@@ -12,5 +12,9 @@ getrandom = "0.4.3"
 if-addrs = "0.15.0"
 mdns-sd = "0.21.5"
 
+[target.'cfg(windows)'.dependencies]
+serde = { version = "1", features = ["derive"] }
+wmi = "0.18.4"
+
 [lints]
 workspace = true
