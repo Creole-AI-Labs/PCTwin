@@ -1444,9 +1444,7 @@ impl<'d> ReceiverSession<'d> {
     /// Checks and writes one whole block of an open file; returns its number, or `None` if it was
     /// refused (then the file fails and its partial copy is removed).
     fn write_block(&mut self, stream: u32, whole: &[u8]) -> Option<u64> {
-        let Some(s) = self.streams.get_mut(&stream) else {
-            return None;
-        };
+        let s = self.streams.get_mut(&stream)?;
         let accepted = Block::decode(whole, s.block_size).and_then(|b| {
             s.assembly
                 .as_mut()
