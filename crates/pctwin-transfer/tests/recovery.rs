@@ -9,7 +9,8 @@ use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Permission, PlannedWrite, State};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    block_size_for, file_fingerprint, fingerprint_reader, recover, recover_with,
+    KeepPartials, block_size_for, expire_partials, file_fingerprint, fingerprint_reader, partials,
+    recover, recover_with,
 };
 
 struct World {
@@ -643,4 +644,209 @@ fn a_named_file_swapped_for_an_identical_copy_after_recovery_decided_is_never_co
     assert!(r.committed.is_empty());
     assert!(matches!(w.state(id), State::Failed { .. }));
     assert_eq!(std::fs::read(&target).unwrap(), bytes);
+}
+
+// Partly copied files kept to continue from (second review 9): they do not stay forever.
+
+const DAY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+impl World {
+    /// A partly copied file of `len` bytes, last written `ago` before `now`.
+    fn partial(
+        &self,
+        n: u8,
+        len: usize,
+        now: std::time::SystemTime,
+        ago: std::time::Duration,
+    ) -> u64 {
+        let id = self.staged(n, &data(len * 2), Some(&data(len)));
+        let f = std::fs::File::options()
+            .write(true)
+            .open(self.root.join(self.temp(id)))
+            .unwrap();
+        f.set_modified(now - ago).unwrap();
+        id
+    }
+}
+
+fn rules<'a>(
+    now: std::time::SystemTime,
+    max_age: std::time::Duration,
+    max_bytes: u64,
+    wanted: &'a dyn Fn(&pctwin_journal::Entry) -> bool,
+) -> KeepPartials<'a> {
+    KeepPartials {
+        now,
+        max_age,
+        max_bytes,
+        wanted,
+    }
+}
+
+#[test]
+fn the_space_partly_copied_files_take_is_shown() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let a = w.partial(1, 1000, now, DAY);
+    let b = w.partial(2, 3000, now, 2 * DAY);
+    let p = partials(&w.journal, &w.table).unwrap();
+    let mut kept: Vec<(u64, u64)> = p.kept.iter().map(|k| (k.id, k.bytes)).collect();
+    kept.sort_unstable();
+    assert_eq!(kept, [(a, 1000), (b, 3000)]);
+    assert_eq!(p.kept_bytes, 4000);
+    assert!(p.ended.is_empty() && p.unseen.is_empty());
+    // Looking changes nothing.
+    assert!(matches!(w.state(a), State::Staged { .. }));
+    assert!(w.read(&w.temp(a)).is_some());
+}
+
+#[test]
+fn a_partly_copied_file_not_added_to_for_too_long_is_removed_and_its_copy_ended() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let old = w.partial(1, 1000, now, 31 * DAY);
+    let recent = w.partial(2, 2000, now, 29 * DAY);
+    // Exactly at the limit: still kept.
+    let edge = w.partial(3, 500, now, 30 * DAY);
+    let p = expire_partials(
+        &w.journal,
+        &w.table,
+        &rules(now, 30 * DAY, u64::MAX, &|_| true),
+    )
+    .unwrap();
+    assert_eq!(p.ended.iter().map(|e| e.0).collect::<Vec<_>>(), [old]);
+    assert_eq!(p.freed_bytes, 1000);
+    assert!(matches!(w.state(old), State::Failed { .. }));
+    assert!(w.read(&w.temp(old)).is_none());
+    for id in [recent, edge] {
+        assert!(matches!(w.state(id), State::Staged { .. }));
+        assert!(w.read(&w.temp(id)).is_some());
+    }
+    assert_eq!(p.kept_bytes, 2500);
+    // Run again: nothing more to do.
+    let again = expire_partials(
+        &w.journal,
+        &w.table,
+        &rules(now, 30 * DAY, u64::MAX, &|_| true),
+    )
+    .unwrap();
+    assert!(again.ended.is_empty());
+    assert_eq!(again.kept_bytes, 2500);
+}
+
+#[test]
+fn when_partly_copied_files_take_more_than_allowed_the_oldest_go_first() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let oldest = w.partial(1, 1000, now, 3 * DAY);
+    let middle = w.partial(2, 2000, now, 2 * DAY);
+    let newest = w.partial(3, 3000, now, DAY);
+    let p = expire_partials(&w.journal, &w.table, &rules(now, 90 * DAY, 3500, &|_| true)).unwrap();
+    let mut ended: Vec<u64> = p.ended.iter().map(|e| e.0).collect();
+    ended.sort_unstable();
+    assert_eq!(ended, [oldest, middle]);
+    assert_eq!(p.freed_bytes, 3000);
+    assert_eq!(p.kept_bytes, 3000);
+    assert!(matches!(w.state(newest), State::Staged { .. }));
+    assert!(w.read(&w.temp(newest)).is_some());
+}
+
+#[test]
+fn partly_copied_files_that_take_exactly_the_space_allowed_are_all_kept() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    w.partial(1, 1000, now, 2 * DAY);
+    w.partial(2, 2000, now, DAY);
+    let p = expire_partials(&w.journal, &w.table, &rules(now, 90 * DAY, 3000, &|_| true)).unwrap();
+    assert!(p.ended.is_empty());
+    assert_eq!(p.kept_bytes, 3000);
+}
+
+#[test]
+fn a_partly_copied_file_whose_move_or_laptop_is_gone_is_removed() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let gone = w.partial(1, 1000, now, DAY);
+    let wanted = w.partial(2, 1000, now, DAY);
+    let p = expire_partials(
+        &w.journal,
+        &w.table,
+        &rules(now, 90 * DAY, u64::MAX, &|e| e.id != gone),
+    )
+    .unwrap();
+    assert_eq!(p.ended.iter().map(|e| e.0).collect::<Vec<_>>(), [gone]);
+    assert!(w.read(&w.temp(gone)).is_none());
+    assert!(matches!(w.state(gone), State::Failed { .. }));
+    assert!(matches!(w.state(wanted), State::Staged { .. }));
+}
+
+#[test]
+fn a_partly_copied_file_whose_place_cannot_be_reached_is_kept_and_said() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let id = w.partial(1, 1000, now, 365 * DAY);
+    // Its place is not approved now (a drive unplugged, say): its age cannot be looked at.
+    let none = Destinations::new();
+    let p = expire_partials(&w.journal, &none, &rules(now, DAY, 0, &|_| true)).unwrap();
+    assert_eq!(p.unseen.iter().map(|e| e.0).collect::<Vec<_>>(), [id]);
+    assert!(p.ended.is_empty());
+    assert!(matches!(w.state(id), State::Staged { .. }));
+    assert!(w.read(&w.temp(id)).is_some());
+}
+
+#[test]
+fn an_unwanted_partly_copied_file_in_a_place_not_reachable_now_is_removed_once_it_is() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let id = w.partial(1, 1000, now, DAY);
+    let none = Destinations::new();
+    let p = expire_partials(
+        &w.journal,
+        &none,
+        &rules(now, 90 * DAY, u64::MAX, &|_| false),
+    )
+    .unwrap();
+    assert_eq!(p.ended.iter().map(|e| e.0).collect::<Vec<_>>(), [id]);
+    assert_eq!(p.freed_bytes, 0);
+    assert!(matches!(w.state(id), State::Failed { .. }));
+    assert!(w.read(&w.temp(id)).is_some());
+    // Once the place is back, the next start removes it.
+    recover(&w.journal, &w.table).unwrap();
+    assert!(w.read(&w.temp(id)).is_none());
+}
+
+#[test]
+fn a_partly_copied_file_written_in_the_future_by_the_clock_is_kept() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let id = w.staged(1, &data(2000), Some(&data(1000)));
+    std::fs::File::options()
+        .write(true)
+        .open(w.root.join(w.temp(id)))
+        .unwrap()
+        .set_modified(now + 10 * DAY)
+        .unwrap();
+    let p = expire_partials(&w.journal, &w.table, &rules(now, DAY, u64::MAX, &|_| true)).unwrap();
+    assert!(p.ended.is_empty());
+    assert!(matches!(w.state(id), State::Staged { .. }));
+}
+
+#[test]
+fn expiry_never_touches_checked_files_or_the_persons_own() {
+    let w = world();
+    let now = std::time::SystemTime::now();
+    let bytes = data(4000);
+    let checked = w.verified(1, &bytes, Some(&bytes));
+    std::fs::File::options()
+        .write(true)
+        .open(w.root.join(w.temp(checked)))
+        .unwrap()
+        .set_modified(now - 365 * DAY)
+        .unwrap();
+    w.put("Docs/mine.txt", b"mine");
+    let p = expire_partials(&w.journal, &w.table, &rules(now, DAY, 0, &|_| false)).unwrap();
+    assert!(p.ended.is_empty() && p.kept.is_empty());
+    assert!(matches!(w.state(checked), State::Verified { .. }));
+    assert_eq!(w.read(&w.temp(checked)).unwrap(), bytes);
+    assert_eq!(w.read("Docs/mine.txt").unwrap(), b"mine");
 }

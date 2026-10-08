@@ -323,13 +323,13 @@ fn sweep(journal: &Journal, look: &DiskLook<'_>, keep: &HashSet<u64>) -> Result<
 
 /// Looks at the disk for recovery, through the gate, only inside approved places that are still
 /// the folders they were when the write was planned.
-struct DiskLook<'a> {
-    journal: &'a Journal,
-    table: &'a Destinations,
+pub(crate) struct DiskLook<'a> {
+    pub(crate) journal: &'a Journal,
+    pub(crate) table: &'a Destinations,
 }
 
 impl DiskLook<'_> {
-    fn destination(&self, entry: &Entry) -> Result<&Destination, String> {
+    pub(crate) fn destination(&self, entry: &Entry) -> Result<&Destination, String> {
         let dest = self
             .table
             .get(&entry.write.destination)

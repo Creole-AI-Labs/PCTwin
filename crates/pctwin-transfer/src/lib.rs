@@ -44,6 +44,7 @@ mod lanedriver;
 mod lanes;
 mod message;
 mod netlanes;
+mod partials;
 mod progress;
 mod queue;
 mod reading;
@@ -59,6 +60,10 @@ pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use netlanes::{LinkLanes, accept_lanes};
+pub use partials::{
+    KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,
+    expire_partials, partials,
+};
 pub use progress::{Progress, TimeLeft};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
