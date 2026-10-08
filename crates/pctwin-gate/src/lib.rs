@@ -444,7 +444,54 @@ impl Destination {
             name: converted.name,
             sent_path: path.original().to_string(),
             changes,
+            modified: None,
         })
+    }
+
+    /// Where a file sent as `path` would be stored, if a file is already there: its stored path
+    /// and size. Names are converted exactly as for writing; nothing is created and no link is
+    /// followed out of the approved folder.
+    pub fn find(&self, path: &IncomingPath) -> Option<(String, u64)> {
+        let host = Platform::host();
+        let (file_name, folders) = path.components().split_last()?;
+        let mut dir = self.root.try_clone().ok()?;
+        let mut shown = Vec::new();
+        for folder in folders {
+            let name = convert_name(folder, host).name;
+            if !dir.symlink_metadata(&name).ok()?.is_dir() {
+                return None;
+            }
+            dir = dir.open_dir(&name).ok()?;
+            shown.push(name);
+        }
+        let name = convert_name(file_name, host).name;
+        let meta = dir.symlink_metadata(&name).ok()?;
+        if !meta.is_file() {
+            return None;
+        }
+        shown.push(name);
+        Some((shown.join("/"), meta.len()))
+    }
+
+    /// Opens a stored file to read, by its stored path (as [`find`](Self::find) or
+    /// [`Finished::final_path`] give it). Never follows a link.
+    pub fn open_read(&self, stored: &str) -> io::Result<std::fs::File> {
+        let parts: Vec<&str> = stored.split('/').collect();
+        let (file_name, folders) = parts
+            .split_last()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "empty path"))?;
+        let not_found = || io::Error::new(io::ErrorKind::NotFound, "not a stored file");
+        let mut dir = self.root.try_clone()?;
+        for folder in folders {
+            if !dir.symlink_metadata(folder)?.is_dir() {
+                return Err(not_found());
+            }
+            dir = dir.open_dir(folder)?;
+        }
+        if !dir.symlink_metadata(file_name)?.is_file() {
+            return Err(not_found());
+        }
+        Ok(dir.open(file_name)?.into_std())
     }
 
     /// Gives the finished temporary file a real name that nothing else uses, never replacing
@@ -692,9 +739,17 @@ pub struct IncomingFile<'d> {
     name: String,
     sent_path: String,
     changes: Vec<NameChange>,
+    /// The modified time to give the finished file (the original's).
+    modified: Option<std::time::SystemTime>,
 }
 
 impl IncomingFile<'_> {
+    /// Gives the finished file this modified time, so it keeps the original's (and a later check
+    /// can tell it is unchanged).
+    pub fn keep_modified_time(&mut self, time: std::time::SystemTime) {
+        self.modified = Some(time);
+    }
+
     /// Checks every announced byte arrived, makes sure it is on disk, and gives the file its real
     /// name. On any failure the partial file is removed.
     pub fn finish(mut self) -> Result<Finished, GateError> {
@@ -706,7 +761,13 @@ impl IncomingFile<'_> {
         }
         let file = self.file.take().ok_or(GateError::Conflict)?;
         file.sync_all()?;
-        drop(file);
+        if let Some(time) = self.modified {
+            let file = file.into_std();
+            file.set_modified(time)?;
+            file.sync_all()?;
+        } else {
+            drop(file);
+        }
         let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
         let (name, clashed) =
             self.destination

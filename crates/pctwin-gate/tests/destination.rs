@@ -1,7 +1,7 @@
 //! Writing on the new laptop: only inside the approved folder, through a handle (cap-std), never
 //! overwriting, and never more or fewer bytes than the old laptop announced.
 
-use std::io::Write;
+use std::io::{Read, Write};
 
 use pctwin_gate::{Destination, GateError, IncomingPath, NameChange};
 
@@ -405,4 +405,59 @@ fn long_names_that_shorten_to_the_same_start_do_not_slow_numbering() {
         "{:?}",
         started.elapsed()
     );
+}
+
+// ---------- keeping times and looking files up ----------
+
+#[test]
+fn a_finished_file_keeps_the_modified_time_it_is_given() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let mut file = dest.create_file(&path("Docs/old.txt"), 3).unwrap();
+    file.write_all(b"abc").unwrap();
+    file.keep_modified_time(when);
+    file.finish().unwrap();
+    let meta = std::fs::metadata(root.path().join("Docs/old.txt")).unwrap();
+    assert_eq!(meta.modified().unwrap(), when);
+}
+
+#[test]
+fn a_file_can_be_looked_up_by_the_name_it_would_get_without_creating_anything() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    write(&dest, "Docs/report.pdf", b"12345").unwrap();
+    assert_eq!(
+        dest.find(&path("Docs/report.pdf")),
+        Some(("Docs/report.pdf".to_string(), 5))
+    );
+    assert_eq!(dest.find(&path("Docs/missing.pdf")), None);
+    assert_eq!(dest.find(&path("Nowhere/x.pdf")), None);
+    // Looking up never creates folders.
+    assert!(!root.path().join("Nowhere").exists());
+    // A folder is not a file.
+    assert_eq!(dest.find(&path("Docs")), None);
+    // The same name conversion as writing: a forbidden character finds the stored lookalike.
+    if cfg!(windows) {
+        write(&dest, "Docs/a?b.txt", b"x").unwrap();
+        assert!(dest.find(&path("Docs/a?b.txt")).is_some());
+    }
+    let mut read = String::new();
+    dest.open_read("Docs/report.pdf")
+        .unwrap()
+        .read_to_string(&mut read)
+        .unwrap();
+    assert_eq!(read, "12345");
+}
+
+#[cfg(unix)]
+#[test]
+fn looking_up_never_follows_a_link_out_of_the_approved_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("secret.txt"), b"secret").unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("link")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    assert_eq!(dest.find(&path("link/secret.txt")), None);
+    assert!(dest.open_read("link/secret.txt").is_err());
 }
