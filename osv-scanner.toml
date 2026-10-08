@@ -1,5 +1,5 @@
 # OSV-Scanner accepted exceptions. Each expires on 6 January 2027 so it must be reviewed again.
-# Reasons are recorded in deny.toml next to the matching RustSec ids.
+# Each carries its reason here; the RustSec ids cargo-deny still reports are also in deny.toml.
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0429"

@@ -669,3 +669,118 @@ async fn a_file_that_cannot_be_started_here_is_recorded_failed_with_why() {
         b"a file in the way"
     );
 }
+
+/// Counts the checkpoints the receiver asks for.
+struct Counting<'j> {
+    inner: &'j Journal,
+    checkpoints: std::cell::Cell<usize>,
+}
+
+impl Ledger for Counting<'_> {
+    fn temp_tag(&self, id: u64) -> String {
+        self.inner.temp_tag(id)
+    }
+    fn plan(&self, w: &PlannedWrite) -> Result<u64, JournalError> {
+        self.inner.plan(w)
+    }
+    fn staged(
+        &self,
+        id: u64,
+        temp: &str,
+        made: &[(String, Option<FileId>)],
+    ) -> Result<(), JournalError> {
+        self.inner.staged(id, temp, made)
+    }
+    fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), JournalError> {
+        self.checkpoints.set(self.checkpoints.get() + 1);
+        self.inner.checkpoint(id, blocks, durable)
+    }
+    fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError> {
+        self.inner.blocks(id)
+    }
+    fn unfinished(&self) -> Result<Vec<pctwin_journal::Entry>, JournalError> {
+        self.inner.unfinished()
+    }
+    fn verified(&self, id: u64, fp: [u8; 32], file: Option<FileId>) -> Result<(), JournalError> {
+        self.inner.verified(id, fp, file)
+    }
+    fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
+        self.inner.applied(id, final_path)
+    }
+    fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
+        self.inner.committed(id, landed)
+    }
+    fn existing(&self, id: u64, stored: &str) -> Result<(), JournalError> {
+        self.inner.existing(id, stored)
+    }
+    fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
+        self.inner.failed(id, why)
+    }
+}
+
+#[tokio::test]
+async fn a_block_sent_over_and_over_is_recorded_once() {
+    use pctwin_transfer::{FileSender, Message, split_into_pieces};
+    let w = world();
+    let (job, data) = w.file(1, 300_000, "me", "a.bin");
+    let counting = Counting {
+        inner: &w.journal,
+        checkpoints: std::cell::Cell::new(0),
+    };
+    let mut receiver = ReceiverSession::new(
+        &w.table,
+        plan_for(&[(job.clone(), data)]),
+        &counting,
+        "1001",
+    );
+    let mut reader = FileSender::open(&job.source, None, false).unwrap();
+    let header = reader.header().clone();
+    let wire = reader.block_at(0).unwrap().encode();
+    let (old, new) = mem_pair();
+    let script = async {
+        let mut old = old;
+        let hear = |m: Vec<u8>| Message::decode(&m).unwrap();
+        assert_eq!(hear(old.recv().await.unwrap()), Message::Ready);
+        let start = Message::StartFile {
+            stream: 0,
+            item: id(1),
+            destination: "me".into(),
+            path: "a.bin".into(),
+            header,
+            resumed_done: 0,
+        };
+        old.send(&start.encode()).await.unwrap();
+        assert!(matches!(
+            hear(old.recv().await.unwrap()),
+            Message::Have { .. }
+        ));
+        for _ in 0..200 {
+            for piece in split_into_pieces(0, &wire) {
+                old.send(&piece.encode()).await.unwrap();
+            }
+            assert!(matches!(
+                hear(old.recv().await.unwrap()),
+                Message::Receipt { block: 0, .. }
+            ));
+        }
+    };
+    let receive = async {
+        let mut new = new;
+        receiver.run(&mut new).await
+    };
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receive)
+    })
+    .await
+    .expect("hung");
+    // One block landed: nothing to checkpoint in a batch yet.
+    assert_eq!(counting.checkpoints.get(), 0);
+    drop(receiver);
+    let entry = w.journal.unfinished().unwrap()[0].id;
+    assert_eq!(w.journal.blocks(entry).unwrap().len(), 1);
+}

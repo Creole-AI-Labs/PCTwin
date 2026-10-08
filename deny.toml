@@ -10,10 +10,8 @@ version = 2
 yanked = "deny"
 # Accepted exceptions. Each has a reason and is reviewed by 6 January 2027 (see osv-scanner.toml).
 ignore = [
-  # glib 0.18 VariantStrIter unsoundness. Pulled in only by Tauri's Linux GTK 3 stack, which pins
-  # glib 0.18; we cannot upgrade it ourselves. Neither our code nor Tauri's window handling uses
-  # VariantStrIter. Remove when Tauri moves to glib >= 0.20.
-  { id = "RUSTSEC-2024-0429", reason = "Tauri GTK 3 stack pins glib 0.18; VariantStrIter unused" },
+  # (RUSTSEC-2024-0429, glib 0.18, is no longer reported by cargo-deny, so it is not ignored here;
+  # OSV-Scanner still lists it by its GHSA id: see osv-scanner.toml.)
   # proc-macro-error is unmaintained (no known vulnerability). Build-time only, via the same
   # GTK 3 macros; it is not part of the shipped app.
   { id = "RUSTSEC-2024-0370", reason = "Unmaintained build-time macro crate from Tauri GTK 3 stack" },

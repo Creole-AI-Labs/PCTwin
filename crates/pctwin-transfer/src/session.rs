@@ -1152,6 +1152,11 @@ impl<'d> ReceiverSession<'d> {
     pub fn restore(&mut self) -> Result<u64, TransferError> {
         let mut picked = 0;
         for e in self.journal.unfinished().map_err(record)? {
+            // No more open at once than any move may hold; the rest stay as they are in the
+            // journal, for a later start.
+            if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
+                break;
+            }
             let State::Staged { temp } = &e.state else {
                 continue;
             };
@@ -1459,7 +1464,7 @@ impl<'d> ReceiverSession<'d> {
                 // The plan is checked before anything is read, created or reserved here.
                 let admitted = if resumed_done > 0 {
                     Err("the new laptop has no place to continue from".to_string())
-                } else if self.streams.len() >= MAX_OPEN_FILES {
+                } else if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
                     Err("the old laptop started too many files at once".to_string())
                 } else {
                     self.allowance.admit(item, size).map_err(|r| r.to_string())
@@ -1639,20 +1644,25 @@ impl<'d> ReceiverSession<'d> {
         let s = self.streams.get_mut(&stream)?;
         let accepted = Block::decode(whole, s.block_size).and_then(|b| {
             let hash = b.hash;
-            let receipt = s
+            let assembly = s
                 .assembly
                 .as_mut()
-                .ok_or_else(|| protocol("no file open"))?
-                .accept(b)?;
-            Ok((receipt, hash))
+                .ok_or_else(|| protocol("no file open"))?;
+            // A block sent again (it is already here) is confirmed, never recorded again, so
+            // sending one block over and over cannot make the journal write over and over.
+            let fresh = !assembly.has_block(b.index);
+            let receipt = assembly.accept(b)?;
+            Ok((receipt, fresh.then_some(hash)))
         });
         match accepted {
-            Ok((receipt, hash)) => {
+            Ok((receipt, fresh)) => {
                 self.written
                     .fetch_add(whole.len() as u64, Ordering::Relaxed);
-                s.pending.push((receipt.block, hash));
-                if s.pending.len() >= CHECKPOINT_BLOCKS {
-                    flush_checkpoint(journal, s, false);
+                if let Some(hash) = fresh {
+                    s.pending.push((receipt.block, hash));
+                    if s.pending.len() >= CHECKPOINT_BLOCKS {
+                        flush_checkpoint(journal, s, false);
+                    }
                 }
                 Some(receipt.block)
             }

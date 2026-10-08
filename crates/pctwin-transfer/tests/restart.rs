@@ -568,3 +568,109 @@ async fn cancelling_records_every_unfinished_file_failed_and_removes_its_partial
         0
     );
 }
+
+#[tokio::test]
+async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() {
+    let w = world();
+    let place = w
+        .table
+        .get("me")
+        .unwrap()
+        .folder_identity("")
+        .unwrap()
+        .unwrap();
+    let n = pctwin_transfer::MAX_OPEN_FILES + 6;
+    let files: Vec<(ItemId, u64)> = (0..n)
+        .map(|k| {
+            (
+                ItemId::from_hex(&format!("{:04x}{}", k + 16, "0".repeat(28))).unwrap(),
+                10,
+            )
+        })
+        .collect();
+    std::fs::create_dir_all(w.mine.path().join("Many")).unwrap();
+    for (item, size) in &files {
+        let entry = w
+            .journal
+            .plan(&PlannedWrite {
+                item: *item,
+                source_laptop: LaptopId::from_hex(LAPTOP).unwrap(),
+                destination: "me".into(),
+                path: format!("Many/{}.txt", item.to_hex()),
+                size: *size,
+                actor: Actor {
+                    acting_account: "1001".into(),
+                    for_account: "1001".into(),
+                    permission: Permission::OwnFolders,
+                },
+                block_size: block_size_for(*size),
+                source_modified_ns: None,
+                place: Some(FileId {
+                    volume: place.volume,
+                    index: place.index,
+                }),
+            })
+            .unwrap();
+        let temp = format!("Many/{}", temp_name(&w.journal.temp_tag(entry)));
+        std::fs::write(w.mine.path().join(&temp), b"").unwrap();
+        w.journal.staged(entry, &temp, &[]).unwrap();
+    }
+    let mut receiver = ReceiverSession::new(&w.table, common::approved(&files), &w.journal, "1001");
+    assert_eq!(
+        receiver.restore().unwrap(),
+        pctwin_transfer::MAX_OPEN_FILES as u64
+    );
+    // The rest stay in the journal, untouched, for a later start.
+    let staged = w
+        .journal
+        .unfinished()
+        .unwrap()
+        .iter()
+        .filter(|e| matches!(e.state, State::Staged { .. }))
+        .count();
+    assert_eq!(staged, n);
+    // With every place taken by the files picked up, a new start is refused, not let in.
+    use pctwin_transfer::{Header, Message, Stamp};
+    let (mut old, mut new) = mem_pair(None);
+    let last = files[n - 1].0;
+    let script = async {
+        loop {
+            let m = Message::decode(&old.recv().await.unwrap()).unwrap();
+            if m == Message::Ready {
+                break;
+            }
+        }
+        let start = Message::StartFile {
+            stream: 99,
+            item: last,
+            destination: "me".into(),
+            path: format!("Many/{}.txt", last.to_hex()),
+            header: Header {
+                size: 10,
+                block_size: block_size_for(10),
+                block_count: 1,
+                stamp: Stamp {
+                    size: 10,
+                    modified_ns: None,
+                },
+            },
+            resumed_done: 0,
+        };
+        old.send(&start.encode()).await.unwrap();
+        let answer = Message::decode(&old.recv().await.unwrap()).unwrap();
+        old.cut.store(true, Ordering::SeqCst);
+        answer
+    };
+    let (answer, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    assert_eq!(
+        answer,
+        Message::FileDone {
+            stream: 99,
+            ok: false
+        }
+    );
+}

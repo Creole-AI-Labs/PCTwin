@@ -195,6 +195,11 @@ fn the_whole_file_fingerprint_is_its_blocks_in_order() {
         None
     );
     assert_eq!(fingerprint_reader(&mut &b""[..], 0, 0).unwrap(), None);
+    // Only ever worked out the one way it was made: in the block size for its size.
+    assert_eq!(
+        fingerprint_reader(&mut &bytes[..], bytes.len() as u64, bs * 2).unwrap(),
+        None
+    );
     assert!(fingerprint_reader(&mut &b""[..], 0, bs).unwrap().is_some());
 }
 

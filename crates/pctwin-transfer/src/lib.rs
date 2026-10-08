@@ -148,14 +148,15 @@ pub fn file_fingerprint<'a>(
 }
 
 /// The whole-file fingerprint of exactly `size` bytes read from `reader` in blocks of
-/// `block_size`; `None` if there are fewer or more bytes than that, or the block size is not one
-/// a file is sent in.
+/// `block_size`; `None` if there are fewer or more bytes than that, or the block size is not the
+/// one a file of this size is sent in ([`block_size_for`]): a fingerprint is only ever worked out
+/// the one way it was made.
 pub fn fingerprint_reader(
     reader: &mut impl Read,
     size: u64,
     block_size: u64,
 ) -> io::Result<Option<[u8; 32]>> {
-    if block_size == 0 || block_size > MAX_BLOCK {
+    if block_size != block_size_for(size) {
         return Ok(None);
     }
     let mut hashes = Vec::new();
@@ -669,6 +670,11 @@ impl<'d> Assembly<'d> {
     /// (dropping the assembly instead removes it).
     pub fn persist(self) {
         self.file.persist();
+    }
+
+    /// Whether block `index` is already written.
+    pub fn has_block(&self, index: u64) -> bool {
+        self.done.contains(index)
     }
 
     pub fn blocks_done(&self) -> u64 {
