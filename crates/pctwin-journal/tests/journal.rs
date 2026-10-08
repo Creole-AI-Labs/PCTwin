@@ -30,6 +30,8 @@ fn planned(n: u8) -> PlannedWrite {
         },
         block_size: 128 * 1024,
         source_modified_ns: Some(1_780_000_000_000_000_000),
+        source_file: None,
+        partial_keep: Default::default(),
         place: Some(FileId {
             volume: 7,
             index: 9,

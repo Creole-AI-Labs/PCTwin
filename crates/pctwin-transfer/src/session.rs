@@ -1776,6 +1776,8 @@ impl<'d> ReceiverSession<'d> {
             block_size: header.block_size,
             source_modified_ns: header.stamp.modified_ns,
             place: dest.folder_identity("").ok().flatten().map(file_id),
+            source_file: None,
+            partial_keep: self.allowance.partial_keep(),
         };
         let entry = self.journal.plan(&write).map_err(Start::Record)?;
         let assembly =

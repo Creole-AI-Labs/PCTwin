@@ -148,7 +148,8 @@ async fn a_received_file_is_recorded_step_by_step_and_committed_with_what_it_lan
     let src_modified = std::fs::metadata(&job.source).unwrap().modified().unwrap();
     let mut receiver = ReceiverSession::new(
         &w.table,
-        plan_for(&[(job.clone(), data.clone())]),
+        plan_for(&[(job.clone(), data.clone())])
+            .with_partial_keep(pctwin_journal::PartialKeep::Days7),
         &w.journal,
         "1001",
     );
@@ -156,6 +157,8 @@ async fn a_received_file_is_recorded_step_by_step_and_committed_with_what_it_lan
     assert!(sent.is_ok() && received.is_ok());
     let e = only_entry(&w.journal);
     assert_eq!(e.write.item, id(1));
+    // The keep-time the person chose for this move's partly copied files.
+    assert_eq!(e.write.partial_keep, pctwin_journal::PartialKeep::Days7);
     assert_eq!(
         e.write.source_laptop,
         LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap()

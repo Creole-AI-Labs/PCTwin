@@ -186,6 +186,8 @@ impl World {
                 },
                 block_size,
                 source_modified_ns: self.modified_ns(),
+                source_file: None,
+                partial_keep: Default::default(),
                 place: Some(FileId {
                     volume: place.volume,
                     index: place.index,
@@ -605,6 +607,8 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
                 },
                 block_size: block_size_for(*size),
                 source_modified_ns: None,
+                source_file: None,
+                partial_keep: Default::default(),
                 place: Some(FileId {
                     volume: place.volume,
                     index: place.index,

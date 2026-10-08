@@ -1,6 +1,7 @@
 //! Partly copied files kept to continue from (Task List 1.6, second review 9). A file the old
 //! laptop stopped sending is kept so the move can carry on later without sending it again; it is
-//! not kept forever. Like Windows' own background transfers (which give up on a transfer with no
+//! not kept forever: each move waits as long as the person chose before it (3 to 90 days, 30
+//! unless they picked another). Like Windows' own background transfers (which give up on a transfer with no
 //! progress for 90 days and remove its partial files), a partly copied file goes once nothing has
 //! been added to it for too long, once partly copied files take more space than allowed (oldest
 //! first), or once the move it belongs to, or its laptop, is gone. Its write then ends as failed,
@@ -9,7 +10,7 @@
 //!
 //! Run it at start, after [`crate::recover`] and before anything is received, as recovery is.
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use pctwin_gate::Destinations;
 use pctwin_journal::{Entry, Journal, JournalError, State};
@@ -27,8 +28,6 @@ pub const PARTIAL_NOT_WANTED: &str = "the move it was part of was cancelled, or 
 pub struct KeepPartials<'a> {
     /// The time now.
     pub now: SystemTime,
-    /// The longest a partly copied file is kept with nothing added to it.
-    pub max_age: Duration,
     /// The most space all partly copied files may take together.
     pub max_bytes: u64,
     /// Whether a write is still wanted: false once its move is cancelled or its laptop removed.
@@ -100,7 +99,7 @@ pub fn expire_partials(
                 let old = p
                     .modified
                     .and_then(|m| keep.now.duration_since(m).ok())
-                    .is_some_and(|age| age > keep.max_age);
+                    .is_some_and(|age| age > entry.write.partial_keep.duration());
                 if old {
                     end(&look, &entry, &temp, PARTIAL_TOO_OLD, &mut out)?;
                 } else {

@@ -115,6 +115,8 @@ impl World {
                 },
                 block_size: block_size_for(size),
                 source_modified_ns: None,
+                source_file: None,
+                partial_keep: Default::default(),
                 place: Some(FileId {
                     volume: place.volume,
                     index: place.index,
@@ -359,6 +361,8 @@ fn identical_files_that_were_already_there_are_never_touched() {
             block_size: block_size_for(4),
             source_modified_ns: None,
             place: None,
+            source_file: None,
+            partial_keep: Default::default(),
         })
         .unwrap();
     std::fs::write(w.root.join("mine.txt"), b"mine").unwrap();
@@ -847,6 +851,8 @@ fn a_folder_whose_identity_was_never_known_is_never_removed() {
         block_size: block_size_for(1),
         source_modified_ns: None,
         place: None,
+        source_file: None,
+        partial_keep: Default::default(),
     });
     w.journal
         .staged(e.unwrap(), "Y/.pctwin-x.part", &[("Y".to_string(), None)])
@@ -876,6 +882,8 @@ fn a_file_whose_identity_was_never_known_is_kept_and_said_so() {
             block_size: block_size_for(1),
             source_modified_ns: None,
             place: None,
+            source_file: None,
+            partial_keep: Default::default(),
         })
         .unwrap();
     w.journal.staged(id, ".pctwin-n.part", &[]).unwrap();

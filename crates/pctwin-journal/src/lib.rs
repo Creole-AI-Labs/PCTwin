@@ -130,6 +130,68 @@ pub struct PlannedWrite {
     /// The approved folder's identity when the write was planned: after a restart nothing is done
     /// in a folder that is not the same one (another drive under the same letter, say).
     pub place: Option<FileId>,
+    /// The original's identity on the old laptop when it was read, so undo can ask the old laptop
+    /// whether it still has that very file, unchanged, before removing the copy.
+    #[serde(default)]
+    pub source_file: Option<FileId>,
+    /// How long a partly copied file of this move waits for the rest with nothing added to it,
+    /// as the person chose before the move.
+    #[serde(default)]
+    pub partial_keep: PartialKeep,
+}
+
+/// How long a partly copied file waits for the rest with nothing added to it, picked before the
+/// move (Product Spec, decided 8 October 2026): one of these, 30 days unless the person picks
+/// another.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PartialKeep {
+    #[serde(rename = "3-days")]
+    Days3,
+    #[serde(rename = "7-days")]
+    Days7,
+    #[serde(rename = "14-days")]
+    Days14,
+    #[default]
+    #[serde(rename = "30-days")]
+    Days30,
+    #[serde(rename = "60-days")]
+    Days60,
+    #[serde(rename = "90-days")]
+    Days90,
+}
+
+impl PartialKeep {
+    /// Every choice, shortest first.
+    pub const ALL: [PartialKeep; 6] = [
+        PartialKeep::Days3,
+        PartialKeep::Days7,
+        PartialKeep::Days14,
+        PartialKeep::Days30,
+        PartialKeep::Days60,
+        PartialKeep::Days90,
+    ];
+
+    /// How many days.
+    pub fn days(self) -> u32 {
+        match self {
+            PartialKeep::Days3 => 3,
+            PartialKeep::Days7 => 7,
+            PartialKeep::Days14 => 14,
+            PartialKeep::Days30 => 30,
+            PartialKeep::Days60 => 60,
+            PartialKeep::Days90 => 90,
+        }
+    }
+
+    /// The choice for exactly this many days, if it is one.
+    pub fn from_days(days: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.days() == days)
+    }
+
+    /// As a length of time.
+    pub fn duration(self) -> std::time::Duration {
+        std::time::Duration::from_secs(u64::from(self.days()) * 24 * 60 * 60)
+    }
 }
 
 /// What a finished file landed as: undo compares against this to keep later edits.

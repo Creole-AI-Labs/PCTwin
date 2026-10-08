@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use pctwin_journal::PartialKeep;
 use pctwin_record::{Approval, Inclusion, ItemId, ItemKind, LaptopId, Record, RecordError};
 
 /// The least room a file has to grow since the plan was approved (a document saved again).
@@ -54,6 +55,8 @@ pub struct Allowance {
     /// Each file's attempts so far.
     started: HashMap<ItemId, Progress>,
     started_total: u64,
+    /// How long a partly copied file of this move waits for the rest, as the person chose.
+    partial_keep: PartialKeep,
 }
 
 impl Allowance {
@@ -73,6 +76,7 @@ impl Allowance {
             total_room: total.saturating_add(total / 10).saturating_add(MOVE_ROOM),
             started: HashMap::new(),
             started_total: 0,
+            partial_keep: PartialKeep::default(),
         })
     }
 
@@ -126,6 +130,17 @@ impl Allowance {
             p.live = false;
             p.landed |= landed;
         }
+    }
+
+    /// With the keep-time the person chose for partly copied files of this move.
+    pub fn with_partial_keep(mut self, keep: PartialKeep) -> Self {
+        self.partial_keep = keep;
+        self
+    }
+
+    /// How long a partly copied file of this move waits for the rest.
+    pub fn partial_keep(&self) -> PartialKeep {
+        self.partial_keep
     }
 
     /// The old laptop the plan is for.

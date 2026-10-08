@@ -91,6 +91,8 @@ fn entry(id: u64, state: State) -> Entry {
             block_size: 128 * 1024,
             source_modified_ns: None,
             place: None,
+            source_file: None,
+            partial_keep: Default::default(),
         },
         state,
     }
