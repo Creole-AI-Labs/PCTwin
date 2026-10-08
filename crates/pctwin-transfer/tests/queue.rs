@@ -252,3 +252,42 @@ fn asking_for_a_file_already_on_its_way_hurries_it() {
     let turns: Vec<ItemId> = (0..3).map(|_| s.next_turn().unwrap()).collect();
     assert_eq!(turns, [id[2]; 3]);
 }
+
+#[test]
+fn your_own_essentials_come_after_what_you_asked_for_and_before_the_general_ones() {
+    let items = vec![
+        file(FolderRole::Documents, &["cv.docx"]),
+        file(FolderRole::Music, &["played often.mp3"]),
+        file(FolderRole::Pictures, &["opened today.jpg"]),
+        file(FolderRole::Videos, &["asked.mp4"]),
+        file(FolderRole::Music, &["never opened.mp3"]),
+    ];
+    let mut personal = BTreeMap::new();
+    personal.insert(items[1].id, NOW - 5 * DAY_NS);
+    personal.insert(items[2].id, NOW - DAY_NS);
+    let asked = vec![items[3].id];
+    let order: Vec<String> =
+        pctwin_transfer::plan_order_with(&items, &asked, &personal, &BTreeMap::new(), NOW)
+            .into_iter()
+            .map(|(id, _)| name(&items, id))
+            .collect();
+    assert_eq!(
+        order,
+        [
+            "asked.mp4",
+            // Yours, most recently used first.
+            "opened today.jpg",
+            "played often.mp3",
+            // Then the general essentials, then the rest.
+            "cv.docx",
+            "never opened.mp3",
+        ]
+    );
+    let tiers: Vec<Tier> =
+        pctwin_transfer::plan_order_with(&items, &asked, &personal, &BTreeMap::new(), NOW)
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect();
+    assert_eq!(tiers[1], Tier::Personal);
+    assert!(Tier::AskedFirst { rank: 0 } < Tier::Personal && Tier::Personal < Tier::Essential);
+}

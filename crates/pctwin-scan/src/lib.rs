@@ -26,6 +26,9 @@
 //! - [`system_drive_health`] reads the old drive's health from what each system reports to a
 //!   normal user (never guessed; no answer is Unknown), and [`ReadPlan`] reads a weak drive
 //!   carefully.
+//! - [`read_usage`] reads what the old laptop records about what this person uses (recent files,
+//!   pinned folders) and [`personal_essentials`] matches it to the scanned items, so their own
+//!   essentials move first. Read only on the old laptop, used only for the order, sent nowhere.
 
 mod drives;
 mod folders;
@@ -35,6 +38,7 @@ mod measure;
 mod people;
 mod scan;
 mod state;
+mod usage;
 
 pub use drives::{
     CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
@@ -58,3 +62,7 @@ pub use people::{
 };
 pub use scan::{Counts, Scan, Stamp, scan_folder};
 pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
+pub use usage::{
+    Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials, read_usage,
+    recent_from_lnk_dir, recent_from_mdfind, recent_from_xbel,
+};

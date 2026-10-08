@@ -9,6 +9,8 @@ pub enum Tier {
     AskedFirst {
         rank: u32,
     },
+    /// What this person actually uses: files they opened recently or keep in a pinned folder.
+    Personal,
     /// Documents, the desktop, settings and anything changed recently, so the new laptop is usable
     /// in minutes.
     Essential,
@@ -25,6 +27,19 @@ const RECENT_NS: i64 = 30 * 86_400_000_000_000;
 pub fn plan_order(
     items: &[Item],
     asked: &[ItemId],
+    modified: &BTreeMap<ItemId, i64>,
+    now_ns: i64,
+) -> Vec<(ItemId, Tier)> {
+    plan_order_with(items, asked, &BTreeMap::new(), modified, now_ns)
+}
+
+/// As [`plan_order`], with this person's own essentials (`personal`: each item and when they
+/// last used it) moving after what they asked for and before the general essentials, most
+/// recently used first.
+pub fn plan_order_with(
+    items: &[Item],
+    asked: &[ItemId],
+    personal: &BTreeMap<ItemId, i64>,
     modified: &BTreeMap<ItemId, i64>,
     now_ns: i64,
 ) -> Vec<(ItemId, Tier)> {
@@ -49,15 +64,17 @@ pub fn plan_order(
         .filter(|i| !(i.kind == ItemKind::Folder && i.size_bytes == 0))
         .map(|i| {
             let changed = modified.get(&i.id).copied();
-            let tier = match rank_of(i) {
-                Some(rank) => Tier::AskedFirst { rank },
-                None if is_essential(i, changed, now_ns) => Tier::Essential,
-                None => Tier::Rest,
+            let used = personal.get(&i.id).copied();
+            let (tier, when) = match (rank_of(i), used) {
+                (Some(rank), _) => (Tier::AskedFirst { rank }, changed),
+                (None, Some(used)) => (Tier::Personal, Some(used)),
+                (None, None) if is_essential(i, changed, now_ns) => (Tier::Essential, changed),
+                (None, None) => (Tier::Rest, changed),
             };
-            (tier, changed.unwrap_or(i64::MIN), i.size_bytes, i.id)
+            (tier, when.unwrap_or(i64::MIN), i.size_bytes, i.id)
         })
         .collect();
-    // Within a tier: newest first, then smaller first, then by ID so the order never varies.
+    // Within a tier: newest first (for your own essentials, most recently used), then smaller first, then by ID so the order never varies.
     queue.sort_by(|a, b| {
         a.0.cmp(&b.0)
             .then(b.1.cmp(&a.1))

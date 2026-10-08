@@ -34,7 +34,7 @@ mod session;
 
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
-pub use queue::{Scheduler, Tier, plan_order};
+pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use session::{
     Channel, ChannelError, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
