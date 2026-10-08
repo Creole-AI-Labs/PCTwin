@@ -166,6 +166,22 @@ impl LaneTuner {
         }
     }
 
+    /// The lane just tried was refused this time: go back at once and settle, trying more lanes
+    /// again only at the next look for them (unlike [`could_not_open`](Self::could_not_open),
+    /// which rules that many out for the move).
+    pub fn refused(&mut self) {
+        if let Phase::Trying {
+            from,
+            base,
+            down: false,
+            ..
+        } = self.phase
+        {
+            self.change_to(from);
+            self.settle(base);
+        }
+    }
+
     /// A lane dropped. The first connection is never counted away; a new lane may replace it later.
     pub fn lane_lost(&mut self) {
         if self.lanes > 1 {

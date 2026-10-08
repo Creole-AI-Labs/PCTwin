@@ -35,6 +35,11 @@ const IN_FLIGHT_BYTES: u64 = 32 * 1024 * 1024;
 /// move or a slow old drive never loses a file to a timer.)
 pub const MAX_OPEN_FILES: usize = 64;
 
+/// How long an extra lane may stay silent while receipts are owed on it before it is let go and
+/// its blocks are sent on the others (the idle limit QUIC uses). The main connection is never
+/// timed out this way: losing it ends the move, so a dead one is left to the keep-alive.
+pub const LANE_SILENCE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Files not in the plan whose refusals are remembered (for the report); beyond this they are
 /// still refused, just not remembered.
 const MAX_REMEMBERED_REFUSALS: usize = 1024;
@@ -881,8 +886,12 @@ async fn send_lane<C: Channel>(
                 sent
             }
             Work::Wait if !state.borrow().lanes[lane].is_empty() => {
-                // Receipts are owed on this lane, so waiting for one cannot hang.
-                match recv(&mut ch).await {
+                // Receipts are owed on this lane. If none comes for LANE_SILENCE the other end is
+                // stuck (not just slow), so the lane is let go and its blocks go to the others.
+                match tokio::time::timeout(LANE_SILENCE, recv(&mut ch))
+                    .await
+                    .unwrap_or(Err(TransferError::ConnectionDropped))
+                {
                     Ok(m) => {
                         let answered = state.borrow_mut().answer(lane, m).is_ok();
                         changed.notify_waiters();

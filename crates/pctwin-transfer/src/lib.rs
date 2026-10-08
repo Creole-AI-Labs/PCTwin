@@ -53,7 +53,7 @@ mod session;
 pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
-pub use lanedriver::{Closable, LaneDriver, OpenLane};
+pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use netlanes::{LinkLanes, accept_lanes};
@@ -62,8 +62,8 @@ pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
-    Channel, ChannelError, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
-    SenderSession,
+    Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob,
+    SendOutcome, SenderSession,
 };
 
 use std::fs::File;

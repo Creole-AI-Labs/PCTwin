@@ -40,8 +40,11 @@ impl Channel for Quiet {
 /// Opens lanes until `refuse_from` attempts, counting every attempt.
 struct Opener {
     attempts: Arc<AtomicUsize>,
+    /// The window of each attempt.
+    tried_at: Arc<Mutex<Vec<u64>>>,
     refuse_from: usize,
     deaths: Arc<Mutex<Vec<Arc<AtomicBool>>>>,
+    start: tokio::time::Instant,
 }
 
 impl OpenLane for Opener {
@@ -49,6 +52,11 @@ impl OpenLane for Opener {
 
     async fn open(&mut self) -> Option<Quiet> {
         let n = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+        let window = tokio::time::Instant::now()
+            .duration_since(self.start)
+            .as_secs()
+            / WINDOW.as_secs();
+        self.tried_at.lock().unwrap().push(window);
         if n >= self.refuse_from {
             return None;
         }
@@ -61,8 +69,10 @@ impl OpenLane for Opener {
 fn opener(refuse_from: usize) -> Opener {
     Opener {
         attempts: Arc::default(),
+        tried_at: Arc::default(),
         refuse_from,
         deaths: Arc::default(),
+        start: tokio::time::Instant::now(),
     }
 }
 
@@ -113,19 +123,25 @@ async fn it_opens_lanes_while_they_make_the_move_faster() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_refused_lane_stops_all_further_opening() {
-    // The second lane is refused (its number was burned, or a firewall).
+async fn a_refused_lane_is_tried_again_a_few_times_far_apart_then_never() {
+    // Every lane after the first is refused (a firewall, or someone burning lane numbers).
     let mut o = opener(2);
-    // Long enough for the tuner's look again for more lanes (every 100 windows).
-    let (driver, _rx) = drive(&mut o, [10e6, 20e6, 30e6, 40e6], 130).await;
+    let tried_at = o.tried_at.clone();
+    let (driver, _rx) = drive(&mut o, [10e6, 20e6, 30e6, 40e6], 1500).await;
+    let at = tried_at.lock().unwrap().clone();
+    // The first lane, then three refused tries, then no more.
+    assert_eq!(pctwin_transfer::MAX_LANE_REFUSALS, 3);
     assert_eq!(
-        o.attempts.load(Ordering::SeqCst),
-        2,
-        "no retry after a refusal"
+        at.len(),
+        1 + pctwin_transfer::MAX_LANE_REFUSALS as usize,
+        "{at:?}"
     );
     assert!(driver.stopped_opening());
+    // Refused tries are far apart, and further apart each time (exponential backoff).
+    let gaps: Vec<u64> = at[1..].windows(2).map(|p| p[1] - p[0]).collect();
+    assert!(gaps.iter().all(|g| *g >= 90), "{at:?}");
+    assert!(gaps.windows(2).all(|g| g[1] > g[0]), "{at:?}");
 }
-
 #[tokio::test(start_paused = true)]
 async fn a_closed_lane_fails_at_once_even_mid_wait() {
     let mut o = opener(usize::MAX);

@@ -71,15 +71,25 @@ impl<C: Channel> Channel for Closable<C> {
     }
 }
 
+/// Most refused lanes in one move before opening stops for good: a refusal may be a passing
+/// failure, or someone burning lane numbers (Security Design A), so lanes are tried again only a
+/// few times, far apart.
+pub const MAX_LANE_REFUSALS: u32 = 3;
+/// Windows to wait after the first refusal before a lane may be opened again; doubled after each
+/// further refusal.
+const REFUSAL_HOLD_OFF: u64 = 100;
+
 /// Keeps the number of lanes where the [`LaneTuner`] wants it during a move, on the new laptop.
-/// A lane that cannot be opened stops all further opening for this move: someone on the network
-/// may be burning lane numbers (Security Design A), so the move carries on over the lanes it has
-/// rather than retrying.
+/// After a lane is refused the tuner settles back, and tries again only at its next look for more
+/// lanes (minutes later); after [`MAX_LANE_REFUSALS`] refusals no more lanes are opened in this
+/// move, and it carries on over the lanes it has.
 #[derive(Debug)]
 pub struct LaneDriver {
     tuner: LaneTuner,
     open: Vec<Arc<Switch>>,
-    refused: bool,
+    refusals: u32,
+    /// Windows to wait before opening again after a refusal (it grows with each one).
+    hold_off: u64,
     window: Duration,
 }
 
@@ -89,7 +99,8 @@ impl LaneDriver {
         Self {
             tuner: LaneTuner::new(),
             open: Vec::new(),
-            refused: false,
+            refusals: 0,
+            hold_off: 0,
             window,
         }
     }
@@ -105,9 +116,9 @@ impl LaneDriver {
         usize::from(self.tuner.lanes()).saturating_sub(1)
     }
 
-    /// Whether a lane was refused, so no more are opened in this move.
+    /// Whether lanes were refused too often, so no more are opened in this move.
     pub fn stopped_opening(&self) -> bool {
-        self.refused
+        self.refusals >= MAX_LANE_REFUSALS
     }
 
     /// Runs until `finished` says the move is over, then closes every lane it opened. Each window
@@ -137,7 +148,8 @@ impl LaneDriver {
             let speed = now.saturating_sub(last) as f64 / self.window.as_secs_f64();
             last = now;
             let want = usize::from(self.tuner.measured(speed)).saturating_sub(1);
-            while self.open.len() < want && !self.refused {
+            self.hold_off = self.hold_off.saturating_sub(1);
+            while self.open.len() < want && !self.stopped_opening() && self.hold_off == 0 {
                 match opener.open().await {
                     Some(lane) => {
                         let switch = Arc::new(Switch::default());
@@ -153,8 +165,14 @@ impl LaneDriver {
                         self.open.push(switch);
                     }
                     None => {
-                        self.tuner.could_not_open();
-                        self.refused = true;
+                        // Not tried again now: the tuner goes back and settles, and asks again
+                        // only at its next look for more lanes (minutes later).
+                        self.tuner.refused();
+                        self.refusals += 1;
+                        // Exponential backoff: each refusal doubles the wait before trying
+                        // again (on top of the tuner's own minutes between looks).
+                        self.hold_off = REFUSAL_HOLD_OFF << (self.refusals - 1);
+                        break;
                     }
                 }
             }

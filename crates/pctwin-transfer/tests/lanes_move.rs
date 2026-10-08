@@ -478,3 +478,44 @@ async fn a_whole_move_over_real_lanes_that_the_driver_opens_and_closes() {
     assert!(opener.opened() >= 1);
     assert_eq!(driver.lanes(), 0, "every lane closed with the move");
 }
+
+/// A lane that goes silent: whatever is sent is swallowed and nothing ever comes back.
+struct Silent;
+
+impl Channel for Silent {
+    async fn send(&mut self, _data: &[u8]) -> Result<(), ChannelError> {
+        Ok(())
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        std::future::pending().await
+    }
+}
+
+#[tokio::test]
+async fn a_lane_that_goes_silent_is_let_go_and_its_blocks_go_to_the_others() {
+    // The new laptop's end of one lane stops answering (hung, not disconnected): the old laptop
+    // gives up on it after LANE_SILENCE and sends its blocks on the main connection.
+    tokio::time::pause();
+    let l = laptops();
+    let table = table(&l);
+    let mut sender = SenderSession::new(jobs(&l), 4);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let (mut old_main, mut new_main) = pair();
+    let (old_tx, mut old_in) = mpsc::unbounded_channel::<Silent>();
+    old_tx.send(Silent).unwrap();
+    drop(old_tx);
+    let (_new_tx, mut new_in) = mpsc::unbounded_channel::<Mem>();
+    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(600), async {
+        tokio::join!(sender.run_joining(&mut old_main, &mut old_in), async {
+            let r = receiver.run_joining(&mut new_main, &mut new_in).await;
+            drop(_new_tx);
+            r
+        })
+    })
+    .await
+    .expect("the move hung on the silent lane");
+    s.unwrap();
+    r.unwrap();
+    assert_arrived(&l);
+}

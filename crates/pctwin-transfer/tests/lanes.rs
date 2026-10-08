@@ -180,3 +180,19 @@ fn a_lost_lane_is_counted_and_the_tuner_carries_on() {
     one.lane_lost();
     assert_eq!(one.lanes(), 1, "the first connection is never counted away");
 }
+
+#[test]
+fn a_refused_lane_is_tried_again_only_at_the_next_look() {
+    let mut t = LaneTuner::new();
+    run(&mut t, [10.0, 20.0, 30.0, 40.0], 3);
+    assert_eq!(t.lanes(), 2);
+    // Refused this time: straight back to one lane, settled.
+    t.refused();
+    assert_eq!(t.lanes(), 1);
+    assert!(t.settled());
+    run(&mut t, [10.0, 20.0, 30.0, 40.0], 50);
+    assert_eq!(t.lanes(), 1, "not asked again soon");
+    // At the next look (every 100 windows) more lanes are tried again, unlike after could_not_open.
+    run(&mut t, [10.0, 20.0, 30.0, 40.0], 200);
+    assert!(t.lanes() > 1);
+}
