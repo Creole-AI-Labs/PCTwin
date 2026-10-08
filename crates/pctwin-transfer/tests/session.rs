@@ -274,6 +274,7 @@ async fn never_more_than_the_in_flight_limit_is_unconfirmed() {
 #[tokio::test]
 async fn a_dropped_connection_continues_each_file_from_where_it_stopped() {
     // Cut at many points, including part way through a block.
+    let mut some_partway = false;
     for cut in [8usize, 15, 22, 23, 24, 31, 40, 41, 55] {
         let l = laptops();
         let table = table(&l);
@@ -287,6 +288,8 @@ async fn a_dropped_connection_continues_each_file_from_where_it_stopped() {
             "cut {cut}"
         );
         let before = sender.lock().await.blocks_sent();
+        let partway = receiver.lock().await.partway();
+        some_partway |= partway > 0;
 
         assert_eq!(
             run_both(&sender, &receiver, mem_pair()).await,
@@ -294,11 +297,12 @@ async fn a_dropped_connection_continues_each_file_from_where_it_stopped() {
             "cut {cut}"
         );
         assert_arrived(&l);
-        // The files under way were continued, not started over: only the blocks lost in the cut
+        // Every file held partway was continued, not started over: only the blocks lost in the cut
         // were sent again.
-        assert!(
-            receiver.lock().await.continued() >= 1,
-            "cut {cut}: nothing was continued"
+        assert_eq!(
+            receiver.lock().await.continued(),
+            partway,
+            "cut {cut}: a partway file was started over"
         );
         let sent = sender.lock().await.blocks_sent();
         assert!(
@@ -306,6 +310,10 @@ async fn a_dropped_connection_continues_each_file_from_where_it_stopped() {
             "cut {cut}: {sent} sent, {before} before"
         );
     }
+    assert!(
+        some_partway,
+        "no cut left a file partway, so resuming was not tested"
+    );
 }
 
 #[tokio::test]
@@ -431,4 +439,84 @@ async fn a_move_runs_over_a_real_paired_link() {
     sent.unwrap();
     received.unwrap();
     assert_arrived(&l);
+}
+
+#[tokio::test]
+async fn a_file_the_new_laptop_already_has_is_not_copied_again() {
+    let l = laptops();
+    let table = table(&l);
+    // The new laptop already holds an identical copy of the medium file.
+    std::fs::create_dir_all(l.new_shared.path().join("Public")).unwrap();
+    std::fs::write(l.new_shared.path().join("Public/medium.bin"), &l.files[1].1).unwrap();
+    let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
+    let receiver = Mutex::new(ReceiverSession::new(&table));
+    assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
+    let s = sender.lock().await;
+    assert_eq!(s.outcome(id(1)), Some(&SendOutcome::AlreadyThere));
+    assert_eq!(s.outcome(id(0)), Some(&SendOutcome::Arrived));
+    let medium_blocks = 300_000u64.div_ceil(131_072);
+    assert_eq!(s.blocks_sent(), total_blocks(&l) - medium_blocks);
+    let left: Vec<_> = std::fs::read_dir(l.new_shared.path().join("Public"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, ["medium.bin"], "no second copy, no leftovers");
+    assert!(matches!(
+        receiver.lock().await.outcome(id(1)),
+        Some(ReceiveOutcome::AlreadyThere(p)) if p == "Public/medium.bin"
+    ));
+}
+
+#[tokio::test]
+async fn a_different_file_with_the_same_name_and_size_is_kept_and_the_new_one_copied_beside_it() {
+    let l = laptops();
+    let table = table(&l);
+    std::fs::create_dir_all(l.new_shared.path().join("Public")).unwrap();
+    let theirs = pattern(300_000, 555);
+    std::fs::write(l.new_shared.path().join("Public/medium.bin"), &theirs).unwrap();
+    let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
+    let receiver = Mutex::new(ReceiverSession::new(&table));
+    assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
+    assert_eq!(
+        sender.lock().await.outcome(id(1)),
+        Some(&SendOutcome::Arrived)
+    );
+    assert_eq!(
+        std::fs::read(l.new_shared.path().join("Public/medium.bin")).unwrap(),
+        theirs
+    );
+    assert_eq!(
+        std::fs::read(l.new_shared.path().join("Public/medium (2).bin")).unwrap(),
+        l.files[1].1
+    );
+}
+
+#[tokio::test]
+async fn a_file_removed_soon_after_copying_is_reported_not_copied() {
+    let l = laptops();
+    let table = table(&l);
+    let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
+    let receiver = Mutex::new(ReceiverSession::new(&table));
+    assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
+    // Security software removes one copy, and another is cut short.
+    std::fs::remove_file(l.new_mine.path().join("Documents/small.bin")).unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(l.new_mine.path().join("Videos/big.bin"))
+        .unwrap()
+        .set_len(10)
+        .unwrap();
+    let mut r = receiver.lock().await;
+    let mut gone = r.recheck();
+    gone.sort();
+    let mut expected = vec![id(0), id(2)];
+    expected.sort();
+    assert_eq!(gone, expected);
+    assert!(matches!(r.outcome(id(0)), Some(ReceiveOutcome::Failed(_))));
+    assert!(matches!(
+        r.outcome(id(1)),
+        Some(ReceiveOutcome::Finished(_))
+    ));
+    // Checking again finds nothing new.
+    assert!(r.recheck().is_empty());
 }

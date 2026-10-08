@@ -49,6 +49,14 @@ pub enum Message {
     Ready,
     /// Sender: every file has been sent and answered for.
     AllSent,
+    /// Receiver, answering every `StartFile`: no file of that name and size is here (`None`),
+    /// or one is, with its BLAKE3 fingerprint.
+    Have {
+        stream: u32,
+        same_size: Option<[u8; 32]>,
+    },
+    /// Sender: the file already there is identical, so it is not sent.
+    Skip { stream: u32 },
 }
 
 const START: u8 = 1;
@@ -59,6 +67,8 @@ const RESUME: u8 = 5;
 const DONE: u8 = 6;
 const READY: u8 = 7;
 const ALL_SENT: u8 = 8;
+const HAVE: u8 = 9;
+const SKIP: u8 = 10;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -125,6 +135,21 @@ impl Message {
                 w.push(ALL_SENT);
                 w.extend_from_slice(&0u32.to_be_bytes());
             }
+            Message::Have { stream, same_size } => {
+                w.push(HAVE);
+                w.extend_from_slice(&stream.to_be_bytes());
+                match same_size {
+                    Some(hash) => {
+                        w.push(1);
+                        w.extend_from_slice(hash);
+                    }
+                    None => w.push(0),
+                }
+            }
+            Message::Skip { stream } => {
+                w.push(SKIP);
+                w.extend_from_slice(&stream.to_be_bytes());
+            }
         }
         w
     }
@@ -186,6 +211,17 @@ impl Message {
             },
             READY if stream == 0 => Message::Ready,
             ALL_SENT if stream == 0 => Message::AllSent,
+            HAVE => Message::Have {
+                stream,
+                same_size: if r.flag()? {
+                    let mut hash = [0u8; 32];
+                    hash.copy_from_slice(r.take(32)?);
+                    Some(hash)
+                } else {
+                    None
+                },
+            },
+            SKIP => Message::Skip { stream },
             _ => return Err(damaged("unknown message")),
         };
         r.end()?;

@@ -70,6 +70,15 @@ fn all_kinds() -> Vec<Message> {
         },
         Message::Ready,
         Message::AllSent,
+        Message::Have {
+            stream: 7,
+            same_size: None,
+        },
+        Message::Have {
+            stream: 7,
+            same_size: Some([9; 32]),
+        },
+        Message::Skip { stream: 7 },
     ]
 }
 
