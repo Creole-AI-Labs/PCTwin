@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use pctwin_gate::{Destinations, Finished, IncomingPath};
 use pctwin_record::ItemId;
@@ -266,10 +267,10 @@ impl SenderSession {
 
     /// Sends everything not yet done over the main connection `main` and the extra `lanes` to
     /// the same new laptop. See [`run_joining`](Self::run_joining).
-    pub async fn run_lanes<C: Channel>(
+    pub async fn run_lanes<C: Channel, L: Channel>(
         &mut self,
         main: &mut C,
-        lanes: Vec<C>,
+        lanes: Vec<L>,
     ) -> Result<(), TransferError> {
         self.run_joining(main, &mut inbox_of(lanes)).await
     }
@@ -280,10 +281,10 @@ impl SenderSession {
     /// once, most important files first. A lane that drops gives its unconfirmed blocks back to be
     /// sent on the others; if the main connection drops, call again with a new one to continue.
     /// Lanes end with the move.
-    pub async fn run_joining<C: Channel>(
+    pub async fn run_joining<C: Channel, L: Channel>(
         &mut self,
         main: &mut C,
-        joining: &mut UnboundedReceiver<C>,
+        joining: &mut UnboundedReceiver<L>,
     ) -> Result<(), TransferError> {
         self.resume(main).await?;
         self.lanes = vec![VecDeque::new()];
@@ -981,6 +982,8 @@ struct Incoming<'d> {
 pub struct ReceiverSession<'d> {
     table: &'d Destinations,
     allowance: Allowance,
+    /// Bytes of blocks written so far, readable while the move runs (for the lane driver).
+    written: Arc<AtomicU64>,
     streams: BTreeMap<u32, Incoming<'d>>,
     done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
     continued: u64,
@@ -994,11 +997,17 @@ impl<'d> ReceiverSession<'d> {
         Self {
             table,
             allowance,
+            written: Arc::new(AtomicU64::new(0)),
             streams: BTreeMap::new(),
             done: BTreeMap::new(),
             continued: 0,
             landed: BTreeMap::new(),
         }
+    }
+
+    /// A counter of bytes of blocks written, to read while the move runs (the lane driver's speed).
+    pub fn meter(&self) -> Arc<AtomicU64> {
+        self.written.clone()
     }
 
     /// Files picked up partway after a dropped connection, rather than started again.
@@ -1028,10 +1037,10 @@ impl<'d> ReceiverSession<'d> {
 
     /// Receives over the main connection `main` and the extra `lanes` to the same old laptop.
     /// See [`run_joining`](Self::run_joining).
-    pub async fn run_lanes<C: Channel>(
+    pub async fn run_lanes<C: Channel, L: Channel>(
         &mut self,
         main: &mut C,
-        lanes: Vec<C>,
+        lanes: Vec<L>,
     ) -> Result<(), TransferError> {
         self.run_joining(main, &mut inbox_of(lanes)).await
     }
@@ -1042,10 +1051,10 @@ impl<'d> ReceiverSession<'d> {
     /// receipts, and each lane rejoins its own pieces. A lane that drops or sends anything but
     /// pieces is closed and the move carries on over the others; if the main connection drops,
     /// call again with a new one to continue. Lanes end with the move.
-    pub async fn run_joining<C: Channel>(
+    pub async fn run_joining<C: Channel, L: Channel>(
         &mut self,
         main: &mut C,
-        joining: &mut UnboundedReceiver<C>,
+        joining: &mut UnboundedReceiver<L>,
     ) -> Result<(), TransferError> {
         let state = RefCell::new(self);
         // Say what is already here, so the old laptop continues from there.
@@ -1261,6 +1270,7 @@ impl<'d> ReceiverSession<'d> {
         if let Some(s) = self.streams.get_mut(&stream) {
             match whole {
                 Ok(Some(whole)) if s.failure.is_none() => {
+                    let size = whole.len() as u64;
                     let accepted = Block::decode(&whole, s.block_size).and_then(|b| {
                         s.assembly
                             .as_mut()
@@ -1268,7 +1278,10 @@ impl<'d> ReceiverSession<'d> {
                             .accept(b)
                     });
                     match accepted {
-                        Ok(receipt) => written = receipt.block,
+                        Ok(receipt) => {
+                            written = receipt.block;
+                            self.written.fetch_add(size, Ordering::Relaxed);
+                        }
                         Err(e) => {
                             s.failure = Some(e.to_string());
                             // Dropping the assembly removes the partial file.

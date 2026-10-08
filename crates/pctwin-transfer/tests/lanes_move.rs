@@ -401,3 +401,80 @@ async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
         "the late lane carried nothing"
     );
 }
+
+#[tokio::test]
+async fn a_whole_move_over_real_lanes_that_the_driver_opens_and_closes() {
+    use std::sync::atomic::AtomicU64;
+    use std::time::Instant;
+    let l = laptops();
+    let table = table(&l);
+    let config = pctwin_link::LinkConfig {
+        step_timeout: std::time::Duration::from_secs(5),
+        handshake_timeout: std::time::Duration::from_secs(5),
+        silence_penalty: std::time::Duration::ZERO,
+        connect_timeout: std::time::Duration::from_secs(5),
+    };
+    // Pair over a real connection, as the app does.
+    let host = pctwin_link::Host::bind("127.0.0.1:0".parse().unwrap(), config)
+        .await
+        .unwrap();
+    let addr = host.local_addr().unwrap();
+    let rotating = Arc::new(Mutex::new(
+        pctwin_pairing::RotatingSender::new(Instant::now()).unwrap(),
+    ));
+    let code = {
+        let mut s = rotating.lock().unwrap();
+        s.tick(Instant::now()).unwrap();
+        pctwin_pairing::PairingCode::parse(&s.code().unwrap()).unwrap()
+    };
+    let guest =
+        tokio::spawn(async move { pctwin_link::connect(addr, &code, config).await.unwrap() });
+    let pending_host = host.next_peer(&rotating).await.unwrap();
+    let pending_guest = guest.await.unwrap();
+    let number = pending_guest.match_number();
+    let mut old_link = pending_host.choose(number, Instant::now()).await.unwrap();
+    let mut new_link = pending_guest.approval().await.unwrap();
+
+    // The old laptop serves lanes; the new laptop's driver opens them as the tuner asks.
+    let old_keys = old_link.take_lane_keys().unwrap();
+    let mut listener = host.into_lanes(old_keys, old_link.peer_addr());
+    let mut opener = pctwin_transfer::LinkLanes::new(&mut new_link, config).unwrap();
+    let (old_tx, mut old_in) = mpsc::unbounded_channel();
+    let (new_tx, mut new_in) = mpsc::unbounded_channel();
+    let mut sender = SenderSession::new(jobs(&l), 4);
+    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let meter: Arc<AtomicU64> = receiver.meter();
+    let done = Arc::new(AtomicBool::new(false));
+    let mut driver = pctwin_transfer::LaneDriver::new(std::time::Duration::from_millis(100));
+
+    let old_side = async {
+        tokio::select! {
+            sent = sender.run_joining(&mut old_link, &mut old_in) => sent,
+            () = pctwin_transfer::accept_lanes(&mut listener, &old_tx) => {
+                panic!("the old laptop stopped accepting lanes during the move")
+            }
+        }
+    };
+    let new_side = async {
+        let received = receiver.run_joining(&mut new_link, &mut new_in).await;
+        done.store(true, Ordering::SeqCst);
+        received
+    };
+    let driving = driver.run(
+        &mut opener,
+        &new_tx,
+        |_| meter.load(Ordering::SeqCst),
+        || done.load(Ordering::SeqCst),
+    );
+    let (sent, received, ()) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        tokio::join!(old_side, new_side, driving)
+    })
+    .await
+    .expect("the move hung");
+    sent.unwrap();
+    received.unwrap();
+    assert_arrived(&l);
+    // The tuner always tries a second lane first, so at least one real lane was opened.
+    assert!(opener.opened() >= 1);
+    assert_eq!(driver.lanes(), 0, "every lane closed with the move");
+}

@@ -45,9 +45,11 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+/// The keys for extra lanes (see [`Link::take_lane_keys`]).
+pub use pctwin_pairing::LaneKeys;
 use pctwin_pairing::{
-    LaneKeys, MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval,
-    ReceiverSession, RotatingSender, SenderChoosing, SenderStatus, Transport,
+    MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval, ReceiverSession,
+    RotatingSender, SenderChoosing, SenderStatus, Transport,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};

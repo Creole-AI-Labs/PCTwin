@@ -43,6 +43,7 @@ mod landing;
 mod lanedriver;
 mod lanes;
 mod message;
+mod netlanes;
 mod progress;
 mod queue;
 mod reading;
@@ -55,6 +56,7 @@ pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_labe
 pub use lanedriver::{Closable, LaneDriver, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
+pub use netlanes::{LinkLanes, accept_lanes};
 pub use progress::{Progress, TimeLeft};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
