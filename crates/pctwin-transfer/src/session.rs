@@ -750,6 +750,32 @@ impl SenderSession {
     /// Handles a message from the new laptop on `lane`. Extra lanes carry only receipts.
     fn answer(&mut self, lane: usize, m: Message) -> Result<(), TransferError> {
         match m {
+            Message::Refused { .. } => {
+                let (stream, _, bytes) = self.lanes[lane]
+                    .pop_front()
+                    .ok_or_else(|| protocol("a refusal for nothing sent"))?;
+                self.in_flight -= bytes;
+                // The new laptop could not write a block of the current attempt, so the file
+                // will not finish: stop sending it now and end it, rather than send the rest for
+                // nothing.
+                if let Some(&job) = self.job_of.get(&stream)
+                    && let SendState::Open { reader, .. } = &self.states[job]
+                {
+                    self.ends.push(Message::EndFile {
+                        stream,
+                        stamp_after: reader.header().stamp,
+                        changed: true,
+                    });
+                    self.scheduler.finished(self.jobs[job].item);
+                    self.states[job] = SendState::Ended {
+                        retry: false,
+                        failure: Some("the new laptop could not write part of it".into()),
+                        later: false,
+                    };
+                    self.dirty = true;
+                }
+                Ok(())
+            }
             Message::Receipt { .. } => {
                 let (stream, block, bytes) = self.lanes[lane]
                     .pop_front()
@@ -1383,7 +1409,7 @@ impl<'d> ReceiverSession<'d> {
                 "pieces of two blocks were mixed on one connection",
             ));
         }
-        let mut written = 0;
+        let mut written = None;
         let open = self
             .streams
             .get(&stream)
@@ -1409,17 +1435,17 @@ impl<'d> ReceiverSession<'d> {
                 }
             }
         }
-        Ok(last.then_some(Message::Receipt {
-            stream,
-            block: written,
+        Ok(last.then_some(match written {
+            Some(block) => Message::Receipt { stream, block },
+            None => Message::Refused { stream },
         }))
     }
 
-    /// Checks and writes one whole block of an open file; returns its number (0 if refused, in
-    /// which case the file fails and its partial copy is removed).
-    fn write_block(&mut self, stream: u32, whole: &[u8]) -> u64 {
+    /// Checks and writes one whole block of an open file; returns its number, or `None` if it was
+    /// refused (then the file fails and its partial copy is removed).
+    fn write_block(&mut self, stream: u32, whole: &[u8]) -> Option<u64> {
         let Some(s) = self.streams.get_mut(&stream) else {
-            return 0;
+            return None;
         };
         let accepted = Block::decode(whole, s.block_size).and_then(|b| {
             s.assembly
@@ -1431,11 +1457,11 @@ impl<'d> ReceiverSession<'d> {
             Ok(receipt) => {
                 self.written
                     .fetch_add(whole.len() as u64, Ordering::Relaxed);
-                receipt.block
+                Some(receipt.block)
             }
             Err(e) => {
                 self.fail_stream(stream, e.to_string());
-                0
+                None
             }
         }
     }

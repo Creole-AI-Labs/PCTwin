@@ -60,6 +60,9 @@ pub enum Message {
     },
     /// Sender: the file already there is identical, so it is not sent.
     Skip { stream: u32 },
+    /// Receiver, in place of a receipt: that block was not written (the file failed, is not open,
+    /// or belongs to an earlier attempt), so its file will not finish.
+    Refused { stream: u32 },
 }
 
 const START: u8 = 1;
@@ -72,6 +75,7 @@ const READY: u8 = 7;
 const ALL_SENT: u8 = 8;
 const HAVE: u8 = 9;
 const SKIP: u8 = 10;
+const REFUSED: u8 = 11;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -156,6 +160,10 @@ impl Message {
                 w.push(SKIP);
                 w.extend_from_slice(&stream.to_be_bytes());
             }
+            Message::Refused { stream } => {
+                w.push(REFUSED);
+                w.extend_from_slice(&stream.to_be_bytes());
+            }
         }
         w
     }
@@ -228,6 +236,7 @@ impl Message {
                 },
             },
             SKIP => Message::Skip { stream },
+            REFUSED => Message::Refused { stream },
             _ => return Err(damaged("unknown message")),
         };
         r.end()?;

@@ -88,6 +88,7 @@ fn all_kinds() -> Vec<Message> {
             same_size: Some([9; 32]),
         },
         Message::Skip { stream: 7 },
+        Message::Refused { stream: 7 },
     ]
 }
 

@@ -96,7 +96,7 @@ impl Channel for Mem {
         loop {
             if let Ok(m) = self.rx.try_recv() {
                 // As the sender sees it: a receipt confirms the oldest unconfirmed block.
-                if let Ok(Message::Receipt { .. }) = Message::decode(&m)
+                if let Ok(Message::Receipt { .. } | Message::Refused { .. }) = Message::decode(&m)
                     && let Some(len) = self.fifo.pop_front()
                 {
                     self.unconfirmed.fetch_sub(len, Ordering::SeqCst);
@@ -911,13 +911,7 @@ async fn an_extra_lane_cannot_start_end_or_skip_files() {
         for piece in split_into_pieces(0, &blocks[1].encode()) {
             say(&mut old, &piece).await;
         }
-        assert_eq!(
-            hear(&mut old).await,
-            Message::Receipt {
-                stream: 0,
-                block: 0
-            }
-        );
+        assert_eq!(hear(&mut old).await, Message::Refused { stream: 0 });
         say(&mut old, &Message::AllSent).await;
     };
     let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
@@ -947,13 +941,7 @@ async fn pieces_for_a_file_never_started_are_still_answered() {
             for piece in split_into_pieces(9, &block.encode()) {
                 say(lane, &piece).await;
             }
-            assert_eq!(
-                hear(lane).await,
-                Message::Receipt {
-                    stream: 9,
-                    block: 0
-                }
-            );
+            assert_eq!(hear(lane).await, Message::Refused { stream: 9 });
         }
         say(&mut old, &Message::AllSent).await;
     };
@@ -1337,13 +1325,7 @@ async fn pieces_for_a_file_that_is_not_open_are_answered_and_not_kept() {
             },
         )
         .await;
-        assert_eq!(
-            hear(&mut old).await,
-            Message::Receipt {
-                stream: 77,
-                block: 0
-            }
-        );
+        assert_eq!(hear(&mut old).await, Message::Refused { stream: 77 });
         // A real file still goes through.
         assert_eq!(
             send_small(&mut old, &l, 0).await,
@@ -1529,4 +1511,61 @@ async fn a_file_found_already_there_is_spent_too() {
     .expect("hung");
     r.unwrap();
     assert_eq!(files_under(l.new_mine.path()), 1);
+}
+
+#[tokio::test]
+async fn a_refused_block_stops_the_old_laptop_sending_that_file() {
+    // The test plays the new laptop: it refuses the first block of the big file, and the old
+    // laptop must stop sending that file (not finish it for nothing) and report it failed.
+    let l = laptops();
+    let job = jobs(&l)[2].clone();
+    let total = (l.files[2].1.len() as u64).div_ceil(block_size_for(l.files[2].1.len() as u64));
+    let mut sender = SenderSession::new(vec![job], 1).with_in_flight_limit(256 * 1024);
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        say(&mut new, &Message::Ready).await;
+        let Message::StartFile { stream, .. } = hear(&mut new).await else {
+            panic!("expected a start");
+        };
+        say(
+            &mut new,
+            &Message::Have {
+                stream,
+                same_size: None,
+            },
+        )
+        .await;
+        let mut blocks = 0;
+        loop {
+            match hear(&mut new).await {
+                Message::Piece { last: true, .. } => {
+                    blocks += 1;
+                    // Every block of this file is refused (its first already failed it).
+                    say(&mut new, &Message::Refused { stream }).await;
+                }
+                Message::Piece { .. } => {}
+                Message::EndFile { changed, .. } => {
+                    assert!(changed, "a refused file is ended as not complete");
+                    say(&mut new, &Message::FileDone { stream, ok: false }).await;
+                }
+                Message::AllSent => break,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        blocks
+    };
+    let (blocks, sent) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, sender.run(&mut old))
+    })
+    .await
+    .expect("hung");
+    sent.unwrap();
+    assert!(
+        blocks < total,
+        "sent {blocks} of {total} blocks after the refusal"
+    );
+    assert!(matches!(
+        sender.outcome(id(2)),
+        Some(SendOutcome::Failed(_))
+    ));
 }
