@@ -18,12 +18,19 @@
 //!   request at once.
 //! - [`Message`] is what travels over the encrypted link; blocks go as pieces of at most
 //!   [`PIECE_MAX`] and are rejoined by [`PieceBuffer`], never past the largest block.
+//! - [`SenderSession`] and [`ReceiverSession`] run a whole move over a [`Channel`] (the paired
+//!   link): up to 32 MiB unconfirmed at a time, every block receipted, and after a drop each file
+//!   continues from exactly where it stopped on the next connection.
 
 mod message;
 mod queue;
+mod session;
 
 pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use queue::{Scheduler, Tier, plan_order};
+pub use session::{
+    Channel, ChannelError, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
+};
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -61,6 +68,10 @@ pub enum TransferError {
     ChangedWhileRead,
     #[error(transparent)]
     Gate(#[from] GateError),
+    #[error("the connection dropped; the move continues from here on the next connection")]
+    ConnectionDropped,
+    #[error("the other laptop sent something unexpected: {0}")]
+    Protocol(String),
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the
@@ -115,6 +126,13 @@ pub struct Trailer {
 }
 
 impl Trailer {
+    pub(crate) fn new(stamp_after: Stamp, changed: bool) -> Self {
+        Self {
+            stamp_after,
+            changed,
+        }
+    }
+
     pub fn changed_while_read(&self) -> bool {
         self.changed
     }

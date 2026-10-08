@@ -1,0 +1,581 @@
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::future::Future;
+use std::path::PathBuf;
+
+use pctwin_gate::{Destinations, Finished, IncomingPath};
+use pctwin_record::ItemId;
+
+use crate::message::{Message, PieceBuffer, split_into_pieces};
+use crate::queue::{Scheduler, Tier};
+use crate::{Assembly, Block, FileSender, ResumeTicket, Trailer, TransferError};
+
+/// How much may be sent before the receiver confirms it (as Syncthing does): enough to keep the
+/// connection busy, small enough that memory stays bounded.
+const IN_FLIGHT_BYTES: u64 = 32 * 1024 * 1024;
+
+/// The connection dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the connection dropped")]
+pub struct ChannelError;
+
+/// A connection that carries whole messages in order, one at a time each way.
+pub trait Channel {
+    fn send(&mut self, data: &[u8]) -> impl Future<Output = Result<(), ChannelError>>;
+    fn recv(&mut self) -> impl Future<Output = Result<Vec<u8>, ChannelError>>;
+}
+
+impl Channel for pctwin_link::Link {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        pctwin_link::Link::send(self, data)
+            .await
+            .map_err(|_| ChannelError)
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        pctwin_link::Link::recv(self)
+            .await
+            .map(|m| m.to_vec())
+            .map_err(|_| ChannelError)
+    }
+}
+
+async fn send(ch: &mut impl Channel, m: &Message) -> Result<(), TransferError> {
+    ch.send(&m.encode())
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)
+}
+
+async fn recv(ch: &mut impl Channel) -> Result<Message, TransferError> {
+    let bytes = ch
+        .recv()
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    Message::decode(&bytes)
+}
+
+fn protocol(why: &str) -> TransferError {
+    TransferError::Protocol(why.to_string())
+}
+
+/// One file the old laptop sends.
+#[derive(Debug, Clone)]
+pub struct SendJob {
+    pub item: ItemId,
+    /// Where the file is on the old laptop.
+    pub source: PathBuf,
+    /// The approved destination's label on the new laptop.
+    pub destination: String,
+    /// The path inside that destination.
+    pub path: String,
+    /// False for formats that are already compressed.
+    pub compressible: bool,
+    pub tier: Tier,
+}
+
+/// How a sent file ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendOutcome {
+    /// The new laptop confirmed it is complete under its real name.
+    Arrived,
+    Failed(String),
+}
+
+enum SendState {
+    Waiting,
+    Open {
+        reader: FileSender,
+        announced: bool,
+        from_block: u64,
+    },
+    /// The last block was sent; waiting for the new laptop's answer.
+    Ended {
+        /// Send the whole file again if the answer is no (it changed while being read).
+        retry: bool,
+        /// Why it failed on this side, if it did.
+        failure: Option<String>,
+    },
+    Done(SendOutcome),
+}
+
+/// The old laptop's side of a move. Keeps its place across dropped connections: call
+/// [`run`](Self::run) again with a new connection to continue.
+pub struct SenderSession {
+    jobs: Vec<SendJob>,
+    states: Vec<SendState>,
+    by_item: HashMap<ItemId, u32>,
+    scheduler: Scheduler,
+    capacity: usize,
+    blocks_sent: u64,
+    in_flight_limit: u64,
+}
+
+impl SenderSession {
+    /// `jobs` in the order planned; `capacity` files take turns at once.
+    pub fn new(jobs: Vec<SendJob>, capacity: usize) -> Self {
+        let mut scheduler = Scheduler::new(capacity);
+        let mut by_item = HashMap::new();
+        for (i, job) in jobs.iter().enumerate() {
+            scheduler.push(job.item, job.tier);
+            by_item.insert(job.item, u32::try_from(i).unwrap_or(u32::MAX));
+        }
+        let states = jobs.iter().map(|_| SendState::Waiting).collect();
+        Self {
+            jobs,
+            states,
+            by_item,
+            scheduler,
+            capacity,
+            blocks_sent: 0,
+            in_flight_limit: IN_FLIGHT_BYTES,
+        }
+    }
+
+    /// Sends at most ytes before the new laptop confirms them (32 MiB unless set).
+    pub fn with_in_flight_limit(mut self, bytes: u64) -> Self {
+        self.in_flight_limit = bytes.max(1);
+        self
+    }
+
+    /// Blocks sent so far, over every connection.
+    pub fn blocks_sent(&self) -> u64 {
+        self.blocks_sent
+    }
+
+    pub fn outcome(&self, item: ItemId) -> Option<&SendOutcome> {
+        let i = *self.by_item.get(&item)? as usize;
+        match &self.states[i] {
+            SendState::Done(o) => Some(o),
+            _ => None,
+        }
+    }
+
+    /// The person asked for these to move first, during the move.
+    pub fn ask_first(&mut self, items: &[ItemId]) {
+        self.scheduler.ask_first(items);
+    }
+
+    /// Sends everything not yet done over `ch`. Returns when every file is answered for, or with
+    /// [`TransferError::ConnectionDropped`] (call again with a new connection to continue).
+    pub async fn run(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
+        self.resume(ch).await?;
+        let mut in_flight: VecDeque<u64> = VecDeque::new();
+        loop {
+            if in_flight.iter().sum::<u64>() >= self.in_flight_limit {
+                let m = recv(ch).await?;
+                self.answer(m, &mut in_flight)?;
+                continue;
+            }
+            match self.scheduler.next_turn() {
+                Some(item) => {
+                    let stream = self.by_item[&item];
+                    self.step(stream, ch, &mut in_flight).await?;
+                }
+                None => {
+                    let waiting = self
+                        .states
+                        .iter()
+                        .any(|s| matches!(s, SendState::Ended { .. }));
+                    if waiting || !in_flight.is_empty() {
+                        let m = recv(ch).await?;
+                        self.answer(m, &mut in_flight)?;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        send(ch, &Message::AllSent).await
+    }
+
+    /// Reads what the new laptop already has and picks each file up from there.
+    async fn resume(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
+        let mut tickets: BTreeMap<u32, ResumeTicket> = BTreeMap::new();
+        loop {
+            match recv(ch).await? {
+                Message::ResumeFrom { stream, ticket } => {
+                    tickets.insert(stream, ticket);
+                }
+                Message::FileDone { stream, ok } => self.done(stream, ok),
+                Message::Ready => break,
+                _ => return Err(protocol("expected the new laptop's resume list")),
+            }
+        }
+        self.scheduler = Scheduler::new(self.capacity);
+        for (i, job) in self.jobs.iter().enumerate() {
+            let stream = u32::try_from(i).unwrap_or(u32::MAX);
+            if matches!(self.states[i], SendState::Done(_)) {
+                continue;
+            }
+            let picked_up = tickets.get(&stream).and_then(|ticket| {
+                FileSender::open(&job.source, Some(ticket), job.compressible)
+                    .ok()
+                    .map(|reader| SendState::Open {
+                        reader,
+                        announced: false,
+                        from_block: ticket.next_block,
+                    })
+            });
+            // Without a ticket, or if the file changed since, it starts again from the beginning.
+            self.states[i] = picked_up.unwrap_or(SendState::Waiting);
+            self.scheduler.push(job.item, job.tier);
+        }
+        Ok(())
+    }
+
+    async fn step(
+        &mut self,
+        stream: u32,
+        ch: &mut impl Channel,
+        in_flight: &mut VecDeque<u64>,
+    ) -> Result<(), TransferError> {
+        let i = stream as usize;
+        let job = self.jobs[i].clone();
+        if matches!(self.states[i], SendState::Waiting) {
+            match FileSender::open(&job.source, None, job.compressible) {
+                Ok(reader) => {
+                    self.states[i] = SendState::Open {
+                        reader,
+                        announced: false,
+                        from_block: 0,
+                    }
+                }
+                Err(e) => {
+                    self.states[i] = SendState::Done(SendOutcome::Failed(e.to_string()));
+                    self.scheduler.finished(job.item);
+                    return Ok(());
+                }
+            }
+        }
+        let SendState::Open {
+            reader,
+            announced,
+            from_block,
+        } = &mut self.states[i]
+        else {
+            self.scheduler.finished(job.item);
+            return Ok(());
+        };
+        if !*announced {
+            send(
+                ch,
+                &Message::StartFile {
+                    stream,
+                    item: job.item,
+                    destination: job.destination.clone(),
+                    path: job.path.clone(),
+                    header: reader.header().clone(),
+                    from_block: *from_block,
+                },
+            )
+            .await?;
+            *announced = true;
+        }
+        let stamp = reader.header().stamp;
+        match reader.next_block() {
+            Ok(Some(block)) => {
+                let wire = block.encode();
+                for piece in split_into_pieces(stream, &wire) {
+                    send(ch, &piece).await?;
+                }
+                self.blocks_sent += 1;
+                in_flight.push_back(wire.len() as u64);
+                Ok(())
+            }
+            Ok(None) => {
+                let SendState::Open { reader, .. } =
+                    std::mem::replace(&mut self.states[i], SendState::Waiting)
+                else {
+                    return Ok(());
+                };
+                let trailer = reader.finish()?;
+                send(
+                    ch,
+                    &Message::EndFile {
+                        stream,
+                        stamp_after: trailer.stamp_after,
+                        changed: trailer.changed_while_read(),
+                    },
+                )
+                .await?;
+                self.states[i] = SendState::Ended {
+                    retry: trailer.changed_while_read(),
+                    failure: None,
+                };
+                self.scheduler.finished(job.item);
+                Ok(())
+            }
+            Err(e) => {
+                // Tell the new laptop to drop what it has of this file.
+                let retry = matches!(e, TransferError::ChangedWhileRead);
+                send(
+                    ch,
+                    &Message::EndFile {
+                        stream,
+                        stamp_after: stamp,
+                        changed: true,
+                    },
+                )
+                .await?;
+                self.states[i] = SendState::Ended {
+                    retry,
+                    failure: (!retry).then(|| e.to_string()),
+                };
+                self.scheduler.finished(job.item);
+                Ok(())
+            }
+        }
+    }
+
+    fn answer(&mut self, m: Message, in_flight: &mut VecDeque<u64>) -> Result<(), TransferError> {
+        match m {
+            Message::Receipt { .. } => {
+                in_flight.pop_front();
+                Ok(())
+            }
+            Message::FileDone { stream, ok } => {
+                self.done(stream, ok);
+                Ok(())
+            }
+            _ => Err(protocol("unexpected message from the new laptop")),
+        }
+    }
+
+    fn done(&mut self, stream: u32, ok: bool) {
+        let i = stream as usize;
+        let Some(job) = self.jobs.get(i) else { return };
+        let item = job.item;
+        let tier = job.tier;
+        let state = std::mem::replace(&mut self.states[i], SendState::Waiting);
+        self.states[i] = match (state, ok) {
+            (SendState::Ended { failure: None, .. }, true) => SendState::Done(SendOutcome::Arrived),
+            (SendState::Ended { retry: true, .. }, false) => {
+                // It changed while being read: send the whole file again.
+                self.scheduler.push(item, tier);
+                SendState::Waiting
+            }
+            (
+                SendState::Ended {
+                    failure: Some(why), ..
+                },
+                _,
+            ) => SendState::Done(SendOutcome::Failed(why)),
+            (SendState::Done(o), _) => SendState::Done(o),
+            (_, true) => SendState::Done(SendOutcome::Arrived),
+            (_, false) => {
+                self.scheduler.finished(item);
+                SendState::Done(SendOutcome::Failed(
+                    "the new laptop did not accept it".into(),
+                ))
+            }
+        };
+    }
+}
+
+/// How a received file ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReceiveOutcome {
+    Finished(Finished),
+    Failed(String),
+}
+
+struct Incoming<'d> {
+    item: ItemId,
+    assembly: Option<Assembly<'d>>,
+    buffer: PieceBuffer,
+    block_size: u64,
+    failure: Option<String>,
+}
+
+/// The new laptop's side of a move. Every file lands through the safety gate in one of the
+/// approved destinations. Keeps what it has across dropped connections: call [`run`](Self::run)
+/// again with a new connection to continue.
+pub struct ReceiverSession<'d> {
+    table: &'d Destinations,
+    streams: BTreeMap<u32, Incoming<'d>>,
+    done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
+    continued: u64,
+}
+
+impl<'d> ReceiverSession<'d> {
+    pub fn new(table: &'d Destinations) -> Self {
+        Self {
+            table,
+            streams: BTreeMap::new(),
+            done: BTreeMap::new(),
+            continued: 0,
+        }
+    }
+
+    /// Files picked up partway after a dropped connection, rather than started again.
+    pub fn continued(&self) -> u64 {
+        self.continued
+    }
+
+    pub fn outcome(&self, item: ItemId) -> Option<&ReceiveOutcome> {
+        self.done.values().find(|(i, _)| *i == item).map(|(_, o)| o)
+    }
+
+    /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
+    /// again with a new connection to continue).
+    pub async fn run(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
+        // Say what is already here, so the old laptop continues from there.
+        self.streams
+            .retain(|_, s| s.assembly.is_some() && s.failure.is_none());
+        let mut list = Vec::new();
+        for (stream, s) in &mut self.streams {
+            // A block cut off by the drop is sent again whole.
+            s.buffer = PieceBuffer::default();
+            if let Some(a) = &s.assembly {
+                list.push(Message::ResumeFrom {
+                    stream: *stream,
+                    ticket: a.resume_ticket(),
+                });
+            }
+        }
+        for (stream, (_, outcome)) in &self.done {
+            list.push(Message::FileDone {
+                stream: *stream,
+                ok: matches!(outcome, ReceiveOutcome::Finished(_)),
+            });
+        }
+        for m in &list {
+            send(ch, m).await?;
+        }
+        send(ch, &Message::Ready).await?;
+
+        loop {
+            match recv(ch).await? {
+                Message::StartFile {
+                    stream,
+                    item,
+                    destination,
+                    path,
+                    header,
+                    from_block,
+                } => {
+                    self.done.remove(&stream);
+                    let continuing = from_block > 0
+                        && self.streams.get(&stream).is_some_and(|s| {
+                            s.item == item
+                                && s.assembly
+                                    .as_ref()
+                                    .is_some_and(|a| a.resume_ticket().next_block == from_block)
+                        });
+                    if continuing {
+                        self.continued += 1;
+                        continue;
+                    }
+                    // A fresh start replaces anything kept (the partial file is removed).
+                    self.streams.remove(&stream);
+                    let block_size = header.block_size;
+                    let started = if from_block > 0 {
+                        Err("the new laptop has no place to continue from".to_string())
+                    } else {
+                        self.start(&destination, &path, header)
+                    };
+                    let (assembly, failure) = match started {
+                        Ok(a) => (Some(a), None),
+                        Err(why) => (None, Some(why)),
+                    };
+                    if let Some(why) = &failure {
+                        self.done
+                            .insert(stream, (item, ReceiveOutcome::Failed(why.clone())));
+                        send(ch, &Message::FileDone { stream, ok: false }).await?;
+                    }
+                    self.streams.insert(
+                        stream,
+                        Incoming {
+                            item,
+                            assembly,
+                            buffer: PieceBuffer::default(),
+                            block_size,
+                            failure,
+                        },
+                    );
+                }
+                Message::Piece {
+                    stream,
+                    last,
+                    bytes,
+                } => {
+                    let Some(s) = self.streams.get_mut(&stream) else {
+                        // Pieces of a file never started: nothing to keep, but still answered.
+                        if last {
+                            send(
+                                ch,
+                                &Message::Receipt {
+                                    stream,
+                                    next_block: 0,
+                                },
+                            )
+                            .await?;
+                        }
+                        continue;
+                    };
+                    match s.buffer.add(&bytes, last) {
+                        Ok(Some(whole)) if s.failure.is_none() => {
+                            let accepted = Block::decode(&whole, s.block_size).and_then(|b| {
+                                s.assembly
+                                    .as_mut()
+                                    .ok_or_else(|| protocol("no file open"))?
+                                    .accept(b)
+                            });
+                            if let Err(e) = accepted {
+                                s.failure = Some(e.to_string());
+                                // Dropping the assembly removes the partial file.
+                                s.assembly = None;
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            s.failure = Some(e.to_string());
+                            s.assembly = None;
+                        }
+                    }
+                    if last {
+                        let next_block = s
+                            .assembly
+                            .as_ref()
+                            .map_or(0, |a| a.resume_ticket().next_block);
+                        send(ch, &Message::Receipt { stream, next_block }).await?;
+                    }
+                }
+                Message::EndFile {
+                    stream,
+                    stamp_after,
+                    changed,
+                } => {
+                    let Some(s) = self.streams.remove(&stream) else {
+                        send(ch, &Message::FileDone { stream, ok: false }).await?;
+                        continue;
+                    };
+                    let outcome = match (s.assembly, s.failure) {
+                        (Some(a), None) => match a.finish(Trailer::new(stamp_after, changed)) {
+                            Ok(f) => ReceiveOutcome::Finished(f),
+                            Err(e) => ReceiveOutcome::Failed(e.to_string()),
+                        },
+                        (_, Some(why)) => ReceiveOutcome::Failed(why),
+                        (None, None) => ReceiveOutcome::Failed("no file open".into()),
+                    };
+                    let ok = matches!(outcome, ReceiveOutcome::Finished(_));
+                    self.done.insert(stream, (s.item, outcome));
+                    send(ch, &Message::FileDone { stream, ok }).await?;
+                }
+                Message::AllSent => return Ok(()),
+                _ => return Err(protocol("unexpected message from the old laptop")),
+            }
+        }
+    }
+
+    fn start(
+        &self,
+        destination: &str,
+        path: &str,
+        header: crate::Header,
+    ) -> Result<Assembly<'d>, String> {
+        let table: &'d Destinations = self.table;
+        let dest = table.get(destination).map_err(|e| e.to_string())?;
+        let path = IncomingPath::parse(path).map_err(|e| e.to_string())?;
+        Assembly::start(dest, &path, header).map_err(|e| e.to_string())
+    }
+}

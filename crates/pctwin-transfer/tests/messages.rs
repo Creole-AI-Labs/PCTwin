@@ -68,6 +68,8 @@ fn all_kinds() -> Vec<Message> {
             stream: 7,
             ok: false,
         },
+        Message::Ready,
+        Message::AllSent,
     ]
 }
 

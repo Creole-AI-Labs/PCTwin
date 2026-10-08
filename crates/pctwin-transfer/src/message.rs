@@ -44,6 +44,11 @@ pub enum Message {
     ResumeFrom { stream: u32, ticket: ResumeTicket },
     /// Receiver: the file is finished under its real name (`ok`), or was not.
     FileDone { stream: u32, ok: bool },
+    /// Receiver, at the start of each connection: everything it already has has been listed
+    /// (`ResumeFrom` and `FileDone`), so sending can begin.
+    Ready,
+    /// Sender: every file has been sent and answered for.
+    AllSent,
 }
 
 const START: u8 = 1;
@@ -52,6 +57,8 @@ const END: u8 = 3;
 const RECEIPT: u8 = 4;
 const RESUME: u8 = 5;
 const DONE: u8 = 6;
+const READY: u8 = 7;
+const ALL_SENT: u8 = 8;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -109,6 +116,14 @@ impl Message {
                 w.push(DONE);
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.push(u8::from(*ok));
+            }
+            Message::Ready => {
+                w.push(READY);
+                w.extend_from_slice(&0u32.to_be_bytes());
+            }
+            Message::AllSent => {
+                w.push(ALL_SENT);
+                w.extend_from_slice(&0u32.to_be_bytes());
             }
         }
         w
@@ -169,6 +184,8 @@ impl Message {
                 stream,
                 ok: r.flag()?,
             },
+            READY if stream == 0 => Message::Ready,
+            ALL_SENT if stream == 0 => Message::AllSent,
             _ => return Err(damaged("unknown message")),
         };
         r.end()?;

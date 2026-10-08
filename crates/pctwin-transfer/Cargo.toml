@@ -11,13 +11,16 @@ publish.workspace = true
 [dependencies]
 blake3 = "1.8"
 pctwin-gate = { path = "../pctwin-gate" }
+pctwin-link = { version = "0.1.0", path = "../pctwin-link" }
 pctwin-record = { version = "0.1.0", path = "../pctwin-record" }
 thiserror = "2.0.21"
 zstd = { version = "0.13", default-features = false }
 
 [dev-dependencies]
+pctwin-pairing = { path = "../pctwin-pairing" }
 proptest = "1.11.0"
 tempfile = "3"
+tokio = { version = "1.53.2", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [lints]
 workspace = true
