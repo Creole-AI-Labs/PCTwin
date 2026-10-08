@@ -187,6 +187,8 @@ pub struct SenderSession {
     in_flight: u64,
     /// Something changed that other lanes may be waiting for.
     dirty: bool,
+    /// Same-size files on the new laptop whose fingerprints are still to be compared.
+    checks: Vec<(usize, [u8; 32])>,
     /// Jobs opened at least once: opening one again starts a new attempt on a new stream.
     attempted: HashSet<usize>,
 }
@@ -227,6 +229,7 @@ impl SenderSession {
             lanes: Vec::new(),
             in_flight: 0,
             dirty: false,
+            checks: Vec::new(),
             attempted: HashSet::new(),
         }
     }
@@ -325,6 +328,7 @@ impl SenderSession {
                     // blocks. It is owed, so waiting for it cannot hang.
                     let m = recv(main).await?;
                     state.borrow_mut().answer(0, m)?;
+                    compare_fingerprints(&state).await;
                     changed.notify_waiters();
                     continue;
                 }
@@ -346,6 +350,7 @@ impl SenderSession {
                     // A reply is owed on this connection, so waiting for it cannot hang.
                     let m = recv(main).await?;
                     state.borrow_mut().answer(0, m)?;
+                    compare_fingerprints(&state).await;
                     changed.notify_waiters();
                 } else if state.borrow().all_done() {
                     break;
@@ -689,6 +694,25 @@ impl SenderSession {
         !self.ends.is_empty() || !self.skips.is_empty()
     }
 
+    /// Fingerprint comparisons waiting to run: (job, the new laptop's fingerprint).
+    fn take_checks(&mut self) -> Vec<(usize, std::path::PathBuf, [u8; 32])> {
+        std::mem::take(&mut self.checks)
+            .into_iter()
+            .map(|(job, theirs)| (job, self.jobs[job].source.clone(), theirs))
+            .collect()
+    }
+
+    /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
+    fn checked(&mut self, job: usize, identical: bool) {
+        if let SendState::Open { cleared, .. } = &mut self.states[job] {
+            if identical {
+                self.skips.push(job);
+            } else {
+                *cleared = true;
+            }
+        }
+    }
+
     /// A lane joined: its number.
     fn add_lane(&mut self) -> usize {
         self.lanes.push(VecDeque::new());
@@ -752,15 +776,11 @@ impl SenderSession {
                 let Some(&job) = self.job_of.get(&stream) else {
                     return Ok(());
                 };
-                let source = self.jobs[job].source.clone();
-                if let SendState::Open { cleared, .. } = &mut self.states[job] {
-                    let identical = same_size
-                        .is_some_and(|theirs| hash_file(&source).is_ok_and(|mine| mine == theirs));
-                    if identical {
-                        self.skips.push(job);
-                    } else {
-                        *cleared = true;
-                    }
+                match same_size {
+                    // A same-size file is there: compare fingerprints, off the main loop (see
+                    // `take_checks`).
+                    Some(theirs) => self.checks.push((job, theirs)),
+                    None => self.checked(job, false),
                 }
                 Ok(())
             }
@@ -957,6 +977,23 @@ fn sections_for(header: &crate::Header, done: &[bool]) -> Option<FileSections> {
     Some(FileSections::new(blocks, header.block_size, done))
 }
 
+/// Compares fingerprints for same-size files on the blocking-thread pool, so hashing a big file
+/// never stalls the lanes; each answer is settled before the main loop goes on.
+async fn compare_fingerprints(state: &RefCell<&mut SenderSession>) {
+    let checks = state.borrow_mut().take_checks();
+    for (job, source, theirs) in checks {
+        let mine = off_the_loop(move || hash_file(&source)).await;
+        state.borrow_mut().checked(job, mine == Some(theirs));
+    }
+}
+
+/// Runs blocking file work on the blocking-thread pool; `None` if it failed.
+async fn off_the_loop(
+    work: impl FnOnce() -> std::io::Result<[u8; 32]> + Send + 'static,
+) -> Option<[u8; 32]> {
+    tokio::task::spawn_blocking(work).await.ok()?.ok()
+}
+
 /// The BLAKE3 fingerprint of a whole file.
 fn hash_file(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     let mut file = std::fs::File::open(path)?;
@@ -1006,6 +1043,8 @@ pub struct ReceiverSession<'d> {
     written: Arc<AtomicU64>,
     /// Why a file's start was refused, kept per file (bounded).
     refused: BTreeMap<ItemId, String>,
+    /// A same-size file already here, to fingerprint before answering a start (off the loop).
+    to_fingerprint: Option<(u32, std::fs::File)>,
     streams: BTreeMap<u32, Incoming<'d>>,
     done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
     continued: u64,
@@ -1021,6 +1060,7 @@ impl<'d> ReceiverSession<'d> {
             allowance,
             written: Arc::new(AtomicU64::new(0)),
             refused: BTreeMap::new(),
+            to_fingerprint: None,
             streams: BTreeMap::new(),
             done: BTreeMap::new(),
             continued: 0,
@@ -1102,6 +1142,13 @@ impl<'d> ReceiverSession<'d> {
                 let (replies, finished) = state.borrow_mut().handle(m, &mut slot)?;
                 for r in &replies {
                     send(main, r).await?;
+                }
+                // A start waiting on a same-size file's fingerprint: worked out on the
+                // blocking-thread pool, so the lanes keep going meanwhile.
+                let waiting = state.borrow_mut().to_fingerprint.take();
+                if let Some((stream, mut file)) = waiting {
+                    let same_size = off_the_loop(move || hash_reader(&mut file)).await;
+                    send(main, &Message::Have { stream, same_size }).await?;
                 }
                 if finished {
                     return Ok(());
@@ -1232,6 +1279,7 @@ impl<'d> ReceiverSession<'d> {
                     return Ok((replies, false));
                 }
                 let same = self.same_file(&destination, &path, size);
+                let stored = same.as_ref().map(|(stored, _)| stored.clone());
                 let assembly = match self.start(&destination, &path, header) {
                     Ok(a) => a,
                     Err(why) => {
@@ -1242,10 +1290,15 @@ impl<'d> ReceiverSession<'d> {
                         return Ok((replies, false));
                     }
                 };
-                // Every start is answered: here is a same-size file's fingerprint, or nothing
-                // like it is here.
-                let same_size = same.as_ref().map(|(_, hash)| *hash);
-                replies.push(Message::Have { stream, same_size });
+                // Every start is answered: nothing like it is here, or (once its fingerprint is
+                // worked out off the main loop) the fingerprint of the same-size file that is.
+                match same {
+                    Some((_, file)) => self.to_fingerprint = Some((stream, file)),
+                    None => replies.push(Message::Have {
+                        stream,
+                        same_size: None,
+                    }),
+                }
                 self.streams.insert(
                     stream,
                     Incoming {
@@ -1255,7 +1308,7 @@ impl<'d> ReceiverSession<'d> {
                         failure: None,
                         destination,
                         size,
-                        same: same.map(|(stored, _)| stored),
+                        same: stored,
                     },
                 );
             }
@@ -1404,17 +1457,22 @@ impl<'d> ReceiverSession<'d> {
         }
     }
 
-    /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path
-    /// and fingerprint.
-    fn same_file(&self, destination: &str, path: &str, size: u64) -> Option<(String, [u8; 32])> {
+    /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path,
+    /// opened to fingerprint.
+    fn same_file(
+        &self,
+        destination: &str,
+        path: &str,
+        size: u64,
+    ) -> Option<(String, std::fs::File)> {
         let dest = self.table.get(destination).ok()?;
         let path = IncomingPath::parse(path).ok()?;
         let (stored, len) = dest.find(&path)?;
         if len != size {
             return None;
         }
-        let hash = hash_reader(&mut dest.open_read(&stored).ok()?).ok()?;
-        Some((stored, hash))
+        let file = dest.open_read(&stored).ok()?;
+        Some((stored, file))
     }
 
     /// Checks every copied file again, a short while after copying: anything now missing or of

@@ -16,7 +16,7 @@ pctwin-link = { version = "0.1.0", path = "../pctwin-link" }
 pctwin-record = { version = "0.1.0", path = "../pctwin-record" }
 pctwin-scan = { version = "0.1.0", path = "../pctwin-scan" }
 thiserror = "2.0.21"
-tokio = { version = "1.53.2", features = ["macros", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["macros", "rt", "sync", "time"] }
 zstd = { version = "0.13", default-features = false }
 
 [dev-dependencies]
