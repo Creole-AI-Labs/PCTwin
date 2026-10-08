@@ -3,18 +3,25 @@
 //!
 //! Every write on the new laptop is one entry that moves, one durable step at a time, through
 //! [`State::Planned`], [`State::Staged`] (its temporary `.pctwin-` file exists), [`State::Verified`]
-//! (every byte arrived, checked, and flushed to disk), [`State::Applied`] (it has its real name) and
-//! [`State::Committed`] (finished; what it landed as is kept for undo), or ends [`State::Failed`]
-//! with the reason and the step it had reached. Steps cannot be skipped, repeated or taken back.
+//! (every byte arrived, checked, and flushed to disk), [`State::Applied`] (the real name it is
+//! getting, recorded before it gets it) and [`State::Committed`] (finished; what it landed as is
+//! kept for undo), or ends [`State::Existing`] (an identical file was already there, so nothing was
+//! written) or [`State::Failed`] with the reason and the step it had reached. Steps cannot be
+//! skipped or taken back.
 //!
 //! Each step is its own committed transaction in a [redb](https://docs.rs/redb) database: crash-safe
 //! by default, with two checksummed commit slots, so a write torn by power loss is detected and the
-//! last good commit is used. After a crash the journal holds exactly the steps already taken; the
-//! app reconciles anything unfinished instead of announcing success. A damaged journal is reported,
-//! never trusted, and a journal from a newer PCTwin is refused.
+//! last good commit is used. After a crash the journal holds exactly the steps already taken, and
+//! [`recovery`] works out what each unfinished write needs instead of announcing success. A damaged
+//! journal is reported, never trusted, and a journal from a newer PCTwin is refused.
 //!
 //! Each entry records the item, the old laptop it came from, the approved destination and path,
-//! and who acted for whom with what permission.
+//! and who acted for whom with what permission. Each journal has its own random number, and each
+//! write's temporary file is named after it and the entry ([`Journal::temp_tag`]), so the journal
+//! always knows exactly which temporary file is its own, even one made just before a crash, and
+//! never touches another's. Folders made for a write are recorded, so undo removes only those.
+
+pub mod recovery;
 
 use std::path::Path;
 
@@ -26,7 +33,21 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT: u32 = 1;
 
 const META: TableDefinition<&str, u32> = TableDefinition::new("meta");
+/// The journal's own number, the next entry number, and how far clean-up has looked.
+const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 const ENTRIES: TableDefinition<u64, &[u8]> = TableDefinition::new("entries");
+/// Entries not yet finished, so a restart reads only those.
+const UNFINISHED: TableDefinition<u64, ()> = TableDefinition::new("unfinished");
+/// The unfinished entry for each file of each old laptop (`laptop/item` in hex).
+const OPEN_ITEMS: TableDefinition<&str, u64> = TableDefinition::new("open-items");
+/// Folders made for a write: (destination, stored folder) to who made it.
+const FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("folders");
+/// Entries whose temporary file could not be removed yet.
+const LEFTOVERS: TableDefinition<u64, ()> = TableDefinition::new("leftovers");
+
+const JOURNAL_ID: &str = "journal-id";
+const NEXT_ID: &str = "next-id";
+const SWEPT_UPTO: &str = "swept-upto";
 
 /// Why the journal could not be used.
 #[derive(Debug, thiserror::Error)]
@@ -52,6 +73,10 @@ fn storage(e: impl std::fmt::Display) -> JournalError {
     JournalError::Storage(e.to_string())
 }
 
+fn damaged(e: impl std::fmt::Display) -> JournalError {
+    JournalError::Damaged(e.to_string())
+}
+
 /// What allowed this write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -72,6 +97,14 @@ pub struct Actor {
     pub permission: Permission,
 }
 
+/// Which file or folder this is on its drive (the drive's number and the file's number on it):
+/// two names with the same identity are the same file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileId {
+    pub volume: u64,
+    pub index: u64,
+}
+
 /// What is about to be written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlannedWrite {
@@ -83,6 +116,14 @@ pub struct PlannedWrite {
     pub path: String,
     pub size: u64,
     pub actor: Actor,
+    /// The block size the file is sent in (its fingerprint is worked out over these blocks).
+    pub block_size: u64,
+    /// The original's modified time on the old laptop (nanoseconds since 1970), to continue after
+    /// a restart only if the original has not changed.
+    pub source_modified_ns: Option<i64>,
+    /// The approved folder's identity when the write was planned: after a restart nothing is done
+    /// in a folder that is not the same one (another drive under the same letter, say).
+    pub place: Option<FileId>,
 }
 
 /// What a finished file landed as: undo compares against this to keep later edits.
@@ -91,6 +132,8 @@ pub struct Landed {
     pub size: u64,
     /// Nanoseconds since 1970.
     pub modified_ns: Option<i64>,
+    /// Which file it is, so undo never takes a different file made later under the same name.
+    pub file: Option<FileId>,
 }
 
 /// How far a write got.
@@ -98,17 +141,20 @@ pub struct Landed {
 #[serde(rename_all = "kebab-case", tag = "step")]
 pub enum State {
     Planned,
-    /// Its temporary file (in the destination folder) exists.
+    /// Its temporary file (stored path inside the destination) exists.
     Staged {
         temp: String,
     },
-    /// Every byte arrived and was checked, and the file was flushed to disk.
+    /// Every byte arrived and was checked, the file did not change while it was read, and it is
+    /// flushed to disk under its temporary name. `fingerprint` is the whole file's.
     Verified {
         temp: String,
         fingerprint: [u8; 32],
     },
-    /// It has its real name (never replacing another file).
+    /// The real name it is getting, recorded before it gets it (never replacing another file).
+    /// If something took that name first, it moves on to another name.
     Applied {
+        temp: String,
         final_path: String,
         fingerprint: [u8; 32],
     },
@@ -116,6 +162,11 @@ pub enum State {
         final_path: String,
         fingerprint: [u8; 32],
         landed: Landed,
+    },
+    /// An identical file was already at `stored_path`, so nothing was written. It is the person's
+    /// own file: undo never touches it.
+    Existing {
+        stored_path: String,
     },
     /// It did not finish: why, and the step it had reached (for clean-up).
     Failed {
@@ -132,13 +183,17 @@ impl State {
             State::Verified { .. } => "verified",
             State::Applied { .. } => "applied",
             State::Committed { .. } => "committed",
+            State::Existing { .. } => "existing",
             State::Failed { .. } => "failed",
         }
     }
 
-    /// Committed and failed writes are finished.
+    /// Committed, existing and failed writes are finished.
     pub fn is_finished(&self) -> bool {
-        matches!(self, State::Committed { .. } | State::Failed { .. })
+        matches!(
+            self,
+            State::Committed { .. } | State::Existing { .. } | State::Failed { .. }
+        )
     }
 }
 
@@ -150,15 +205,31 @@ pub struct Entry {
     pub state: State,
 }
 
+/// A folder made for a write: which entry made it, and its identity then.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MadeFolder {
+    pub destination: String,
+    /// Its stored path inside the destination.
+    pub folder: String,
+    pub entry: u64,
+    pub id: Option<FileId>,
+}
+
 /// The change journal for a move on this laptop.
 pub struct Journal {
     db: Database,
+    /// This journal's own random number (names its temporary files).
+    journal_id: u64,
 }
 
 impl std::fmt::Debug for Journal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Journal(..)")
     }
+}
+
+fn open_key(write: &PlannedWrite) -> String {
+    format!("{}/{}", write.source_laptop.to_hex(), write.item.to_hex())
 }
 
 impl Journal {
@@ -168,14 +239,14 @@ impl Journal {
             redb::DatabaseError::DatabaseAlreadyOpen => JournalError::InUse,
             other => JournalError::Damaged(other.to_string()),
         })?;
-        let journal = Self { db };
-        journal.check_format()?;
-        Ok(journal)
+        let journal_id = Self::prepare(&db)?;
+        Ok(Self { db, journal_id })
     }
 
-    fn check_format(&self) -> Result<(), JournalError> {
-        let tx = self.db.begin_write().map_err(storage)?;
-        {
+    /// Checks the format and makes every table; returns the journal's own number.
+    fn prepare(db: &Database) -> Result<u64, JournalError> {
+        let tx = db.begin_write().map_err(storage)?;
+        let journal_id = {
             let mut meta = tx.open_table(META).map_err(storage)?;
             let found = meta.get("format").map_err(storage)?.map(|v| v.value());
             match found {
@@ -187,112 +258,242 @@ impl Journal {
                     meta.insert("format", FORMAT).map_err(storage)?;
                 }
             }
+            let mut counters = tx.open_table(COUNTERS).map_err(storage)?;
+            let existing = counters
+                .get(JOURNAL_ID)
+                .map_err(storage)?
+                .map(|v| v.value());
+            let journal_id = match existing {
+                Some(id) => id,
+                None => {
+                    let mut bytes = [0u8; 8];
+                    getrandom::fill(&mut bytes).map_err(storage)?;
+                    let id = u64::from_le_bytes(bytes);
+                    counters.insert(JOURNAL_ID, id).map_err(storage)?;
+                    id
+                }
+            };
+            if counters.get(NEXT_ID).map_err(storage)?.is_none() {
+                counters.insert(NEXT_ID, 1).map_err(storage)?;
+            }
             tx.open_table(ENTRIES).map_err(storage)?;
-        }
-        tx.commit().map_err(storage)
+            tx.open_table(UNFINISHED).map_err(storage)?;
+            tx.open_table(OPEN_ITEMS).map_err(storage)?;
+            tx.open_table(FOLDERS).map_err(storage)?;
+            tx.open_table(LEFTOVERS).map_err(storage)?;
+            journal_id
+        };
+        tx.commit().map_err(storage)?;
+        Ok(journal_id)
     }
 
-    /// Records a write about to start; returns its entry number (never reused).
+    /// The tag of entry `id`'s temporary file: this journal's number and the entry's, so the
+    /// name is known before the file exists and differs from every other journal's.
+    pub fn temp_tag(&self, id: u64) -> String {
+        format!("{:016x}-{id}", self.journal_id)
+    }
+
+    /// Records a write about to start; returns its entry number (never reused). A write of the
+    /// same file from the same old laptop still unfinished is ended as failed in the same step
+    /// (one attempt at a file at a time); its temporary file is cleaned up by recovery.
     pub fn plan(&self, write: &PlannedWrite) -> Result<u64, JournalError> {
         let tx = self.db.begin_write().map_err(storage)?;
         let id = {
-            let mut entries = tx.open_table(ENTRIES).map_err(storage)?;
-            let id = entries
-                .last()
+            let mut counters = tx.open_table(COUNTERS).map_err(storage)?;
+            let id = counters
+                .get(NEXT_ID)
                 .map_err(storage)?
-                .map_or(1, |(k, _)| k.value() + 1);
+                .map(|v| v.value())
+                .ok_or_else(|| damaged("no next entry number"))?;
+            counters.insert(NEXT_ID, id + 1).map_err(storage)?;
+            let mut open = tx.open_table(OPEN_ITEMS).map_err(storage)?;
+            let key = open_key(write);
+            let earlier = open.get(key.as_str()).map_err(storage)?.map(|v| v.value());
+            open.insert(key.as_str(), id).map_err(storage)?;
+            drop(open);
+            if let Some(earlier) = earlier {
+                let mut entries = tx.open_table(ENTRIES).map_err(storage)?;
+                let mut old = read_entry(&entries, earlier)?;
+                if !old.state.is_finished() {
+                    old.state = State::Failed {
+                        why: "it was started again".into(),
+                        reached: Box::new(old.state.clone()),
+                    };
+                    write_entry(&mut entries, &old)?;
+                    let mut unfinished = tx.open_table(UNFINISHED).map_err(storage)?;
+                    unfinished.remove(earlier).map_err(storage)?;
+                }
+            }
             let entry = Entry {
                 id,
                 write: write.clone(),
                 state: State::Planned,
             };
-            let bytes = serde_json::to_vec(&entry).map_err(storage)?;
-            entries.insert(id, bytes.as_slice()).map_err(storage)?;
+            let mut entries = tx.open_table(ENTRIES).map_err(storage)?;
+            write_entry(&mut entries, &entry)?;
+            let mut unfinished = tx.open_table(UNFINISHED).map_err(storage)?;
+            unfinished.insert(id, ()).map_err(storage)?;
             id
         };
         tx.commit().map_err(storage)?;
         Ok(id)
     }
 
-    /// Its temporary file `temp` exists.
-    pub fn staged(&self, id: u64, temp: &str) -> Result<(), JournalError> {
-        self.step(id, "staged", |s| match s {
-            State::Planned => Some(State::Staged { temp: temp.into() }),
-            _ => None,
-        })
+    /// Its temporary file (stored path `temp`) exists; `made` are the folders made for it (stored
+    /// paths, with their identity). A folder already recorded as made keeps its first record.
+    pub fn staged(
+        &self,
+        id: u64,
+        temp: &str,
+        made: &[(String, Option<FileId>)],
+    ) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "staged",
+            |s| match s {
+                State::Planned => Some(State::Staged { temp: temp.into() }),
+                _ => None,
+            },
+            |tx, entry| {
+                let mut folders = tx.open_table(FOLDERS).map_err(storage)?;
+                for (folder, folder_id) in made {
+                    let key = (entry.write.destination.as_str(), folder.as_str());
+                    if folders.get(key).map_err(storage)?.is_none() {
+                        let record = MadeFolder {
+                            destination: entry.write.destination.clone(),
+                            folder: folder.clone(),
+                            entry: id,
+                            id: *folder_id,
+                        };
+                        let bytes = serde_json::to_vec(&record).map_err(storage)?;
+                        folders.insert(key, bytes.as_slice()).map_err(storage)?;
+                    }
+                }
+                Ok(())
+            },
+        )
     }
 
-    /// Every byte arrived, was checked, and was flushed to disk; `fingerprint` is the whole file's.
+    /// Every byte arrived and was checked, the file did not change while it was read, and it was
+    /// flushed to disk; `fingerprint` is the whole file's.
     pub fn verified(&self, id: u64, fingerprint: [u8; 32]) -> Result<(), JournalError> {
-        self.step(id, "verified", |s| match s {
-            State::Staged { temp } => Some(State::Verified {
-                temp: temp.clone(),
-                fingerprint,
-            }),
-            _ => None,
-        })
+        self.step(
+            id,
+            "verified",
+            |s| match s {
+                State::Staged { temp } => Some(State::Verified {
+                    temp: temp.clone(),
+                    fingerprint,
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
     }
 
-    /// It has its real name, `final_path` inside the destination.
+    /// The real name it is getting, `final_path` inside the destination: recorded before the file
+    /// gets it. Called again with another name if something took this one first.
     pub fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
-        self.step(id, "applied", |s| match s {
-            State::Verified { fingerprint, .. } => Some(State::Applied {
-                final_path: final_path.into(),
-                fingerprint: *fingerprint,
-            }),
-            _ => None,
-        })
+        self.step(
+            id,
+            "applied",
+            |s| match s {
+                State::Verified { temp, fingerprint }
+                | State::Applied {
+                    temp, fingerprint, ..
+                } => Some(State::Applied {
+                    temp: temp.clone(),
+                    final_path: final_path.into(),
+                    fingerprint: *fingerprint,
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
     }
 
-    /// Finished, as `landed`.
+    /// Finished, under the name it was applied with, as `landed`.
     pub fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
-        self.step(id, "committed", |s| match s {
-            State::Applied {
-                final_path,
-                fingerprint,
-            } => Some(State::Committed {
-                final_path: final_path.clone(),
-                fingerprint: *fingerprint,
-                landed,
-            }),
-            _ => None,
-        })
+        self.step(
+            id,
+            "committed",
+            |s| match s {
+                State::Applied {
+                    final_path,
+                    fingerprint,
+                    ..
+                } => Some(State::Committed {
+                    final_path: final_path.clone(),
+                    fingerprint: *fingerprint,
+                    landed,
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// An identical file was already at `stored_path`, so nothing was written.
+    pub fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "existing",
+            |s| match s {
+                State::Planned | State::Staged { .. } => Some(State::Existing {
+                    stored_path: stored_path.into(),
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
     }
 
     /// It did not finish, because of `why`.
     pub fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
-        self.step(id, "failed", |s| {
-            (!s.is_finished()).then(|| State::Failed {
-                why: why.into(),
-                reached: Box::new(s.clone()),
-            })
-        })
+        self.step(
+            id,
+            "failed",
+            |s| {
+                (!s.is_finished()).then(|| State::Failed {
+                    why: why.into(),
+                    reached: Box::new(s.clone()),
+                })
+            },
+            |_, _| Ok(()),
+        )
     }
 
-    /// Takes one step as its own committed transaction, if `next` allows it from where it is.
+    /// Takes one step as its own committed transaction, if `next` allows it from where it is, with
+    /// `also` recorded in the same transaction. A step that finishes the write takes it off the
+    /// unfinished lists.
     fn step(
         &self,
         id: u64,
         to: &'static str,
         next: impl FnOnce(&State) -> Option<State>,
+        also: impl FnOnce(&redb::WriteTransaction, &Entry) -> Result<(), JournalError>,
     ) -> Result<(), JournalError> {
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let mut entries = tx.open_table(ENTRIES).map_err(storage)?;
-            let mut entry: Entry = {
-                let found = entries
-                    .get(id)
-                    .map_err(storage)?
-                    .ok_or(JournalError::NoSuchEntry(id))?;
-                serde_json::from_slice(found.value())
-                    .map_err(|e| JournalError::Damaged(e.to_string()))?
-            };
+            let mut entry = read_entry(&entries, id)?;
             entry.state = next(&entry.state).ok_or(JournalError::OutOfOrder {
                 from: entry.state.name(),
                 to,
             })?;
-            let bytes = serde_json::to_vec(&entry).map_err(storage)?;
-            entries.insert(id, bytes.as_slice()).map_err(storage)?;
+            write_entry(&mut entries, &entry)?;
+            drop(entries);
+            if entry.state.is_finished() {
+                let mut unfinished = tx.open_table(UNFINISHED).map_err(storage)?;
+                unfinished.remove(id).map_err(storage)?;
+                let mut open = tx.open_table(OPEN_ITEMS).map_err(storage)?;
+                let key = open_key(&entry.write);
+                let current = open.get(key.as_str()).map_err(storage)?.map(|v| v.value());
+                if current == Some(id) {
+                    open.remove(key.as_str()).map_err(storage)?;
+                }
+            }
+            also(&tx, &entry)?;
         }
         tx.commit().map_err(storage)
     }
@@ -304,33 +505,117 @@ impl Journal {
         entries
             .get(id)
             .map_err(storage)?
-            .map(|v| {
-                serde_json::from_slice(v.value()).map_err(|e| JournalError::Damaged(e.to_string()))
-            })
+            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
             .transpose()
     }
 
     /// Every entry, in the order planned.
     pub fn entries(&self) -> Result<Vec<Entry>, JournalError> {
+        self.entries_after(0)
+    }
+
+    /// Every entry numbered above `after`, in the order planned.
+    pub fn entries_after(&self, after: u64) -> Result<Vec<Entry>, JournalError> {
         let tx = self.db.begin_read().map_err(storage)?;
         let entries = tx.open_table(ENTRIES).map_err(storage)?;
         let mut out = Vec::new();
-        for row in entries.iter().map_err(storage)? {
+        for row in entries.range(after.saturating_add(1)..).map_err(storage)? {
             let (_, v) = row.map_err(storage)?;
-            out.push(
-                serde_json::from_slice(v.value())
-                    .map_err(|e| JournalError::Damaged(e.to_string()))?,
-            );
+            out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
         }
         Ok(out)
     }
 
-    /// Entries not yet committed or failed, in the order planned: what recovery looks at.
+    /// Entries not yet finished, in the order planned: what recovery looks at. Only these are
+    /// read, however long the journal is.
     pub fn unfinished(&self) -> Result<Vec<Entry>, JournalError> {
-        Ok(self
-            .entries()?
-            .into_iter()
-            .filter(|e| !e.state.is_finished())
-            .collect())
+        let tx = self.db.begin_read().map_err(storage)?;
+        let unfinished = tx.open_table(UNFINISHED).map_err(storage)?;
+        let entries = tx.open_table(ENTRIES).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in unfinished.iter().map_err(storage)? {
+            let (k, _) = row.map_err(storage)?;
+            out.push(read_entry(&entries, k.value())?);
+        }
+        Ok(out)
     }
+
+    /// The folders made for writes, in no particular order.
+    pub fn made_folders(&self) -> Result<Vec<MadeFolder>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let folders = tx.open_table(FOLDERS).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in folders.iter().map_err(storage)? {
+            let (_, v) = row.map_err(storage)?;
+            out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
+        }
+        Ok(out)
+    }
+
+    /// Entries up to this number have had their temporary files cleaned up.
+    pub fn swept_upto(&self) -> Result<u64, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let counters = tx.open_table(COUNTERS).map_err(storage)?;
+        Ok(counters
+            .get(SWEPT_UPTO)
+            .map_err(storage)?
+            .map_or(0, |v| v.value()))
+    }
+
+    /// Records a clean-up in one transaction: entries up to `upto` are swept, `leftovers` still
+    /// have a temporary file that could not be removed (looked at again next time), and `cleared`
+    /// no longer do.
+    pub fn record_sweep(
+        &self,
+        upto: u64,
+        leftovers: &[u64],
+        cleared: &[u64],
+    ) -> Result<(), JournalError> {
+        let tx = self.db.begin_write().map_err(storage)?;
+        {
+            let mut counters = tx.open_table(COUNTERS).map_err(storage)?;
+            counters.insert(SWEPT_UPTO, upto).map_err(storage)?;
+            let mut left = tx.open_table(LEFTOVERS).map_err(storage)?;
+            for id in cleared {
+                left.remove(*id).map_err(storage)?;
+            }
+            for id in leftovers {
+                left.insert(*id, ()).map_err(storage)?;
+            }
+        }
+        tx.commit().map_err(storage)
+    }
+
+    /// Entries whose temporary file could not be removed at the last clean-up.
+    pub fn leftovers(&self) -> Result<Vec<u64>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let left = tx.open_table(LEFTOVERS).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in left.iter().map_err(storage)? {
+            out.push(row.map_err(storage)?.0.value());
+        }
+        Ok(out)
+    }
+}
+
+fn read_entry(
+    entries: &impl ReadableTable<u64, &'static [u8]>,
+    id: u64,
+) -> Result<Entry, JournalError> {
+    let found = entries
+        .get(id)
+        .map_err(storage)?
+        .ok_or(JournalError::NoSuchEntry(id))?;
+    serde_json::from_slice(found.value()).map_err(damaged)
+}
+
+fn write_entry(
+    entries: &mut redb::Table<'_, u64, &'static [u8]>,
+    entry: &Entry,
+) -> Result<(), JournalError> {
+    let bytes = serde_json::to_vec(entry).map_err(storage)?;
+    entries
+        .insert(entry.id, bytes.as_slice())
+        .map_err(storage)?;
+    Ok(())
 }

@@ -47,6 +47,7 @@ mod netlanes;
 mod progress;
 mod queue;
 mod reading;
+mod recovery;
 mod sections;
 mod session;
 
@@ -60,6 +61,7 @@ pub use netlanes::{LinkLanes, accept_lanes};
 pub use progress::{Progress, TimeLeft};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
+pub use recovery::{Recovered, recover};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
     Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob,
@@ -118,6 +120,65 @@ pub fn block_size_for(len: u64) -> u64 {
     size
 }
 
+/// Names the whole-file fingerprint, so it can never be confused with any other BLAKE3 value.
+const FINGERPRINT_CONTEXT: &str = "PCTwin 2026-10-08 whole-file fingerprint v1";
+
+/// The whole file's fingerprint, from its size, its block size and each block's BLAKE3
+/// fingerprint in order (the file's contents, block by block). Worked out as blocks arrive in any
+/// order, without reading the file again; [`fingerprint_reader`] works it out from the file.
+pub fn file_fingerprint<'a>(
+    size: u64,
+    block_size: u64,
+    blocks: impl IntoIterator<Item = &'a [u8; 32]>,
+) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new_derive_key(FINGERPRINT_CONTEXT);
+    hasher.update(&size.to_le_bytes());
+    hasher.update(&block_size.to_le_bytes());
+    for block in blocks {
+        hasher.update(block);
+    }
+    *hasher.finalize().as_bytes()
+}
+
+/// The whole-file fingerprint of exactly `size` bytes read from `reader` in blocks of
+/// `block_size`; `None` if there are fewer or more bytes than that, or the block size is not one
+/// a file is sent in.
+pub fn fingerprint_reader(
+    reader: &mut impl Read,
+    size: u64,
+    block_size: u64,
+) -> io::Result<Option<[u8; 32]>> {
+    if block_size == 0 || block_size > MAX_BLOCK {
+        return Ok(None);
+    }
+    let mut hashes = Vec::new();
+    let mut buf = vec![0u8; usize::try_from(block_size).unwrap_or(usize::MAX)];
+    let mut left = size;
+    while left > 0 {
+        let len = usize::try_from(left.min(block_size)).unwrap_or(usize::MAX);
+        match reader.read_exact(&mut buf[..len]) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e),
+        }
+        hashes.push(*blake3::hash(&buf[..len]).as_bytes());
+        left -= len as u64;
+    }
+    // Longer than it should be.
+    if reader.read(&mut [0u8; 1])? != 0 {
+        return Ok(None);
+    }
+    Ok(Some(file_fingerprint(size, block_size, &hashes)))
+}
+
+/// A time as nanoseconds since 1970 (negative before).
+pub(crate) fn nanos(t: std::time::SystemTime) -> i64 {
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => i64::try_from(d.as_nanos()).unwrap_or(i64::MAX),
+        Err(e) => -i64::try_from(e.duration().as_nanos()).unwrap_or(i64::MAX),
+    }
+}
+
 /// What tells whether a file changed: its size and modified time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stamp {
@@ -127,13 +188,7 @@ pub struct Stamp {
 
 impl Stamp {
     fn of(meta: &std::fs::Metadata) -> Self {
-        let modified_ns =
-            meta.modified()
-                .ok()
-                .map(|t| match t.duration_since(std::time::UNIX_EPOCH) {
-                    Ok(d) => i64::try_from(d.as_nanos()).unwrap_or(i64::MAX),
-                    Err(e) => -i64::try_from(e.duration().as_nanos()).unwrap_or(i64::MAX),
-                });
+        let modified_ns = meta.modified().ok().map(nanos);
         Self {
             size: meta.len(),
             modified_ns,

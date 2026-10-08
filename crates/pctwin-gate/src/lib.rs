@@ -366,6 +366,8 @@ pub enum GateError {
     TooScattered,
     #[error("there is not enough free space on the new laptop for this file")]
     NoSpace,
+    #[error("a temporary name's tag must be 1 to 64 of a-z, 0-9 and '-'")]
+    BadTag,
     #[error("writing failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -433,6 +435,31 @@ impl Destination {
         path: &IncomingPath,
         announced: u64,
     ) -> Result<IncomingFile<'d>, GateError> {
+        self.create_with(path, announced, None)
+    }
+
+    /// As [`create_file`](Self::create_file), under the temporary name [`temp_name`]`(tag)`, which
+    /// the change journal chose and recorded before the file exists, so after a crash it knows
+    /// exactly which file is its own. `tag` is 1 to 64 of `a`-`z`, `0`-`9` and `-`. A file
+    /// already under that name is never reused or replaced: the start is refused.
+    pub fn create_file_tagged<'d>(
+        &'d self,
+        path: &IncomingPath,
+        announced: u64,
+        tag: &str,
+    ) -> Result<IncomingFile<'d>, GateError> {
+        if !is_plain_tag(tag) {
+            return Err(GateError::BadTag);
+        }
+        self.create_with(path, announced, Some(tag))
+    }
+
+    fn create_with<'d>(
+        &'d self,
+        path: &IncomingPath,
+        announced: u64,
+        tag: Option<&str>,
+    ) -> Result<IncomingFile<'d>, GateError> {
         let host = Platform::host();
         let (file_name, folders) = path
             .components()
@@ -440,16 +467,29 @@ impl Destination {
             .ok_or(GateError::Path(PathError::Empty))?;
         let mut changes = Vec::new();
         let mut shown = Vec::new();
+        let mut created = Vec::new();
         let mut dir = self.root.try_clone()?;
         for folder in folders {
             let converted = convert_name(folder, host);
             changes.extend(converted.changes.iter().copied());
-            dir = open_or_create_folder(&dir, &converted.name)?;
+            let (opened, made) = open_or_create_folder(&dir, &converted.name)?;
+            dir = opened;
             shown.push(converted.name);
+            if made {
+                created.push(shown.join("/"));
+            }
         }
         let converted = convert_name(file_name, host);
         changes.extend(converted.changes.iter().copied());
-        let (file, temp_name) = create_temp_file(&dir)?;
+        let (file, temp_name) = match tag {
+            Some(tag) => {
+                let name = temp_name(tag);
+                let mut options = OpenOptions::new();
+                options.write(true).create_new(true);
+                (dir.open_with(&name, &options)?, name)
+            }
+            None => create_temp_file(&dir)?,
+        };
         Ok(IncomingFile {
             destination: self,
             dir,
@@ -464,7 +504,158 @@ impl Destination {
             sent_path: path.original().to_string(),
             changes,
             modified: None,
+            created,
         })
+    }
+
+    /// The folder (inside the approved folder, `/` between folders) a file sent as `path` lands
+    /// in, with names converted exactly as for writing. Nothing on disk is looked at.
+    pub fn folder_of(&self, path: &IncomingPath) -> String {
+        let host = Platform::host();
+        let parts = path.components();
+        parts[..parts.len().saturating_sub(1)]
+            .iter()
+            .map(|f| convert_name(f, host).name)
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    /// The size of the regular file at the stored path `stored`, or `None` if there is none (a
+    /// missing folder, or a folder or link in its place). Never follows a link or creates
+    /// anything.
+    pub fn look(&self, stored: &str) -> io::Result<Option<u64>> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(None);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => Ok(Some(meta.len())),
+            Ok(_) => Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Removes PCTwin's temporary file at the stored path `stored`. Only a regular file with a
+    /// temporary `.pctwin-` name is ever removed; any other name is refused. Returns whether a
+    /// file was removed.
+    pub fn remove_temp(&self, stored: &str) -> io::Result<bool> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(false);
+        };
+        if !is_temp_name(name) {
+            return Err(invalid("not a PCTwin temporary file"));
+        }
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        match dir.remove_file(name) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The regular file at the stored path `stored`: its size, modified time and identity, or
+    /// `None` if there is none. Never follows a link.
+    pub fn stat(&self, stored: &str) -> io::Result<Option<Stat>> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(None);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        }
+        let file = dir.open(name)?.into_std();
+        let meta = file.metadata()?;
+        Ok(Some(Stat {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            id: identity(&file)?.0,
+        }))
+    }
+
+    /// The identity of the folder at the stored path `stored` (`""` is the approved folder
+    /// itself), or `None` if there is no folder there. Never follows a link.
+    pub fn folder_identity(&self, stored: &str) -> io::Result<Option<FileId>> {
+        let dir = if stored.is_empty() {
+            self.root.try_clone()?
+        } else {
+            let Some((parent, name)) = self.open_stored_folder(stored)? else {
+                return Ok(None);
+            };
+            match parent.symlink_metadata(name) {
+                Ok(meta) if meta.is_dir() => parent.open_dir(name)?,
+                Ok(_) => return Ok(None),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => return Err(e),
+            }
+        };
+        Ok(Some(identity(&dir.into_std_file())?.0))
+    }
+
+    /// After a restart: the sealed temporary file at the stored path `temp` (every byte checked
+    /// and on disk before the crash), to give the real name a file sent as `sent` gets. Only a
+    /// regular file with a PCTwin temporary name is accepted.
+    pub fn reopen_sealed<'d>(
+        &'d self,
+        sent: &IncomingPath,
+        temp: &str,
+    ) -> Result<Sealed<'d>, GateError> {
+        let not_temp = || GateError::Io(invalid("not a PCTwin temporary file"));
+        let (dir, temp_name) = self.open_stored_folder(temp)?.ok_or_else(not_temp)?;
+        if !is_temp_name(temp_name)
+            || !dir
+                .symlink_metadata(temp_name)
+                .is_ok_and(|meta| meta.is_file())
+        {
+            return Err(not_temp());
+        }
+        let host = Platform::host();
+        let mut changes: Vec<NameChange> = Vec::new();
+        for part in sent.components() {
+            for c in convert_name(part, host).changes {
+                if !changes.contains(&c) {
+                    changes.push(c);
+                }
+            }
+        }
+        let name = sent
+            .components()
+            .last()
+            .map(|n| convert_name(n, host).name)
+            .ok_or(GateError::Path(PathError::Empty))?;
+        Ok(Sealed {
+            destination: self,
+            dir,
+            temp: Some(temp_name.to_string()),
+            folder: temp.rsplit_once('/').map_or("", |(f, _)| f).to_string(),
+            name,
+            sent_path: sent.original().to_string(),
+            changes,
+        })
+    }
+
+    /// Opens the folder of the stored path `stored` without following links or creating
+    /// anything: the folder and the file name, or `None` if a folder on the way is missing.
+    fn open_stored_folder<'s>(&self, stored: &'s str) -> io::Result<Option<(Dir, &'s str)>> {
+        let parts = stored_parts(stored)?;
+        let (name, folders) = parts.split_last().ok_or_else(|| invalid("empty path"))?;
+        let mut dir = self.root.try_clone()?;
+        for folder in folders {
+            match dir.symlink_metadata(folder) {
+                Ok(meta) if meta.is_dir() => {}
+                Ok(_) => return Ok(None),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Err(e) => return Err(e),
+            }
+            dir = dir.open_dir(folder)?;
+        }
+        Ok(Some((dir, name)))
     }
 
     /// Where a file sent as `path` would be stored, if a file is already there: its stored path
@@ -513,16 +704,11 @@ impl Destination {
         Ok(dir.open(file_name)?.into_std())
     }
 
-    /// Gives the finished temporary file a real name that nothing else uses, never replacing
-    /// another file. Returns the name used.
-    fn claim_name(
-        &self,
-        dir: &Dir,
-        folder: &str,
-        name: &str,
-        temp: &str,
-    ) -> Result<(String, bool), GateError> {
-        if claim(dir, name, temp)? {
+    /// The first name for `name` in `dir` that nothing uses now: `name` itself, or a numbered one
+    /// such as `name (2).ext`. Nothing is claimed: another program can still take it first, so a
+    /// claim never replaces anything and a taken name is simply tried again.
+    fn free_name(&self, dir: &Dir, folder: &str, name: &str) -> Result<(String, bool), GateError> {
+        if !name_taken(dir, name)? {
             return Ok((name.to_string(), false));
         }
         let hints = || {
@@ -545,7 +731,7 @@ impl Destination {
                 "{}{suffix}",
                 cut_to(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len()))
             );
-            if claim(dir, &candidate, temp)? {
+            if !name_taken(dir, &candidate)? {
                 hints().remember(key, attempt + 1);
                 return Ok((candidate, true));
             }
@@ -554,21 +740,147 @@ impl Destination {
     }
 }
 
-/// Gives the finished file `temp` the name `name` if nothing has it, never replacing anything.
-/// Returns `false` when the name is taken. On failure nothing is left under `name`.
-fn claim(dir: &Dir, name: &str, temp: &str) -> Result<bool, GateError> {
-    // A hard link makes the whole file appear under its name at once, or not at all.
-    match dir.hard_link(temp, dir, name) {
-        Ok(()) => {
-            // If another program holds the temporary name, it stays behind as a copy; the file
-            // under its real name is complete either way.
-            let _ = dir.remove_file(temp);
-            Ok(true)
-        }
-        Err(e) if is_taken(dir, name, &e) => Ok(false),
-        // Some drives (FAT, exFAT) have no hard links.
-        Err(_) => claim_by_reservation(dir, name, temp),
+/// Whether something already has `name` in `dir`.
+fn name_taken(dir: &Dir, name: &str) -> io::Result<bool> {
+    match dir.symlink_metadata(name) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
     }
+}
+
+/// How a finished file got its real name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Linked {
+    /// A second name for the same file: the temporary name is still there until it is kept.
+    Hard,
+    /// Moved onto a reservation (drives without hard links): the temporary name is gone.
+    Moved,
+}
+
+/// Gives the finished file `temp` the name `name` if nothing has it, never replacing anything.
+/// Returns `None` when the name is taken. On failure nothing is left under `name`.
+fn claim(dir: &Dir, name: &str, temp: &str) -> Result<Option<Linked>, GateError> {
+    // A hard link makes the whole file appear under its name at once, or not at all. The
+    // temporary name stays until the journal has recorded the real one.
+    match dir.hard_link(temp, dir, name) {
+        Ok(()) => Ok(Some(Linked::Hard)),
+        Err(e) if is_taken(dir, name, &e) => Ok(None),
+        // Some drives (FAT, exFAT) have no hard links.
+        Err(_) => Ok(claim_by_reservation(dir, name, temp)?.then_some(Linked::Moved)),
+    }
+}
+
+/// Which file or folder this is on its drive: the drive's number and the file's number on it.
+/// Two names with the same identity are the same file. A file that is edited keeps its identity;
+/// one deleted and made again usually gets a new one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileId {
+    pub volume: u64,
+    pub index: u64,
+}
+
+/// A stored file's size, modified time and identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stat {
+    pub len: u64,
+    pub modified: Option<std::time::SystemTime>,
+    pub id: FileId,
+}
+
+#[cfg(unix)]
+fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = file.metadata()?;
+    Ok((
+        FileId {
+            volume: meta.dev(),
+            index: meta.ino(),
+        },
+        meta.nlink(),
+    ))
+}
+
+#[cfg(windows)]
+fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
+    let info = winapi_util::file::information(file)?;
+    Ok((
+        FileId {
+            volume: info.volume_serial_number(),
+            index: info.file_index(),
+        },
+        info.number_of_links(),
+    ))
+}
+
+/// Makes sure a file's new name is on disk before the journal moves on, by flushing the folder
+/// that holds it (a name is in the folder's list, not the file): on Unix through the folder's
+/// handle; on Windows by opening the folder itself for writing (backup semantics) and flushing
+/// it, and the file too. Best effort: some drives cannot do this, and recovery after a crash then
+/// treats a lost name honestly (the file is reported failed).
+fn flush_name(dir: &Dir, name: &str) {
+    #[cfg(unix)]
+    {
+        let _ = name;
+        if let Ok(dir) = dir.try_clone() {
+            let _ = dir.into_std_file().sync_all();
+        }
+    }
+    #[cfg(windows)]
+    {
+        /// Lets Windows open a folder as a handle.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        let mut options = OpenOptions::new();
+        options.write(true);
+        if let Ok(file) = dir.open_with(name, &options) {
+            let _ = file.sync_all();
+        }
+        let mut folder = OpenOptions::new();
+        folder.write(true);
+        cap_std::fs::OpenOptionsExt::custom_flags(&mut folder, FILE_FLAG_BACKUP_SEMANTICS);
+        if let Ok(handle) = dir.open_with(".", &folder) {
+            let _ = handle.sync_all();
+        }
+    }
+}
+
+/// Longest tag for a temporary name, in bytes.
+const MAX_TAG_BYTES: usize = 64;
+
+/// The temporary name for a write tagged `tag`: `.pctwin-<tag>.part`.
+pub fn temp_name(tag: &str) -> String {
+    format!(".pctwin-{tag}.part")
+}
+
+fn is_plain_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= MAX_TAG_BYTES
+        && tag
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Whether `name` is one of PCTwin's temporary names.
+fn is_temp_name(name: &str) -> bool {
+    name.strip_prefix(".pctwin-")
+        .and_then(|rest| rest.strip_suffix(".part"))
+        .is_some_and(is_plain_tag)
+}
+
+fn invalid(why: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, why.to_string())
+}
+
+/// The parts of a stored path (as the gate gave it), refusing anything that could climb out.
+fn stored_parts(stored: &str) -> io::Result<Vec<&str>> {
+    let parts: Vec<&str> = stored.split('/').collect();
+    if parts
+        .iter()
+        .any(|p| p.is_empty() || *p == "." || *p == ".." || p.contains(['\\', ':', '\0']))
+    {
+        return Err(invalid("not a stored path"));
+    }
+    Ok(parts)
 }
 
 /// For drives without hard links: reserve the name (never replacing anything), then move the
@@ -704,18 +1016,20 @@ impl Destinations {
     }
 }
 
-fn open_or_create_folder(parent: &Dir, name: &str) -> Result<Dir, GateError> {
-    match parent.create_dir(name) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+/// Opens the folder `name` in `parent`, creating it if there is none; says whether it was
+/// created here (a folder that was already there is the person's own).
+fn open_or_create_folder(parent: &Dir, name: &str) -> Result<(Dir, bool), GateError> {
+    let created = match parent.create_dir(name) {
+        Ok(()) => true,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
         Err(e) => return Err(e.into()),
-    }
+    };
     // cap-std refuses to follow a link out of the approved folder.
     let meta = parent.symlink_metadata(name)?;
     if !meta.is_dir() {
         return Err(GateError::Conflict);
     }
-    Ok(parent.open_dir(name)?)
+    Ok((parent.open_dir(name)?, created))
 }
 
 /// What a space reservation's result means: reserved, not possible on this drive (the copy goes
@@ -787,9 +1101,11 @@ pub struct IncomingFile<'d> {
     changes: Vec<NameChange>,
     /// The modified time to give the finished file (the original's).
     modified: Option<std::time::SystemTime>,
+    /// Folders made for this file (stored paths, outermost first).
+    created: Vec<String>,
 }
 
-impl IncomingFile<'_> {
+impl<'d> IncomingFile<'d> {
     /// Reserves disk space for the whole announced size now, so a full disk shows at the start
     /// rather than partway through (the approach rclone takes). Returns `false` when this drive
     /// cannot reserve space (some USB and network drives); the file can still be written.
@@ -855,9 +1171,26 @@ impl IncomingFile<'_> {
         self.modified = Some(time);
     }
 
+    /// Where the temporary file is: its stored path inside the approved folder.
+    pub fn temp_path(&self) -> String {
+        stored_path(&self.folder, self.temp_name.as_deref().unwrap_or_default())
+    }
+
+    /// The folders made for this file because they were not there (stored paths, outermost
+    /// first). Folders that were already there are the person's own and are never listed.
+    pub fn created_folders(&self) -> &[String] {
+        &self.created
+    }
+
     /// Checks every announced byte arrived, makes sure it is on disk, and gives the file its real
     /// name. On any failure the partial file is removed.
-    pub fn finish(mut self) -> Result<Finished, GateError> {
+    pub fn finish(self) -> Result<Finished, GateError> {
+        Ok(self.seal()?.claim()?.keep())
+    }
+
+    /// Checks every announced byte arrived and makes sure all of it (and its modified time) is on
+    /// disk, still under its temporary name. On any failure the partial file is removed.
+    pub fn seal(mut self) -> Result<Sealed<'d>, GateError> {
         // The count of bytes that arrived decides, never the file's length: a reserved file is
         // already full length, with zeros where nothing has arrived yet.
         if self.received != self.announced {
@@ -875,25 +1208,170 @@ impl IncomingFile<'_> {
         } else {
             drop(file);
         }
-        let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
-        let (name, clashed) =
-            self.destination
-                .claim_name(&self.dir, &self.folder, &self.name, &temp)?;
-        // The file now has its real name; nothing is left to clean up.
-        self.temp_name = None;
-        if clashed {
-            self.changes.push(NameChange::NameClash);
-        }
-        let final_path = if self.folder.is_empty() {
-            name
-        } else {
-            format!("{}/{name}", self.folder)
-        };
-        Ok(Finished {
-            final_path,
+        let dir = self.dir.try_clone()?;
+        let temp = self.temp_name.take().ok_or(GateError::Conflict)?;
+        Ok(Sealed {
+            destination: self.destination,
+            dir,
+            temp: Some(temp),
+            folder: std::mem::take(&mut self.folder),
+            name: std::mem::take(&mut self.name),
             sent_path: std::mem::take(&mut self.sent_path),
             changes: std::mem::take(&mut self.changes),
         })
+    }
+}
+
+fn stored_path(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        name.to_string()
+    } else {
+        format!("{folder}/{name}")
+    }
+}
+
+/// A received file with every byte checked and on disk, still under its temporary name.
+/// [`claim`](Self::claim) gives it its real name. Dropping it removes it.
+pub struct Sealed<'d> {
+    destination: &'d Destination,
+    dir: Dir,
+    temp: Option<String>,
+    folder: String,
+    name: String,
+    sent_path: String,
+    changes: Vec<NameChange>,
+}
+
+impl<'d> Sealed<'d> {
+    /// Where the temporary file is: its stored path inside the approved folder.
+    pub fn temp_path(&self) -> String {
+        stored_path(&self.folder, self.temp.as_deref().unwrap_or_default())
+    }
+
+    /// The real name (as a stored path) this file would get now: its own name, or a numbered one
+    /// if that is taken. Nothing is claimed yet: record it in the journal first, then
+    /// [`claim_as`](Self::claim_as).
+    pub fn next_name(&self) -> Result<String, GateError> {
+        let (name, _) = self
+            .destination
+            .free_name(&self.dir, &self.folder, &self.name)?;
+        Ok(stored_path(&self.folder, &name))
+    }
+
+    /// Gives the file the real name `stored` (a name in its own folder), never replacing anything,
+    /// and makes sure the name is on disk. If something took that name meanwhile, the file comes
+    /// back unchanged (`Err`) to try [`next_name`](Self::next_name) again. Where the drive has hard
+    /// links the temporary name stays until [`Claimed::keep`].
+    pub fn claim_as(mut self, stored: &str) -> Result<Result<Claimed<'d>, Self>, GateError> {
+        let name = self.name_in_folder(stored)?;
+        let temp = self.temp.clone().ok_or(GateError::Conflict)?;
+        let Some(linked) = claim(&self.dir, &name, &temp)? else {
+            return Ok(Err(self));
+        };
+        self.temp = None;
+        flush_name(&self.dir, &name);
+        Ok(Ok(
+            self.claimed(name, (linked == Linked::Hard).then_some(temp))
+        ))
+    }
+
+    /// For a drive without hard links, after a crash: the real name `stored` holds only the empty
+    /// reservation made for this file just before the crash, so the file is moved onto it. Refused
+    /// unless what is there is an empty regular file.
+    pub fn take_reservation(mut self, stored: &str) -> Result<Claimed<'d>, GateError> {
+        let name = self.name_in_folder(stored)?;
+        let temp = self.temp.clone().ok_or(GateError::Conflict)?;
+        let meta = self.dir.symlink_metadata(&name)?;
+        if !meta.is_file() || meta.len() != 0 {
+            return Err(GateError::Conflict);
+        }
+        self.dir.rename(&temp, &self.dir, &name)?;
+        self.temp = None;
+        flush_name(&self.dir, &name);
+        Ok(self.claimed(name, None))
+    }
+
+    /// Gives the file a real name that nothing else uses, never replacing another file (without
+    /// a journal: the name is not recorded first).
+    pub fn claim(self) -> Result<Claimed<'d>, GateError> {
+        let mut sealed = self;
+        // Each try fails only if another program took the free name in between.
+        for _ in 0..MAX_CLAIM_RACES {
+            let name = sealed.next_name()?;
+            match sealed.claim_as(&name)? {
+                Ok(claimed) => return Ok(claimed),
+                Err(back) => sealed = back,
+            }
+        }
+        Err(GateError::TooManyClashes)
+    }
+
+    /// The file name part of `stored`, which must be in this file's own folder.
+    fn name_in_folder(&self, stored: &str) -> Result<String, GateError> {
+        let (folder, name) = stored.rsplit_once('/').unwrap_or(("", stored));
+        let parts = stored_parts(stored)?;
+        if folder != self.folder || parts.is_empty() {
+            return Err(GateError::Io(invalid("not a name in this file's folder")));
+        }
+        Ok(name.to_string())
+    }
+
+    fn claimed(&mut self, name: String, temp: Option<String>) -> Claimed<'d> {
+        let mut changes = std::mem::take(&mut self.changes);
+        if name != self.name && !changes.contains(&NameChange::NameClash) {
+            changes.push(NameChange::NameClash);
+        }
+        Claimed {
+            dir: self.dir.try_clone().ok(),
+            temp,
+            finished: Finished {
+                final_path: stored_path(&self.folder, &name),
+                sent_path: std::mem::take(&mut self.sent_path),
+                changes,
+            },
+            _destination: std::marker::PhantomData,
+        }
+    }
+}
+
+/// Most times a free name is taken by another program between finding it and claiming it before
+/// giving up.
+const MAX_CLAIM_RACES: u32 = 64;
+
+impl Drop for Sealed<'_> {
+    fn drop(&mut self) {
+        // Never given its real name: never leave it behind.
+        if let Some(temp) = self.temp.take() {
+            let _ = self.dir.remove_file(temp);
+        }
+    }
+}
+
+/// A received file under its real name. [`keep`](Self::keep) removes the temporary name once
+/// the journal no longer needs it (if dropped instead, the temporary name stays for the journal's
+/// clean-up).
+pub struct Claimed<'d> {
+    dir: Option<Dir>,
+    /// The temporary name, while the file still has it (drives with hard links).
+    temp: Option<String>,
+    finished: Finished,
+    _destination: std::marker::PhantomData<&'d Destination>,
+}
+
+impl Claimed<'_> {
+    /// Where it landed and what was changed on the way.
+    pub fn finished(&self) -> &Finished {
+        &self.finished
+    }
+
+    /// Removes the temporary name; the file stays under its real name. If another program holds
+    /// the temporary name it stays behind (the journal's clean-up removes it later); the file
+    /// under its real name is complete either way.
+    pub fn keep(self) -> Finished {
+        if let (Some(dir), Some(temp)) = (&self.dir, &self.temp) {
+            let _ = dir.remove_file(temp);
+        }
+        self.finished
     }
 }
 

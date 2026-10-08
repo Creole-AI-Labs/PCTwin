@@ -3,7 +3,9 @@
 //! committed, each step a durable transaction, so after a crash the app knows exactly how far each
 //! file got, and a finished move can be undone.
 
-use pctwin_journal::{Actor, Journal, JournalError, Landed, Permission, PlannedWrite, State};
+use pctwin_journal::{
+    Actor, FileId, Journal, JournalError, Landed, Permission, PlannedWrite, State,
+};
 use pctwin_record::{ItemId, LaptopId};
 
 fn item(n: u8) -> ItemId {
@@ -26,6 +28,12 @@ fn planned(n: u8) -> PlannedWrite {
             for_account: "1001".into(),
             permission: Permission::OwnFolders,
         },
+        block_size: 128 * 1024,
+        source_modified_ns: Some(1_780_000_000_000_000_000),
+        place: Some(FileId {
+            volume: 7,
+            index: 9,
+        }),
     }
 }
 
@@ -33,6 +41,10 @@ fn landed() -> Landed {
     Landed {
         size: 1000,
         modified_ns: Some(1_790_000_000_000_000_000),
+        file: Some(FileId {
+            volume: 7,
+            index: 11,
+        }),
     }
 }
 
@@ -49,7 +61,7 @@ fn a_write_goes_through_every_step_and_is_read_back_after_reopening() {
     let id = {
         let j = Journal::open(&path).unwrap();
         let id = j.plan(&planned(1)).unwrap();
-        j.staged(id, ".pctwin-77-1.part").unwrap();
+        j.staged(id, ".pctwin-77-1.part", &[]).unwrap();
         j.verified(id, [7; 32]).unwrap();
         j.applied(id, "Documents/f1.txt").unwrap();
         j.committed(id, landed()).unwrap();
@@ -104,10 +116,10 @@ fn steps_cannot_be_skipped_repeated_or_undone() {
         j.committed(id, landed()),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.staged(id, ".pctwin-1.part").unwrap();
+    j.staged(id, ".pctwin-1.part", &[]).unwrap();
     // Repeating a step.
     assert!(matches!(
-        j.staged(id, ".pctwin-2.part"),
+        j.staged(id, ".pctwin-2.part", &[]),
         Err(JournalError::OutOfOrder { .. })
     ));
     j.verified(id, [1; 32]).unwrap();
@@ -119,12 +131,12 @@ fn steps_cannot_be_skipped_repeated_or_undone() {
         Err(JournalError::OutOfOrder { .. })
     ));
     assert!(matches!(
-        j.staged(id, ".pctwin-3.part"),
+        j.staged(id, ".pctwin-3.part", &[]),
         Err(JournalError::OutOfOrder { .. })
     ));
     // An unknown entry.
     assert!(matches!(
-        j.staged(9999, ".x"),
+        j.staged(9999, ".x", &[]),
         Err(JournalError::NoSuchEntry(9999))
     ));
 }
@@ -135,7 +147,7 @@ fn a_write_can_fail_at_any_unfinished_step_and_says_why() {
     let a = j.plan(&planned(1)).unwrap();
     j.failed(a, "not part of the plan").unwrap();
     let b = j.plan(&planned(2)).unwrap();
-    j.staged(b, ".pctwin-b.part").unwrap();
+    j.staged(b, ".pctwin-b.part", &[]).unwrap();
     j.verified(b, [2; 32]).unwrap();
     j.failed(b, "disk full").unwrap();
     for (id, why) in [(a, "not part of the plan"), (b, "disk full")] {
@@ -155,7 +167,7 @@ fn a_write_can_fail_at_any_unfinished_step_and_says_why() {
 fn a_failed_write_keeps_the_step_it_reached_for_clean_up() {
     let (_d, j) = journal();
     let id = j.plan(&planned(1)).unwrap();
-    j.staged(id, ".pctwin-9.part").unwrap();
+    j.staged(id, ".pctwin-9.part", &[]).unwrap();
     j.failed(id, "the old laptop went away").unwrap();
     match j.entry(id).unwrap().unwrap().state {
         State::Failed { reached, .. } => assert_eq!(
@@ -174,7 +186,7 @@ fn unfinished_writes_are_listed_in_the_order_they_were_planned() {
     let a = j.plan(&planned(1)).unwrap();
     let b = j.plan(&planned(2)).unwrap();
     let c = j.plan(&planned(3)).unwrap();
-    j.staged(b, ".pctwin-b.part").unwrap();
+    j.staged(b, ".pctwin-b.part", &[]).unwrap();
     j.failed(c, "skipped").unwrap();
     let ids: Vec<u64> = j.unfinished().unwrap().iter().map(|e| e.id).collect();
     assert_eq!(ids, [a, b]);
@@ -191,7 +203,7 @@ fn a_crash_leaves_the_journal_at_the_last_step_taken() {
     let (a, b) = {
         let j = Journal::open(&path).unwrap();
         let a = j.plan(&planned(1)).unwrap();
-        j.staged(a, ".pctwin-a.part").unwrap();
+        j.staged(a, ".pctwin-a.part", &[]).unwrap();
         let b = j.plan(&planned(2)).unwrap();
         (a, b)
     };
@@ -246,4 +258,218 @@ fn a_journal_from_a_newer_pctwin_is_refused_safely() {
         Journal::open(&path),
         Err(JournalError::NewerFormat { .. })
     ));
+}
+
+#[test]
+fn each_journal_has_its_own_number_kept_across_reopening_and_naming_its_temporary_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    let tag = Journal::open(&path).unwrap().temp_tag(5);
+    let again = Journal::open(&path).unwrap().temp_tag(5);
+    assert_eq!(tag, again);
+    let (hex, entry) = tag.split_once('-').unwrap();
+    assert_eq!(hex.len(), 16);
+    assert!(
+        hex.chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    );
+    assert_eq!(entry, "5");
+    let other = tempfile::tempdir().unwrap();
+    let theirs = Journal::open(&other.path().join("journal.redb"))
+        .unwrap()
+        .temp_tag(5);
+    assert_ne!(
+        tag, theirs,
+        "two journals never name a temporary file the same"
+    );
+}
+
+#[test]
+fn a_name_is_recorded_before_the_file_gets_it_and_can_move_on_if_taken() {
+    let (_d, j) = journal();
+    let id = j.plan(&planned(1)).unwrap();
+    j.staged(id, "d/.pctwin-x.part", &[]).unwrap();
+    assert!(matches!(
+        j.applied(id, "d/f1.txt"),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    j.verified(id, [3; 32]).unwrap();
+    j.applied(id, "d/f1.txt").unwrap();
+    assert_eq!(
+        j.entry(id).unwrap().unwrap().state,
+        State::Applied {
+            temp: "d/.pctwin-x.part".into(),
+            final_path: "d/f1.txt".into(),
+            fingerprint: [3; 32],
+        }
+    );
+    // Something took that name first: another name, still before the file gets it.
+    j.applied(id, "d/f1 (2).txt").unwrap();
+    j.committed(id, landed()).unwrap();
+    assert_eq!(
+        j.entry(id).unwrap().unwrap().state,
+        State::Committed {
+            final_path: "d/f1 (2).txt".into(),
+            fingerprint: [3; 32],
+            landed: landed(),
+        }
+    );
+    assert!(matches!(
+        j.applied(id, "d/f1 (3).txt"),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+}
+
+#[test]
+fn an_identical_file_already_there_is_recorded_as_existing_never_as_written() {
+    let (_d, j) = journal();
+    let a = j.plan(&planned(1)).unwrap();
+    j.existing(a, "Documents/f1.txt").unwrap();
+    let b = j.plan(&planned(2)).unwrap();
+    j.staged(b, ".pctwin-b.part", &[]).unwrap();
+    j.existing(b, "Documents/f2.txt").unwrap();
+    let c = j.plan(&planned(3)).unwrap();
+    j.staged(c, ".pctwin-c.part", &[]).unwrap();
+    j.verified(c, [1; 32]).unwrap();
+    assert!(matches!(
+        j.existing(c, "x"),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    assert_eq!(
+        j.entry(a).unwrap().unwrap().state,
+        State::Existing {
+            stored_path: "Documents/f1.txt".into()
+        }
+    );
+    assert!(j.entry(b).unwrap().unwrap().state.is_finished());
+    assert!(matches!(
+        j.failed(a, "late"),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    let open: Vec<u64> = j.unfinished().unwrap().iter().map(|e| e.id).collect();
+    assert_eq!(open, [c]);
+}
+
+#[test]
+fn only_one_unfinished_write_of_a_file_at_a_time() {
+    let (_d, j) = journal();
+    let first = j.plan(&planned(1)).unwrap();
+    j.staged(first, ".pctwin-1.part", &[]).unwrap();
+    // The same file from another old laptop is a different file.
+    let mut elsewhere = planned(1);
+    elsewhere.source_laptop = LaptopId::from_hex("ffeeddccbbaa99887766554433221100").unwrap();
+    let theirs = j.plan(&elsewhere).unwrap();
+    let again = j.plan(&planned(1)).unwrap();
+    match j.entry(first).unwrap().unwrap().state {
+        State::Failed { why, reached } => {
+            assert_eq!(why, "it was started again");
+            assert_eq!(
+                *reached,
+                State::Staged {
+                    temp: ".pctwin-1.part".into()
+                }
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let open: Vec<u64> = j.unfinished().unwrap().iter().map(|e| e.id).collect();
+    assert_eq!(open, [theirs, again]);
+    // A finished write is history: starting the file again leaves it as it was.
+    j.staged(again, ".pctwin-2.part", &[]).unwrap();
+    j.verified(again, [1; 32]).unwrap();
+    j.applied(again, "f1.txt").unwrap();
+    j.committed(again, landed()).unwrap();
+    let later = j.plan(&planned(1)).unwrap();
+    assert!(matches!(
+        j.entry(again).unwrap().unwrap().state,
+        State::Committed { .. }
+    ));
+    assert_eq!(j.entry(later).unwrap().unwrap().state, State::Planned);
+}
+
+#[test]
+fn unfinished_writes_stay_listed_until_finished_however_they_finish() {
+    let (_d, j) = journal();
+    let ids: Vec<u64> = (1..=6).map(|n| j.plan(&planned(n)).unwrap()).collect();
+    j.failed(ids[0], "x").unwrap();
+    j.existing(ids[1], "f").unwrap();
+    for id in [ids[2], ids[3]] {
+        j.staged(id, ".pctwin-t.part", &[]).unwrap();
+        j.verified(id, [0; 32]).unwrap();
+        j.applied(id, "f").unwrap();
+    }
+    j.committed(ids[2], landed()).unwrap();
+    let open: Vec<u64> = j.unfinished().unwrap().iter().map(|e| e.id).collect();
+    assert_eq!(open, [ids[3], ids[4], ids[5]]);
+    let after: Vec<u64> = j
+        .entries_after(ids[3])
+        .unwrap()
+        .iter()
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(after, [ids[4], ids[5]]);
+}
+
+#[test]
+fn folders_made_for_a_write_are_recorded_once_by_whoever_made_them() {
+    let (_d, j) = journal();
+    let a = j.plan(&planned(1)).unwrap();
+    let made = [
+        (
+            "Docs/New".to_string(),
+            Some(FileId {
+                volume: 1,
+                index: 2,
+            }),
+        ),
+        ("Docs/New/Deeper".to_string(), None),
+    ];
+    j.staged(a, "Docs/New/Deeper/.pctwin-a.part", &made)
+        .unwrap();
+    let b = j.plan(&planned(2)).unwrap();
+    j.staged(
+        b,
+        "Docs/New/.pctwin-b.part",
+        &[(
+            "Docs/New".to_string(),
+            Some(FileId {
+                volume: 1,
+                index: 99,
+            }),
+        )],
+    )
+    .unwrap();
+    let mut folders = j.made_folders().unwrap();
+    folders.sort_by(|x, y| x.folder.cmp(&y.folder));
+    assert_eq!(folders.len(), 2);
+    assert_eq!(folders[0].folder, "Docs/New");
+    assert_eq!(folders[0].entry, a);
+    assert_eq!(
+        folders[0].id,
+        Some(FileId {
+            volume: 1,
+            index: 2
+        })
+    );
+    assert_eq!(folders[0].destination, "me");
+    assert_eq!(folders[1].folder, "Docs/New/Deeper");
+    assert_eq!(folders[1].id, None);
+}
+
+#[test]
+fn clean_up_progress_and_leftovers_are_kept_across_reopening() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    {
+        let j = Journal::open(&path).unwrap();
+        assert_eq!(j.swept_upto().unwrap(), 0);
+        assert!(j.leftovers().unwrap().is_empty());
+        j.record_sweep(7, &[3, 5], &[]).unwrap();
+    }
+    let j = Journal::open(&path).unwrap();
+    assert_eq!(j.swept_upto().unwrap(), 7);
+    assert_eq!(j.leftovers().unwrap(), [3, 5]);
+    j.record_sweep(9, &[8], &[3]).unwrap();
+    assert_eq!(j.swept_upto().unwrap(), 9);
+    assert_eq!(j.leftovers().unwrap(), [5, 8]);
 }

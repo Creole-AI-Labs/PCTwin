@@ -12,6 +12,7 @@ publish.workspace = true
 blake3 = "1.8"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 pctwin-gate = { path = "../pctwin-gate" }
+pctwin-journal = { path = "../pctwin-journal" }
 pctwin-link = { version = "0.1.0", path = "../pctwin-link" }
 pctwin-record = { version = "0.1.0", path = "../pctwin-record" }
 pctwin-scan = { version = "0.1.0", path = "../pctwin-scan" }

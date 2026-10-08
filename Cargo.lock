@@ -3154,12 +3154,14 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "unicode-normalization",
+ "winapi-util",
 ]
 
 [[package]]
 name = "pctwin-journal"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.4.3",
  "pctwin-record",
  "redb",
  "serde",
@@ -3251,6 +3253,7 @@ dependencies = [
  "blake3",
  "futures-util",
  "pctwin-gate",
+ "pctwin-journal",
  "pctwin-link",
  "pctwin-pairing",
  "pctwin-record",

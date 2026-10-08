@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+getrandom = "0.4.3"
 pctwin-record = { path = "../pctwin-record" }
 redb = "4.3"
 serde = { version = "1", features = ["derive"] }
