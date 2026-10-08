@@ -235,3 +235,25 @@ fn the_old_laptop_refuses_lane_numbers_outside_the_limit() {
         );
     }
 }
+
+#[test]
+fn the_link_and_the_lane_keys_can_be_held_apart() {
+    // The main link stays busy carrying the move while lanes are opened beside it.
+    let (old, new) = pair();
+    let (mut old_link, mut old_keys) = old.into_parts();
+    let (mut new_link, mut new_keys) = new.into_parts();
+    let now = Instant::now();
+    let (opening, l1) = new_keys.open_lane(now).unwrap();
+    let (accepting, l2) = old_keys.accept_lane(&l1, now).unwrap();
+    let (mut new_end, l3) = opening.receive(&l2, now).unwrap();
+    let mut old_end = accepting.confirm(&l3, now).unwrap();
+    let sealed = old_link.seal(b"main").unwrap();
+    assert_eq!(&new_link.open(&sealed).unwrap()[..], b"main");
+    let sealed = new_end.seal(b"lane").unwrap();
+    assert_eq!(&old_end.open(&sealed).unwrap()[..], b"lane");
+    // The roles stay: the old laptop's keys cannot open a lane.
+    assert_eq!(
+        old_keys.open_lane(now).map(|_| ()).unwrap_err(),
+        PairingError::LaneRefused
+    );
+}

@@ -636,20 +636,19 @@ impl ReceiverAwaitingApproval {
 /// A confirmed pairing with its encrypted link.
 pub struct Paired {
     transport: Transport,
-    lane_secret: Zeroizing<[u8; 32]>,
-    opens_lanes: bool,
-    next_lane: u32,
-    used_lanes: BTreeSet<u32>,
+    lanes: LaneKeys,
 }
 
 impl Paired {
     fn new(transport: Transport, lane_secret: Zeroizing<[u8; 32]>, opens_lanes: bool) -> Self {
         Self {
             transport,
-            lane_secret,
-            opens_lanes,
-            next_lane: 1,
-            used_lanes: BTreeSet::new(),
+            lanes: LaneKeys {
+                lane_secret,
+                opens_lanes,
+                next_lane: 1,
+                used_lanes: BTreeSet::new(),
+            },
         }
     }
 
@@ -658,6 +657,37 @@ impl Paired {
         &mut self.transport
     }
 
+    /// New laptop: see [`LaneKeys::open_lane`].
+    pub fn open_lane(&mut self, now: Instant) -> Result<(LaneOpening, Vec<u8>), PairingError> {
+        self.lanes.open_lane(now)
+    }
+
+    /// Old laptop: see [`LaneKeys::accept_lane`].
+    pub fn accept_lane(
+        &mut self,
+        msg1: &[u8],
+        now: Instant,
+    ) -> Result<(LaneAccepting, Vec<u8>), PairingError> {
+        self.lanes.accept_lane(msg1, now)
+    }
+
+    /// The encrypted link and the keys for extra lanes, held apart: the link stays busy carrying
+    /// the move while lanes are opened (new laptop) or accepted (old laptop) beside it.
+    pub fn into_parts(self) -> (Transport, LaneKeys) {
+        (self.transport, self.lanes)
+    }
+}
+
+/// What a paired session needs to open (new laptop) or accept (old laptop) extra lanes: a secret
+/// bound to exactly this pairing, and which lane numbers are used. Wiped from memory when dropped.
+pub struct LaneKeys {
+    lane_secret: Zeroizing<[u8; 32]>,
+    opens_lanes: bool,
+    next_lane: u32,
+    used_lanes: BTreeSet<u32>,
+}
+
+impl LaneKeys {
     /// New laptop: starts an extra lane at time `now`, returning lane message 1 to send on a new
     /// connection to the old laptop. Each call uses the next lane number, never one used before,
     /// even if that lane failed. Only the new laptop opens lanes.
@@ -1086,6 +1116,7 @@ redacted_debug!(
     ReceiverSession,
     ReceiverAwaitingApproval,
     Paired,
+    LaneKeys,
     LaneOpening,
     LaneAccepting,
     Transport
