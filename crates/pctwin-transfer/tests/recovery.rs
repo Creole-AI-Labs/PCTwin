@@ -3,6 +3,10 @@
 //! then checks recovery proves before it commits, never replaces or removes anything that is not
 //! its own, and is as safe run twice as once.
 
+// Tests make and remove files to set up each case; only the code under test is held to removing
+// nothing but through the gate.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::Path;
 
 use pctwin_gate::{Approved, Destinations, temp_name};

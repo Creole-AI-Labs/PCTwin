@@ -18,13 +18,11 @@ pctwin-record = { version = "0.1.0", path = "../pctwin-record" }
 pctwin-scan = { version = "0.1.0", path = "../pctwin-scan" }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["macros", "rt", "sync", "time"] }
-trash = "5.2.9"
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-# The Recycle Bin's settings (deletes at once, size, turned off by policy) and drive numbers.
+# An original's identity on the old laptop (volume number and file index), from its open handle.
 winapi-util = "0.1.11"
-winreg = "0.55"
 
 [dev-dependencies]
 pctwin-pairing = { path = "../pctwin-pairing" }

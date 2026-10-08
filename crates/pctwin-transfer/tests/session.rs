@@ -5,6 +5,10 @@
 //! being sent arrives whole and current; a file for a place that was not approved fails on its
 //! own. Run over an in-memory connection that can be cut, and once over a real paired link.
 
+// Tests make and remove files to set up each case; only the code under test is held to removing
+// nothing but through the gate.
+#![allow(clippy::disallowed_methods)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};

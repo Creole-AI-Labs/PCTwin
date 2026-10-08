@@ -301,18 +301,6 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "step")]
 pub enum Undo {
-    /// About to move this file (by identity) aside to `at` (a stored path in PCTwin's own folder),
-    /// on its way to the Trash: recorded first, so after a crash undo knows where to look.
-    Aside {
-        file: Option<FileId>,
-        at: String,
-        /// The folder its move uses for a moment (where it may be after a crash in between).
-        #[serde(default)]
-        staging: Option<String>,
-        /// The folders made for it aside, once it is there (only these are ever tidied away).
-        #[serde(default)]
-        made: Vec<String>,
-    },
     /// About to delete this very file (by identity) through the handle it was checked on:
     /// recorded first, so after a crash undo knows the file may already be gone.
     Removing { file: FileId },
@@ -324,15 +312,13 @@ pub enum Undo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "result")]
 pub enum UndoOutcome {
-    /// Moved to the system Trash or Recycle Bin, where the person can bring it back.
-    Trashed,
     /// Deleted outright (not to the Recycle Bin): the original is still on the old laptop.
     Deleted,
     /// A folder PCTwin made, empty, removed.
     Removed,
     /// It was already gone.
     AlreadyGone,
-    /// Kept, and why in plain words (changed since the move, not empty, no Recycle Bin there).
+    /// Kept, and why in plain words (changed since the move, in use, not empty).
     Kept { why: String },
     /// It could not be done this time, and why; undo tries it again next time.
     NotDone { why: String },

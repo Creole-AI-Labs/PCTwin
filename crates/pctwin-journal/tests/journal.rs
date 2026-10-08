@@ -547,11 +547,11 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
         j.record_undo(
             &permit,
             id,
-            &Undo::Aside {
-                file: None,
-                at: "x".into(),
-                staging: None,
-                made: Vec::new(),
+            &Undo::Removing {
+                file: FileId {
+                    volume: 1,
+                    index: 2,
+                },
             }
         ),
         Err(JournalError::OutOfOrder { .. })
@@ -563,19 +563,16 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     j.committed(id, landed()).unwrap();
     let before = j.entry(id).unwrap().unwrap();
     assert_eq!(j.undo_of(id).unwrap(), None);
-    let moving = Undo::Aside {
-        file: Some(FileId {
+    let moving = Undo::Removing {
+        file: FileId {
             volume: 1,
             index: 2,
-        }),
-        at: "Undone/Docs/f1.txt".into(),
-        staging: Some("Docs/.pctwin-move-t".into()),
-        made: vec!["Undone".into()],
+        },
     };
     j.record_undo(&permit, id, &moving).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(moving));
     let done = Undo::Done {
-        outcome: UndoOutcome::Trashed,
+        outcome: UndoOutcome::Deleted,
     };
     j.record_undo(&permit, id, &done).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(done));
@@ -593,7 +590,7 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     );
     assert_eq!(j.folder_undo_of("me", "Other").unwrap(), None);
     // Only "not done this time" is tried again.
-    assert!(UndoOutcome::Trashed.is_final());
+    assert!(UndoOutcome::Deleted.is_final());
     assert!(UndoOutcome::Kept { why: "x".into() }.is_final());
     assert!(UndoOutcome::AlreadyGone.is_final());
     assert!(UndoOutcome::Removed.is_final());
