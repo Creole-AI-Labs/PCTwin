@@ -31,10 +31,22 @@ pub struct Recovered {
 
 /// Recovers every unfinished write in `journal`, writing only into the places in `table`.
 pub fn recover(journal: &Journal, table: &Destinations) -> Result<Recovered, JournalError> {
+    recover_with(journal, table, &|| {})
+}
+
+/// As [`recover`], with `after_planning` run once every decision is made and before any is
+/// carried out (for tests, and fault injection, of what happens in between).
+pub fn recover_with(
+    journal: &Journal,
+    table: &Destinations,
+    after_planning: &dyn Fn(),
+) -> Result<Recovered, JournalError> {
     let look = DiskLook { journal, table };
     let mut done = Recovered::default();
     let unfinished = journal.unfinished()?;
-    for decision in recovery::plan(&unfinished, &look) {
+    let decisions = recovery::plan(&unfinished, &look);
+    after_planning();
+    for decision in decisions {
         let Some(entry) = unfinished.iter().find(|e| e.id == decision.id) else {
             continue;
         };
@@ -87,29 +99,44 @@ fn finish(
         Ok(dest) => dest,
         Err(why) => return Ok(Finish::Left(why)),
     };
-    let committed = |stat: pctwin_gate::Stat| -> Result<(), JournalError> {
-        journal.committed(
-            entry.id,
-            Landed {
-                size: stat.len,
-                modified_ns: stat.modified.map(crate::nanos),
-                file: Some(FileId {
-                    volume: stat.id.volume,
-                    index: stat.id.index,
-                }),
-            },
-        )
+    // Proven again immediately before it is committed (not only when it was decided): the very
+    // file it sealed, exactly its size and fingerprint, read now.
+    let commit_if_proven = |stored: &str| -> Result<Finish, JournalError> {
+        let (sealed, fingerprint) = match &entry.state {
+            State::Verified {
+                file, fingerprint, ..
+            }
+            | State::Applied {
+                file, fingerprint, ..
+            } => (*file, fingerprint),
+            _ => return Ok(Finish::Failed(NOT_NAMED.into())),
+        };
+        match prove(dest, entry, stored, sealed, fingerprint) {
+            Proof::Proven(stat) => {
+                journal.committed(
+                    entry.id,
+                    Landed {
+                        size: stat.len,
+                        modified_ns: stat.modified.map(crate::nanos),
+                        file: Some(FileId {
+                            volume: stat.id.volume,
+                            index: stat.id.index,
+                        }),
+                    },
+                )?;
+                Ok(Finish::Committed)
+            }
+            Proof::Gone => Ok(Finish::Failed(
+                "it was removed as soon as it was given its name, often by security software"
+                    .into(),
+            )),
+            Proof::Changed => Ok(Finish::Failed(CHANGED_NOW.into())),
+            Proof::CannotLook(why) => Ok(Finish::Left(why)),
+        }
     };
     let claimed = match (&entry.state, action) {
         (State::Applied { final_path, .. }, Action::Commit) => {
-            return match dest.stat(final_path) {
-                Ok(Some(stat)) => {
-                    committed(stat)?;
-                    Ok(Finish::Committed)
-                }
-                Ok(None) => Ok(Finish::Left("its file could not be found just now".into())),
-                Err(e) => Ok(Finish::Left(e.to_string())),
-            };
+            return commit_if_proven(final_path);
         }
         (_, Action::Commit) => return Ok(Finish::Failed(NOT_NAMED.into())),
         (_, _) => match name(journal, dest, entry)? {
@@ -119,17 +146,49 @@ fn finish(
         },
     };
     // Committed while the temporary name still holds the file, then the temporary name goes.
-    match dest.stat(&claimed.finished().final_path) {
-        Ok(Some(stat)) => {
-            committed(stat)?;
-            claimed.keep();
-            Ok(Finish::Committed)
-        }
-        Ok(None) => Ok(Finish::Failed(
-            "it was removed as soon as it was given its name, often by security software".into(),
-        )),
-        // It has its name in the journal; the next recovery looks again.
-        Err(e) => Ok(Finish::Left(e.to_string())),
+    let finish = commit_if_proven(&claimed.finished().final_path)?;
+    if matches!(finish, Finish::Committed) {
+        claimed.keep();
+    }
+    Ok(finish)
+}
+
+/// Said of a file that changed after recovery last read it.
+const CHANGED_NOW: &str = "the copy was interrupted as it finished, and the file changed before PCTwin could confirm it; it was kept as it is";
+
+/// What proving a file just now found.
+enum Proof {
+    Proven(pctwin_gate::Stat),
+    Gone,
+    Changed,
+    CannotLook(String),
+}
+
+/// Proves the file at `stored` is, right now, the very file sealed (`sealed`) with exactly the
+/// write's size and `fingerprint`.
+fn prove(
+    dest: &Destination,
+    entry: &Entry,
+    stored: &str,
+    sealed: Option<FileId>,
+    fingerprint: &[u8; 32],
+) -> Proof {
+    let stat = match dest.stat(stored) {
+        Ok(Some(stat)) => stat,
+        Ok(None) => return Proof::Gone,
+        Err(e) => return Proof::CannotLook(e.to_string()),
+    };
+    let same = sealed.is_some_and(|f| f.volume == stat.id.volume && f.index == stat.id.index);
+    if !same || stat.len != entry.write.size {
+        return Proof::Changed;
+    }
+    match dest
+        .open_read(stored)
+        .and_then(|mut f| fingerprint_reader(&mut f, entry.write.size, entry.write.block_size))
+    {
+        Ok(Some(found)) if &found == fingerprint => Proof::Proven(stat),
+        Ok(_) => Proof::Changed,
+        Err(e) => Proof::CannotLook(e.to_string()),
     }
 }
 
@@ -162,6 +221,27 @@ fn name<'d>(
         Ok(s) => s,
         Err(e) => return Ok(Naming::Cannot(reason(&e))),
     };
+    // Still the very file it sealed, exactly as checked, read now, before it gets a real name.
+    let (recorded, fingerprint) = match &entry.state {
+        State::Verified {
+            file, fingerprint, ..
+        }
+        | State::Applied {
+            file, fingerprint, ..
+        } => (*file, fingerprint),
+        _ => return Ok(Naming::Cannot(NOT_NAMED.into())),
+    };
+    match prove(dest, entry, temp, recorded, fingerprint) {
+        Proof::Proven(_) => {}
+        Proof::CannotLook(why) => {
+            sealed.persist();
+            return Ok(Naming::NotNow(why));
+        }
+        Proof::Gone | Proof::Changed => {
+            sealed.persist();
+            return Ok(Naming::Cannot(CHANGED_NOW.into()));
+        }
+    }
     // A name lost in the crash is free again, so it is the one found first.
     for _ in 0..MAX_NAME_TRIES {
         let next = match sealed.next_name() {

@@ -1896,9 +1896,12 @@ fn land(
     };
     // Which file it is, so after a crash only this very file is ever taken as it.
     let sealed_as = sealed.identity().ok().map(file_id);
-    journal
-        .verified(entry, fingerprint, sealed_as)
-        .map_err(record)?;
+    // If the journal cannot take it, the checked file is still kept (never thrown away), for
+    // recovery to finish once the journal works again.
+    if let Err(e) = journal.verified(entry, fingerprint, sealed_as) {
+        sealed.persist();
+        return Err(record(e));
+    }
     let mut tries = 0;
     let claimed = loop {
         tries += 1;
@@ -1909,7 +1912,10 @@ fn land(
             Ok(name) => name,
             Err(e) => return later(sealed, &e),
         };
-        journal.applied(entry, &name).map_err(record)?;
+        if let Err(e) = journal.applied(entry, &name) {
+            sealed.persist();
+            return Err(record(e));
+        }
         match sealed.claim_as(&name) {
             Claim::Named(c) => break c,
             // Another program took the name first: another name, recorded first again.

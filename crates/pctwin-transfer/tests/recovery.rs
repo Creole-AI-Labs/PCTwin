@@ -8,7 +8,9 @@ use std::path::Path;
 use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Permission, PlannedWrite, State};
 use pctwin_record::{ItemId, LaptopId};
-use pctwin_transfer::{block_size_for, file_fingerprint, fingerprint_reader, recover};
+use pctwin_transfer::{
+    block_size_for, file_fingerprint, fingerprint_reader, recover, recover_with,
+};
 
 struct World {
     _dirs: Vec<tempfile::TempDir>,
@@ -567,4 +569,78 @@ fn a_temporary_file_in_a_place_not_reachable_is_cleaned_up_once_it_is() {
     let r = recover(&w.journal, &w.table).unwrap();
     assert_eq!(r.removed, 1);
     assert!(w.names().is_empty());
+}
+
+#[test]
+fn a_named_file_edited_after_recovery_decided_is_never_committed() {
+    let w = world();
+    let small = data(1000);
+    let id = w.applied(1, &small, "Docs/e1.txt");
+    // Its real name is a second name of the sealed file, as the gate leaves it.
+    std::fs::hard_link(w.root.join(w.temp(id)), w.root.join("Docs/e1.txt")).unwrap();
+    let target = w.root.join("Docs/e1.txt");
+    // Edited in place (same file, same size) after recovery decided to commit it.
+    let r = recover_with(&w.journal, &w.table, &|| {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)
+            .unwrap();
+        f.write_all(&vec![b'X'; 1000]).unwrap();
+    })
+    .unwrap();
+    assert!(r.committed.is_empty());
+    assert!(matches!(w.state(id), State::Failed { .. }));
+    assert_eq!(std::fs::read(&target).unwrap(), vec![b'X'; 1000]);
+}
+
+#[test]
+fn a_checked_file_edited_after_recovery_decided_is_never_named_or_committed() {
+    let w = world();
+    let bytes = data(4000);
+    let id = w.verified(1, &bytes, Some(&bytes));
+    let temp = w.root.join(w.temp(id));
+    let r = recover_with(&w.journal, &w.table, &|| {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().write(true).open(&temp).unwrap();
+        f.write_all(b"edited").unwrap();
+    })
+    .unwrap();
+    assert!(r.committed.is_empty());
+    assert!(matches!(w.state(id), State::Failed { .. }));
+    assert!(!w.root.join("Docs/f1.txt").exists());
+}
+
+#[test]
+fn a_checked_file_swapped_for_another_after_recovery_decided_is_never_named() {
+    let w = world();
+    let bytes = data(4000);
+    let id = w.verified(1, &bytes, Some(&bytes));
+    let temp = w.root.join(w.temp(id));
+    // The same bytes, but another file.
+    let r = recover_with(&w.journal, &w.table, &|| {
+        std::fs::remove_file(&temp).unwrap();
+        std::fs::write(&temp, &bytes).unwrap();
+    })
+    .unwrap();
+    assert!(r.committed.is_empty());
+    assert!(!w.root.join("Docs/f1.txt").exists());
+}
+
+#[test]
+fn a_named_file_swapped_for_an_identical_copy_after_recovery_decided_is_never_committed() {
+    let w = world();
+    let bytes = data(1000);
+    let id = w.applied(1, &bytes, "Docs/e1.txt");
+    std::fs::hard_link(w.root.join(w.temp(id)), w.root.join("Docs/e1.txt")).unwrap();
+    let target = w.root.join("Docs/e1.txt");
+    let r = recover_with(&w.journal, &w.table, &|| {
+        // The same bytes, but a person's own file now has the name.
+        std::fs::remove_file(&target).unwrap();
+        std::fs::write(&target, &bytes).unwrap();
+    })
+    .unwrap();
+    assert!(r.committed.is_empty());
+    assert!(matches!(w.state(id), State::Failed { .. }));
+    assert_eq!(std::fs::read(&target).unwrap(), bytes);
 }

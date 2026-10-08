@@ -62,7 +62,7 @@ pub use netlanes::{LinkLanes, accept_lanes};
 pub use progress::{Progress, TimeLeft};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
-pub use recovery::{Recovered, recover};
+pub use recovery::{Recovered, recover, recover_with};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
     Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob,

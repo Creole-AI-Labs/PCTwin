@@ -483,7 +483,7 @@ impl Breaks<'_> {
 }
 
 #[tokio::test]
-async fn when_the_journal_cannot_be_written_the_move_stops_and_nothing_unrecorded_is_left() {
+async fn when_the_journal_cannot_be_written_the_move_stops_and_a_checked_file_is_never_lost() {
     for at in ["plan", "staged", "verified", "applied"] {
         let w = world();
         let (job, data) = w.file(1, 1000, "me", "a.txt");
@@ -492,8 +492,12 @@ async fn when_the_journal_cannot_be_written_the_move_stops_and_nothing_unrecorde
             at,
             calls: Default::default(),
         };
-        let mut receiver =
-            ReceiverSession::new(&w.table, plan_for(&[(job.clone(), data)]), &breaks, "1001");
+        let mut receiver = ReceiverSession::new(
+            &w.table,
+            plan_for(&[(job.clone(), data.clone())]),
+            &breaks,
+            "1001",
+        );
         let (_, received, _) = move_all(vec![job], &mut receiver).await;
         assert!(
             matches!(received, Err(TransferError::Record(_))),
@@ -520,17 +524,36 @@ async fn when_the_journal_cannot_be_written_the_move_stops_and_nothing_unrecorde
             "{at}: {calls:?}"
         );
         drop(calls);
-        // Not even a temporary file is left; and once the journal works again, recovery ends
-        // whatever it had as failed, never committed.
-        assert_eq!(std::fs::read_dir(w.mine.path()).unwrap().count(), 0, "{at}");
+        // Before anything was checked, nothing is left and recovery ends it as failed. Once a
+        // file is checked, it is never thrown away: recovery finishes it once the journal works.
         let r = pctwin_transfer::recover(&w.journal, &w.table).unwrap();
-        assert!(r.committed.is_empty(), "{at}");
-        for e in w.journal.entries().unwrap() {
-            assert!(
-                matches!(e.state, State::Failed { .. }),
-                "{at}: {:?}",
-                e.state
-            );
+        let entries = w.journal.entries().unwrap();
+        match at {
+            "plan" | "staged" => {
+                assert_eq!(std::fs::read_dir(w.mine.path()).unwrap().count(), 0, "{at}");
+                assert!(r.committed.is_empty(), "{at}");
+                for e in &entries {
+                    assert!(
+                        matches!(e.state, State::Failed { .. }),
+                        "{at}: {:?}",
+                        e.state
+                    );
+                }
+            }
+            // Checked and on disk, but not yet recorded as checked: kept to continue.
+            "verified" => {
+                assert_eq!(r.resumable, [entries[0].id], "{at}");
+                assert_eq!(std::fs::read_dir(w.mine.path()).unwrap().count(), 1, "{at}");
+            }
+            // Recorded as checked: recovery names it and commits it.
+            _ => {
+                assert_eq!(r.committed, [entries[0].id], "{at}");
+                assert_eq!(
+                    std::fs::read(w.mine.path().join("a.txt")).unwrap(),
+                    data,
+                    "{at}"
+                );
+            }
         }
     }
 }
