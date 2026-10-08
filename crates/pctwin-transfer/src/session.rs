@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use pctwin_gate::{Destinations, Finished, IncomingPath};
+use pctwin_gate::{Approved, Destination, Destinations, Finished, IncomingPath};
+use pctwin_journal::{Actor, FileId, JournalError, Landed, Ledger, Permission, PlannedWrite};
 use pctwin_record::ItemId;
 
 use crate::message::{BLOCK_WIRE_OVERHEAD, Message, split_into_pieces};
@@ -1050,6 +1051,8 @@ pub enum ReceiveOutcome {
 
 struct Incoming<'d> {
     item: ItemId,
+    /// Its entry in the change journal.
+    entry: u64,
     assembly: Option<Assembly<'d>>,
     block_size: u64,
     failure: Option<String>,
@@ -1060,10 +1063,18 @@ struct Incoming<'d> {
 }
 
 /// The new laptop's side of a move. A file starts only if the approved plan allows it (see
-/// [`Allowance`]); every file lands through the safety gate in one of the approved destinations. Keeps what it has across dropped connections: call [`run`](Self::run)
-/// again with a new connection to continue.
+/// [`Allowance`]); every file lands through the safety gate in one of the approved destinations,
+/// and every step of every write is recorded in the change journal first (planned before anything
+/// is created, staged, verified, its name applied before it gets it, committed; or failed with
+/// why, or existing for an identical file already there). If the journal cannot be written the
+/// move stops ([`TransferError::Record`]): nothing is written that the journal does not know.
+/// Keeps what it has across dropped connections: call [`run`](Self::run) again with a new
+/// connection to continue.
 pub struct ReceiverSession<'d> {
     table: &'d Destinations,
+    journal: &'d dyn Ledger,
+    /// The signed-in person's account on this laptop (who acts).
+    account: String,
     allowance: Allowance,
     /// Bytes of blocks written so far, readable while the move runs (for the lane driver).
     written: Arc<AtomicU64>,
@@ -1079,10 +1090,19 @@ pub struct ReceiverSession<'d> {
 }
 
 impl<'d> ReceiverSession<'d> {
-    /// Receives into the places in `table`, only what `allowance` (the approved plan) allows.
-    pub fn new(table: &'d Destinations, allowance: Allowance) -> Self {
+    /// Receives into the places in `table`, only what `allowance` (the approved plan) allows,
+    /// recording every write in `journal`; `account` is the signed-in person's account on this
+    /// laptop.
+    pub fn new(
+        table: &'d Destinations,
+        allowance: Allowance,
+        journal: &'d dyn Ledger,
+        account: &str,
+    ) -> Self {
         Self {
             table,
+            journal,
+            account: account.to_string(),
             allowance,
             written: Arc::new(AtomicU64::new(0)),
             refused: BTreeMap::new(),
@@ -1286,6 +1306,9 @@ impl<'d> ReceiverSession<'d> {
                 for k in replaced {
                     if let Some(old) = self.streams.remove(&k) {
                         self.allowance.ended(old.item, false);
+                        // Its partial file is removed with it (already failed if it had failed).
+                        drop(old.assembly);
+                        let _ = self.journal.failed(old.entry, "it was started again");
                     }
                 }
                 let block_size = header.block_size;
@@ -1306,9 +1329,10 @@ impl<'d> ReceiverSession<'d> {
                 }
                 let same = self.same_file(&destination, &path, size);
                 let stored = same.as_ref().map(|(stored, _)| stored.clone());
-                let assembly = match self.start(&destination, &path, header) {
-                    Ok(a) => a,
-                    Err(why) => {
+                let (assembly, entry) = match self.start(item, &destination, &path, header) {
+                    Ok(started) => started,
+                    Err(Start::Record(e)) => return Err(record(e)),
+                    Err(Start::Refused(why)) => {
                         self.allowance.ended(item, false);
                         self.done
                             .insert(stream, (item, ReceiveOutcome::Failed(why)));
@@ -1329,6 +1353,7 @@ impl<'d> ReceiverSession<'d> {
                     stream,
                     Incoming {
                         item,
+                        entry,
                         assembly: Some(assembly),
                         block_size,
                         failure: None,
@@ -1356,13 +1381,25 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 };
+                let trailer = Trailer::new(stamp_after, changed);
                 let outcome = match (s.assembly, s.failure) {
-                    (Some(a), None) => match a.finish(Trailer::new(stamp_after, changed)) {
-                        Ok(f) => ReceiveOutcome::Finished(f),
-                        Err(e) => ReceiveOutcome::Failed(e.to_string()),
-                    },
-                    (_, Some(why)) => ReceiveOutcome::Failed(why),
-                    (None, None) => ReceiveOutcome::Failed("no file open".into()),
+                    (Some(a), None) => {
+                        let dest = self
+                            .table
+                            .get(&s.destination)
+                            .map_err(|e| protocol(&e.to_string()))?;
+                        land(self.journal, dest, a, trailer, s.entry)?
+                    }
+                    (_, Some(why)) => {
+                        // Recorded when it failed; recorded now if that did not get through.
+                        let _ = self.journal.failed(s.entry, &why);
+                        ReceiveOutcome::Failed(why)
+                    }
+                    (None, None) => {
+                        let why = "no file open".to_string();
+                        let _ = self.journal.failed(s.entry, &why);
+                        ReceiveOutcome::Failed(why)
+                    }
                 };
                 let ok = matches!(outcome, ReceiveOutcome::Finished(_));
                 self.allowance.ended(s.item, ok);
@@ -1375,9 +1412,18 @@ impl<'d> ReceiverSession<'d> {
             Message::Skip { stream } => {
                 // Identical to what is here: drop the partial copy and keep the original.
                 if let Some(s) = self.streams.remove(&stream) {
+                    // Its partial copy is removed first, then recorded.
+                    drop(s.assembly);
                     let outcome = match s.same {
-                        Some(stored) => ReceiveOutcome::AlreadyThere(stored),
-                        None => ReceiveOutcome::Failed("skipped".into()),
+                        Some(stored) => {
+                            self.journal.existing(s.entry, &stored).map_err(record)?;
+                            ReceiveOutcome::AlreadyThere(stored)
+                        }
+                        None => {
+                            let why = "skipped".to_string();
+                            self.journal.failed(s.entry, &why).map_err(record)?;
+                            ReceiveOutcome::Failed(why)
+                        }
                     };
                     // Already there: spent, like a file that landed.
                     self.allowance
@@ -1468,8 +1514,10 @@ impl<'d> ReceiverSession<'d> {
     /// it, and reports why).
     fn fail_stream(&mut self, stream: u32, why: String) {
         if let Some(s) = self.streams.get_mut(&stream) {
-            s.failure = Some(why);
             s.assembly = None;
+            // If this does not get through, recovery finds its partial file gone and records it.
+            let _ = self.journal.failed(s.entry, &why);
+            s.failure = Some(why);
         }
     }
 
@@ -1529,15 +1577,151 @@ impl<'d> ReceiverSession<'d> {
         gone
     }
 
+    /// Plans the write in the journal, then creates its temporary file, then records it staged.
     fn start(
         &self,
+        item: ItemId,
         destination: &str,
         path: &str,
         header: crate::Header,
-    ) -> Result<Assembly<'d>, String> {
+    ) -> Result<(Assembly<'d>, u64), Start> {
+        let refused = |e: &dyn std::fmt::Display| Start::Refused(e.to_string());
         let table: &'d Destinations = self.table;
-        let dest = table.get(destination).map_err(|e| e.to_string())?;
-        let path = IncomingPath::parse(path).map_err(|e| e.to_string())?;
-        Assembly::start(dest, &path, header).map_err(|e| e.to_string())
+        let dest = table.get(destination).map_err(|e| refused(&e))?;
+        let place = table.place(destination).map_err(|e| refused(&e))?;
+        let parsed = IncomingPath::parse(path).map_err(|e| refused(&e))?;
+        let (permission, for_account) = match place {
+            Approved::MyFolders | Approved::ChosenDrive | Approved::OffloadDrive => {
+                (Permission::OwnFolders, self.account.clone())
+            }
+            Approved::SharedFolder => (Permission::SharedFolder, EVERYONE.to_string()),
+            Approved::AnotherAccount { account_id } => {
+                (Permission::AdminHelper, account_id.clone())
+            }
+        };
+        let write = PlannedWrite {
+            item,
+            source_laptop: self.allowance.source_laptop(),
+            destination: destination.to_string(),
+            path: path.to_string(),
+            size: header.size,
+            actor: Actor {
+                acting_account: self.account.clone(),
+                for_account,
+                permission,
+            },
+            block_size: header.block_size,
+            source_modified_ns: header.stamp.modified_ns,
+            place: dest.folder_identity("").ok().flatten().map(file_id),
+        };
+        let entry = self.journal.plan(&write).map_err(Start::Record)?;
+        let assembly =
+            match Assembly::start_tagged(dest, &parsed, header, &self.journal.temp_tag(entry)) {
+                Ok(a) => a,
+                Err(e) => {
+                    let why = e.to_string();
+                    self.journal.failed(entry, &why).map_err(Start::Record)?;
+                    return Err(Start::Refused(why));
+                }
+            };
+        let made: Vec<(String, Option<FileId>)> = assembly
+            .created_folders()
+            .iter()
+            .map(|f| {
+                (
+                    f.clone(),
+                    dest.folder_identity(f).ok().flatten().map(file_id),
+                )
+            })
+            .collect();
+        // If this fails the partial file goes with the assembly; recovery records the rest.
+        self.journal
+            .staged(entry, &assembly.temp_path(), &made)
+            .map_err(Start::Record)?;
+        Ok((assembly, entry))
     }
+}
+
+/// Who a shared folder's files are for.
+const EVERYONE: &str = "everyone";
+
+/// Why a file did not start: refused (the file fails on its own), or the journal could not be
+/// written (the move stops).
+enum Start {
+    Refused(String),
+    Record(JournalError),
+}
+
+fn record(e: JournalError) -> TransferError {
+    TransferError::Record(e.to_string())
+}
+
+fn file_id(id: pctwin_gate::FileId) -> FileId {
+    FileId {
+        volume: id.volume,
+        index: id.index,
+    }
+}
+
+/// Most names tried when other programs keep taking the free one first.
+const MAX_NAME_TRIES: u32 = 64;
+
+/// Lands a complete file through the journal: verified (every byte checked, the original
+/// unchanged, all of it on disk), its name recorded before it gets it, then committed with what it
+/// landed as. A file that cannot land is recorded failed with why; if the journal cannot be
+/// written the move stops, and recovery finishes whatever the journal already has.
+fn land(
+    journal: &dyn Ledger,
+    dest: &Destination,
+    assembly: Assembly<'_>,
+    trailer: Trailer,
+    entry: u64,
+) -> Result<ReceiveOutcome, TransferError> {
+    let fail = |why: String| -> Result<ReceiveOutcome, TransferError> {
+        journal.failed(entry, &why).map_err(record)?;
+        Ok(ReceiveOutcome::Failed(why))
+    };
+    let size = assembly.header.size;
+    let modified_ns = assembly.header.stamp.modified_ns;
+    let (mut sealed, fingerprint) = match assembly.seal(trailer) {
+        Ok(sealed) => sealed,
+        Err(e) => return fail(e.to_string()),
+    };
+    journal.verified(entry, fingerprint).map_err(record)?;
+    let mut claimed = None;
+    for _ in 0..MAX_NAME_TRIES {
+        let name = match sealed.next_name() {
+            Ok(name) => name,
+            Err(e) => return fail(e.to_string()),
+        };
+        journal.applied(entry, &name).map_err(record)?;
+        match sealed.claim_as(&name) {
+            Ok(Ok(c)) => {
+                claimed = Some(c);
+                break;
+            }
+            // Another program took the name first: another name, recorded first again.
+            Ok(Err(back)) => sealed = back,
+            Err(e) => return fail(e.to_string()),
+        }
+    }
+    let Some(claimed) = claimed else {
+        return fail(pctwin_gate::GateError::TooManyClashes.to_string());
+    };
+    let finished = claimed.keep();
+    let landed = match dest.stat(&finished.final_path) {
+        Ok(Some(stat)) => Landed {
+            size: stat.len,
+            modified_ns: stat.modified.map(crate::nanos),
+            file: Some(file_id(stat.id)),
+        },
+        // What was written, as far as this side knows it.
+        _ => Landed {
+            size,
+            modified_ns,
+            file: None,
+        },
+    };
+    journal.committed(entry, landed).map_err(record)?;
+    Ok(ReceiveOutcome::Finished(finished))
 }

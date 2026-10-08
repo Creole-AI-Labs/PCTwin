@@ -72,7 +72,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use pctwin_gate::{Destination, Finished, GateError, IncomingFile, IncomingPath};
+use pctwin_gate::{Destination, Finished, GateError, IncomingFile, IncomingPath, Sealed};
 
 /// The smallest block.
 pub const MIN_BLOCK: u64 = 128 * 1024;
@@ -108,6 +108,8 @@ pub enum TransferError {
     ConnectionDropped,
     #[error("the other laptop sent something unexpected: {0}")]
     Protocol(String),
+    #[error("the move's record on this laptop could not be written, so the move stopped: {0}")]
+    Record(String),
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the
@@ -492,6 +494,8 @@ pub struct Assembly<'d> {
     file: IncomingFile<'d>,
     header: Header,
     done: BlockMap,
+    /// Each written block's fingerprint, for the whole file's.
+    hashes: std::collections::BTreeMap<u64, [u8; 32]>,
 }
 
 impl<'d> Assembly<'d> {
@@ -501,15 +505,39 @@ impl<'d> Assembly<'d> {
         path: &IncomingPath,
         header: Header,
     ) -> Result<Self, TransferError> {
-        if header.block_size == 0
-            || header.block_size > MAX_BLOCK
+        Self::start_with(destination, path, header, None)
+    }
+
+    /// As [`start`](Self::start), under the temporary name the change journal chose for it
+    /// (see [`Destination::create_file_tagged`]).
+    pub fn start_tagged(
+        destination: &'d Destination,
+        path: &IncomingPath,
+        header: Header,
+        tag: &str,
+    ) -> Result<Self, TransferError> {
+        Self::start_with(destination, path, header, Some(tag))
+    }
+
+    fn start_with(
+        destination: &'d Destination,
+        path: &IncomingPath,
+        header: Header,
+        tag: Option<&str>,
+    ) -> Result<Self, TransferError> {
+        // The block size is always the one the old laptop must use for this size, so a file can
+        // never be sent in tiny blocks that would fill memory.
+        if header.block_size != block_size_for(header.size)
             || header.block_count != header.size.div_ceil(header.block_size)
         {
             return Err(TransferError::Damaged(
                 "the file's description does not add up".into(),
             ));
         }
-        let mut file = destination.create_file(path, header.size)?;
+        let mut file = match tag {
+            Some(tag) => destination.create_file_tagged(path, header.size, tag)?,
+            None => destination.create_file(path, header.size)?,
+        };
         // Reserve the whole size now, so a full disk shows at the start. Callers check the size
         // against the approved plan first. A drive that cannot reserve still copies.
         file.reserve()?;
@@ -526,7 +554,22 @@ impl<'d> Assembly<'d> {
             }
         }
         let done = BlockMap::new(header.block_count);
-        Ok(Self { file, header, done })
+        Ok(Self {
+            file,
+            header,
+            done,
+            hashes: std::collections::BTreeMap::new(),
+        })
+    }
+
+    /// Where its temporary file is (stored path inside the destination).
+    pub fn temp_path(&self) -> String {
+        self.file.temp_path()
+    }
+
+    /// The folders made for it (stored paths): those not already there.
+    pub fn created_folders(&self) -> &[String] {
+        self.file.created_folders()
     }
 
     /// Checks a block and writes it at its place. A block already written (sent again because a
@@ -549,6 +592,7 @@ impl<'d> Assembly<'d> {
             .write_at(block.index * self.header.block_size, &block.data)?;
         // In range and not yet done (both checked above), so this always marks it.
         let _ = self.done.insert(block.index);
+        self.hashes.insert(block.index, block.hash);
         Ok(Receipt { block: block.index })
     }
 
@@ -569,6 +613,14 @@ impl<'d> Assembly<'d> {
     /// Gives the file its real name, only if every block arrived and the file did not change while
     /// it was read. Otherwise the partial file is removed.
     pub fn finish(self, trailer: Trailer) -> Result<Finished, TransferError> {
+        let (sealed, _) = self.seal(trailer)?;
+        Ok(sealed.claim()?.keep())
+    }
+
+    /// Only if every block arrived and the file did not change while it was read: makes sure the
+    /// whole file is on disk (still under its temporary name) and gives its whole-file
+    /// fingerprint. Otherwise the partial file is removed.
+    pub fn seal(self, trailer: Trailer) -> Result<(Sealed<'d>, [u8; 32]), TransferError> {
         if trailer.changed || trailer.stamp_after != self.header.stamp {
             return Err(TransferError::ChangedWhileRead);
         }
@@ -578,6 +630,11 @@ impl<'d> Assembly<'d> {
                 expected: self.header.block_count,
             });
         }
-        Ok(self.file.finish()?)
+        let fingerprint = file_fingerprint(
+            self.header.size,
+            self.header.block_size,
+            self.hashes.values(),
+        );
+        Ok((self.file.seal()?, fingerprint))
     }
 }

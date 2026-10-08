@@ -39,3 +39,12 @@ pub fn approved(files: &[(ItemId, u64)]) -> Allowance {
     let approval = record.approve().unwrap();
     Allowance::from_record(&record, &approval).unwrap()
 }
+
+/// A change journal for a test's receiver, kept until the test run ends.
+#[allow(dead_code)]
+pub fn journal() -> &'static pctwin_journal::Journal {
+    let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+    Box::leak(Box::new(
+        pctwin_journal::Journal::open(&dir.path().join("journal.redb")).unwrap(),
+    ))
+}

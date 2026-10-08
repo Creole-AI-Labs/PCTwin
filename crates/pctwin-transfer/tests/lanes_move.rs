@@ -204,7 +204,7 @@ async fn a_big_file_goes_over_several_lanes_at_once_and_everything_arrives() {
     let l = laptops();
     let table = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let conns = connections(2);
     let carried: Vec<_> = std::iter::once(&conns.0)
         .chain(&conns.1)
@@ -232,7 +232,7 @@ async fn an_extra_lane_that_drops_mid_move_loses_nothing() {
     let l = laptops();
     let table = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut conns = connections(2);
     // The extra lanes drop after carrying some pieces (some blocks unconfirmed). Which lane gets
     // work varies, so both are set to drop; at least one really does.
@@ -255,7 +255,7 @@ async fn the_main_connection_dropping_is_picked_up_again_over_new_lanes() {
     let l = laptops();
     let table = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut conns = connections(2);
     // Early, while the big file is still on its way (the main connection's 8th message).
     conns.0.cut_at = Some(8);
@@ -284,7 +284,7 @@ async fn a_file_changed_while_sent_over_lanes_arrives_whole_and_current() {
     let l = laptops();
     let table = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut conns = connections(2);
     let starts = conns.0.starts.clone();
     // Partway through, another program saves a new version of the big file (same size).
@@ -326,7 +326,7 @@ async fn one_lane_and_several_lanes_move_the_same_files() {
     let l = laptops();
     let t1 = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&t1, plan(&l));
+    let mut receiver = ReceiverSession::new(&t1, plan(&l), common::journal(), "1001");
     assert_eq!(
         run(&mut sender, &mut receiver, connections(0)).await,
         (true, true)
@@ -338,7 +338,7 @@ async fn one_lane_and_several_lanes_move_the_same_files() {
     let l2 = laptops();
     let table2 = table(&l2);
     let mut sender2 = SenderSession::new(jobs(&l2), 4);
-    let mut receiver2 = ReceiverSession::new(&table2, plan(&l2));
+    let mut receiver2 = ReceiverSession::new(&table2, plan(&l2), common::journal(), "1001");
     assert_eq!(
         run(&mut sender2, &mut receiver2, connections(3)).await,
         (true, true)
@@ -368,7 +368,7 @@ async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
     };
     let table = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 8);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old_main, mut new_main) = pair();
     let (old_in, mut old_joining) = mpsc::unbounded_channel();
     let (new_in, mut new_joining) = mpsc::unbounded_channel();
@@ -442,7 +442,7 @@ async fn a_whole_move_over_real_lanes_that_the_driver_opens_and_closes() {
     let (old_tx, mut old_in) = mpsc::unbounded_channel();
     let (new_tx, mut new_in) = mpsc::unbounded_channel();
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let meter: Arc<AtomicU64> = receiver.meter();
     let done = Arc::new(AtomicBool::new(false));
     let mut driver = pctwin_transfer::LaneDriver::new(std::time::Duration::from_millis(100));
@@ -500,7 +500,7 @@ async fn a_lane_that_goes_silent_is_let_go_and_its_blocks_go_to_the_others() {
     let l = laptops();
     let table = table(&l);
     let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old_main, mut new_main) = pair();
     let (old_tx, mut old_in) = mpsc::unbounded_channel::<Silent>();
     old_tx.send(Silent).unwrap();

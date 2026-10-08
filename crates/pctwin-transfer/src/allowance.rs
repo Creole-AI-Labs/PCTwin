@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pctwin_record::{Approval, Inclusion, ItemId, ItemKind, Record, RecordError};
+use pctwin_record::{Approval, Inclusion, ItemId, ItemKind, LaptopId, Record, RecordError};
 
 /// The least room a file has to grow since the plan was approved (a document saved again).
 const MIN_FILE_ROOM: u64 = 1024 * 1024;
@@ -47,6 +47,8 @@ struct Progress {
 /// (and 64 MiB), so that room cannot be used over and over to fill the disk.
 #[derive(Debug, Clone)]
 pub struct Allowance {
+    /// The old laptop the plan is for.
+    source_laptop: LaptopId,
     sizes: HashMap<ItemId, u64>,
     total_room: u64,
     /// Each file's attempts so far.
@@ -66,6 +68,7 @@ impl Allowance {
             .collect();
         let total = sizes.values().fold(0u64, |t, s| t.saturating_add(*s));
         Ok(Self {
+            source_laptop: record.source_laptop,
             sizes,
             total_room: total.saturating_add(total / 10).saturating_add(MOVE_ROOM),
             started: HashMap::new(),
@@ -123,6 +126,11 @@ impl Allowance {
             p.live = false;
             p.landed |= landed;
         }
+    }
+
+    /// The old laptop the plan is for.
+    pub fn source_laptop(&self) -> LaptopId {
+        self.source_laptop
     }
 
     /// Bytes agreed to so far, each file counted once at its largest size.

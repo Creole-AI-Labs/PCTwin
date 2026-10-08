@@ -230,7 +230,12 @@ async fn every_file_arrives_in_its_approved_place() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     assert_arrived(&l);
     let s = sender.lock().await;
@@ -261,7 +266,7 @@ async fn never_more_than_the_in_flight_limit_is_unconfirmed() {
     let table = table(&l);
     let limit: u64 = 256 * 1024;
     let mut sender = SenderSession::new(jobs(&l), 2).with_in_flight_limit(limit);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut a, mut b) = mem_pair();
     let most = a.most_unconfirmed.clone();
     let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
@@ -289,7 +294,12 @@ async fn a_dropped_connection_continues_each_file_from_where_it_stopped() {
         let l = laptops();
         let table = table(&l);
         let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-        let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+        let receiver = Mutex::new(ReceiverSession::new(
+            &table,
+            plan(&l),
+            common::journal(),
+            "1001",
+        ));
         let (mut a, b) = mem_pair();
         a.cut_at = Some(cut);
         assert_eq!(
@@ -331,7 +341,12 @@ async fn a_file_changed_during_the_break_is_sent_again_whole() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 1));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     let (mut a, b) = mem_pair();
     a.cut_at = Some(30);
     let _ = run_both(&sender, &receiver, (a, b)).await;
@@ -351,7 +366,12 @@ async fn a_file_changed_while_being_sent_arrives_whole_and_current() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 1));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     let (mut a, b) = mem_pair();
     // Part way through the big file, another program rewrites it (same size, new contents).
     let big = l.files[2].0.clone();
@@ -384,7 +404,12 @@ async fn a_file_for_a_place_that_was_not_approved_fails_on_its_own() {
     let mut jobs = jobs(&l);
     jobs[1].destination = "somewhere-else".into();
     let sender = Mutex::new(SenderSession::new(jobs, 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     let s = sender.lock().await;
     assert_eq!(s.outcome(id(0)), Some(&SendOutcome::Arrived));
@@ -400,7 +425,12 @@ async fn a_source_file_that_cannot_be_read_fails_on_its_own() {
     let mut jobs = jobs(&l);
     jobs[0].source = Path::new("does-not-exist.bin").to_path_buf();
     let sender = Mutex::new(SenderSession::new(jobs, 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     let s = sender.lock().await;
     assert!(matches!(s.outcome(id(0)), Some(SendOutcome::Failed(_))));
@@ -440,7 +470,7 @@ async fn a_move_runs_over_a_real_paired_link() {
     let mut new_link = pending_guest.approval().await.unwrap();
 
     let mut sender = SenderSession::new(jobs(&l), 2);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (sent, received) = tokio::time::timeout(Duration::from_secs(60), async {
         tokio::join!(sender.run(&mut old_link), receiver.run(&mut new_link))
     })
@@ -459,7 +489,12 @@ async fn a_file_the_new_laptop_already_has_is_not_copied_again() {
     std::fs::create_dir_all(l.new_shared.path().join("Public")).unwrap();
     std::fs::write(l.new_shared.path().join("Public/medium.bin"), &l.files[1].1).unwrap();
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     let s = sender.lock().await;
     assert_eq!(s.outcome(id(1)), Some(&SendOutcome::AlreadyThere));
@@ -485,7 +520,12 @@ async fn a_different_file_with_the_same_name_and_size_is_kept_and_the_new_one_co
     let theirs = pattern(300_000, 555);
     std::fs::write(l.new_shared.path().join("Public/medium.bin"), &theirs).unwrap();
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     assert_eq!(
         sender.lock().await.outcome(id(1)),
@@ -506,7 +546,12 @@ async fn a_file_removed_soon_after_copying_is_reported_not_copied() {
     let l = laptops();
     let table = table(&l);
     let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
-    let receiver = Mutex::new(ReceiverSession::new(&table, plan(&l)));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
     assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
     // Security software removes one copy, and another is cut short.
     std::fs::remove_file(l.new_mine.path().join("Documents/small.bin")).unwrap();
@@ -546,7 +591,7 @@ async fn three_blocks_then_a_drop<'d>(
     l: &Laptops,
     table: &'d Destinations,
 ) -> (ReceiverSession<'d>, Header, Vec<Block>) {
-    let mut receiver = ReceiverSession::new(table, plan(l));
+    let mut receiver = ReceiverSession::new(table, plan(l), common::journal(), "1001");
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
@@ -678,7 +723,7 @@ fn everything_under(dir: &Path) -> Vec<PathBuf> {
 async fn the_new_laptop_starts_only_what_the_approved_plan_allows() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let honest = fs.header().clone();
     // The same file, announced as 1 TiB: far more than the plan allows for it.
@@ -744,7 +789,7 @@ async fn interleave(lanes: &mut [&mut Mem], plan: &[Vec<usize>], blocks: &[Block
 async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
@@ -814,7 +859,7 @@ async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
 async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main_lane() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
@@ -894,7 +939,7 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
 async fn an_extra_lane_cannot_start_end_or_skip_files() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let (mut old, mut new) = mem_pair();
@@ -929,7 +974,7 @@ async fn pieces_for_a_file_never_started_are_still_answered() {
     // Otherwise the old laptop would wait for those receipts for ever.
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let block = fs.next_block().unwrap().unwrap();
     let (mut old, mut new) = mem_pair();
@@ -958,7 +1003,7 @@ async fn pieces_for_a_file_never_started_are_still_answered() {
 async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
@@ -1050,7 +1095,8 @@ async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
     let table = table(&l);
     let n = pctwin_transfer::MAX_OPEN_FILES as u8 + 1;
     let files: Vec<(ItemId, u64)> = (0..n).map(|k| (id(k), 1000)).collect();
-    let mut receiver = ReceiverSession::new(&table, common::approved(&files));
+    let mut receiver =
+        ReceiverSession::new(&table, common::approved(&files), common::journal(), "1001");
     let header = |size| Header {
         size,
         block_size: 131_072,
@@ -1106,7 +1152,7 @@ async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
 async fn files_refused_at_their_start_do_not_count_toward_the_open_limit() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let (mut old, mut new) = mem_pair();
@@ -1194,7 +1240,7 @@ async fn an_approved_file_lands_once_however_often_it_is_started() {
     // The review's repro: the same approved file started again and again on new streams.
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
@@ -1230,7 +1276,7 @@ async fn an_approved_file_lands_once_however_often_it_is_started() {
 async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
@@ -1273,7 +1319,7 @@ async fn pieces_of_two_files_mixed_on_one_connection_end_it() {
     // than buffered.
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
@@ -1300,7 +1346,7 @@ async fn pieces_of_two_files_mixed_on_one_connection_end_it() {
 async fn pieces_for_a_file_that_is_not_open_are_answered_and_not_kept() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
@@ -1348,7 +1394,7 @@ async fn pieces_for_a_file_that_is_not_open_are_answered_and_not_kept() {
 async fn refused_starts_do_not_pile_up_in_what_the_new_laptop_remembers() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let fs = FileSender::open(&l.files[2].0, None, true).unwrap();
     let header = fs.header().clone();
     let (mut old, mut new) = mem_pair();
@@ -1390,7 +1436,7 @@ async fn refused_starts_do_not_pile_up_in_what_the_new_laptop_remembers() {
 async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
     let l = laptops();
     let table = table(&l);
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
@@ -1478,7 +1524,7 @@ async fn a_file_found_already_there_is_spent_too() {
     let there = l.new_mine.path().join("Documents");
     std::fs::create_dir_all(&there).unwrap();
     std::fs::write(there.join("small.bin"), &l.files[0].1).unwrap();
-    let mut receiver = ReceiverSession::new(&table, plan(&l));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
@@ -1567,5 +1613,59 @@ async fn a_refused_block_stops_the_old_laptop_sending_that_file() {
     assert!(matches!(
         sender.outcome(id(2)),
         Some(SendOutcome::Failed(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_stream_started_again_with_another_file_ends_the_first_in_the_journal_at_once() {
+    let l = laptops();
+    let table = table(&l);
+    let jdir = tempfile::tempdir().unwrap();
+    let journal = pctwin_journal::Journal::open(&jdir.path().join("journal.redb")).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+    let big = FileSender::open(&l.files[2].0, None, true)
+        .unwrap()
+        .header()
+        .clone();
+    let medium = FileSender::open(&l.files[1].0, None, true)
+        .unwrap()
+        .header()
+        .clone();
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &start(&big, 0, id(2))).await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        // The same stream, another file.
+        say(
+            &mut old,
+            &Message::StartFile {
+                stream: 0,
+                item: id(1),
+                destination: "shared".into(),
+                path: "Public/medium.bin".into(),
+                header: medium.clone(),
+                resumed_done: 0,
+            },
+        )
+        .await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    let entries = journal.entries().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(
+        matches!(&entries[0].state, pctwin_journal::State::Failed { why, .. } if why == "it was started again"),
+        "{:?}",
+        entries[0].state
+    );
+    assert!(matches!(
+        entries[1].state,
+        pctwin_journal::State::Staged { .. }
     ));
 }

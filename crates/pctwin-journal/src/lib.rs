@@ -598,6 +598,57 @@ impl Journal {
     }
 }
 
+/// The steps a write is recorded through, as the receiving side uses them. [`Journal`] is the real
+/// one; the receiver takes any, so a test can make the record fail at any step (fault injection).
+pub trait Ledger {
+    /// See [`Journal::temp_tag`].
+    fn temp_tag(&self, id: u64) -> String;
+    fn plan(&self, write: &PlannedWrite) -> Result<u64, JournalError>;
+    fn staged(
+        &self,
+        id: u64,
+        temp: &str,
+        made: &[(String, Option<FileId>)],
+    ) -> Result<(), JournalError>;
+    fn verified(&self, id: u64, fingerprint: [u8; 32]) -> Result<(), JournalError>;
+    fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError>;
+    fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
+    fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
+    fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
+}
+
+impl Ledger for Journal {
+    fn temp_tag(&self, id: u64) -> String {
+        Journal::temp_tag(self, id)
+    }
+    fn plan(&self, write: &PlannedWrite) -> Result<u64, JournalError> {
+        Journal::plan(self, write)
+    }
+    fn staged(
+        &self,
+        id: u64,
+        temp: &str,
+        made: &[(String, Option<FileId>)],
+    ) -> Result<(), JournalError> {
+        Journal::staged(self, id, temp, made)
+    }
+    fn verified(&self, id: u64, fingerprint: [u8; 32]) -> Result<(), JournalError> {
+        Journal::verified(self, id, fingerprint)
+    }
+    fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
+        Journal::applied(self, id, final_path)
+    }
+    fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
+        Journal::committed(self, id, landed)
+    }
+    fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError> {
+        Journal::existing(self, id, stored_path)
+    }
+    fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
+        Journal::failed(self, id, why)
+    }
+}
+
 fn read_entry(
     entries: &impl ReadableTable<u64, &'static [u8]>,
     id: u64,

@@ -461,3 +461,34 @@ fn a_genuine_block_of_the_wrong_length_for_its_place_is_refused() {
     ));
     assert_eq!(assembly.resume_ticket().done.done_count(), 0);
 }
+
+#[test]
+fn a_file_described_in_any_other_block_size_than_its_own_is_refused() {
+    // Tiny blocks would make the new laptop keep a record for every few bytes.
+    let dst = tempfile::tempdir().unwrap();
+    let dest = Destination::open(dst.path()).unwrap();
+    let size = 1024 * 1024;
+    for block_size in [0, 4096, 2 * MIN_BLOCK, MAX_BLOCK, MAX_BLOCK * 2] {
+        let header = pctwin_transfer::Header {
+            size,
+            block_size,
+            block_count: if block_size == 0 {
+                0
+            } else {
+                size.div_ceil(block_size)
+            },
+            stamp: pctwin_transfer::Stamp {
+                size,
+                modified_ns: None,
+            },
+        };
+        assert!(
+            matches!(
+                Assembly::start(&dest, &IncomingPath::parse("a.bin").unwrap(), header),
+                Err(TransferError::Damaged(_))
+            ),
+            "{block_size}"
+        );
+    }
+    assert_eq!(std::fs::read_dir(dst.path()).unwrap().count(), 0);
+}
