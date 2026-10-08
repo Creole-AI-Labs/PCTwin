@@ -10,6 +10,10 @@ use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_scan::{Drive, FileSystem};
+/// PCTwin's own folder for files on their way to the Trash (the app gives it in the person's
+/// language).
+const ASIDE: &str = "Undone by PCTwin";
+
 use pctwin_transfer::{
     Bin, CHANGED_SINCE, block_size_for, fingerprint_reader, recycle_bin_for, undo,
 };
@@ -196,7 +200,7 @@ fn files_nobody_changed_go_to_the_trash_and_empty_folders_the_move_made_are_remo
         b"aaaa",
         &["Documents/Tax", "Documents/Tax/2026"],
     );
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(
         outcome_of(&r, "Documents/Tax/2026/a.pdf"),
         UndoOutcome::Trashed
@@ -242,7 +246,7 @@ fn a_file_changed_since_the_move_is_kept_and_says_so() {
         f.write_all(b"4321").unwrap();
     }
     w.set_modified("sneaky.txt", t);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     for p in ["edited.txt", "touched.txt", "sneaky.txt"] {
         assert_eq!(outcome_of(&r, p), kept_changed(), "{p}");
         assert!(w.exists(p), "{p}");
@@ -265,7 +269,7 @@ fn a_file_made_again_under_the_same_name_is_not_the_one_the_move_wrote() {
     std::fs::remove_file(w.root.join("a.txt")).unwrap();
     std::fs::write(w.root.join("a.txt"), b"same").unwrap();
     w.set_modified("a.txt", t);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     // Only when the drive gives each new file a new identity (all the drives tests run on).
     assert_eq!(outcome_of(&r, "a.txt"), kept_changed());
     assert!(w.exists("a.txt"));
@@ -278,7 +282,7 @@ fn a_file_already_gone_is_reported_and_undo_goes_newest_first() {
     w.moved(1, "first.txt", b"1", &[]);
     w.moved(2, "second.txt", b"2", &[]);
     std::fs::remove_file(w.root.join("first.txt")).unwrap();
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     let order: Vec<&str> = r.files.iter().map(|u| u.path.as_str()).collect();
     assert_eq!(order, ["second.txt", "first.txt"]);
     assert_eq!(outcome_of(&r, "first.txt"), UndoOutcome::AlreadyGone);
@@ -286,15 +290,19 @@ fn a_file_already_gone_is_reported_and_undo_goes_newest_first() {
 }
 
 #[test]
-fn a_folder_with_something_in_it_is_kept() {
+fn a_folder_with_something_in_it_is_kept_and_looked_at_again_next_time() {
     let w = world();
     let bin = FakeBin::new();
     w.moved(1, "New/a.txt", b"a", &["New"]);
     std::fs::write(w.root.join("New/mine.txt"), b"mine").unwrap();
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(outcome_of(&r, "New/a.txt"), UndoOutcome::Trashed);
-    assert!(matches!(outcome_of(&r, "New"), UndoOutcome::Kept { .. }));
+    assert!(matches!(outcome_of(&r, "New"), UndoOutcome::NotDone { .. }));
     assert_eq!(std::fs::read(w.root.join("New/mine.txt")).unwrap(), b"mine");
+    // Once it is empty, the next undo removes it.
+    std::fs::remove_file(w.root.join("New/mine.txt")).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "New"), UndoOutcome::Removed);
 }
 
 #[test]
@@ -305,7 +313,7 @@ fn a_folder_made_again_by_the_person_is_never_removed() {
     std::fs::remove_file(w.root.join("New/a.txt")).unwrap();
     std::fs::remove_dir(w.root.join("New")).unwrap();
     std::fs::create_dir(w.root.join("New")).unwrap();
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(matches!(outcome_of(&r, "New"), UndoOutcome::Kept { .. }));
     assert!(w.exists("New"));
 }
@@ -334,7 +342,7 @@ fn identical_files_that_were_already_there_are_never_touched() {
         .unwrap();
     std::fs::write(w.root.join("mine.txt"), b"mine").unwrap();
     w.journal.existing(id, "mine.txt").unwrap();
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(r.files.is_empty());
     assert!(w.exists("mine.txt"));
 }
@@ -345,7 +353,7 @@ fn where_the_trash_cannot_take_a_file_it_is_kept_with_why() {
     let mut bin = FakeBin::new();
     bin.refuse = Some("this drive has no Recycle Bin, so it was kept".into());
     w.moved(1, "a.txt", b"a", &[]);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(
         outcome_of(&r, "a.txt"),
         UndoOutcome::Kept {
@@ -361,13 +369,13 @@ fn a_file_the_trash_could_not_take_this_time_is_tried_again_next_time() {
     let bin = FakeBin::new();
     *bin.fail_put.borrow_mut() = 1;
     w.moved(1, "a.txt", b"a", &[]);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(matches!(
         outcome_of(&r, "a.txt"),
         UndoOutcome::NotDone { .. }
     ));
     assert!(w.exists("a.txt"));
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Trashed);
     assert!(!w.exists("a.txt"));
 }
@@ -379,10 +387,10 @@ fn undoing_twice_is_as_safe_as_once() {
     w.moved(1, "a.txt", b"a", &["New"]);
     w.moved(2, "b.txt", b"b", &[]);
     std::fs::write(w.root.join("b.txt"), b"changed").unwrap();
-    undo(&w.journal, &w.table, &bin).unwrap();
+    undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     // The person makes a new a.txt after undo: a second undo never takes it.
     std::fs::write(w.root.join("a.txt"), b"a").unwrap();
-    let again = undo(&w.journal, &w.table, &bin).unwrap();
+    let again = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(again.files.is_empty(), "{again:?}");
     assert!(again.folders.is_empty(), "{again:?}");
     assert!(w.exists("a.txt"));
@@ -390,42 +398,110 @@ fn undoing_twice_is_as_safe_as_once() {
 }
 
 #[test]
-fn undo_cut_short_after_recording_carries_on_without_taking_another_file() {
+fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
     let w = world();
     let bin = FakeBin::new();
     let a = w.moved(1, "a.txt", b"a", &[]);
     let b = w.moved(2, "b.txt", b"b", &[]);
-    let stat = |p: &str| {
+    let c = w.moved(3, "c.txt", b"c", &[]);
+    let id = |p: &str| {
         let s = w.table.get("me").unwrap().stat(p).unwrap().unwrap();
         FileId {
             volume: s.id.volume,
             index: s.id.index,
         }
     };
-    // a.txt: recorded as going, then the crash came before it went.
+    let aside = |name: &str| format!("{ASIDE}/{name}");
+    // a.txt: recorded as going aside, then the crash came before it moved.
     w.journal
         .record_undo(
             a,
-            &Undo::Moving {
-                file: Some(stat("a.txt")),
+            &Undo::Aside {
+                file: Some(id("a.txt")),
+                at: aside("a.txt"),
             },
         )
         .unwrap();
-    // b.txt: recorded as going, it went, then the crash came; the person made a new b.txt since.
+    // b.txt: recorded, moved aside, then the crash; the person made a new b.txt since.
     w.journal
         .record_undo(
             b,
-            &Undo::Moving {
-                file: Some(stat("b.txt")),
+            &Undo::Aside {
+                file: Some(id("b.txt")),
+                at: aside("b.txt"),
             },
         )
         .unwrap();
-    std::fs::rename(w.root.join("b.txt"), bin.dir.path().join("earlier")).unwrap();
+    std::fs::create_dir(w.root.join(ASIDE)).unwrap();
+    std::fs::rename(w.root.join("b.txt"), w.root.join(aside("b.txt"))).unwrap();
     std::fs::write(w.root.join("b.txt"), b"b").unwrap();
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    // c.txt: recorded, moved aside and handed to the Trash, then the crash; a new c.txt since.
+    w.journal
+        .record_undo(
+            c,
+            &Undo::Aside {
+                file: Some(id("c.txt")),
+                at: aside("c.txt"),
+            },
+        )
+        .unwrap();
+    std::fs::rename(w.root.join("c.txt"), bin.dir.path().join("earlier")).unwrap();
+    std::fs::write(w.root.join("c.txt"), b"c").unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Trashed);
-    assert!(matches!(outcome_of(&r, "b.txt"), UndoOutcome::Kept { .. }));
-    assert!(w.exists("b.txt"));
+    assert_eq!(outcome_of(&r, "b.txt"), UndoOutcome::Trashed);
+    assert_eq!(outcome_of(&r, "c.txt"), kept_changed());
+    // The person's new files are never taken; PCTwin's folder is gone once empty.
+    assert_eq!(std::fs::read(w.root.join("b.txt")).unwrap(), b"b");
+    assert_eq!(std::fs::read(w.root.join("c.txt")).unwrap(), b"c");
+    assert!(!w.root.join(ASIDE).exists());
+    assert_eq!(bin.taken.borrow().len(), 2);
+}
+
+#[test]
+fn an_edit_made_while_a_file_is_aside_puts_it_back_where_it_was() {
+    let w = world();
+    let bin = FakeBin::new();
+    let a = w.moved(1, "Docs/a.txt", b"draft", &[]);
+    let s = w
+        .table
+        .get("me")
+        .unwrap()
+        .stat("Docs/a.txt")
+        .unwrap()
+        .unwrap();
+    let at = format!("{ASIDE}/Docs/a.txt");
+    w.journal
+        .record_undo(
+            a,
+            &Undo::Aside {
+                file: Some(FileId {
+                    volume: s.id.volume,
+                    index: s.id.index,
+                }),
+                at: at.clone(),
+            },
+        )
+        .unwrap();
+    std::fs::create_dir_all(w.root.join(format!("{ASIDE}/Docs"))).unwrap();
+    std::fs::rename(w.root.join("Docs/a.txt"), w.root.join(&at)).unwrap();
+    // A program that had it open writes to it while it is aside.
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(w.root.join(&at))
+            .unwrap();
+        f.write_all(b" and more").unwrap();
+    }
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "Docs/a.txt"), kept_changed());
+    assert_eq!(
+        std::fs::read(w.root.join("Docs/a.txt")).unwrap(),
+        b"draft and more"
+    );
+    assert!(!w.root.join(ASIDE).exists());
+    assert!(bin.taken.borrow().is_empty());
 }
 
 #[test]
@@ -434,14 +510,14 @@ fn a_place_not_reachable_now_is_tried_again_later() {
     let bin = FakeBin::new();
     let a = w.moved(1, "a.txt", b"a", &[]);
     let full = std::mem::take(&mut w.table);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(matches!(
         outcome_of(&r, "a.txt"),
         UndoOutcome::NotDone { .. }
     ));
     assert_eq!(w.journal.undo_of(a).unwrap(), None);
     w.table = full;
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Trashed);
 }
 
@@ -529,11 +605,17 @@ impl Bin for RecordFirst<'_> {
             .filter(|id| {
                 matches!(
                     self.journal.undo_of(**id).unwrap(),
-                    Some(Undo::Moving { .. })
+                    Some(Undo::Aside { .. })
                 )
             })
             .count();
         assert_eq!(going, 1, "recorded as going before it goes");
+        // Only ever from PCTwin's own folder.
+        assert!(
+            path.components()
+                .any(|c| c.as_os_str() == std::ffi::OsStr::new(ASIDE)),
+            "{path:?}"
+        );
         self.inner.put(path)
     }
 }
@@ -548,7 +630,7 @@ fn each_file_is_recorded_as_going_before_it_goes() {
         journal: &w.journal,
         entries: vec![a, b],
     };
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert_eq!(r.files.len(), 2);
     assert_eq!(bin.inner.taken.borrow().len(), 2);
 }
@@ -565,7 +647,7 @@ fn a_different_folder_under_the_same_label_is_never_undone() {
         .approve("me", Approved::MyFolders, other.path())
         .unwrap();
     let real = std::mem::replace(&mut w.table, table);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(matches!(
         outcome_of(&r, "a.txt"),
         UndoOutcome::NotDone { .. }
@@ -573,7 +655,7 @@ fn a_different_folder_under_the_same_label_is_never_undone() {
     assert!(other.path().join("a.txt").exists());
     w.table = real;
     assert_eq!(
-        outcome_of(&undo(&w.journal, &w.table, &bin).unwrap(), "a.txt"),
+        outcome_of(&undo(&w.journal, &w.table, &bin, ASIDE).unwrap(), "a.txt"),
         UndoOutcome::Trashed
     );
 }
@@ -587,7 +669,7 @@ fn a_file_in_a_folder_spelled_otherwise_on_the_disk_is_still_undone() {
     std::fs::create_dir(w.root.join("Docs")).unwrap();
     let case_blind = w.root.join("docs").exists();
     w.moved(1, "docs/a.txt", b"aaaa", &[]);
-    let r = undo(&w.journal, &w.table, &bin).unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     if case_blind {
         assert_eq!(outcome_of(&r, "docs/a.txt"), UndoOutcome::Trashed);
         assert!(!w.root.join("Docs/a.txt").exists());
@@ -611,7 +693,180 @@ fn a_junction_put_in_place_of_a_folder_is_never_followed_by_undo() {
         .unwrap();
     assert!(made.status.success());
     let bin = FakeBin::new();
-    undo(&w.journal, &w.table, &bin).unwrap();
+    undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
     assert!(outside.path().join("victim.txt").exists());
     assert!(bin.taken.borrow().is_empty());
+}
+
+/// Lets the person save an edit into the file between undo checking it and moving it aside.
+struct EditingBin {
+    inner: FakeBin,
+}
+
+impl Bin for EditingBin {
+    fn can_take(&self, path: &Path) -> Result<(), String> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+        f.write_all(b" + my new edit").unwrap();
+        Ok(())
+    }
+    fn put(&self, path: &Path) -> Result<(), String> {
+        self.inner.put(path)
+    }
+}
+
+#[test]
+fn an_edit_saved_after_the_check_is_never_trashed() {
+    let w = world();
+    w.moved(1, "a.txt", b"original", &[]);
+    let bin = EditingBin {
+        inner: FakeBin::new(),
+    };
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "a.txt"), kept_changed());
+    assert_eq!(
+        std::fs::read(w.root.join("a.txt")).unwrap(),
+        b"original + my new edit"
+    );
+    assert!(bin.inner.taken.borrow().is_empty());
+    assert!(!w.root.join(ASIDE).exists());
+}
+
+/// Swaps the file for the person's new work between undo checking it and moving it.
+struct SwapBin {
+    inner: FakeBin,
+}
+
+impl Bin for SwapBin {
+    fn can_take(&self, path: &Path) -> Result<(), String> {
+        std::fs::rename(path, path.with_extension("orig-elsewhere")).unwrap();
+        std::fs::write(path, b"the person's new work").unwrap();
+        Ok(())
+    }
+    fn put(&self, path: &Path) -> Result<(), String> {
+        self.inner.put(path)
+    }
+}
+
+#[test]
+fn a_file_swapped_in_after_the_check_is_never_trashed() {
+    let w = world();
+    w.moved(1, "f.txt", b"ours", &[]);
+    let bin = SwapBin {
+        inner: FakeBin::new(),
+    };
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert_eq!(outcome_of(&r, "f.txt"), kept_changed());
+    assert_eq!(
+        std::fs::read(w.root.join("f.txt")).unwrap(),
+        b"the person's new work"
+    );
+    assert!(bin.inner.taken.borrow().is_empty());
+}
+
+#[test]
+fn a_file_or_folder_moved_or_renamed_since_is_kept_and_said_so() {
+    let w = world();
+    let bin = FakeBin::new();
+    w.moved(1, "A/b.txt", b"bbbb", &["A"]);
+    w.moved(2, "C/d.txt", b"dddd", &["C"]);
+    w.moved(3, "E/f.txt", b"ffff", &["E"]);
+    // A renamed, d.txt renamed inside C, f.txt deleted.
+    std::fs::rename(w.root.join("A"), w.root.join("A-renamed")).unwrap();
+    std::fs::rename(w.root.join("C/d.txt"), w.root.join("C/d2.txt")).unwrap();
+    std::fs::remove_file(w.root.join("E/f.txt")).unwrap();
+    // Another file of the same size there is not it.
+    std::fs::write(w.root.join("E/g.txt"), b"gggg").unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    let moved = UndoOutcome::Kept {
+        why: pctwin_transfer::MOVED_SINCE.into(),
+    };
+    assert_eq!(outcome_of(&r, "A/b.txt"), moved);
+    assert_eq!(outcome_of(&r, "C/d.txt"), moved);
+    assert_eq!(outcome_of(&r, "E/f.txt"), UndoOutcome::AlreadyGone);
+    assert!(w.exists("A-renamed/b.txt"));
+    assert!(w.exists("C/d2.txt"));
+    assert_eq!(
+        r.not_undone().count(),
+        2 + 2,
+        "A/b.txt, C/d.txt, and folders C and E (not empty)"
+    );
+}
+
+#[test]
+fn a_folder_whose_identity_was_never_known_is_never_removed() {
+    let w = world();
+    let bin = FakeBin::new();
+    // Recorded without an identity (it could not be read when made).
+    let id = w.moved(1, "X/a.txt", b"a", &[]);
+    let _ = id;
+    std::fs::create_dir(w.root.join("Y")).unwrap();
+    let e = w.journal.plan(&pctwin_journal::PlannedWrite {
+        item: ItemId::from_hex(&format!("0e{}", "0".repeat(30))).unwrap(),
+        source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+        destination: "me".into(),
+        path: "Y/z.txt".into(),
+        size: 1,
+        actor: Actor {
+            acting_account: "1001".into(),
+            for_account: "1001".into(),
+            permission: Permission::OwnFolders,
+        },
+        block_size: block_size_for(1),
+        source_modified_ns: None,
+        place: None,
+    });
+    w.journal
+        .staged(e.unwrap(), "Y/.pctwin-x.part", &[("Y".to_string(), None)])
+        .unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    assert!(matches!(outcome_of(&r, "Y"), UndoOutcome::Kept { .. }));
+    assert!(w.root.join("Y").is_dir());
+}
+
+#[test]
+fn a_file_whose_identity_was_never_known_is_kept_and_said_so() {
+    let w = world();
+    let bin = FakeBin::new();
+    let id = w
+        .journal
+        .plan(&pctwin_journal::PlannedWrite {
+            item: ItemId::from_hex(&format!("0d{}", "0".repeat(30))).unwrap(),
+            source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+            destination: "me".into(),
+            path: "n.txt".into(),
+            size: 1,
+            actor: Actor {
+                acting_account: "1001".into(),
+                for_account: "1001".into(),
+                permission: Permission::OwnFolders,
+            },
+            block_size: block_size_for(1),
+            source_modified_ns: None,
+            place: None,
+        })
+        .unwrap();
+    w.journal.staged(id, ".pctwin-n.part", &[]).unwrap();
+    let fp = fingerprint_reader(&mut &b"n"[..], 1, block_size_for(1))
+        .unwrap()
+        .unwrap();
+    w.journal.verified(id, fp, None).unwrap();
+    w.journal.applied(id, "n.txt").unwrap();
+    std::fs::write(w.root.join("n.txt"), b"n").unwrap();
+    w.journal
+        .committed(
+            id,
+            Landed {
+                size: 1,
+                modified_ns: None,
+                file: None,
+            },
+        )
+        .unwrap();
+    let r = undo(&w.journal, &w.table, &bin, ASIDE).unwrap();
+    let UndoOutcome::Kept { why } = outcome_of(&r, "n.txt") else {
+        panic!("not kept")
+    };
+    assert!(why.contains("cannot tell"), "{why}");
+    assert!(w.exists("n.txt"));
 }

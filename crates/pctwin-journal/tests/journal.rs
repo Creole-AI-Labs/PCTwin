@@ -541,7 +541,13 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     let id = j.plan(&planned(1)).unwrap();
     // Only a committed write can be undone.
     assert!(matches!(
-        j.record_undo(id, &Undo::Moving { file: None }),
+        j.record_undo(
+            id,
+            &Undo::Aside {
+                file: None,
+                at: "x".into()
+            }
+        ),
         Err(JournalError::OutOfOrder { .. })
     ));
     j.staged(id, "Docs/.pctwin-t.part", &[("Docs".into(), None)])
@@ -551,11 +557,12 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     j.committed(id, landed()).unwrap();
     let before = j.entry(id).unwrap().unwrap();
     assert_eq!(j.undo_of(id).unwrap(), None);
-    let moving = Undo::Moving {
+    let moving = Undo::Aside {
         file: Some(FileId {
             volume: 1,
             index: 2,
         }),
+        at: "Undone/Docs/f1.txt".into(),
     };
     j.record_undo(id, &moving).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(moving));

@@ -219,9 +219,9 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "step")]
 pub enum Undo {
-    /// About to move this file (by identity) to the Trash: recorded first, so after a crash undo
-    /// knows to check whether it already went.
-    Moving { file: Option<FileId> },
+    /// About to move this file (by identity) aside to `at` (a stored path in PCTwin's own folder),
+    /// on its way to the Trash: recorded first, so after a crash undo knows where to look.
+    Aside { file: Option<FileId>, at: String },
     /// Done; never looked at again, unless it could not be done.
     Done { outcome: UndoOutcome },
 }

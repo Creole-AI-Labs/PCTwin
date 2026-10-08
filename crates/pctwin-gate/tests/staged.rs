@@ -549,3 +549,70 @@ fn on_windows_a_stored_path_never_names_a_stream_or_another_separator() {
         assert!(dest.remove_temp(stored).is_err(), "{stored}");
     }
 }
+
+#[test]
+fn a_file_is_moved_aside_by_handle_only_if_it_is_still_the_same_file() {
+    let (root, dest) = setup();
+    std::fs::create_dir(root.path().join("d")).unwrap();
+    std::fs::write(root.path().join("d/a.txt"), b"ours").unwrap();
+    let ours = dest.stat("d/a.txt").unwrap().unwrap().id;
+    // Into a folder that is not there yet: made on the way.
+    assert_eq!(
+        dest.move_file("d/a.txt", "Aside/d/a.txt", ours).unwrap(),
+        pctwin_gate::Moved::Moved
+    );
+    assert!(!root.path().join("d/a.txt").exists());
+    assert_eq!(
+        std::fs::read(root.path().join("Aside/d/a.txt")).unwrap(),
+        b"ours"
+    );
+    assert_eq!(dest.stat("Aside/d/a.txt").unwrap().unwrap().id, ours);
+    // Back again.
+    assert_eq!(
+        dest.move_file("Aside/d/a.txt", "d/a.txt", ours).unwrap(),
+        pctwin_gate::Moved::Moved
+    );
+    assert_eq!(std::fs::read(root.path().join("d/a.txt")).unwrap(), b"ours");
+}
+
+#[test]
+fn moving_never_replaces_and_never_moves_another_file() {
+    let (root, dest) = setup();
+    std::fs::write(root.path().join("a.txt"), b"ours").unwrap();
+    std::fs::write(root.path().join("b.txt"), b"mine").unwrap();
+    std::fs::write(root.path().join("taken.txt"), b"").unwrap();
+    let ours = dest.stat("a.txt").unwrap().unwrap().id;
+    // Something already has the new name, even an empty file: nothing moves.
+    assert_eq!(
+        dest.move_file("a.txt", "taken.txt", ours).unwrap(),
+        pctwin_gate::Moved::Taken
+    );
+    assert_eq!(std::fs::read(root.path().join("taken.txt")).unwrap(), b"");
+    assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"ours");
+    // Another file at the old name (the person's own, however alike): nothing moves.
+    assert_eq!(
+        dest.move_file("b.txt", "elsewhere.txt", ours).unwrap(),
+        pctwin_gate::Moved::NotThatFile
+    );
+    assert_eq!(
+        dest.move_file("gone.txt", "elsewhere.txt", ours).unwrap(),
+        pctwin_gate::Moved::NotThatFile
+    );
+    assert!(!root.path().join("elsewhere.txt").exists());
+    assert!(dest.move_file("a.txt", "../out.txt", ours).is_err());
+    assert_eq!(std::fs::read(root.path().join("a.txt")).unwrap(), b"ours");
+}
+
+#[test]
+fn a_free_name_is_found_without_making_anything() {
+    let (root, dest) = setup();
+    assert_eq!(dest.free_name_at("Aside/d/a.txt").unwrap(), "Aside/d/a.txt");
+    assert!(!root.path().join("Aside").exists());
+    std::fs::create_dir_all(root.path().join("Aside/d")).unwrap();
+    std::fs::write(root.path().join("Aside/d/a.txt"), b"x").unwrap();
+    assert_eq!(
+        dest.free_name_at("Aside/d/a.txt").unwrap(),
+        "Aside/d/a (2).txt"
+    );
+    assert!(dest.free_name_at("../a.txt").is_err());
+}

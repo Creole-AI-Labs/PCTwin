@@ -603,6 +603,108 @@ impl Destination {
         Ok(Some(identity(&dir.into_std_file())?.0))
     }
 
+    /// Moves the file at the stored path `from` to the stored path `to` in the same place (making
+    /// `to`'s folders if needed), by handle, only if the file at `from` is still the very file
+    /// `expect`, and never replacing anything. Where the drive cannot move without replacing, a
+    /// hard link then removing the old name does the same; where it can do neither, nothing moves.
+    pub fn move_file(&self, from: &str, to: &str, expect: FileId) -> Result<Moved, GateError> {
+        let Some((from_dir, from_name)) = self.open_stored_folder(from)? else {
+            return Ok(Moved::NotThatFile);
+        };
+        let still = from_dir
+            .symlink_metadata(from_name)
+            .is_ok_and(|meta| meta.is_file())
+            && from_dir
+                .open(from_name)
+                .and_then(|f| identity(&f.into_std()))
+                .is_ok_and(|(id, _)| id == expect);
+        if !still {
+            return Ok(Moved::NotThatFile);
+        }
+        let to_parts = stored_parts(to)?;
+        let (to_name, to_folders) = to_parts.split_last().ok_or_else(|| invalid("empty path"))?;
+        let mut to_dir = self.root.try_clone()?;
+        for folder in to_folders {
+            to_dir = open_or_create_folder(&to_dir, folder)?.0;
+        }
+        let from_folder = from.rsplit_once('/').map_or("", |(f, _)| f);
+        let to_folder = to.rsplit_once('/').map_or("", |(f, _)| f);
+        let from_path = || self.folder_path(&from_dir, from_folder);
+        let to_path = || self.folder_path(&to_dir, to_folder);
+        let moved =
+            match move_no_replace(&from_dir, from_name, &to_dir, to_name, &from_path, &to_path) {
+                Ok(moved) => moved,
+                Err(GateError::NoSafeName) => match from_dir.hard_link(from_name, &to_dir, to_name)
+                {
+                    Ok(()) => {
+                        from_dir.remove_file(from_name)?;
+                        true
+                    }
+                    Err(e) if is_taken(&to_dir, to_name, &e) => false,
+                    Err(_) => return Err(GateError::NoSafeName),
+                },
+                Err(e) => return Err(e),
+            };
+        if !moved {
+            return Ok(Moved::Taken);
+        }
+        flush_name(&to_dir, to_name);
+        sync_folder(&from_dir);
+        Ok(Moved::Moved)
+    }
+
+    /// The name, in the folder `folder` (a stored path), of the very file `expect` of `len` bytes,
+    /// if it is there under any name (renamed by the person, say). Never follows a link.
+    pub fn find_in_folder(
+        &self,
+        folder: &str,
+        expect: FileId,
+        len: u64,
+    ) -> io::Result<Option<String>> {
+        let dir = if folder.is_empty() {
+            self.root.try_clone()?
+        } else {
+            let Some((parent, name)) = self.open_stored_folder(folder)? else {
+                return Ok(None);
+            };
+            if !parent.symlink_metadata(name).is_ok_and(|m| m.is_dir()) {
+                return Ok(None);
+            }
+            parent.open_dir(name)?
+        };
+        for entry in dir.entries()? {
+            let Ok(name) = entry?.file_name().into_string() else {
+                continue;
+            };
+            let candidate = dir
+                .symlink_metadata(&name)
+                .is_ok_and(|m| m.is_file() && m.len() == len);
+            if candidate
+                && dir
+                    .open(&name)
+                    .and_then(|f| identity(&f.into_std()))
+                    .is_ok_and(|(id, _)| id == expect)
+            {
+                return Ok(Some(name));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The first stored path for `stored` that nothing uses now: `stored` itself, or a numbered
+    /// one such as `name (2).ext` in the same folder. Nothing is created or claimed.
+    pub fn free_name_at(&self, stored: &str) -> Result<String, GateError> {
+        let parts = stored_parts(stored)?;
+        let (name, _) = parts.split_last().ok_or_else(|| invalid("empty path"))?;
+        let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
+        let Some((dir, _)) = self.open_stored_folder(stored)? else {
+            // The folder is not there yet: every name in it is free.
+            return Ok(stored.to_string());
+        };
+        let (free, _) = self.free_name(&dir, folder, name)?;
+        Ok(stored_path(folder, &free))
+    }
+
     /// Removes the folder at the stored path `stored` only if it is empty (never anything in it).
     /// Returns `false` if something is in it; `Ok(false)` too if there is no folder there.
     pub fn remove_empty_folder(&self, stored: &str) -> io::Result<bool> {
@@ -925,20 +1027,33 @@ fn claim(
     }
 }
 
-/// Moves `temp` onto `name` in `dir` only if nothing has `name`; the drive checks and moves in one
-/// step, so another file can never be replaced. `Ok(false)` when the name is taken. Refused where
-/// the system cannot do this (the file is then not named rather than named unsafely).
-#[cfg(unix)]
+/// Moves `temp` onto `name` in `dir` only if nothing has `name` (see [`move_no_replace`]).
 fn rename_no_replace(
     dir: &Dir,
     temp: &str,
     name: &str,
-    _folder_path: FolderPath<'_>,
+    folder_path: FolderPath<'_>,
+) -> Result<bool, GateError> {
+    move_no_replace(dir, temp, dir, name, folder_path, folder_path)
+}
+
+/// Moves `from` in `from_dir` to `to` in `to_dir` (the same drive) only if nothing has `to`; the
+/// drive checks and moves in one step, so another file can never be replaced. `Ok(false)` when the
+/// name is taken. Refused where the system cannot do this (nothing is moved rather than moved
+/// unsafely).
+#[cfg(unix)]
+fn move_no_replace(
+    from_dir: &Dir,
+    from: &str,
+    to_dir: &Dir,
+    to: &str,
+    _from_path: FolderPath<'_>,
+    _to_path: FolderPath<'_>,
 ) -> Result<bool, GateError> {
     use rustix::fs::{RenameFlags, renameat_with};
     use rustix::io::Errno;
     // renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS.
-    match renameat_with(dir, temp, dir, name, RenameFlags::NOREPLACE) {
+    match renameat_with(from_dir, from, to_dir, to, RenameFlags::NOREPLACE) {
         Ok(()) => Ok(true),
         Err(Errno::EXIST) => Ok(false),
         Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => Err(GateError::NoSafeName),
@@ -947,19 +1062,22 @@ fn rename_no_replace(
 }
 
 /// Windows: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (through `tempfile`, which wraps it
-/// safely), on the folder's full path, proven to be the folder held.
+/// safely), on the folders' full paths, each proven to be the folder held.
 #[cfg(windows)]
-fn rename_no_replace(
-    _dir: &Dir,
-    temp: &str,
-    name: &str,
-    folder_path: FolderPath<'_>,
+fn move_no_replace(
+    _from_dir: &Dir,
+    from: &str,
+    _to_dir: &Dir,
+    to: &str,
+    from_path: FolderPath<'_>,
+    to_path: FolderPath<'_>,
 ) -> Result<bool, GateError> {
-    let folder = folder_path().map_err(|_| GateError::NoSafeName)?;
-    let mut from = tempfile::TempPath::try_from_path(folder.join(temp))?;
+    let from_folder = from_path().map_err(|_| GateError::NoSafeName)?;
+    let to_folder = to_path().map_err(|_| GateError::NoSafeName)?;
+    let mut source = tempfile::TempPath::try_from_path(from_folder.join(from))?;
     // Never removed by `tempfile`, whatever happens.
-    from.disable_cleanup(true);
-    match from.persist_noclobber(folder.join(name)) {
+    source.disable_cleanup(true);
+    match source.persist_noclobber(to_folder.join(to)) {
         Ok(()) => Ok(true),
         Err(e) => {
             let taken = e.error.kind() == io::ErrorKind::AlreadyExists
@@ -974,13 +1092,26 @@ fn rename_no_replace(
 }
 
 #[cfg(not(any(unix, windows)))]
-fn rename_no_replace(
-    _dir: &Dir,
-    _temp: &str,
-    _name: &str,
-    _folder_path: FolderPath<'_>,
+fn move_no_replace(
+    _from_dir: &Dir,
+    _from: &str,
+    _to_dir: &Dir,
+    _to: &str,
+    _from_path: FolderPath<'_>,
+    _to_path: FolderPath<'_>,
 ) -> Result<bool, GateError> {
     Err(GateError::NoSafeName)
+}
+
+/// How moving a stored file ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Moved {
+    /// It is under its new name now.
+    Moved,
+    /// Something already has the new name: nothing was moved.
+    Taken,
+    /// The file there is not the one expected (or there is none): nothing was moved.
+    NotThatFile,
 }
 
 /// Which file or folder this is on its drive: the drive's number and the file's number on it.
@@ -1050,6 +1181,23 @@ fn flush_name(dir: &Dir, name: &str) {
         let mut folder = OpenOptions::new();
         folder.write(true);
         cap_std::fs::OpenOptionsExt::custom_flags(&mut folder, FILE_FLAG_BACKUP_SEMANTICS);
+        if let Ok(handle) = dir.open_with(".", &folder) {
+            let _ = handle.sync_all();
+        }
+    }
+}
+
+/// Flushes a folder's list of names (after a name left it). Best effort, as [`flush_name`].
+fn sync_folder(dir: &Dir) {
+    #[cfg(unix)]
+    if let Ok(dir) = dir.try_clone() {
+        let _ = dir.into_std_file().sync_all();
+    }
+    #[cfg(windows)]
+    {
+        let mut folder = OpenOptions::new();
+        folder.write(true);
+        cap_std::fs::OpenOptionsExt::custom_flags(&mut folder, 0x0200_0000);
         if let Ok(handle) = dir.open_with(".", &folder) {
             let _ = handle.sync_all();
         }
