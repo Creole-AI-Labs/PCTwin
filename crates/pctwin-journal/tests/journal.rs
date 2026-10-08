@@ -532,3 +532,54 @@ fn checkpoints_written_durably_survive_reopening() {
     let j = Journal::open(&path).unwrap();
     assert_eq!(j.blocks(id).unwrap(), [(5, [5; 32])]);
 }
+
+#[test]
+fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
+    use pctwin_journal::{Undo, UndoOutcome};
+    let (_d, j) = journal();
+    let id = j.plan(&planned(1)).unwrap();
+    // Only a committed write can be undone.
+    assert!(matches!(
+        j.record_undo(id, &Undo::Moving { file: None }),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    j.staged(id, "Docs/.pctwin-t.part", &[("Docs".into(), None)])
+        .unwrap();
+    j.verified(id, [1; 32]).unwrap();
+    j.applied(id, "Docs/f1.txt").unwrap();
+    j.committed(id, landed()).unwrap();
+    let before = j.entry(id).unwrap().unwrap();
+    assert_eq!(j.undo_of(id).unwrap(), None);
+    let moving = Undo::Moving {
+        file: Some(FileId {
+            volume: 1,
+            index: 2,
+        }),
+    };
+    j.record_undo(id, &moving).unwrap();
+    assert_eq!(j.undo_of(id).unwrap(), Some(moving));
+    let done = Undo::Done {
+        outcome: UndoOutcome::Trashed,
+    };
+    j.record_undo(id, &done).unwrap();
+    assert_eq!(j.undo_of(id).unwrap(), Some(done));
+    assert_eq!(j.entry(id).unwrap().unwrap(), before);
+    // Folders: only those the move made.
+    assert!(
+        j.record_folder_undo("me", "Elsewhere", &UndoOutcome::Removed)
+            .is_err()
+    );
+    j.record_folder_undo("me", "Docs", &UndoOutcome::Removed)
+        .unwrap();
+    assert_eq!(
+        j.folder_undo_of("me", "Docs").unwrap(),
+        Some(UndoOutcome::Removed)
+    );
+    assert_eq!(j.folder_undo_of("me", "Other").unwrap(), None);
+    // Only "not done this time" is tried again.
+    assert!(UndoOutcome::Trashed.is_final());
+    assert!(UndoOutcome::Kept { why: "x".into() }.is_final());
+    assert!(UndoOutcome::AlreadyGone.is_final());
+    assert!(UndoOutcome::Removed.is_final());
+    assert!(!UndoOutcome::NotDone { why: "x".into() }.is_final());
+}

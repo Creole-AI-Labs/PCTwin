@@ -375,6 +375,9 @@ pub enum GateError {
 /// An approved folder on the new laptop. Everything written goes inside it.
 pub struct Destination {
     root: Dir,
+    /// Where it is, when it was opened by its path (not through the admin helper): needed only to
+    /// hand an undone file to the system Trash, which takes paths.
+    root_path: Option<std::path::PathBuf>,
     /// Where to start numbering the next clash of a name in a folder, so thousands of clashes
     /// stay fast. Only a hint: the exact name is always tried first and every name is claimed
     /// without replacing anything, so a wrong or shared hint can only skip numbers.
@@ -414,15 +417,15 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 impl Destination {
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
-        Ok(Self::from_dir(Dir::open_ambient_dir(
-            path,
-            ambient_authority(),
-        )?))
+        let mut dest = Self::from_dir(Dir::open_ambient_dir(path, ambient_authority())?);
+        dest.root_path = Some(path.to_path_buf());
+        Ok(dest)
     }
 
     fn from_dir(root: Dir) -> Self {
         Self {
             root,
+            root_path: None,
             clash_hints: Mutex::new(ClashHints::default()),
         }
     }
@@ -596,6 +599,61 @@ impl Destination {
             }
         };
         Ok(Some(identity(&dir.into_std_file())?.0))
+    }
+
+    /// Removes the folder at the stored path `stored` only if it is empty (never anything in it).
+    /// Returns `false` if something is in it; `Ok(false)` too if there is no folder there.
+    pub fn remove_empty_folder(&self, stored: &str) -> io::Result<bool> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(false);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        let empty = dir.read_dir(name)?.next().is_none();
+        if !empty {
+            return Ok(false);
+        }
+        // Removing a folder never removes anything in it: if something arrived meanwhile, this
+        // fails and the folder stays.
+        match dir.remove_dir(name) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::DirectoryNotEmpty => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The full path of the stored file `stored`, for handing it to the system Trash (which takes
+    /// paths, not handles), only once that path is proven to lead to exactly that file: the same
+    /// file as `expect`, reached without any link or junction on the way. Refused for a place
+    /// opened through the admin helper.
+    pub fn ambient_path(&self, stored: &str, expect: FileId) -> io::Result<std::path::PathBuf> {
+        let root = self.root_path.as_ref().ok_or_else(|| {
+            io::Error::other(
+                "it is in another person's account, so PCTwin cannot move it to the Trash",
+            )
+        })?;
+        let parts = stored_parts(stored)?;
+        let real_root = std::fs::canonicalize(root)?;
+        let mut wanted = real_root.clone();
+        for part in &parts {
+            wanted.push(part);
+        }
+        let real = std::fs::canonicalize(&wanted)?;
+        if real != wanted {
+            return Err(io::Error::other("the path leads somewhere else"));
+        }
+        if !std::fs::symlink_metadata(&real)?.is_file() {
+            return Err(io::Error::other("not a file"));
+        }
+        let file = std::fs::File::open(&real)?;
+        if identity(&file)?.0 != expect {
+            return Err(io::Error::other("a different file is there now"));
+        }
+        Ok(real)
     }
 
     /// After a restart: the partly received temporary file at the stored path `temp`, opened again

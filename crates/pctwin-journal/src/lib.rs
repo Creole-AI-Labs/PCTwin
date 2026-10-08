@@ -44,6 +44,10 @@ const OPEN_ITEMS: TableDefinition<&str, u64> = TableDefinition::new("open-items"
 const FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("folders");
 /// Entries whose temporary file could not be removed yet.
 const LEFTOVERS: TableDefinition<u64, ()> = TableDefinition::new("leftovers");
+/// Undo of each committed write, by entry: what was decided, then what happened.
+const UNDO: TableDefinition<u64, &[u8]> = TableDefinition::new("undo");
+/// Undo of each folder made for a write: (destination, stored folder) to what happened.
+const UNDO_FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("undo-folders");
 /// Each landed block's fingerprint, while its file is being received: (entry, block).
 const BLOCKS: TableDefinition<(u64, u64), [u8; 32]> = TableDefinition::new("blocks");
 
@@ -207,6 +211,41 @@ pub struct Entry {
     pub state: State,
 }
 
+/// Undoing one committed write, recorded beside the write (the write's own record never changes:
+/// it is the history of the move).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "step")]
+pub enum Undo {
+    /// About to move this file (by identity) to the Trash: recorded first, so after a crash undo
+    /// knows to check whether it already went.
+    Moving { file: Option<FileId> },
+    /// Done; never looked at again, unless it could not be done.
+    Done { outcome: UndoOutcome },
+}
+
+/// How undoing one thing ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", tag = "result")]
+pub enum UndoOutcome {
+    /// Moved to the system Trash or Recycle Bin, where the person can bring it back.
+    Trashed,
+    /// A folder PCTwin made, empty, removed.
+    Removed,
+    /// It was already gone.
+    AlreadyGone,
+    /// Kept, and why in plain words (changed since the move, not empty, no Recycle Bin there).
+    Kept { why: String },
+    /// It could not be done this time, and why; undo tries it again next time.
+    NotDone { why: String },
+}
+
+impl UndoOutcome {
+    /// Whether undo is finished with it (only "not done this time" is tried again).
+    pub fn is_final(&self) -> bool {
+        !matches!(self, UndoOutcome::NotDone { .. })
+    }
+}
+
 /// A folder made for a write: which entry made it, and its identity then.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MadeFolder {
@@ -284,6 +323,8 @@ impl Journal {
             tx.open_table(FOLDERS).map_err(storage)?;
             tx.open_table(LEFTOVERS).map_err(storage)?;
             tx.open_table(BLOCKS).map_err(storage)?;
+            tx.open_table(UNDO).map_err(storage)?;
+            tx.open_table(UNDO_FOLDERS).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -609,6 +650,75 @@ impl Journal {
             out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
         }
         Ok(out)
+    }
+
+    /// Records a step of undoing entry `id` (a committed write).
+    pub fn record_undo(&self, id: u64, undo: &Undo) -> Result<(), JournalError> {
+        let tx = self.db.begin_write().map_err(storage)?;
+        {
+            let entries = tx.open_table(ENTRIES).map_err(storage)?;
+            let entry = read_entry(&entries, id)?;
+            if !matches!(entry.state, State::Committed { .. }) {
+                return Err(JournalError::OutOfOrder {
+                    from: entry.state.name(),
+                    to: "undo",
+                });
+            }
+            let mut table = tx.open_table(UNDO).map_err(storage)?;
+            let bytes = serde_json::to_vec(undo).map_err(storage)?;
+            table.insert(id, bytes.as_slice()).map_err(storage)?;
+        }
+        tx.commit().map_err(storage)
+    }
+
+    /// How far undoing entry `id` got, if it was started.
+    pub fn undo_of(&self, id: u64) -> Result<Option<Undo>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(UNDO).map_err(storage)?;
+        table
+            .get(id)
+            .map_err(storage)?
+            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .transpose()
+    }
+
+    /// Records how undoing a folder made for a write ended.
+    pub fn record_folder_undo(
+        &self,
+        destination: &str,
+        folder: &str,
+        outcome: &UndoOutcome,
+    ) -> Result<(), JournalError> {
+        let tx = self.db.begin_write().map_err(storage)?;
+        {
+            let made = tx.open_table(FOLDERS).map_err(storage)?;
+            if made.get((destination, folder)).map_err(storage)?.is_none() {
+                return Err(JournalError::Damaged(
+                    "undo of a folder PCTwin did not make".into(),
+                ));
+            }
+            let mut table = tx.open_table(UNDO_FOLDERS).map_err(storage)?;
+            let bytes = serde_json::to_vec(outcome).map_err(storage)?;
+            table
+                .insert((destination, folder), bytes.as_slice())
+                .map_err(storage)?;
+        }
+        tx.commit().map_err(storage)
+    }
+
+    /// How undoing a folder made for a write ended, if it was undone.
+    pub fn folder_undo_of(
+        &self,
+        destination: &str,
+        folder: &str,
+    ) -> Result<Option<UndoOutcome>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(UNDO_FOLDERS).map_err(storage)?;
+        table
+            .get((destination, folder))
+            .map_err(storage)?
+            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .transpose()
     }
 
     /// Entries up to this number have had their temporary files cleaned up.

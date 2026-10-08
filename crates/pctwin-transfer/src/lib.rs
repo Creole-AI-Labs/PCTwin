@@ -50,6 +50,7 @@ mod reading;
 mod recovery;
 mod sections;
 mod session;
+mod undo;
 
 pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
@@ -66,6 +67,9 @@ pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
     Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob,
     SendOutcome, SenderSession,
+};
+pub use undo::{
+    Bin, CHANGED_SINCE, NO_RECYCLE_BIN, SystemBin, UndoReport, Undone, recycle_bin_for, undo,
 };
 
 use std::fs::File;

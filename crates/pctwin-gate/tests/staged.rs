@@ -418,3 +418,95 @@ fn a_reopened_file_dropped_unfinished_is_removed() {
     drop(file);
     assert!(names(root.path()).is_empty());
 }
+
+#[test]
+fn only_an_empty_folder_is_ever_removed() {
+    let (root, dest) = setup();
+    std::fs::create_dir_all(root.path().join("a/empty")).unwrap();
+    std::fs::create_dir_all(root.path().join("a/full")).unwrap();
+    std::fs::write(root.path().join("a/full/mine.txt"), b"mine").unwrap();
+    std::fs::write(root.path().join("a/file"), b"x").unwrap();
+    assert!(dest.remove_empty_folder("a/empty").unwrap());
+    assert!(!root.path().join("a/empty").exists());
+    assert!(!dest.remove_empty_folder("a/full").unwrap());
+    assert_eq!(
+        std::fs::read(root.path().join("a/full/mine.txt")).unwrap(),
+        b"mine"
+    );
+    assert!(!dest.remove_empty_folder("a/file").unwrap());
+    assert!(root.path().join("a/file").exists());
+    assert!(!dest.remove_empty_folder("a/gone").unwrap());
+    assert!(dest.remove_empty_folder("../a").is_err());
+}
+
+#[test]
+fn a_path_for_the_trash_is_given_only_for_exactly_the_file_expected() {
+    let (root, dest) = setup();
+    std::fs::create_dir(root.path().join("d")).unwrap();
+    std::fs::write(root.path().join("d/a.txt"), b"a").unwrap();
+    std::fs::write(root.path().join("d/b.txt"), b"a").unwrap();
+    let a = dest.stat("d/a.txt").unwrap().unwrap().id;
+    let path = dest.ambient_path("d/a.txt", a).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"a");
+    assert_eq!(
+        path,
+        std::fs::canonicalize(root.path().join("d/a.txt")).unwrap()
+    );
+    // Another file, even with the same contents, is never given.
+    assert!(dest.ambient_path("d/b.txt", a).is_err());
+    assert!(dest.ambient_path("d/x.txt", a).is_err());
+    assert!(dest.ambient_path("d", a).is_err());
+    assert!(dest.ambient_path("../d/a.txt", a).is_err());
+    // A place opened through the admin helper has no path to give.
+    let mut table = pctwin_gate::Destinations::new();
+    let dir =
+        pctwin_gate::Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+    table.approve_through_helper("them", "1002", dir).unwrap();
+    assert!(
+        table
+            .get("them")
+            .unwrap()
+            .ambient_path("d/a.txt", a)
+            .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_path_through_a_link_is_never_given_for_the_trash() {
+    let (root, dest) = setup();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("a.txt"), b"theirs").unwrap();
+    std::os::unix::fs::symlink(outside.path(), root.path().join("d")).unwrap();
+    let file = std::fs::File::open(outside.path().join("a.txt")).unwrap();
+    use std::os::unix::fs::MetadataExt;
+    let meta = file.metadata().unwrap();
+    let id = pctwin_gate::FileId {
+        volume: meta.dev(),
+        index: meta.ino(),
+    };
+    assert!(dest.ambient_path("d/a.txt", id).is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_path_through_a_junction_is_never_given_for_the_trash() {
+    let (root, dest) = setup();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(outside.path().join("a.txt"), b"theirs").unwrap();
+    // A junction needs no special rights on Windows.
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(root.path().join("d"))
+        .arg(outside.path())
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{made:?}");
+    let theirs = Destination::open(outside.path()).unwrap();
+    let id = theirs.stat("a.txt").unwrap().unwrap().id;
+    assert!(dest.ambient_path("d/a.txt", id).is_err());
+    assert_eq!(
+        std::fs::read(outside.path().join("a.txt")).unwrap(),
+        b"theirs"
+    );
+}
