@@ -20,10 +20,15 @@
 //! write's temporary file is named after it and the entry ([`Journal::temp_tag`]), so the journal
 //! always knows exactly which temporary file is its own, even one made just before a crash, and
 //! never touches another's. Folders made for a write are recorded, so undo removes only those.
+//!
+//! Undo is open only until the wipe of the old laptop starts ([`Journal::close_undo`], one way and
+//! for good). Every undo write needs an [`UndoPermit`] taken while it was open, and closing waits
+//! for every permit still held, so no file is being undone once the wipe can be sent.
 
 pub mod recovery;
 
 use std::path::Path;
+use std::sync::{Condvar, Mutex, PoisonError};
 
 use pctwin_record::{ItemId, LaptopId};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
@@ -50,6 +55,10 @@ const UNDO: TableDefinition<u64, &[u8]> = TableDefinition::new("undo");
 const UNDO_FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("undo-folders");
 /// Each landed block's fingerprint, while its file is being received: (entry, block).
 const BLOCKS: TableDefinition<(u64, u64), [u8; 32]> = TableDefinition::new("blocks");
+/// One-way gates. `undo`: absent while undo is open, [`CLOSED`] once the wipe has started.
+const GATE: TableDefinition<&str, u8> = TableDefinition::new("gate");
+const UNDO_GATE: &str = "undo";
+const CLOSED: u8 = 1;
 
 const JOURNAL_ID: &str = "journal-id";
 const NEXT_ID: &str = "next-id";
@@ -73,6 +82,12 @@ pub enum JournalError {
     },
     #[error("the move's record could not be written: {0}")]
     Storage(String),
+    /// The wipe of the old laptop has started, so nothing can be undone any more.
+    #[error("undo is closed because the wipe of the old laptop has started")]
+    UndoClosed,
+    /// An undo permit taken from another move's record.
+    #[error("undo was allowed for another move's record, not this one")]
+    OtherJournal,
 }
 
 fn storage(e: impl std::fmt::Display) -> JournalError {
@@ -81,6 +96,11 @@ fn storage(e: impl std::fmt::Display) -> JournalError {
 
 fn damaged(e: impl std::fmt::Display) -> JournalError {
     JournalError::Damaged(e.to_string())
+}
+
+/// Another thread stopped with a panic while it held the undo count.
+fn poisoned<T>(_: PoisonError<T>) -> JournalError {
+    JournalError::Storage("undo stopped part way in another task; restart PCTwin".into())
 }
 
 /// What allowed this write.
@@ -293,6 +313,9 @@ pub enum Undo {
         #[serde(default)]
         made: Vec<String>,
     },
+    /// About to delete this very file (by identity) through the handle it was checked on:
+    /// recorded first, so after a crash undo knows the file may already be gone.
+    Removing { file: FileId },
     /// Done; never looked at again, unless it could not be done.
     Done { outcome: UndoOutcome },
 }
@@ -303,6 +326,8 @@ pub enum Undo {
 pub enum UndoOutcome {
     /// Moved to the system Trash or Recycle Bin, where the person can bring it back.
     Trashed,
+    /// Deleted outright (not to the Recycle Bin): the original is still on the old laptop.
+    Deleted,
     /// A folder PCTwin made, empty, removed.
     Removed,
     /// It was already gone.
@@ -330,11 +355,79 @@ pub struct MadeFolder {
     pub id: Option<FileId>,
 }
 
+/// Whether undo is still possible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UndoGate {
+    /// The wipe has not started: files can be undone.
+    Open,
+    /// The wipe has started (even if it was cancelled later): undo refuses everything, for good.
+    Closed,
+}
+
+/// Proof that undo is closed for good in a journal, on disk: only [`Journal::close_undo`] makes
+/// one (its field is private, and it has no `Default` or `Clone`). The function that sends the
+/// wipe to the old laptop is to take `&ClosedToken` and check [`ClosedToken::is_for`] its move's
+/// journal, so no wipe can be sent while a file could still be undone. (No such function exists
+/// yet.)
+#[derive(Debug)]
+pub struct ClosedToken {
+    journal_id: u64,
+}
+
+impl ClosedToken {
+    /// Whether this is the close of `journal` (by the journal's own number, kept on disk).
+    pub fn is_for(&self, journal: &Journal) -> bool {
+        self.journal_id == journal.journal_id
+    }
+}
+
+/// Leave to undo while undo is open: taken per file with [`Journal::begin_undo`], needed for every
+/// undo write, and given back when dropped. Many can be held at once (files undone side by side);
+/// [`Journal::close_undo`] waits until none is held.
+pub struct UndoPermit<'j> {
+    journal: &'j Journal,
+}
+
+impl std::fmt::Debug for UndoPermit<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("UndoPermit(..)")
+    }
+}
+
+impl Drop for UndoPermit<'_> {
+    fn drop(&mut self) {
+        // Given back even if another thread panicked while holding the count's lock: the count is
+        // a plain number, still right, and a permit never given back would make closing wait
+        // forever.
+        let mut undo = self
+            .journal
+            .undo
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        undo.permits = undo.permits.saturating_sub(1);
+        drop(undo);
+        self.journal.undo_free.notify_all();
+    }
+}
+
+/// Undo permits held in this process, and whether closing has begun.
+#[derive(Default)]
+struct UndoUse {
+    permits: usize,
+    closing: bool,
+}
+
 /// The change journal for a move on this laptop.
 pub struct Journal {
     db: Database,
     /// This journal's own random number (names its temporary files).
     journal_id: u64,
+    /// Undo permits held and whether closing has begun. A count and a flag rather than a
+    /// read-write lock: the systems' read-write locks differ in whether a waiting writer holds
+    /// back new readers, and here no permit may ever be handed out once closing has begun.
+    undo: Mutex<UndoUse>,
+    /// Woken when a permit is given back.
+    undo_free: Condvar,
 }
 
 impl std::fmt::Debug for Journal {
@@ -355,7 +448,12 @@ impl Journal {
             other => JournalError::Damaged(other.to_string()),
         })?;
         let journal_id = Self::prepare(&db)?;
-        Ok(Self { db, journal_id })
+        Ok(Self {
+            db,
+            journal_id,
+            undo: Mutex::new(UndoUse::default()),
+            undo_free: Condvar::new(),
+        })
     }
 
     /// Checks the format and makes every table; returns the journal's own number.
@@ -399,6 +497,7 @@ impl Journal {
             tx.open_table(BLOCKS).map_err(storage)?;
             tx.open_table(UNDO).map_err(storage)?;
             tx.open_table(UNDO_FOLDERS).map_err(storage)?;
+            tx.open_table(GATE).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -740,8 +839,78 @@ impl Journal {
         Ok(out)
     }
 
-    /// Records a step of undoing entry `id` (a committed write).
-    pub fn record_undo(&self, id: u64, undo: &Undo) -> Result<(), JournalError> {
+    /// Whether undo is still open, as recorded on disk.
+    pub fn undo_gate(&self) -> Result<UndoGate, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let gate = tx.open_table(GATE).map_err(storage)?;
+        match gate.get(UNDO_GATE).map_err(storage)?.map(|v| v.value()) {
+            None => Ok(UndoGate::Open),
+            Some(CLOSED) => Ok(UndoGate::Closed),
+            Some(other) => Err(damaged(format!("unknown undo gate {other}"))),
+        }
+    }
+
+    /// Leave to undo one file, while undo is open; [`JournalError::UndoClosed`] once the wipe has
+    /// started (also after a restart, and also to finish an undo a crash interrupted), or as soon
+    /// as closing has begun. Give it back (drop it) when that file is done. Never call
+    /// [`Journal::close_undo`] on a thread holding one: it would wait for itself.
+    pub fn begin_undo(&self) -> Result<UndoPermit<'_>, JournalError> {
+        let mut undo = self.undo.lock().map_err(poisoned)?;
+        if undo.closing {
+            return Err(JournalError::UndoClosed);
+        }
+        // Read while holding the count, so closing cannot slip in between.
+        if self.undo_gate()? == UndoGate::Closed {
+            return Err(JournalError::UndoClosed);
+        }
+        undo.permits += 1;
+        Ok(UndoPermit { journal: self })
+    }
+
+    /// Closes undo for good, as the wipe of the old laptop starts: from now no permit is handed
+    /// out, then it waits for every file still being undone, then records the close on disk in its
+    /// own transaction. The token is returned only once that close is on disk (redb's default,
+    /// immediate durability: the commit is flushed to the drive before it returns). Already closed,
+    /// it returns a token again, so after a crash between the close and the wipe the wipe can be
+    /// sent again. There is no way to reopen undo.
+    pub fn close_undo(&self) -> Result<ClosedToken, JournalError> {
+        let mut undo = self.undo.lock().map_err(poisoned)?;
+        // Set first and never cleared: even if the close below fails, nothing more is undone here.
+        undo.closing = true;
+        while undo.permits > 0 {
+            undo = self.undo_free.wait(undo).map_err(poisoned)?;
+        }
+        if self.undo_gate()? != UndoGate::Closed {
+            let tx = self.db.begin_write().map_err(storage)?;
+            {
+                let mut gate = tx.open_table(GATE).map_err(storage)?;
+                gate.insert(UNDO_GATE, CLOSED).map_err(storage)?;
+            }
+            tx.commit().map_err(storage)?;
+        }
+        drop(undo);
+        Ok(ClosedToken {
+            journal_id: self.journal_id,
+        })
+    }
+
+    /// An error unless `permit` was taken from this journal.
+    fn check_permit(&self, permit: &UndoPermit<'_>) -> Result<(), JournalError> {
+        if std::ptr::eq(permit.journal, self) {
+            Ok(())
+        } else {
+            Err(JournalError::OtherJournal)
+        }
+    }
+
+    /// Records a step of undoing entry `id` (a committed write), with leave from this journal.
+    pub fn record_undo(
+        &self,
+        permit: &UndoPermit<'_>,
+        id: u64,
+        undo: &Undo,
+    ) -> Result<(), JournalError> {
+        self.check_permit(permit)?;
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let entries = tx.open_table(ENTRIES).map_err(storage)?;
@@ -770,13 +939,15 @@ impl Journal {
             .transpose()
     }
 
-    /// Records how undoing a folder made for a write ended.
+    /// Records how undoing a folder made for a write ended, with leave from this journal.
     pub fn record_folder_undo(
         &self,
+        permit: &UndoPermit<'_>,
         destination: &str,
         folder: &str,
         outcome: &UndoOutcome,
     ) -> Result<(), JournalError> {
+        self.check_permit(permit)?;
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let made = tx.open_table(FOLDERS).map_err(storage)?;

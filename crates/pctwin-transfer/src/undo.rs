@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use pctwin_gate::{Destination, Destinations, Moved, Stat};
-use pctwin_journal::{Entry, FileId, Journal, JournalError, State, Undo, UndoOutcome};
+use pctwin_journal::{Entry, FileId, Journal, JournalError, State, Undo, UndoOutcome, UndoPermit};
 
 use crate::fingerprint_reader;
 
@@ -100,6 +100,8 @@ pub fn undo(
     bin: &dyn Bin,
     aside: &str,
 ) -> Result<UndoReport, JournalError> {
+    // Undo is open only until the wipe starts: refused once it is closed.
+    let permit = journal.begin_undo()?;
     let mut report = UndoReport::default();
     let mut entries = journal.entries()?;
     entries.retain(|e| matches!(e.state, State::Committed { .. }));
@@ -111,7 +113,7 @@ pub fn undo(
         {
             continue;
         }
-        let outcome = undo_file(journal, table, bin, aside, entry, earlier.as_ref())?;
+        let outcome = undo_file(journal, &permit, table, bin, aside, entry, earlier.as_ref())?;
         let State::Committed { final_path, .. } = &entry.state else {
             continue;
         };
@@ -154,7 +156,7 @@ pub fn undo(
                 },
             },
         };
-        journal.record_folder_undo(&made.destination, &made.folder, &outcome)?;
+        journal.record_folder_undo(&permit, &made.destination, &made.folder, &outcome)?;
         report.folders.push(Undone {
             entry: made.entry,
             destination: made.destination,
@@ -224,6 +226,7 @@ impl Landing<'_> {
 /// Undoes one committed file; records and returns how it ended.
 fn undo_file(
     journal: &Journal,
+    permit: &UndoPermit<'_>,
     table: &Destinations,
     bin: &dyn Bin,
     aside: &str,
@@ -242,6 +245,7 @@ fn undo_file(
     };
     let done = |outcome: UndoOutcome| -> Result<UndoOutcome, JournalError> {
         journal.record_undo(
+            permit,
             entry.id,
             &Undo::Done {
                 outcome: outcome.clone(),
@@ -263,6 +267,7 @@ fn undo_file(
     };
     let mover = Mover {
         journal,
+        permit,
         dest,
         bin,
         id: entry.id,
@@ -404,6 +409,7 @@ fn undo_file(
 /// One file's undo, moving it aside and on to the Trash.
 struct Mover<'a> {
     journal: &'a Journal,
+    permit: &'a UndoPermit<'a>,
     dest: &'a Destination,
     bin: &'a dyn Bin,
     id: u64,
@@ -415,6 +421,7 @@ struct Mover<'a> {
 impl Mover<'_> {
     fn done(&self, outcome: UndoOutcome) -> Result<UndoOutcome, JournalError> {
         self.journal.record_undo(
+            self.permit,
             self.id,
             &Undo::Done {
                 outcome: outcome.clone(),
@@ -434,6 +441,7 @@ impl Mover<'_> {
 
     fn record_aside(&self, at: &str, staging: &str, made: &[String]) -> Result<(), JournalError> {
         self.journal.record_undo(
+            self.permit,
             self.id,
             &Undo::Aside {
                 file: Some(self.landing.file),

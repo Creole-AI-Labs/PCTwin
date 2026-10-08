@@ -440,6 +440,7 @@ fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
     // a.txt: recorded as going aside, then the crash came before it moved.
     w.journal
         .record_undo(
+            &w.journal.begin_undo().unwrap(),
             a,
             &Undo::Aside {
                 file: Some(id("a.txt")),
@@ -452,6 +453,7 @@ fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
     // b.txt: recorded, moved aside, then the crash; the person made a new b.txt since.
     w.journal
         .record_undo(
+            &w.journal.begin_undo().unwrap(),
             b,
             &Undo::Aside {
                 file: Some(id("b.txt")),
@@ -468,6 +470,7 @@ fn undo_cut_short_carries_on_from_where_it_was_without_taking_another_file() {
     // c.txt: recorded, moved aside and handed to the Trash, then the crash; a new c.txt since.
     w.journal
         .record_undo(
+            &w.journal.begin_undo().unwrap(),
             c,
             &Undo::Aside {
                 file: Some(id("c.txt")),
@@ -505,6 +508,7 @@ fn an_edit_made_while_a_file_is_aside_puts_it_back_where_it_was() {
     let at = format!("{ASIDE}/Docs/a.txt");
     w.journal
         .record_undo(
+            &w.journal.begin_undo().unwrap(),
             a,
             &Undo::Aside {
                 file: Some(FileId {
@@ -1005,6 +1009,7 @@ fn a_lookalike_put_where_a_file_was_going_aside_is_never_trashed() {
     let at = format!("{ASIDE}/Documents/a.pdf");
     w.journal
         .record_undo(
+            &w.journal.begin_undo().unwrap(),
             e,
             &Undo::Aside {
                 file: Some(FileId {
@@ -1179,6 +1184,7 @@ fn undo_cut_short_after_the_trash_took_a_file_says_trashed_only_if_the_trash_has
         let at = format!("{ASIDE}/{name}");
         w.journal
             .record_undo(
+                &w.journal.begin_undo().unwrap(),
                 entry,
                 &Undo::Aside {
                     file: Some(id_of(name)),
@@ -1264,6 +1270,7 @@ fn a_file_left_in_its_staging_folder_by_a_crash_is_picked_up_again() {
     let staging = format!("Docs/{}", pctwin_gate::staging_name(&w.journal.temp_tag(e)));
     w.journal
         .record_undo(
+            &w.journal.begin_undo().unwrap(),
             e,
             &Undo::Aside {
                 file: Some(FileId {

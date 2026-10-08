@@ -540,10 +540,12 @@ fn checkpoints_written_durably_survive_reopening() {
 fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     use pctwin_journal::{Undo, UndoOutcome};
     let (_d, j) = journal();
+    let permit = j.begin_undo().unwrap();
     let id = j.plan(&planned(1)).unwrap();
     // Only a committed write can be undone.
     assert!(matches!(
         j.record_undo(
+            &permit,
             id,
             &Undo::Aside {
                 file: None,
@@ -570,20 +572,20 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
         staging: Some("Docs/.pctwin-move-t".into()),
         made: vec!["Undone".into()],
     };
-    j.record_undo(id, &moving).unwrap();
+    j.record_undo(&permit, id, &moving).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(moving));
     let done = Undo::Done {
         outcome: UndoOutcome::Trashed,
     };
-    j.record_undo(id, &done).unwrap();
+    j.record_undo(&permit, id, &done).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(done));
     assert_eq!(j.entry(id).unwrap().unwrap(), before);
     // Folders: only those the move made.
     assert!(
-        j.record_folder_undo("me", "Elsewhere", &UndoOutcome::Removed)
+        j.record_folder_undo(&permit, "me", "Elsewhere", &UndoOutcome::Removed)
             .is_err()
     );
-    j.record_folder_undo("me", "Docs", &UndoOutcome::Removed)
+    j.record_folder_undo(&permit, "me", "Docs", &UndoOutcome::Removed)
         .unwrap();
     assert_eq!(
         j.folder_undo_of("me", "Docs").unwrap(),
