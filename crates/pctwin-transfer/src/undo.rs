@@ -416,19 +416,27 @@ pub const NO_RECYCLE_BIN: &str = "this drive has no Recycle Bin, so it was kept"
 
 /// Whether the Recycle Bin of the drive `path` is on can be trusted to keep a file, among `drives`
 /// (as the scan lists them). Windows deletes outright, without a Recycle Bin, on removable drives,
-/// FAT and exFAT drives and network drives, so only a fixed NTFS or ReFS drive counts.
+/// FAT and exFAT drives and network drives, so only a fixed NTFS or ReFS drive counts. The drive is
+/// the one whose mount point holds the path, part by part (`C:\mnt\usb` is not `C:\mnt\usb2`).
 pub fn recycle_bin_for(drives: &[pctwin_scan::Drive], path: &Path) -> Result<(), String> {
     use pctwin_scan::FileSystem;
-    let text = path.to_string_lossy();
     // A verbatim path (`\\?\C:\...`, as canonical paths are on Windows) names the same drive.
-    let text = text.strip_prefix("\\\\?\\").unwrap_or(&text).to_lowercase();
+    let parts = |p: &Path| -> Vec<String> {
+        let text = p.to_string_lossy();
+        let text = text.strip_prefix("\\\\?\\").unwrap_or(&text).to_lowercase();
+        text.split(['\\', '/'])
+            .filter(|c| !c.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    let file = parts(path);
     let drive = drives
         .iter()
         .filter(|d| {
-            let mount = d.mount.to_string_lossy().to_lowercase();
-            !mount.is_empty() && text.starts_with(&mount)
+            let mount = parts(&d.mount);
+            !mount.is_empty() && file.len() > mount.len() && file.starts_with(&mount)
         })
-        .max_by_key(|d| d.mount.as_os_str().len());
+        .max_by_key(|d| parts(&d.mount).len());
     match drive {
         Some(d)
             if !d.removable
@@ -439,6 +447,85 @@ pub fn recycle_bin_for(drives: &[pctwin_scan::Drive], path: &Path) -> Result<(),
         }
         _ => Err(NO_RECYCLE_BIN.into()),
     }
+}
+
+/// What this laptop's settings say about the Recycle Bin a file would go to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BinSettings {
+    /// "Do not move deleted files to the Recycle Bin" is set for this person or this laptop.
+    pub turned_off: bool,
+    /// The drive's Recycle Bin is set to delete files at once.
+    pub deletes_at_once: bool,
+    /// The most the drive's Recycle Bin holds; a bigger file would be deleted at once.
+    pub max_bytes: Option<u64>,
+}
+
+/// The plain reason for a Recycle Bin set to delete files instead of keeping them.
+pub const BIN_TURNED_OFF: &str =
+    "Windows is set to delete files instead of using the Recycle Bin, so it was kept";
+/// The plain reason for a file too big for its drive's Recycle Bin.
+pub const TOO_BIG_FOR_BIN: &str = "it is too big for this drive's Recycle Bin, so it was kept";
+
+/// Whether, by these settings, a file of `size` bytes would be kept by the Recycle Bin (Windows
+/// deletes it outright otherwise, even when asked to allow undo).
+pub fn bin_keeps(settings: &BinSettings, size: u64) -> Result<(), String> {
+    if settings.turned_off || settings.deletes_at_once {
+        return Err(BIN_TURNED_OFF.into());
+    }
+    if settings.max_bytes.is_some_and(|max| size > max) {
+        return Err(TOO_BIG_FOR_BIN.into());
+    }
+    Ok(())
+}
+
+/// Reads the Recycle Bin settings for the drive with volume number `volume` (Windows only): the
+/// policy that turns it off, and the drive's own "delete at once" and size settings (kept per
+/// drive under the drive's volume name, matched to the drive by its volume number).
+#[cfg(windows)]
+fn bin_settings(volume: u64) -> BinSettings {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    let on = |key: &RegKey, name: &str| key.get_value::<u32, _>(name).is_ok_and(|v| v != 0);
+    let policy = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+    let mut settings = BinSettings {
+        turned_off: [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE].iter().any(|root| {
+            RegKey::predef(*root)
+                .open_subkey(policy)
+                .is_ok_and(|k| on(&k, "NoRecycleFiles"))
+        }),
+        ..BinSettings::default()
+    };
+    let volumes = r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume";
+    let Ok(all) = RegKey::predef(HKEY_CURRENT_USER).open_subkey(volumes) else {
+        return settings;
+    };
+    for name in all.enum_keys().flatten() {
+        let root = std::path::PathBuf::from(format!(r"\\?\Volume{name}\"));
+        let same_drive = open_volume(&root)
+            .and_then(|f| winapi_util::file::information(&f))
+            .is_ok_and(|info| info.volume_serial_number() == volume);
+        if !same_drive {
+            continue;
+        }
+        if let Ok(key) = all.open_subkey(&name) {
+            settings.deletes_at_once = on(&key, "NukeOnDelete");
+            settings.max_bytes = key
+                .get_value::<u32, _>("MaxCapacity")
+                .ok()
+                .map(|mb| u64::from(mb) * 1024 * 1024);
+        }
+        break;
+    }
+    settings
+}
+
+#[cfg(windows)]
+fn open_volume(root: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(0x0200_0000)
+        .open(root)
 }
 
 /// The system Trash (Recycle Bin on Windows) through the `trash` crate. It never deletes: what it
@@ -466,9 +553,19 @@ impl Default for SystemBin {
 
 impl Bin for SystemBin {
     fn can_take(&self, path: &Path) -> Result<(), String> {
-        if cfg!(windows) {
-            recycle_bin_for(&self.drives, path)
-        } else {
+        #[cfg(windows)]
+        {
+            recycle_bin_for(&self.drives, path)?;
+            let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+            let size = file.metadata().map_err(|e| e.to_string())?.len();
+            let volume = winapi_util::file::information(&file)
+                .map_err(|e| e.to_string())?
+                .volume_serial_number();
+            bin_keeps(&bin_settings(volume), size)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (&self.drives, path);
             Ok(())
         }
     }
@@ -483,6 +580,11 @@ impl Bin for SystemBin {
         };
         #[cfg(not(target_os = "macos"))]
         let result = trash::delete(path);
-        result.map_err(|e| format!("it could not be moved to the Trash ({e})"))
+        result.map_err(|e| format!("it could not be moved to the Trash ({e})"))?;
+        // Taken only if it really left its place.
+        if path.symlink_metadata().is_ok() {
+            return Err("the Trash did not take it".into());
+        }
+        Ok(())
     }
 }

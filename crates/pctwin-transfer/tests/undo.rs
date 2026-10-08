@@ -870,3 +870,58 @@ fn a_file_whose_identity_was_never_known_is_kept_and_said_so() {
     assert!(why.contains("cannot tell"), "{why}");
     assert!(w.exists("n.txt"));
 }
+
+#[test]
+fn a_drive_is_matched_by_whole_folder_names_not_by_the_start_of_a_name() {
+    let drives = [
+        drive("C:\\", FileSystem::Ntfs, false),
+        drive("C:\\mnt\\usb\\", FileSystem::ExFat, true),
+    ];
+    let ok = |p: &str| recycle_bin_for(&drives, Path::new(p)).is_ok();
+    // "usb2" is a folder on C:, not on the stick mounted at "usb".
+    assert!(ok("C:\\mnt\\usb2\\a.txt"));
+    assert!(!ok("C:\\mnt\\usb\\a.txt"));
+    assert!(!ok("C:\\mnt\\USB\\a.txt"));
+}
+
+#[test]
+fn a_recycle_bin_set_to_delete_or_too_small_never_gets_the_file() {
+    use pctwin_transfer::{BIN_TURNED_OFF, BinSettings, TOO_BIG_FOR_BIN, bin_keeps};
+    let normal = BinSettings::default();
+    assert!(bin_keeps(&normal, 1 << 40).is_ok());
+    let off = BinSettings {
+        turned_off: true,
+        ..BinSettings::default()
+    };
+    assert_eq!(bin_keeps(&off, 1), Err(BIN_TURNED_OFF.to_string()));
+    let nuke = BinSettings {
+        deletes_at_once: true,
+        ..BinSettings::default()
+    };
+    assert_eq!(bin_keeps(&nuke, 1), Err(BIN_TURNED_OFF.to_string()));
+    let small = BinSettings {
+        max_bytes: Some(1000),
+        ..BinSettings::default()
+    };
+    assert!(bin_keeps(&small, 1000).is_ok());
+    assert_eq!(bin_keeps(&small, 1001), Err(TOO_BIG_FOR_BIN.to_string()));
+}
+
+/// Reads this laptop's real Recycle Bin settings (nothing is put in the Recycle Bin).
+#[cfg(windows)]
+#[test]
+fn the_real_recycle_bin_settings_are_read_and_answered_in_plain_words() {
+    use pctwin_transfer::{BIN_TURNED_OFF, NO_RECYCLE_BIN, SystemBin, TOO_BIG_FOR_BIN};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("probe.txt");
+    std::fs::write(&path, b"x").unwrap();
+    let real = std::fs::canonicalize(&path).unwrap();
+    match SystemBin::new().can_take(&real) {
+        Ok(()) => {}
+        Err(why) => assert!(
+            [NO_RECYCLE_BIN, BIN_TURNED_OFF, TOO_BIG_FOR_BIN].contains(&why.as_str()),
+            "{why}"
+        ),
+    }
+    assert!(path.exists());
+}

@@ -69,8 +69,8 @@ pub use session::{
     SendOutcome, SenderSession,
 };
 pub use undo::{
-    Bin, CHANGED_SINCE, MOVED_SINCE, NO_RECYCLE_BIN, SystemBin, UndoReport, Undone,
-    recycle_bin_for, undo,
+    BIN_TURNED_OFF, Bin, BinSettings, CHANGED_SINCE, MOVED_SINCE, NO_RECYCLE_BIN, SystemBin,
+    TOO_BIG_FOR_BIN, UndoReport, Undone, bin_keeps, recycle_bin_for, undo,
 };
 
 use std::fs::File;
