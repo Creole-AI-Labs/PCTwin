@@ -151,7 +151,7 @@ impl World {
     }
 
     fn undo(&self) -> UndoReport {
-        undo(&self.journal, &self.table, &self.token(self.confirmed())).unwrap()
+        undo(&self.journal, &self.table, self.token(self.confirmed())).unwrap()
     }
 
     fn exists(&self, stored: &str) -> bool {
@@ -265,7 +265,7 @@ fn without_the_old_laptop_nothing_is_removed() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
     w.moved(2, "New/b.txt", b"b", &["New"]);
-    let r = undo(&w.journal, &w.table, &Confirmed::none(&w.journal)).unwrap();
+    let r = undo(&w.journal, &w.table, Confirmed::none(&w.journal)).unwrap();
     for p in ["a.txt", "New/b.txt"] {
         assert_eq!(
             outcome_of(&r, p),
@@ -294,7 +294,7 @@ fn an_original_the_old_laptop_could_not_confirm_keeps_its_copy() {
     let mut answers = w.confirmed();
     answers.remove(&item(1));
     answers.insert(item(2), OriginalNow::CannotLook);
-    let r = undo(&w.journal, &w.table, &w.token(answers)).unwrap();
+    let r = undo(&w.journal, &w.table, w.token(answers)).unwrap();
     for p in ["unanswered.txt", "unseen.txt"] {
         assert_eq!(
             outcome_of(&r, p),
@@ -338,7 +338,7 @@ fn a_copy_whose_original_changed_on_the_old_laptop_is_kept() {
         },
     );
     answers.insert(item(3), OriginalNow::Missing);
-    let r = undo(&w.journal, &w.table, &w.token(answers)).unwrap();
+    let r = undo(&w.journal, &w.table, w.token(answers)).unwrap();
     for p in ["edited.txt", "replaced.txt"] {
         assert_eq!(outcome_of(&r, p), kept(ORIGINAL_CHANGED), "{p}");
         assert!(w.exists(p), "{p}");
@@ -361,7 +361,7 @@ fn an_original_not_found_for_a_moment_does_not_keep_the_copy_for_good() {
     w.moved(1, "a.txt", b"a", &[]);
     let mut glitch = w.confirmed();
     glitch.insert(item(1), OriginalNow::Missing);
-    let r = undo(&w.journal, &w.table, &w.token(glitch)).unwrap();
+    let r = undo(&w.journal, &w.table, w.token(glitch)).unwrap();
     assert!(matches!(
         outcome_of(&r, "a.txt"),
         UndoOutcome::NotDone { .. }
@@ -436,7 +436,7 @@ fn a_removal_that_landed_before_a_crash_is_reported_gone_whatever_the_old_laptop
     for answer in [OriginalNow::Missing, OriginalNow::CannotLook] {
         let mut answers = w.confirmed();
         answers.insert(item(1), answer);
-        let r = undo(&w.journal, &w.table, &w.token(answers)).unwrap();
+        let r = undo(&w.journal, &w.table, w.token(answers)).unwrap();
         if let Some(u) = r.files.first() {
             assert_eq!(u.outcome, UndoOutcome::AlreadyGone);
         }
@@ -614,7 +614,7 @@ fn once_the_wipe_starts_undo_refuses_everything() {
     w.close(pctwin_journal::Resolved::Kept {
         why: "undo was cut short".into(),
     });
-    let r = undo(&w.journal, &w.table, &w.token(w.confirmed())).unwrap();
+    let r = undo(&w.journal, &w.table, w.token(w.confirmed())).unwrap();
     assert!(
         r.closed && r.files.is_empty() && r.folders.is_empty(),
         "{r:?}"
@@ -663,7 +663,7 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
     w.close(pctwin_journal::Resolved::Kept {
         why: "undo was cut short".into(),
     });
-    let r = undo(&w.journal, &w.table, &w.token(w.confirmed())).unwrap();
+    let r = undo(&w.journal, &w.table, w.token(w.confirmed())).unwrap();
     assert!(r.closed && r.files.is_empty(), "{r:?}");
     assert!(w.exists("a.txt"));
 }

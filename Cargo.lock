@@ -3407,6 +3407,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "futures-util",
+ "getrandom 0.4.3",
  "pctwin-gate",
  "pctwin-journal",
  "pctwin-link",
@@ -3414,7 +3415,6 @@ dependencies = [
  "pctwin-record",
  "pctwin-scan",
  "proptest",
- "rustix",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

@@ -59,11 +59,11 @@ pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
-pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
+pub use message::{Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use netlanes::{LinkLanes, accept_lanes};
 pub use original::{
-    Confirmed, MAX_CONFIRMED_AGE, MAX_ORIGINALS_PER_REQUEST, OriginalNow, answer_originals,
-    original_unchanged,
+    Confirmed, MAX_CONFIRMED_AGE, MAX_ORIGINALS_PER_REQUEST, OriginalNow, OriginalsFault,
+    answer_originals, original_unchanged,
 };
 pub use partials::{
     KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,

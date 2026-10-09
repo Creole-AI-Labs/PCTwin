@@ -43,41 +43,6 @@ pub(crate) fn file_identity(file: &File) -> io::Result<FileId> {
     pctwin_gate::file_identity(file)
 }
 
-/// Opens a file for reading only, never following a link and never waiting on a pipe.
-///
-/// The open itself refuses a link at the name (`O_NOFOLLOW`), so one swapped in after the check
-/// by name is refused here, not followed; and a pipe or device swapped in cannot hold the look
-/// up (`O_NONBLOCK`; the handle is then found not to be a regular file and let go). The flags
-/// come from `rustix`, because their numbers differ between systems. The handle is
-/// close-on-exec.
-#[cfg(unix)]
-fn open_read_only(path: &Path) -> io::Result<File> {
-    use rustix::fs::{Mode, OFlags};
-    let fd = rustix::fs::open(
-        path,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-        Mode::empty(),
-    )?;
-    Ok(File::from(fd))
-}
-
-/// Opens a file for reading only. Windows lets others read, write and delete it meanwhile (the
-/// standard library's default share mode), so this holds nobody up; a link itself is opened, not
-/// what it points to.
-#[cfg(not(unix))]
-fn open_read_only(path: &Path) -> io::Result<File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        /// Opens a link itself instead of following it (and never wakes an online-only file).
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    options.open(path)
-}
-
 /// One fresh, read-only look at one path. Nothing is written, no time is set, and the file is
 /// not held open after this returns.
 fn look(path: &Path) -> OriginalNow {
@@ -94,7 +59,7 @@ fn look_with(path: &Path, between: impl FnOnce()) -> OriginalNow {
         Err(_) => return OriginalNow::CannotLook,
     }
     between();
-    let file = match open_read_only(path) {
+    let file = match pctwin_gate::open_original(path) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return OriginalNow::Missing,
         Err(_) => return OriginalNow::CannotLook,
@@ -159,21 +124,65 @@ pub fn original_unchanged(write: &PlannedWrite, now: &OriginalNow) -> bool {
 /// user stepping away, editing the old laptop's files and coming back. After that undo asks again.
 pub const MAX_CONFIRMED_AGE: Duration = Duration::from_secs(10 * 60);
 
+/// Why a whole request's answers were thrown away (every item in it became `CannotLook`). The
+/// caller logs these; this crate has no logger of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OriginalsFault {
+    /// The reply did not carry the nonce of the request it answered: a stale reply, a replay of an
+    /// earlier one, or one that was not an answer to this question. `items` is how many items the
+    /// request asked about.
+    WrongNonce { items: usize },
+}
+
+impl std::fmt::Display for OriginalsFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WrongNonce { items } => write!(
+                f,
+                "the old laptop's reply was not for the question just asked, so its answers for {items} item(s) were thrown away"
+            ),
+        }
+    }
+}
+
 /// What the old laptop said about the originals, tied to the one journal it was asked for and the
 /// moment it was asked. Only [`check_originals`](crate::check_originals) (or [`Confirmed::none`])
 /// makes one; undo takes it and cannot invent, extend or move an answer. It cannot be cloned or
 /// defaulted, and its fields are private.
+///
+/// It is good for one undo pass: [`undo`](crate::undo) takes it by value, so a second pass needs a
+/// fresh check. Using it twice does not compile:
+///
+/// ```compile_fail,E0382
+/// # fn demo(journal: &pctwin_journal::Journal, table: &pctwin_gate::Destinations) {
+/// let token = pctwin_transfer::Confirmed::none(journal);
+/// let _ = pctwin_transfer::undo(journal, table, token);
+/// let _ = pctwin_transfer::undo(journal, table, token);
+/// # }
+/// ```
 #[derive(Debug)]
 pub struct Confirmed {
     journal: u64,
     taken: Instant,
     answers: HashMap<ItemId, OriginalNow>,
+    faults: Vec<OriginalsFault>,
 }
 
 impl Confirmed {
     /// The old laptop could not be asked: this confirms nothing.
     pub fn none(journal: &Journal) -> Self {
-        Self::from_answers(journal.instance(), Instant::now(), HashMap::new())
+        Self::from_answers(
+            journal.instance(),
+            Instant::now(),
+            HashMap::new(),
+            Vec::new(),
+        )
+    }
+
+    /// Requests whose answers were thrown away, and why (for the caller to log). Empty when every
+    /// reply was an answer to the question asked.
+    pub fn faults(&self) -> &[OriginalsFault] {
+        &self.faults
     }
 
     /// What the old laptop said about `item`, if this is for `journal`, is no older than
@@ -186,11 +195,13 @@ impl Confirmed {
         journal: u64,
         taken: Instant,
         answers: HashMap<ItemId, OriginalNow>,
+        faults: Vec<OriginalsFault>,
     ) -> Self {
         Self {
             journal,
             taken,
             answers,
+            faults,
         }
     }
 
@@ -231,6 +242,7 @@ mod tests {
             j.instance(),
             at,
             HashMap::from([(id(1), OriginalNow::Missing)]),
+            Vec::new(),
         )
     }
 
@@ -298,7 +310,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         fn mkfifo(path: &Path) {
-            // rustix has no mknod on macOS; the mkfifo tool is on every Unix.
+            // The mkfifo tool is on every Unix.
             let status = std::process::Command::new("mkfifo")
                 .arg(path)
                 .status()
@@ -326,17 +338,6 @@ mod tests {
         }
 
         #[test]
-        fn opening_a_link_directly_fails() {
-            let dir = tempfile::tempdir().unwrap();
-            let target = dir.path().join("t");
-            std::fs::write(&target, b"x").unwrap();
-            let link = dir.path().join("l");
-            symlink(&target, &link).unwrap();
-            assert!(open_read_only(&link).is_err());
-            assert!(open_read_only(&target).is_ok());
-        }
-
-        #[test]
         fn a_pipe_swapped_in_after_the_check_never_blocks_the_look() {
             let dir = tempfile::tempdir().unwrap();
             let name = dir.path().join("orig.bin");
@@ -357,17 +358,11 @@ mod tests {
         }
 
         #[test]
-        fn a_pipe_is_not_looked_at_and_opening_it_does_not_block() {
+        fn a_pipe_is_not_looked_at() {
             let dir = tempfile::tempdir().unwrap();
             let name = dir.path().join("pipe");
             mkfifo(&name);
             assert_eq!(look(&name), OriginalNow::CannotLook);
-            let (tx, rx) = std::sync::mpsc::channel();
-            let n2 = name.clone();
-            std::thread::spawn(move || {
-                let _ = tx.send(open_read_only(&n2).is_ok());
-            });
-            assert!(rx.recv_timeout(Duration::from_secs(20)).is_ok());
         }
     }
 }

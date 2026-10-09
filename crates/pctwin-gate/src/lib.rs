@@ -40,10 +40,12 @@ use unicode_normalization::UnicodeNormalization;
 mod birth_hold;
 #[cfg(target_os = "macos")]
 mod macos_check;
+mod original;
 mod siblings;
 #[cfg(unix)]
 mod unix_undo;
 
+pub use original::open_original;
 pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
 pub use unix_undo::{Check, Checked, Context, Resolution, Step, private_name};
