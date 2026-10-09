@@ -9,8 +9,9 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use pctwin_journal::{FileId, PlannedWrite};
+use pctwin_journal::{FileId, Journal, PlannedWrite};
 use pctwin_record::ItemId;
 
 use crate::Stamp;
@@ -35,6 +36,7 @@ pub enum OriginalNow {
 }
 
 /// Which file this open handle is, on its drive: the drive's number and the file's number on it.
+// TODO(engineer): switch to pctwin_gate::file_identity (adds birth time on Linux) at merge.
 #[cfg(unix)]
 pub(crate) fn file_identity(file: &File) -> io::Result<FileId> {
     use std::os::unix::fs::MetadataExt;
@@ -61,9 +63,28 @@ pub(crate) fn file_identity(_file: &File) -> io::Result<FileId> {
     Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
+/// Opens a file for reading only, never following a link and never waiting on a pipe.
+///
+/// The open itself refuses a link at the name (`O_NOFOLLOW`), so one swapped in after the check
+/// by name is refused here, not followed; and a pipe or device swapped in cannot hold the look
+/// up (`O_NONBLOCK`; the handle is then found not to be a regular file and let go). The flags
+/// come from `rustix`, because their numbers differ between systems. The handle is
+/// close-on-exec.
+#[cfg(unix)]
+fn open_read_only(path: &Path) -> io::Result<File> {
+    use rustix::fs::{Mode, OFlags};
+    let fd = rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    Ok(File::from(fd))
+}
+
 /// Opens a file for reading only. Windows lets others read, write and delete it meanwhile (the
 /// standard library's default share mode), so this holds nobody up; a link itself is opened, not
 /// what it points to.
+#[cfg(not(unix))]
 fn open_read_only(path: &Path) -> io::Result<File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -80,6 +101,11 @@ fn open_read_only(path: &Path) -> io::Result<File> {
 /// One fresh, read-only look at one path. Nothing is written, no time is set, and the file is
 /// not held open after this returns.
 fn look(path: &Path) -> OriginalNow {
+    look_with(path, || {})
+}
+
+/// [`look`], with a step run between the check by name and the open (tests swap the name there).
+fn look_with(path: &Path, between: impl FnOnce()) -> OriginalNow {
     // A link, folder or device is not what the scan saw, so it is never followed or opened.
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.is_file() => {}
@@ -87,6 +113,7 @@ fn look(path: &Path) -> OriginalNow {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return OriginalNow::Missing,
         Err(_) => return OriginalNow::CannotLook,
     }
+    between();
     let file = match open_read_only(path) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return OriginalNow::Missing,
@@ -145,4 +172,222 @@ pub fn original_unchanged(write: &PlannedWrite, now: &OriginalNow) -> bool {
         return false;
     };
     recorded == *seen && *size == write.size && recorded_time == *seen_time
+}
+
+/// How long a [`Confirmed`] stays usable. Undo asks, then removes copies one by one; ten minutes
+/// is far longer than a removal pass takes, yet short enough that an answer cannot outlive the
+/// user stepping away, editing the old laptop's files and coming back. After that undo asks again.
+pub const MAX_CONFIRMED_AGE: Duration = Duration::from_secs(10 * 60);
+
+/// What the old laptop said about the originals, tied to the one journal it was asked for and the
+/// moment it was asked. Only [`check_originals`](crate::check_originals) (or [`Confirmed::none`])
+/// makes one; undo takes it and cannot invent, extend or move an answer. It cannot be cloned or
+/// defaulted, and its fields are private.
+#[derive(Debug)]
+pub struct Confirmed {
+    journal: u64,
+    taken: Instant,
+    answers: HashMap<ItemId, OriginalNow>,
+}
+
+impl Confirmed {
+    /// The old laptop could not be asked: this confirms nothing.
+    pub fn none(journal: &Journal) -> Self {
+        Self::from_answers(journal.instance(), Instant::now(), HashMap::new())
+    }
+
+    /// What the old laptop said about `item`, if this is for `journal`, is no older than
+    /// [`MAX_CONFIRMED_AGE`], and `item` was asked about. Otherwise `None`, which confirms nothing.
+    pub fn answer(&self, journal: &Journal, item: &ItemId) -> Option<&OriginalNow> {
+        self.answer_at(Instant::now(), journal, item)
+    }
+
+    pub(crate) fn from_answers(
+        journal: u64,
+        taken: Instant,
+        answers: HashMap<ItemId, OriginalNow>,
+    ) -> Self {
+        Self {
+            journal,
+            taken,
+            answers,
+        }
+    }
+
+    /// [`answer`](Self::answer) as of `now` (tests choose the time).
+    pub(crate) fn answer_at(
+        &self,
+        now: Instant,
+        journal: &Journal,
+        item: &ItemId,
+    ) -> Option<&OriginalNow> {
+        if self.journal != journal.instance() {
+            return None;
+        }
+        // A clock that did not move forward counts as no time having passed, never as an error.
+        if now.saturating_duration_since(self.taken) > MAX_CONFIRMED_AGE {
+            return None;
+        }
+        self.answers.get(item)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(n: u8) -> ItemId {
+        ItemId::from_hex(&format!("{n:02x}{}", "0".repeat(30))).unwrap()
+    }
+
+    fn journal() -> (tempfile::TempDir, Journal) {
+        let dir = tempfile::tempdir().unwrap();
+        let j = Journal::open(&dir.path().join("j.redb")).unwrap();
+        (dir, j)
+    }
+
+    fn token(j: &Journal, at: Instant) -> Confirmed {
+        Confirmed::from_answers(
+            j.instance(),
+            at,
+            HashMap::from([(id(1), OriginalNow::Missing)]),
+        )
+    }
+
+    #[test]
+    fn an_answer_is_given_while_fresh_and_only_for_items_asked() {
+        let (_d, j) = journal();
+        let t0 = Instant::now();
+        let c = token(&j, t0);
+        assert_eq!(c.answer_at(t0, &j, &id(1)), Some(&OriginalNow::Missing));
+        assert_eq!(c.answer_at(t0, &j, &id(2)), None, "never asked");
+    }
+
+    #[test]
+    fn a_token_older_than_the_limit_is_refused_and_one_at_the_limit_is_not() {
+        let (_d, j) = journal();
+        let t0 = Instant::now();
+        let c = token(&j, t0);
+        assert!(c.answer_at(t0 + MAX_CONFIRMED_AGE, &j, &id(1)).is_some());
+        let late = t0 + MAX_CONFIRMED_AGE + Duration::from_nanos(1);
+        assert_eq!(c.answer_at(late, &j, &id(1)), None);
+        assert_eq!(
+            c.answer_at(t0 + Duration::from_secs(3600), &j, &id(1)),
+            None
+        );
+    }
+
+    #[test]
+    fn a_time_before_the_token_was_taken_is_not_an_error() {
+        let (_d, j) = journal();
+        let t0 = Instant::now();
+        let c = token(&j, t0 + Duration::from_secs(5));
+        assert!(c.answer_at(t0, &j, &id(1)).is_some());
+    }
+
+    #[test]
+    fn a_token_for_another_journal_is_refused() {
+        let (_d1, one) = journal();
+        let (_d2, two) = journal();
+        assert_ne!(one.instance(), two.instance());
+        let t0 = Instant::now();
+        let c = token(&one, t0);
+        assert!(c.answer_at(t0, &one, &id(1)).is_some());
+        assert_eq!(c.answer_at(t0, &two, &id(1)), None);
+    }
+
+    #[test]
+    fn none_confirms_nothing_for_any_item() {
+        let (_d, j) = journal();
+        let c = Confirmed::none(&j);
+        for n in 0..=255u8 {
+            assert_eq!(c.answer(&j, &id(n)), None);
+        }
+    }
+
+    #[test]
+    fn the_public_answer_uses_the_real_clock() {
+        let (_d, j) = journal();
+        let c = token(&j, Instant::now());
+        assert!(c.answer(&j, &id(1)).is_some());
+    }
+
+    #[cfg(unix)]
+    mod unix {
+        use super::*;
+        use std::os::unix::fs::symlink;
+
+        fn mkfifo(path: &Path) {
+            // rustix has no mknod on macOS; the mkfifo tool is on every Unix.
+            let status = std::process::Command::new("mkfifo")
+                .arg(path)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        #[allow(clippy::disallowed_methods)]
+        fn remove(path: &Path) {
+            std::fs::remove_file(path).unwrap();
+        }
+
+        #[test]
+        fn a_link_swapped_in_after_the_check_is_refused_not_followed() {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("secret.bin");
+            std::fs::write(&target, b"not the original").unwrap();
+            let name = dir.path().join("orig.bin");
+            std::fs::write(&name, b"the original").unwrap();
+            let answer = look_with(&name, || {
+                remove(&name);
+                symlink(&target, &name).unwrap();
+            });
+            assert_eq!(answer, OriginalNow::CannotLook, "{answer:?}");
+        }
+
+        #[test]
+        fn opening_a_link_directly_fails() {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("t");
+            std::fs::write(&target, b"x").unwrap();
+            let link = dir.path().join("l");
+            symlink(&target, &link).unwrap();
+            assert!(open_read_only(&link).is_err());
+            assert!(open_read_only(&target).is_ok());
+        }
+
+        #[test]
+        fn a_pipe_swapped_in_after_the_check_never_blocks_the_look() {
+            let dir = tempfile::tempdir().unwrap();
+            let name = dir.path().join("orig.bin");
+            std::fs::write(&name, b"the original").unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            let n2 = name.clone();
+            std::thread::spawn(move || {
+                let answer = look_with(&n2, || {
+                    remove(&n2);
+                    mkfifo(&n2);
+                });
+                let _ = tx.send(answer);
+            });
+            let answer = rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the look waited on a pipe");
+            assert_eq!(answer, OriginalNow::CannotLook);
+        }
+
+        #[test]
+        fn a_pipe_is_not_looked_at_and_opening_it_does_not_block() {
+            let dir = tempfile::tempdir().unwrap();
+            let name = dir.path().join("pipe");
+            mkfifo(&name);
+            assert_eq!(look(&name), OriginalNow::CannotLook);
+            let (tx, rx) = std::sync::mpsc::channel();
+            let n2 = name.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(open_read_only(&n2).is_ok());
+            });
+            assert!(rx.recv_timeout(Duration::from_secs(20)).is_ok());
+        }
+    }
 }

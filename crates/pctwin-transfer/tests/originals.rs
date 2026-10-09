@@ -16,9 +16,9 @@ use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::{Actor, FileId, Journal, PartialKeep, Permission, PlannedWrite};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    Channel, ChannelError, MAX_ORIGINALS_PER_REQUEST, Message, OriginalNow, ReceiverSession,
-    SendJob, SenderSession, Tier, TransferError, answer_originals, check_originals,
-    original_unchanged, serve_originals,
+    Channel, ChannelError, Confirmed, MAX_ORIGINALS_PER_REQUEST, Message, OriginalNow,
+    OriginalsBudget, ReceiverSession, SendJob, SenderSession, Tier, TransferError,
+    answer_originals, check_originals, original_unchanged, serve_originals,
 };
 use tokio::sync::mpsc;
 
@@ -158,20 +158,30 @@ fn sent_of(jobs: &[(SendJob, Vec<u8>)]) -> HashMap<ItemId, PathBuf> {
 async fn ask(sent: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> HashMap<ItemId, OriginalNow> {
     let (mut new, mut old) = mem_pair();
     let chunks = items.len().div_ceil(MAX_ORIGINALS_PER_REQUEST).max(1);
+    let journal = common::journal();
     let serve = async {
+        let mut budget = OriginalsBudget::new();
         for _ in 0..chunks {
             if items.is_empty() {
                 break;
             }
-            serve_originals(&mut old, sent).await.unwrap();
+            serve_originals(&mut old, sent, &mut budget).await.unwrap();
         }
     };
     let (answers, ()) = tokio::time::timeout(Duration::from_secs(30), async {
-        tokio::join!(check_originals(&mut new, items), serve)
+        tokio::join!(check_originals(&mut new, journal, items), serve)
     })
     .await
     .expect("the check hung");
-    answers.unwrap()
+    flatten(&answers.unwrap(), journal, items)
+}
+
+/// What a token says for each of `items` (those it has no answer for are left out).
+fn flatten(c: &Confirmed, journal: &Journal, items: &[ItemId]) -> HashMap<ItemId, OriginalNow> {
+    items
+        .iter()
+        .filter_map(|i| c.answer(journal, i).map(|n| (*i, *n)))
+        .collect()
 }
 
 fn planned(source_file: Option<FileId>, modified: Option<i64>, size: u64) -> PlannedWrite {
@@ -311,8 +321,9 @@ async fn many_items_go_in_several_requests_and_every_one_is_answered() {
 #[tokio::test]
 async fn asking_about_nothing_sends_nothing() {
     let (mut new, mut old) = mem_pair();
-    let now = check_originals(&mut new, &[]).await.unwrap();
-    assert!(now.is_empty());
+    let journal = common::journal();
+    let now = check_originals(&mut new, journal, &[]).await.unwrap();
+    assert_eq!(now.answer(journal, &id(1)), None);
     drop(new);
     assert!(old.recv().await.is_err(), "nothing was sent");
 }
@@ -338,8 +349,9 @@ async fn ask_hostile(
         assert!(matches!(heard, Message::CheckOriginals { .. }));
         old.send(&reply).await.unwrap();
     };
-    let (answers, ()) = tokio::join!(check_originals(&mut new, items), script);
-    answers
+    let journal = common::journal();
+    let (answers, ()) = tokio::join!(check_originals(&mut new, journal, items), script);
+    answers.map(|c| flatten(&c, journal, items))
 }
 
 fn present(n: u64) -> OriginalNow {
@@ -435,18 +447,19 @@ async fn an_oversized_damaged_or_wrong_reply_is_an_error() {
 async fn a_dropped_connection_is_an_error_not_a_confirmation() {
     let (mut new, old) = mem_pair();
     drop(old);
-    let r = check_originals(&mut new, &[id(1)]).await;
+    let r = check_originals(&mut new, common::journal(), &[id(1)]).await;
     assert!(matches!(r, Err(TransferError::ConnectionDropped)));
 }
 
 #[tokio::test]
 async fn the_old_laptop_refuses_anything_but_a_request() {
     let sent = HashMap::new();
+    let mut budget = OriginalsBudget::new();
     let (mut new, mut old) = mem_pair();
     new.send(&Message::Ready.encode()).await.unwrap();
-    assert!(serve_originals(&mut old, &sent).await.is_err());
+    assert!(serve_originals(&mut old, &sent, &mut budget).await.is_err());
     new.send(&[255, 0, 0, 0, 0]).await.unwrap();
-    assert!(serve_originals(&mut old, &sent).await.is_err());
+    assert!(serve_originals(&mut old, &sent, &mut budget).await.is_err());
     // An oversized request.
     let big = Message::CheckOriginals {
         items: (0..=MAX_ORIGINALS_PER_REQUEST)
@@ -454,7 +467,7 @@ async fn the_old_laptop_refuses_anything_but_a_request() {
             .collect(),
     };
     new.send(&big.encode()).await.unwrap();
-    assert!(serve_originals(&mut old, &sent).await.is_err());
+    assert!(serve_originals(&mut old, &sent, &mut budget).await.is_err());
 }
 
 // ---- the old laptop stays read-only ----
@@ -654,4 +667,73 @@ fn only_the_same_file_with_the_same_size_and_time_is_unchanged() {
         &planned(Some(file), Some(1000), 51),
         &same
     ));
+}
+
+// ---- the token the check hands to undo ----
+
+#[tokio::test]
+async fn the_helper_token_answers_exactly_what_the_scripted_old_laptop_said() {
+    let j = common::journal();
+    let c = common::confirmed(
+        j,
+        vec![
+            (id(1), present(1)),
+            (id(2), OriginalNow::Missing),
+            (id(3), OriginalNow::CannotLook),
+        ],
+    )
+    .await;
+    assert_eq!(c.answer(j, &id(1)), Some(&present(1)));
+    assert_eq!(c.answer(j, &id(2)), Some(&OriginalNow::Missing));
+    assert_eq!(c.answer(j, &id(3)), Some(&OriginalNow::CannotLook));
+    assert_eq!(c.answer(j, &id(4)), None, "never asked");
+}
+
+#[test]
+fn the_blocking_helper_works_outside_a_runtime() {
+    let j = common::journal();
+    let c = common::confirmed_blocking(j, vec![(id(1), present(1))]);
+    assert_eq!(c.answer(j, &id(1)), Some(&present(1)));
+}
+
+#[tokio::test]
+async fn a_token_from_one_journal_gives_nothing_to_another() {
+    let a = world();
+    let b = world();
+    let c = common::confirmed(&a.journal, vec![(id(1), present(1))]).await;
+    assert!(c.answer(&a.journal, &id(1)).is_some());
+    assert_eq!(c.answer(&b.journal, &id(1)), None);
+}
+
+#[tokio::test]
+async fn an_answer_for_an_item_not_asked_is_not_in_the_token() {
+    let j = common::journal();
+    let reply = Message::Originals {
+        answers: vec![(id(1), present(1)), (id(9), present(9))],
+    }
+    .encode();
+    let (mut new, mut old) = mem_pair();
+    let script = async {
+        old.recv().await.unwrap();
+        old.send(&reply).await.unwrap();
+    };
+    let asked = [id(1)];
+    let (c, ()) = tokio::join!(check_originals(&mut new, j, &asked), script);
+    let c = c.unwrap();
+    assert_eq!(c.answer(j, &id(1)), Some(&present(1)));
+    assert_eq!(c.answer(j, &id(9)), None);
+}
+
+#[tokio::test]
+async fn nothing_asked_means_the_token_confirms_nothing() {
+    let j = common::journal();
+    let (mut new, _old) = mem_pair();
+    let c = check_originals(&mut new, j, &[]).await.unwrap();
+    assert_eq!(c.answer(j, &id(1)), None);
+}
+
+#[test]
+fn a_token_for_no_answers_confirms_nothing() {
+    let j = common::journal();
+    assert_eq!(Confirmed::none(j).answer(j, &id(1)), None);
 }

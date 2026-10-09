@@ -4,10 +4,11 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, IncomingPath};
 use pctwin_journal::{
-    Actor, FileId, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
+    Actor, FileId, Journal, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
 };
 use pctwin_record::ItemId;
 
@@ -16,7 +17,7 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::{
-    Allowance, Assembly, Block, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
+    Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
     OriginalNow, ResumeTicket, Trailer, TransferError, answer_originals,
 };
 use futures_util::StreamExt;
@@ -96,17 +97,35 @@ fn protocol(why: &str) -> TransferError {
     TransferError::Protocol(why.to_string())
 }
 
+/// How long the new laptop waits for the old laptop's answer to one request. Longer than the old
+/// laptop's own limit for a request ([`ORIGINALS_REQUEST_TIME`]), so a slow old laptop answers
+/// "cannot look" itself before the new laptop gives up.
+pub const ORIGINALS_REPLY_WAIT: Duration = Duration::from_secs(90);
+
 /// New laptop, for undo: asks the old laptop, over the paired connection, what it sees now for
-/// each of `items`. Every item asked gets an answer in the result, and only an exact, single,
-/// well-formed answer counts: an item the old laptop skipped, answered twice, or answered with
-/// something else is `CannotLook` (never "confirmed"), and an answer for an item that was not
-/// asked is thrown away. A damaged or oversized message is an error. Long lists go in several
-/// requests of at most `MAX_ORIGINALS_PER_REQUEST`, so the old laptop must call
-/// [`serve_originals`] once for each.
+/// each of `items`, and returns the answers as a [`Confirmed`] tied to `journal` and to this
+/// moment. Every item asked gets an answer in it, and only an exact, single, well-formed answer
+/// counts: an item the old laptop skipped, answered twice, or answered with something else is
+/// `CannotLook` (never "confirmed"), and an answer for an item that was not asked is thrown away.
+/// A damaged or oversized message, or no answer in time, is an error (confirm nothing: use
+/// [`Confirmed::none`]). Long lists go in several requests of at most
+/// `MAX_ORIGINALS_PER_REQUEST`, so the old laptop must call [`serve_originals`] once for each.
 pub async fn check_originals(
     ch: &mut impl Channel,
+    journal: &Journal,
     items: &[ItemId],
-) -> Result<HashMap<ItemId, OriginalNow>, TransferError> {
+) -> Result<Confirmed, TransferError> {
+    check_originals_within(ch, journal, items, ORIGINALS_REPLY_WAIT).await
+}
+
+pub(crate) async fn check_originals_within(
+    ch: &mut impl Channel,
+    journal: &Journal,
+    items: &[ItemId],
+    wait: Duration,
+) -> Result<Confirmed, TransferError> {
+    // Taken before asking: the answers can only be as old as this or newer.
+    let taken = Instant::now();
     let mut seen = HashSet::new();
     let unique: Vec<ItemId> = items.iter().copied().filter(|i| seen.insert(*i)).collect();
     let mut result = HashMap::new();
@@ -118,12 +137,15 @@ pub async fn check_originals(
             },
         )
         .await?;
-        let Message::Originals { answers } = recv(ch).await? else {
+        let reply = tokio::time::timeout(wait, recv(ch))
+            .await
+            .map_err(|_| protocol("the old laptop did not answer about the originals in time"))??;
+        let Message::Originals { answers } = reply else {
             return Err(protocol("expected the answer about the originals"));
         };
         result.extend(match_answers(chunk, answers));
     }
-    Ok(result)
+    Ok(Confirmed::from_answers(journal.instance(), taken, result))
 }
 
 /// Pairs answers with the items that were asked, strictly. Anything not exactly one answer to a
@@ -159,24 +181,108 @@ fn match_answers(
         .collect()
 }
 
+/// Most items one session may ask the old laptop about, in all. A move holds at most a few
+/// hundred thousand files in ordinary use; a million is well beyond that, yet the old laptop's
+/// disk is looked at a bounded number of times however the new laptop behaves.
+pub const MAX_ORIGINALS_PER_SESSION: usize = 1_000_000;
+
+/// Most requests one session may make, in all. A full million items is about a thousand full
+/// requests; four times that leaves room, while one-item requests cannot be sent without end.
+pub const MAX_ORIGINAL_REQUESTS_PER_SESSION: usize = 4096;
+
+/// How long the old laptop spends looking for one request. A request is at most 1024 looks; a
+/// sleeping disk or a slow share can take a few seconds each at worst, so a minute covers real
+/// delays. When it runs out the answer is "cannot look", which is the safe way to fail.
+pub const ORIGINALS_REQUEST_TIME: Duration = Duration::from_secs(60);
+
+/// What the old laptop has been asked in one session so far. Make one per session and pass it to
+/// every [`serve_originals`] call of that session.
+#[derive(Debug)]
+pub struct OriginalsBudget {
+    items_left: usize,
+    requests_left: usize,
+    time: Duration,
+}
+
+impl OriginalsBudget {
+    pub fn new() -> Self {
+        Self::with_limits(
+            MAX_ORIGINALS_PER_SESSION,
+            MAX_ORIGINAL_REQUESTS_PER_SESSION,
+            ORIGINALS_REQUEST_TIME,
+        )
+    }
+
+    pub(crate) fn with_limits(items: usize, requests: usize, time: Duration) -> Self {
+        Self {
+            items_left: items,
+            requests_left: requests,
+            time,
+        }
+    }
+}
+
+impl Default for OriginalsBudget {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Old laptop, for undo: answers one `CheckOriginals` request from what it sent (`sent`: item to
 /// source path). It looks only at files in `sent`, read-only, and changes nothing. Call it once
 /// per request, when no file is being sent on this connection.
+///
+/// `budget` limits the whole session. A request over the session's totals, or one whose looking
+/// takes longer than the time limit, is still answered (so the new laptop is not left waiting),
+/// but every item in it is `CannotLook`: never confirmed.
 pub async fn serve_originals(
     ch: &mut impl Channel,
     sent: &HashMap<ItemId, PathBuf>,
+    budget: &mut OriginalsBudget,
 ) -> Result<(), TransferError> {
+    serve_with(ch, sent, budget, answer_originals).await
+}
+
+pub(crate) async fn serve_with<F>(
+    ch: &mut impl Channel,
+    sent: &HashMap<ItemId, PathBuf>,
+    budget: &mut OriginalsBudget,
+    answer: F,
+) -> Result<(), TransferError>
+where
+    F: FnOnce(&HashMap<ItemId, PathBuf>, &[ItemId]) -> Vec<(ItemId, OriginalNow)> + Send + 'static,
+{
     let Message::CheckOriginals { items } = recv(ch).await? else {
         return Err(protocol("expected a request about the originals"));
     };
-    // Only the asked items' paths go to the worker; the new laptop never names a path.
-    let known: HashMap<ItemId, PathBuf> = items
-        .iter()
-        .filter_map(|i| sent.get(i).map(|p| (*i, p.clone())))
-        .collect();
-    let answers = tokio::task::spawn_blocking(move || answer_originals(&known, &items))
-        .await
-        .map_err(|_| protocol("the look at the originals failed"))?;
+    let refuse = |items: &[ItemId]| -> Vec<(ItemId, OriginalNow)> {
+        items
+            .iter()
+            .map(|i| (*i, OriginalNow::CannotLook))
+            .collect()
+    };
+    let within = budget.requests_left > 0 && items.len() <= budget.items_left;
+    budget.requests_left = budget.requests_left.saturating_sub(1);
+    let answers = if within {
+        budget.items_left -= items.len();
+        // Only the asked items' paths go to the worker; the new laptop never names a path.
+        let known: HashMap<ItemId, PathBuf> = items
+            .iter()
+            .filter_map(|i| sent.get(i).map(|p| (*i, p.clone())))
+            .collect();
+        let asked = items.clone();
+        let work = tokio::task::spawn_blocking(move || answer(&known, &asked));
+        match tokio::time::timeout(budget.time, work).await {
+            Ok(Ok(answers)) => answers,
+            Ok(Err(_)) => return Err(protocol("the look at the originals failed")),
+            // The look runs on in the background until it ends by itself; its result is dropped.
+            Err(_) => refuse(&items),
+        }
+    } else {
+        // Nothing more is looked at this session; what was left is spent so it stays refused.
+        budget.items_left = 0;
+        refuse(&items)
+    };
     send(ch, &Message::Originals { answers }).await
 }
 
@@ -2038,5 +2144,154 @@ fn land(
         Ok(None) => fail(REMOVED_AT_ONCE.into()),
         // Could not look just now: recovery finishes it (the journal has its name).
         Err(e) => Ok(ReceiveOutcome::Failed(format!("{e}; {FINISHED_LATER}"))),
+    }
+}
+
+#[cfg(test)]
+mod originals_limits {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    struct Mem {
+        tx: mpsc::UnboundedSender<Vec<u8>>,
+        rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    }
+
+    fn pair() -> (Mem, Mem) {
+        let (a_tx, b_rx) = mpsc::unbounded_channel();
+        let (b_tx, a_rx) = mpsc::unbounded_channel();
+        (Mem { tx: a_tx, rx: a_rx }, Mem { tx: b_tx, rx: b_rx })
+    }
+
+    impl Channel for Mem {
+        async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+            self.tx.send(data.to_vec()).map_err(|_| ChannelError)
+        }
+        async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+            self.rx.recv().await.ok_or(ChannelError)
+        }
+    }
+
+    type Looker = fn(&HashMap<ItemId, PathBuf>, &[ItemId]) -> Vec<(ItemId, OriginalNow)>;
+
+    fn id(n: u8) -> ItemId {
+        ItemId::from_hex(&format!("{n:02x}{}", "0".repeat(30))).unwrap()
+    }
+
+    fn present(n: u64) -> OriginalNow {
+        OriginalNow::Present {
+            size: n,
+            modified_ns: Some(1),
+            file: Some(FileId {
+                volume: 1,
+                index: n,
+            }),
+        }
+    }
+
+    /// Always says "present" for everything asked.
+    fn all_present(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
+        items.iter().map(|i| (*i, present(1))).collect()
+    }
+
+    fn sent_all(n: u8) -> HashMap<ItemId, PathBuf> {
+        (1..=n).map(|i| (id(i), PathBuf::from("x"))).collect()
+    }
+
+    /// One request of `items`, served with `budget`; returns what the new laptop would read.
+    async fn round(
+        budget: &mut OriginalsBudget,
+        items: Vec<ItemId>,
+        answer: Looker,
+    ) -> Vec<(ItemId, OriginalNow)> {
+        let (mut new, mut old) = pair();
+        new.send(&Message::CheckOriginals { items }.encode())
+            .await
+            .unwrap();
+        serve_with(&mut old, &sent_all(10), budget, answer)
+            .await
+            .unwrap();
+        let Message::Originals { answers } = Message::decode(&new.recv().await.unwrap()).unwrap()
+        else {
+            panic!("not an answer")
+        };
+        answers
+    }
+
+    fn big() -> Duration {
+        Duration::from_secs(60)
+    }
+
+    #[tokio::test]
+    async fn within_the_limits_the_looks_are_answered() {
+        let mut b = OriginalsBudget::with_limits(3, 2, big());
+        let a = round(&mut b, vec![id(1), id(2)], all_present).await;
+        assert!(a.iter().all(|(_, n)| *n == present(1)), "{a:?}");
+        // Exactly the rest of the item allowance is still allowed.
+        let a = round(&mut b, vec![id(3)], all_present).await;
+        assert_eq!(a, vec![(id(3), present(1))]);
+    }
+
+    #[tokio::test]
+    async fn over_the_item_cap_the_request_is_refused_as_cannot_look() {
+        let mut b = OriginalsBudget::with_limits(3, 10, big());
+        round(&mut b, vec![id(1), id(2)], all_present).await;
+        let a = round(&mut b, vec![id(3), id(4)], all_present).await;
+        assert_eq!(
+            a,
+            vec![
+                (id(3), OriginalNow::CannotLook),
+                (id(4), OriginalNow::CannotLook)
+            ]
+        );
+        // And once refused, even a request that would have fitted stays refused.
+        let a = round(&mut b, vec![id(1)], all_present).await;
+        assert_eq!(a, vec![(id(1), OriginalNow::CannotLook)]);
+    }
+
+    #[tokio::test]
+    async fn over_the_request_cap_the_request_is_refused_as_cannot_look() {
+        let mut b = OriginalsBudget::with_limits(100, 2, big());
+        round(&mut b, vec![id(1)], all_present).await;
+        round(&mut b, vec![id(1)], all_present).await;
+        let a = round(&mut b, vec![id(1)], all_present).await;
+        assert_eq!(a, vec![(id(1), OriginalNow::CannotLook)]);
+    }
+
+    #[tokio::test]
+    async fn a_look_that_takes_too_long_is_answered_cannot_look() {
+        fn slow(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
+            std::thread::sleep(Duration::from_millis(600));
+            items.iter().map(|i| (*i, present(1))).collect()
+        }
+        let mut b = OriginalsBudget::with_limits(100, 100, Duration::from_millis(50));
+        let a = round(&mut b, vec![id(1), id(2)], slow).await;
+        assert_eq!(
+            a,
+            vec![
+                (id(1), OriginalNow::CannotLook),
+                (id(2), OriginalNow::CannotLook)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_session_limits_are_what_they_are_documented_to_be() {
+        let b = OriginalsBudget::new();
+        assert_eq!(b.items_left, MAX_ORIGINALS_PER_SESSION);
+        assert_eq!(b.requests_left, MAX_ORIGINAL_REQUESTS_PER_SESSION);
+        assert_eq!(b.time, ORIGINALS_REQUEST_TIME);
+        assert!(ORIGINALS_REPLY_WAIT > ORIGINALS_REQUEST_TIME);
+        const { assert!(MAX_ORIGINALS_PER_SESSION >= MAX_ORIGINALS_PER_REQUEST) };
+    }
+
+    #[tokio::test]
+    async fn an_old_laptop_that_never_answers_is_an_error_not_a_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = Journal::open(&dir.path().join("j.redb")).unwrap();
+        let (mut new, _old) = pair();
+        let r =
+            check_originals_within(&mut new, &journal, &[id(1)], Duration::from_millis(50)).await;
+        assert!(matches!(r, Err(TransferError::Protocol(_))), "{r:?}");
     }
 }
