@@ -348,3 +348,179 @@ fn a_save_whose_record_breaks_the_rules_is_refused() {
         Err(StateError::Damaged(_))
     ));
 }
+
+// The temporary file a save writes first has a name nobody can guess, and is made only if nothing
+// is there (Security Design Part J): a file or link someone planted beside the save, at the name
+// an older PCTwin used (`.scan.json.<process>.tmp`), is never followed, written or removed.
+
+fn finished_scan(base: &Path) -> ScanState {
+    let folders = two_folders(base);
+    build_scan_resumable(laptop(), me(base), folders, Vec::new(), None, &mut |_| {
+        Flow::Continue
+    })
+    .unwrap()
+    .state
+}
+
+/// The predictable name older saves used, for this process.
+fn old_temp_name(saves: &Path) -> PathBuf {
+    saves.join(format!(".scan.json.{}.tmp", std::process::id()))
+}
+
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_file_planted_at_the_old_temporary_name_is_never_written_or_removed() {
+    let base = tempfile::tempdir().unwrap();
+    let saves = tempfile::tempdir().unwrap();
+    let state = finished_scan(base.path());
+    let planted = old_temp_name(saves.path());
+    std::fs::write(&planted, b"planted").unwrap();
+    let file = saves.path().join("scan.json");
+
+    state.save(&file).unwrap();
+    assert_eq!(ScanState::load(&file).unwrap(), state);
+    assert_eq!(std::fs::read(&planted).unwrap(), b"planted");
+
+    // Nor by a save that fails.
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir(&file).unwrap();
+    std::fs::write(file.join("keep.txt"), b"keep").unwrap();
+    assert!(state.save(&file).is_err());
+    assert_eq!(std::fs::read(&planted).unwrap(), b"planted");
+    let planted_name = planted.file_name().unwrap().to_string_lossy().into_owned();
+    let mut want = vec![planted_name, "scan.json".to_string()];
+    want.sort();
+    assert_eq!(
+        names_in(saves.path()),
+        want,
+        "only the planted file and the folder"
+    );
+}
+
+#[test]
+fn a_hard_link_planted_at_the_old_temporary_name_never_lets_a_save_write_through_it() {
+    // Hard links need no special right, so this runs on every system.
+    let base = tempfile::tempdir().unwrap();
+    let saves = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let state = finished_scan(base.path());
+    let victim = elsewhere.path().join("victim.txt");
+    std::fs::write(&victim, b"not yours").unwrap();
+    let planted = old_temp_name(saves.path());
+    std::fs::hard_link(&victim, &planted).unwrap();
+    let file = saves.path().join("scan.json");
+
+    state.save(&file).unwrap();
+    assert_eq!(ScanState::load(&file).unwrap(), state);
+    assert_eq!(std::fs::read(&victim).unwrap(), b"not yours");
+    assert_eq!(std::fs::read(&planted).unwrap(), b"not yours");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symbolic_link_planted_at_the_old_temporary_name_is_never_followed() {
+    let base = tempfile::tempdir().unwrap();
+    let saves = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let state = finished_scan(base.path());
+    let victim = elsewhere.path().join("victim.txt");
+    std::fs::write(&victim, b"not yours").unwrap();
+    let planted = old_temp_name(saves.path());
+    std::os::unix::fs::symlink(&victim, &planted).unwrap();
+    // And a link to nowhere, which a plain create would make the file for.
+    let nowhere = elsewhere.path().join("made-by-pctwin.txt");
+    let file = saves.path().join("scan.json");
+
+    state.save(&file).unwrap();
+    assert_eq!(std::fs::read(&victim).unwrap(), b"not yours");
+    assert!(std::fs::symlink_metadata(&planted).unwrap().is_symlink());
+
+    std::fs::remove_file(&planted).unwrap();
+    std::os::unix::fs::symlink(&nowhere, &planted).unwrap();
+    state.save(&file).unwrap();
+    assert!(!nowhere.exists(), "a dangling link was followed");
+    assert!(std::fs::symlink_metadata(&planted).unwrap().is_symlink());
+    assert_eq!(ScanState::load(&file).unwrap(), state);
+}
+
+#[test]
+fn a_save_into_a_missing_folder_fails_and_makes_nothing() {
+    let base = tempfile::tempdir().unwrap();
+    let state = finished_scan(base.path());
+    let saves = tempfile::tempdir().unwrap();
+    let file = saves.path().join("gone").join("scan.json");
+    assert!(state.save(&file).is_err());
+    assert!(names_in(saves.path()).is_empty());
+}
+
+#[cfg(windows)]
+#[test]
+fn the_temporary_file_is_made_beside_the_save_under_a_new_name_each_time() {
+    // While moving into place keeps failing (a folder is where the save goes), the save retries
+    // for about a second: long enough to see where its temporary file is and what it is called.
+    let base = tempfile::tempdir().unwrap();
+    let saves = tempfile::tempdir().unwrap();
+    let state = finished_scan(base.path());
+    let file = saves.path().join("scan.json");
+    std::fs::create_dir(&file).unwrap();
+    std::fs::write(file.join("keep.txt"), b"keep").unwrap();
+    let old = old_temp_name(saves.path())
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        let done = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                assert!(state.save(&file).is_err());
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+            });
+            let mut found = None;
+            while !done.load(std::sync::atomic::Ordering::SeqCst) && found.is_none() {
+                found = names_in(saves.path())
+                    .into_iter()
+                    .find(|n| n.starts_with(".scan.json.") && n.ends_with(".tmp"));
+            }
+            seen.push(found.expect("no temporary file beside the save"));
+        });
+    }
+    assert!(seen.iter().all(|n| *n != old), "{seen:?}");
+    assert_ne!(seen[0], seen[1], "the same name twice");
+    assert_eq!(names_in(saves.path()), ["scan.json"]);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_save_waits_out_another_program_briefly_holding_the_old_save() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let base = tempfile::tempdir().unwrap();
+    let saves = tempfile::tempdir().unwrap();
+    let state = finished_scan(base.path());
+    let file = saves.path().join("scan.json");
+    std::fs::write(&file, b"old").unwrap();
+    // As antivirus does: open with no sharing, so it cannot be replaced for a moment.
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&file)
+        .unwrap();
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            drop(held);
+        });
+        state.save(&file).unwrap();
+    });
+    assert_eq!(ScanState::load(&file).unwrap(), state);
+    assert_eq!(names_in(saves.path()), ["scan.json"]);
+}
