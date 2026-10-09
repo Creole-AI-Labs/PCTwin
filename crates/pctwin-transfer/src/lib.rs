@@ -77,7 +77,7 @@ pub use session::{
 };
 pub use undo::{
     CHANGED_SINCE, CONNECT_OLD_LAPTOP, IN_USE, MOVED_SINCE, ONLINE_ONLY, ORIGINAL_CHANGED,
-    SECOND_NAME, UndoReport, Undone, undo, undo_items,
+    ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, SECOND_NAME, UndoReport, Undone, undo, undo_items,
 };
 
 use std::fs::File;

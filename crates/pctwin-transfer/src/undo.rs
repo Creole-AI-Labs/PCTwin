@@ -22,7 +22,7 @@
 
 use std::collections::HashMap;
 
-use pctwin_gate::{Destination, Destinations, Removed};
+use pctwin_gate::{Destination, Destinations, Left, Removed};
 use pctwin_journal::{
     Entry, FileId, Journal, JournalError, Landed, State, Undo, UndoOutcome, UndoPermit,
 };
@@ -46,6 +46,9 @@ pub struct Undone {
 pub struct UndoReport {
     pub files: Vec<Undone>,
     pub folders: Vec<Undone>,
+    /// Undo is closed for good (the wipe of the old laptop started), so it stopped: what is
+    /// listed was done before that, and nothing else was touched.
+    pub closed: bool,
 }
 
 impl UndoReport {
@@ -67,9 +70,14 @@ pub const MOVED_SINCE: &str = "it is no longer where the move put it (moved, ren
 /// The plain reason when the old laptop could not confirm the original (not connected, or no
 /// answer for it): nothing is removed.
 pub const CONNECT_OLD_LAPTOP: &str = "Connect your old laptop to undo. Nothing was removed.";
-/// The plain reason for a copy whose original on the old laptop changed or is gone.
+/// The plain reason for a copy whose original on the old laptop has changed (final).
 pub const ORIGINAL_CHANGED: &str =
-    "the original on your old laptop has changed or is gone, so this copy was kept";
+    "the original on your old laptop has changed since the move, so this copy was kept";
+/// The plain reason for a copy whose original the old laptop cannot find now (perhaps its drive
+/// is not connected): kept for now, and asked again next time.
+pub const ORIGINAL_NOT_FOUND: &str = "your old laptop cannot find the original right now (is its drive connected?), so this copy was kept for now; undo again once it is back";
+/// The plain reason for a copy whose original PCTwin did not record when it was copied.
+pub const ORIGINAL_UNKNOWN: &str = "PCTwin did not note which file the original was when it copied it, so it cannot check the original is still on your old laptop; this copy was kept";
 /// The plain reason for a file another program is using.
 pub const IN_USE: &str = "another program is using it, so it was kept; close it and undo again";
 /// The plain reason for a file stored online only.
@@ -98,13 +106,30 @@ pub fn undo_items(journal: &Journal) -> Result<Vec<ItemId>, JournalError> {
 
 /// Undoes every file the move in `journal` committed, newest first, then the folders it made.
 /// `originals` are the old laptop's answers for [`undo_items`], asked just before (`None`: it
-/// could not be asked, so nothing is removed). Refused once undo is closed.
+/// could not be asked, so nothing is removed). Once undo is closed (even part of the way), it
+/// stops and says so ([`UndoReport::closed`]), with what it did before.
 pub fn undo(
     journal: &Journal,
     table: &Destinations,
     originals: Option<&HashMap<ItemId, OriginalNow>>,
 ) -> Result<UndoReport, JournalError> {
     let mut report = UndoReport::default();
+    match undo_all(journal, table, originals, &mut report) {
+        Err(JournalError::UndoClosed) => {
+            report.closed = true;
+            Ok(report)
+        }
+        Err(e) => Err(e),
+        Ok(()) => Ok(report),
+    }
+}
+
+fn undo_all(
+    journal: &Journal,
+    table: &Destinations,
+    originals: Option<&HashMap<ItemId, OriginalNow>>,
+    report: &mut UndoReport,
+) -> Result<(), JournalError> {
     let mut in_use = Vec::new();
     for entry in committed(journal)? {
         if finished(journal, &entry)? {
@@ -131,8 +156,7 @@ pub fn undo(
             report.files[at].outcome = undo_file(journal, table, originals, &entry)?;
         }
     }
-    undo_folders(journal, table, &mut report)?;
-    Ok(report)
+    undo_folders(journal, table, report)
 }
 
 /// Committed files, newest first.
@@ -273,14 +297,6 @@ fn undo_file(
     let kept = |why: &str| UndoOutcome::Kept { why: why.into() };
     // Not recorded: tried again next time.
     let not_done = |why: String| Ok(UndoOutcome::NotDone { why });
-    // The old laptop still has the original, unchanged, or nothing is removed.
-    match originals.and_then(|o| o.get(&entry.write.item)) {
-        None | Some(OriginalNow::CannotLook) => return not_done(CONNECT_OLD_LAPTOP.into()),
-        Some(now) if !original_unchanged(&entry.write, now) => {
-            return done(&permit, kept(ORIGINAL_CHANGED));
-        }
-        Some(_) => {}
-    }
     let dest = match place(table, &entry.write.destination, entry.write.place) {
         Ok(dest) => dest,
         Err(why) => return not_done(why),
@@ -289,22 +305,63 @@ fn undo_file(
     let Some(file) = landed.file else {
         return done(&permit, kept(CANNOT_TELL));
     };
-    let was_removing = matches!(journal.undo_of(entry.id)?, Some(Undo::Removing { .. }));
-    // Recorded before anything is removed, so a crash part of the way is finished next time.
-    journal.record_undo(&permit, entry.id, &Undo::Removing { file })?;
+    let gate_file = pctwin_gate::FileId {
+        volume: file.volume,
+        index: file.index,
+    };
+    // A removal was under way when PCTwin stopped: what is on the disk decides first, so a copy
+    // that is already gone is never reported as kept.
+    if matches!(journal.undo_of(entry.id)?, Some(Undo::Removing { .. })) {
+        match dest.resume_removal(&permit, final_path, gate_file) {
+            Ok(Left::Here) => {}
+            Ok(Left::Gone) => return done(&permit, UndoOutcome::AlreadyGone),
+            Ok(Left::Stranded { at }) => {
+                return done(
+                    &permit,
+                    UndoOutcome::Kept {
+                        why: format!("it was kept in {at}"),
+                    },
+                );
+            }
+            Err(e) => return not_done(e.to_string()),
+        }
+    }
+    // The old laptop still has the original, unchanged, or nothing is removed. Only an original
+    // that is there but different is final; one it cannot find now is asked about again.
+    if entry.write.source_file.is_none() || entry.write.source_modified_ns.is_none() {
+        return done(&permit, kept(ORIGINAL_UNKNOWN));
+    }
+    match originals.and_then(|o| o.get(&entry.write.item)) {
+        None | Some(OriginalNow::CannotLook) => return not_done(CONNECT_OLD_LAPTOP.into()),
+        Some(OriginalNow::Missing) => return not_done(ORIGINAL_NOT_FOUND.into()),
+        Some(now) if !original_unchanged(&entry.write, now) => {
+            return done(&permit, kept(ORIGINAL_CHANGED));
+        }
+        Some(_) => {}
+    }
+    // Recorded only when the removal really happens, just before it (a journal that cannot be
+    // written stops it, with nothing removed).
+    let failed_record = std::cell::Cell::new(None);
     let removed = dest.remove_if_unchanged(
+        &permit,
         final_path,
-        pctwin_gate::FileId {
-            volume: file.volume,
-            index: file.index,
-        },
+        gate_file,
         |f| unchanged(f, landed, fingerprint, entry.write.block_size),
+        || {
+            journal
+                .record_undo(&permit, entry.id, &Undo::Removing { file })
+                .map_err(|e| {
+                    let message = e.to_string();
+                    failed_record.set(Some(e));
+                    std::io::Error::other(message)
+                })
+        },
     );
+    if let Some(e) = failed_record.take() {
+        return Err(e);
+    }
     let outcome = match removed {
         Ok(Removed::Removed) => UndoOutcome::Deleted,
-        // Gone after a removal was under way: it may have been this undo, cut short before it
-        // could record it, or the person; either way nothing is there, and nothing more is said.
-        Ok(Removed::Gone) if was_removing => UndoOutcome::AlreadyGone,
         Ok(Removed::Gone) => kept(MOVED_SINCE),
         Ok(Removed::NotThatFile | Removed::Changed) => kept(CHANGED_SINCE),
         Ok(Removed::Linked) => kept(SECOND_NAME),

@@ -4,10 +4,6 @@
 //! a question it asked, and removes a copy only if the original is the very same file, with the
 //! same size and the same modified time as when it was read.
 
-// Tests make and remove files to set up each case; only the code under test is held to removing
-// nothing but through the gate.
-#![allow(clippy::disallowed_methods)]
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};

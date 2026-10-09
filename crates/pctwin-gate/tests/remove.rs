@@ -8,7 +8,41 @@ use std::io::Read;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pctwin_gate::{Destination, FileId, Removed};
+use pctwin_gate::{Destination, FileId, GateError, Left, Removed};
+
+/// One undo journal for the whole test run, open: every removal needs one of its permits.
+fn journal() -> &'static pctwin_journal::Journal {
+    static J: std::sync::OnceLock<(tempfile::TempDir, pctwin_journal::Journal)> =
+        std::sync::OnceLock::new();
+    &J.get_or_init(|| {
+        let d = tempfile::tempdir().unwrap();
+        let j = pctwin_journal::Journal::open(&d.path().join("j.redb")).unwrap();
+        (d, j)
+    })
+    .1
+}
+
+/// Removal as undo does it, with nothing to record first.
+trait Rm {
+    fn rm(
+        &self,
+        stored: &str,
+        expect: FileId,
+        verify: impl FnOnce(&mut std::fs::File) -> std::io::Result<bool>,
+    ) -> Result<Removed, GateError>;
+}
+
+impl Rm for Destination {
+    fn rm(
+        &self,
+        stored: &str,
+        expect: FileId,
+        verify: impl FnOnce(&mut std::fs::File) -> std::io::Result<bool>,
+    ) -> Result<Removed, GateError> {
+        let permit = journal().begin_undo().unwrap();
+        self.remove_if_unchanged(&permit, stored, expect, verify, || Ok(()))
+    }
+}
 
 fn setup() -> (tempfile::TempDir, Destination) {
     let root = tempfile::tempdir().unwrap();
@@ -48,9 +82,7 @@ fn the_very_file_unchanged_is_removed() {
     let (root, dest) = setup();
     put(&root, "Docs/a.txt", b"copy");
     let file = id(&dest, "Docs/a.txt");
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
     assert_eq!(r, Removed::Removed);
     assert!(names(&root.path().join("Docs")).is_empty());
 }
@@ -66,7 +98,7 @@ fn another_file_at_the_name_is_never_removed() {
     put(&root, "Docs/a.txt", b"copy");
     let mut called = false;
     let r = dest
-        .remove_if_unchanged("Docs/a.txt", file, |_| {
+        .rm("Docs/a.txt", file, |_| {
             called = true;
             Ok(true)
         })
@@ -85,7 +117,7 @@ fn a_file_changed_since_is_kept() {
     put(&root, "Docs/a.txt", b"copy");
     let file = id(&dest, "Docs/a.txt");
     let r = dest
-        .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"something else"))
+        .rm("Docs/a.txt", file, bytes_are(b"something else"))
         .unwrap();
     assert_eq!(r, Removed::Changed);
     assert_eq!(
@@ -100,7 +132,7 @@ fn a_check_that_cannot_finish_removes_nothing() {
     let (root, dest) = setup();
     put(&root, "Docs/a.txt", b"copy");
     let file = id(&dest, "Docs/a.txt");
-    let r = dest.remove_if_unchanged("Docs/a.txt", file, |_| {
+    let r = dest.rm("Docs/a.txt", file, |_| {
         Err(std::io::Error::other("the drive stopped answering"))
     });
     assert!(r.is_err());
@@ -118,7 +150,7 @@ fn a_file_no_longer_there_is_gone() {
     std::fs::remove_file(root.path().join("Docs/a.txt")).unwrap();
     for stored in ["Docs/a.txt", "Missing/a.txt"] {
         let r = dest
-            .remove_if_unchanged(stored, file, |_| panic!("nothing to check"))
+            .rm(stored, file, |_| panic!("nothing to check"))
             .unwrap();
         assert_eq!(r, Removed::Gone, "{stored}");
     }
@@ -134,9 +166,7 @@ fn a_file_with_a_second_name_is_kept() {
         root.path().join("Docs/second.txt"),
     )
     .unwrap();
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", file, |_| Ok(true))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", file, |_| Ok(true)).unwrap();
     assert_eq!(r, Removed::Linked);
     assert_eq!(names(&root.path().join("Docs")), ["a.txt", "second.txt"]);
 }
@@ -146,9 +176,7 @@ fn a_folder_at_the_name_is_never_removed() {
     let (root, dest) = setup();
     std::fs::create_dir(root.path().join("Docs/a.txt")).unwrap();
     let folder = dest.folder_identity("Docs/a.txt").unwrap().unwrap();
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", folder, |_| Ok(true))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", folder, |_| Ok(true)).unwrap();
     assert_eq!(r, Removed::NotThatFile);
     assert!(root.path().join("Docs/a.txt").is_dir());
 }
@@ -174,9 +202,7 @@ fn a_link_at_the_name_is_never_followed_or_removed() {
         return;
     }
     // Even told the link's target is the file, the link is never followed.
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", target, |_| Ok(true))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", target, |_| Ok(true)).unwrap();
     assert_eq!(r, Removed::NotThatFile);
     assert_eq!(
         std::fs::read(root.path().join("Docs/target.txt")).unwrap(),
@@ -199,9 +225,7 @@ fn a_read_only_copy_is_removed() {
     perms.set_readonly(true);
     std::fs::set_permissions(&p, perms).unwrap();
     let file = id(&dest, "Docs/a.txt");
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
     assert_eq!(r, Removed::Removed);
     assert!(!p.exists());
 }
@@ -212,9 +236,7 @@ fn only_the_one_name_is_touched_and_no_private_name_is_left() {
     put(&root, "Docs/a.txt", b"copy");
     put(&root, "Docs/b.txt", b"mine");
     let file = id(&dest, "Docs/a.txt");
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
     assert_eq!(r, Removed::Removed);
     assert_eq!(names(&root.path().join("Docs")), ["b.txt"]);
 }
@@ -230,10 +252,7 @@ fn removing_the_same_file_twice_at_once_removes_it_once() {
         let tries: Vec<_> = (0..4)
             .map(|_| {
                 let dest = Arc::clone(&dest);
-                s.spawn(move || {
-                    dest.remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-                        .unwrap()
-                })
+                s.spawn(move || dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap())
             })
             .collect();
         tries.into_iter().map(|t| t.join().unwrap()).collect()
@@ -287,7 +306,7 @@ fn a_new_version_saved_over_the_name_during_undo_is_never_lost() {
                 panic!("the save never landed");
             });
             go.store(true, Ordering::Release);
-            let r = dest.remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"));
+            let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy"));
             saver.join().unwrap();
             r
         });
@@ -339,7 +358,7 @@ fn a_look_alike_swapped_in_during_undo_is_never_removed() {
                 panic!("the swap never landed");
             });
             go.store(true, Ordering::Release);
-            let r = dest.remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"));
+            let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy"));
             swapper.join().unwrap();
             r
         });
@@ -371,7 +390,7 @@ mod windows {
         let other = root.path().join("Docs/other.txt");
         let file = id(&dest, "Docs/a.txt");
         let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, |f| {
+            .rm("Docs/a.txt", file, |f| {
                 // Writing, with or without sharing.
                 assert!(std::fs::OpenOptions::new().write(true).open(&p).is_err());
                 assert!(
@@ -411,7 +430,7 @@ mod windows {
             .open(root.path().join("Docs/a.txt"))
             .unwrap();
         let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, |_| panic!("never checked while in use"))
+            .rm("Docs/a.txt", file, |_| panic!("never checked while in use"))
             .unwrap();
         assert_eq!(r, Removed::InUse);
         assert!(root.path().join("Docs/a.txt").exists());
@@ -433,8 +452,7 @@ mod windows {
                 std::thread::sleep(std::time::Duration::from_millis(30));
                 drop(writer);
             });
-            dest.remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-                .unwrap()
+            dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap()
         });
         assert_eq!(r, Removed::Removed);
     }
@@ -449,9 +467,7 @@ mod windows {
             .share_mode(SHARE_READ | SHARE_WRITE)
             .open(root.path().join("Docs/a.txt"))
             .unwrap();
-        let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, |_| Ok(true))
-            .unwrap();
+        let r = dest.rm("Docs/a.txt", file, |_| Ok(true)).unwrap();
         assert_eq!(r, Removed::InUse);
         assert!(root.path().join("Docs/a.txt").exists());
     }
@@ -466,9 +482,7 @@ mod windows {
             .share_mode(SHARE_READ | SHARE_WRITE | SHARE_DELETE)
             .open(root.path().join("Docs/a.txt"))
             .unwrap();
-        let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-            .unwrap();
+        let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
         assert_eq!(r, Removed::Removed);
         // The name is free while the reader still reads the old bytes.
         assert!(!root.path().join("Docs/a.txt").exists());
@@ -493,7 +507,7 @@ mod windows {
             .is_ok_and(|s| s.success());
         assert!(ok, "attrib +O failed");
         let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, |_| panic!("never read"))
+            .rm("Docs/a.txt", file, |_| panic!("never read"))
             .unwrap();
         assert_eq!(r, Removed::CloudOnly);
         assert!(p.exists());
@@ -514,9 +528,7 @@ fn a_junction_at_the_name_is_never_followed_or_removed() {
         .is_ok_and(|o| o.status.success());
     assert!(ok, "mklink /J failed");
     let folder = dest.folder_identity("Elsewhere").unwrap().unwrap();
-    let r = dest
-        .remove_if_unchanged("Docs/a.txt", folder, |_| Ok(true))
-        .unwrap();
+    let r = dest.rm("Docs/a.txt", folder, |_| Ok(true)).unwrap();
     assert_eq!(r, Removed::NotThatFile);
     assert_eq!(
         std::fs::read(root.path().join("Elsewhere/keep.txt")).unwrap(),
@@ -538,9 +550,7 @@ mod unix {
         let file = id(&dest, "Docs/a.txt");
         let docs = root.path().join("Docs");
         std::fs::rename(docs.join("a.txt"), docs.join(undo_name(file))).unwrap();
-        let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"))
-            .unwrap();
+        let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
         assert_eq!(r, Removed::Removed);
         assert!(names(&docs).is_empty());
     }
@@ -552,9 +562,7 @@ mod unix {
         let file = id(&dest, "Docs/a.txt");
         let docs = root.path().join("Docs");
         std::fs::rename(docs.join("a.txt"), docs.join(undo_name(file))).unwrap();
-        let r = dest
-            .remove_if_unchanged("Docs/a.txt", file, bytes_are(b"other"))
-            .unwrap();
+        let r = dest.rm("Docs/a.txt", file, bytes_are(b"other")).unwrap();
         assert_eq!(r, Removed::Changed);
         assert_eq!(names(&docs), [undo_name(file)]);
     }
@@ -567,7 +575,7 @@ mod unix {
         let file = id(&dest, "Docs/a.txt");
         let docs = root.path().join("Docs");
         std::fs::write(docs.join(undo_name(file)), b"planted").unwrap();
-        let r = dest.remove_if_unchanged("Docs/a.txt", file, bytes_are(b"copy"));
+        let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy"));
         assert!(r.is_err(), "{r:?}");
         assert_eq!(
             std::fs::read(docs.join(undo_name(file))).unwrap(),
@@ -583,10 +591,7 @@ mod unix {
         put(&root, "Docs/a.txt", b"copy");
         let file = id(&dest, "Docs/a.txt");
         let stored = format!("Docs/{}", undo_name(file));
-        assert!(
-            dest.remove_if_unchanged(&stored, file, |_| Ok(true))
-                .is_err()
-        );
+        assert!(dest.rm(&stored, file, |_| Ok(true)).is_err());
         assert!(root.path().join("Docs/a.txt").exists());
     }
 }
@@ -601,8 +606,128 @@ fn pctwin_s_own_names_are_refused() {
     ] {
         put(&root, &format!("Docs/{name}"), b"x");
         let file = id(&dest, &format!("Docs/{name}"));
-        let r = dest.remove_if_unchanged(&format!("Docs/{name}"), file, |_| Ok(true));
+        let r = dest.rm(&format!("Docs/{name}"), file, |_| Ok(true));
         assert!(r.is_err(), "{name}: {r:?}");
         assert!(root.path().join("Docs").join(&name).exists());
     }
+}
+
+/// Sharing that blocks writers does not block making another name: one made while the file is
+/// checked keeps it (the number of names is read again just before the removal).
+#[test]
+fn a_second_name_made_while_the_file_is_checked_keeps_it() {
+    let (root, dest) = setup();
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let (p, q) = (
+        root.path().join("Docs/a.txt"),
+        root.path().join("Docs/theirs.txt"),
+    );
+    let r = dest
+        .rm("Docs/a.txt", file, |f| {
+            std::fs::hard_link(&p, &q).unwrap();
+            bytes_are(b"copy")(f)
+        })
+        .unwrap();
+    assert_eq!(r, Removed::Linked);
+    assert_eq!(names(&root.path().join("Docs")), ["a.txt", "theirs.txt"]);
+}
+
+/// A drive that gives files no number cannot tell one from another: never removed.
+#[test]
+fn a_file_with_no_number_is_never_removed() {
+    let (root, dest) = setup();
+    put(&root, "Docs/a.txt", b"copy");
+    let mut file = id(&dest, "Docs/a.txt");
+    file.index = 0;
+    let r = dest.rm("Docs/a.txt", file, |_| Ok(true)).unwrap();
+    assert_eq!(r, Removed::Unsupported);
+    assert!(root.path().join("Docs/a.txt").exists());
+}
+
+/// The last call before the removal comes once, only when the file is really being removed, and
+/// if it fails nothing is removed.
+#[test]
+fn the_removal_is_announced_once_only_when_it_happens() {
+    let (root, dest) = setup();
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let permit = journal().begin_undo().unwrap();
+    // Changed: never announced.
+    let mut told = 0;
+    let r = dest
+        .remove_if_unchanged(&permit, "Docs/a.txt", file, bytes_are(b"other"), || {
+            told += 1;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!((r, told), (Removed::Changed, 0));
+    // The announcement fails: nothing is removed.
+    let r = dest.remove_if_unchanged(&permit, "Docs/a.txt", file, bytes_are(b"copy"), || {
+        Err(std::io::Error::other("the journal could not be written"))
+    });
+    assert!(r.is_err());
+    assert!(root.path().join("Docs/a.txt").exists());
+    // Removed: announced once, before.
+    let r = dest
+        .remove_if_unchanged(&permit, "Docs/a.txt", file, bytes_are(b"copy"), || {
+            told += 1;
+            assert!(root.path().join("Docs/a.txt").exists(), "announced first");
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!((r, told), (Removed::Removed, 1));
+}
+
+#[test]
+fn a_removal_under_way_is_resumed_from_what_is_on_the_disk() {
+    let (root, dest) = setup();
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let permit = journal().begin_undo().unwrap();
+    assert_eq!(
+        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
+        Left::Here
+    );
+    // Another file under its name now: the copy is gone.
+    std::fs::remove_file(root.path().join("Docs/a.txt")).unwrap();
+    assert_eq!(
+        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
+        Left::Gone
+    );
+    put(&root, "Docs/a.txt", b"copy");
+    assert_eq!(
+        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
+        Left::Gone
+    );
+    assert_eq!(
+        dest.resume_removal(&permit, "Nowhere/a.txt", file).unwrap(),
+        Left::Gone
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_copy_left_under_its_private_name_is_put_back_before_anything_is_decided() {
+    let (root, dest) = setup();
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let docs = root.path().join("Docs");
+    std::fs::rename(docs.join("a.txt"), docs.join(pctwin_gate::undo_name(file))).unwrap();
+    let permit = journal().begin_undo().unwrap();
+    assert_eq!(
+        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
+        Left::Here
+    );
+    assert_eq!(names(&docs), ["a.txt"]);
+    // Its name taken meanwhile: kept under the private name, and said where.
+    std::fs::rename(docs.join("a.txt"), docs.join(pctwin_gate::undo_name(file))).unwrap();
+    put(&root, "Docs/a.txt", b"theirs");
+    assert_eq!(
+        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
+        Left::Stranded {
+            at: format!("Docs/{}", pctwin_gate::undo_name(file))
+        }
+    );
+    assert_eq!(std::fs::read(docs.join("a.txt")).unwrap(), b"theirs");
 }

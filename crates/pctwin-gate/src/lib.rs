@@ -644,13 +644,20 @@ impl Destination {
     ///   removed. Anything else found is put back. A write by a program that already had the file
     ///   open, landing after the last look, is caught and the bytes are put back.
     ///
-    /// After a crash part of the way, calling this again finishes or undoes what was started: the
-    /// private name is looked at (only that one name, never a pattern).
+    /// After a crash part of the way, [`resume_removal`](Self::resume_removal) says where the file
+    /// is (only that one private name is looked at, never a pattern).
+    ///
+    /// It takes an open undo permit, so nothing can be removed once undo is closed for good (the
+    /// type makes that impossible). `about_to_remove` is called once, after the last check and
+    /// just before the removal (to record it first); nothing is removed if it fails. A file whose
+    /// drive gives it no number (0) cannot be told apart from others, so it is never removed.
     pub fn remove_if_unchanged(
         &self,
+        _permit: &pctwin_journal::UndoPermit<'_>,
         stored: &str,
         expect: FileId,
         verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+        about_to_remove: impl FnOnce() -> io::Result<()>,
     ) -> Result<Removed, GateError> {
         let Some((dir, name)) = self.open_stored_folder(stored)? else {
             return Ok(Removed::Gone);
@@ -658,8 +665,50 @@ impl Destination {
         if is_undo_name(name) || is_temp_name(name) {
             return Err(GateError::Io(invalid("not a copy undo removes")));
         }
+        if expect.index == 0 {
+            return Ok(Removed::Unsupported);
+        }
         let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
-        remove_checked(&dir, folder, name, expect, verify)
+        remove_checked(&dir, folder, name, expect, verify, about_to_remove)
+    }
+
+    /// Where a copy is whose removal was under way when PCTwin stopped: still under its name
+    /// ([`Left::Here`]), gone, or (Linux and macOS) found under its private name and put back
+    /// under its name first, never replacing anything; [`Left::Stranded`] if its name was taken
+    /// meanwhile. Decided from the disk, before anything else.
+    pub fn resume_removal(
+        &self,
+        _permit: &pctwin_journal::UndoPermit<'_>,
+        stored: &str,
+        expect: FileId,
+    ) -> Result<Left, GateError> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(Left::Gone);
+        };
+        if is_undo_name(name) || is_temp_name(name) {
+            return Err(GateError::Io(invalid("not a copy undo removes")));
+        }
+        #[cfg(unix)]
+        {
+            use rustix::fs::{RenameFlags, renameat_with};
+            let private = undo_name(expect);
+            if let Ok(Opened::File(file)) = open_plain(&dir, &private)
+                && identity(&file).is_ok_and(|(id, _)| id == expect)
+            {
+                let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
+                if renameat_with(&dir, &private, &dir, name, RenameFlags::NOREPLACE).is_err() {
+                    return Ok(Left::Stranded {
+                        at: stored_path(folder, &private),
+                    });
+                }
+                sync_folder(&dir)?;
+            }
+        }
+        drop(dir);
+        Ok(match self.stat(stored)? {
+            Some(now) if now.id == expect => Left::Here,
+            _ => Left::Gone,
+        })
     }
 
     /// After a restart: the partly received temporary file at the stored path `temp`, opened again
@@ -749,6 +798,10 @@ impl Destination {
             .last()
             .map(|n| convert_name(n, host).name)
             .ok_or(GateError::Path(PathError::Empty))?;
+        let held = dir.open(temp_name)?.into_std();
+        if !held.metadata()?.is_file() {
+            return Err(not_temp());
+        }
         Ok(Sealed {
             destination: self,
             dir,
@@ -760,6 +813,7 @@ impl Destination {
             // A checked copy found again after a restart: never thrown away by being dropped,
             // whichever way naming it ends (the journal's clean-up decides).
             kept_if_dropped: true,
+            held: Some(held),
         })
     }
 
@@ -1015,10 +1069,44 @@ fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
     Ok((
         FileId {
             volume: meta.dev(),
-            index: meta.ino(),
+            index: unix_index(meta.ino(), meta.created().ok()),
         },
         meta.nlink(),
     ))
+}
+
+/// A file's number on Linux and macOS. The inode number alone is not enough: Linux drives give a
+/// freed number to the next new file at once, so a file removed and another made in its place
+/// would look like the same file. Where the drive keeps a file's birth time (most do: ext4, btrfs,
+/// XFS, APFS), the number is the inode number and the birth time together, worked into one number
+/// with BLAKE3 (a named library, not for secrecy, only so different files never share a number);
+/// a file made in a freed inode has a later birth time, so a different number. Where the drive
+/// keeps no birth time, it is the inode number, as before.
+#[cfg(unix)]
+fn unix_index(ino: u64, born: Option<std::time::SystemTime>) -> u64 {
+    let Some(born) = born else {
+        return ino;
+    };
+    let (secs, nanos) = match born.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => (i128::from(d.as_secs()), d.subsec_nanos()),
+        Err(e) => (
+            -i128::from(e.duration().as_secs()),
+            e.duration().subsec_nanos(),
+        ),
+    };
+    let mut hasher = blake3::Hasher::new_derive_key("PCTwin 2026-10-09 file identity v1");
+    hasher.update(&ino.to_le_bytes());
+    hasher.update(&secs.to_le_bytes());
+    hasher.update(&nanos.to_le_bytes());
+    let mut number = [0u8; 8];
+    number.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
+    u64::from_le_bytes(number)
+}
+
+/// Which file `file` is on its drive, the way the gate tells files apart everywhere (for other
+/// crates that must compare with what the gate recorded, such as the old laptop's answer).
+pub fn file_identity(file: &std::fs::File) -> io::Result<FileId> {
+    Ok(identity(file)?.0)
 }
 
 #[cfg(windows)]
@@ -1040,45 +1128,86 @@ fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
 /// treats a lost name honestly (the file is reported failed).
 fn flush_name(dir: &Dir, name: &str) {
     #[cfg(unix)]
-    {
-        let _ = name;
-        if let Ok(dir) = dir.try_clone() {
-            let _ = dir.into_std_file().sync_all();
-        }
-    }
+    let _ = name;
     #[cfg(windows)]
     {
-        /// Lets Windows open a folder as a handle.
-        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
         let mut options = OpenOptions::new();
         options.write(true);
         if let Ok(file) = dir.open_with(name, &options) {
             let _ = file.sync_all();
         }
-        let mut folder = OpenOptions::new();
-        folder.write(true);
-        cap_std::fs::OpenOptionsExt::custom_flags(&mut folder, FILE_FLAG_BACKUP_SEMANTICS);
-        if let Ok(handle) = dir.open_with(".", &folder) {
-            let _ = handle.sync_all();
-        }
+    }
+    if let Ok(folder) = folder_to_flush(dir) {
+        let _ = folder.sync_all();
     }
 }
 
-/// Flushes a folder's list of names (after a name left it). Best effort, as [`flush_name`].
-fn sync_folder(dir: &Dir) {
+/// A handle on the folder itself that a flush works through. The folder's own handle cannot be
+/// used on Linux: it is opened for paths only, and flushing it fails ("bad file descriptor"), so
+/// the folder is opened again for reading. On Windows a folder opens for writing with backup
+/// semantics.
+fn folder_to_flush(dir: &Dir) -> io::Result<std::fs::File> {
     #[cfg(unix)]
-    if let Ok(dir) = dir.try_clone() {
-        let _ = dir.into_std_file().sync_all();
+    {
+        use rustix::fs::{Mode, OFlags, openat};
+        let fd = openat(
+            dir,
+            ".",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        Ok(std::fs::File::from(fd))
     }
     #[cfg(windows)]
     {
+        /// Lets Windows open a folder as a handle.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
         let mut folder = OpenOptions::new();
         folder.write(true);
-        cap_std::fs::OpenOptionsExt::custom_flags(&mut folder, 0x0200_0000);
-        if let Ok(handle) = dir.open_with(".", &folder) {
-            let _ = handle.sync_all();
-        }
+        cap_std::fs::OpenOptionsExt::custom_flags(&mut folder, FILE_FLAG_BACKUP_SEMANTICS);
+        Ok(dir.open_with(".", &folder)?.into_std())
     }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = dir;
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+/// What a held file's count of names says before it is removed: none left means another try (or
+/// the person) removed it meanwhile, so it is gone; more than one means another name was made for
+/// it, which stays the person's. `None` is the one name, the only case that may go ahead.
+fn by_names(links: u64) -> Option<Removed> {
+    match links {
+        0 => Some(Removed::Gone),
+        1 => None,
+        _ => Some(Removed::Linked),
+    }
+}
+
+/// Flushes a folder's list of names (after a name left it), so a removal is on the disk before
+/// the journal says it is done. A drive that cannot flush a folder at all (or a folder that cannot
+/// be opened for it) is not an error; a flush that fails is.
+fn sync_folder(dir: &Dir) -> io::Result<()> {
+    let Ok(folder) = folder_to_flush(dir) else {
+        return Ok(());
+    };
+    match folder.sync_all() {
+        Ok(()) => Ok(()),
+        Err(e) if cannot_flush_folders(&e) => Ok(()),
+        Err(e) => Err(io::Error::other(format!(
+            "it was removed, but the drive did not confirm the change was written ({e})"
+        ))),
+    }
+}
+
+/// A drive that does not flush folders at all (said as "not supported" or "not that kind of
+/// file"), as opposed to a flush that failed.
+fn cannot_flush_folders(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput
+    ) || (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50)))
 }
 
 /// How removing a copy ended ([`Destination::remove_if_unchanged`]).
@@ -1105,6 +1234,17 @@ pub enum Removed {
     Stranded { at: String },
 }
 
+/// Where a copy is whose removal was under way ([`Destination::resume_removal`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Left {
+    /// Still under its name: it was not removed.
+    Here,
+    /// Not under its name: it was removed, or moved by the person.
+    Gone,
+    /// Found under its private name, but its name was taken meanwhile: kept under `at`.
+    Stranded { at: String },
+}
+
 /// The private name a copy's name is moved to on its way out, on Linux and macOS: one name for
 /// each file, so a crash part of the way is found again by exactly this name.
 pub fn undo_name(file: FileId) -> String {
@@ -1126,6 +1266,7 @@ fn remove_checked(
     name: &str,
     expect: FileId,
     verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+    about_to_remove: impl FnOnce() -> io::Result<()>,
 ) -> Result<Removed, GateError> {
     use cap_std::fs::MetadataExt as _;
     use cap_std::fs::OpenOptionsExt;
@@ -1140,6 +1281,7 @@ fn remove_checked(
     const FILE_SHARE_READ: u32 = 0x0001;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
     const SHARING_VIOLATION: i32 = 32;
+    const ACCESS_DENIED: i32 = 5;
     // Before opening, from the folder's list: a file stored online only is never opened (opening
     // it for its bytes would download it).
     match dir.symlink_metadata(name) {
@@ -1166,10 +1308,22 @@ fn remove_checked(
         match dir.open_with(name, &options) {
             Ok(f) => break f.into_std(),
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Removed::Gone),
-            Err(e) if e.raw_os_error() == Some(SHARING_VIOLATION) => match waits.next() {
-                Some(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
-                None => return Ok(Removed::InUse),
-            },
+            // Held by another program, or (refused) being removed by another try right now.
+            Err(e) if matches!(e.raw_os_error(), Some(SHARING_VIOLATION | ACCESS_DENIED)) => {
+                if dir
+                    .symlink_metadata(name)
+                    .is_err_and(|m| m.kind() == io::ErrorKind::NotFound)
+                {
+                    return Ok(Removed::Gone);
+                }
+                match waits.next() {
+                    Some(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
+                    None if e.raw_os_error() == Some(SHARING_VIOLATION) => {
+                        return Ok(Removed::InUse);
+                    }
+                    None => return Err(GateError::Io(e)),
+                }
+            }
             Err(e) => return Err(GateError::Io(e)),
         }
     };
@@ -1185,16 +1339,22 @@ fn remove_checked(
     if id != expect {
         return Ok(Removed::NotThatFile);
     }
-    if links != 1 {
-        return Ok(Removed::Linked);
+    if let Some(kept) = by_names(links) {
+        return Ok(kept);
     }
     if !verify(&mut held)? {
         return Ok(Removed::Changed);
     }
+    // Sharing that blocks writers does not block making another name for the file: read again on
+    // the same handle, as late as possible.
+    if let Some(kept) = by_names(identity(&held)?.1) {
+        return Ok(kept);
+    }
+    about_to_remove()?;
     match held.delete_by_handle() {
         Ok(()) => {
             // The removal on disk before the journal says it is done.
-            sync_folder(dir);
+            sync_folder(dir)?;
             Ok(Removed::Removed)
         }
         Err((_, e)) => Err(GateError::Io(e)),
@@ -1258,6 +1418,7 @@ fn remove_checked(
     name: &str,
     expect: FileId,
     verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+    about_to_remove: impl FnOnce() -> io::Result<()>,
 ) -> Result<Removed, GateError> {
     use rustix::fs::{AtFlags, RenameFlags, renameat_with, unlinkat};
     use rustix::io::Errno;
@@ -1281,8 +1442,8 @@ fn remove_checked(
     if id != expect {
         return Ok(Removed::NotThatFile);
     }
-    if links != 1 {
-        return Ok(Removed::Linked);
+    if let Some(kept) = by_names(links) {
+        return Ok(kept);
     }
     let looked = Look::of(&held)?;
     if !verify(&mut held)? || Look::of(&held)? != looked {
@@ -1291,6 +1452,7 @@ fn remove_checked(
     let stranded = || Removed::Stranded {
         at: stored_path(folder, &private),
     };
+    about_to_remove()?;
     if !at_private {
         match renameat_with(dir, name, dir, &private, RenameFlags::NOREPLACE) {
             Ok(()) => {}
@@ -1310,10 +1472,15 @@ fn remove_checked(
             _ => false,
         };
         let unchanged = Look::of(&held)? == looked;
-        if !is_held || !unchanged {
+        // Another name made for the file meanwhile: it stays the person's.
+        let one_name = identity(&held)?.1 == 1;
+        if !is_held || !unchanged || !one_name {
             return match renameat_with(dir, &private, dir, name, RenameFlags::NOREPLACE) {
-                Ok(()) if is_held => Ok(Removed::Changed),
-                Ok(()) => Ok(Removed::NotThatFile),
+                Ok(()) if !is_held => Ok(Removed::NotThatFile),
+                Ok(()) if !one_name => Ok(Removed::Linked),
+                Ok(()) => Ok(Removed::Changed),
+                // Removed from the private name by another try at the same time.
+                Err(Errno::NOENT) => Ok(Removed::Gone),
                 Err(_) => Ok(stranded()),
             };
         }
@@ -1329,7 +1496,7 @@ fn remove_checked(
     if Look::of(&held)? != looked {
         return restore(dir, folder, name, &private, &mut held);
     }
-    sync_folder(dir);
+    sync_folder(dir)?;
     Ok(Removed::Removed)
 }
 
@@ -1379,7 +1546,8 @@ fn restore(
                 held.seek(io::SeekFrom::Start(0))?;
                 io::copy(held, &mut new)?;
                 new.sync_all()?;
-                sync_folder(dir);
+                // Best effort: the bytes are back whether or not the folder's list is flushed.
+                let _ = sync_folder(dir);
                 return Ok(back);
             }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -1398,6 +1566,7 @@ fn remove_checked(
     _name: &str,
     _expect: FileId,
     _verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+    _about_to_remove: impl FnOnce() -> io::Result<()>,
 ) -> Result<Removed, GateError> {
     Ok(Removed::Unsupported)
 }
@@ -1815,14 +1984,11 @@ impl<'d> IncomingFile<'d> {
                 received: self.received,
             });
         }
-        let file = self.file.take().ok_or(GateError::Conflict)?;
+        let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
         file.sync_all()?;
         if let Some(time) = self.modified {
-            let file = file.into_std();
             file.set_modified(time)?;
             file.sync_all()?;
-        } else {
-            drop(file);
         }
         let dir = self.dir.try_clone()?;
         let temp = self.temp_name.take().ok_or(GateError::Conflict)?;
@@ -1835,6 +2001,7 @@ impl<'d> IncomingFile<'d> {
             sent_path: std::mem::take(&mut self.sent_path),
             changes: std::mem::take(&mut self.changes),
             kept_if_dropped: false,
+            held: Some(file),
         })
     }
 }
@@ -1859,6 +2026,9 @@ pub struct Sealed<'d> {
     changes: Vec<NameChange>,
     /// Kept, not removed, if dropped without a name.
     kept_if_dropped: bool,
+    /// The file itself, held open until it is kept under its real name: while it is held, the
+    /// drive cannot give its number to another file.
+    held: Option<std::fs::File>,
 }
 
 impl<'d> Sealed<'d> {
@@ -1909,11 +2079,11 @@ impl<'d> Sealed<'d> {
     /// Which file it is on its drive, to record before it gets its real name: after a crash only
     /// this very file is ever taken as it.
     pub fn identity(&self) -> io::Result<FileId> {
-        let temp = self
-            .temp
-            .as_deref()
+        let held = self
+            .held
+            .as_ref()
             .ok_or_else(|| io::Error::other("no file"))?;
-        Ok(identity(&self.dir.open(temp)?.into_std())?.0)
+        Ok(identity(held)?.0)
     }
 
     /// Gives the file a real name that nothing else uses, never replacing another file (without
@@ -1949,6 +2119,7 @@ impl<'d> Sealed<'d> {
         }
         Claimed {
             dir: self.dir.try_clone().ok(),
+            _held: self.held.take(),
             temp,
             finished: Finished {
                 final_path: stored_path(&self.folder, &name),
@@ -1979,6 +2150,7 @@ impl Drop for Sealed<'_> {
     fn drop(&mut self) {
         // Never given its real name: never leave it behind (unless it is a checked copy found
         // again after a restart).
+        drop(self.held.take());
         if self.kept_if_dropped {
             return;
         }
@@ -1993,6 +2165,8 @@ impl Drop for Sealed<'_> {
 /// clean-up).
 pub struct Claimed<'d> {
     dir: Option<Dir>,
+    /// The file, still held open until it is kept (so its number stays its own until then).
+    _held: Option<std::fs::File>,
     /// The temporary name, while the file still has it (drives with hard links).
     temp: Option<String>,
     finished: Finished,
@@ -2008,7 +2182,8 @@ impl Claimed<'_> {
     /// Removes the temporary name; the file stays under its real name. If another program holds
     /// the temporary name it stays behind (the journal's clean-up removes it later); the file
     /// under its real name is complete either way.
-    pub fn keep(self) -> Finished {
+    pub fn keep(mut self) -> Finished {
+        drop(self._held.take());
         if let (Some(dir), Some(temp)) = (&self.dir, &self.temp) {
             let _ = dir.remove_file(temp);
         }
@@ -2054,6 +2229,26 @@ mod tests {
     //! [`Destination`] on the test machines' disks, so it is checked directly. So is what a space
     //! reservation's error means, since the test machines' disks can all reserve.
     use super::*;
+
+    /// A folder's own handle is opened for paths only on Linux, and flushing through it fails, so
+    /// a flush that quietly did nothing there would go unseen. The handle a flush uses must
+    /// really flush, on every system.
+    /// Two tries at once on Unix: the slower one may hold the file after the faster removed its
+    /// last name, and must then say it is gone, never that another name was made for it.
+    #[test]
+    fn a_file_with_no_names_left_is_gone() {
+        assert_eq!(by_names(0), Some(Removed::Gone));
+        assert_eq!(by_names(1), None);
+        assert_eq!(by_names(2), Some(Removed::Linked));
+    }
+
+    #[test]
+    fn a_folder_really_flushes() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        folder_to_flush(&dir).unwrap().sync_all().unwrap();
+        sync_folder(&dir).unwrap();
+    }
 
     #[test]
     fn a_drive_that_cannot_reserve_lets_the_copy_go_ahead_and_a_full_one_does_not() {

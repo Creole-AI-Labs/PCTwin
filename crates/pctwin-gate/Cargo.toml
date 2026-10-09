@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 cap-std = "4.0.3"
+# Undo permits: nothing is removed once undo is closed for good.
+pctwin-journal = { path = "../pctwin-journal" }
 fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 thiserror = "2.0.21"
 unicode-normalization = "0.1.25"
@@ -21,6 +23,8 @@ tempfile = "3"
 winapi-util = "0.1.11"
 
 [target.'cfg(unix)'.dependencies]
+# A file's number from its inode number and birth time together (see unix_index).
+blake3 = "1.8"
 # renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links.
 rustix = { version = "1.1", features = ["fs"] }
 
