@@ -77,7 +77,9 @@ fn format_1_journal(dir: &Path) -> (std::path::PathBuf, String) {
             },
         )
         .unwrap();
-        let _closed = j.close_undo().unwrap();
+        let _closed = j
+            .close_undo(&mut |_, _| Ok(pctwin_journal::Resolved::Removed))
+            .unwrap();
         j.temp_tag(1)
     };
     set_format(&path, 1);

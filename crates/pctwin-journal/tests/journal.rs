@@ -558,6 +558,12 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
                     index: std::num::NonZeroU64::new(2).unwrap(),
                     born: None
                 },
+                dir_id: FileId {
+                    volume: 1,
+                    index: std::num::NonZeroU64::new(3).unwrap(),
+                    born: None
+                },
+                private: ".pctwin-undo-1".into(),
             }
         ),
         Err(JournalError::OutOfOrder { .. })
@@ -575,6 +581,12 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
             index: std::num::NonZeroU64::new(2).unwrap(),
             born: None,
         },
+        dir_id: FileId {
+            volume: 1,
+            index: std::num::NonZeroU64::new(3).unwrap(),
+            born: None,
+        },
+        private: ".pctwin-undo-1".into(),
     };
     j.record_undo(&permit, id, &moving).unwrap();
     assert_eq!(j.undo_of(id).unwrap(), Some(moving));

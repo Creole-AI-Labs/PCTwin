@@ -173,6 +173,29 @@ impl World {
             .unwrap()
     }
 
+    /// The record of a removal about to happen, for a copy at the top of the destination.
+    fn removing(&self, entry: u64) -> Undo {
+        let file = self.file_of(entry);
+        Undo::Removing {
+            file,
+            dir_id: self
+                .table
+                .get("me")
+                .unwrap()
+                .folder_identity("")
+                .unwrap()
+                .unwrap(),
+            private: pctwin_gate::undo_name(file),
+        }
+    }
+
+    /// Closes undo, finishing anything part-way with `resolved`.
+    fn close(&self, resolved: pctwin_journal::Resolved) {
+        self.journal
+            .close_undo(&mut |_, _| Ok(resolved.clone()))
+            .unwrap();
+    }
+
     fn file_of(&self, entry: u64) -> FileId {
         match self.journal.entry(entry).unwrap().unwrap().state {
             pctwin_journal::State::Committed { landed, .. } => landed.file.unwrap(),
@@ -407,9 +430,7 @@ fn a_removal_that_landed_before_a_crash_is_reported_gone_whatever_the_old_laptop
     let a = w.moved(1, "a.txt", b"a", &[]);
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
     std::fs::remove_file(w.root.join("a.txt")).unwrap();
     for answer in [OriginalNow::Missing, OriginalNow::CannotLook] {
@@ -590,7 +611,9 @@ fn once_the_wipe_starts_undo_refuses_everything() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
     w.moved(2, "New/b.txt", b"b", &["New"]);
-    w.journal.close_undo().unwrap();
+    w.close(pctwin_journal::Resolved::Kept {
+        why: "undo was cut short".into(),
+    });
     let r = undo(&w.journal, &w.table, &w.token(w.confirmed())).unwrap();
     assert!(
         r.closed && r.files.is_empty() && r.folders.is_empty(),
@@ -616,7 +639,9 @@ fn undo_closed_part_of_the_way_stops_and_reports_what_it_did() {
     let r = std::thread::scope(|s| {
         let undoing = s.spawn(|| w.undo());
         std::thread::sleep(std::time::Duration::from_millis(100));
-        w.journal.close_undo().unwrap();
+        w.close(pctwin_journal::Resolved::Kept {
+            why: "undo was cut short".into(),
+        });
         undoing.join().unwrap()
     });
     drop(holder);
@@ -633,11 +658,11 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
     // Cut short just after recording that it was about to remove it.
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
-    w.journal.close_undo().unwrap();
+    w.close(pctwin_journal::Resolved::Kept {
+        why: "undo was cut short".into(),
+    });
     let r = undo(&w.journal, &w.table, &w.token(w.confirmed())).unwrap();
     assert!(r.closed && r.files.is_empty(), "{r:?}");
     assert!(w.exists("a.txt"));
@@ -649,9 +674,7 @@ fn undo_cut_short_before_removing_finishes_next_time() {
     let a = w.moved(1, "a.txt", b"a", &[]);
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
     let r = w.undo();
     assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted);
@@ -674,7 +697,7 @@ fn a_removal_that_fails_after_it_started_is_recorded_as_under_way() {
         matches!(outcome_of(&r, "a.txt"), UndoOutcome::NotDone { .. }),
         "{r:?}"
     );
-    assert_eq!(w.journal.undo_of(a).unwrap(), Some(Undo::Removing { file }));
+    assert_eq!(w.journal.undo_of(a).unwrap(), Some(w.removing(a)));
     assert!(w.exists("a.txt"));
     assert_eq!(std::fs::read(&private).unwrap(), b"planted");
     // Once the way is clear, the next undo finishes it.
@@ -690,9 +713,7 @@ fn undo_cut_short_after_removing_says_it_is_gone_and_claims_nothing_more() {
     let a = w.moved(1, "a.txt", b"a", &[]);
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
     std::fs::remove_file(w.root.join("a.txt")).unwrap();
     let r = w.undo();
