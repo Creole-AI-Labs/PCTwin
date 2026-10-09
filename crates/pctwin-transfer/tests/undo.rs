@@ -17,9 +17,9 @@ use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    CHANGED_SINCE, CONNECT_OLD_LAPTOP, Confirmed, MOVED_SINCE, ORIGINAL_CHANGED,
-    ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoReport, block_size_for,
-    fingerprint_reader, undo, undo_items,
+    CHANGED_SINCE, CONNECT_OLD_LAPTOP, Confirmed, KEPT_AT_CLOSE, MOVED_SINCE, ORIGINAL_CHANGED,
+    ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoOptions, UndoReport,
+    block_size_for, close_undo, fingerprint_reader, undo, undo_items,
 };
 
 struct World {
@@ -187,7 +187,7 @@ impl World {
                 .folder_identity("")
                 .unwrap()
                 .unwrap(),
-            private: pctwin_gate::undo_name(file),
+            private: format!(".pctwin-undo-{:032x}", file.index.get()),
         }
     }
 
@@ -196,6 +196,25 @@ impl World {
         self.journal
             .close_undo(&mut |_, _| Ok(resolved.clone()))
             .unwrap();
+    }
+
+    /// Undo's own names left anywhere in the destination.
+    #[cfg(unix)]
+    fn hidden(&self) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut dirs = vec![self.root.clone()];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap() {
+                let e = e.unwrap();
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with(".pctwin-undo-") || name.starts_with(".pctwin-salvage-") {
+                    found.push(name);
+                } else if e.file_type().unwrap().is_dir() {
+                    dirs.push(e.path());
+                }
+            }
+        }
+        found
     }
 
     fn file_of(&self, entry: u64) -> FileId {
@@ -662,9 +681,16 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
         let permit = w.journal.begin_undo().unwrap();
         w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
-    w.close(pctwin_journal::Resolved::Kept {
-        why: "undo was cut short".into(),
-    });
+    // Closing finishes it from the disk: nothing was moved, so the copy stays, said kept.
+    close_undo(&w.journal, &w.table, &UndoOptions::default()).unwrap();
+    assert_eq!(
+        w.journal.undo_of(a).unwrap(),
+        Some(Undo::Done {
+            outcome: UndoOutcome::Kept {
+                why: KEPT_AT_CLOSE.into()
+            }
+        })
+    );
     let r = undo(&w.journal, &w.table, w.token(w.confirmed())).unwrap();
     assert!(r.closed && r.files.is_empty(), "{r:?}");
     assert!(w.exists("a.txt"));
@@ -683,30 +709,94 @@ fn undo_cut_short_before_removing_finishes_next_time() {
     assert!(!w.exists("a.txt"));
 }
 
-/// The removal is recorded before it is attempted: a removal that then fails part of the way (on
-/// Mac and Linux, a file planted at the private name it goes through) leaves the record, so the
-/// next undo looks at the disk first, and nothing is removed meanwhile.
+/// Linux and macOS: PCTwin stopped after moving the copy's name aside. The next undo finds it
+/// under exactly the recorded private name, proves it is the copy, unchanged, and removes it.
 #[cfg(unix)]
 #[test]
-fn a_removal_that_fails_after_it_started_is_recorded_as_under_way() {
+fn undo_cut_short_after_moving_aside_is_finished_from_the_disk() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
-    let file = w.file_of(a);
-    let private = w.root.join(pctwin_gate::undo_name(file));
-    std::fs::write(&private, b"planted").unwrap();
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
     let r = w.undo();
-    assert!(
-        matches!(outcome_of(&r, "a.txt"), UndoOutcome::NotDone { .. }),
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    assert!(!w.exists("a.txt"));
+}
+
+/// Linux and macOS: a copy changed while it was under its private name goes back under its own
+/// name, and is said to be kept.
+#[cfg(unix)]
+#[test]
+fn a_copy_changed_while_moved_aside_goes_back_under_its_name() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    std::fs::write(w.root.join(private), b"edited").unwrap();
+    let r = w.undo();
+    assert_eq!(
+        outcome_of(&r, "a.txt"),
+        UndoOutcome::Kept {
+            why: CHANGED_SINCE.into()
+        },
         "{r:?}"
     );
-    assert_eq!(w.journal.undo_of(a).unwrap(), Some(w.removing(a)));
-    assert!(w.exists("a.txt"));
-    assert_eq!(std::fs::read(&private).unwrap(), b"planted");
-    // Once the way is clear, the next undo finishes it.
-    std::fs::remove_file(&private).unwrap();
-    let r = w.undo();
-    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted);
+    assert_eq!(std::fs::read(w.root.join("a.txt")).unwrap(), b"edited");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+}
+
+/// Linux and macOS: closing undo (the wipe starts) finishes a removal cut short after the move
+/// aside, so nothing is left under a hidden name once undo is gone.
+#[cfg(unix)]
+#[test]
+fn closing_finishes_a_removal_cut_short_after_moving_aside() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    close_undo(&w.journal, &w.table, &UndoOptions::default()).unwrap();
+    assert_eq!(
+        w.journal.undo_of(a).unwrap(),
+        Some(Undo::Done {
+            outcome: UndoOutcome::Deleted
+        })
+    );
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
     assert!(!w.exists("a.txt"));
+}
+
+/// Every undo on Linux and macOS leaves no name of its own behind.
+#[cfg(unix)]
+#[test]
+fn undo_leaves_no_hidden_names() {
+    let w = world();
+    w.moved(1, "a.txt", b"a", &[]);
+    w.moved(2, "New/b.txt", b"b", &["New"]);
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
 }
 
 #[test]

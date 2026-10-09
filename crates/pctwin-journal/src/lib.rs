@@ -405,6 +405,8 @@ pub enum Undo {
     /// beside it. Recorded before each rename tried.
     Putting {
         file: FileId,
+        /// The folder of the removal it follows, so it can be found again if moved.
+        dir_id: FileId,
         private: String,
         to: String,
     },
@@ -412,6 +414,8 @@ pub enum Undo {
     /// visible name beside the copy's), because the file changed while it was removed.
     Salvaging {
         file: FileId,
+        /// The folder of the removal it follows, so it can be found again if moved.
+        dir_id: FileId,
         temp: String,
         to: String,
     },
@@ -444,6 +448,16 @@ impl Undo {
         }
     }
 
+    /// The folder a stage before Done is in.
+    pub fn dir_id(&self) -> Option<FileId> {
+        match self {
+            Undo::Removing { dir_id, .. }
+            | Undo::Putting { dir_id, .. }
+            | Undo::Salvaging { dir_id, .. } => Some(*dir_id),
+            Undo::Done { .. } => None,
+        }
+    }
+
     /// The names this stage will create or move to, each one plain name in the copy's folder.
     fn names(&self) -> Vec<&str> {
         match self {
@@ -471,7 +485,9 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
         (None | Some(Undo::Done { .. }), Undo::Removing { .. } | Undo::Done { .. }) => true,
         (None | Some(Undo::Done { .. }), _) => false,
         (Some(before), next) => {
-            let same_file = next.file().is_none_or(|f| before.file() == Some(f));
+            // About the same file, in the same folder, as the removal it follows.
+            let same_file = next.file().is_none_or(|f| before.file() == Some(f))
+                && next.dir_id().is_none_or(|d| before.dir_id() == Some(d));
             same_file
                 && matches!(
                     (before, next),

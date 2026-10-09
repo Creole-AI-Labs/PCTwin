@@ -4,7 +4,6 @@
 #![cfg(target_os = "linux")]
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -39,21 +38,9 @@ fn helper() {
             ready();
             std::thread::sleep(Duration::from_secs(20));
         }
+        // Run as a copy of this binary: the system keeps the running program's file mapped, with
+        // no handle open to it (the same as a mapping whose handle was closed).
         "map" => {
-            let f = std::fs::File::open(&path).unwrap();
-            #[allow(unsafe_code, reason = "test helper: a mapping with its handle closed")]
-            let p = unsafe {
-                libc::mmap(
-                    std::ptr::null_mut(),
-                    4096,
-                    libc::PROT_READ,
-                    libc::MAP_SHARED,
-                    f.as_raw_fd(),
-                    0,
-                )
-            };
-            assert_ne!(p, libc::MAP_FAILED);
-            drop(f);
             ready();
             std::thread::sleep(Duration::from_secs(20));
         }
@@ -67,13 +54,28 @@ fn helper() {
 }
 
 fn spawn(role: &str, path: &Path, wait_ready: bool) -> Child {
-    let mut child = Command::new(std::env::current_exe().unwrap())
+    spawn_as(&std::env::current_exe().unwrap(), role, path, wait_ready)
+}
+
+fn spawn_as(program: &Path, role: &str, path: &Path, wait_ready: bool) -> Child {
+    let mut command = Command::new(program);
+    command
         .args(["--exact", "helper", "--nocapture", "--test-threads=1"])
         .env("PCTWIN_LEASE_ROLE", role)
         .env("PCTWIN_LEASE_PATH", path)
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stdout(Stdio::piped());
+    // A program just copied can be briefly "busy" while a process started by another test
+    // still shares the handle that wrote it.
+    let mut tries = 0;
+    let mut child = loop {
+        match command.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 100 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            r => break r.unwrap(),
+        }
+    };
     if wait_ready {
         let mut out = BufReader::new(child.stdout.take().unwrap());
         let mut line = String::new();
@@ -139,7 +141,14 @@ fn granted_only_when_nothing_else_has_the_file_open() {
     assert!(!still_held(&f));
     for role in ["read", "write", "map"] {
         let p = fresh(dir.path(), role);
-        let mut other = spawn(role, &p, true);
+        let mut other = if role == "map" {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::copy(std::env::current_exe().unwrap(), &p).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            spawn_as(&p, role, &p, true)
+        } else {
+            spawn(role, &p, true)
+        };
         let f = read_only(&p);
         let got = write_lease(&f);
         other.kill().unwrap();

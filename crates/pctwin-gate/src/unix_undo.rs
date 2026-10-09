@@ -343,7 +343,7 @@ impl Destination {
     /// before recording the batch as done.
     pub fn remove_checked(
         &self,
-        _permit: &pctwin_journal::UndoPermit<'_>,
+        _right: &impl pctwin_journal::UndoRight,
         copy: Checked,
         private: &str,
         cx: &mut Context<'_>,
@@ -478,6 +478,31 @@ fn move_prove_remove(
     let first = opened_meanwhile.then_some(name);
     let to = salvage(dir, handle, name, first, cx)?;
     Ok(Removed::Salvaged { at: at(&to) })
+}
+
+/// Removes the proven copy under `private` (held as `held`, looked at as `before`), then makes sure
+/// nothing written to it meanwhile is lost: `None` if removed cleanly, or the visible name the late
+/// bytes were saved under.
+fn finish_unlink(
+    dir: &Dir,
+    held: &std::fs::File,
+    name: &str,
+    private: &str,
+    before: Look,
+    leased: bool,
+    cx: &mut Context<'_>,
+) -> Result<Option<String>, GateError> {
+    match rustix::fs::unlinkat(dir, private, AtFlags::empty()) {
+        Ok(()) | Err(Errno::NOENT) => {}
+        Err(e) => return Err(e.into()),
+    }
+    let after = Look::of(held)?;
+    let opened_meanwhile = leased && !lease_still_held(held);
+    if after.names == 0 && after.same_contents(&before) && !opened_meanwhile {
+        return Ok(None);
+    }
+    let first = opened_meanwhile.then_some(name);
+    Ok(Some(salvage(dir, held, name, first, cx)?))
 }
 
 /// Where a file that went back ended.
@@ -641,7 +666,6 @@ fn changed_lately(look: &Look) -> bool {
 }
 
 /// Whether anyone else has the held file open.
-#[cfg(not(target_os = "macos"))]
 enum Openers {
     None { leased: bool },
     Some,
@@ -705,6 +729,11 @@ pub enum Resolution {
     StillThere,
     /// Put back under its own name, being changed or not PCTwin's copy.
     Home,
+    /// Put back under its own name: another program has it open (try again later).
+    InUse,
+    /// Put back under its own name: the system cannot say whether another program has it open,
+    /// and the person has not confirmed their other programs are closed.
+    CannotCheck,
     /// Kept under the visible name `at` beside its own (the stored path).
     KeptAt { at: String },
     /// Its folder cannot be found on this drive (unplugged, or moved somewhere undo cannot find
@@ -724,7 +753,7 @@ impl Destination {
     )]
     pub fn resolve_removing(
         &self,
-        _permit: &pctwin_journal::UndoPermit<'_>,
+        _right: &impl pctwin_journal::UndoRight,
         stored: &str,
         file: FileId,
         dir_id: FileId,
@@ -751,28 +780,74 @@ impl Destination {
         };
         let before = Look::of(&held)?;
         let ours = identity(&held).is_ok_and(|(id, names)| id == file && names == 1);
+        let mut kept = Resolution::Home;
         if ours && verify(&mut held)? && Look::of(&held)? == before {
-            match rustix::fs::unlinkat(&dir, private, AtFlags::empty()) {
-                Ok(()) | Err(Errno::NOENT) => {}
-                Err(e) => return Err(e.into()),
+            // A program that had it open before PCTwin stopped may still be writing to it: such
+            // a file goes back under its name for another try, as at any other time.
+            match self.nobody_else_has(&held, &folder, private, cx.others_closed) {
+                Openers::None { leased } => {
+                    let r = finish_unlink(&dir, &held, name, private, before, leased, cx);
+                    #[cfg(target_os = "linux")]
+                    if leased {
+                        let _ = pctwin_lease::release(&held);
+                    }
+                    let r = r?;
+                    sync_folder(&dir)?;
+                    return Ok(match r {
+                        None => Resolution::Removed,
+                        Some(to) => Resolution::KeptAt { at: at(&to) },
+                    });
+                }
+                Openers::Some => kept = Resolution::InUse,
+                Openers::CannotCheck => kept = Resolution::CannotCheck,
             }
-            sync_folder(&dir)?;
-            return Ok(Resolution::Removed);
         }
         drop(held);
         let back = put_back(&dir, private, name, cx)?;
         sync_folder(&dir)?;
         Ok(match back {
-            Back::Home => Resolution::Home,
+            Back::Home => kept,
             Back::Beside(n) => Resolution::KeptAt { at: at(&n) },
         })
+    }
+
+    /// Whether another program has the held file (under `private` in `folder`) open, for
+    /// finishing a removal after PCTwin stopped.
+    fn nobody_else_has(
+        &self,
+        held: &std::fs::File,
+        folder: &str,
+        private: &str,
+        others_closed: bool,
+    ) -> Openers {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = (held, others_closed);
+            let Some(path) = self
+                .root_path
+                .as_ref()
+                .map(|r| r.join(folder).join(private))
+            else {
+                return Openers::CannotCheck;
+            };
+            match macos_check::others_have_it_open(&path) {
+                Ok(false) => Openers::None { leased: false },
+                Ok(true) => Openers::Some,
+                Err(_) => Openers::CannotCheck,
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (folder, private);
+            others_have_it_open(held, others_closed)
+        }
     }
 
     /// Finishes a recorded `Putting { private, to }`: whatever is under `private` goes to `to`
     /// (or the next free visible name), or is confirmed already there.
     pub fn resolve_putting(
         &self,
-        _permit: &pctwin_journal::UndoPermit<'_>,
+        _right: &impl pctwin_journal::UndoRight,
         stored: &str,
         dir_id: FileId,
         private: &str,
@@ -825,7 +900,7 @@ impl Destination {
     /// if PCTwin stopped while copying) are given a visible name, never replacing anything.
     pub fn resolve_salvaging(
         &self,
-        _permit: &pctwin_journal::UndoPermit<'_>,
+        _right: &impl pctwin_journal::UndoRight,
         stored: &str,
         dir_id: FileId,
         temp: &str,

@@ -440,6 +440,51 @@ fn a_part_way_removal_is_finished_from_the_disk() {
     assert!(hidden(&docs).is_empty());
 }
 
+/// Linux: a part-way removal of a file something still has open (a program that had it open
+/// before PCTwin stopped) is not finished: it goes back under its name for another try.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_part_way_removal_of_a_file_still_open_elsewhere_goes_back_for_another_try() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let folder = dir_id(&dest, "Docs");
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let private = pctwin_gate::private_name().unwrap();
+    std::fs::rename(docs.join("a.txt"), docs.join(&private)).unwrap();
+    let other = std::fs::File::open(docs.join(&private)).unwrap();
+    let mut ok = |_: Step<'_>| Ok(());
+    let r = dest
+        .resolve_removing(
+            &permit,
+            "Docs/a.txt",
+            file,
+            folder,
+            &private,
+            bytes_are(b"copy"),
+            &mut resolve_cx(&mut ok),
+        )
+        .unwrap();
+    assert_eq!(r, Resolution::InUse);
+    assert_eq!(names(&docs), ["a.txt"]);
+    drop(other);
+    // Once it is closed, the next try removes it.
+    let r = dest
+        .resolve_removing(
+            &permit,
+            "Docs/a.txt",
+            file,
+            folder,
+            &private,
+            bytes_are(b"copy"),
+            &mut resolve_cx(&mut ok),
+        )
+        .unwrap();
+    assert_eq!(r, Resolution::StillThere);
+}
+
 /// A folder moved after a crash is found again by the exact private name; one that is gone is
 /// never treated as finished.
 #[test]

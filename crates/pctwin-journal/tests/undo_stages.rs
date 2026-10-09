@@ -17,11 +17,11 @@ fn every_stage_round_trips_through_the_record_in_its_exact_shape() {
         ),
         (
             putting(1, "f1.txt"),
-            r#"{"step":"putting","file":{"volume":3,"index":101},"private":".pctwin-undo-00000000000000000000000000000001","to":"f1.txt"}"#,
+            r#"{"step":"putting","file":{"volume":3,"index":101},"dir_id":{"volume":3,"index":2},"private":".pctwin-undo-00000000000000000000000000000001","to":"f1.txt"}"#,
         ),
         (
             salvaging(1, "f1 (kept).txt"),
-            r#"{"step":"salvaging","file":{"volume":3,"index":101},"temp":".pctwin-salvage-00000000000000000000000000000001","to":"f1 (kept).txt"}"#,
+            r#"{"step":"salvaging","file":{"volume":3,"index":101},"dir_id":{"volume":3,"index":2},"temp":".pctwin-salvage-00000000000000000000000000000001","to":"f1 (kept).txt"}"#,
         ),
         (
             Undo::Done {
@@ -200,6 +200,32 @@ fn putting_and_salvaging_follow_only_a_removal_of_the_same_file() {
         j.record_undo(&permit, a, &putting(2, "f1.txt")),
         Err(JournalError::OutOfOrder { .. })
     ));
+    // Nor one that says it is in another folder.
+    let mut elsewhere = dir();
+    elsewhere.index = std::num::NonZeroU64::new(9).unwrap();
+    for stage in [putting(1, "f1.txt"), salvaging(1, "f1 (kept).txt")] {
+        let moved = match stage {
+            Undo::Putting {
+                file, private, to, ..
+            } => Undo::Putting {
+                file,
+                dir_id: elsewhere,
+                private,
+                to,
+            },
+            Undo::Salvaging { file, temp, to, .. } => Undo::Salvaging {
+                file,
+                dir_id: elsewhere,
+                temp,
+                to,
+            },
+            other => other,
+        };
+        assert!(matches!(
+            j.record_undo(&permit, a, &moved),
+            Err(JournalError::OutOfOrder { .. })
+        ));
+    }
     assert!(matches!(
         j.record_undo(&permit, a, &removing(2)),
         Err(JournalError::OutOfOrder { .. })
@@ -332,6 +358,7 @@ fn a_name_that_is_not_a_plain_name_in_the_folder_is_refused() {
                 a,
                 &Undo::Putting {
                     file: file(1),
+                    dir_id: dir(),
                     private: ".pctwin-undo-1".into(),
                     to: bad.into()
                 }
@@ -344,6 +371,7 @@ fn a_name_that_is_not_a_plain_name_in_the_folder_is_refused() {
                 a,
                 &Undo::Salvaging {
                     file: file(1),
+                    dir_id: dir(),
                     temp: bad.into(),
                     to: "f1 (kept).txt".into()
                 }

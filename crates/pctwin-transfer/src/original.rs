@@ -224,6 +224,8 @@ impl Confirmed {
 }
 
 #[cfg(test)]
+// Tests set up files of their own directly (fixtures), as the integration tests do.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
 
@@ -318,7 +320,6 @@ mod tests {
             assert!(status.success());
         }
 
-        #[allow(clippy::disallowed_methods)]
         fn remove(path: &Path) {
             std::fs::remove_file(path).unwrap();
         }

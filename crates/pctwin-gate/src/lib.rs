@@ -641,32 +641,29 @@ impl Destination {
         }
     }
 
-    /// Removes the file at the stored path `stored` only if it is, right now, the very file
-    /// `expect`, a regular file with one name, and `verify` (the caller's check, given the file
-    /// opened for reading and held) says it is unchanged. Nothing is acted on by name after a
-    /// check (Security Design B, decided 8 October 2026):
+    /// Windows: removes the file at the stored path `stored` only if it is, right now, the very
+    /// file `expect`, a regular file with one name, and `verify` (the caller's check, given the
+    /// file opened for reading and held) says it is unchanged. Nothing is acted on by name after
+    /// a check (Security Design B, decided 8 October 2026): the file is opened relative to its
+    /// folder with sharing that lets others only read, so while it is held nobody can write,
+    /// rename, replace or remove it; it is checked on that handle, and that handle's file is
+    /// removed (`fs_at`'s delete by handle). A file another program holds is
+    /// [`Removed::InUse`]; a file stored online only is never opened for its bytes (so never
+    /// downloaded) and is [`Removed::CloudOnly`].
     ///
-    /// - **Windows:** the file is opened relative to its folder with sharing that lets others
-    ///   only read, so while it is held nobody can write, rename, replace or remove it; it is
-    ///   checked on that handle, and that handle's file is removed (`fs_at`'s delete by handle).
-    ///   A file another program holds is [`Removed::InUse`]; a file stored online only is never
-    ///   opened for its bytes (so never downloaded) and is [`Removed::CloudOnly`].
-    /// - **Linux and macOS** (no removal by handle): the file is opened without following links
-    ///   and checked on that handle; its name is then moved, never replacing, to a private name in
-    ///   the same folder ([`undo_name`]), proven there to be the same file, still unchanged, and
-    ///   removed. Anything else found is put back. A write by a program that already had the file
-    ///   open, landing after the last look, is caught and the bytes are put back.
+    /// Linux and macOS have no removal by handle: there undo moves the name aside first, then
+    /// checks ([`check_copy`](Self::check_copy), [`remove_checked`](Self::remove_checked);
+    /// decided 9 October 2026).
     ///
-    /// After a crash part of the way, [`resume_removal`](Self::resume_removal) says where the file
-    /// is (only that one private name is looked at, never a pattern).
-    ///
-    /// It takes an open undo permit, so nothing can be removed once undo is closed for good (the
-    /// type makes that impossible). `about_to_remove` is called once, after the last check and
-    /// just before the removal (to record it first); nothing is removed if it fails. A file whose
-    /// drive gives it no number (0) cannot be told apart from others, so it is never removed.
+    /// It takes an undo right (an open undo permit, or the ticket undo's close lends), so nothing
+    /// can be removed once undo is closed for good (the type makes that impossible).
+    /// `about_to_remove` is called once, after the last check and just before the removal (to
+    /// record it first); nothing is removed if it fails. A file whose drive gives it no number (0)
+    /// cannot be told apart from others, so it is never removed.
+    #[cfg(windows)]
     pub fn remove_if_unchanged(
         &self,
-        _permit: &pctwin_journal::UndoPermit<'_>,
+        _right: &impl pctwin_journal::UndoRight,
         stored: &str,
         expect: FileId,
         verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
@@ -680,48 +677,26 @@ impl Destination {
         if is_undo_name(name) || is_temp_name(name) {
             return Err(GateError::Io(invalid("not a copy undo removes")));
         }
-        // On Linux and macOS only the birth time tells a file from one made later in its freed
-        // number: without it the copy is never removed.
-        if cfg!(unix) && expect.born.is_none() {
-            return Ok(Removed::Unsupported);
-        }
         let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
         remove_checked(&dir, folder, name, expect, verify, about_to_remove)
     }
 
-    /// Where a copy is whose removal was under way when PCTwin stopped: still under its name
-    /// ([`Left::Here`]), gone, or (Linux and macOS) found under its private name and put back
-    /// under its name first, never replacing anything; [`Left::Stranded`] if its name was taken
-    /// meanwhile. Decided from the disk, before anything else.
+    /// Windows: whether a copy whose removal was under way when PCTwin stopped is still under its
+    /// name ([`Left::Here`]) or gone (removal by handle leaves nothing part-way). Decided from the
+    /// disk, before anything else.
+    #[cfg(windows)]
     pub fn resume_removal(
         &self,
-        _permit: &pctwin_journal::UndoPermit<'_>,
+        _right: &impl pctwin_journal::UndoRight,
         stored: &str,
         expect: FileId,
     ) -> Result<Left, GateError> {
-        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+        let Some((_dir, name)) = self.open_stored_folder(stored)? else {
             return Ok(Left::Gone);
         };
         if is_undo_name(name) || is_temp_name(name) {
             return Err(GateError::Io(invalid("not a copy undo removes")));
         }
-        #[cfg(unix)]
-        {
-            use rustix::fs::{RenameFlags, renameat_with};
-            let private = undo_name(expect);
-            if let Ok(Opened::File(file)) = open_plain(&dir, &private)
-                && identity(&file).is_ok_and(|(id, _)| id == expect)
-            {
-                let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
-                if renameat_with(&dir, &private, &dir, name, RenameFlags::NOREPLACE).is_err() {
-                    return Ok(Left::Stranded {
-                        at: stored_path(folder, &private),
-                    });
-                }
-                sync_folder(&dir)?;
-            }
-        }
-        drop(dir);
         Ok(match self.stat(stored)? {
             Some(now) if now.id == expect => Left::Here,
             _ => Left::Gone,
@@ -1210,7 +1185,7 @@ fn cannot_flush_folders(e: &io::Error) -> bool {
     ) || (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50)))
 }
 
-/// How removing a copy ended ([`Destination::remove_if_unchanged`]).
+/// How removing a copy ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Removed {
     /// The very file, unchanged, is removed.
@@ -1229,9 +1204,6 @@ pub enum Removed {
     CloudOnly,
     /// This drive cannot move a name without risking another file, so nothing was done.
     Unsupported,
-    /// Something went wrong part of the way and the file could not be put back under its name:
-    /// it is kept, under the stored path `at`.
-    Stranded { at: String },
     /// A database's working files, a lock file or an app's owner file is beside it, or it is a
     /// kind of file an app keeps open (a mail store, a password safe, a database): left as it is.
     AppKeepsOpen,
@@ -1246,24 +1218,19 @@ pub enum Removed {
 }
 
 /// Where a copy is whose removal was under way ([`Destination::resume_removal`]).
+#[cfg(windows)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Left {
     /// Still under its name: it was not removed.
     Here,
     /// Not under its name: it was removed, or moved by the person.
     Gone,
-    /// Found under its private name, but its name was taken meanwhile: kept under `at`.
-    Stranded { at: String },
 }
 
-/// The private name a copy's name is moved to on its way out, on Linux and macOS: one name for
-/// each file, so a crash part of the way is found again by exactly this name.
-pub fn undo_name(file: FileId) -> String {
-    format!(".pctwin-undo-{:x}-{:x}", file.volume, file.index)
-}
-
+/// Whether `name` is one of undo's own (a private name a copy's name is moved to, or a salvage
+/// being written): never a name undo removes.
 fn is_undo_name(name: &str) -> bool {
-    name.starts_with(".pctwin-undo-")
+    name.starts_with(".pctwin-undo-") || name.starts_with(".pctwin-salvage-")
 }
 
 /// Tries for a file another program holds for a moment, and the wait before each.
@@ -1389,197 +1356,6 @@ fn not_plain(attributes: u32) -> Option<Removed> {
         return Some(Removed::CloudOnly);
     }
     (attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(Removed::NotThatFile)
-}
-
-/// What opening a name found, never following a link.
-#[cfg(unix)]
-enum Opened {
-    File(std::fs::File),
-    Missing,
-    /// A link, a folder, or anything else that is not a regular file.
-    Other,
-}
-
-#[cfg(unix)]
-fn open_plain(dir: &Dir, at: &str) -> io::Result<Opened> {
-    use rustix::fs::{Mode, OFlags, openat};
-    use rustix::io::Errno;
-    // Never following a link, never waiting on a pipe.
-    let flags =
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY;
-    match openat(dir, at, flags, Mode::empty()) {
-        Ok(fd) => {
-            let file = std::fs::File::from(fd);
-            if file.metadata()?.is_file() {
-                Ok(Opened::File(file))
-            } else {
-                Ok(Opened::Other)
-            }
-        }
-        Err(Errno::NOENT) => Ok(Opened::Missing),
-        Err(Errno::LOOP | Errno::MLINK) => Ok(Opened::Other),
-        Err(e) => Err(e.into()),
-    }
-}
-
-#[cfg(unix)]
-fn remove_checked(
-    dir: &Dir,
-    folder: &str,
-    name: &str,
-    expect: FileId,
-    verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
-    about_to_remove: impl FnOnce() -> io::Result<()>,
-) -> Result<Removed, GateError> {
-    use rustix::fs::{AtFlags, RenameFlags, renameat_with, unlinkat};
-    use rustix::io::Errno;
-    let private = undo_name(expect);
-    // A crash part of the way may have left the file under its private name (only that one name
-    // is ever looked at): it is finished from there.
-    let mut at_private = false;
-    let found = match open_plain(dir, &private) {
-        Ok(Opened::File(file)) if identity(&file).is_ok_and(|(id, _)| id == expect) => {
-            at_private = true;
-            Opened::File(file)
-        }
-        _ => open_plain(dir, name)?,
-    };
-    let mut held = match found {
-        Opened::File(file) => file,
-        Opened::Missing => return Ok(Removed::Gone),
-        Opened::Other => return Ok(Removed::NotThatFile),
-    };
-    let (id, links) = identity(&held)?;
-    if id != expect {
-        return Ok(Removed::NotThatFile);
-    }
-    if let Some(kept) = by_names(links) {
-        return Ok(kept);
-    }
-    let looked = Look::of(&held)?;
-    if !verify(&mut held)? || Look::of(&held)? != looked {
-        return Ok(Removed::Changed);
-    }
-    let stranded = || Removed::Stranded {
-        at: stored_path(folder, &private),
-    };
-    about_to_remove()?;
-    if !at_private {
-        match renameat_with(dir, name, dir, &private, RenameFlags::NOREPLACE) {
-            Ok(()) => {}
-            Err(Errno::NOENT) => return Ok(Removed::Gone),
-            Err(Errno::EXIST) => {
-                return Err(GateError::Io(io::Error::other(
-                    "a file is in the way of the private name PCTwin removes copies through",
-                )));
-            }
-            Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => return Ok(Removed::Unsupported),
-            Err(e) => return Err(GateError::Io(e.into())),
-        }
-        // What was moved must be the file held, unchanged: anything put at the name between the
-        // open and the move is put back.
-        let is_held = match open_plain(dir, &private) {
-            Ok(Opened::File(moved)) => identity(&moved).is_ok_and(|(id, _)| id == expect),
-            _ => false,
-        };
-        let unchanged = Look::of(&held)? == looked;
-        // Another name made for the file meanwhile: it stays the person's.
-        let one_name = identity(&held)?.1 == 1;
-        if !is_held || !unchanged || !one_name {
-            return match renameat_with(dir, &private, dir, name, RenameFlags::NOREPLACE) {
-                Ok(()) if !is_held => Ok(Removed::NotThatFile),
-                Ok(()) if !one_name => Ok(Removed::Linked),
-                Ok(()) => Ok(Removed::Changed),
-                // Removed from the private name by another try at the same time.
-                Err(Errno::NOENT) => Ok(Removed::Gone),
-                Err(_) => Ok(stranded()),
-            };
-        }
-    }
-    match unlinkat(dir, private.as_str(), AtFlags::empty()) {
-        Ok(()) => {}
-        // Removed by another try at the same time.
-        Err(Errno::NOENT) => return Ok(Removed::Gone),
-        Err(e) => return Err(GateError::Io(e.into())),
-    }
-    // A program that already had the file open may have written to it after the last look: its
-    // bytes are put back, under the name if it is free, else under the private name.
-    if Look::of(&held)? != looked {
-        return restore(dir, folder, name, &private, &mut held);
-    }
-    sync_folder(dir)?;
-    Ok(Removed::Removed)
-}
-
-/// What tells a held file changed: its size and modified time.
-#[cfg(unix)]
-#[derive(PartialEq, Eq)]
-struct Look {
-    len: u64,
-    modified: Option<std::time::SystemTime>,
-}
-
-#[cfg(unix)]
-impl Look {
-    fn of(file: &std::fs::File) -> io::Result<Self> {
-        let meta = file.metadata()?;
-        Ok(Self {
-            len: meta.len(),
-            modified: meta.modified().ok(),
-        })
-    }
-}
-
-/// Writes a removed file's bytes back, never replacing anything: under `name`, else under
-/// `private`.
-#[cfg(unix)]
-fn restore(
-    dir: &Dir,
-    folder: &str,
-    name: &str,
-    private: &str,
-    held: &mut std::fs::File,
-) -> Result<Removed, GateError> {
-    for (at, back) in [
-        (name, Removed::Changed),
-        (
-            private,
-            Removed::Stranded {
-                at: stored_path(folder, private),
-            },
-        ),
-    ] {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        match dir.open_with(at, &options) {
-            Ok(new) => {
-                let mut new = new.into_std();
-                held.seek(io::SeekFrom::Start(0))?;
-                io::copy(held, &mut new)?;
-                new.sync_all()?;
-                // Best effort: the bytes are back whether or not the folder's list is flushed.
-                let _ = sync_folder(dir);
-                return Ok(back);
-            }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(GateError::Io(e)),
-        }
-    }
-    Err(GateError::Io(io::Error::other(
-        "a file changed as it was removed and its bytes could not be put back",
-    )))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn remove_checked(
-    _dir: &Dir,
-    _folder: &str,
-    _name: &str,
-    _expect: FileId,
-    _verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
-    _about_to_remove: impl FnOnce() -> io::Result<()>,
-) -> Result<Removed, GateError> {
-    Ok(Removed::Unsupported)
 }
 
 /// Longest tag for a temporary name, in bytes.

@@ -29,7 +29,7 @@ getrandom = "0.3"
 rustix = { version = "1.1", features = ["fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# Whether another program has a file open (the one crate allowed unsafe code; decided 9 October 2026).
+# Whether another program has a file open, through a Linux write lease (decided 9 October 2026).
 pctwin-lease = { path = "../pctwin-lease" }
 
 [target.'cfg(target_os = "macos")'.dependencies]

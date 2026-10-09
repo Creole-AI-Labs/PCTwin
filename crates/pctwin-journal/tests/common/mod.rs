@@ -79,6 +79,7 @@ pub fn removing(n: u8) -> Undo {
 pub fn putting(n: u8, to: &str) -> Undo {
     Undo::Putting {
         file: file(n),
+        dir_id: dir(),
         private: format!(".pctwin-undo-{n:032x}"),
         to: to.into(),
     }
@@ -87,6 +88,7 @@ pub fn putting(n: u8, to: &str) -> Undo {
 pub fn salvaging(n: u8, to: &str) -> Undo {
     Undo::Salvaging {
         file: file(n),
+        dir_id: dir(),
         temp: format!(".pctwin-salvage-{n:032x}"),
         to: to.into(),
     }

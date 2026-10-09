@@ -1,14 +1,18 @@
-//! Undo removes only the file it checked, through one handle (Security Design B, decided 8 October
-//! 2026; Task List 2.3). The gate opens the copy relative to its approved folder, checks on that
-//! same handle that it is a regular file, the very file PCTwin wrote, with one name, and unchanged
-//! (the caller's check, read through the handle), and removes that handle's file. Nothing is acted
-//! on by name after a check. These tests never use the person's real Recycle Bin.
+//! Undo removes only the file it checked (Security Design B, decided 8 October 2026; Task List
+//! 2.3). The gate opens the copy relative to its approved folder and checks on that same handle
+//! that it is a regular file, the very file PCTwin wrote, with one name, and unchanged (the
+//! caller's check, read through the handle). On Windows it removes that handle's file; on Linux
+//! and macOS it moves the name aside first and checks again there (decided 9 October 2026; the
+//! steps of that are tested in `unix_undo.rs`). Nothing is acted on by name after a check. These
+//! tests never use the person's real Recycle Bin.
 
 use std::io::Read;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use pctwin_gate::{Destination, FileId, GateError, Left, Removed};
+#[cfg(windows)]
+use pctwin_gate::Left;
+use pctwin_gate::{Destination, FileId, GateError, Removed};
 
 /// One undo journal for the whole test run, open: every removal needs one of its permits.
 fn journal() -> &'static pctwin_journal::Journal {
@@ -40,7 +44,24 @@ impl Rm for Destination {
         verify: impl FnOnce(&mut std::fs::File) -> std::io::Result<bool>,
     ) -> Result<Removed, GateError> {
         let permit = journal().begin_undo().unwrap();
-        self.remove_if_unchanged(&permit, stored, expect, verify, || Ok(()))
+        #[cfg(windows)]
+        return self.remove_if_unchanged(&permit, stored, expect, verify, || Ok(()));
+        #[cfg(unix)]
+        {
+            let copy = match self.check_copy(stored, expect, verify)? {
+                pctwin_gate::Check::Ready(copy) => copy,
+                pctwin_gate::Check::Done(r) => return Ok(r),
+            };
+            let private = pctwin_gate::private_name()?;
+            let mut nothing = |_: pctwin_gate::Step<'_>| Ok(());
+            let mut cx = pctwin_gate::Context {
+                kept_words: " (kept by PCTwin undo)",
+                room_for_words: 64,
+                others_closed: false,
+                journal: &mut nothing,
+            };
+            self.remove_checked(&permit, *copy, &private, &mut cx)
+        }
     }
 }
 
@@ -261,18 +282,24 @@ fn removing_the_same_file_twice_at_once_removes_it_once() {
             .collect();
         tries.into_iter().map(|t| t.join().unwrap()).collect()
     });
-    assert_eq!(
-        results.iter().filter(|r| **r == Removed::Removed).count(),
-        1,
-        "{results:?}"
-    );
+    let removed = results.iter().filter(|r| **r == Removed::Removed).count();
     assert!(
         results
             .iter()
             .all(|r| matches!(r, Removed::Removed | Removed::Gone | Removed::InUse)),
         "{results:?}"
     );
-    assert!(names(&root.path().join("Docs")).is_empty());
+    // Windows waits out a handle held for a moment, so one try always removes it. On Linux each
+    // try sees the others' handles open, so all may correctly say "in use": then it is all there.
+    if cfg!(windows) || removed > 0 {
+        assert_eq!(removed, 1, "{results:?}");
+        assert!(names(&root.path().join("Docs")).is_empty());
+    } else {
+        assert_eq!(
+            std::fs::read(root.path().join("Docs/a.txt")).unwrap(),
+            b"copy"
+        );
+    }
 }
 
 /// The race the redesign is for: while undo checks and removes, the person saves a new version of
@@ -540,66 +567,6 @@ fn a_junction_at_the_name_is_never_followed_or_removed() {
     );
 }
 
-#[cfg(unix)]
-mod unix {
-    use super::*;
-    use pctwin_gate::undo_name;
-
-    /// A crash after the name was moved to its private name and before it was removed: the next
-    /// try finds it by exactly that name and finishes.
-    #[test]
-    fn a_copy_left_under_its_private_name_by_a_crash_is_finished() {
-        let (root, dest) = setup();
-        put(&root, "Docs/a.txt", b"copy");
-        let file = id(&dest, "Docs/a.txt");
-        let docs = root.path().join("Docs");
-        std::fs::rename(docs.join("a.txt"), docs.join(undo_name(file))).unwrap();
-        let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-        assert_eq!(r, Removed::Removed);
-        assert!(names(&docs).is_empty());
-    }
-
-    #[test]
-    fn a_changed_copy_under_its_private_name_is_kept() {
-        let (root, dest) = setup();
-        put(&root, "Docs/a.txt", b"copy");
-        let file = id(&dest, "Docs/a.txt");
-        let docs = root.path().join("Docs");
-        std::fs::rename(docs.join("a.txt"), docs.join(undo_name(file))).unwrap();
-        let r = dest.rm("Docs/a.txt", file, bytes_are(b"other")).unwrap();
-        assert_eq!(r, Removed::Changed);
-        assert_eq!(names(&docs), [undo_name(file)]);
-    }
-
-    /// Another file at the private name is never removed, and the copy is not removed through it.
-    #[test]
-    fn another_file_at_the_private_name_is_never_touched() {
-        let (root, dest) = setup();
-        put(&root, "Docs/a.txt", b"copy");
-        let file = id(&dest, "Docs/a.txt");
-        let docs = root.path().join("Docs");
-        std::fs::write(docs.join(undo_name(file)), b"planted").unwrap();
-        let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy"));
-        assert!(r.is_err(), "{r:?}");
-        assert_eq!(
-            std::fs::read(docs.join(undo_name(file))).unwrap(),
-            b"planted"
-        );
-        assert_eq!(std::fs::read(docs.join("a.txt")).unwrap(), b"copy");
-    }
-
-    /// A private name is never itself a name undo removes.
-    #[test]
-    fn the_private_name_is_refused_as_a_name_to_remove() {
-        let (root, dest) = setup();
-        put(&root, "Docs/a.txt", b"copy");
-        let file = id(&dest, "Docs/a.txt");
-        let stored = format!("Docs/{}", undo_name(file));
-        assert!(dest.rm(&stored, file, |_| Ok(true)).is_err());
-        assert!(root.path().join("Docs/a.txt").exists());
-    }
-}
-
 /// PCTwin's own temporary and private names are never names undo removes through this.
 #[test]
 fn pctwin_s_own_names_are_refused() {
@@ -607,6 +574,8 @@ fn pctwin_s_own_names_are_refused() {
     for name in [
         pctwin_gate::temp_name("ab-1"),
         ".pctwin-undo-1-2".to_string(),
+        format!(".pctwin-undo-{}", "a".repeat(32)),
+        format!(".pctwin-salvage-{}", "b".repeat(32)),
     ] {
         put(&root, &format!("Docs/{name}"), b"x");
         let file = id(&dest, &format!("Docs/{name}"));
@@ -652,7 +621,8 @@ fn a_file_with_no_birth_time_is_never_removed() {
 }
 
 /// The last call before the removal comes once, only when the file is really being removed, and
-/// if it fails nothing is removed.
+/// if it fails nothing is removed. (Linux and macOS record each step instead: `unix_undo.rs`.)
+#[cfg(windows)]
 #[test]
 fn the_removal_is_announced_once_only_when_it_happens() {
     let (root, dest) = setup();
@@ -685,6 +655,7 @@ fn the_removal_is_announced_once_only_when_it_happens() {
     assert_eq!((r, told), (Removed::Removed, 1));
 }
 
+#[cfg(windows)]
 #[test]
 fn a_removal_under_way_is_resumed_from_what_is_on_the_disk() {
     let (root, dest) = setup();
@@ -710,30 +681,4 @@ fn a_removal_under_way_is_resumed_from_what_is_on_the_disk() {
         dest.resume_removal(&permit, "Nowhere/a.txt", file).unwrap(),
         Left::Gone
     );
-}
-
-#[cfg(unix)]
-#[test]
-fn a_copy_left_under_its_private_name_is_put_back_before_anything_is_decided() {
-    let (root, dest) = setup();
-    put(&root, "Docs/a.txt", b"copy");
-    let file = id(&dest, "Docs/a.txt");
-    let docs = root.path().join("Docs");
-    std::fs::rename(docs.join("a.txt"), docs.join(pctwin_gate::undo_name(file))).unwrap();
-    let permit = journal().begin_undo().unwrap();
-    assert_eq!(
-        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
-        Left::Here
-    );
-    assert_eq!(names(&docs), ["a.txt"]);
-    // Its name taken meanwhile: kept under the private name, and said where.
-    std::fs::rename(docs.join("a.txt"), docs.join(pctwin_gate::undo_name(file))).unwrap();
-    put(&root, "Docs/a.txt", b"theirs");
-    assert_eq!(
-        dest.resume_removal(&permit, "Docs/a.txt", file).unwrap(),
-        Left::Stranded {
-            at: format!("Docs/{}", pctwin_gate::undo_name(file))
-        }
-    );
-    assert_eq!(std::fs::read(docs.join("a.txt")).unwrap(), b"theirs");
 }
