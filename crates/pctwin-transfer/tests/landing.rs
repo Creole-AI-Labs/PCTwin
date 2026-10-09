@@ -2,6 +2,8 @@
 //! that role, wherever it is and whatever it is called; in a "from your old laptop" folder when the
 //! new laptop has no such folder; left to the cloud service when both laptops keep that folder in
 //! the same one; and never into another person's account without the administrator helper.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
 use std::path::Path;

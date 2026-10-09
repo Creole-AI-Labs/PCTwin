@@ -5,6 +5,8 @@
 //! and said so; empty folders the move made are removed; every removal is recorded first, so undo
 //! cut short carries on safely; once the wipe starts, undo refuses everything. These tests never
 //! use the person's real Recycle Bin.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 mod common;
 

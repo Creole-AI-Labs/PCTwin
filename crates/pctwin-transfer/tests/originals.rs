@@ -3,6 +3,8 @@
 //! and only for what it sent; the new laptop trusts an answer only if it is exactly one answer to
 //! a question it asked, and removes a copy only if the original is the very same file, with the
 //! same size and the same modified time as when it was read.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -3,6 +3,9 @@
 
 [graph]
 all-features = true
+# Test-only crates (dev-dependencies) are left out of every check below, so a test helper that
+# uses a raw file-system crate does not trip the bans. Shipped code is still checked in full.
+exclude-dev = true
 
 [advisories]
 version = 2
@@ -44,7 +47,27 @@ ignore = true
 multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
-deny = []
+# Raw file-system power is allowed only through the safety gate (Security Design B). `wrappers`
+# lists the only crates that may depend on each one directly. No other pctwin crate is listed, so
+# a new direct use in, say, pctwin-transfer fails `cargo deny check bans`.
+deny = [
+  { crate = "fs_at", wrappers = ["pctwin-gate"] },
+  { crate = "cap-std", wrappers = ["pctwin-gate"] },
+  { crate = "cap-primitives", wrappers = ["cap-std"] },
+  { crate = "trash", wrappers = ["pctwin-gate"] },
+  # The one crate allowed to use unsafe (user-approved, October 2026; see scripts/unsafe-fence.sh).
+  # It comes in on undo4. Only the gate may use it, and only it may use signal-hook.
+  { crate = "pctwin-lease", wrappers = ["pctwin-gate"] },
+  { crate = "signal-hook", wrappers = ["pctwin-lease"] },
+  { crate = "rustix", wrappers = [
+    "pctwin-gate",
+    # until undo5-integ merges (it opens originals without following links; the gate will take that over)
+    "pctwin-transfer",
+    # Third-party crates that use rustix themselves (checked 9 October 2026).
+    "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
+    "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",
+  ] },
+]
 
 [sources]
 unknown-registry = "deny"

@@ -2,6 +2,8 @@
 //! landed block's fingerprint in the journal (in batches), and after a restart picks the partly
 //! received file up again, trusting no block until its bytes in the file match its fingerprint
 //! (as Syncthing re-hashes temporary files), so the old laptop sends only what is really missing.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

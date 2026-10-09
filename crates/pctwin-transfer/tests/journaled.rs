@@ -4,6 +4,8 @@
 //! disk, applied with its real name before it gets it, and committed with what it landed as. A
 //! failure is recorded with its plain reason; an identical file already there is recorded as
 //! existing, never as written; and if the journal cannot be written, nothing more is written.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::path::PathBuf;
 
