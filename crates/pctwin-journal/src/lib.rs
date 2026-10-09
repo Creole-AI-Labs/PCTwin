@@ -525,6 +525,13 @@ impl Journal {
         Ok(journal_id)
     }
 
+    /// This journal's own number: random, chosen when it was first made, and kept as long as its
+    /// file is kept. Something taken from one journal (a check of the originals, say) names this
+    /// number so it is never used against another journal.
+    pub fn instance(&self) -> u64 {
+        self.journal_id
+    }
+
     /// The tag of entry `id`'s temporary file: this journal's number and the entry's, so the
     /// name is known before the file exists and differs from every other journal's.
     pub fn temp_tag(&self, id: u64) -> String {
