@@ -104,17 +104,19 @@ pub fn undo_items(journal: &Journal) -> Result<Vec<ItemId>, JournalError> {
 
 /// Undoes every file the move in `journal` committed, newest first, then the folders it made.
 /// `originals` are the old laptop's answers for [`undo_items`], from [`crate::check_originals`]
-/// just before: only answers for this journal, and only while fresh, count
+/// just before, and are used up by this one pass (taken by value): a second pass asks again.
+/// Only answers for this journal, and only while fresh, count
 /// ([`crate::MAX_CONFIRMED_AGE`]). If it could not be asked, pass [`Confirmed::none`], and
 /// nothing is removed. Once undo is closed (even part of the way), it
 /// stops and says so ([`UndoReport::closed`]), with what it did before.
 pub fn undo(
     journal: &Journal,
     table: &Destinations,
-    originals: &Confirmed,
+    originals: Confirmed, // TODO(engineer): by value so one answer is good for one pass only
 ) -> Result<UndoReport, JournalError> {
     let mut report = UndoReport::default();
-    match undo_all(journal, table, originals, &mut report) {
+    match undo_all(journal, table, &originals, &mut report) {
+        // TODO(engineer): lookup stays on the borrowed token
         Err(JournalError::UndoClosed) => {
             report.closed = true;
             Ok(report)

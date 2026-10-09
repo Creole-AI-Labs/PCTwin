@@ -12,9 +12,9 @@ use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::{Actor, FileId, Journal, PartialKeep, Permission, PlannedWrite};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    Channel, ChannelError, Confirmed, MAX_ORIGINALS_PER_REQUEST, Message, OriginalNow,
-    OriginalsBudget, ReceiverSession, SendJob, SenderSession, Tier, TransferError,
-    answer_originals, check_originals, original_unchanged, serve_originals,
+    Channel, ChannelError, Confirmed, MAX_ORIGINALS_PER_REQUEST, Message, NONCE_LEN, Nonce,
+    OriginalNow, OriginalsBudget, OriginalsFault, ReceiverSession, SendJob, SenderSession, Tier,
+    TransferError, answer_originals, check_originals, original_unchanged, serve_originals,
 };
 use tokio::sync::mpsc;
 
@@ -337,17 +337,30 @@ async fn the_same_item_asked_twice_is_asked_once_and_answered() {
 /// Asks about `items`, and lets a scripted old laptop answer with `reply`.
 async fn ask_hostile(
     items: &[ItemId],
-    reply: Vec<u8>,
+    reply: impl FnOnce(Nonce) -> Vec<u8>,
 ) -> Result<HashMap<ItemId, OriginalNow>, TransferError> {
+    ask_hostile_with(items, reply)
+        .await
+        .map(|(now, _faults)| now)
+}
+
+/// [`ask_hostile`], also returning what the token says went wrong.
+async fn ask_hostile_with(
+    items: &[ItemId],
+    reply: impl FnOnce(Nonce) -> Vec<u8>,
+) -> Result<(HashMap<ItemId, OriginalNow>, Vec<OriginalsFault>), TransferError> {
     let (mut new, mut old) = mem_pair();
     let script = async {
-        let heard = Message::decode(&old.recv().await.unwrap()).unwrap();
-        assert!(matches!(heard, Message::CheckOriginals { .. }));
-        old.send(&reply).await.unwrap();
+        let Message::CheckOriginals { nonce, .. } =
+            Message::decode(&old.recv().await.unwrap()).unwrap()
+        else {
+            panic!("not a request")
+        };
+        old.send(&reply(nonce)).await.unwrap();
     };
     let journal = common::journal();
     let (answers, ()) = tokio::join!(check_originals(&mut new, journal, items), script);
-    answers.map(|c| flatten(&c, journal, items))
+    answers.map(|c| (flatten(&c, journal, items), c.faults().to_vec()))
 }
 
 fn present(n: u64) -> OriginalNow {
@@ -364,10 +377,13 @@ fn present(n: u64) -> OriginalNow {
 
 #[tokio::test]
 async fn an_answer_for_an_item_not_asked_confirms_nothing_and_is_dropped() {
-    let reply = Message::Originals {
-        answers: vec![(id(1), present(1)), (id(9), present(9))],
-    }
-    .encode();
+    let reply = |nonce| {
+        Message::Originals {
+            nonce,
+            answers: vec![(id(1), present(1)), (id(9), present(9))],
+        }
+        .encode()
+    };
     let now = ask_hostile(&[id(1), id(2)], reply).await.unwrap();
     assert_eq!(now[&id(1)], present(1));
     assert_eq!(now[&id(2)], OriginalNow::CannotLook, "no answer given");
@@ -376,14 +392,17 @@ async fn an_answer_for_an_item_not_asked_confirms_nothing_and_is_dropped() {
 
 #[tokio::test]
 async fn a_duplicate_answer_spoils_that_item() {
-    let reply = Message::Originals {
-        answers: vec![
-            (id(1), present(1)),
-            (id(2), present(2)),
-            (id(1), present(1)),
-        ],
-    }
-    .encode();
+    let reply = |nonce| {
+        Message::Originals {
+            nonce,
+            answers: vec![
+                (id(1), present(1)),
+                (id(2), present(2)),
+                (id(1), present(1)),
+            ],
+        }
+        .encode()
+    };
     let now = ask_hostile(&[id(1), id(2)], reply).await.unwrap();
     assert_eq!(now[&id(1)], OriginalNow::CannotLook);
     assert_eq!(now[&id(2)], present(2));
@@ -391,10 +410,13 @@ async fn a_duplicate_answer_spoils_that_item() {
 
 #[tokio::test]
 async fn a_dropped_answer_is_not_confirmed() {
-    let reply = Message::Originals {
-        answers: vec![(id(2), present(2))],
-    }
-    .encode();
+    let reply = |nonce| {
+        Message::Originals {
+            nonce,
+            answers: vec![(id(2), present(2))],
+        }
+        .encode()
+    };
     let now = ask_hostile(&[id(1), id(2), id(3)], reply).await.unwrap();
     assert_eq!(now[&id(1)], OriginalNow::CannotLook);
     assert_eq!(now[&id(2)], present(2));
@@ -404,39 +426,54 @@ async fn a_dropped_answer_is_not_confirmed() {
 
 #[tokio::test]
 async fn an_empty_answer_confirms_nothing() {
-    let reply = Message::Originals { answers: vec![] }.encode();
+    let reply = |nonce| {
+        Message::Originals {
+            nonce,
+            answers: vec![],
+        }
+        .encode()
+    };
     let now = ask_hostile(&[id(1)], reply).await.unwrap();
     assert_eq!(now[&id(1)], OriginalNow::CannotLook);
 }
 
 #[tokio::test]
 async fn an_oversized_damaged_or_wrong_reply_is_an_error() {
-    let big = Message::Originals {
-        answers: (0..=MAX_ORIGINALS_PER_REQUEST)
-            .map(|i| {
-                (
-                    ItemId::from_hex(&format!("{i:032x}")).unwrap(),
-                    OriginalNow::Missing,
-                )
-            })
-            .collect(),
-    }
-    .encode();
+    let big = |nonce| {
+        Message::Originals {
+            nonce,
+            answers: (0..=MAX_ORIGINALS_PER_REQUEST)
+                .map(|i| {
+                    (
+                        ItemId::from_hex(&format!("{i:032x}")).unwrap(),
+                        OriginalNow::Missing,
+                    )
+                })
+                .collect(),
+        }
+        .encode()
+    };
     assert!(ask_hostile(&[id(1)], big).await.is_err());
     assert!(
-        ask_hostile(&[id(1)], vec![13, 0, 0, 0, 0, 0])
+        ask_hostile(&[id(1)], |_| vec![13, 0, 0, 0, 0, 0])
             .await
             .is_err()
     );
-    assert!(ask_hostile(&[id(1)], vec![]).await.is_err());
+    assert!(ask_hostile(&[id(1)], |_| vec![]).await.is_err());
     // A valid message of the wrong kind.
     assert!(
-        ask_hostile(&[id(1)], Message::Ready.encode())
+        ask_hostile(&[id(1)], |_| Message::Ready.encode())
             .await
             .is_err()
     );
     // The reply to a request must not be another request.
-    let echo = Message::CheckOriginals { items: vec![id(1)] }.encode();
+    let echo = |nonce| {
+        Message::CheckOriginals {
+            nonce,
+            items: vec![id(1)],
+        }
+        .encode()
+    };
     assert!(ask_hostile(&[id(1)], echo).await.is_err());
 }
 
@@ -459,6 +496,7 @@ async fn the_old_laptop_refuses_anything_but_a_request() {
     assert!(serve_originals(&mut old, &sent, &mut budget).await.is_err());
     // An oversized request.
     let big = Message::CheckOriginals {
+        nonce: [1; NONCE_LEN],
         items: (0..=MAX_ORIGINALS_PER_REQUEST)
             .map(|i| ItemId::from_hex(&format!("{i:032x}")).unwrap())
             .collect(),
@@ -708,14 +746,21 @@ async fn a_token_from_one_journal_gives_nothing_to_another() {
 #[tokio::test]
 async fn an_answer_for_an_item_not_asked_is_not_in_the_token() {
     let j = common::journal();
-    let reply = Message::Originals {
-        answers: vec![(id(1), present(1)), (id(9), present(9))],
-    }
-    .encode();
+    let reply = |nonce| {
+        Message::Originals {
+            nonce,
+            answers: vec![(id(1), present(1)), (id(9), present(9))],
+        }
+        .encode()
+    };
     let (mut new, mut old) = mem_pair();
     let script = async {
-        old.recv().await.unwrap();
-        old.send(&reply).await.unwrap();
+        let Message::CheckOriginals { nonce, .. } =
+            Message::decode(&old.recv().await.unwrap()).unwrap()
+        else {
+            panic!("not a request")
+        };
+        old.send(&reply(nonce)).await.unwrap();
     };
     let asked = [id(1)];
     let (c, ()) = tokio::join!(check_originals(&mut new, j, &asked), script);
@@ -736,4 +781,142 @@ async fn nothing_asked_means_the_token_confirms_nothing() {
 fn a_token_for_no_answers_confirms_nothing() {
     let j = common::journal();
     assert_eq!(Confirmed::none(j).answer(j, &id(1)), None);
+}
+
+// ---- the nonce: an answer belongs to the one question just asked ----
+
+fn answer_for(nonce: Nonce, items: &[ItemId]) -> Vec<u8> {
+    Message::Originals {
+        nonce,
+        answers: items.iter().map(|i| (*i, present(1))).collect(),
+    }
+    .encode()
+}
+
+#[tokio::test]
+async fn an_answer_that_echoes_the_nonce_is_believed() {
+    let (now, faults) = ask_hostile_with(&[id(1)], |n| answer_for(n, &[id(1)]))
+        .await
+        .unwrap();
+    assert_eq!(now[&id(1)], present(1));
+    assert!(faults.is_empty());
+}
+
+#[tokio::test]
+async fn an_answer_with_the_wrong_nonce_confirms_nothing_and_is_reported() {
+    let (now, faults) = ask_hostile_with(&[id(1), id(2)], |_| {
+        answer_for([0; NONCE_LEN], &[id(1), id(2)])
+    })
+    .await
+    .unwrap();
+    assert_eq!(now[&id(1)], OriginalNow::CannotLook);
+    assert_eq!(now[&id(2)], OriginalNow::CannotLook);
+    assert_eq!(faults, vec![OriginalsFault::WrongNonce { items: 2 }]);
+}
+
+#[tokio::test]
+async fn a_nonce_off_by_one_bit_is_wrong() {
+    for bit in 0..NONCE_LEN * 8 {
+        let (now, faults) = ask_hostile_with(&[id(1)], |mut n| {
+            n[bit / 8] ^= 1 << (bit % 8);
+            answer_for(n, &[id(1)])
+        })
+        .await
+        .unwrap();
+        assert_eq!(now[&id(1)], OriginalNow::CannotLook, "bit {bit}");
+        assert_eq!(faults.len(), 1, "bit {bit}");
+    }
+}
+
+#[tokio::test]
+async fn an_answer_cut_short_before_its_nonce_is_an_error() {
+    // The old shape (no nonce at all) and every cut inside the nonce are damaged messages.
+    for keep in 0..5 + NONCE_LEN {
+        let r = ask_hostile(&[id(1)], |n| answer_for(n, &[id(1)])[..keep].to_vec()).await;
+        assert!(
+            matches!(r, Err(TransferError::Damaged(_))),
+            "keep {keep}: {r:?}"
+        );
+    }
+}
+
+/// Plays the old laptop for two requests: the first answered honestly (and kept), the second
+/// answered with the first's reply replayed, or with a fresh honest one.
+async fn two_requests(replay: bool) -> (HashMap<ItemId, OriginalNow>, Vec<OriginalsFault>) {
+    let items: Vec<ItemId> = (0..MAX_ORIGINALS_PER_REQUEST + 1)
+        .map(|i| ItemId::from_hex(&format!("{i:032x}")).unwrap())
+        .collect();
+    let (mut new, mut old) = mem_pair();
+    let journal = common::journal();
+    let script = async {
+        let mut first_reply: Option<Vec<u8>> = None;
+        let mut nonces = Vec::new();
+        for _ in 0..2 {
+            let Message::CheckOriginals { nonce, items } =
+                Message::decode(&old.recv().await.unwrap()).unwrap()
+            else {
+                panic!("not a request")
+            };
+            nonces.push(nonce);
+            let reply = match (&first_reply, replay) {
+                (Some(first), true) => first.clone(),
+                _ => answer_for(nonce, &items),
+            };
+            first_reply.get_or_insert_with(|| reply.clone());
+            old.send(&reply).await.unwrap();
+        }
+        nonces
+    };
+    let (token, nonces) = tokio::join!(check_originals(&mut new, journal, &items), script);
+    let token = token.unwrap();
+    assert_ne!(nonces[0], nonces[1], "every request has its own nonce");
+    assert_ne!(nonces[0], [0; NONCE_LEN]);
+    assert_ne!(nonces[1], [0; NONCE_LEN]);
+    (flatten(&token, journal, &items), token.faults().to_vec())
+}
+
+#[tokio::test]
+async fn each_request_has_a_fresh_nonce_and_honest_answers_to_both_are_believed() {
+    let (now, faults) = two_requests(false).await;
+    assert_eq!(now.len(), MAX_ORIGINALS_PER_REQUEST + 1);
+    assert!(now.values().all(|n| *n == present(1)));
+    assert!(faults.is_empty());
+}
+
+#[tokio::test]
+async fn a_reply_to_an_earlier_request_replayed_later_confirms_nothing() {
+    let (now, faults) = two_requests(true).await;
+    // The first request was answered honestly; the second got the first's reply again.
+    let believed = now.values().filter(|n| **n == present(1)).count();
+    assert_eq!(believed, MAX_ORIGINALS_PER_REQUEST);
+    let refused = now
+        .values()
+        .filter(|n| **n == OriginalNow::CannotLook)
+        .count();
+    assert_eq!(refused, 1);
+    assert_eq!(faults, vec![OriginalsFault::WrongNonce { items: 1 }]);
+}
+
+#[tokio::test]
+async fn the_old_laptop_echoes_the_nonce_it_was_asked_with() {
+    let sent = HashMap::new();
+    let (mut new, mut old) = mem_pair();
+    let nonce: Nonce = [0x5C; NONCE_LEN];
+    new.send(
+        &Message::CheckOriginals {
+            nonce,
+            items: vec![id(1)],
+        }
+        .encode(),
+    )
+    .await
+    .unwrap();
+    let mut budget = OriginalsBudget::new();
+    serve_originals(&mut old, &sent, &mut budget).await.unwrap();
+    let Message::Originals { nonce: echoed, .. } =
+        Message::decode(&new.recv().await.unwrap()).unwrap()
+    else {
+        panic!("not an answer")
+    };
+    assert_eq!(echoed, nonce);
 }

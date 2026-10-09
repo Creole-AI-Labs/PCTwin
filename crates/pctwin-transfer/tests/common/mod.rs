@@ -94,7 +94,11 @@ pub async fn confirmed(
         let unique = items.iter().filter(|i| seen.insert(**i)).count();
         while covered < unique {
             let bytes = old.recv().await.unwrap();
-            let Message::CheckOriginals { items: asked } = Message::decode(&bytes).unwrap() else {
+            let Message::CheckOriginals {
+                nonce,
+                items: asked,
+            } = Message::decode(&bytes).unwrap()
+            else {
                 panic!("expected a request about the originals")
             };
             covered += asked.len();
@@ -103,9 +107,15 @@ pub async fn confirmed(
                 .filter(|(i, _)| asked.contains(i))
                 .copied()
                 .collect();
-            old.send(&Message::Originals { answers: reply }.encode())
-                .await
-                .unwrap();
+            old.send(
+                &Message::Originals {
+                    nonce,
+                    answers: reply,
+                }
+                .encode(),
+            )
+            .await
+            .unwrap();
         }
     };
     let (token, ()) = tokio::join!(check_originals(&mut new, journal, &items), script);

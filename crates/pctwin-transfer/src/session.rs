@@ -12,13 +12,13 @@ use pctwin_journal::{
 };
 use pctwin_record::ItemId;
 
-use crate::message::{BLOCK_WIRE_OVERHEAD, Message, split_into_pieces};
+use crate::message::{BLOCK_WIRE_OVERHEAD, Message, NONCE_LEN, Nonce, split_into_pieces};
 use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
-    OriginalNow, ResumeTicket, Trailer, TransferError, answer_originals,
+    OriginalNow, OriginalsFault, ResumeTicket, Trailer, TransferError, answer_originals,
 };
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -129,10 +129,14 @@ pub(crate) async fn check_originals_within(
     let mut seen = HashSet::new();
     let unique: Vec<ItemId> = items.iter().copied().filter(|i| seen.insert(*i)).collect();
     let mut result = HashMap::new();
+    let mut faults = Vec::new();
     for chunk in unique.chunks(MAX_ORIGINALS_PER_REQUEST) {
+        // Fresh for every request, so a reply can only ever answer the one question just asked.
+        let nonce = fresh_nonce()?;
         send(
             ch,
             &Message::CheckOriginals {
+                nonce,
                 items: chunk.to_vec(),
             },
         )
@@ -140,12 +144,36 @@ pub(crate) async fn check_originals_within(
         let reply = tokio::time::timeout(wait, recv(ch))
             .await
             .map_err(|_| protocol("the old laptop did not answer about the originals in time"))??;
-        let Message::Originals { answers } = reply else {
+        let Message::Originals {
+            nonce: echoed,
+            answers,
+        } = reply
+        else {
             return Err(protocol("expected the answer about the originals"));
         };
-        result.extend(match_answers(chunk, answers));
+        if echoed == nonce {
+            result.extend(match_answers(chunk, answers));
+        } else {
+            // A stale or replayed reply (or one for another question): none of it is believed.
+            // The request's reply is spent either way, so the next request starts clean.
+            faults.push(OriginalsFault::WrongNonce { items: chunk.len() });
+            result.extend(chunk.iter().map(|i| (*i, OriginalNow::CannotLook)));
+        }
     }
-    Ok(Confirmed::from_answers(journal.instance(), taken, result))
+    Ok(Confirmed::from_answers(
+        journal.instance(),
+        taken,
+        result,
+        faults,
+    ))
+}
+
+/// 128 random bits from the operating system. Without them nothing is asked: an old laptop's
+/// answer cannot be tied to a question, so none is trusted.
+fn fresh_nonce() -> Result<Nonce, TransferError> {
+    let mut nonce = [0u8; NONCE_LEN];
+    getrandom::fill(&mut nonce).map_err(|_| protocol("no random numbers to ask with"))?;
+    Ok(nonce)
 }
 
 /// Pairs answers with the items that were asked, strictly. Anything not exactly one answer to a
@@ -202,6 +230,18 @@ pub struct OriginalsBudget {
     items_left: usize,
     requests_left: usize,
     time: Duration,
+    /// True while a look that ran out of time is still going on a blocked thread. No further look
+    /// is started until it ends, so a hung drive or share holds one thread, never a growing pile.
+    look_running: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Clears the flag when the look ends, however it ends.
+struct LookEnded(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for LookEnded {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 impl OriginalsBudget {
@@ -218,6 +258,7 @@ impl OriginalsBudget {
             items_left: items,
             requests_left: requests,
             time,
+            look_running: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -252,7 +293,7 @@ pub(crate) async fn serve_with<F>(
 where
     F: FnOnce(&HashMap<ItemId, PathBuf>, &[ItemId]) -> Vec<(ItemId, OriginalNow)> + Send + 'static,
 {
-    let Message::CheckOriginals { items } = recv(ch).await? else {
+    let Message::CheckOriginals { nonce, items } = recv(ch).await? else {
         return Err(protocol("expected a request about the originals"));
     };
     let refuse = |items: &[ItemId]| -> Vec<(ItemId, OriginalNow)> {
@@ -261,7 +302,9 @@ where
             .map(|i| (*i, OriginalNow::CannotLook))
             .collect()
     };
-    let within = budget.requests_left > 0 && items.len() <= budget.items_left;
+    // A look that timed out and has not ended yet is still holding its thread: refuse, do not add.
+    let busy = budget.look_running.load(Ordering::SeqCst);
+    let within = budget.requests_left > 0 && items.len() <= budget.items_left && !busy;
     budget.requests_left = budget.requests_left.saturating_sub(1);
     let answers = if within {
         budget.items_left -= items.len();
@@ -271,7 +314,12 @@ where
             .filter_map(|i| sent.get(i).map(|p| (*i, p.clone())))
             .collect();
         let asked = items.clone();
-        let work = tokio::task::spawn_blocking(move || answer(&known, &asked));
+        budget.look_running.store(true, Ordering::SeqCst);
+        let ended = LookEnded(Arc::clone(&budget.look_running));
+        let work = tokio::task::spawn_blocking(move || {
+            let _ended = ended;
+            answer(&known, &asked)
+        });
         match tokio::time::timeout(budget.time, work).await {
             Ok(Ok(answers)) => answers,
             Ok(Err(_)) => return Err(protocol("the look at the originals failed")),
@@ -279,11 +327,15 @@ where
             Err(_) => refuse(&items),
         }
     } else {
-        // Nothing more is looked at this session; what was left is spent so it stays refused.
-        budget.items_left = 0;
+        // Over the session's totals: nothing more is looked at this session, so what was left is
+        // spent and it stays refused. (A look still hung only refuses this request, not later ones.)
+        if !busy {
+            budget.items_left = 0;
+        }
         refuse(&items)
     };
-    send(ch, &Message::Originals { answers }).await
+    // The request's nonce goes back with the answers, refused ones included.
+    send(ch, &Message::Originals { nonce, answers }).await
 }
 
 /// One file the old laptop sends.
@@ -2173,6 +2225,8 @@ mod originals_limits {
         }
     }
 
+    const NONCE: Nonce = [0x42; NONCE_LEN];
+
     type Looker = fn(&HashMap<ItemId, PathBuf>, &[ItemId]) -> Vec<(ItemId, OriginalNow)>;
 
     fn id(n: u8) -> ItemId {
@@ -2207,16 +2261,24 @@ mod originals_limits {
         answer: Looker,
     ) -> Vec<(ItemId, OriginalNow)> {
         let (mut new, mut old) = pair();
-        new.send(&Message::CheckOriginals { items }.encode())
-            .await
-            .unwrap();
+        new.send(
+            &Message::CheckOriginals {
+                nonce: NONCE,
+                items,
+            }
+            .encode(),
+        )
+        .await
+        .unwrap();
         serve_with(&mut old, &sent_all(10), budget, answer)
             .await
             .unwrap();
-        let Message::Originals { answers } = Message::decode(&new.recv().await.unwrap()).unwrap()
+        let Message::Originals { nonce, answers } =
+            Message::decode(&new.recv().await.unwrap()).unwrap()
         else {
             panic!("not an answer")
         };
+        assert_eq!(nonce, NONCE, "the nonce is echoed, refused or not");
         answers
     }
 
@@ -2275,6 +2337,38 @@ mod originals_limits {
                 (id(2), OriginalNow::CannotLook)
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_look_that_hung_holds_one_thread_and_no_new_look_starts_until_it_ends() {
+        use std::sync::atomic::AtomicUsize;
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn slow(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(800));
+            items.iter().map(|i| (*i, present(1))).collect()
+        }
+        fn quick(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
+            CALLS.fetch_add(1, Ordering::SeqCst);
+            items.iter().map(|i| (*i, present(1))).collect()
+        }
+        let mut b = OriginalsBudget::with_limits(100, 100, Duration::from_millis(50));
+        let first = round(&mut b, vec![id(1)], slow).await;
+        assert_eq!(first, vec![(id(1), OriginalNow::CannotLook)]);
+        // The first look is still running: this one is refused without being started.
+        let second = round(&mut b, vec![id(2)], quick).await;
+        assert_eq!(second, vec![(id(2), OriginalNow::CannotLook)]);
+        assert_eq!(
+            CALLS.load(Ordering::SeqCst),
+            1,
+            "no second look was started"
+        );
+        // Once the hung look ends, looking works again.
+        while b.look_running.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let third = round(&mut b, vec![id(3)], quick).await;
+        assert_eq!(third, vec![(id(3), present(1))]);
     }
 
     #[test]

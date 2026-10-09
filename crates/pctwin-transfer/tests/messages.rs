@@ -5,9 +5,13 @@
 use pctwin_journal::FileId;
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    BlockMap, Header, MAX_BLOCK, MAX_ORIGINALS_PER_REQUEST, Message, OriginalNow, PIECE_MAX,
-    PieceBuffer, ResumeTicket, Stamp, TransferError, split_into_pieces,
+    BlockMap, Header, MAX_BLOCK, MAX_ORIGINALS_PER_REQUEST, Message, NONCE_LEN, Nonce, OriginalNow,
+    PIECE_MAX, PieceBuffer, ResumeTicket, Stamp, TransferError, split_into_pieces,
 };
+
+fn nonce(n: u8) -> Nonce {
+    [n; NONCE_LEN]
+}
 
 fn id() -> ItemId {
     ItemId::from_hex("0123456789abcdef0123456789abcdef").unwrap()
@@ -97,13 +101,18 @@ fn all_kinds() -> Vec<Message> {
         Message::Skip { stream: 7 },
         Message::Refused { stream: 7 },
         Message::CheckOriginals {
+            nonce: nonce(1),
             items: vec![
                 id(),
                 ItemId::from_hex("0f0e0d0c0b0a09080706050403020100").unwrap(),
             ],
         },
-        Message::CheckOriginals { items: Vec::new() },
+        Message::CheckOriginals {
+            nonce: nonce(1),
+            items: Vec::new(),
+        },
         Message::Originals {
+            nonce: nonce(1),
             answers: vec![
                 (
                     id(),
@@ -188,11 +197,13 @@ fn items(n: usize) -> Vec<ItemId> {
 #[test]
 fn the_check_about_originals_is_bounded() {
     let at_limit = Message::CheckOriginals {
+        nonce: nonce(1),
         items: items(MAX_ORIGINALS_PER_REQUEST),
     };
     assert!(at_limit.encode().len() <= 60 * 1024);
     assert_eq!(Message::decode(&at_limit.encode()).unwrap(), at_limit);
     let over = Message::CheckOriginals {
+        nonce: nonce(1),
         items: items(MAX_ORIGINALS_PER_REQUEST + 1),
     };
     assert!(Message::decode(&over.encode()).is_err());
@@ -201,6 +212,7 @@ fn the_check_about_originals_is_bounded() {
 #[test]
 fn the_answer_about_originals_is_bounded_and_fits_the_link() {
     let answer = |n: usize| Message::Originals {
+        nonce: nonce(1),
         answers: items(n)
             .into_iter()
             .map(|i| {
@@ -231,20 +243,25 @@ fn the_answer_about_originals_is_bounded_and_fits_the_link() {
 
 #[test]
 fn damaged_originals_messages_are_refused() {
-    let check = Message::CheckOriginals { items: items(2) }.encode();
+    let check = Message::CheckOriginals {
+        nonce: nonce(1),
+        items: items(2),
+    }
+    .encode();
     // Cut short, trailing bytes, and a count that promises more than there is.
     assert!(Message::decode(&check[..check.len() - 1]).is_err());
     let mut extra = check.clone();
     extra.push(0);
     assert!(Message::decode(&extra).is_err());
     let mut lying = check.clone();
-    lying[6] = 3; // count (after kind and the 4-byte stream) says 3 items
+    lying[5 + NONCE_LEN + 1] = 3; // count (after kind, stream and nonce) says 3 items
     assert!(Message::decode(&lying).is_err());
     // These two have no stream of their own: a stream number is refused.
     let mut streamed = check.clone();
     streamed[4] = 1;
     assert!(Message::decode(&streamed).is_err());
     let answers = Message::Originals {
+        nonce: nonce(1),
         answers: vec![(id(), OriginalNow::Missing)],
     }
     .encode();
@@ -259,6 +276,7 @@ fn damaged_originals_messages_are_refused() {
     extra.push(0);
     assert!(Message::decode(&extra).is_err());
     let present = Message::Originals {
+        nonce: nonce(1),
         answers: vec![(
             id(),
             OriginalNow::Present {
@@ -394,5 +412,69 @@ proptest::proptest! {
     #[test]
     fn decoding_anything_never_crashes(bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..300)) {
         let _ = Message::decode(&bytes);
+    }
+}
+
+#[test]
+fn the_nonce_travels_in_both_messages_and_nothing_else_does() {
+    let n: Nonce = *b"0123456789abcdef";
+    let check = Message::CheckOriginals {
+        nonce: n,
+        items: items(1),
+    };
+    let answer = Message::Originals {
+        nonce: n,
+        answers: vec![(id(), OriginalNow::Missing)],
+    };
+    for m in [check, answer] {
+        let wire = m.encode();
+        // kind(1) stream(4) nonce(16)
+        assert_eq!(&wire[5..5 + NONCE_LEN], &n);
+        assert_eq!(Message::decode(&wire).unwrap(), m);
+    }
+}
+
+#[test]
+fn two_messages_that_differ_only_in_the_nonce_are_different() {
+    let one = Message::CheckOriginals {
+        nonce: nonce(1),
+        items: items(2),
+    };
+    let two = Message::CheckOriginals {
+        nonce: nonce(2),
+        items: items(2),
+    };
+    assert_ne!(one, two);
+    assert_ne!(one.encode(), two.encode());
+}
+
+#[test]
+fn a_damaged_or_missing_nonce_is_refused_or_changes_the_message() {
+    for m in [
+        Message::CheckOriginals {
+            nonce: nonce(7),
+            items: items(2),
+        },
+        Message::Originals {
+            nonce: nonce(7),
+            answers: vec![(id(), OriginalNow::Missing)],
+        },
+    ] {
+        let wire = m.encode();
+        // Cut anywhere inside the nonce, or before it: refused, never read as something else.
+        for cut in 0..5 + NONCE_LEN + 2 {
+            assert!(Message::decode(&wire[..cut]).is_err(), "cut at {cut}");
+        }
+        // A message with the nonce taken out (the old shape) is refused.
+        let mut without = wire[..5].to_vec();
+        without.extend_from_slice(&wire[5 + NONCE_LEN..]);
+        assert!(Message::decode(&without).is_err());
+        // Any single damaged nonce byte reads as a different nonce, so it cannot match the request.
+        for at in 5..5 + NONCE_LEN {
+            let mut bad = wire.clone();
+            bad[at] ^= 0x01;
+            let read = Message::decode(&bad).unwrap();
+            assert_ne!(read, m, "byte {at}");
+        }
     }
 }

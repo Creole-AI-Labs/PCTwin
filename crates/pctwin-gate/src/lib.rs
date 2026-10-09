@@ -38,6 +38,8 @@ use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
 mod birth_hold;
+mod original;
+pub use original::open_original;
 
 /// Longest single file or folder name, in bytes (the limit on every supported system).
 pub const MAX_COMPONENT_BYTES: usize = 255;
