@@ -2,6 +2,8 @@
 //! copied first; a file that fails is skipped without retrying at once and tried once more at the
 //! end (never on a drive already found weak); errors in a row mean a dying drive, so reading stops
 //! cleanly and the rest is reported, not strained for; a missing file is not a drive error.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeSet, HashMap};
 use std::io::{self, Read, Seek, SeekFrom};

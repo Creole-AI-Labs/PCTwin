@@ -97,5 +97,27 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Unsafe fence (only pctwin-lease may loosen unsafe_code)
+        shell: bash
+        run: bash scripts/unsafe-fence.sh
+      - name: Fence canary (clippy must reject a file removal in the canary crate)
+        shell: bash
+        run: bash scripts/clippy-canary.sh
+      # The gate, journal and transfer tests all run here, on macOS too (the matrix includes
+      # macos-latest and macos-15-intel): this runs the whole workspace.
       - name: Tests
         run: cargo test --workspace --locked
+      # macOS only: two probes that REPORT facts about the platform. They never fail the job.
+      - name: macOS probe, file leases (F_SETLEASE)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          cc -o "$RUNNER_TEMP/lease_probe" fixtures/macos/lease_probe.c
+          "$RUNNER_TEMP/lease_probe" "$RUNNER_TEMP" || true
+      - name: macOS probe, inode number reuse on APFS (2000 files)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          cc -o "$RUNNER_TEMP/inode_reuse" fixtures/macos/inode_reuse.c
+          "$RUNNER_TEMP/inode_reuse" "$RUNNER_TEMP" || true
+          df -T "$RUNNER_TEMP" 2>/dev/null || mount | head -3

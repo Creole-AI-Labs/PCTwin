@@ -2,6 +2,8 @@
 //! what a crash at one step leaves behind (the journal at that step, the files as they were),
 //! then checks recovery proves before it commits, never replaces or removes anything that is not
 //! its own, and is as safe run twice as once.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::path::Path;
 

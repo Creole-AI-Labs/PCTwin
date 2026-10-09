@@ -1,0 +1,13 @@
+# A tiny crate that breaks the transfer fence on purpose. scripts/clippy-canary.sh copies the real
+# crates/pctwin-transfer/clippy.toml next to it and checks that clippy REJECTS it. If clippy ever
+# accepts it, the fence has stopped working and CI fails.
+[package]
+name = "clippy-canary"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Stand-alone: not part of the PCTwin workspace.
+[workspace]
+
+[dependencies]

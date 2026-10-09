@@ -37,6 +37,10 @@
 //! - [`BlockMap`] records which blocks of a file are done, as runs joined when they touch, and is
 //!   what a resume message carries.
 
+// The type-resolved fence: clippy.toml bans every std/tokio/cap-std/fs_at/rustix way to change a
+// file or folder. Tests make files to test on, so they are exempt. The CI canary proves it fires.
+#![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
+
 mod allowance;
 mod blockmap;
 mod landing;
