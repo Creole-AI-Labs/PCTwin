@@ -24,10 +24,6 @@ zstd = { version = "0.13", default-features = false }
 # Opening an original on the old laptop without following a link or waiting on a pipe.
 rustix = { version = "1.1", features = ["fs"] }
 
-[target.'cfg(windows)'.dependencies]
-# An original's identity on the old laptop (volume number and file index), from its open handle.
-winapi-util = "0.1.11"
-
 [dev-dependencies]
 pctwin-pairing = { path = "../pctwin-pairing" }
 proptest = "1.11.0"

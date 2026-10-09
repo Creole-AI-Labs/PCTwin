@@ -8,6 +8,7 @@ use pctwin_record::{
 use pctwin_transfer::Allowance;
 
 /// The approved plan for these files (each with its size), as the new laptop holds it.
+#[allow(dead_code)]
 pub fn approved(files: &[(ItemId, u64)]) -> Allowance {
     let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
     let mut record = Record::new(laptop);
@@ -49,26 +50,14 @@ pub fn journal() -> &'static pctwin_journal::Journal {
     ))
 }
 
-/// Which file this is on its drive, worked out here independently of the crate under test.
+/// Which file this is on its drive, as the gate tells files apart (the gate's own tests prove
+/// that), worked out here independently of the crate under test.
 #[allow(dead_code)]
-#[cfg(unix)]
 pub fn identity_of(path: &std::path::Path) -> pctwin_journal::FileId {
-    use std::os::unix::fs::MetadataExt;
-    let m = std::fs::metadata(path).unwrap();
+    let id = pctwin_gate::file_identity(&std::fs::File::open(path).unwrap()).unwrap();
     pctwin_journal::FileId {
-        volume: m.dev(),
-        index: m.ino(),
-    }
-}
-
-/// Which file this is on its drive, worked out here independently of the crate under test.
-#[allow(dead_code)]
-#[cfg(windows)]
-pub fn identity_of(path: &std::path::Path) -> pctwin_journal::FileId {
-    let info = winapi_util::file::information(std::fs::File::open(path).unwrap()).unwrap();
-    pctwin_journal::FileId {
-        volume: info.volume_serial_number(),
-        index: info.file_index(),
+        volume: id.volume,
+        index: id.index,
     }
 }
 

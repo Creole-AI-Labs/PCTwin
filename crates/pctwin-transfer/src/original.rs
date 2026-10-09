@@ -35,32 +35,16 @@ pub enum OriginalNow {
     CannotLook,
 }
 
-/// Which file this open handle is, on its drive: the drive's number and the file's number on it.
-// TODO(engineer): switch to pctwin_gate::file_identity (adds birth time on Linux) at merge.
-#[cfg(unix)]
+/// Which file this open handle is, on its drive, told apart exactly the way the gate tells files
+/// apart (on Linux that includes the file's birth time, since a freed file number is handed to
+/// the next new file at once). The move records it and the check compares with it, so both
+/// always use this one function.
 pub(crate) fn file_identity(file: &File) -> io::Result<FileId> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = file.metadata()?;
+    let id = pctwin_gate::file_identity(file)?;
     Ok(FileId {
-        volume: meta.dev(),
-        index: meta.ino(),
+        volume: id.volume,
+        index: id.index,
     })
-}
-
-/// Which file this open handle is, on its drive: the drive's number and the file's number on it.
-#[cfg(windows)]
-pub(crate) fn file_identity(file: &File) -> io::Result<FileId> {
-    let info = winapi_util::file::information(file)?;
-    Ok(FileId {
-        volume: info.volume_serial_number(),
-        index: info.file_index(),
-    })
-}
-
-/// Which file this open handle is: not known on this kind of system.
-#[cfg(not(any(unix, windows)))]
-pub(crate) fn file_identity(_file: &File) -> io::Result<FileId> {
-    Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
 /// Opens a file for reading only, never following a link and never waiting on a pipe.

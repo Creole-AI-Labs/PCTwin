@@ -33,10 +33,18 @@ const CHANGES: &[&str] = &[
     "delete_by_handle",
 ];
 
-/// Each way of changing a file found in `text`, with its line number.
+/// Each way of changing a file found in `text`, with its line number. A file's unit tests (the
+/// module marked `#[cfg(test)]`, at the end by convention) make files to test on and are never
+/// built into PCTwin, so the scan stops there; anything else marked for tests alone is still
+/// scanned.
 fn changes_in(text: &str) -> Vec<(usize, &'static str)> {
     let mut found = Vec::new();
+    let mut previous = "";
     for (n, line) in text.lines().enumerate() {
+        if previous == "#[cfg(test)]" && line.starts_with("mod ") {
+            break;
+        }
+        previous = line.trim_end();
         let code = line.split("//").next().unwrap_or("");
         for change in CHANGES {
             if code.contains(change) {
@@ -82,6 +90,16 @@ fn the_scan_finds_a_change_and_ignores_comments() {
 }
 ";
     assert_eq!(changes_in(sample), [(3, "remove_file"), (4, ".write(true")]);
+    // The unit tests at the end are not scanned; a function only for tests elsewhere still is.
+    let with_tests = "#[cfg(test)]
+fn hook(p: &Path) { let _ = std::fs::remove_file(p); }
+fn f() {}
+#[cfg(test)]
+mod tests {
+    fn t(p: &Path) { std::fs::write(p, b\"x\").unwrap(); }
+}
+";
+    assert_eq!(changes_in(with_tests), [(2, "remove_file")]);
     for change in CHANGES {
         assert_eq!(changes_in(&format!("x{change}y")).len(), 1, "{change}");
     }

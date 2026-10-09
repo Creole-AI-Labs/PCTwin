@@ -20,15 +20,13 @@
 //! folders the move made are removed, deepest first, only if they are empty and are still the
 //! folders it made. Nothing that could not be undone is hidden: every one is reported with why.
 
-use std::collections::HashMap;
-
 use pctwin_gate::{Destination, Destinations, Left, Removed};
 use pctwin_journal::{
     Entry, FileId, Journal, JournalError, Landed, State, Undo, UndoOutcome, UndoPermit,
 };
 use pctwin_record::ItemId;
 
-use crate::{OriginalNow, fingerprint_reader, original_unchanged};
+use crate::{Confirmed, OriginalNow, fingerprint_reader, original_unchanged};
 
 /// What undo did with one thing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,13 +103,15 @@ pub fn undo_items(journal: &Journal) -> Result<Vec<ItemId>, JournalError> {
 }
 
 /// Undoes every file the move in `journal` committed, newest first, then the folders it made.
-/// `originals` are the old laptop's answers for [`undo_items`], asked just before (`None`: it
-/// could not be asked, so nothing is removed). Once undo is closed (even part of the way), it
+/// `originals` are the old laptop's answers for [`undo_items`], from [`crate::check_originals`]
+/// just before: only answers for this journal, and only while fresh, count
+/// ([`crate::MAX_CONFIRMED_AGE`]). If it could not be asked, pass [`Confirmed::none`], and
+/// nothing is removed. Once undo is closed (even part of the way), it
 /// stops and says so ([`UndoReport::closed`]), with what it did before.
 pub fn undo(
     journal: &Journal,
     table: &Destinations,
-    originals: Option<&HashMap<ItemId, OriginalNow>>,
+    originals: &Confirmed,
 ) -> Result<UndoReport, JournalError> {
     let mut report = UndoReport::default();
     match undo_all(journal, table, originals, &mut report) {
@@ -127,7 +127,7 @@ pub fn undo(
 fn undo_all(
     journal: &Journal,
     table: &Destinations,
-    originals: Option<&HashMap<ItemId, OriginalNow>>,
+    originals: &Confirmed,
     report: &mut UndoReport,
 ) -> Result<(), JournalError> {
     let mut in_use = Vec::new();
@@ -267,7 +267,7 @@ fn unchanged(
 fn undo_file(
     journal: &Journal,
     table: &Destinations,
-    originals: Option<&HashMap<ItemId, OriginalNow>>,
+    originals: &Confirmed,
     entry: &Entry,
 ) -> Result<UndoOutcome, JournalError> {
     let State::Committed {
@@ -331,7 +331,7 @@ fn undo_file(
     if entry.write.source_file.is_none() || entry.write.source_modified_ns.is_none() {
         return done(&permit, kept(ORIGINAL_UNKNOWN));
     }
-    match originals.and_then(|o| o.get(&entry.write.item)) {
+    match originals.answer(journal, &entry.write.item) {
         None | Some(OriginalNow::CannotLook) => return not_done(CONNECT_OLD_LAPTOP.into()),
         Some(OriginalNow::Missing) => return not_done(ORIGINAL_NOT_FOUND.into()),
         Some(now) if !original_unchanged(&entry.write, now) => {

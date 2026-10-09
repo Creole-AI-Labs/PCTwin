@@ -6,6 +6,8 @@
 //! cut short carries on safely; once the wipe starts, undo refuses everything. These tests never
 //! use the person's real Recycle Bin.
 
+mod common;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -13,9 +15,9 @@ use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    CHANGED_SINCE, CONNECT_OLD_LAPTOP, MOVED_SINCE, ORIGINAL_CHANGED, ORIGINAL_NOT_FOUND,
-    ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoReport, block_size_for, fingerprint_reader,
-    undo, undo_items,
+    CHANGED_SINCE, CONNECT_OLD_LAPTOP, Confirmed, MOVED_SINCE, ORIGINAL_CHANGED,
+    ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoReport, block_size_for,
+    fingerprint_reader, undo, undo_items,
 };
 
 struct World {
@@ -151,8 +153,13 @@ impl World {
             .collect()
     }
 
+    /// The answers as the old laptop gives them, through the real check.
+    fn token(&self, answers: HashMap<ItemId, OriginalNow>) -> Confirmed {
+        common::confirmed_blocking(&self.journal, answers.into_iter().collect())
+    }
+
     fn undo(&self) -> UndoReport {
-        undo(&self.journal, &self.table, Some(&self.confirmed())).unwrap()
+        undo(&self.journal, &self.table, &self.token(self.confirmed())).unwrap()
     }
 
     fn exists(&self, stored: &str) -> bool {
@@ -243,7 +250,7 @@ fn without_the_old_laptop_nothing_is_removed() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
     w.moved(2, "New/b.txt", b"b", &["New"]);
-    let r = undo(&w.journal, &w.table, None).unwrap();
+    let r = undo(&w.journal, &w.table, &Confirmed::none(&w.journal)).unwrap();
     for p in ["a.txt", "New/b.txt"] {
         assert_eq!(
             outcome_of(&r, p),
@@ -272,7 +279,7 @@ fn an_original_the_old_laptop_could_not_confirm_keeps_its_copy() {
     let mut answers = w.confirmed();
     answers.remove(&item(1));
     answers.insert(item(2), OriginalNow::CannotLook);
-    let r = undo(&w.journal, &w.table, Some(&answers)).unwrap();
+    let r = undo(&w.journal, &w.table, &w.token(answers)).unwrap();
     for p in ["unanswered.txt", "unseen.txt"] {
         assert_eq!(
             outcome_of(&r, p),
@@ -315,7 +322,7 @@ fn a_copy_whose_original_changed_on_the_old_laptop_is_kept() {
         },
     );
     answers.insert(item(3), OriginalNow::Missing);
-    let r = undo(&w.journal, &w.table, Some(&answers)).unwrap();
+    let r = undo(&w.journal, &w.table, &w.token(answers)).unwrap();
     for p in ["edited.txt", "replaced.txt"] {
         assert_eq!(outcome_of(&r, p), kept(ORIGINAL_CHANGED), "{p}");
         assert!(w.exists(p), "{p}");
@@ -338,7 +345,7 @@ fn an_original_not_found_for_a_moment_does_not_keep_the_copy_for_good() {
     w.moved(1, "a.txt", b"a", &[]);
     let mut glitch = w.confirmed();
     glitch.insert(item(1), OriginalNow::Missing);
-    let r = undo(&w.journal, &w.table, Some(&glitch)).unwrap();
+    let r = undo(&w.journal, &w.table, &w.token(glitch)).unwrap();
     assert!(matches!(
         outcome_of(&r, "a.txt"),
         UndoOutcome::NotDone { .. }
@@ -421,7 +428,7 @@ fn a_removal_that_landed_before_a_crash_is_reported_gone_whatever_the_old_laptop
     for answer in [OriginalNow::Missing, OriginalNow::CannotLook] {
         let mut answers = w.confirmed();
         answers.insert(item(1), answer);
-        let r = undo(&w.journal, &w.table, Some(&answers)).unwrap();
+        let r = undo(&w.journal, &w.table, &w.token(answers)).unwrap();
         if let Some(u) = r.files.first() {
             assert_eq!(u.outcome, UndoOutcome::AlreadyGone);
         }
@@ -597,7 +604,7 @@ fn once_the_wipe_starts_undo_refuses_everything() {
     w.moved(1, "a.txt", b"a", &[]);
     w.moved(2, "New/b.txt", b"b", &["New"]);
     w.journal.close_undo().unwrap();
-    let r = undo(&w.journal, &w.table, Some(&w.confirmed())).unwrap();
+    let r = undo(&w.journal, &w.table, &w.token(w.confirmed())).unwrap();
     assert!(
         r.closed && r.files.is_empty() && r.folders.is_empty(),
         "{r:?}"
@@ -644,7 +651,7 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
             .unwrap();
     }
     w.journal.close_undo().unwrap();
-    let r = undo(&w.journal, &w.table, Some(&w.confirmed())).unwrap();
+    let r = undo(&w.journal, &w.table, &w.token(w.confirmed())).unwrap();
     assert!(r.closed && r.files.is_empty(), "{r:?}");
     assert!(w.exists("a.txt"));
 }
