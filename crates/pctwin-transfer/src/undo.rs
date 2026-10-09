@@ -53,9 +53,10 @@ impl UndoReport {
     /// Everything that was not undone, with why.
     pub fn not_undone(&self) -> impl Iterator<Item = &Undone> {
         self.files.iter().chain(&self.folders).filter(|u| {
+            // TODO(engineer): undo pipeline. KeptAt is needs-action too, so it is listed.
             matches!(
                 u.outcome,
-                UndoOutcome::Kept { .. } | UndoOutcome::NotDone { .. }
+                UndoOutcome::Kept { .. } | UndoOutcome::KeptAt { .. } | UndoOutcome::NotDone { .. }
             )
         })
     }
@@ -114,6 +115,12 @@ pub fn undo(
     originals: &Confirmed,
 ) -> Result<UndoReport, JournalError> {
     let mut report = UndoReport::default();
+    // TODO(engineer): undo pipeline. Closing now finishes every part-way undo itself, so after
+    // the close there may be nothing left whose permit would be refused: read the gate first.
+    if journal.undo_gate()? == pctwin_journal::UndoGate::Closed {
+        report.closed = true;
+        return Ok(report);
+    }
     match undo_all(journal, table, originals, &mut report) {
         Err(JournalError::UndoClosed) => {
             report.closed = true;
@@ -341,8 +348,20 @@ fn undo_file(
         gate_file,
         |f| unchanged(f, landed, fingerprint, entry.write.block_size),
         || {
+            // TODO(engineer): undo pipeline. Placeholder until the group commit and the
+            // move-aside pipeline land: the folder's identity is read now (no removal without
+            // it), and the private name is the gate's current one for this file.
+            let folder = final_path.rsplit_once('/').map_or("", |(f, _)| f);
+            let dir_id = dest.folder_identity(folder)?.ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, "its folder is not there")
+            })?;
+            let removing = Undo::Removing {
+                file,
+                dir_id,
+                private: pctwin_gate::undo_name(file),
+            };
             journal
-                .record_undo(&permit, entry.id, &Undo::Removing { file })
+                .record_undo(&permit, entry.id, &removing)
                 .map_err(|e| {
                     let message = e.to_string();
                     failed_record.set(Some(e));

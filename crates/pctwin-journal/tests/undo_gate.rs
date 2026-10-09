@@ -8,8 +8,8 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use pctwin_journal::{
-    Actor, FileId, Journal, JournalError, Landed, Permission, PlannedWrite, Undo, UndoGate,
-    UndoOutcome,
+    Actor, ClosedToken, FileId, Journal, JournalError, Landed, Permission, PlannedWrite, Resolved,
+    Undo, UndoGate, UndoOutcome,
 };
 use pctwin_record::{ItemId, LaptopId};
 
@@ -60,6 +60,24 @@ fn file() -> FileId {
     }
 }
 
+fn removing() -> Undo {
+    Undo::Removing {
+        file: file(),
+        dir_id: FileId {
+            volume: 3,
+            index: std::num::NonZeroU64::new(2).unwrap(),
+            born: None,
+        },
+        private: ".pctwin-undo-0123456789abcdef0123456789abcdef".into(),
+    }
+}
+
+/// Closes undo with nothing part-way (a resolver that is never asked).
+fn close(j: &Journal) -> ClosedToken {
+    j.close_undo(&mut |_, p| panic!("nothing should be part-way: {p:?}"))
+        .unwrap()
+}
+
 fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
@@ -73,18 +91,14 @@ fn a_new_journal_is_open_for_undo() {
     assert_eq!(j.undo_gate().unwrap(), UndoGate::Open);
     let permit = j.begin_undo().unwrap();
     let id = committed(&j, 1);
-    j.record_undo(&permit, id, &Undo::Removing { file: file() })
-        .unwrap();
-    assert_eq!(
-        j.undo_of(id).unwrap(),
-        Some(Undo::Removing { file: file() })
-    );
+    j.record_undo(&permit, id, &removing()).unwrap();
+    assert_eq!(j.undo_of(id).unwrap(), Some(removing()));
 }
 
 #[test]
 fn once_close_returns_the_journal_is_closed_on_disk_even_after_reopening() {
     let (_d, path, j) = journal();
-    let token = j.close_undo().unwrap();
+    let token = close(&j);
     assert!(token.is_for(&j));
     assert_eq!(j.undo_gate().unwrap(), UndoGate::Closed);
     drop(j);
@@ -97,13 +111,13 @@ fn once_close_returns_the_journal_is_closed_on_disk_even_after_reopening() {
 #[test]
 fn closing_twice_is_fine_and_stays_closed_so_the_wipe_can_be_sent_again() {
     let (_d, path, j) = journal();
-    let first = j.close_undo().unwrap();
-    let second = j.close_undo().unwrap();
+    let first = close(&j);
+    let second = close(&j);
     assert!(first.is_for(&j) && second.is_for(&j));
     drop(j);
     // A crash after the close and before the wipe was sent: closing again gives a token again.
     let j = Journal::open(&path).unwrap();
-    let again = j.close_undo().unwrap();
+    let again = close(&j);
     assert!(again.is_for(&j));
     assert_eq!(j.undo_gate().unwrap(), UndoGate::Closed);
 }
@@ -114,17 +128,25 @@ fn after_the_close_undo_refuses_everything_including_finishing_an_interrupted_un
     let id = committed(&j, 1);
     {
         let permit = j.begin_undo().unwrap();
-        // About to delete; then the app stops.
-        j.record_undo(&permit, id, &Undo::Removing { file: file() })
-            .unwrap();
+        // About to move it aside; then the app stops.
+        j.record_undo(&permit, id, &removing()).unwrap();
     }
-    j.close_undo().unwrap();
+    // Closing finishes it first (here: the copy is still under its name, so it is kept).
+    let cut_short = UndoOutcome::Kept {
+        why: "undo was cut short".into(),
+    };
+    j.close_undo(&mut |_, _| {
+        Ok(Resolved::Kept {
+            why: "undo was cut short".into(),
+        })
+    })
+    .unwrap();
     drop(j);
     let j = Journal::open(&path).unwrap();
-    // The interrupted undo is still readable, so the app can say what may have happened...
+    // What happened is still readable, so the app can say so...
     assert_eq!(
         j.undo_of(id).unwrap(),
-        Some(Undo::Removing { file: file() })
+        Some(Undo::Done { outcome: cut_short })
     );
     // ...but nothing more is done: no permit, so no undo write of any kind.
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
@@ -134,7 +156,7 @@ fn after_the_close_undo_refuses_everything_including_finishing_an_interrupted_un
 fn there_is_no_way_back_a_cancelled_wipe_leaves_undo_closed() {
     // No reopening call exists; opening the journal again never reopens it either.
     let (_d, path, j) = journal();
-    j.close_undo().unwrap();
+    close(&j);
     drop(j);
     for _ in 0..3 {
         let j = Journal::open(&path).unwrap();
@@ -150,7 +172,11 @@ fn close_soon(j: &Arc<Journal>) -> Option<bool> {
     let (tx, rx) = mpsc::channel();
     let jj = Arc::clone(j);
     std::thread::spawn(move || {
-        let ok = jj.close_undo().unwrap().is_for(&jj);
+        // Anything part-way is finished by the close.
+        let ok = jj
+            .close_undo(&mut |_, _| Ok(Resolved::Removed))
+            .unwrap()
+            .is_for(&jj);
         let _ = tx.send(ok);
     });
     rx.recv_timeout(LONG).ok()
@@ -188,7 +214,7 @@ fn a_held_permit_makes_closing_wait_until_it_is_dropped() {
         let j = Arc::clone(&j);
         std::thread::spawn(move || {
             closing_tx.send(()).unwrap();
-            let ok = j.close_undo().unwrap().is_for(&j);
+            let ok = close(&j).is_for(&j);
             let _ = closed_tx.send(ok);
         });
     }
@@ -237,7 +263,7 @@ fn once_closing_is_waiting_no_new_permit_is_handed_out() {
     {
         let j = Arc::clone(&j);
         std::thread::spawn(move || {
-            j.close_undo().unwrap();
+            close(&j);
             let _ = closed_tx.send(());
         });
     }
@@ -279,12 +305,10 @@ fn permits_are_shared_so_files_can_be_undone_side_by_side() {
     std::thread::scope(|s| {
         s.spawn(|| {
             let p = j.begin_undo().unwrap();
-            j.record_undo(&p, ia, &Undo::Removing { file: file() })
-                .unwrap();
+            j.record_undo(&p, ia, &removing()).unwrap();
         });
     });
-    j.record_undo(&b, ib, &Undo::Removing { file: file() })
-        .unwrap();
+    j.record_undo(&b, ib, &removing()).unwrap();
     drop((a, b));
     assert_eq!(close_soon(&j), Some(true), "closing never finished");
 }
@@ -294,10 +318,10 @@ fn a_permit_from_another_journal_is_refused() {
     let (_d1, _p1, mine) = journal();
     let (_d2, _p2, other) = journal();
     let id = committed(&mine, 1);
-    mine.close_undo().unwrap();
+    close(&mine);
     let theirs = other.begin_undo().unwrap();
     assert!(matches!(
-        mine.record_undo(&theirs, id, &Undo::Removing { file: file() }),
+        mine.record_undo(&theirs, id, &removing()),
         Err(JournalError::OtherJournal)
     ));
     assert!(matches!(
@@ -307,7 +331,7 @@ fn a_permit_from_another_journal_is_refused() {
     assert_eq!(mine.undo_of(id).unwrap(), None);
     assert_eq!(mine.folder_undo_of("me", "Docs").unwrap(), None);
     // And a close token says which journal it closed.
-    let token = mine.close_undo().unwrap();
+    let token = close(&mine);
     assert!(token.is_for(&mine));
     assert!(!token.is_for(&other));
 }
@@ -346,10 +370,12 @@ fn an_unknown_gate_value_is_reported_as_damaged_and_undo_stays_shut() {
 
 #[test]
 fn removing_and_deleted_round_trip_through_the_record() {
-    let removing = Undo::Removing { file: file() };
-    let text = serde_json::to_string(&removing).unwrap();
-    assert_eq!(text, r#"{"step":"removing","file":{"volume":3,"index":4}}"#);
-    assert_eq!(serde_json::from_str::<Undo>(&text).unwrap(), removing);
+    let text = serde_json::to_string(&removing()).unwrap();
+    assert_eq!(
+        text,
+        r#"{"step":"removing","file":{"volume":3,"index":4},"dir_id":{"volume":3,"index":2},"private":".pctwin-undo-0123456789abcdef0123456789abcdef"}"#
+    );
+    assert_eq!(serde_json::from_str::<Undo>(&text).unwrap(), removing());
     let deleted = Undo::Done {
         outcome: UndoOutcome::Deleted,
     };
