@@ -1,0 +1,28 @@
+[package]
+name = "pctwin-lease"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Asks Linux whether any other program has a file open (a write lease). The one place PCTwin calls the system unsafely; used only by pctwin-gate."
+
+# Not the workspace lints: the workspace forbids unsafe code outright, and this crate's one call
+# (fcntl with whole-number arguments) has no safe binding anywhere (checked 9 October 2026:
+# rustix 1.1.5, nix 0.31.3, crates.io). Everything else matches the workspace.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+signal-hook = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+libc = "0.2"

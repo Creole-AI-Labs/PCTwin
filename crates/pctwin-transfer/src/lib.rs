@@ -81,8 +81,9 @@ pub use session::{
     serve_originals,
 };
 pub use undo::{
-    CHANGED_SINCE, CONNECT_OLD_LAPTOP, IN_USE, MOVED_SINCE, ONLINE_ONLY, ORIGINAL_CHANGED,
-    ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, SECOND_NAME, UndoReport, Undone, undo, undo_items,
+    APP_KEEPS_OPEN, CANNOT_CHECK, CHANGED_SINCE, CONNECT_OLD_LAPTOP, IN_USE, MOVED_SINCE,
+    ONLINE_ONLY, ORIGINAL_CHANGED, ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, SECOND_NAME, UndoReport,
+    Undone, undo, undo_items,
 };
 
 use std::fs::File;

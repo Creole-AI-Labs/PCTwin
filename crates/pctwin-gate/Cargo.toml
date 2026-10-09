@@ -23,8 +23,22 @@ tempfile = "3"
 winapi-util = "0.1.11"
 
 [target.'cfg(unix)'.dependencies]
+# 128 random bits from the system for undo's private names.
+getrandom = "0.3"
 # renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links.
 rustix = { version = "1.1", features = ["fs"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Whether another program has a file open (the one crate allowed unsafe code; decided 9 October 2026).
+pctwin-lease = { path = "../pctwin-lease" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Apple's file coordination, so apps showing a file save and let go before undo removes it, and
+# the list of programs with a file open (decided 9 October 2026). Safe bindings only.
+block2 = "0.6"
+libproc = "0.14"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSError", "NSFileCoordinator", "NSFilePresenter", "NSString", "NSURL"] }
 
 [dev-dependencies]
 proptest = "1.11.0"

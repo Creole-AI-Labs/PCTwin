@@ -78,6 +78,12 @@ pub const ORIGINAL_NOT_FOUND: &str = "your old laptop cannot find the original r
 pub const ORIGINAL_UNKNOWN: &str = "PCTwin did not note which file the original was when it copied it, so it cannot check the original is still on your old laptop; this copy was kept";
 /// The plain reason for a file another program is using.
 pub const IN_USE: &str = "another program is using it, so it was kept; close it and undo again";
+/// Why a copy an app keeps open (a database or mail store, or one with an app's working files
+/// beside it) was kept.
+pub const APP_KEEPS_OPEN: &str = "an app keeps this file open, so it was kept";
+/// Why a copy was not removed where the system cannot say whether another program has it open.
+pub const CANNOT_CHECK: &str =
+    "PCTwin can't tell if another program is using this. Close your other programs, then remove";
 /// The plain reason for a file stored online only.
 pub const ONLINE_ONLY: &str = "it is stored online only, so it was kept";
 /// The plain reason for a file with a second name on the drive.
@@ -363,7 +369,12 @@ fn undo_file(
         Ok(Removed::Stranded { at }) => UndoOutcome::Kept {
             why: format!("it was kept in {at}"),
         },
+        Ok(Removed::AppKeepsOpen) => kept(APP_KEEPS_OPEN),
+        Ok(Removed::KeptBeside { at } | Removed::Salvaged { at }) => UndoOutcome::Kept {
+            why: format!("it was kept in {at}"),
+        },
         Ok(Removed::InUse) => return not_done(IN_USE.into()),
+        Ok(Removed::CannotCheck) => return not_done(CANNOT_CHECK.into()),
         Err(e) => return not_done(e.to_string()),
     };
     done(&permit, outcome)

@@ -38,6 +38,15 @@ use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
 mod birth_hold;
+#[cfg(target_os = "macos")]
+mod macos_check;
+mod siblings;
+#[cfg(unix)]
+mod unix_undo;
+
+pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
+#[cfg(unix)]
+pub use unix_undo::{Check, Checked, Context, Resolution, Step, private_name};
 
 /// Longest single file or folder name, in bytes (the limit on every supported system).
 pub const MAX_COMPONENT_BYTES: usize = 255;
@@ -1221,6 +1230,17 @@ pub enum Removed {
     /// Something went wrong part of the way and the file could not be put back under its name:
     /// it is kept, under the stored path `at`.
     Stranded { at: String },
+    /// A database's working files, a lock file or an app's owner file is beside it, or it is a
+    /// kind of file an app keeps open (a mail store, a password safe, a database): left as it is.
+    AppKeepsOpen,
+    /// The system cannot say whether another program has it open, and the person has not
+    /// confirmed that their other programs are closed: left as it is, for another try.
+    CannotCheck,
+    /// Another file took its name meanwhile: it is kept, under the visible name `at` beside it.
+    KeptBeside { at: String },
+    /// Removed, but bytes written to it meanwhile (or a program opening it at that moment) made
+    /// PCTwin save it again, under `at` beside its name.
+    Salvaged { at: String },
 }
 
 /// Where a copy is whose removal was under way ([`Destination::resume_removal`]).
