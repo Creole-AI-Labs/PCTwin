@@ -31,11 +31,28 @@ use std::path::Path;
 use std::sync::{Condvar, Mutex, PoisonError};
 
 use pctwin_record::{ItemId, LaptopId};
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 
-/// The journal's format. A journal with a higher number came from a newer PCTwin.
-pub const FORMAT: u32 = 1;
+/// The journal's format. A journal with a higher number came from a newer PCTwin and is refused
+/// ([`JournalError::NewerFormat`]), so an older PCTwin never reads records it does not know.
+///
+/// - **2**: undo removes a copy through the handle it was checked on (`Undo::Removing`,
+///   `UndoOutcome::Deleted`), and every PCTwin that reads it honours the undo gate in the `gate`
+///   table. Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
+///   and could allow undo after the wipe, so it must refuse this journal instead.
+/// - **1**: undo set copies aside or sent them to the Recycle Bin (`Undo::Aside`,
+///   `UndoOutcome::Trashed`). Opening a format-1 journal that holds no undo record (of a file or
+///   of a folder) upgrades it to 2 in the same transaction as the open: its entries, folders and
+///   gate mean the same in both, and a missing `gate` table means undo is open (no PCTwin could
+///   send a wipe then). One that holds any undo record is refused
+///   ([`JournalError::OlderFormatWithUndo`]) and left unchanged, because those records cannot be
+///   read in format 2 and guessing what a half-done undo did could remove the wrong thing. (No
+///   format-1 journal was ever installed, so this is a guard, not a migration path.)
+/// - Any other number (0) is reported damaged.
+pub const FORMAT: u32 = 2;
+/// The one older format that can still be opened (when it holds no undo record).
+const FORMAT_1: u32 = 1;
 
 const META: TableDefinition<&str, u32> = TableDefinition::new("meta");
 /// The journal's own number, the next entry number, and how far clean-up has looked.
@@ -73,6 +90,11 @@ pub enum JournalError {
     InUse,
     #[error("the move's record was made by a newer PCTwin (format {found}); update PCTwin")]
     NewerFormat { found: u32 },
+    /// A format-1 journal holding undo records that this PCTwin cannot read safely.
+    #[error(
+        "the move's record was made by an older PCTwin (format {found}) and holds an undo          this PCTwin cannot read; nothing was changed"
+    )]
+    OlderFormatWithUndo { found: u32 },
     #[error("no such entry in the move's record: {0}")]
     NoSuchEntry(u64),
     #[error("a step was taken out of order ({from} to {to})")]
@@ -449,10 +471,23 @@ impl Journal {
             let mut meta = tx.open_table(META).map_err(storage)?;
             let found = meta.get("format").map_err(storage)?.map(|v| v.value());
             match found {
+                Some(FORMAT) => {}
                 Some(found) if found > FORMAT => {
                     return Err(JournalError::NewerFormat { found });
                 }
-                Some(_) => {}
+                Some(FORMAT_1) => {
+                    // Upgraded only if no undo record exists; returning drops the transaction
+                    // uncommitted, so a refused journal is left exactly as it was.
+                    let files = tx.open_table(UNDO).map_err(storage)?;
+                    let folders = tx.open_table(UNDO_FOLDERS).map_err(storage)?;
+                    if !files.is_empty().map_err(storage)?
+                        || !folders.is_empty().map_err(storage)?
+                    {
+                        return Err(JournalError::OlderFormatWithUndo { found: FORMAT_1 });
+                    }
+                    meta.insert("format", FORMAT).map_err(storage)?;
+                }
+                Some(other) => return Err(damaged(format!("unknown format {other}"))),
                 None => {
                     meta.insert("format", FORMAT).map_err(storage)?;
                 }

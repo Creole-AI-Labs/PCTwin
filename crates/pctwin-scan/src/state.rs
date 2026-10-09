@@ -103,6 +103,10 @@ impl ScanState {
 
     /// Saves to `path` so that a crash leaves either the previous save or this one, never a mix:
     /// written to a temporary file beside it, flushed to disk, then moved into place.
+    ///
+    /// The temporary file has a random name and is made only where nothing exists (never through
+    /// a file or link someone left there), readable by this account alone on Mac and Linux. It is
+    /// removed on every failure, since it is deleted when dropped unless moved into place.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let wire = Wire {
             format: STATE_FORMAT,
@@ -119,24 +123,21 @@ impl ScanState {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "scan".into());
-        let temp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-        let result = (|| {
-            let mut file = std::fs::File::create(&temp)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            drop(file);
-            replace(&temp, path)?;
-            // On Mac and Linux the folder's own record of the new name is flushed too.
-            #[cfg(unix)]
-            if let Some(dir) = path.parent() {
-                std::fs::File::open(dir)?.sync_all()?;
-            }
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temp);
-        }
-        result
+        let dir = match path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir,
+            _ => Path::new("."),
+        };
+        let mut temp = tempfile::Builder::new()
+            .prefix(&format!(".{name}."))
+            .suffix(".tmp")
+            .tempfile_in(dir)?;
+        temp.write_all(&bytes)?;
+        temp.as_file().sync_all()?;
+        replace(temp, path)?;
+        // On Mac and Linux the folder's own record of the new name is flushed too.
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        Ok(())
     }
 
     /// Loads a saved scan. The format is checked first, so a newer save is refused safely even if
@@ -167,21 +168,21 @@ impl ScanState {
     }
 }
 
-/// Moves `from` onto `to`. Windows refuses for a moment while another program (antivirus, search
-/// indexing) has the target open, so it tries again briefly.
-fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
-    let mut last = None;
-    for _ in 0..20 {
-        match std::fs::rename(from, to) {
-            Ok(()) => return Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                last = Some(e);
+/// Moves the temporary file onto `to`. Windows refuses for a moment while another program
+/// (antivirus, search indexing) has the target open, so it tries again briefly. On failure the
+/// temporary file is dropped, which removes it.
+fn replace(mut temp: tempfile::NamedTempFile, to: &Path) -> std::io::Result<()> {
+    for _ in 1..20 {
+        match temp.persist(to) {
+            Ok(_) => return Ok(()),
+            Err(e) if e.error.kind() == std::io::ErrorKind::PermissionDenied => {
+                temp = e.file;
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.error),
         }
     }
-    Err(last.unwrap_or_else(|| std::io::Error::other("could not replace the saved scan")))
+    temp.persist(to).map(drop).map_err(|e| e.error)
 }
 
 fn now_ns() -> i64 {
