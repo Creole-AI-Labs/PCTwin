@@ -370,7 +370,15 @@ fn put_file_id(w: &mut Vec<u8>, id: Option<&FileId>) {
         Some(id) => {
             w.push(1);
             w.extend_from_slice(&id.volume.to_be_bytes());
-            w.extend_from_slice(&id.index.to_be_bytes());
+            w.extend_from_slice(&id.index.get().to_be_bytes());
+            match id.born {
+                Some(born) => {
+                    w.push(1);
+                    w.extend_from_slice(&born.secs.to_be_bytes());
+                    w.extend_from_slice(&born.nanos.to_be_bytes());
+                }
+                None => w.push(0),
+            }
         }
         None => w.push(0),
     }
@@ -489,9 +497,23 @@ impl<'a> Reader<'a> {
 
     fn file_id(&mut self) -> Result<Option<FileId>, TransferError> {
         if self.flag()? {
+            let volume = self.u64()?;
+            let index =
+                std::num::NonZeroU64::new(self.u64()?).ok_or_else(|| damaged("file number 0"))?;
+            let born = if self.flag()? {
+                let secs = self.i64()?;
+                let nanos = self.u32()?;
+                if nanos >= 1_000_000_000 {
+                    return Err(damaged("bad birth time"));
+                }
+                Some(pctwin_journal::Born { secs, nanos })
+            } else {
+                None
+            };
             Ok(Some(FileId {
-                volume: self.u64()?,
-                index: self.u64()?,
+                volume,
+                index,
+                born,
             }))
         } else {
             Ok(None)

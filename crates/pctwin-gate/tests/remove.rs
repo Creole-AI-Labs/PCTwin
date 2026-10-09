@@ -51,7 +51,11 @@ fn setup() -> (tempfile::TempDir, Destination) {
     (root, dest)
 }
 
+/// The copy's identity as PCTwin records it. PCTwin keeps each file it makes open until 10 ms
+/// after it was made, so nothing made later shares its number and birth time; the wait here
+/// stands in for that.
 fn id(dest: &Destination, stored: &str) -> FileId {
+    std::thread::sleep(std::time::Duration::from_millis(11));
     dest.stat(stored).unwrap().unwrap().id
 }
 
@@ -633,13 +637,15 @@ fn a_second_name_made_while_the_file_is_checked_keeps_it() {
     assert_eq!(names(&root.path().join("Docs")), ["a.txt", "theirs.txt"]);
 }
 
-/// A drive that gives files no number cannot tell one from another: never removed.
+/// On Linux and macOS a file recorded without a birth time cannot be told from one made later in
+/// its freed number: never removed. (A file number of 0 cannot even be recorded.)
+#[cfg(unix)]
 #[test]
-fn a_file_with_no_number_is_never_removed() {
+fn a_file_with_no_birth_time_is_never_removed() {
     let (root, dest) = setup();
     put(&root, "Docs/a.txt", b"copy");
     let mut file = id(&dest, "Docs/a.txt");
-    file.index = 0;
+    file.born = None;
     let r = dest.rm("Docs/a.txt", file, |_| Ok(true)).unwrap();
     assert_eq!(r, Removed::Unsupported);
     assert!(root.path().join("Docs/a.txt").exists());

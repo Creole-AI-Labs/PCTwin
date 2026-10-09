@@ -201,7 +201,7 @@ fn undo_folders(
             (Ok(dest), Some(id)) => match dest.folder_identity(&made.folder) {
                 Err(e) => UndoOutcome::NotDone { why: e.to_string() },
                 Ok(None) => UndoOutcome::AlreadyGone,
-                Ok(Some(now)) if !same(id, now) => UndoOutcome::Kept {
+                Ok(Some(now)) if id != now => UndoOutcome::Kept {
                     why: NOT_ITS_FOLDER.into(),
                 },
                 Ok(Some(_)) => match dest.remove_empty_folder(&made.folder) {
@@ -225,10 +225,6 @@ fn undo_folders(
     Ok(())
 }
 
-fn same(a: FileId, b: pctwin_gate::FileId) -> bool {
-    a.volume == b.volume && a.index == b.index
-}
-
 /// The approved place `label`, if it is still the folder it was (`place`).
 fn place<'t>(
     table: &'t Destinations,
@@ -241,7 +237,7 @@ fn place<'t>(
             .folder_identity("")
             .map_err(|e| e.to_string())?
             .ok_or_else(|| NOT_REACHABLE.to_string())?;
-        if !same(place, now) {
+        if place != now {
             return Err(NOT_SAME_PLACE.into());
         }
     }
@@ -305,10 +301,7 @@ fn undo_file(
     let Some(file) = landed.file else {
         return done(&permit, kept(CANNOT_TELL));
     };
-    let gate_file = pctwin_gate::FileId {
-        volume: file.volume,
-        index: file.index,
-    };
+    let gate_file = file;
     // A removal was under way when PCTwin stopped: what is on the disk decides first, so a copy
     // that is already gone is never reported as kept.
     if matches!(journal.undo_of(entry.id)?, Some(Undo::Removing { .. })) {

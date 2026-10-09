@@ -23,8 +23,6 @@ tempfile = "3"
 winapi-util = "0.1.11"
 
 [target.'cfg(unix)'.dependencies]
-# A file's number from its inode number and birth time together (see unix_index).
-blake3 = "1.8"
 # renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links.
 rustix = { version = "1.1", features = ["fs"] }
 

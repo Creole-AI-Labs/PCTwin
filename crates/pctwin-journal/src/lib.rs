@@ -145,12 +145,52 @@ pub struct Actor {
     pub permission: Permission,
 }
 
-/// Which file or folder this is on its drive (the drive's number and the file's number on it):
-/// two names with the same identity are the same file.
+/// Which file or folder this is on its drive: the drive's number, the file's number on it (never
+/// 0, which drives use for "no number"), and, where the drive keeps it, when the file was made.
+/// Two names with the same identity are the same file. The birth time matters on Linux and macOS:
+/// a drive there gives a freed number to the next new file at once, and only the birth time tells
+/// the two apart. Kept as the raw fields, never folded together, so nothing can collide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FileId {
     pub volume: u64,
-    pub index: u64,
+    pub index: std::num::NonZeroU64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub born: Option<Born>,
+}
+
+/// When a file was made, as its drive keeps it: seconds since 1970 (negative before) and the
+/// nanoseconds within that second.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Born {
+    pub secs: i64,
+    pub nanos: u32,
+}
+
+impl Born {
+    /// A birth time from the system's clock value.
+    pub fn of(t: std::time::SystemTime) -> Self {
+        match t.duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => Self {
+                secs: i64::try_from(d.as_secs()).unwrap_or(i64::MAX),
+                nanos: d.subsec_nanos(),
+            },
+            Err(e) => {
+                let d = e.duration();
+                let secs = i64::try_from(d.as_secs()).unwrap_or(i64::MAX);
+                if d.subsec_nanos() == 0 {
+                    Self {
+                        secs: -secs,
+                        nanos: 0,
+                    }
+                } else {
+                    Self {
+                        secs: -secs - 1,
+                        nanos: 1_000_000_000 - d.subsec_nanos(),
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// What is about to be written.

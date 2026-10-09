@@ -34,7 +34,8 @@ fn planned(n: u8) -> PlannedWrite {
         partial_keep: Default::default(),
         place: Some(FileId {
             volume: 7,
-            index: 9,
+            index: std::num::NonZeroU64::new(9).unwrap(),
+            born: None,
         }),
     }
 }
@@ -45,7 +46,8 @@ fn landed() -> Landed {
         modified_ns: Some(1_790_000_000_000_000_000),
         file: Some(FileId {
             volume: 7,
-            index: 11,
+            index: std::num::NonZeroU64::new(11).unwrap(),
+            born: None,
         }),
     }
 }
@@ -422,7 +424,8 @@ fn folders_made_for_a_write_are_recorded_once_by_whoever_made_them() {
             "Docs/New".to_string(),
             Some(FileId {
                 volume: 1,
-                index: 2,
+                index: std::num::NonZeroU64::new(2).unwrap(),
+                born: None,
             }),
         ),
         ("Docs/New/Deeper".to_string(), None),
@@ -437,7 +440,8 @@ fn folders_made_for_a_write_are_recorded_once_by_whoever_made_them() {
             "Docs/New".to_string(),
             Some(FileId {
                 volume: 1,
-                index: 99,
+                index: std::num::NonZeroU64::new(99).unwrap(),
+                born: None,
             }),
         )],
     )
@@ -451,7 +455,8 @@ fn folders_made_for_a_write_are_recorded_once_by_whoever_made_them() {
         folders[0].id,
         Some(FileId {
             volume: 1,
-            index: 2
+            index: std::num::NonZeroU64::new(2).unwrap(),
+            born: None
         })
     );
     assert_eq!(folders[0].destination, "me");
@@ -550,7 +555,8 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
             &Undo::Removing {
                 file: FileId {
                     volume: 1,
-                    index: 2,
+                    index: std::num::NonZeroU64::new(2).unwrap(),
+                    born: None
                 },
             }
         ),
@@ -566,7 +572,8 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     let moving = Undo::Removing {
         file: FileId {
             volume: 1,
-            index: 2,
+            index: std::num::NonZeroU64::new(2).unwrap(),
+            born: None,
         },
     };
     j.record_undo(&permit, id, &moving).unwrap();

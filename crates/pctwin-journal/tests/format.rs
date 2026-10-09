@@ -71,7 +71,8 @@ fn format_1_journal(dir: &Path) -> (std::path::PathBuf, String) {
                 modified_ns: None,
                 file: Some(FileId {
                     volume: 1,
-                    index: 2,
+                    index: std::num::NonZeroU64::new(2).unwrap(),
+                    born: None,
                 }),
             },
         )

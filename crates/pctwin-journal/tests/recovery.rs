@@ -23,14 +23,22 @@ struct Disk {
 /// The file the write sealed (recorded in the journal).
 const OURS: FileId = FileId {
     volume: 1,
-    index: 1,
+    index: std::num::NonZeroU64::new(1).unwrap(),
+    born: None,
 };
 
 impl Disk {
     fn file(mut self, path: &str, len: u64, good: bool) -> Self {
         self.files.insert(path.into(), Seen::File { len });
         let index = 100 + self.ids.len() as u64;
-        self.ids.insert(path.into(), FileId { volume: 1, index });
+        self.ids.insert(
+            path.into(),
+            FileId {
+                volume: 1,
+                index: std::num::NonZeroU64::new(index).unwrap(),
+                born: None,
+            },
+        );
         if good {
             self.good.insert(path.into());
         }

@@ -51,7 +51,8 @@ fn original(n: u8) -> (FileId, i64) {
     (
         FileId {
             volume: 7,
-            index: u64::from(n),
+            index: std::num::NonZeroU64::new(u64::from(n)).unwrap(),
+            born: None,
         },
         1_000 + i64::from(n),
     )
@@ -81,23 +82,14 @@ impl World {
                 source_modified_ns: Some(source_ns),
                 source_file: Some(source_file),
                 partial_keep: Default::default(),
-                place: Some(FileId {
-                    volume: place.volume,
-                    index: place.index,
-                }),
+                place: Some(place),
             })
             .unwrap();
         let mut made_ids = Vec::new();
         for f in made {
             std::fs::create_dir_all(self.root.join(f)).unwrap();
             let fid = dest.folder_identity(f).unwrap().unwrap();
-            made_ids.push((
-                f.to_string(),
-                Some(FileId {
-                    volume: fid.volume,
-                    index: fid.index,
-                }),
-            ));
+            made_ids.push((f.to_string(), Some(fid)));
         }
         if let Some(parent) = Path::new(stored).parent() {
             std::fs::create_dir_all(self.root.join(parent)).unwrap();
@@ -115,6 +107,9 @@ impl World {
         self.journal.verified(id, fp, None).unwrap();
         self.journal.applied(id, stored).unwrap();
         std::fs::write(self.root.join(stored), bytes).unwrap();
+        // PCTwin keeps each file and folder it makes open until 10 ms after it was made, so
+        // nothing made later shares its number and birth time; this stands in for that.
+        std::thread::sleep(std::time::Duration::from_millis(11));
         let stat = dest.stat(stored).unwrap().unwrap();
         self.journal
             .committed(
@@ -124,10 +119,7 @@ impl World {
                     modified_ns: stat.modified.map(|t| {
                         t.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
                     }),
-                    file: Some(FileId {
-                        volume: stat.id.volume,
-                        index: stat.id.index,
-                    }),
+                    file: Some(stat.id),
                 },
             )
             .unwrap();
@@ -317,7 +309,8 @@ fn a_copy_whose_original_changed_on_the_old_laptop_is_kept() {
             modified_ns: Some(ns2),
             file: Some(FileId {
                 volume: 7,
-                index: 99,
+                index: std::num::NonZeroU64::new(99).unwrap(),
+                born: None,
             }),
         },
     );
@@ -383,10 +376,7 @@ fn a_copy_whose_original_was_never_noted_is_kept_and_said_so() {
             source_modified_ns: Some(1),
             source_file: None,
             partial_keep: Default::default(),
-            place: Some(FileId {
-                volume: place.volume,
-                index: place.index,
-            }),
+            place: Some(place),
         })
         .unwrap();
     w.journal.staged(id, "x", &[]).unwrap();
@@ -400,10 +390,7 @@ fn a_copy_whose_original_was_never_noted_is_kept_and_said_so() {
             Landed {
                 size: 1,
                 modified_ns: None,
-                file: Some(FileId {
-                    volume: st.id.volume,
-                    index: st.id.index,
-                }),
+                file: Some(st.id),
             },
         )
         .unwrap();
@@ -680,10 +667,7 @@ fn a_removal_that_fails_after_it_started_is_recorded_as_under_way() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
     let file = w.file_of(a);
-    let private = w.root.join(pctwin_gate::undo_name(pctwin_gate::FileId {
-        volume: file.volume,
-        index: file.index,
-    }));
+    let private = w.root.join(pctwin_gate::undo_name(file));
     std::fs::write(&private, b"planted").unwrap();
     let r = w.undo();
     assert!(
@@ -886,13 +870,11 @@ fn a_file_whose_identity_was_never_known_is_kept_and_said_so() {
             source_modified_ns: Some(1),
             source_file: Some(FileId {
                 volume: 1,
-                index: 1,
+                index: std::num::NonZeroU64::new(1).unwrap(),
+                born: None,
             }),
             partial_keep: Default::default(),
-            place: Some(FileId {
-                volume: place.volume,
-                index: place.index,
-            }),
+            place: Some(place),
         })
         .unwrap();
     w.journal.staged(id, "x", &[]).unwrap();

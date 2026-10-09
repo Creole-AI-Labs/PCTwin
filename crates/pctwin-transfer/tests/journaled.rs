@@ -182,13 +182,7 @@ async fn a_received_file_is_recorded_step_by_step_and_committed_with_what_it_lan
         .folder_identity("")
         .unwrap()
         .unwrap();
-    assert_eq!(
-        e.write.place,
-        Some(FileId {
-            volume: root.volume,
-            index: root.index
-        })
-    );
+    assert_eq!(e.write.place, Some(root));
     let State::Committed {
         final_path,
         fingerprint,
@@ -221,10 +215,7 @@ async fn a_received_file_is_recorded_step_by_step_and_committed_with_what_it_lan
         Landed {
             size: data.len() as u64,
             modified_ns: Some(src_ns),
-            file: Some(FileId {
-                volume: stat.id.volume,
-                index: stat.id.index
-            }),
+            file: Some(stat.id),
         }
     );
     assert!(w.journal.unfinished().unwrap().is_empty());
@@ -273,13 +264,7 @@ async fn folders_made_for_a_file_are_recorded_and_folders_already_there_are_not(
     let dest = w.table.get("me").unwrap();
     for m in &made {
         let now = dest.folder_identity(&m.folder).unwrap().unwrap();
-        assert_eq!(
-            m.id,
-            Some(FileId {
-                volume: now.volume,
-                index: now.index
-            })
-        );
+        assert_eq!(m.id, Some(now));
     }
 }
 

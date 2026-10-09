@@ -54,11 +54,7 @@ pub fn journal() -> &'static pctwin_journal::Journal {
 /// that), worked out here independently of the crate under test.
 #[allow(dead_code)]
 pub fn identity_of(path: &std::path::Path) -> pctwin_journal::FileId {
-    let id = pctwin_gate::file_identity(&std::fs::File::open(path).unwrap()).unwrap();
-    pctwin_journal::FileId {
-        volume: id.volume,
-        index: id.index,
-    }
+    pctwin_gate::file_identity(&std::fs::File::open(path).unwrap()).unwrap()
 }
 
 /// A connection for a test: whole messages in order, in memory.

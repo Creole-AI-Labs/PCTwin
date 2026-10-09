@@ -37,6 +37,8 @@ pub use cap_std::fs::Dir;
 use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
+mod birth_hold;
+
 /// Longest single file or folder name, in bytes (the limit on every supported system).
 pub const MAX_COMPONENT_BYTES: usize = 255;
 /// Deepest folder nesting accepted.
@@ -659,13 +661,17 @@ impl Destination {
         verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
         about_to_remove: impl FnOnce() -> io::Result<()>,
     ) -> Result<Removed, GateError> {
+        // No handle PCTwin itself still holds on a file it made may look like another program's.
+        birth_hold::settle();
         let Some((dir, name)) = self.open_stored_folder(stored)? else {
             return Ok(Removed::Gone);
         };
         if is_undo_name(name) || is_temp_name(name) {
             return Err(GateError::Io(invalid("not a copy undo removes")));
         }
-        if expect.index == 0 {
+        // On Linux and macOS only the birth time tells a file from one made later in its freed
+        // number: without it the copy is never removed.
+        if cfg!(unix) && expect.born.is_none() {
             return Ok(Removed::Unsupported);
         }
         let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
@@ -1045,14 +1051,7 @@ fn rename_no_replace(
     Err(GateError::NoSafeName)
 }
 
-/// Which file or folder this is on its drive: the drive's number and the file's number on it.
-/// Two names with the same identity are the same file. A file that is edited keeps its identity;
-/// one deleted and made again usually gets a new one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FileId {
-    pub volume: u64,
-    pub index: u64,
-}
+pub use pctwin_journal::{Born, FileId};
 
 /// A stored file's size, modified time and identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1062,45 +1061,34 @@ pub struct Stat {
     pub id: FileId,
 }
 
+/// A file's number on its drive, refused when it is 0 (drives use 0 for "no number", so such a
+/// file cannot be told apart from another).
+fn number(index: u64) -> io::Result<std::num::NonZeroU64> {
+    std::num::NonZeroU64::new(index).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this drive gives files no number, so PCTwin cannot tell them apart",
+        )
+    })
+}
+
+/// Which file this is, and how many names it has. On Linux and macOS the drive is told by its
+/// file-system number (the same however the drive is plugged in, unlike the device number), the
+/// file by its inode number, and the birth time is kept where the drive keeps it (Linux asks for
+/// it explicitly and gets none where the drive has none, never a made-up one).
 #[cfg(unix)]
 fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
     use std::os::unix::fs::MetadataExt;
     let meta = file.metadata()?;
+    let volume = rustix::fs::fstatvfs(file)?.f_fsid;
     Ok((
         FileId {
-            volume: meta.dev(),
-            index: unix_index(meta.ino(), meta.created().ok()),
+            volume,
+            index: number(meta.ino())?,
+            born: meta.created().ok().map(Born::of),
         },
         meta.nlink(),
     ))
-}
-
-/// A file's number on Linux and macOS. The inode number alone is not enough: Linux drives give a
-/// freed number to the next new file at once, so a file removed and another made in its place
-/// would look like the same file. Where the drive keeps a file's birth time (most do: ext4, btrfs,
-/// XFS, APFS), the number is the inode number and the birth time together, worked into one number
-/// with BLAKE3 (a named library, not for secrecy, only so different files never share a number);
-/// a file made in a freed inode has a later birth time, so a different number. Where the drive
-/// keeps no birth time, it is the inode number, as before.
-#[cfg(unix)]
-fn unix_index(ino: u64, born: Option<std::time::SystemTime>) -> u64 {
-    let Some(born) = born else {
-        return ino;
-    };
-    let (secs, nanos) = match born.duration_since(std::time::UNIX_EPOCH) {
-        Ok(d) => (i128::from(d.as_secs()), d.subsec_nanos()),
-        Err(e) => (
-            -i128::from(e.duration().as_secs()),
-            e.duration().subsec_nanos(),
-        ),
-    };
-    let mut hasher = blake3::Hasher::new_derive_key("PCTwin 2026-10-09 file identity v1");
-    hasher.update(&ino.to_le_bytes());
-    hasher.update(&secs.to_le_bytes());
-    hasher.update(&nanos.to_le_bytes());
-    let mut number = [0u8; 8];
-    number.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
-    u64::from_le_bytes(number)
 }
 
 /// Which file `file` is on its drive, the way the gate tells files apart everywhere (for other
@@ -1115,7 +1103,8 @@ fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
     Ok((
         FileId {
             volume: info.volume_serial_number(),
-            index: info.file_index(),
+            index: number(info.file_index())?,
+            born: None,
         },
         info.number_of_links(),
     ))
@@ -1749,6 +1738,7 @@ impl Destinations {
 /// Opens the folder `name` in `parent`, creating it if there is none; says whether it was
 /// created here (a folder that was already there is the person's own).
 fn open_or_create_folder(parent: &Dir, name: &str) -> Result<(Dir, bool), GateError> {
+    let born = std::time::Instant::now();
     let created = match parent.create_dir(name) {
         Ok(()) => true,
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
@@ -1759,7 +1749,11 @@ fn open_or_create_folder(parent: &Dir, name: &str) -> Result<(Dir, bool), GateEr
     if !meta.is_dir() {
         return Err(GateError::Conflict);
     }
-    Ok((parent.open_dir(name)?, created))
+    let dir = parent.open_dir(name)?;
+    if created && let Ok(held) = dir.try_clone() {
+        birth_hold::hold(&held.into_std_file(), born);
+    }
+    Ok((dir, created))
 }
 
 /// What a space reservation's result means: reserved, not possible on this drive (the copy goes
@@ -1791,8 +1785,13 @@ fn create_temp_file(dir: &Dir) -> Result<(File, String), GateError> {
     for _ in 0..64 {
         let n = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let name = format!(".pctwin-{}-{n}.part", std::process::id());
+        let born = std::time::Instant::now();
         match dir.open_with(&name, &options) {
-            Ok(file) => return Ok((file, name)),
+            Ok(file) => {
+                let file = file.into_std();
+                birth_hold::hold(&file, born);
+                return Ok((File::from_std(file), name));
+            }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e.into()),
         }

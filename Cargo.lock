@@ -3201,7 +3201,6 @@ dependencies = [
 name = "pctwin-gate"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "cap-std",
  "fs4",
  "fs_at",

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use pctwin_gate::{Approved, Destinations, temp_name};
-use pctwin_journal::{Actor, FileId, Journal, Permission, PlannedWrite, State};
+use pctwin_journal::{Actor, Journal, Permission, PlannedWrite, State};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
     Channel, ChannelError, ReceiverSession, SendJob, SenderSession, Tier, block_size_for, recover,
@@ -188,10 +188,7 @@ impl World {
                 source_modified_ns: self.modified_ns(),
                 source_file: Some(common::identity_of(&self.source)),
                 partial_keep: Default::default(),
-                place: Some(FileId {
-                    volume: place.volume,
-                    index: place.index,
-                }),
+                place: Some(place),
             })
             .unwrap();
         let temp = format!("Videos/{}", temp_name(&self.journal.temp_tag(entry)));
@@ -610,10 +607,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
                 source_modified_ns: None,
                 source_file: None,
                 partial_keep: Default::default(),
-                place: Some(FileId {
-                    volume: place.volume,
-                    index: place.index,
-                }),
+                place: Some(place),
             })
             .unwrap();
         let temp = format!("Many/{}", temp_name(&w.journal.temp_tag(entry)));

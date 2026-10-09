@@ -118,10 +118,7 @@ fn finish(
                     Landed {
                         size: stat.len,
                         modified_ns: stat.modified.map(crate::nanos),
-                        file: Some(FileId {
-                            volume: stat.id.volume,
-                            index: stat.id.index,
-                        }),
+                        file: Some(stat.id),
                     },
                 )?;
                 Ok(Finish::Committed)
@@ -181,7 +178,7 @@ fn prove(
         Ok(None) => return Proof::Gone,
         Err(e) => return Proof::CannotLook(e.to_string()),
     };
-    let same = sealed.is_some_and(|f| f.volume == stat.id.volume && f.index == stat.id.index);
+    let same = sealed == Some(stat.id);
     if !same || stat.len != entry.write.size {
         return Proof::Changed;
     }
@@ -358,13 +355,7 @@ impl Look for DiskLook<'_> {
 
     fn identity(&self, entry: &Entry, stored: &str) -> Result<Option<FileId>, String> {
         let dest = self.destination(entry)?;
-        Ok(dest
-            .stat(stored)
-            .map_err(|e| e.to_string())?
-            .map(|s| FileId {
-                volume: s.id.volume,
-                index: s.id.index,
-            }))
+        Ok(dest.stat(stored).map_err(|e| e.to_string())?.map(|s| s.id))
     }
 
     fn temp_path(&self, entry: &Entry, folder: Option<&str>) -> Option<String> {

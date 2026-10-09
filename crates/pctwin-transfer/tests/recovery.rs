@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use pctwin_gate::{Approved, Destinations, temp_name};
-use pctwin_journal::{Actor, FileId, Journal, PartialKeep, Permission, PlannedWrite, State};
+use pctwin_journal::{Actor, Journal, PartialKeep, Permission, PlannedWrite, State};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
     KeepPartials, block_size_for, expire_partials, file_fingerprint, fingerprint_reader, partials,
@@ -79,10 +79,7 @@ impl World {
                 source_modified_ns: None,
                 source_file: None,
                 partial_keep: keep,
-                place: Some(FileId {
-                    volume: place.volume,
-                    index: place.index,
-                }),
+                place: Some(place),
             })
             .unwrap()
     }
@@ -105,6 +102,9 @@ impl World {
         let temp = self.temp(id);
         if let Some(b) = on_disk {
             self.put(&temp, b);
+            // PCTwin keeps each file and folder it makes open until 10 ms after it was made, so
+            // nothing made later shares its number and birth time; this stands in for that.
+            std::thread::sleep(std::time::Duration::from_millis(11));
         }
         self.journal.staged(id, &temp, &[]).unwrap();
         id
@@ -119,10 +119,7 @@ impl World {
             .unwrap()
             .stat(&self.temp(id))
             .unwrap()
-            .map(|s| FileId {
-                volume: s.id.volume,
-                index: s.id.index,
-            });
+            .map(|s| s.id);
         self.journal.verified(id, fp(bytes), sealed).unwrap();
         id
     }
@@ -270,13 +267,7 @@ fn a_verified_file_is_proven_again_then_named_and_committed() {
         .unwrap()
         .unwrap();
     assert_eq!(landed.size, bytes.len() as u64);
-    assert_eq!(
-        landed.file,
-        Some(FileId {
-            volume: stat.id.volume,
-            index: stat.id.index
-        })
-    );
+    assert_eq!(landed.file, Some(stat.id));
     assert!(landed.modified_ns.is_some());
 }
 
@@ -386,10 +377,7 @@ fn another_write_s_committed_empty_file_at_the_name_is_never_replaced() {
     w.journal.applied(b, "Docs/f1.txt").unwrap();
     let dest = w.table.get("me").unwrap();
     let st = dest.stat("Docs/f1.txt").unwrap().unwrap();
-    let landed_as = FileId {
-        volume: st.id.volume,
-        index: st.id.index,
-    };
+    let landed_as = st.id;
     w.journal
         .committed(
             b,

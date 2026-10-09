@@ -55,7 +55,8 @@ fn committed(j: &Journal, n: u8) -> u64 {
 fn file() -> FileId {
     FileId {
         volume: 3,
-        index: 4,
+        index: std::num::NonZeroU64::new(4).unwrap(),
+        born: None,
     }
 }
 

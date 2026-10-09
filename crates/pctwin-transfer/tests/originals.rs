@@ -356,7 +356,8 @@ fn present(n: u64) -> OriginalNow {
         modified_ns: Some(1),
         file: Some(FileId {
             volume: 1,
-            index: n,
+            index: std::num::NonZeroU64::new(n).unwrap(),
+            born: None,
         }),
     }
 }
@@ -575,7 +576,8 @@ fn answers_come_in_the_order_asked() {
 fn only_the_same_file_with_the_same_size_and_time_is_unchanged() {
     let file = FileId {
         volume: 7,
-        index: 42,
+        index: std::num::NonZeroU64::new(42).unwrap(),
+        born: None,
     };
     let write = planned(Some(file), Some(1000), 50);
     let same = OriginalNow::Present {
@@ -612,7 +614,8 @@ fn only_the_same_file_with_the_same_size_and_time_is_unchanged() {
         modified_ns: Some(1000),
         file: Some(FileId {
             volume: 8,
-            index: 42,
+            index: std::num::NonZeroU64::new(42).unwrap(),
+            born: None,
         }),
     });
     differs(OriginalNow::Present {
@@ -620,7 +623,8 @@ fn only_the_same_file_with_the_same_size_and_time_is_unchanged() {
         modified_ns: Some(1000),
         file: Some(FileId {
             volume: 7,
-            index: 43,
+            index: std::num::NonZeroU64::new(43).unwrap(),
+            born: None,
         }),
     });
     // Each field unknown on the old laptop's side.

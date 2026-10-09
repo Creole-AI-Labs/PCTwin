@@ -311,6 +311,10 @@ pub enum SendOutcome {
     Failed(String),
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one per file in flight (a bounded few); boxing the reader buys nothing"
+)]
 enum SendState {
     Waiting,
     Open {
@@ -2062,10 +2066,7 @@ fn record(e: JournalError) -> TransferError {
 }
 
 fn file_id(id: pctwin_gate::FileId) -> FileId {
-    FileId {
-        volume: id.volume,
-        index: id.index,
-    }
+    id
 }
 
 /// Most names tried when other programs keep taking the free one first.
@@ -2184,7 +2185,8 @@ mod originals_limits {
             modified_ns: Some(1),
             file: Some(FileId {
                 volume: 1,
-                index: n,
+                index: std::num::NonZeroU64::new(n).unwrap(),
+                born: None,
             }),
         }
     }

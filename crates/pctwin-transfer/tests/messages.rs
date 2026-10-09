@@ -43,7 +43,8 @@ fn all_kinds() -> Vec<Message> {
                 stamp: stamp(),
                 source_file: Some(FileId {
                     volume: 0xdead_beef_0102_0304,
-                    index: 0x0011_2233_4455_6677,
+                    index: std::num::NonZeroU64::new(0x0011_2233_4455_6677).unwrap(),
+                    born: None,
                 }),
             },
             resumed_done: 0,
@@ -111,7 +112,8 @@ fn all_kinds() -> Vec<Message> {
                         modified_ns: Some(-5),
                         file: Some(FileId {
                             volume: 9,
-                            index: 8,
+                            index: std::num::NonZeroU64::new(8).unwrap(),
+                            born: None,
                         }),
                     },
                 ),
@@ -136,7 +138,16 @@ fn a_header_with_and_without_the_originals_identity_survives_the_trip() {
         None,
         Some(FileId {
             volume: u64::MAX,
-            index: 0,
+            index: std::num::NonZeroU64::MAX,
+            born: None,
+        }),
+        Some(FileId {
+            volume: 0,
+            index: std::num::NonZeroU64::MIN,
+            born: Some(pctwin_journal::Born {
+                secs: -1,
+                nanos: 999_999_999,
+            }),
         }),
     ] {
         let m = Message::StartFile {
@@ -200,7 +211,8 @@ fn the_answer_about_originals_is_bounded_and_fits_the_link() {
                         modified_ns: Some(1),
                         file: Some(FileId {
                             volume: 1,
-                            index: 1,
+                            index: std::num::NonZeroU64::new(1).unwrap(),
+                            born: None,
                         }),
                     },
                 )

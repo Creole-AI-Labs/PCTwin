@@ -40,11 +40,7 @@ pub enum OriginalNow {
 /// the next new file at once). The move records it and the check compares with it, so both
 /// always use this one function.
 pub(crate) fn file_identity(file: &File) -> io::Result<FileId> {
-    let id = pctwin_gate::file_identity(file)?;
-    Ok(FileId {
-        volume: id.volume,
-        index: id.index,
-    })
+    pctwin_gate::file_identity(file)
 }
 
 /// Opens a file for reading only, never following a link and never waiting on a pipe.
