@@ -1,7 +1,7 @@
 //! macOS: before undo moves a copy aside, it announces the removal through Apple's file
 //! coordination, so apps showing the file save it and let go, and then asks the system which
 //! programs have the file open (decided 9 October 2026, Security Design 3B undo bullet). A file
-//! any other program still has open is kept. If either cannot be asked, nothing is removed.
+//! any other program has open, in any way, is kept. If either cannot be asked, nothing is removed.
 //!
 //! Both work by path: they are a courtesy to other programs and a check, never the proof. The
 //! proof that PCTwin removes the very file it checked, unchanged, stays with the held handle and
@@ -51,11 +51,28 @@ pub(crate) fn coordinated_for_deleting<R>(path: &Path, then: impl FnOnce() -> R)
         .ok_or_else(|| io::Error::other("file coordination did not run"))
 }
 
-/// Whether any program other than PCTwin has the file at `path` open (watchers that only listen
-/// for changes do not count). The system's list is an Apple interface without a promise, so a
-/// failure to read it is an error, and the caller keeps the file.
+/// How many times the system's list is asked for when it may have been cut short.
+const LIST_TRIES: usize = 3;
+
+/// Whether any program other than PCTwin has the file at `path` open, in any way: one that only
+/// watches it for changes counts too (no filter is asked for, so the list is exactly every
+/// program with the file open). The system's list is an Apple interface without a promise, so a
+/// failure to read it is an error and the caller keeps the file. The list is made in a space
+/// sized for every program running; a list that fills that space may have been cut short
+/// (programs started meanwhile), so it is asked for again, and if it stays full, that is an error
+/// too.
 pub(crate) fn others_have_it_open(path: &Path) -> io::Result<bool> {
     let me = std::process::id();
-    let pids = libproc::processes::pids_by_path(path, false, true)?;
-    Ok(pids.into_iter().any(|p| p != me))
+    for _ in 0..LIST_TRIES {
+        let pids = libproc::processes::pids_by_path(path, false, false)?;
+        if pids.iter().any(|p| *p != me) {
+            return Ok(true);
+        }
+        if pids.len() < pids.capacity() {
+            return Ok(false);
+        }
+    }
+    Err(io::Error::other(
+        "the list of programs with the file open may be incomplete",
+    ))
 }

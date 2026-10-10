@@ -593,3 +593,48 @@ fn private_names_are_random_and_recognised_exactly() {
     assert_ne!(a, b);
     assert!(a.starts_with(".pctwin-undo-") && a.len() == ".pctwin-undo-".len() + 32);
 }
+
+/// macOS: a file another program has open is kept, even one that only watches it for changes
+/// (opened with O_EVTONLY): any program but PCTwin counts (finding 7).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_file_another_program_has_open_even_only_to_watch_it_is_kept() {
+    use std::io::BufRead;
+    let Some((root, dest)) = setup() else { return };
+    for (how, flags) in [("read", "os.O_RDONLY"), ("watch", "0x8000")] {
+        put(&root, "Docs/a.txt", b"copy");
+        let file = id(&dest, "Docs/a.txt");
+        let path = root.path().join("Docs/a.txt");
+        let script = format!(
+            "import os, sys, time\nfd = os.open(sys.argv[1], {flags})\nprint('open', flush=True)\ntime.sleep(60)\n"
+        );
+        let child = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(&script)
+            .arg(&path)
+            .stdout(std::process::Stdio::piped())
+            .spawn();
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => {
+                assert!(
+                    std::env::var_os("PCTWIN_REQUIRE_UNIX_UNDO").is_none(),
+                    "python3 is needed for this test here: {e}"
+                );
+                eprintln!("skipped: no python3 to hold the file open ({e})");
+                return;
+            }
+        };
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line.trim(), "open", "{how}");
+        let r = plain(&dest, "Docs/a.txt", file, b"copy");
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(r, Removed::InUse, "{how}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"copy", "{how}");
+        std::fs::remove_file(&path).unwrap();
+    }
+}
