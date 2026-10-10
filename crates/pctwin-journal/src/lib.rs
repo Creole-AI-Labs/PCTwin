@@ -418,6 +418,12 @@ pub enum Undo {
         dir_id: FileId,
         temp: String,
         to: String,
+        /// Every byte is in `temp`, flushed to the disk, with its permissions: recorded after the
+        /// copy and before `temp` is named. Without it, what is in `temp` may be incomplete (it
+        /// was being copied when PCTwin stopped). Once recorded, it is never recorded as not
+        /// complete again.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        complete: bool,
     },
     /// Done; never looked at again, unless it could not be done this time.
     Done { outcome: UndoOutcome },
@@ -488,7 +494,24 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
             // About the same file, in the same folder, as the removal it follows.
             let same_file = next.file().is_none_or(|f| before.file() == Some(f))
                 && next.dir_id().is_none_or(|d| before.dir_id() == Some(d));
+            // A salvage keeps its one temporary file, and once complete stays complete.
+            let same_salvage = match (before, next) {
+                (
+                    Undo::Salvaging {
+                        temp: t0,
+                        complete: c0,
+                        ..
+                    },
+                    Undo::Salvaging {
+                        temp: t1,
+                        complete: c1,
+                        ..
+                    },
+                ) => t0 == t1 && (!c0 || *c1),
+                _ => true,
+            };
             same_file
+                && same_salvage
                 && matches!(
                     (before, next),
                     (
@@ -592,8 +615,12 @@ impl ClosedToken {
 mod sealed {
     /// Only this crate can say what an undo right is.
     pub trait Sealed {
-        /// The journal that granted it.
+        /// The journal that granted it (none for a [`super::LentRight`], which never writes).
         fn granted_by(&self) -> *const super::Journal;
+        /// The lendings it hangs on: it is in force only while none of them has ended.
+        fn lendings(&self) -> &[std::sync::Arc<std::sync::atomic::AtomicBool>] {
+            &[]
+        }
     }
 }
 
@@ -601,7 +628,67 @@ mod sealed {
 /// [`CloseTicket`] (handed out by [`Journal::close_undo`] alone, while it finishes what was left
 /// part-way). Only this crate can make one, and each is checked against the journal it is used
 /// on ([`JournalError::OtherJournal`]).
-pub trait UndoRight: sealed::Sealed {}
+///
+/// It can also be lent ([`lend`](Self::lend)) to a worker that does the drive's part of an undo
+/// with a deadline: the [`LentRight`] lets the gate act only while the [`Lending`] lasts.
+pub trait UndoRight: sealed::Sealed {
+    /// Whether this right still allows acting on the drive: always for a permit or a ticket
+    /// (while it is in hand), and for a lent right only until its lending ends. The gate checks it
+    /// before every rename and removal.
+    fn in_force(&self) -> bool {
+        self.lendings()
+            .iter()
+            .all(|ended| !ended.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// Lends this right to work done elsewhere (a worker thread with a deadline). The
+    /// [`LentRight`] can be sent anywhere and kept, but it is in force only while the returned
+    /// [`Lending`] lasts (and whatever this right hangs on): dropping the lending ends it, for
+    /// good. A lent right never writes the journal; the worker asks the lender to.
+    fn lend(&self) -> (Lending<'_>, LentRight) {
+        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut lendings = self.lendings().to_vec();
+        lendings.push(ended.clone());
+        (
+            Lending {
+                ended,
+                _right: std::marker::PhantomData,
+            },
+            LentRight { lendings },
+        )
+    }
+}
+
+/// While this lasts, the [`LentRight`] made with it is in force; dropping it ends that right.
+/// It borrows the right it was lent from, so it cannot outlive it.
+#[must_use = "dropping the lending ends the lent right at once"]
+pub struct Lending<'r> {
+    ended: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _right: std::marker::PhantomData<&'r ()>,
+}
+
+impl Drop for Lending<'_> {
+    fn drop(&mut self) {
+        self.ended.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// An undo right lent to a worker ([`UndoRight::lend`]): in force only while its lending lasts.
+/// It is refused by every journal write ([`JournalError::OtherJournal`]).
+#[derive(Debug)]
+pub struct LentRight {
+    lendings: Vec<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+}
+
+impl sealed::Sealed for LentRight {
+    fn granted_by(&self) -> *const Journal {
+        std::ptr::null()
+    }
+    fn lendings(&self) -> &[std::sync::Arc<std::sync::atomic::AtomicBool>] {
+        &self.lendings
+    }
+}
+impl UndoRight for LentRight {}
 
 impl sealed::Sealed for UndoPermit<'_> {
     fn granted_by(&self) -> *const Journal {

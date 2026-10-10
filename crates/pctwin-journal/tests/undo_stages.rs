@@ -218,6 +218,7 @@ fn putting_and_salvaging_follow_only_a_removal_of_the_same_file() {
                 dir_id: elsewhere,
                 temp,
                 to,
+                complete: false,
             },
             other => other,
         };
@@ -373,7 +374,8 @@ fn a_name_that_is_not_a_plain_name_in_the_folder_is_refused() {
                     file: file(1),
                     dir_id: dir(),
                     temp: bad.into(),
-                    to: "f1 (kept).txt".into()
+                    to: "f1 (kept).txt".into(),
+                    complete: false
                 }
             ),
             Err(JournalError::BadName(_))
@@ -436,4 +438,93 @@ fn rights_from_another_journal_are_refused_by_every_undo_write() {
     assert_eq!(refused, [true; 4]);
     assert_eq!(mine.undo_of(a).unwrap(), None);
     assert_eq!(mine.folder_undo_of("me", "Docs").unwrap(), None);
+}
+
+/// A salvage records that every byte is in its temporary file, on disk, before it is named: the
+/// mark survives a restart, is the only way a salvage counts as whole, and never goes back.
+#[test]
+fn a_salvage_records_when_it_is_complete_and_never_goes_back() {
+    let complete = |n: u8, to: &str| match salvaging(n, to) {
+        Undo::Salvaging {
+            file,
+            dir_id,
+            temp,
+            to,
+            ..
+        } => Undo::Salvaging {
+            file,
+            dir_id,
+            temp,
+            to,
+            complete: true,
+        },
+        other => other,
+    };
+    // An incomplete salvage keeps the record's old shape; a complete one says so.
+    assert_eq!(
+        serde_json::to_string(&complete(1, "f1 (kept).txt")).unwrap(),
+        r#"{"step":"salvaging","file":{"volume":3,"index":101},"dir_id":{"volume":3,"index":2},"temp":".pctwin-salvage-00000000000000000000000000000001","to":"f1 (kept).txt","complete":true}"#
+    );
+    let (_d, path, j) = journal();
+    let a = committed(&j, 1);
+    {
+        let permit = j.begin_undo().unwrap();
+        j.record_undo(&permit, a, &removing(1)).unwrap();
+        j.record_undo(&permit, a, &salvaging(1, "f1 (kept).txt"))
+            .unwrap();
+        j.record_undo(&permit, a, &complete(1, "f1 (kept).txt"))
+            .unwrap();
+        j.record_undo(&permit, a, &complete(1, "f1 (kept) 2.txt"))
+            .unwrap();
+        // Once whole, never "not whole" again.
+        assert!(matches!(
+            j.record_undo(&permit, a, &salvaging(1, "f1 (kept) 3.txt")),
+            Err(JournalError::OutOfOrder { .. })
+        ));
+        // Nor another temporary file for the same salvage.
+        let mut other_temp = complete(1, "f1 (kept) 3.txt");
+        if let Undo::Salvaging { temp, .. } = &mut other_temp {
+            *temp = format!(".pctwin-salvage-{:032x}", 9);
+        }
+        assert!(matches!(
+            j.record_undo(&permit, a, &other_temp),
+            Err(JournalError::OutOfOrder { .. })
+        ));
+    }
+    drop(j);
+    let j = Journal::open(&path).unwrap();
+    assert_eq!(j.undo_of(a).unwrap(), Some(complete(1, "f1 (kept) 2.txt")));
+}
+
+/// A right lent to a worker (for a resolution that runs with a deadline) is in force only while
+/// the lending lasts, and can never write to the journal itself.
+#[test]
+fn a_lent_right_ends_with_its_lending_and_never_writes_the_journal() {
+    use pctwin_journal::UndoRight;
+    let (_d, _p, j) = journal();
+    let a = committed(&j, 1);
+    let permit = j.begin_undo().unwrap();
+    assert!(permit.in_force());
+    let (lending, lent) = permit.lend();
+    assert!(lent.in_force());
+    assert!(matches!(
+        j.record_undo(&lent, a, &removing(1)),
+        Err(JournalError::OtherJournal)
+    ));
+    let moved = std::thread::spawn(move || {
+        let seen = lent.in_force();
+        (seen, lent)
+    });
+    let (seen, lent) = moved.join().unwrap();
+    assert!(seen);
+    // Lent again (to a step inside the worker): ends with either lending.
+    let (inner, relent) = lent.lend();
+    assert!(relent.in_force());
+    drop(lending);
+    assert!(!lent.in_force());
+    assert!(!relent.in_force());
+    drop(inner);
+    drop(lent);
+    assert!(permit.in_force());
+    assert_eq!(j.undo_of(a).unwrap(), None);
 }

@@ -91,6 +91,7 @@ pub fn salvaging(n: u8, to: &str) -> Undo {
         dir_id: dir(),
         temp: format!(".pctwin-salvage-{n:032x}"),
         to: to.into(),
+        complete: false,
     }
 }
 
