@@ -682,3 +682,44 @@ fn a_removal_under_way_is_resumed_from_what_is_on_the_disk() {
         Left::Gone
     );
 }
+
+/// A right lent to a worker that has ended (a resolution that ran out of time) removes nothing,
+/// even when every check passes (Part J, finding 8).
+#[test]
+fn a_lent_right_that_has_ended_removes_nothing() {
+    use pctwin_journal::UndoRight;
+    let (root, dest) = setup();
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let permit = journal().begin_undo().unwrap();
+    let (lending, lent) = permit.lend();
+    drop(lending);
+    #[cfg(windows)]
+    let r = dest.remove_if_unchanged(&lent, "Docs/a.txt", file, bytes_are(b"copy"), || Ok(()));
+    #[cfg(unix)]
+    let r = {
+        let copy = match dest
+            .check_copy("Docs/a.txt", file, bytes_are(b"copy"))
+            .unwrap()
+        {
+            pctwin_gate::Check::Ready(copy) => copy,
+            // A drive undo does not remove from: nothing to show here.
+            pctwin_gate::Check::Done(_) => return,
+        };
+        let private = pctwin_gate::private_name().unwrap();
+        let mut nothing = |_: pctwin_gate::Step<'_>| Ok(());
+        let mut cx = pctwin_gate::Context {
+            kept_words: " (kept by PCTwin undo)",
+            room_for_words: 64,
+            others_closed: true,
+            journal: &mut nothing,
+        };
+        dest.remove_checked(&lent, *copy, &private, &mut cx)
+    };
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(
+        std::fs::read(root.path().join("Docs/a.txt")).unwrap(),
+        b"copy"
+    );
+    assert_eq!(names(&root.path().join("Docs")), ["a.txt"]);
+}

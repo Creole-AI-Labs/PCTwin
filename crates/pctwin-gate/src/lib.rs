@@ -38,6 +38,7 @@ use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
 mod birth_hold;
+mod deadline;
 #[cfg(target_os = "macos")]
 mod macos_check;
 mod original;
@@ -437,6 +438,16 @@ impl Destination {
         Ok(dest)
     }
 
+    /// Another handle on the very same approved folder (for a worker that finishes part of an
+    /// undo with a deadline, which must own what it works on).
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            root: self.root.try_clone()?,
+            root_path: self.root_path.clone(),
+            clash_hints: Mutex::new(ClashHints::default()),
+        })
+    }
+
     fn from_dir(root: Dir) -> Self {
         Self {
             root,
@@ -663,12 +674,18 @@ impl Destination {
     #[cfg(windows)]
     pub fn remove_if_unchanged(
         &self,
-        _right: &impl pctwin_journal::UndoRight,
+        right: &impl pctwin_journal::UndoRight,
         stored: &str,
         expect: FileId,
         verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
         about_to_remove: impl FnOnce() -> io::Result<()>,
     ) -> Result<Removed, GateError> {
+        if !right.in_force() {
+            return Err(GateError::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "undo stopped here: it took too long",
+            )));
+        }
         // No handle PCTwin itself still holds on a file it made may look like another program's.
         birth_hold::settle();
         let Some((dir, name)) = self.open_stored_folder(stored)? else {
@@ -678,6 +695,17 @@ impl Destination {
             return Err(GateError::Io(invalid("not a copy undo removes")));
         }
         let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
+        // The right is looked at again just before the removal (a lent right may have ended).
+        let about_to_remove = || {
+            if right.in_force() {
+                about_to_remove()
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "undo stopped here: it took too long",
+                ))
+            }
+        };
         remove_checked(&dir, folder, name, expect, verify, about_to_remove)
     }
 
@@ -1161,28 +1189,48 @@ fn by_names(links: u64) -> Option<Removed> {
 }
 
 /// Flushes a folder's list of names (after a name left it), so a removal is on the disk before
-/// the journal says it is done. A drive that cannot flush a folder at all (or a folder that cannot
-/// be opened for it) is not an error; a flush that fails is.
+/// the journal says it is done. It goes through `dir`, the very folder held (opened again
+/// relative to it, never by path). Only a drive that says it cannot flush folders at all is let
+/// go; on Linux and macOS a folder that cannot be opened for the flush, or a flush that fails, is
+/// an error. (Windows keeps its own rule: a folder it cannot open for writing is let go.)
 fn sync_folder(dir: &Dir) -> io::Result<()> {
-    let Ok(folder) = folder_to_flush(dir) else {
-        return Ok(());
+    let failed = |e: io::Error| {
+        io::Error::other(format!(
+            "it was removed, but the drive did not confirm the change was written ({e})"
+        ))
+    };
+    let folder = match folder_to_flush(dir) {
+        Ok(folder) => folder,
+        Err(_) if cfg!(windows) => return Ok(()),
+        Err(e) => return Err(failed(e)),
     };
     match folder.sync_all() {
         Ok(()) => Ok(()),
         Err(e) if cannot_flush_folders(&e) => Ok(()),
-        Err(e) => Err(io::Error::other(format!(
-            "it was removed, but the drive did not confirm the change was written ({e})"
-        ))),
+        Err(e) => Err(failed(e)),
     }
 }
 
-/// A drive that does not flush folders at all (said as "not supported" or "not that kind of
-/// file"), as opposed to a flush that failed.
+/// A drive that does not flush folders at all, as opposed to a flush that failed: on Linux and
+/// macOS only the system's own "invalid for this kind of file" (EINVAL) or "not supported"
+/// (ENOTSUP, EOPNOTSUPP) from the flush; on Windows "not supported" or "not that kind of file".
 fn cannot_flush_folders(e: &io::Error) -> bool {
-    matches!(
-        e.kind(),
-        io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput
-    ) || (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50)))
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        e.raw_os_error().is_some_and(|code| {
+            [Errno::INVAL, Errno::NOTSUP, Errno::OPNOTSUPP]
+                .iter()
+                .any(|n| n.raw_os_error() == code)
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        matches!(
+            e.kind(),
+            io::ErrorKind::Unsupported | io::ErrorKind::InvalidInput
+        ) || (cfg!(windows) && matches!(e.raw_os_error(), Some(1 | 50)))
+    }
 }
 
 /// How removing a copy ended.
@@ -2045,6 +2093,40 @@ mod tests {
         let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
         folder_to_flush(&dir).unwrap().sync_all().unwrap();
         sync_folder(&dir).unwrap();
+    }
+
+    /// Unix: a folder that cannot be opened for its flush is an error, never a quiet "done"
+    /// (Part J, finding 5); only a drive that says it cannot flush folders at all is let go.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_flushed_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("locked");
+        std::fs::create_dir(&sub).unwrap();
+        let top = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        let dir = top.open_dir("locked").unwrap();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o300)).unwrap();
+        let unreadable = std::fs::read_dir(&sub).is_err();
+        let r = sync_folder(&dir);
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if unreadable {
+            assert!(r.is_err(), "{r:?}");
+        }
+        use rustix::io::Errno;
+        let e = |n: Errno| io::Error::from_raw_os_error(n.raw_os_error());
+        assert!(cannot_flush_folders(&e(Errno::INVAL)));
+        assert!(cannot_flush_folders(&e(Errno::NOTSUP)));
+        assert!(cannot_flush_folders(&e(Errno::OPNOTSUPP)));
+        for failed in [
+            Errno::IO,
+            Errno::NOSPC,
+            Errno::ROFS,
+            Errno::BADF,
+            Errno::ACCESS,
+        ] {
+            assert!(!cannot_flush_folders(&e(failed)), "{failed:?}");
+        }
     }
 
     #[test]

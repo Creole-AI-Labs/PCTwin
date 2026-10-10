@@ -19,17 +19,22 @@
 //! 4. The caller takes an undo permit and records `Removing { private }` durably (in batches).
 //! 5. Linux: a write lease on the handle (nobody else has it open), or the person's batch
 //!    confirmation where the system cannot say. macOS: file coordination for deleting (apps
-//!    showing the file save and let go; steps 6 to 9 run while they wait), then the system's
-//!    list of programs with the file open; if either cannot be asked, nothing is removed.
+//!    showing the file save and let go; steps 6 to 9 run while they wait, and a coordination that
+//!    does not answer in time removes nothing), then the system's list of programs with the file
+//!    open; if either cannot be asked, nothing is removed.
 //! 6. The name moves to the private name, never replacing.
 //! 7. What is under the private name is proven to be the held file, unchanged; else it goes back.
-//! 8. The private name is removed (Linux: only while the lease shows nobody waiting).
+//! 8. Right before the removal it is proven again, in every way, change time included
+//!    ([`finish`], the one way a private name is ever removed, after a crash too); then removed.
 //! 9. The held file is checked once more: no names left and unchanged is removed; anything
 //!    written meanwhile is saved beside it under a visible name.
+//!
+//! Every rename, removal and new name goes through [`Acts`], which refuses it once the undo right
+//! it runs under has ended (a resolution that ran out of time): a late worker never acts.
 
 use std::io;
 
-use rustix::fs::{AtFlags, Mode, OFlags, RenameFlags};
+use rustix::fs::{AtFlags, FileType, Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
 
 #[cfg(target_os = "macos")]
@@ -53,8 +58,14 @@ pub enum Step<'a> {
     NewPrivate { private: &'a str },
     /// About to move whatever is under `private` to `to` (its own name, or a visible name).
     Putting { private: &'a str, to: &'a str },
-    /// About to save bytes into the new private file `temp`, to be named `to`.
-    Salvaging { temp: &'a str, to: &'a str },
+    /// About to save bytes into the new private file `temp`, to be named `to`. `complete` is
+    /// false before the copy (the file is made with no permissions at all) and true once every
+    /// byte is in it, flushed, with the file's permissions: only then is it named.
+    Salvaging {
+        temp: &'a str,
+        to: &'a str,
+        complete: bool,
+    },
 }
 
 /// What the person's app passes in for one batch of removals.
@@ -133,6 +144,58 @@ pub(crate) fn is_private_name(name: &str) -> bool {
     token(".pctwin-undo-") || token(".pctwin-salvage-")
 }
 
+/// Every rename, removal and new name undo makes here goes through this, and each is refused once
+/// the undo right it runs under is no longer in force: a resolution that ran out of time and was
+/// given up on never acts later. (A step already inside the system when the right ends finishes;
+/// every such step was journaled before it began, so the journal still explains the disk.)
+struct Acts<'a> {
+    in_force: &'a dyn Fn() -> bool,
+}
+
+impl Acts<'_> {
+    /// An error once the right has ended.
+    fn go(&self) -> Result<(), GateError> {
+        if (self.in_force)() {
+            Ok(())
+        } else {
+            Err(GateError::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "undo stopped here: it took too long",
+            )))
+        }
+    }
+
+    /// Moves `from` to `to` in `dir`, never replacing anything.
+    fn rename(&self, dir: &Dir, from: &str, to: &str) -> Result<(), Errno> {
+        if !(self.in_force)() {
+            return Err(Errno::CANCELED);
+        }
+        rustix::fs::renameat_with(dir, from, dir, to, RenameFlags::NOREPLACE)
+    }
+
+    /// Removes the name `name` in `dir` (only ever from [`finish`]).
+    fn unlink(&self, dir: &Dir, name: &str) -> Result<(), Errno> {
+        if !(self.in_force)() {
+            return Err(Errno::CANCELED);
+        }
+        rustix::fs::unlinkat(dir, name, AtFlags::empty())
+    }
+
+    /// Makes the new file `name` in `dir`, with no permissions at all, open for writing.
+    fn create(&self, dir: &Dir, name: &str) -> Result<std::fs::File, Errno> {
+        if !(self.in_force)() {
+            return Err(Errno::CANCELED);
+        }
+        rustix::fs::openat(
+            dir,
+            name,
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(std::fs::File::from)
+    }
+}
+
 /// What tells a held file changed: size, modified time, change time (which a program cannot set
 /// back), and its count of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,10 +226,15 @@ impl Look {
     }
 
     /// The same contents as `other` as far as size and modified time tell (the change time moves
-    /// with PCTwin's own rename and removal, so it is not compared after those).
+    /// with PCTwin's own rename and removal, so it is not compared across those).
     fn same_contents(&self, other: &Look) -> bool {
         self.len == other.len && self.modified == other.modified
     }
+}
+
+/// Whether two looks are at the very same file (same drive, same number).
+fn same_file(a: &rustix::fs::Stat, b: &rustix::fs::Stat) -> bool {
+    a.st_dev == b.st_dev && a.st_ino == b.st_ino
 }
 
 /// Whether the drive under `file` is one undo removes from: it must keep birth times and
@@ -288,7 +356,7 @@ impl Destination {
             Err(e) => return Err(GateError::Io(e.into())),
         };
         let st = rustix::fs::fstat(&handle)?;
-        if rustix::fs::FileType::from_raw_mode(st.st_mode) != rustix::fs::FileType::RegularFile {
+        if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile {
             return done(Removed::NotThatFile);
         }
         if !drive_allowed(&handle)? {
@@ -338,12 +406,12 @@ impl Destination {
     }
 
     /// Steps 5 to 9 for a checked copy, whose removal through `private` the journal holds. Takes
-    /// an open undo permit, so nothing can be removed once undo is closed for good. The folder is
-    /// not flushed here: the caller flushes each folder touched ([`flush_folder`](Self::flush_folder))
-    /// before recording the batch as done.
+    /// an undo right, so nothing can be removed once undo is closed for good (and nothing once a
+    /// lent right has ended). Whatever it changed is flushed to the disk through the very folder
+    /// it was checked in before it returns, so the caller may record the outcome at once.
     pub fn remove_checked(
         &self,
-        _right: &impl pctwin_journal::UndoRight,
+        right: &impl pctwin_journal::UndoRight,
         copy: Checked,
         private: &str,
         cx: &mut Context<'_>,
@@ -357,53 +425,53 @@ impl Destination {
             file: _,
             dir_id: _,
         } = copy;
+        let in_force = || right.in_force();
+        let acts = Acts {
+            in_force: &in_force,
+        };
+        acts.go()?;
         // 5. Nobody else has it open.
         #[cfg(target_os = "macos")]
-        {
+        let r = {
             let Some(path) = self.root_path.as_ref().map(|r| r.join(&folder).join(&name)) else {
                 return Ok(Removed::CannotCheck);
             };
-            // Apps presenting the file are told and let go; the rest happens while they wait.
+            // Apps presenting the file are told and let go; the rest happens while they wait. A
+            // coordination that does not answer in time, or fails, removes nothing.
             let done = macos_check::coordinated_for_deleting(&path, || {
                 match macos_check::others_have_it_open(&path) {
                     Ok(true) => Ok(Removed::InUse),
                     Err(_) => Ok(Removed::CannotCheck),
-                    Ok(false) => {
-                        move_prove_remove(&dir, &folder, &name, &handle, look0, private, false, cx)
-                    }
+                    Ok(false) => move_prove_remove(
+                        &dir, &folder, &name, &handle, look0, private, false, &acts, cx,
+                    ),
                 }
             });
-            done.unwrap_or(Ok(Removed::CannotCheck))
-        }
+            match done {
+                Ok(Some(r)) => r,
+                Ok(None) | Err(_) => Ok(Removed::CannotCheck),
+            }
+        };
         #[cfg(not(target_os = "macos"))]
-        {
+        let r = {
             let leased = match others_have_it_open(&handle, cx.others_closed) {
                 Openers::None { leased } => leased,
                 Openers::Some => return Ok(Removed::InUse),
                 Openers::CannotCheck => return Ok(Removed::CannotCheck),
             };
-            let r = move_prove_remove(&dir, &folder, &name, &handle, look0, private, leased, cx);
+            let r = move_prove_remove(
+                &dir, &folder, &name, &handle, look0, private, leased, &acts, cx,
+            );
             #[cfg(target_os = "linux")]
             if leased {
                 let _ = pctwin_lease::release(&handle);
             }
             r
-        }
-    }
-
-    /// Flushes the folder at the stored path `folder` ("" for the approved folder itself), so
-    /// every removal in it is on the disk before the journal says it is done.
-    pub fn flush_folder(&self, folder: &str) -> io::Result<()> {
-        let dir = if folder.is_empty() {
-            self.root.try_clone()?
-        } else {
-            let probe = format!("{folder}/x");
-            match self.open_stored_folder(&probe)? {
-                Some((dir, _)) => dir,
-                None => return Err(io::Error::from(io::ErrorKind::NotFound)),
-            }
         };
-        sync_folder(&dir)
+        let r = r?;
+        // On the disk before anyone records it, through the folder it happened in.
+        sync_folder(&dir)?;
+        Ok(r)
     }
 }
 
@@ -418,6 +486,7 @@ fn move_prove_remove(
     look0: Look,
     private: &str,
     leased: bool,
+    acts: &Acts<'_>,
     cx: &mut Context<'_>,
 ) -> Result<Removed, GateError> {
     let at = |n: &str| crate::stored_path(folder, n);
@@ -428,7 +497,7 @@ fn move_prove_remove(
     let mut private = private.to_string();
     let mut tries = 0;
     loop {
-        match rustix::fs::renameat_with(dir, name, dir, private.as_str(), RenameFlags::NOREPLACE) {
+        match acts.rename(dir, name, private.as_str()) {
             Ok(()) => break,
             Err(Errno::NOENT) => return Ok(Removed::Gone),
             Err(Errno::EXIST) if tries < 8 => {
@@ -443,66 +512,107 @@ fn move_prove_remove(
         }
     }
     // 7. What moved is the held file, unchanged, with one name; anything else goes back.
-    let moved = rustix::fs::statat(dir, private.as_str(), AtFlags::SYMLINK_NOFOLLOW);
     let held = rustix::fs::fstat(handle)?;
-    let ours = moved
-        .as_ref()
-        .is_ok_and(|m| m.st_dev == held.st_dev && m.st_ino == held.st_ino);
+    let ours = match rustix::fs::statat(dir, private.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(moved) => same_file(&moved, &held),
+        Err(Errno::NOENT) => false,
+        Err(e) => return Err(e.into()),
+    };
     let now = Look::from(&held);
     if !ours || now.names != 1 || !now.same_contents(&look0) {
-        return Ok(match put_back(dir, &private, name, cx)? {
+        return Ok(match put_back(dir, &private, name, acts, cx)? {
             Back::Home if !ours => Removed::NotThatFile,
             Back::Home => Removed::Changed,
             Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
         });
     }
-    // 8. Removed, only while nobody has started to open it.
-    if leased && !lease_still_held(handle) {
-        return Ok(match put_back(dir, &private, name, cx)? {
-            Back::Home => Removed::InUse,
-            Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
-        });
-    }
-    match rustix::fs::unlinkat(dir, private.as_str(), AtFlags::empty()) {
-        Ok(()) | Err(Errno::NOENT) => {}
-        Err(e) => return Err(e.into()),
-    }
-    // 9. No names left and unchanged. Bytes written meanwhile are saved beside it; a program
-    // that started to open it at the last moment expects it under its own name, so a copy goes
-    // back there if that is free.
-    let after = Look::of(handle)?;
-    let opened_meanwhile = leased && !lease_still_held(handle);
-    if after.names == 0 && after.same_contents(&look0) && !opened_meanwhile {
-        return Ok(Removed::Removed);
-    }
-    let first = opened_meanwhile.then_some(name);
-    let to = salvage(dir, handle, name, first, cx)?;
-    Ok(Removed::Salvaged { at: at(&to) })
+    // 8 and 9. `now` was looked at after PCTwin's own rename: from here nothing of PCTwin's
+    // touches the file before the removal, so every part of it must still match.
+    Ok(
+        match finish(dir, handle, name, &private, now, leased, acts, cx)? {
+            Finish::Removed => Removed::Removed,
+            Finish::Saved(to) => Removed::Salvaged { at: at(&to) },
+            Finish::NotProven(Unproven::Gone) => Removed::Gone,
+            Finish::NotProven(why) => match put_back(dir, &private, name, acts, cx)? {
+                Back::Home => match why {
+                    Unproven::OpenedMeanwhile => Removed::InUse,
+                    Unproven::NotThatFile => Removed::NotThatFile,
+                    Unproven::Changed | Unproven::Gone => Removed::Changed,
+                },
+                Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
+            },
+        },
+    )
 }
 
-/// Removes the proven copy under `private` (held as `held`, looked at as `before`), then makes sure
-/// nothing written to it meanwhile is lost: `None` if removed cleanly, or the visible name the late
-/// bytes were saved under.
-fn finish_unlink(
+/// How removing a copy proven under its private name ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Finish {
+    /// Removed; nothing was written to it meanwhile.
+    Removed,
+    /// Removed, and what was written to it meanwhile is saved whole under this visible name.
+    Saved(String),
+    /// Not removed: right before the removal it could not be proven (why). Nothing was changed.
+    NotProven(Unproven),
+}
+
+/// Why a copy could not be proven right before its removal.
+#[derive(Debug, PartialEq, Eq)]
+enum Unproven {
+    /// Someone started to open it (Linux: the lease is no longer held).
+    OpenedMeanwhile,
+    /// It no longer looks exactly as it did (size, modified time, change time or names).
+    Changed,
+    /// Something else is under the private name now.
+    NotThatFile,
+    /// Nothing is under the private name now (moved away by someone else).
+    Gone,
+}
+
+/// Steps 8 and 9: the one way a private name is ever removed, on the way through and after a
+/// crash alike. Right before the removal it proves, in this order: nobody has started to open
+/// the held file (Linux, `leased`); the held file still looks exactly as `expect` in every way,
+/// its change time included (`expect` was taken after PCTwin's last rename of it); and what is
+/// under `private` now is that very file. Only then is the name removed. Then the held file is
+/// looked at once more: no names left and unchanged is done; bytes written meanwhile (or a
+/// program that started to open it) are saved beside it under a visible name.
+#[expect(clippy::too_many_arguments, reason = "the parts of one proven copy")]
+fn finish(
     dir: &Dir,
     held: &std::fs::File,
     name: &str,
     private: &str,
-    before: Look,
+    expect: Look,
     leased: bool,
+    acts: &Acts<'_>,
     cx: &mut Context<'_>,
-) -> Result<Option<String>, GateError> {
-    match rustix::fs::unlinkat(dir, private, AtFlags::empty()) {
+) -> Result<Finish, GateError> {
+    if leased && !lease_still_held(held) {
+        return Ok(Finish::NotProven(Unproven::OpenedMeanwhile));
+    }
+    let held_now = rustix::fs::fstat(held)?;
+    if Look::from(&held_now) != expect {
+        return Ok(Finish::NotProven(Unproven::Changed));
+    }
+    match rustix::fs::statat(dir, private, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(under) if same_file(&under, &held_now) => {}
+        Ok(_) => return Ok(Finish::NotProven(Unproven::NotThatFile)),
+        Err(Errno::NOENT) => return Ok(Finish::NotProven(Unproven::Gone)),
+        Err(e) => return Err(e.into()),
+    }
+    match acts.unlink(dir, private) {
         Ok(()) | Err(Errno::NOENT) => {}
         Err(e) => return Err(e.into()),
     }
     let after = Look::of(held)?;
     let opened_meanwhile = leased && !lease_still_held(held);
-    if after.names == 0 && after.same_contents(&before) && !opened_meanwhile {
-        return Ok(None);
+    if after.names == 0 && after.same_contents(&expect) && !opened_meanwhile {
+        return Ok(Finish::Removed);
     }
+    // A program that started to open it at the last moment expects it under its own name, so a
+    // copy goes back there if that is free.
     let first = opened_meanwhile.then_some(name);
-    Ok(Some(salvage(dir, held, name, first, cx)?))
+    Ok(Finish::Saved(salvage(dir, held, name, first, acts, cx)?))
 }
 
 /// Where a file that went back ended.
@@ -515,9 +625,15 @@ enum Back {
 
 /// Moves whatever is under `private` back to `name`, never replacing; if `name` was taken, to
 /// the first free visible name beside it. Each target is recorded first.
-fn put_back(dir: &Dir, private: &str, name: &str, cx: &mut Context<'_>) -> Result<Back, GateError> {
+fn put_back(
+    dir: &Dir,
+    private: &str,
+    name: &str,
+    acts: &Acts<'_>,
+    cx: &mut Context<'_>,
+) -> Result<Back, GateError> {
     (cx.journal)(Step::Putting { private, to: name })?;
-    match rustix::fs::renameat_with(dir, private, dir, name, RenameFlags::NOREPLACE) {
+    match acts.rename(dir, private, name) {
         Ok(()) => return Ok(Back::Home),
         Err(Errno::EXIST) => {}
         Err(e) => return Err(GateError::Io(e.into())),
@@ -525,7 +641,7 @@ fn put_back(dir: &Dir, private: &str, name: &str, cx: &mut Context<'_>) -> Resul
     for n in 1..=MOST_TRIES {
         let to = sibling_name(name, cx.kept_words, n, cx.room_for_words);
         (cx.journal)(Step::Putting { private, to: &to })?;
-        match rustix::fs::renameat_with(dir, private, dir, to.as_str(), RenameFlags::NOREPLACE) {
+        match acts.rename(dir, private, to.as_str()) {
             Ok(()) => return Ok(Back::Beside(to)),
             Err(Errno::EXIST) => continue,
             Err(e) => return Err(GateError::Io(e.into())),
@@ -537,12 +653,15 @@ fn put_back(dir: &Dir, private: &str, name: &str, cx: &mut Context<'_>) -> Resul
 /// Saves the held file's bytes, as they are now, under a new name beside `name` (or `name`
 /// itself first, if `first` says so and it is free), keeping its permissions, modified time and
 /// extended attributes. Never touches a file of the person's: the bytes go into a new private
-/// file, then that is named without replacing anything.
+/// file, made with no permissions at all; only once every byte is in it and flushed does it get
+/// the file's permissions, and is it recorded complete, and only then is it named, without
+/// replacing anything. If PCTwin stops before that, the journal says it may be incomplete.
 fn salvage(
     dir: &Dir,
     held: &std::fs::File,
     name: &str,
     first: Option<&str>,
+    acts: &Acts<'_>,
     cx: &mut Context<'_>,
 ) -> Result<String, GateError> {
     let temp = salvage_name()?;
@@ -552,20 +671,11 @@ fn salvage(
     (cx.journal)(Step::Salvaging {
         temp: &temp,
         to: &targets[0],
+        complete: false,
     })?;
-    let fd = rustix::fs::openat(
-        dir,
-        temp.as_str(),
-        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::RUSR | Mode::WUSR,
-    )?;
-    let mut out = std::fs::File::from(fd);
-    copy_from(held, &mut out)?;
+    let mut out = acts.create(dir, temp.as_str())?;
+    copy_from(held, &mut out, acts)?;
     let st = rustix::fs::fstat(held)?;
-    rustix::fs::fchmod(
-        &out,
-        Mode::from_raw_mode(st.st_mode) & Mode::from_bits_truncate(0o7777),
-    )?;
     copy_attributes(held, &out);
     #[allow(
         clippy::unnecessary_cast,
@@ -582,18 +692,20 @@ fn salvage(
             last_modification: modified,
         },
     )?;
+    // Every byte is in: only now does it get the file's permissions.
+    rustix::fs::fchmod(
+        &out,
+        Mode::from_raw_mode(st.st_mode) & Mode::from_bits_truncate(0o7777),
+    )?;
     out.sync_all()?;
-    for (i, to) in targets.iter().enumerate() {
-        if i > 0 {
-            (cx.journal)(Step::Salvaging { temp: &temp, to })?;
-        }
-        match rustix::fs::renameat_with(
-            dir,
-            temp.as_str(),
-            dir,
-            to.as_str(),
-            RenameFlags::NOREPLACE,
-        ) {
+    // Recorded complete (with each name tried), and only then named.
+    for to in &targets {
+        (cx.journal)(Step::Salvaging {
+            temp: &temp,
+            to,
+            complete: true,
+        })?;
+        match acts.rename(dir, temp.as_str(), to.as_str()) {
             Ok(()) => return Ok(to.clone()),
             Err(Errno::EXIST) => continue,
             Err(e) => return Err(GateError::Io(e.into())),
@@ -602,12 +714,18 @@ fn salvage(
     Err(GateError::TooManyClashes)
 }
 
-/// Copies every byte of `from` (read from its start, by position) into `to`.
-fn copy_from(from: &std::fs::File, to: &mut std::fs::File) -> io::Result<()> {
+/// Copies every byte of `from` (read from its start, by position) into `to`, stopping if the
+/// undo right ends meanwhile.
+fn copy_from(
+    from: &std::fs::File,
+    to: &mut std::fs::File,
+    acts: &Acts<'_>,
+) -> Result<(), GateError> {
     use std::io::Write;
     let mut buf = vec![0u8; 1 << 16];
     let mut at = 0u64;
     loop {
+        acts.go()?;
         let n = read_at(from, &mut buf, at)?;
         if n == 0 {
             return Ok(());
@@ -647,6 +765,43 @@ fn copy_attributes(from: &std::fs::File, to: &std::fs::File) {
                 rustix::fs::XattrFlags::empty(),
             );
         }
+    }
+}
+
+/// Gives the file under `name` in `dir` read and write for its owner, through the very file
+/// (never by following a link): a salvage cut short still has no permissions at all.
+fn make_readable(dir: &Dir, name: &str) -> Result<(), GateError> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        // A handle that only names the file (no reading needed, so no permission needed), then
+        // the change through the system's own link to that handle: the very file opened.
+        let fd = rustix::fs::openat(
+            dir,
+            name,
+            OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        let st = rustix::fs::fstat(&fd)?;
+        if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile {
+            return Err(GateError::Io(crate::invalid("not a file PCTwin saved")));
+        }
+        rustix::fs::chmod(
+            format!("/proc/self/fd/{}", fd.as_raw_fd()).as_str(),
+            Mode::RUSR | Mode::WUSR,
+        )?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // macOS changes a link itself, never what it points to, when told not to follow.
+        rustix::fs::chmodat(
+            dir,
+            name,
+            Mode::RUSR | Mode::WUSR,
+            AtFlags::SYMLINK_NOFOLLOW,
+        )?;
+        Ok(())
     }
 }
 
@@ -716,8 +871,9 @@ fn lease_still_held(handle: &std::fs::File) -> bool {
 }
 
 /// How finishing a removal the journal recorded part of the way ended (after a crash or a stop,
-/// at the next start and again when undo closes). Every answer is decided from the disk and is
-/// safe to reach again: running a resolution twice ends the same way.
+/// at the next start and again when undo closes). Every answer is decided from the disk, is
+/// flushed to the disk before it is given, and is safe to reach again: running a resolution
+/// twice ends the same way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
     /// The very file, unchanged, was under its private name and is now removed.
@@ -725,9 +881,13 @@ pub enum Resolution {
     /// Nothing of it is left under its name or its private name: it was already removed (or
     /// moved away by the person).
     AlreadyGone,
-    /// Nothing was moved: the copy is still under its own name (undo stopped before moving it).
+    /// The copy itself is under its own name and nothing is under the private name (undo stopped
+    /// before moving it, or it was put back): it is to be looked at again as usual, never called
+    /// changed for having been put back.
     StillThere,
-    /// Put back under its own name, being changed or not PCTwin's copy.
+    /// Put back under its own name: something that is not PCTwin's copy, or the copy changed
+    /// since (never the copy itself merely put back: that is [`Resolution::StillThere`] next
+    /// time it is looked at).
     Home,
     /// Put back under its own name: another program has it open (try again later).
     InUse,
@@ -736,6 +896,12 @@ pub enum Resolution {
     CannotCheck,
     /// Kept under the visible name `at` beside its own (the stored path).
     KeptAt { at: String },
+    /// What a program wrote to the copy while undo removed it, saved whole under the visible
+    /// name `at` (the stored path).
+    SavedAgain { at: String },
+    /// What a program wrote to the copy while undo removed it, saved under the visible name `at`,
+    /// but PCTwin stopped while copying it: it may be incomplete. Readable by its owner.
+    SavedMaybeIncomplete { at: String },
     /// Its folder cannot be found on this drive (unplugged, or moved somewhere undo cannot find
     /// it): not resolved, nothing changed.
     FolderMissing,
@@ -743,6 +909,71 @@ pub enum Resolution {
 
 /// How many folders the search for a folder moved after a crash looks in, at most.
 const MOST_FOLDERS_SEARCHED: usize = 20_000;
+
+/// What is under a name, looked at without following a link.
+enum Under {
+    /// Nothing.
+    Nothing,
+    /// A regular file, opened, and proven to be the one the name showed.
+    File(std::fs::File),
+    /// Something else: a link, a folder, a pipe, a device, or a file PCTwin may not read. Never
+    /// PCTwin's copy, which is a regular file PCTwin read.
+    Other,
+}
+
+/// Looks at what is under `name` in `dir` (never following a link, never waiting on a pipe). A
+/// look the drive refuses is an error, never "nothing".
+fn look_under(dir: &Dir, name: &str) -> Result<Under, GateError> {
+    for _ in 0..3 {
+        let seen = match rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(st) => st,
+            Err(Errno::NOENT) => return Ok(Under::Nothing),
+            Err(e) => return Err(e.into()),
+        };
+        if FileType::from_raw_mode(seen.st_mode) != FileType::RegularFile {
+            return Ok(Under::Other);
+        }
+        let file = match rustix::fs::openat(
+            dir,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC,
+            Mode::empty(),
+        ) {
+            Ok(fd) => std::fs::File::from(fd),
+            Err(Errno::ACCESS | Errno::PERM) => return Ok(Under::Other),
+            // Swapped between the look and the open: look again.
+            Err(Errno::NOENT | Errno::LOOP | Errno::NXIO | Errno::ISDIR) => continue,
+            Err(e) => return Err(e.into()),
+        };
+        let opened = rustix::fs::fstat(&file)?;
+        if same_file(&opened, &seen)
+            && FileType::from_raw_mode(opened.st_mode) == FileType::RegularFile
+        {
+            return Ok(Under::File(file));
+        }
+    }
+    Err(GateError::Io(io::Error::other(
+        "what is under this name keeps changing",
+    )))
+}
+
+/// Whether anything at all is under `name` in `dir` (never following a link). A look the drive
+/// refuses is an error.
+fn present(dir: &Dir, name: &str) -> Result<bool, GateError> {
+    match rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(_) => Ok(true),
+        Err(Errno::NOENT) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Whether the copy `file` itself is under `name` in `dir`.
+fn holds_copy(dir: &Dir, name: &str, file: FileId) -> Result<bool, GateError> {
+    Ok(match look_under(dir, name)? {
+        Under::File(f) => identity(&f)?.0 == file,
+        Under::Nothing | Under::Other => false,
+    })
+}
 
 impl Destination {
     /// Finishes a removal recorded as `Removing { file, dir_id, private }` for the copy at the
@@ -753,7 +984,7 @@ impl Destination {
     )]
     pub fn resolve_removing(
         &self,
-        _right: &impl pctwin_journal::UndoRight,
+        right: &impl pctwin_journal::UndoRight,
         stored: &str,
         file: FileId,
         dir_id: FileId,
@@ -766,49 +997,82 @@ impl Destination {
                 "not one of undo's private names",
             )));
         }
+        let in_force = || right.in_force();
+        let acts = Acts {
+            in_force: &in_force,
+        };
+        acts.go()?;
         let name = stored.rsplit('/').next().unwrap_or(stored);
         let Some((dir, folder)) = self.locate(stored, dir_id, private)? else {
             return Ok(Resolution::FolderMissing);
         };
-        let at = |n: &str| crate::stored_path(&folder, n);
-        let Some(mut held) = open_no_follow(&dir, private)? else {
-            // Nothing under the private name: either it was never moved, or already removed.
-            return Ok(match open_no_follow(&dir, name)? {
-                Some(f) if identity(&f).is_ok_and(|(id, _)| id == file) => Resolution::StillThere,
-                _ => Resolution::AlreadyGone,
-            });
+        let r = match look_under(&dir, private)? {
+            // Nothing under the private name: it was never moved, or it is already removed.
+            Under::Nothing => {
+                if holds_copy(&dir, name, file)? {
+                    Resolution::StillThere
+                } else {
+                    Resolution::AlreadyGone
+                }
+            }
+            // Not PCTwin's copy (a link, a folder, a pipe...): back under the name, visibly.
+            Under::Other => put_back_as(&dir, &folder, private, name, Resolution::Home, &acts, cx)?,
+            Under::File(held) => {
+                self.finish_removing(&dir, &folder, name, private, held, file, verify, &acts, cx)?
+            }
         };
+        // What happened here, or in an earlier try that stopped before its flush, is on the disk
+        // before anyone records it.
+        sync_folder(&dir)?;
+        Ok(r)
+    }
+
+    /// The private name holds a regular file: removed if it is the copy, unchanged, and nobody
+    /// else has it open; otherwise it goes back.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the record, the file and the check"
+    )]
+    fn finish_removing(
+        &self,
+        dir: &Dir,
+        folder: &str,
+        name: &str,
+        private: &str,
+        mut held: std::fs::File,
+        file: FileId,
+        verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+        acts: &Acts<'_>,
+        cx: &mut Context<'_>,
+    ) -> Result<Resolution, GateError> {
+        let at = |n: &str| crate::stored_path(folder, n);
         let before = Look::of(&held)?;
-        let ours = identity(&held).is_ok_and(|(id, names)| id == file && names == 1);
+        let (id, names) = identity(&held)?;
         let mut kept = Resolution::Home;
-        if ours && verify(&mut held)? && Look::of(&held)? == before {
+        if id == file && names == 1 && verify(&mut held)? && Look::of(&held)? == before {
             // A program that had it open before PCTwin stopped may still be writing to it: such
             // a file goes back under its name for another try, as at any other time.
-            match self.nobody_else_has(&held, &folder, private, cx.others_closed) {
+            match self.nobody_else_has(&held, folder, private, cx.others_closed) {
                 Openers::None { leased } => {
-                    let r = finish_unlink(&dir, &held, name, private, before, leased, cx);
+                    let r = finish(dir, &held, name, private, before, leased, acts, cx);
                     #[cfg(target_os = "linux")]
                     if leased {
                         let _ = pctwin_lease::release(&held);
                     }
-                    let r = r?;
-                    sync_folder(&dir)?;
-                    return Ok(match r {
-                        None => Resolution::Removed,
-                        Some(to) => Resolution::KeptAt { at: at(&to) },
-                    });
+                    match r? {
+                        Finish::Removed => return Ok(Resolution::Removed),
+                        Finish::Saved(to) => return Ok(Resolution::SavedAgain { at: at(&to) }),
+                        Finish::NotProven(Unproven::Gone) => return Ok(Resolution::AlreadyGone),
+                        Finish::NotProven(Unproven::OpenedMeanwhile) => kept = Resolution::InUse,
+                        Finish::NotProven(Unproven::Changed | Unproven::NotThatFile) => {}
+                    }
                 }
                 Openers::Some => kept = Resolution::InUse,
                 Openers::CannotCheck => kept = Resolution::CannotCheck,
             }
         }
         drop(held);
-        let back = put_back(&dir, private, name, cx)?;
-        sync_folder(&dir)?;
-        Ok(match back {
-            Back::Home => kept,
-            Back::Beside(n) => Resolution::KeptAt { at: at(&n) },
-        })
+        put_back_as(dir, folder, private, name, kept, acts, cx)
     }
 
     /// Whether another program has the held file (under `private` in `folder`) open, for
@@ -843,12 +1107,19 @@ impl Destination {
         }
     }
 
-    /// Finishes a recorded `Putting { private, to }`: whatever is under `private` goes to `to`
-    /// (or the next free visible name), or is confirmed already there.
+    /// Finishes a recorded `Putting { private, to }` for the copy `file`: whatever is under
+    /// `private` goes to `to` (or the next free visible name), or is confirmed already there. If
+    /// it ends under the copy's own name and is the copy itself, it is
+    /// [`Resolution::StillThere`], to be looked at again; never called changed for that.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "exactly the journal's record and the copy"
+    )]
     pub fn resolve_putting(
         &self,
-        _right: &impl pctwin_journal::UndoRight,
+        right: &impl pctwin_journal::UndoRight,
         stored: &str,
+        file: FileId,
         dir_id: FileId,
         private: &str,
         to: &str,
@@ -859,52 +1130,61 @@ impl Destination {
                 "not one of undo's private names",
             )));
         }
+        let in_force = || right.in_force();
+        let acts = Acts {
+            in_force: &in_force,
+        };
+        acts.go()?;
         let name = stored.rsplit('/').next().unwrap_or(stored);
         let Some((dir, folder)) = self.locate(stored, dir_id, private)? else {
             return Ok(Resolution::FolderMissing);
         };
-        let at = |n: &str| crate::stored_path(&folder, n);
-        let resolved = |to: &str| {
-            if to == name {
-                Resolution::Home
+        let ended = |to: &str| -> Result<Resolution, GateError> {
+            if to != name {
+                return Ok(Resolution::KeptAt {
+                    at: crate::stored_path(&folder, to),
+                });
+            }
+            Ok(if holds_copy(&dir, name, file)? {
+                Resolution::StillThere
             } else {
-                Resolution::KeptAt { at: at(to) }
-            }
+                Resolution::Home
+            })
         };
-        if open_no_follow(&dir, private)?.is_none() {
-            // Already moved (the rename is all or nothing): it is under `to`, or moved on since.
-            return Ok(
-                match rustix::fs::statat(&dir, to, AtFlags::SYMLINK_NOFOLLOW) {
-                    Ok(_) => resolved(to),
-                    Err(_) => Resolution::AlreadyGone,
+        let r = if present(&dir, private)? {
+            match acts.rename(&dir, private, to) {
+                Ok(()) => ended(to)?,
+                Err(Errno::EXIST) => match put_back(&dir, private, name, &acts, cx)? {
+                    Back::Home => ended(name)?,
+                    Back::Beside(n) => ended(&n)?,
                 },
-            );
-        }
-        match rustix::fs::renameat_with(&dir, private, &dir, to, RenameFlags::NOREPLACE) {
-            Ok(()) => {
-                sync_folder(&dir)?;
-                return Ok(resolved(to));
+                Err(e) => return Err(e.into()),
             }
-            Err(Errno::EXIST) => {}
-            Err(e) => return Err(e.into()),
-        }
-        let back = put_back(&dir, private, name, cx)?;
+        } else if present(&dir, to)? {
+            // Already moved (the rename is all or nothing).
+            ended(to)?
+        } else {
+            // Moved on since.
+            Resolution::AlreadyGone
+        };
         sync_folder(&dir)?;
-        Ok(match back {
-            Back::Home => Resolution::Home,
-            Back::Beside(n) => Resolution::KeptAt { at: at(&n) },
-        })
+        Ok(r)
     }
 
-    /// Finishes a recorded `Salvaging { temp, to }`: the saved bytes (perhaps not all of them,
-    /// if PCTwin stopped while copying) are given a visible name, never replacing anything.
+    /// Finishes a recorded `Salvaging { temp, to, complete }`: the saved bytes are given a
+    /// visible name, never replacing anything. Unless the journal recorded them `complete`, they
+    /// are published as "may be incomplete" (PCTwin stopped while copying), readable by their
+    /// owner. Something that is not a regular file under `temp` is never PCTwin's: an error, so
+    /// it is left exactly where it is and listed.
+    #[expect(clippy::too_many_arguments, reason = "exactly the journal's record")]
     pub fn resolve_salvaging(
         &self,
-        _right: &impl pctwin_journal::UndoRight,
+        right: &impl pctwin_journal::UndoRight,
         stored: &str,
         dir_id: FileId,
         temp: &str,
         to: &str,
+        complete: bool,
         cx: &mut Context<'_>,
     ) -> Result<Resolution, GateError> {
         if !is_private_name(temp) {
@@ -912,46 +1192,78 @@ impl Destination {
                 "not one of undo's private names",
             )));
         }
+        let in_force = || right.in_force();
+        let acts = Acts {
+            in_force: &in_force,
+        };
+        acts.go()?;
         let name = stored.rsplit('/').next().unwrap_or(stored);
         let Some((dir, folder)) = self.locate(stored, dir_id, temp)? else {
             return Ok(Resolution::FolderMissing);
         };
-        let at = |n: &str| crate::stored_path(&folder, n);
-        if open_no_follow(&dir, temp)?.is_none() {
-            return Ok(
-                match rustix::fs::statat(&dir, to, AtFlags::SYMLINK_NOFOLLOW) {
-                    Ok(_) => Resolution::KeptAt { at: at(to) },
-                    Err(_) => Resolution::AlreadyGone,
-                },
-            );
-        }
-        let mut targets = vec![to.to_string()];
-        for n in 1..=MOST_TRIES {
-            let t = sibling_name(name, cx.kept_words, n, cx.room_for_words);
-            if t != to {
-                targets.push(t);
+        let saved = |to: &str| {
+            let at = crate::stored_path(&folder, to);
+            if complete {
+                Resolution::SavedAgain { at }
+            } else {
+                Resolution::SavedMaybeIncomplete { at }
             }
-        }
-        for (i, target) in targets.iter().enumerate() {
-            if i > 0 {
-                (cx.journal)(Step::Salvaging { temp, to: target })?;
-            }
-            match rustix::fs::renameat_with(
-                &dir,
-                temp,
-                &dir,
-                target.as_str(),
-                RenameFlags::NOREPLACE,
-            ) {
-                Ok(()) => {
-                    sync_folder(&dir)?;
-                    return Ok(Resolution::KeptAt { at: at(target) });
+        };
+        let r = match rustix::fs::statat(&dir, temp, AtFlags::SYMLINK_NOFOLLOW) {
+            Err(Errno::NOENT) => {
+                if present(&dir, to)? {
+                    saved(to)
+                } else {
+                    Resolution::AlreadyGone
                 }
-                Err(Errno::EXIST) => continue,
-                Err(e) => return Err(e.into()),
             }
-        }
-        Err(GateError::TooManyClashes)
+            Err(e) => return Err(e.into()),
+            Ok(st) if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile => {
+                return Err(GateError::Io(crate::invalid(
+                    "something that is not PCTwin's is under one of its private names",
+                )));
+            }
+            Ok(st) => {
+                // Cut short while copying, it still has no permissions at all.
+                if Mode::from_raw_mode(st.st_mode) & Mode::from_bits_truncate(0o777)
+                    == Mode::empty()
+                {
+                    acts.go()?;
+                    make_readable(&dir, temp)?;
+                }
+                let mut targets = vec![to.to_string()];
+                for n in 1..=MOST_TRIES {
+                    let t = sibling_name(name, cx.kept_words, n, cx.room_for_words);
+                    if t != to {
+                        targets.push(t);
+                    }
+                }
+                let mut named = None;
+                for (i, target) in targets.iter().enumerate() {
+                    if i > 0 {
+                        (cx.journal)(Step::Salvaging {
+                            temp,
+                            to: target,
+                            complete,
+                        })?;
+                    }
+                    match acts.rename(&dir, temp, target.as_str()) {
+                        Ok(()) => {
+                            named = Some(target);
+                            break;
+                        }
+                        Err(Errno::EXIST) => continue,
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                match named {
+                    Some(target) => saved(target),
+                    None => return Err(GateError::TooManyClashes),
+                }
+            }
+        };
+        sync_folder(&dir)?;
+        Ok(r)
     }
 
     /// The folder a recorded removal happened in: the one at `stored`'s folder if it is still the
@@ -1003,36 +1315,48 @@ impl Destination {
     }
 }
 
-/// Opens `name` in `dir` for reading without following a link or waiting on a pipe; `None` if
-/// nothing (or not a regular file) is there.
-fn open_no_follow(dir: &Dir, name: &str) -> Result<Option<std::fs::File>, GateError> {
-    match rustix::fs::openat(
-        dir,
-        name,
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) {
-        Ok(fd) => {
-            let f = std::fs::File::from(fd);
-            let st = rustix::fs::fstat(&f)?;
-            let regular = rustix::fs::FileType::from_raw_mode(st.st_mode)
-                == rustix::fs::FileType::RegularFile;
-            Ok(regular.then_some(f))
-        }
-        Err(Errno::NOENT | Errno::LOOP | Errno::NXIO | Errno::ISDIR) => Ok(None),
-        Err(e) => Err(e.into()),
-    }
+/// Puts whatever is under `private` back, and says how that ended: `home` under its own name, or
+/// kept under a visible name beside it.
+fn put_back_as(
+    dir: &Dir,
+    folder: &str,
+    private: &str,
+    name: &str,
+    home: Resolution,
+    acts: &Acts<'_>,
+    cx: &mut Context<'_>,
+) -> Result<Resolution, GateError> {
+    Ok(match put_back(dir, private, name, acts, cx)? {
+        Back::Home => home,
+        Back::Beside(n) => Resolution::KeptAt {
+            at: crate::stored_path(folder, &n),
+        },
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn always() -> bool {
+        true
+    }
+
+    fn names_in(dir: &std::path::Path) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
 
     /// Saved bytes keep the file's permissions, modified time and extended attributes, go under
-    /// a visible name beside it (never over the person's file), and leave nothing hidden.
+    /// a visible name beside it (never over the person's file), and leave nothing hidden. The
+    /// salvage is recorded as not complete before the copy and complete only after it.
     #[test]
     fn a_salvage_keeps_bytes_permissions_time_and_attributes_beside_the_name() {
-        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let p = root.path().join("a.txt");
         std::fs::write(&p, b"late bytes").unwrap();
@@ -1056,7 +1380,7 @@ mod tests {
         let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
         let mut steps = Vec::new();
         let mut journal = |s: Step<'_>| {
-            steps.push(format!("{s:?}"));
+            steps.push(s.clone().into_owned());
             Ok(())
         };
         let mut cx = Context {
@@ -1065,7 +1389,8 @@ mod tests {
             others_closed: false,
             journal: &mut journal,
         };
-        let to = salvage(&dir, &held, "a.txt", Some("a.txt"), &mut cx).unwrap();
+        let acts = Acts { in_force: &always };
+        let to = salvage(&dir, &held, "a.txt", Some("a.txt"), &acts, &mut cx).unwrap();
         assert_eq!(to, "a (kept by PCTwin undo).txt");
         let saved = root.path().join(&to);
         assert_eq!(std::fs::read(&saved).unwrap(), b"late bytes");
@@ -1079,15 +1404,165 @@ mod tests {
             assert_eq!(&v[..n], b"kept");
         }
         assert_eq!(std::fs::read(&p).unwrap(), b"late bytes");
-        let names: Vec<String> = std::fs::read_dir(root.path())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
         assert!(
-            names.iter().all(|n| !n.starts_with(".pctwin-")),
-            "{names:?}"
+            names_in(root.path())
+                .iter()
+                .all(|n| !n.starts_with(".pctwin-")),
+            "{:?}",
+            names_in(root.path())
         );
-        assert_eq!(steps.len(), 2, "{steps:?}");
+        // Not complete before the copy; complete (for each name tried) only after it.
+        let complete: Vec<(String, bool)> = steps
+            .iter()
+            .map(|s| match s {
+                OwnedStep::Salvaging { to, complete, .. } => (to.clone(), *complete),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            complete,
+            [
+                ("a.txt".to_string(), false),
+                ("a.txt".to_string(), true),
+                (to.clone(), true)
+            ]
+        );
+    }
+
+    /// A salvage stopped while copying (its undo right ended) leaves its temporary file with no
+    /// permissions at all and is never recorded complete or named (finding 1).
+    #[test]
+    fn a_salvage_cut_short_has_no_permissions_and_is_never_recorded_complete() {
+        let root = tempfile::tempdir().unwrap();
+        let p = root.path().join("a.txt");
+        std::fs::write(&p, vec![7u8; 300_000]).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let held = std::fs::File::open(&p).unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        let mut steps = Vec::new();
+        let mut journal = |s: Step<'_>| {
+            steps.push(s.clone().into_owned());
+            Ok(())
+        };
+        let mut cx = Context {
+            kept_words: " (kept by PCTwin undo)",
+            room_for_words: 64,
+            others_closed: false,
+            journal: &mut journal,
+        };
+        // The right ends once the temporary file exists and the first part is copied.
+        let looked = std::cell::Cell::new(0);
+        let path = root.path().to_path_buf();
+        let in_force = || {
+            let temp_made = names_in(&path)
+                .iter()
+                .any(|n| n.starts_with(".pctwin-salvage-"));
+            if temp_made {
+                looked.set(looked.get() + 1);
+            }
+            looked.get() < 2
+        };
+        let acts = Acts {
+            in_force: &in_force,
+        };
+        assert!(salvage(&dir, &held, "a.txt", None, &acts, &mut cx).is_err());
+        let temps: Vec<String> = names_in(root.path())
+            .into_iter()
+            .filter(|n| n.starts_with(".pctwin-salvage-"))
+            .collect();
+        assert_eq!(temps.len(), 1, "{:?}", names_in(root.path()));
+        let mode = std::fs::symlink_metadata(root.path().join(&temps[0]))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o7777,
+            0,
+            "a temporary file cut short has no permissions"
+        );
+        assert!(
+            steps.iter().all(|s| matches!(
+                s,
+                OwnedStep::Salvaging {
+                    complete: false,
+                    ..
+                }
+            )),
+            "{steps:?}"
+        );
+        assert_eq!(names_in(root.path()).len(), 2);
+    }
+
+    /// The one way a private name is removed proves everything again right before it: a change
+    /// of any kind since the last look (its change time included), or something else under the
+    /// private name, removes nothing (finding 4).
+    #[test]
+    fn a_private_name_is_removed_only_after_proving_it_again_right_before() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        let private = private_name().unwrap();
+        let p = root.path().join(&private);
+        let mut journal = |_: Step<'_>| Ok(());
+        let mut cx = Context {
+            kept_words: " (kept by PCTwin undo)",
+            room_for_words: 64,
+            others_closed: false,
+            journal: &mut journal,
+        };
+        let acts = Acts { in_force: &always };
+        // Permissions changed after the last look: only the change time tells.
+        std::fs::write(&p, b"copy").unwrap();
+        let held = std::fs::File::open(&p).unwrap();
+        let expect = Look::of(&held).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let r = finish(
+            &dir, &held, "a.txt", &private, expect, false, &acts, &mut cx,
+        )
+        .unwrap();
+        assert_eq!(r, Finish::NotProven(Unproven::Changed));
+        assert!(p.exists());
+        // Another file put under the private name, the held one looking just as last looked at:
+        // only the proof of what is under the name tells, and nothing is removed.
+        std::fs::write(root.path().join("theirs"), b"theirs").unwrap();
+        std::fs::rename(root.path().join("theirs"), &p).unwrap();
+        let expect = Look::of(&held).unwrap();
+        let r = finish(
+            &dir, &held, "a.txt", &private, expect, false, &acts, &mut cx,
+        )
+        .unwrap();
+        assert_eq!(r, Finish::NotProven(Unproven::NotThatFile));
+        assert_eq!(std::fs::read(&p).unwrap(), b"theirs");
+        // Nothing there any more.
+        std::fs::remove_file(&p).unwrap();
+        let r = finish(
+            &dir, &held, "a.txt", &private, expect, false, &acts, &mut cx,
+        )
+        .unwrap();
+        assert_eq!(r, Finish::NotProven(Unproven::Gone));
+        // The very file, exactly as last looked at: removed.
+        std::fs::write(&p, b"copy").unwrap();
+        let held = std::fs::File::open(&p).unwrap();
+        let expect = Look::of(&held).unwrap();
+        let r = finish(
+            &dir, &held, "a.txt", &private, expect, false, &acts, &mut cx,
+        )
+        .unwrap();
+        assert_eq!(r, Finish::Removed);
+        assert!(names_in(root.path()).is_empty());
+        // A right that has ended removes nothing.
+        std::fs::write(&p, b"copy").unwrap();
+        let held = std::fs::File::open(&p).unwrap();
+        let expect = Look::of(&held).unwrap();
+        let ended = || false;
+        let acts = Acts { in_force: &ended };
+        assert!(
+            finish(
+                &dir, &held, "a.txt", &private, expect, false, &acts, &mut cx
+            )
+            .is_err()
+        );
+        assert!(p.exists());
     }
 
     #[test]
@@ -1107,5 +1582,24 @@ mod tests {
             "a".repeat(32)
         )));
         assert!(!is_private_name("a.txt"));
+    }
+
+    /// A step as kept by a test journal.
+    #[derive(Debug)]
+    enum OwnedStep {
+        Salvaging { to: String, complete: bool },
+        Other,
+    }
+
+    impl Step<'_> {
+        fn into_owned(self) -> OwnedStep {
+            match self {
+                Step::Salvaging { to, complete, .. } => OwnedStep::Salvaging {
+                    to: to.to_string(),
+                    complete,
+                },
+                _ => OwnedStep::Other,
+            }
+        }
     }
 }

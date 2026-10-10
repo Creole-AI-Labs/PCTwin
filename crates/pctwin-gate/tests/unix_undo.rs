@@ -545,6 +545,7 @@ fn a_recorded_put_back_and_salvage_are_finished_visibly() {
             &permit,
             "Docs/a.txt",
             folder,
+            folder,
             &private,
             "a.txt",
             &mut resolve_cx(&mut ok),
@@ -556,6 +557,7 @@ fn a_recorded_put_back_and_salvage_are_finished_visibly() {
         .resolve_putting(
             &permit,
             "Docs/a.txt",
+            folder,
             folder,
             &private,
             "a.txt",
@@ -573,12 +575,13 @@ fn a_recorded_put_back_and_salvage_are_finished_visibly() {
             folder,
             &temp,
             "a (kept by PCTwin undo).txt",
+            true,
             &mut resolve_cx(&mut ok),
         )
         .unwrap();
     assert_eq!(
         r,
-        Resolution::KeptAt {
+        Resolution::SavedAgain {
             at: "Docs/a (kept by PCTwin undo).txt".into()
         }
     );
@@ -593,6 +596,8 @@ fn private_names_are_random_and_recognised_exactly() {
     assert_ne!(a, b);
     assert!(a.starts_with(".pctwin-undo-") && a.len() == ".pctwin-undo-".len() + 32);
 }
+
+// ---- Part J review, 10 October 2026 -------------------------------------------------------
 
 /// macOS: a file another program has open is kept, even one that only watches it for changes
 /// (opened with O_EVTONLY): any program but PCTwin counts (finding 7).
@@ -637,4 +642,232 @@ fn a_file_another_program_has_open_even_only_to_watch_it_is_kept() {
         assert_eq!(std::fs::read(&path).unwrap(), b"copy", "{how}");
         std::fs::remove_file(&path).unwrap();
     }
+}
+
+/// A put-back that ended under the copy's own name, with the copy itself there, is not "changed":
+/// the normal checks run again (finding 2). Only a file that is not the copy is `Home`.
+#[test]
+fn a_put_back_home_of_the_copy_itself_is_looked_at_again_not_called_changed() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let folder = dir_id(&dest, "Docs");
+    let mut ok = |_: Step<'_>| Ok(());
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let private = pctwin_gate::private_name().unwrap();
+    // Stopped after the rename back (private name empty), and stopped before it.
+    for moved_back in [true, false] {
+        if !moved_back {
+            std::fs::rename(docs.join("a.txt"), docs.join(&private)).unwrap();
+        }
+        let r = dest
+            .resolve_putting(
+                &permit,
+                "Docs/a.txt",
+                file,
+                folder,
+                &private,
+                "a.txt",
+                &mut resolve_cx(&mut ok),
+            )
+            .unwrap();
+        assert_eq!(r, Resolution::StillThere, "moved back: {moved_back}");
+        assert_eq!(names(&docs), ["a.txt"]);
+    }
+    // Something that is not the copy, put back under the name: Home.
+    std::fs::remove_file(docs.join("a.txt")).unwrap();
+    put(&root, "Docs/a.txt", b"theirs");
+    let r = dest
+        .resolve_putting(
+            &permit,
+            "Docs/a.txt",
+            file,
+            folder,
+            &private,
+            "a.txt",
+            &mut resolve_cx(&mut ok),
+        )
+        .unwrap();
+    assert_eq!(r, Resolution::Home);
+}
+
+/// Something that is not a regular file under a private name (a link, a folder) is never taken
+/// for "nothing there": it goes back under the copy's name, visibly (finding 6).
+#[test]
+fn something_that_is_not_a_file_under_a_private_name_is_put_back_never_ignored() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let folder = dir_id(&dest, "Docs");
+    let mut ok = |_: Step<'_>| Ok(());
+    put(&root, "Docs/probe2.txt", b"x");
+    let file = id(&dest, "Docs/probe2.txt");
+    std::fs::remove_file(docs.join("probe2.txt")).unwrap();
+    for kind in ["link", "folder"] {
+        let private = pctwin_gate::private_name().unwrap();
+        if kind == "link" {
+            std::os::unix::fs::symlink("elsewhere", docs.join(&private)).unwrap();
+        } else {
+            std::fs::create_dir(docs.join(&private)).unwrap();
+        }
+        let r = dest
+            .resolve_removing(
+                &permit,
+                "Docs/a.txt",
+                file,
+                folder,
+                &private,
+                bytes_are(b"copy"),
+                &mut resolve_cx(&mut ok),
+            )
+            .unwrap();
+        assert_eq!(r, Resolution::Home, "{kind}");
+        assert!(hidden(&docs).is_empty(), "{kind}: {:?}", names(&docs));
+        let meta = std::fs::symlink_metadata(docs.join("a.txt")).unwrap();
+        assert_eq!(meta.is_symlink(), kind == "link", "{kind}");
+        assert_eq!(meta.is_dir(), kind == "folder", "{kind}");
+        if kind == "link" {
+            std::fs::remove_file(docs.join("a.txt")).unwrap();
+        } else {
+            std::fs::remove_dir(docs.join("a.txt")).unwrap();
+        }
+    }
+}
+
+/// A name the drive cannot even look at is an error, never "already gone" (finding 5).
+#[test]
+fn a_name_that_cannot_be_looked_at_is_an_error_never_already_gone() {
+    let Some((_root, dest)) = setup() else { return };
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let folder = dir_id(&dest, "Docs");
+    let mut ok = |_: Step<'_>| Ok(());
+    let private = pctwin_gate::private_name().unwrap();
+    let too_long = "x".repeat(300);
+    let r = dest.resolve_putting(
+        &permit,
+        "Docs/a.txt",
+        folder,
+        folder,
+        &private,
+        &too_long,
+        &mut resolve_cx(&mut ok),
+    );
+    assert!(r.is_err(), "{r:?}");
+    let temp = format!(".pctwin-salvage-{}", "2".repeat(32));
+    let r = dest.resolve_salvaging(
+        &permit,
+        "Docs/a.txt",
+        folder,
+        &temp,
+        &too_long,
+        false,
+        &mut resolve_cx(&mut ok),
+    );
+    assert!(r.is_err(), "{r:?}");
+}
+
+/// Linux: every "already done" answer of the resolver flushes the folder first, so a folder that
+/// cannot be flushed (here: one PCTwin may not read) is an error, not a quiet "done" (finding 5).
+#[cfg(target_os = "linux")]
+#[test]
+fn an_already_done_resolution_flushes_its_folder_first() {
+    use std::os::unix::fs::PermissionsExt;
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let folder = dir_id(&dest, "Docs");
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    std::fs::remove_file(docs.join("a.txt")).unwrap();
+    let mut ok = |_: Step<'_>| Ok(());
+    let private = pctwin_gate::private_name().unwrap();
+    std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o300)).unwrap();
+    // Root reads any folder: then there is nothing to prove here.
+    let unreadable = std::fs::read_dir(&docs).is_err();
+    let removing = dest.resolve_removing(
+        &permit,
+        "Docs/a.txt",
+        file,
+        folder,
+        &private,
+        bytes_are(b"copy"),
+        &mut resolve_cx(&mut ok),
+    );
+    let putting = dest.resolve_putting(
+        &permit,
+        "Docs/a.txt",
+        file,
+        folder,
+        &private,
+        "a.txt",
+        &mut resolve_cx(&mut ok),
+    );
+    let salvaging = dest.resolve_salvaging(
+        &permit,
+        "Docs/a.txt",
+        folder,
+        &format!(".pctwin-salvage-{}", "3".repeat(32)),
+        "a (kept by PCTwin undo).txt",
+        true,
+        &mut resolve_cx(&mut ok),
+    );
+    std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if unreadable {
+        assert!(removing.is_err(), "{removing:?}");
+        assert!(putting.is_err(), "{putting:?}");
+        assert!(salvaging.is_err(), "{salvaging:?}");
+    } else {
+        eprintln!("skipped: running as a user who can read any folder");
+    }
+}
+
+/// A salvage that PCTwin stopped while copying is published under a visible name as "may be
+/// incomplete", readable by its owner; one recorded complete is "saved again" (finding 1).
+#[test]
+fn a_salvage_cut_short_is_published_as_maybe_incomplete() {
+    use std::os::unix::fs::PermissionsExt;
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let folder = dir_id(&dest, "Docs");
+    let mut ok = |_: Step<'_>| Ok(());
+    for (n, complete, mode) in [(4u8, false, 0o000), (5, false, 0o644), (6, true, 0o640)] {
+        let temp = format!(".pctwin-salvage-{}", n.to_string().repeat(32));
+        std::fs::write(docs.join(&temp), b"late bytes").unwrap();
+        std::fs::set_permissions(docs.join(&temp), std::fs::Permissions::from_mode(mode)).unwrap();
+        let to = format!("a{n} (kept by PCTwin undo).txt");
+        let stored = format!("Docs/a{n}.txt");
+        let mut resolve = || {
+            dest.resolve_salvaging(
+                &permit,
+                &stored,
+                folder,
+                &temp,
+                &to,
+                complete,
+                &mut resolve_cx(&mut ok),
+            )
+            .unwrap()
+        };
+        let r = resolve();
+        let at = format!("Docs/{to}");
+        if complete {
+            assert_eq!(r, Resolution::SavedAgain { at });
+        } else {
+            assert_eq!(r, Resolution::SavedMaybeIncomplete { at });
+        }
+        // Again, once published: the same answer.
+        assert_eq!(resolve(), r);
+        let meta = std::fs::metadata(docs.join(&to)).unwrap();
+        // Readable by its owner, whatever it had while being copied.
+        assert_ne!(meta.permissions().mode() & 0o400, 0, "{n}");
+        assert_eq!(std::fs::read(docs.join(&to)).unwrap(), b"late bytes");
+    }
+    assert!(hidden(&docs).is_empty());
 }

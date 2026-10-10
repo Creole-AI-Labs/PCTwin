@@ -162,6 +162,10 @@ pub struct UndoOptions<'a> {
     /// The byte length of the longest of those words in any language, so a name made with them
     /// always fits whatever the language.
     pub room_for_words: usize,
+    /// How long finishing one removal left part-way may take ([`RESOLVE_WITHIN`]): a drive that
+    /// stops answering leaves that file for another try ([`TOOK_TOO_LONG`]) instead of holding
+    /// undo, or its close, for good.
+    pub resolve_within: std::time::Duration,
 }
 
 impl Default for UndoOptions<'_> {
@@ -170,9 +174,13 @@ impl Default for UndoOptions<'_> {
             others_closed: false,
             kept_words: KEPT_WORDS,
             room_for_words: KEPT_WORDS_ROOM,
+            resolve_within: RESOLVE_WITHIN,
         }
     }
 }
+
+/// How long finishing one removal left part-way may take, by default.
+pub const RESOLVE_WITHIN: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// The English words added to the name of a file kept beside its own ("Report (kept by PCTwin
 /// undo).docx").
@@ -360,6 +368,19 @@ fn undo_file(
             PartWay::Ended(outcome) => return done(&permit, outcome),
             PartWay::BackForNow(why) => return not_done(why.into()),
             PartWay::Unresolved(why) => return not_done(why),
+            // A put-back finished with the copy itself under its name: it starts over, as if
+            // never tried (never "changed since" for having been put back).
+            PartWay::StillThere if matches!(stage, Undo::Putting { .. }) => {
+                journal.record_undo(
+                    &permit,
+                    entry.id,
+                    &Undo::Done {
+                        outcome: UndoOutcome::NotDone {
+                            why: BACK_UNDER_ITS_NAME.into(),
+                        },
+                    },
+                )?;
+            }
             PartWay::StillThere => {}
         }
     }
@@ -437,6 +458,13 @@ pub const SAVED_AGAIN: &str =
     "a program changed it while undo removed it, so it was saved again under a new name";
 /// Why a copy undo was saving again when PCTwin stopped needs a look.
 pub const SAVE_CUT_SHORT: &str = "undo stopped while saving changes made to this file during undo; if you changed it then, check it";
+/// Why a copy saved again under a new name needs a look: undo stopped while saving it, so it may
+/// not hold everything.
+pub const SAVED_MAYBE_INCOMPLETE: &str = "a program changed it while undo removed it, and undo stopped while saving it again under a new name, so the saved copy may be incomplete; check it";
+/// Why a copy was not undone this time: its drive did not answer in time.
+pub const TOOK_TOO_LONG: &str = "its drive did not answer in time, so it was left as it is for now; check the drive is connected and working, then undo again";
+/// Internal: a copy put back under its own name, to be looked at again from the start.
+const BACK_UNDER_ITS_NAME: &str = "it is back under its own name, to be looked at again";
 /// Why a copy was not undone: its folder is not on the drive right now.
 pub const FOLDER_MISSING: &str =
     "its folder cannot be found on this drive right now (is the drive connected?)";
@@ -518,11 +546,13 @@ fn remove_copy(
     )?;
     let failed_record = std::cell::Cell::new(None);
     let mut record = |step: pctwin_gate::Step<'_>| {
-        record_step(journal, permit, entry.id, file, dir_id, step).map_err(|e| {
-            let message = e.to_string();
-            failed_record.set(Some(e));
-            std::io::Error::other(message)
-        })
+        journal
+            .record_undo(permit, entry.id, &stage_of(file, dir_id, step))
+            .map_err(|e| {
+                let message = e.to_string();
+                failed_record.set(Some(e));
+                std::io::Error::other(message)
+            })
     };
     let mut cx = pctwin_gate::Context {
         kept_words: options.kept_words,
@@ -530,35 +560,24 @@ fn remove_copy(
         others_closed: options.others_closed,
         journal: &mut record,
     };
+    // The gate flushes the folder it acted in before it answers, so the outcome is on the disk
+    // before the journal says it is done.
     let removed = dest.remove_checked(permit, *copy, &private, &mut cx);
     if let Some(e) = failed_record.take() {
         return Err(e);
     }
-    let removed = match removed {
-        Ok(r) => r,
+    match removed {
+        Ok(r) => Ok(outcome_of(r)),
         // Not recorded as done: the next undo finishes it from the disk.
-        Err(e) => return Ok(Err(e.to_string())),
-    };
-    // On the disk before the journal says it is done.
-    let folder = final_path.rsplit_once('/').map_or("", |(f, _)| f);
-    if let Err(e) = dest.flush_folder(folder) {
-        return Ok(Err(e.to_string()));
+        Err(e) => Ok(Err(e.to_string())),
     }
-    Ok(outcome_of(removed))
 }
 
-/// Records one step of a removal on Linux and macOS before it happens.
+/// The journal's record of one step of a removal on Linux and macOS, taken before it happens.
 #[cfg(unix)]
-fn record_step(
-    journal: &Journal,
-    right: &impl pctwin_journal::UndoRight,
-    id: u64,
-    file: FileId,
-    dir_id: FileId,
-    step: pctwin_gate::Step<'_>,
-) -> Result<(), JournalError> {
+fn stage_of(file: FileId, dir_id: FileId, step: pctwin_gate::Step<'_>) -> Undo {
     use pctwin_gate::Step;
-    let stage = match step {
+    match step {
         Step::NewPrivate { private } => Undo::Removing {
             file,
             dir_id,
@@ -570,21 +589,22 @@ fn record_step(
             private: private.into(),
             to: to.into(),
         },
-        Step::Salvaging { temp, to } => Undo::Salvaging {
+        Step::Salvaging { temp, to, complete } => Undo::Salvaging {
             file,
             dir_id,
             temp: temp.into(),
             to: to.into(),
+            complete,
         },
-    };
-    journal.record_undo(right, id, &stage)
+    }
 }
 
 /// How finishing a removal left part-way ended.
 enum PartWay {
     /// Finished: how it ended.
     Ended(UndoOutcome),
-    /// Nothing was moved: the copy is still under its name, to be looked at as usual.
+    /// Nothing was moved, or it was put back: the copy itself is under its name, to be looked at
+    /// as usual.
     StillThere,
     /// Back under its own name for now, for another try (why).
     #[cfg_attr(
@@ -601,9 +621,161 @@ enum PartWay {
 
 /// Finishes, from what is on the disk, a removal the journal recorded part of the way (`stage`),
 /// with an open undo permit or the ticket undo's close lends. Safe to run again.
+///
+/// The drive's part runs on a worker thread with a deadline (`options.resolve_within`; Security
+/// Design 3B: "each resolution runs in a worker with a deadline"), because a drive that stops
+/// answering blocks whatever asks it, for good. The worker gets a lent right and asks this thread
+/// to journal each of its steps; if it does not finish in time, this file is
+/// [`PartWay::Unresolved`] ([`TOOK_TOO_LONG`]), the lent right ends (the gate then refuses every
+/// rename and removal it would still try), and the file stays busy for any other try until the
+/// worker has ended.
 fn finish_part_way(
     journal: &Journal,
     right: &impl pctwin_journal::UndoRight,
+    dest: &Destination,
+    entry: &Entry,
+    stage: &Undo,
+    options: &UndoOptions<'_>,
+) -> Result<PartWay, JournalError> {
+    let Some(key) = hidden_name(stage) else {
+        return Ok(PartWay::StillThere);
+    };
+    let dest = match dest.try_clone() {
+        Ok(dest) => dest,
+        Err(e) => return Ok(PartWay::Unresolved(e.to_string())),
+    };
+    let (entry, stage) = (entry.clone(), stage.clone());
+    let (others_closed, kept_words, room_for_words) = (
+        options.others_closed,
+        options.kept_words.to_string(),
+        options.room_for_words,
+    );
+    let ended = within(
+        journal,
+        right,
+        entry.id,
+        key,
+        options.resolve_within,
+        move |lent, record| {
+            let options = UndoOptions {
+                others_closed,
+                kept_words: &kept_words,
+                room_for_words,
+                resolve_within: RESOLVE_WITHIN,
+            };
+            on_the_disk(record, lent, &dest, &entry, &stage, &options)
+        },
+    )?;
+    Ok(ended.unwrap_or_else(|| PartWay::Unresolved(TOOK_TOO_LONG.into())))
+}
+
+/// The hidden name a stage before Done is about (for telling one part-way removal from another).
+fn hidden_name(stage: &Undo) -> Option<&str> {
+    match stage {
+        Undo::Removing { private, .. } | Undo::Putting { private, .. } => Some(private),
+        Undo::Salvaging { temp, .. } => Some(temp),
+        Undo::Done { .. } => None,
+    }
+}
+
+/// The hidden names whose part-way removal a worker is finishing right now (one worker each).
+static BUSY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Marks a hidden name busy for as long as it lives (moved into the worker).
+struct Busy(String);
+
+impl Busy {
+    fn claim(key: &str) -> Option<Busy> {
+        let mut busy = BUSY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if busy.iter().any(|k| k == key) {
+            return None;
+        }
+        busy.push(key.to_string());
+        Some(Busy(key.to_string()))
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        let mut busy = BUSY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        busy.retain(|k| *k != self.0);
+    }
+}
+
+/// What a worker asks of the thread that lent it its right.
+enum Ask<T> {
+    /// Journal this step of entry's undo, and answer.
+    Record(Undo, std::sync::mpsc::Sender<Result<(), JournalError>>),
+    /// The work ended.
+    Ended(Result<T, JournalError>),
+}
+
+/// Runs `work` on a worker thread, within `wait`, for entry `id`, about the hidden name `key`:
+/// `work` gets a right lent from `right` and a way to journal its steps (journaled by this
+/// thread, with `right`, before the worker goes on). `Ok(None)` if it did not end in time, or if
+/// another worker is still busy with `key`: then the lent right has ended (the gate refuses
+/// whatever the worker would still do), and nothing it asks to journal is journaled any more.
+fn within<T: Send + 'static>(
+    journal: &Journal,
+    right: &impl pctwin_journal::UndoRight,
+    id: u64,
+    key: &str,
+    wait: std::time::Duration,
+    work: impl FnOnce(
+        &pctwin_journal::LentRight,
+        &dyn Fn(&Undo) -> Result<(), JournalError>,
+    ) -> Result<T, JournalError>
+    + Send
+    + 'static,
+) -> Result<Option<T>, JournalError> {
+    use std::sync::mpsc;
+    let Some(busy) = Busy::claim(key) else {
+        return Ok(None);
+    };
+    let deadline = std::time::Instant::now() + wait;
+    let (lending, lent) = right.lend();
+    let (asks, asked) = mpsc::channel::<Ask<T>>();
+    std::thread::Builder::new()
+        .name("pctwin-undo-finish".into())
+        .spawn(move || {
+            let _busy = busy;
+            let ask = asks.clone();
+            let record = move |stage: &Undo| -> Result<(), JournalError> {
+                let gone = || JournalError::Storage("undo stopped here: it took too long".into());
+                let (answer, answered) = mpsc::channel();
+                ask.send(Ask::Record(stage.clone(), answer))
+                    .map_err(|_| gone())?;
+                answered.recv().map_err(|_| gone())?
+            };
+            let ended = work(&lent, &record);
+            let _ = asks.send(Ask::Ended(ended));
+        })
+        .map_err(|e| JournalError::Storage(e.to_string()))?;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        match asked.recv_timeout(left) {
+            Ok(Ask::Record(stage, answer)) => {
+                let _ = answer.send(journal.record_undo(right, id, &stage));
+            }
+            Ok(Ask::Ended(ended)) => return ended.map(Some),
+            Err(_) => {
+                // Ended here, before anything else: from now the worker can act on nothing.
+                drop(lending);
+                return Ok(None);
+            }
+        }
+    }
+}
+
+/// The drive's part of [`finish_part_way`], on the worker: each step journaled through `record`
+/// before it happens, every rename and removal under the lent `right`.
+fn on_the_disk(
+    record: &dyn Fn(&Undo) -> Result<(), JournalError>,
+    right: &pctwin_journal::LentRight,
     dest: &Destination,
     entry: &Entry,
     stage: &Undo,
@@ -614,7 +786,7 @@ fn finish_part_way(
     };
     #[cfg(windows)]
     {
-        let _ = (journal, options);
+        let _ = (record, options);
         // Removal by handle is all or nothing: the copy is under its name or it is gone.
         let Undo::Removing { file, .. } = stage else {
             return Ok(PartWay::Unresolved(
@@ -634,8 +806,8 @@ fn finish_part_way(
             return Ok(PartWay::StillThere);
         };
         let failed_record = std::cell::Cell::new(None);
-        let mut record = |step: pctwin_gate::Step<'_>| {
-            record_step(journal, right, entry.id, file, dir_id, step).map_err(|e| {
+        let mut journal = |step: pctwin_gate::Step<'_>| {
+            record(&stage_of(file, dir_id, step)).map_err(|e| {
                 let message = e.to_string();
                 failed_record.set(Some(e));
                 std::io::Error::other(message)
@@ -645,7 +817,7 @@ fn finish_part_way(
             kept_words: options.kept_words,
             room_for_words: options.room_for_words,
             others_closed: options.others_closed,
-            journal: &mut record,
+            journal: &mut journal,
         };
         let resolved = match stage {
             Undo::Removing { private, .. } => dest.resolve_removing(
@@ -658,11 +830,11 @@ fn finish_part_way(
                 &mut cx,
             ),
             Undo::Putting { private, to, .. } => {
-                dest.resolve_putting(right, final_path, dir_id, private, to, &mut cx)
+                dest.resolve_putting(right, final_path, file, dir_id, private, to, &mut cx)
             }
-            Undo::Salvaging { temp, to, .. } => {
-                dest.resolve_salvaging(right, final_path, dir_id, temp, to, &mut cx)
-            }
+            Undo::Salvaging {
+                temp, to, complete, ..
+            } => dest.resolve_salvaging(right, final_path, dir_id, temp, to, *complete, &mut cx),
             Undo::Done { .. } => return Ok(PartWay::StillThere),
         };
         if let Some(e) = failed_record.take() {
@@ -670,22 +842,28 @@ fn finish_part_way(
         }
         let salvaging = matches!(stage, Undo::Salvaging { .. });
         let putting = matches!(stage, Undo::Putting { .. });
+        let kept_at = |at: String, why: &str| {
+            PartWay::Ended(UndoOutcome::KeptAt {
+                at,
+                why: why.into(),
+            })
+        };
         Ok(match resolved {
             Err(e) => PartWay::Unresolved(e.to_string()),
             Ok(Resolution::Removed) => PartWay::Ended(UndoOutcome::Deleted),
             // The copy was removed, but the bytes being saved again are not there.
             Ok(Resolution::AlreadyGone) if salvaging => PartWay::Ended(kept(SAVE_CUT_SHORT)),
-            // What was being put back (never the copy to remove) was moved on since.
+            // What was being put back was moved on since.
             Ok(Resolution::AlreadyGone) if putting => PartWay::Ended(kept(MOVED_SINCE)),
             Ok(Resolution::AlreadyGone) => PartWay::Ended(UndoOutcome::AlreadyGone),
             Ok(Resolution::StillThere) => PartWay::StillThere,
+            // Something that is not the copy, or the copy changed since.
             Ok(Resolution::Home) => PartWay::Ended(kept(CHANGED_SINCE)),
             Ok(Resolution::InUse) => PartWay::BackForNow(IN_USE),
             Ok(Resolution::CannotCheck) => PartWay::BackForNow(CANNOT_CHECK),
-            Ok(Resolution::KeptAt { at }) => PartWay::Ended(UndoOutcome::KeptAt {
-                at,
-                why: if salvaging { SAVED_AGAIN } else { KEPT_BESIDE }.into(),
-            }),
+            Ok(Resolution::KeptAt { at }) => kept_at(at, KEPT_BESIDE),
+            Ok(Resolution::SavedAgain { at }) => kept_at(at, SAVED_AGAIN),
+            Ok(Resolution::SavedMaybeIncomplete { at }) => kept_at(at, SAVED_MAYBE_INCOMPLETE),
             Ok(Resolution::FolderMissing) => PartWay::Unresolved(FOLDER_MISSING.into()),
         })
     }
@@ -739,4 +917,195 @@ pub fn close_undo(
             PartWay::Unresolved(why) => Resolved::Unresolved { why },
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    //! The deadline on finishing a part-way removal (Part J, finding 8), shown with work that
+    //! stands in for a drive that stops answering.
+    use super::*;
+    use pctwin_journal::{Actor, Landed, Permission, PlannedWrite, UndoRight};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    fn journal() -> (tempfile::TempDir, Journal) {
+        let dir = tempfile::tempdir().unwrap();
+        let j = Journal::open(&dir.path().join("journal.redb")).unwrap();
+        (dir, j)
+    }
+
+    fn file() -> FileId {
+        FileId {
+            volume: 3,
+            index: std::num::NonZeroU64::new(5).unwrap(),
+            born: None,
+        }
+    }
+
+    fn committed(j: &Journal) -> u64 {
+        let id = j
+            .plan(&PlannedWrite {
+                item: ItemId::from_hex(&"01".repeat(16)).unwrap(),
+                source_laptop: pctwin_record::LaptopId::from_hex(&"02".repeat(16)).unwrap(),
+                destination: "me".into(),
+                path: "a.txt".into(),
+                size: 1,
+                actor: Actor {
+                    acting_account: "1".into(),
+                    for_account: "1".into(),
+                    permission: Permission::OwnFolders,
+                },
+                block_size: crate::block_size_for(1),
+                source_modified_ns: None,
+                source_file: None,
+                partial_keep: Default::default(),
+                place: None,
+            })
+            .unwrap();
+        j.staged(id, ".pctwin-t.part", &[]).unwrap();
+        j.verified(id, [1; 32], None).unwrap();
+        j.applied(id, "a.txt").unwrap();
+        j.committed(
+            id,
+            Landed {
+                size: 1,
+                modified_ns: None,
+                file: Some(file()),
+            },
+        )
+        .unwrap();
+        id
+    }
+
+    fn removing(n: u8) -> Undo {
+        Undo::Removing {
+            file: file(),
+            dir_id: file(),
+            private: format!(".pctwin-undo-{n:032x}"),
+        }
+    }
+
+    /// Work that ends in time: each step it asks for is journaled (by this thread, with the real
+    /// right) before it goes on, and its answer comes back.
+    #[test]
+    fn work_that_ends_in_time_has_its_steps_journaled_first() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        let r = within(
+            &j,
+            &permit,
+            a,
+            "key-in-time",
+            Duration::from_secs(10),
+            |lent, record| {
+                assert!(lent.in_force());
+                record(&removing(1))?;
+                Ok(7)
+            },
+        )
+        .unwrap();
+        assert_eq!(r, Some(7));
+        assert_eq!(j.undo_of(a).unwrap(), Some(removing(1)));
+    }
+
+    /// Work that does not end in time (a drive that stopped answering): the caller is back at
+    /// the deadline, the file is not finished, and the late worker can act on nothing: its right
+    /// has ended and nothing it asks to journal is journaled.
+    #[test]
+    fn work_that_takes_too_long_is_given_up_and_acts_on_nothing_after() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        let (late_tx, late_rx) = mpsc::channel();
+        let start = Instant::now();
+        let r = within(
+            &j,
+            &permit,
+            a,
+            "key-too-long",
+            Duration::from_millis(100),
+            move |lent, record| {
+                std::thread::sleep(Duration::from_millis(600));
+                let in_force = lent.in_force();
+                let recorded = record(&removing(2)).is_ok();
+                let _ = late_tx.send((in_force, recorded));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(r, None);
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "{:?}",
+            start.elapsed()
+        );
+        let (in_force, recorded) = late_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(!in_force, "a late worker's right has ended");
+        assert!(!recorded, "a late worker's step is never journaled");
+        assert_eq!(j.undo_of(a).unwrap(), None);
+    }
+
+    /// While a worker is still busy with a hidden name (given up on, but not ended), no second
+    /// worker starts on it; once it has ended, the name can be finished again.
+    #[test]
+    fn a_hidden_name_is_never_finished_by_two_workers_at_once() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let (ended_tx, ended_rx) = mpsc::channel::<()>();
+        let first = within(
+            &j,
+            &permit,
+            a,
+            "key-busy",
+            Duration::from_millis(50),
+            move |_, _| {
+                let _ = go_rx.recv();
+                let _ = ended_tx.send(());
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(first, None);
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ran2 = std::sync::Arc::clone(&ran);
+        let start = Instant::now();
+        let second = within(
+            &j,
+            &permit,
+            a,
+            "key-busy",
+            Duration::from_secs(10),
+            move |_, _| {
+                ran2.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(second, None);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+        go_tx.send(()).unwrap();
+        ended_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The busy mark goes as the worker's thread ends, just after it said so.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let third = loop {
+            let r = within(
+                &j,
+                &permit,
+                a,
+                "key-busy",
+                Duration::from_secs(10),
+                |_, _| Ok(3),
+            )
+            .unwrap();
+            if r.is_some() || Instant::now() > deadline {
+                break r;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(third, Some(3));
+    }
 }

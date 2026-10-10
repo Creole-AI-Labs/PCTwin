@@ -787,6 +787,139 @@ fn closing_finishes_a_removal_cut_short_after_moving_aside() {
     assert!(!w.exists("a.txt"));
 }
 
+/// Linux and macOS: a salvage PCTwin stopped while copying is never said to be "saved again": it
+/// is named visibly and said to be possibly incomplete; one the journal recorded complete is
+/// "saved again" (Part J, finding 1).
+#[cfg(unix)]
+#[test]
+fn a_salvage_cut_short_is_said_to_be_maybe_incomplete_never_saved_again() {
+    use std::os::unix::fs::PermissionsExt;
+    for (complete, mode) in [(false, 0o644), (false, 0o000), (true, 0o644)] {
+        let w = world();
+        let a = w.moved(1, "a.txt", b"a", &[]);
+        let stage = w.removing(a);
+        let Undo::Removing { file, dir_id, .. } = stage.clone() else {
+            unreachable!()
+        };
+        let temp = format!(".pctwin-salvage-{}", "1".repeat(32));
+        let to = "a (kept by PCTwin undo).txt";
+        {
+            let permit = w.journal.begin_undo().unwrap();
+            w.journal.record_undo(&permit, a, &stage).unwrap();
+            w.journal
+                .record_undo(
+                    &permit,
+                    a,
+                    &Undo::Salvaging {
+                        file,
+                        dir_id,
+                        temp: temp.clone(),
+                        to: to.into(),
+                        complete,
+                    },
+                )
+                .unwrap();
+        }
+        // The copy was removed, then PCTwin stopped while saving what was written to it.
+        std::fs::remove_file(w.root.join("a.txt")).unwrap();
+        std::fs::write(w.root.join(&temp), b"part of the late byt").unwrap();
+        std::fs::set_permissions(w.root.join(&temp), std::fs::Permissions::from_mode(mode))
+            .unwrap();
+        let r = w.undo();
+        let why = if complete {
+            pctwin_transfer::SAVED_AGAIN
+        } else {
+            pctwin_transfer::SAVED_MAYBE_INCOMPLETE
+        };
+        assert_eq!(
+            outcome_of(&r, "a.txt"),
+            UndoOutcome::KeptAt {
+                at: to.into(),
+                why: why.into()
+            },
+            "complete {complete}, mode {mode:o}: {r:?}"
+        );
+        assert_eq!(
+            std::fs::read(w.root.join(to)).unwrap(),
+            b"part of the late byt"
+        );
+        assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    }
+}
+
+/// Linux: a copy put back under its name because another program had it open is tried again
+/// later and removed once it is free; it is never called "changed" for having been put back
+/// (Part J, finding 2).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_copy_put_back_because_it_was_in_use_is_removed_once_free() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    // PCTwin stopped after moving it aside; a program has it open.
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    let holder = std::fs::File::open(w.root.join(private)).unwrap();
+    let r = w.undo();
+    assert_eq!(
+        outcome_of(&r, "a.txt"),
+        UndoOutcome::NotDone {
+            why: pctwin_transfer::IN_USE.into()
+        },
+        "{r:?}"
+    );
+    assert!(w.exists("a.txt"));
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    drop(holder);
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(!w.exists("a.txt"));
+}
+
+/// Linux and macOS: a put-back cut short (recorded, not yet done) of the copy itself ends with
+/// the copy under its name and looked at again as usual, so it is removed (Part J, finding 2).
+#[cfg(unix)]
+#[test]
+fn a_put_back_of_the_copy_cut_short_is_finished_and_the_copy_removed() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing {
+        file,
+        dir_id,
+        private,
+    } = stage.clone()
+    else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+        w.journal
+            .record_undo(
+                &permit,
+                a,
+                &Undo::Putting {
+                    file,
+                    dir_id,
+                    private: private.clone(),
+                    to: "a.txt".into(),
+                },
+            )
+            .unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(&private)).unwrap();
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+}
+
 /// Every undo on Linux and macOS leaves no name of its own behind.
 #[cfg(unix)]
 #[test]

@@ -110,6 +110,9 @@ jobs:
       # The gate, journal and transfer tests all run here, on macOS too (the matrix includes
       # macos-latest and macos-15-intel): this runs the whole workspace.
       - name: Tests
+        # Linux and macOS: the undo tests must really run on the runner's drive, never skip.
+        env:
+          PCTWIN_REQUIRE_UNIX_UNDO: "1"
         run: cargo test --workspace --locked
       # macOS only: two probes that REPORT facts about the platform. They never fail the job.
       - name: macOS probe, file leases (F_SETLEASE)
