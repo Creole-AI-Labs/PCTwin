@@ -100,6 +100,10 @@ jobs:
       - name: Unsafe fence (only pctwin-lease may loosen unsafe_code)
         shell: bash
         run: bash scripts/unsafe-fence.sh
+      - name: Unsafe fence self-test (it must catch attributes spread over lines)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/unsafe-fence-selftest.sh
       - name: Fence canary (clippy must reject a file removal in the canary crate)
         shell: bash
         run: bash scripts/clippy-canary.sh
