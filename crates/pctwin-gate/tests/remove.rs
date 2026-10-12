@@ -266,7 +266,11 @@ fn only_the_one_name_is_touched_and_no_private_name_is_left() {
     assert_eq!(names(&root.path().join("Docs")), ["b.txt"]);
 }
 
-/// Several tries at once: each copy removed exactly once, the rest refused, never an error.
+/// Several tries at once: each copy removed exactly once, the rest refused, never an error. A
+/// loser finds the file gone (looked at through what it holds, or at its name), or in use by the
+/// winner: Windows refuses to open a file whose removal is under way ("access denied") and a
+/// held one (sharing); Linux refuses an open while another try holds a lease on it; macOS file
+/// coordination makes the others wait until the winner is done, and they find it gone.
 #[test]
 fn removing_the_same_file_twice_at_once_removes_it_once() {
     let (root, dest) = setup();

@@ -1308,20 +1308,6 @@ fn remove_checked(
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
     const SHARING_VIOLATION: i32 = 32;
     const ACCESS_DENIED: i32 = 5;
-    // Before opening, from the folder's list: a file stored online only is never opened (opening
-    // it for its bytes would download it).
-    match dir.symlink_metadata(name) {
-        Ok(meta) => {
-            if let Some(kept) = not_plain(meta.file_attributes()) {
-                return Ok(kept);
-            }
-            if !meta.is_file() {
-                return Ok(Removed::NotThatFile);
-            }
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Removed::Gone),
-        Err(e) => return Err(GateError::Io(e)),
-    }
     let mut options = OpenOptions::new();
     options
         .access_mode(
@@ -1330,27 +1316,42 @@ fn remove_checked(
         .share_mode(FILE_SHARE_READ)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     let mut waits = IN_USE_WAITS_MS.iter();
+    // One step, looked at and opened together, and taken again as a whole after a wait: the look
+    // before the open meets the same moments as the open itself.
     let mut held = loop {
-        match dir.open_with(name, &options) {
-            Ok(f) => break f.into_std(),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Removed::Gone),
-            // Held by another program, or (refused) being removed by another try right now.
-            Err(e) if matches!(e.raw_os_error(), Some(SHARING_VIOLATION | ACCESS_DENIED)) => {
-                if dir
-                    .symlink_metadata(name)
-                    .is_err_and(|m| m.kind() == io::ErrorKind::NotFound)
-                {
-                    return Ok(Removed::Gone);
+        // Before opening, from the folder's list: a file stored online only is never opened
+        // (opening it for its bytes would download it).
+        let refused = match dir.symlink_metadata(name) {
+            Ok(meta) => {
+                if let Some(kept) = not_plain(meta.file_attributes()) {
+                    return Ok(kept);
                 }
-                match waits.next() {
-                    Some(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
-                    None if e.raw_os_error() == Some(SHARING_VIOLATION) => {
-                        return Ok(Removed::InUse);
-                    }
-                    None => return Err(GateError::Io(e)),
+                if !meta.is_file() {
+                    return Ok(Removed::NotThatFile);
+                }
+                match dir.open_with(name, &options) {
+                    Ok(f) => break f.into_std(),
+                    Err(e) => e,
                 }
             }
-            Err(e) => return Err(GateError::Io(e)),
+            Err(e) => e,
+        };
+        if refused.kind() == io::ErrorKind::NotFound {
+            return Ok(Removed::Gone);
+        }
+        match refused.raw_os_error() {
+            // Held by another program (sharing), or refused while another try's removal of it is
+            // under way: Windows answers "access denied" to every look at a file between the
+            // moment its removal is asked for and the moment it leaves the folder. Waited out
+            // and looked at again; a refusal that lasts is in use, or (access denied) an error.
+            Some(SHARING_VIOLATION | ACCESS_DENIED) => match waits.next() {
+                Some(ms) => std::thread::sleep(std::time::Duration::from_millis(*ms)),
+                None if refused.raw_os_error() == Some(SHARING_VIOLATION) => {
+                    return Ok(Removed::InUse);
+                }
+                None => return Err(GateError::Io(refused)),
+            },
+            _ => return Err(GateError::Io(refused)),
         }
     };
     // Everything from here is on the held handle.
