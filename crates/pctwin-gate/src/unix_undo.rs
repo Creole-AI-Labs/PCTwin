@@ -676,6 +676,11 @@ fn salvage(
     let mut out = acts.create(dir, temp.as_str())?;
     copy_from(held, &mut out, acts)?;
     let st = rustix::fs::fstat(held)?;
+    let mode = Mode::from_raw_mode(st.st_mode) & Mode::from_bits_truncate(0o7777);
+    // Every byte is in. Extended attributes can only be written to a file its owner may write,
+    // so it gets its permissions plus the owner's write first (a read-only file would otherwise
+    // lose them too). Stopped from here on, the journal still says it may be incomplete.
+    rustix::fs::fchmod(&out, mode | Mode::WUSR)?;
     copy_attributes(held, &out);
     #[allow(
         clippy::unnecessary_cast,
@@ -692,11 +697,8 @@ fn salvage(
             last_modification: modified,
         },
     )?;
-    // Every byte is in: only now does it get the file's permissions.
-    rustix::fs::fchmod(
-        &out,
-        Mode::from_raw_mode(st.st_mode) & Mode::from_bits_truncate(0o7777),
-    )?;
+    // Now exactly the file's own permissions.
+    rustix::fs::fchmod(&out, mode)?;
     out.sync_all()?;
     // Recorded complete (with each name tried), and only then named.
     for to in &targets {

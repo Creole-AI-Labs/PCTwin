@@ -113,7 +113,7 @@ jobs:
         # Linux and macOS: the undo tests must really run on the runner's drive, never skip.
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
       # macOS only: two probes that REPORT facts about the platform. They never fail the job.
       - name: macOS probe, file leases (F_SETLEASE)
         if: runner.os == 'macOS'
