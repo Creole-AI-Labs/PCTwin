@@ -237,6 +237,35 @@ fn same_file(a: &rustix::fs::Stat, b: &rustix::fs::Stat) -> bool {
     a.st_dev == b.st_dev && a.st_ino == b.st_ino
 }
 
+/// The held copy, still under `name` in `dir`, looked at again: `None` if it looks exactly as
+/// `before`, otherwise why it is kept, the most specific true reason first. No names left is
+/// gone; a second name is linked (making a name moves the change time too, so the names are
+/// looked at first); one name, but no longer this one, is gone or not that file; anything else
+/// is changed. Decided from the held file and the name, never from a check by path.
+fn looked_again(
+    dir: &Dir,
+    name: &str,
+    handle: &std::fs::File,
+    before: &Look,
+) -> Result<Option<Removed>, GateError> {
+    let held = rustix::fs::fstat(handle)?;
+    let now = Look::from(&held);
+    if now == *before {
+        return Ok(None);
+    }
+    if let Some(kept) = crate::by_names(now.names) {
+        return Ok(Some(kept));
+    }
+    Ok(Some(
+        match rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(under) if same_file(&under, &held) => Removed::Changed,
+            Ok(_) => Removed::NotThatFile,
+            Err(Errno::NOENT) => Removed::Gone,
+            Err(e) => return Err(e.into()),
+        },
+    ))
+}
+
 /// Whether the drive under `file` is one undo removes from: it must keep birth times and
 /// tell files apart reliably (Linux ext4, XFS, btrfs, ZFS, F2FS; macOS APFS, writable).
 fn drive_allowed(file: &std::fs::File) -> io::Result<bool> {
@@ -353,6 +382,9 @@ impl Destination {
             Err(Errno::NOENT) => return done(Removed::Gone),
             // A link at the name (never followed), or something that is not a file.
             Err(Errno::LOOP | Errno::NXIO | Errno::ISDIR) => return done(Removed::NotThatFile),
+            // Linux: another holds a write lease on it (another undo try at this moment, or a
+            // file server) and is told someone wants it; an open that never waits is refused.
+            Err(Errno::AGAIN) => return done(Removed::InUse),
             Err(e) => return Err(GateError::Io(e.into())),
         };
         let st = rustix::fs::fstat(&handle)?;
@@ -382,15 +414,21 @@ impl Destination {
             return done(Removed::AppKeepsOpen);
         }
         let look0 = Look::from(&st);
-        if !verify(&mut handle)? || Look::of(&handle)? != look0 {
+        // What the held file shows outranks the caller's check: a second name made, or the
+        // copy gone from its name, while it was checked is said as that, not as a change.
+        let unchanged = verify(&mut handle)?;
+        if let Some(kept) = looked_again(&dir, name, &handle, &look0)? {
+            return done(kept);
+        }
+        if !unchanged {
             return done(Removed::Changed);
         }
         // A change in the last 10 ms may not show yet in the drive's clock ticks: wait it out
         // and look again.
         if changed_lately(&look0) {
             std::thread::sleep(birth_hold::HOLD);
-            if Look::of(&handle)? != look0 {
-                return done(Removed::Changed);
+            if let Some(kept) = looked_again(&dir, name, &handle, &look0)? {
+                return done(kept);
             }
         }
         let folder = stored.rsplit_once('/').map_or("", |(f, _)| f).to_string();
@@ -430,18 +468,28 @@ impl Destination {
             in_force: &in_force,
         };
         acts.go()?;
+        // Before "in use" or "cannot check" is said, the held copy is looked at again: a copy
+        // gone (another try or the person removed it), given a second name, moved or changed
+        // meanwhile is said as that. On macOS both checks below go by the file's path, and a
+        // path that no longer finds the file is a failed check, never the answer.
+        let unless_looked_again = |otherwise: Removed| -> Result<Removed, GateError> {
+            Ok(looked_again(&dir, &name, &handle, &look0)?.unwrap_or(otherwise))
+        };
         // 5. Nobody else has it open.
         #[cfg(target_os = "macos")]
         let r = {
             let Some(path) = self.root_path.as_ref().map(|r| r.join(&folder).join(&name)) else {
-                return Ok(Removed::CannotCheck);
+                return unless_looked_again(Removed::CannotCheck);
             };
             // Apps presenting the file are told and let go; the rest happens while they wait. A
             // coordination that does not answer in time, or fails, removes nothing.
-            let done = macos_check::coordinated_for_deleting(&path, || {
+            let done = macos_check::coordinated_for_deleting(&path, || -> Result<_, GateError> {
+                if let Some(kept) = looked_again(&dir, &name, &handle, &look0)? {
+                    return Ok(kept);
+                }
                 match macos_check::others_have_it_open(&path) {
-                    Ok(true) => Ok(Removed::InUse),
-                    Err(_) => Ok(Removed::CannotCheck),
+                    Ok(true) => unless_looked_again(Removed::InUse),
+                    Err(_) => unless_looked_again(Removed::CannotCheck),
                     Ok(false) => move_prove_remove(
                         &dir, &folder, &name, &handle, look0, private, false, &acts, cx,
                     ),
@@ -449,15 +497,15 @@ impl Destination {
             });
             match done {
                 Ok(Some(r)) => r,
-                Ok(None) | Err(_) => Ok(Removed::CannotCheck),
+                Ok(None) | Err(_) => unless_looked_again(Removed::CannotCheck),
             }
         };
         #[cfg(not(target_os = "macos"))]
         let r = {
             let leased = match others_have_it_open(&handle, cx.others_closed) {
                 Openers::None { leased } => leased,
-                Openers::Some => return Ok(Removed::InUse),
-                Openers::CannotCheck => return Ok(Removed::CannotCheck),
+                Openers::Some => return unless_looked_again(Removed::InUse),
+                Openers::CannotCheck => return unless_looked_again(Removed::CannotCheck),
             };
             let r = move_prove_remove(
                 &dir, &folder, &name, &handle, look0, private, leased, &acts, cx,
@@ -490,8 +538,8 @@ fn move_prove_remove(
     cx: &mut Context<'_>,
 ) -> Result<Removed, GateError> {
     let at = |n: &str| crate::stored_path(folder, n);
-    if Look::of(handle)? != look0 {
-        return Ok(Removed::Changed);
+    if let Some(kept) = looked_again(dir, name, handle, &look0)? {
+        return Ok(kept);
     }
     // 6. Moved aside, never replacing.
     let mut private = private.to_string();
@@ -522,6 +570,7 @@ fn move_prove_remove(
     if !ours || now.names != 1 || !now.same_contents(&look0) {
         return Ok(match put_back(dir, &private, name, acts, cx)? {
             Back::Home if !ours => Removed::NotThatFile,
+            Back::Home if now.names > 1 => Removed::Linked,
             Back::Home => Removed::Changed,
             Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
         });
@@ -537,6 +586,7 @@ fn move_prove_remove(
                 Back::Home => match why {
                     Unproven::OpenedMeanwhile => Removed::InUse,
                     Unproven::NotThatFile => Removed::NotThatFile,
+                    Unproven::Linked => Removed::Linked,
                     Unproven::Changed | Unproven::Gone => Removed::Changed,
                 },
                 Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
@@ -561,7 +611,9 @@ enum Finish {
 enum Unproven {
     /// Someone started to open it (Linux: the lease is no longer held).
     OpenedMeanwhile,
-    /// It no longer looks exactly as it did (size, modified time, change time or names).
+    /// Another name was made for it.
+    Linked,
+    /// It no longer looks exactly as it did (size, modified time or change time).
     Changed,
     /// Something else is under the private name now.
     NotThatFile,
@@ -571,9 +623,10 @@ enum Unproven {
 
 /// Steps 8 and 9: the one way a private name is ever removed, on the way through and after a
 /// crash alike. Right before the removal it proves, in this order: nobody has started to open
-/// the held file (Linux, `leased`); the held file still looks exactly as `expect` in every way,
-/// its change time included (`expect` was taken after PCTwin's last rename of it); and what is
-/// under `private` now is that very file. Only then is the name removed. Then the held file is
+/// the held file (Linux, `leased`); what is under `private` now is that very file; and the held
+/// file still looks exactly as `expect` in every way, its change time included (`expect` was
+/// taken after PCTwin's last rename of it), a second name made for it said as that first (making
+/// a name moves the change time too). Only then is the name removed. Then the held file is
 /// looked at once more: no names left and unchanged is done; bytes written meanwhile (or a
 /// program that started to open it) are saved beside it under a visible name.
 #[expect(clippy::too_many_arguments, reason = "the parts of one proven copy")]
@@ -591,14 +644,19 @@ fn finish(
         return Ok(Finish::NotProven(Unproven::OpenedMeanwhile));
     }
     let held_now = rustix::fs::fstat(held)?;
-    if Look::from(&held_now) != expect {
-        return Ok(Finish::NotProven(Unproven::Changed));
-    }
     match rustix::fs::statat(dir, private, AtFlags::SYMLINK_NOFOLLOW) {
         Ok(under) if same_file(&under, &held_now) => {}
         Ok(_) => return Ok(Finish::NotProven(Unproven::NotThatFile)),
         Err(Errno::NOENT) => return Ok(Finish::NotProven(Unproven::Gone)),
         Err(e) => return Err(e.into()),
+    }
+    let now = Look::from(&held_now);
+    if now != expect {
+        return Ok(Finish::NotProven(if now.names > 1 {
+            Unproven::Linked
+        } else {
+            Unproven::Changed
+        }));
     }
     match acts.unlink(dir, private) {
         Ok(()) | Err(Errno::NOENT) => {}
@@ -1066,7 +1124,9 @@ impl Destination {
                         Finish::Saved(to) => return Ok(Resolution::SavedAgain { at: at(&to) }),
                         Finish::NotProven(Unproven::Gone) => return Ok(Resolution::AlreadyGone),
                         Finish::NotProven(Unproven::OpenedMeanwhile) => kept = Resolution::InUse,
-                        Finish::NotProven(Unproven::Changed | Unproven::NotThatFile) => {}
+                        Finish::NotProven(
+                            Unproven::Linked | Unproven::Changed | Unproven::NotThatFile,
+                        ) => {}
                     }
                 }
                 Openers::Some => kept = Resolution::InUse,
@@ -1565,6 +1625,35 @@ mod tests {
             .is_err()
         );
         assert!(p.exists());
+    }
+
+    /// A second name made after the last look is said as such, never as a change, though making
+    /// a name moves the change time too; and nothing is removed.
+    #[test]
+    fn a_second_name_made_after_the_last_look_is_linked_not_changed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        let private = private_name().unwrap();
+        let p = root.path().join(&private);
+        let mut journal = |_: Step<'_>| Ok(());
+        let mut cx = Context {
+            kept_words: " (kept by PCTwin undo)",
+            room_for_words: 64,
+            others_closed: false,
+            journal: &mut journal,
+        };
+        let acts = Acts { in_force: &always };
+        std::fs::write(&p, b"copy").unwrap();
+        let held = std::fs::File::open(&p).unwrap();
+        let expect = Look::of(&held).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::hard_link(&p, root.path().join("theirs")).unwrap();
+        let r = finish(
+            &dir, &held, "a.txt", &private, expect, false, &acts, &mut cx,
+        )
+        .unwrap();
+        assert_eq!(r, Finish::NotProven(Unproven::Linked));
+        assert_eq!(names_in(root.path()), [private.as_str(), "theirs"]);
     }
 
     #[test]

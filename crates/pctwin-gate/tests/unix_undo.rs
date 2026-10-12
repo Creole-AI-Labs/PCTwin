@@ -288,7 +288,103 @@ fn a_new_version_saved_over_the_name_is_put_back_and_never_lost() {
     );
     assert_eq!(std::fs::read(docs.join(&private)).unwrap(), b"planted");
     assert!(steps.iter().any(|s| s.contains("Putting")), "{steps:?}");
-    assert_eq!(names(&docs), ["a.txt", private.as_str()]);
+    // Nothing of PCTwin's is left hidden: the one private-looking name is the file this test
+    // planted there, untouched (`names` is sorted, so it comes first).
+    assert_eq!(hidden(&docs), [private.as_str()]);
+    assert_eq!(names(&docs), [private.as_str(), "a.txt"]);
+}
+
+/// A second name made for the copy just as it is moved aside keeps it, and says why: the count
+/// of names is looked at before the change time (making a name moves the change time too).
+#[test]
+fn a_second_name_made_as_the_copy_is_moved_aside_keeps_it_as_linked() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let copy = match dest
+        .check_copy("Docs/a.txt", file, bytes_are(b"copy"))
+        .unwrap()
+    {
+        Check::Ready(c) => c,
+        Check::Done(r) => panic!("{r:?}"),
+    };
+    // The private name is taken, so a new one is recorded; at that moment another name is made.
+    let private = pctwin_gate::private_name().unwrap();
+    std::fs::write(docs.join(&private), b"planted").unwrap();
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let mut journal = |s: Step<'_>| {
+        if matches!(s, Step::NewPrivate { .. }) {
+            std::fs::hard_link(docs.join("a.txt"), docs.join("theirs.txt")).unwrap();
+        }
+        Ok(())
+    };
+    let mut cx = Context {
+        kept_words: WORDS,
+        room_for_words: 64,
+        others_closed: false,
+        journal: &mut journal,
+    };
+    let r = dest
+        .remove_checked(&permit, *copy, &private, &mut cx)
+        .unwrap();
+    assert_eq!(r, Removed::Linked);
+    assert_eq!(std::fs::read(docs.join("a.txt")).unwrap(), b"copy");
+    assert_eq!(std::fs::read(docs.join("theirs.txt")).unwrap(), b"copy");
+    assert_eq!(hidden(&docs), [private.as_str()]);
+}
+
+/// A copy removed by someone else after it was checked is gone. That is decided from the held
+/// file (no names left), never from a check by its path that can no longer find it (macOS asks
+/// which programs have a file open by its path).
+#[test]
+fn a_copy_removed_by_someone_else_after_it_was_checked_is_gone() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let copy = match dest
+        .check_copy("Docs/a.txt", file, bytes_are(b"copy"))
+        .unwrap()
+    {
+        Check::Ready(c) => c,
+        Check::Done(r) => panic!("{r:?}"),
+    };
+    std::fs::remove_file(docs.join("a.txt")).unwrap();
+    let private = pctwin_gate::private_name().unwrap();
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let mut nothing = |_: Step<'_>| Ok(());
+    let mut cx = Context {
+        kept_words: WORDS,
+        room_for_words: 64,
+        others_closed: false,
+        journal: &mut nothing,
+    };
+    let r = dest
+        .remove_checked(&permit, *copy, &private, &mut cx)
+        .unwrap();
+    assert_eq!(r, Removed::Gone);
+    assert!(names(&docs).is_empty());
+}
+
+/// Linux: while another holds a write lease on the copy (another undo try at the same moment, or
+/// a file server), an open that never waits is refused. That is "in use", for another try, never
+/// an error.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_copy_another_holds_a_lease_on_is_in_use_never_an_error() {
+    let Some((root, dest)) = setup() else { return };
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let other = std::fs::File::open(root.path().join("Docs/a.txt")).unwrap();
+    assert!(matches!(
+        pctwin_lease::write_lease(&other),
+        pctwin_lease::Lease::Held
+    ));
+    assert_eq!(plain(&dest, "Docs/a.txt", file, b"copy"), Removed::InUse);
+    assert_eq!(names(&root.path().join("Docs")), ["a.txt"]);
 }
 
 /// When the name is taken again as a file is being put back, it goes beside it, visibly.
