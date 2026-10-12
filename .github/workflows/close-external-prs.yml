@@ -11,10 +11,10 @@ permissions: {}
 
 jobs:
   close:
-    if: >-
-      github.event.pull_request.author_association != 'OWNER' &&
-      github.event.pull_request.author_association != 'MEMBER' &&
-      github.event.pull_request.author_association != 'COLLABORATOR'
+    # Only pull requests from forks are closed. A branch inside this repository can only be pushed by
+    # someone with write access, so that test cannot misjudge us; author_association could (it showed
+    # our own pull request #1 as outside when org membership is private, and closed it).
+    if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
