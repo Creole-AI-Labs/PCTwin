@@ -58,6 +58,23 @@ export function Lock({ className }: Props) {
   );
 }
 
+export function History({ className }: Props) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+      <path d="M3 3v5h5M12 7v5l3 3" />
+    </svg>
+  );
+}
+
+export function Wrench({ className }: Props) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.1 2.1 0 0 1-3-3l8.4-8.4a4 4 0 0 0-2-2z" />
+    </svg>
+  );
+}
+
 /** The welcome picture: the old laptop handing over to the new one. */
 export function MoveIllustration({ className }: Props) {
   return (

@@ -5,12 +5,13 @@ import { HELP_URL, openExternal } from "./external";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { Lock } from "./icons";
 import { setTrayLabels } from "./native";
+import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import NextStep from "./screens/NextStep";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
 
-type Screen = { id: "welcome" } | { id: "role" } | { id: "next"; role: Role };
+type Screen = { id: "welcome" } | { id: "role" } | { id: "next"; role: Role } | { id: "soon"; which: Soon };
 
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
@@ -61,7 +62,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
           </label>
         </header>
         <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
-          {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} />}
+          {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} onSoon={(which) => { setScreen({ id: "soon", which }); }} />}
+          {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
           {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "next", role }); }} />}
           {screen.id === "next" && <NextStep role={screen.role} onBack={() => { setScreen({ id: "role" }); }} />}
         </main>

@@ -37,3 +37,19 @@ next-body = Pairing the two laptops comes next. It is still being built, so noth
 
 tray-show = Show PCTwin
 tray-quit = Quit PCTwin
+
+## F01 secondary actions and their coming-soon pages
+
+welcome-restore = Restore setup
+welcome-rescue = Rescue a laptop
+welcome-cloud-question = Have Cloud Twin?
+welcome-cloud-body = Sign in to see your saved setup.
+welcome-sign-in = Sign in
+
+soon-eyebrow = Coming soon
+soon-restore-title = Restore setup
+soon-restore-body = Rebuild a laptop from a setup profile you saved after a move. This is coming in a later version.
+soon-rescue-title = Rescue a laptop
+soon-rescue-body = Bring files back from a laptop that will not start, by connecting its drive to a working one. This is coming in a later version.
+soon-sign-in-title = Cloud Twin
+soon-sign-in-body = Signing in to see your saved setup comes with Cloud Twin, in a later version. Moving your own laptops will always be free, with no account.

@@ -47,6 +47,22 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
+  it.each([
+    ["Restore setup", "Restore setup"],
+    ["Rescue a laptop", "Rescue a laptop"],
+    ["Sign in", "Cloud Twin"],
+  ])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(button) }));
+    expect(screen.getByText("Coming soon")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(heading);
+    expect(screen.getByText(/later version/)).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
   it("a new screen takes keyboard focus", () => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));

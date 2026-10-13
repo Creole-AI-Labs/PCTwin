@@ -180,6 +180,29 @@ h1.welcome span {
   cursor: pointer;
 }
 
+/* Welcome: secondary choices and the Cloud Twin row */
+.secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.sign-in-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--colour-line);
+  color: var(--colour-muted);
+}
+
+.sign-in-row p {
+  margin: 0;
+}
+
 /* Illustration */
 .illustration {
   display: block;
