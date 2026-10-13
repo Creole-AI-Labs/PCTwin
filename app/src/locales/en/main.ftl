@@ -2,6 +2,8 @@
 # time from this file; a string missing in a language falls back to English.
 
 app-name = PCTwin
+brand-home =
+    .aria-label = PCTwin home
 language-label = Language
 
 footer-free = Free personal moves. No account needed.

@@ -18,7 +18,7 @@ export default function Welcome({ onStart, onSoon }: { onStart: () => void; onSo
         </Localized>
       </h1>
       <Localized id="welcome-body">
-        <p className="lead">Bring your files, apps and familiar settings along for the move.</p>
+        <p className="subhead welcome-subhead">Bring your files, apps and familiar settings along for the move.</p>
       </Localized>
       <MoveIllustration className="illustration flip" />
       <button type="button" className="button button-primary" onClick={onStart}>
@@ -53,7 +53,7 @@ export default function Welcome({ onStart, onSoon }: { onStart: () => void; onSo
           <Wrench />
         </button>
       </div>
-      <div className="sign-in-row">
+      <div className="account-invite">
         <p>
           <Localized id="welcome-cloud-question">
             <span>Have Cloud Twin?</span>

@@ -75,28 +75,31 @@ export function Wrench({ className }: Props) {
   );
 }
 
-/** The welcome picture: the old laptop handing over to the new one. */
+/**
+ * The welcome picture, drawn to the mockup: the old laptop (white, tilted back 6 degrees) hands over
+ * to the new one (blue, tilted forward 6 degrees) through the citron arrow tile.
+ */
 export function MoveIllustration({ className }: Props) {
   return (
-    <svg className={className} viewBox="0 0 320 120" aria-hidden="true" focusable="false">
-      <g transform="rotate(-3 80 60)">
-        <rect x="18" y="16" width="118" height="78" rx="10" fill="#dfe6f3" />
-        <rect x="26" y="24" width="102" height="62" rx="5" fill="#ffffff" />
-        <rect x="42" y="38" width="38" height="6" rx="3" fill="#a9b9ef" />
-        <rect x="42" y="52" width="62" height="6" rx="3" fill="#c9d4f6" />
-        <rect x="42" y="66" width="56" height="6" rx="3" fill="#c9d4f6" />
-        <rect x="8" y="96" width="140" height="8" rx="4" fill="#dfe6f3" />
+    <svg className={className} viewBox="0 0 300 138" aria-hidden="true" focusable="false">
+      <g transform="rotate(-6 80 66)">
+        <rect x="9" y="21" width="142" height="90" rx="11" fill="#dde4f1" />
+        <rect x="15" y="27" width="130" height="78" rx="6" fill="#ffffff" />
+        <rect x="52" y="52" width="38" height="6" rx="3" fill="#a7baf0" />
+        <rect x="52" y="63" width="55" height="6" rx="3" fill="#cbd8f6" />
+        <rect x="52" y="74" width="55" height="6" rx="3" fill="#cbd8f6" />
+        <rect x="-5" y="113" width="170" height="8" rx="4" fill="#dde4f1" />
       </g>
-      <g transform="rotate(4 240 60)">
-        <rect x="182" y="12" width="122" height="82" rx="10" fill="#1a3fd0" />
-        <rect x="190" y="20" width="106" height="66" rx="5" fill="var(--colour-blue)" />
-        <rect x="206" y="34" width="40" height="6" rx="3" fill="var(--colour-citron)" />
-        <rect x="206" y="48" width="66" height="6" rx="3" fill="#7d97f7" />
-        <rect x="206" y="62" width="60" height="6" rx="3" fill="#7d97f7" />
-        <rect x="174" y="96" width="140" height="8" rx="4" fill="#1a3fd0" />
+      <g transform="rotate(6 220 66)">
+        <rect x="149" y="21" width="142" height="90" rx="11" fill="#173dc0" />
+        <rect x="155" y="27" width="130" height="78" rx="6" fill="#2454f2" />
+        <rect x="192" y="52" width="38" height="6" rx="3" fill="#e7f36a" />
+        <rect x="192" y="63" width="55" height="6" rx="3" fill="#ffffff" fillOpacity="0.4" />
+        <rect x="192" y="74" width="55" height="6" rx="3" fill="#ffffff" fillOpacity="0.4" />
+        <rect x="135" y="113" width="170" height="8" rx="4" fill="#173dc0" />
       </g>
-      <rect x="138" y="46" width="40" height="40" rx="11" fill="var(--colour-citron)" />
-      <path d="M149 66h18M161 59l7 7-7 7" stroke="#171b29" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <rect x="132" y="52" width="36" height="36" rx="12" fill="#e7f36a" />
+      <path d="M141 70h18M152 63l7 7-7 7" stroke="#171b29" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
