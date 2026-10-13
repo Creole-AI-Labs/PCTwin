@@ -38,7 +38,6 @@ use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
 mod birth_hold;
-mod deadline;
 #[cfg(target_os = "macos")]
 mod macos_check;
 mod original;

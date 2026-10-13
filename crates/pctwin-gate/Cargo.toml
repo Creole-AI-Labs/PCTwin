@@ -33,12 +33,9 @@ rustix = { version = "1.1", features = ["fs"] }
 pctwin-lease = { path = "../pctwin-lease" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Apple's file coordination, so apps showing a file save and let go before undo removes it, and
-# the list of programs with a file open (decided 9 October 2026). Safe bindings only.
-block2 = "0.6"
+# The list of programs with a file open, for the reason a copy is kept (decided 9 October 2026;
+# undo never removes on macOS since 13 October 2026). Safe bindings only.
 libproc = "0.14"
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSError", "NSFileCoordinator", "NSFilePresenter", "NSString", "NSURL"] }
 
 [dev-dependencies]
 proptest = "1.11.0"

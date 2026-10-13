@@ -1,5 +1,6 @@
 //! Undo's removal on Linux and macOS: move aside first, then check (Security Design 3B, undo
-//! bullet, decided 9 October 2026). The copy is checked through a held handle, its name moved,
+//! bullet, decided 9 October 2026). Since 13 October 2026 only Linux removes (a write lease proves
+//! nobody else can write); macOS keeps every copy, so tests of the move aside run on Linux only. The copy is checked through a held handle, its name moved,
 //! never replacing, to a random private name the journal recorded first, proven there to be the
 //! very file unchanged, and only then removed. Anything else goes back under its name or beside
 //! it; nothing is lost and nothing is left hidden. A part-way removal is finished from the disk.
@@ -122,7 +123,6 @@ fn remove(
     let mut cx = Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal: &mut journal,
     };
     dest.remove_checked(&permit, *copy, &private, &mut cx)
@@ -140,6 +140,7 @@ fn plain(dest: &Destination, stored: &str, file: FileId, want: &'static [u8]) ->
     )
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn the_very_file_unchanged_is_removed_and_nothing_hidden_is_left() {
     let Some((root, dest)) = setup() else { return };
@@ -147,6 +148,33 @@ fn the_very_file_unchanged_is_removed_and_nothing_hidden_is_left() {
     let file = id(&dest, "Docs/a.txt");
     assert_eq!(plain(&dest, "Docs/a.txt", file, b"copy"), Removed::Removed);
     assert!(names(&root.path().join("Docs")).is_empty());
+}
+
+/// macOS cannot prove that no other program can still write to a file, so an unchanged copy is
+/// kept, untouched, under its own name: nothing moved, nothing recorded, nothing hidden
+/// (Security Design 3B undo bullet, strengthened 13 October 2026).
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_an_unchanged_copy_is_kept_untouched_and_nothing_is_moved() {
+    let Some((root, dest)) = setup() else { return };
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let mut record = Record::new();
+    let r = remove(
+        &dest,
+        "Docs/a.txt",
+        file,
+        bytes_are(b"copy"),
+        &mut record,
+        &mut |_| Ok(()),
+    );
+    assert_eq!(r, Removed::CannotCheck);
+    assert!(record.steps.is_empty(), "{:?}", record.steps);
+    assert_eq!(names(&root.path().join("Docs")), ["a.txt"]);
+    assert_eq!(
+        std::fs::read(root.path().join("Docs/a.txt")).unwrap(),
+        b"copy"
+    );
 }
 
 #[test]
@@ -245,6 +273,10 @@ fn a_file_another_program_has_open_is_kept_for_another_try() {
 /// A program's save that replaces the name just before the move: its new file is moved, found
 /// not to be the copy, and put back under its name. Nothing of the person's is lost.
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_new_version_saved_over_the_name_is_put_back_and_never_lost() {
     let Some((root, dest)) = setup() else { return };
     let docs = root.path().join("Docs");
@@ -275,7 +307,6 @@ fn a_new_version_saved_over_the_name_is_put_back_and_never_lost() {
     let mut cx = Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal: &mut journal,
     };
     let r = dest
@@ -297,6 +328,10 @@ fn a_new_version_saved_over_the_name_is_put_back_and_never_lost() {
 /// A second name made for the copy just as it is moved aside keeps it, and says why: the count
 /// of names is looked at before the change time (making a name moves the change time too).
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_second_name_made_as_the_copy_is_moved_aside_keeps_it_as_linked() {
     let Some((root, dest)) = setup() else { return };
     let docs = root.path().join("Docs");
@@ -323,7 +358,6 @@ fn a_second_name_made_as_the_copy_is_moved_aside_keeps_it_as_linked() {
     let mut cx = Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal: &mut journal,
     };
     let r = dest
@@ -339,6 +373,10 @@ fn a_second_name_made_as_the_copy_is_moved_aside_keeps_it_as_linked() {
 /// file (no names left), never from a check by its path that can no longer find it (macOS asks
 /// which programs have a file open by its path).
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_copy_removed_by_someone_else_after_it_was_checked_is_gone() {
     let Some((root, dest)) = setup() else { return };
     let docs = root.path().join("Docs");
@@ -359,7 +397,6 @@ fn a_copy_removed_by_someone_else_after_it_was_checked_is_gone() {
     let mut cx = Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal: &mut nothing,
     };
     let r = dest
@@ -374,6 +411,10 @@ fn a_copy_removed_by_someone_else_after_it_was_checked_is_gone() {
 /// an error.
 #[cfg(target_os = "linux")]
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_copy_another_holds_a_lease_on_is_in_use_never_an_error() {
     let Some((root, dest)) = setup() else { return };
     put(&root, "Docs/a.txt", b"copy");
@@ -389,6 +430,10 @@ fn a_copy_another_holds_a_lease_on_is_in_use_never_an_error() {
 
 /// When the name is taken again as a file is being put back, it goes beside it, visibly.
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_file_put_back_after_its_name_was_taken_goes_beside_it() {
     let Some((root, dest)) = setup() else { return };
     let docs = root.path().join("Docs");
@@ -421,7 +466,6 @@ fn a_file_put_back_after_its_name_was_taken_goes_beside_it() {
     let mut cx = Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal: &mut journal,
     };
     let r = dest
@@ -443,6 +487,10 @@ fn a_file_put_back_after_its_name_was_taken_goes_beside_it() {
 
 /// A step the journal cannot record is never taken.
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn nothing_is_moved_without_its_record() {
     let Some((root, dest)) = setup() else { return };
     let docs = root.path().join("Docs");
@@ -463,7 +511,6 @@ fn nothing_is_moved_without_its_record() {
     let mut cx = Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal: &mut journal,
     };
     assert!(
@@ -477,7 +524,6 @@ fn resolve_cx<'a>(journal: &'a mut dyn FnMut(Step<'_>) -> std::io::Result<()>) -
     Context {
         kept_words: WORDS,
         room_for_words: 64,
-        others_closed: false,
         journal,
     }
 }
@@ -489,6 +535,10 @@ fn dir_id(dest: &Destination, folder: &str) -> FileId {
 /// After a crash at every point of a removal, the recorded private name is finished from the
 /// disk, and finishing it twice ends the same way.
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_part_way_removal_is_finished_from_the_disk() {
     let Some((root, dest)) = setup() else { return };
     let docs = root.path().join("Docs");
@@ -584,6 +634,10 @@ fn a_part_way_removal_of_a_file_still_open_elsewhere_goes_back_for_another_try()
 /// A folder moved after a crash is found again by the exact private name; one that is gone is
 /// never treated as finished.
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026): no move aside to test"
+)]
 fn a_part_way_removal_in_a_moved_folder_is_found_and_a_missing_one_stays_open() {
     let Some((root, dest)) = setup() else { return };
     let j = journal();

@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
+#[cfg(target_os = "macos")]
+use pctwin_transfer::CANNOT_CHECK;
 use pctwin_transfer::{
     CHANGED_SINCE, CONNECT_OLD_LAPTOP, Confirmed, KEPT_AT_CLOSE, MOVED_SINCE, ORIGINAL_CHANGED,
     ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoOptions, UndoReport,
@@ -250,6 +252,10 @@ fn names_in(dir: &Path) -> Vec<String> {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn files_nobody_changed_are_removed_and_empty_folders_the_move_made_are_removed() {
     let w = world();
     std::fs::create_dir(w.root.join("Documents")).unwrap();
@@ -282,6 +288,10 @@ fn files_nobody_changed_are_removed_and_empty_folders_the_move_made_are_removed(
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn without_the_old_laptop_nothing_is_removed() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -307,6 +317,10 @@ fn without_the_old_laptop_nothing_is_removed() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn an_original_the_old_laptop_could_not_confirm_keeps_its_copy() {
     let w = world();
     w.moved(1, "unanswered.txt", b"1", &[]);
@@ -377,6 +391,10 @@ fn a_copy_whose_original_changed_on_the_old_laptop_is_kept() {
 /// One answer "not found" while the old laptop's drive was unplugged for a moment is not the
 /// last word: once it is back, the next undo removes the copy.
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn an_original_not_found_for_a_moment_does_not_keep_the_copy_for_good() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -533,6 +551,10 @@ fn a_file_made_again_under_the_same_name_is_not_the_one_the_move_wrote() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_file_already_gone_is_reported_and_undo_goes_newest_first() {
     let w = world();
     w.moved(1, "first.txt", b"1", &[]);
@@ -557,6 +579,10 @@ fn a_file_moved_to_another_folder_is_kept_and_said_so() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_folder_with_something_in_it_is_kept_and_looked_at_again_next_time() {
     let w = world();
     w.moved(1, "New/a.txt", b"a", &["New"]);
@@ -615,6 +641,10 @@ fn identical_files_that_were_already_there_are_never_touched() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn undoing_twice_is_as_safe_as_once() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -697,6 +727,10 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn undo_cut_short_before_removing_finishes_next_time() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -713,6 +747,10 @@ fn undo_cut_short_before_removing_finishes_next_time() {
 /// under exactly the recorded private name, proves it is the copy, unchanged, and removes it.
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn undo_cut_short_after_moving_aside_is_finished_from_the_disk() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -735,6 +773,10 @@ fn undo_cut_short_after_moving_aside_is_finished_from_the_disk() {
 /// name, and is said to be kept.
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_copy_changed_while_moved_aside_goes_back_under_its_name() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -764,6 +806,10 @@ fn a_copy_changed_while_moved_aside_goes_back_under_its_name() {
 /// aside, so nothing is left under a hidden name once undo is gone.
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn closing_finishes_a_removal_cut_short_after_moving_aside() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -886,6 +932,10 @@ fn a_copy_put_back_because_it_was_in_use_is_removed_once_free() {
 /// the copy under its name and looked at again as usual, so it is removed (Part J, finding 2).
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_put_back_of_the_copy_cut_short_is_finished_and_the_copy_removed() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -923,6 +973,10 @@ fn a_put_back_of_the_copy_cut_short_is_finished_and_the_copy_removed() {
 /// Every undo on Linux and macOS leaves no name of its own behind.
 #[cfg(unix)]
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn undo_leaves_no_hidden_names() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -946,6 +1000,10 @@ fn undo_cut_short_after_removing_says_it_is_gone_and_claims_nothing_more() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_file_is_recorded_as_being_removed_only_when_it_really_is() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -988,6 +1046,10 @@ fn a_file_with_a_second_name_is_kept_and_said_so() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_place_not_reachable_now_is_tried_again_later() {
     let mut w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -1002,6 +1064,10 @@ fn a_place_not_reachable_now_is_tried_again_later() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_different_folder_under_the_same_label_is_never_undone() {
     let mut w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -1023,6 +1089,10 @@ fn a_different_folder_under_the_same_label_is_never_undone() {
 }
 
 #[test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "macOS never removes a copy (13 October 2026)"
+)]
 fn a_file_in_a_folder_spelled_otherwise_on_the_disk_is_still_undone() {
     let w = world();
     std::fs::create_dir(w.root.join("Docs")).unwrap();
@@ -1200,5 +1270,17 @@ fn a_file_stored_online_only_is_kept_and_said_so() {
     assert!(ok);
     let r = w.undo();
     assert_eq!(outcome_of(&r, "a.txt"), kept(pctwin_transfer::ONLINE_ONLY));
+    assert!(w.exists("a.txt"));
+}
+
+/// macOS cannot prove that no other program can still write to a file, so undo keeps every copy
+/// there and says so; the file is untouched (Security Design 3B undo bullet, 13 October 2026).
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_an_unchanged_copy_is_kept_and_said_so() {
+    let w = world();
+    w.moved(1, "a.txt", b"a", &[]);
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), kept(CANNOT_CHECK));
     assert!(w.exists("a.txt"));
 }

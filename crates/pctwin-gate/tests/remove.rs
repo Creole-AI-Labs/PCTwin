@@ -57,7 +57,6 @@ impl Rm for Destination {
             let mut cx = pctwin_gate::Context {
                 kept_words: " (kept by PCTwin undo)",
                 room_for_words: 64,
-                others_closed: false,
                 journal: &mut nothing,
             };
             self.remove_checked(&permit, *copy, &private, &mut cx)
@@ -94,6 +93,20 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 }
 
 /// The caller's check: the bytes read through the held handle are exactly `want`.
+/// Undo removes a copy only where the system proves no other program can still write to it:
+/// Windows (the held handle) and Linux (a write lease). macOS cannot prove it, so a copy there is
+/// always kept for the person to review (Security Design 3B undo bullet, 13 October 2026).
+const REMOVES: bool = !cfg!(target_os = "macos");
+
+/// What undo says for a copy it may remove: removed, or on macOS kept as "cannot check".
+fn removed_or_kept() -> Removed {
+    if REMOVES {
+        Removed::Removed
+    } else {
+        Removed::CannotCheck
+    }
+}
+
 fn bytes_are(want: &'static [u8]) -> impl FnOnce(&mut std::fs::File) -> std::io::Result<bool> {
     move |f| {
         let mut got = Vec::new();
@@ -108,8 +121,9 @@ fn the_very_file_unchanged_is_removed() {
     put(&root, "Docs/a.txt", b"copy");
     let file = id(&dest, "Docs/a.txt");
     let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-    assert_eq!(r, Removed::Removed);
-    assert!(names(&root.path().join("Docs")).is_empty());
+    assert_eq!(r, removed_or_kept());
+    let left: &[&str] = if REMOVES { &[] } else { &["a.txt"] };
+    assert_eq!(names(&root.path().join("Docs")), left);
 }
 
 #[test]
@@ -251,8 +265,8 @@ fn a_read_only_copy_is_removed() {
     std::fs::set_permissions(&p, perms).unwrap();
     let file = id(&dest, "Docs/a.txt");
     let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-    assert_eq!(r, Removed::Removed);
-    assert!(!p.exists());
+    assert_eq!(r, removed_or_kept());
+    assert_eq!(p.exists(), !REMOVES);
 }
 
 #[test]
@@ -262,15 +276,20 @@ fn only_the_one_name_is_touched_and_no_private_name_is_left() {
     put(&root, "Docs/b.txt", b"mine");
     let file = id(&dest, "Docs/a.txt");
     let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-    assert_eq!(r, Removed::Removed);
-    assert_eq!(names(&root.path().join("Docs")), ["b.txt"]);
+    assert_eq!(r, removed_or_kept());
+    let left: &[&str] = if REMOVES {
+        &["b.txt"]
+    } else {
+        &["a.txt", "b.txt"]
+    };
+    assert_eq!(names(&root.path().join("Docs")), left);
 }
 
 /// Several tries at once: each copy removed exactly once, the rest refused, never an error. A
 /// loser finds the file gone (looked at through what it holds, or at its name), or in use by the
 /// winner: Windows refuses to open a file whose removal is under way ("access denied") and a
-/// held one (sharing); Linux refuses an open while another try holds a lease on it; macOS file
-/// coordination makes the others wait until the winner is done, and they find it gone.
+/// held one (sharing); Linux refuses an open while another try holds a lease on it. macOS keeps
+/// the copy every time ("cannot check").
 #[test]
 fn removing_the_same_file_twice_at_once_removes_it_once() {
     let (root, dest) = setup();
@@ -288,9 +307,10 @@ fn removing_the_same_file_twice_at_once_removes_it_once() {
     });
     let removed = results.iter().filter(|r| **r == Removed::Removed).count();
     assert!(
-        results
-            .iter()
-            .all(|r| matches!(r, Removed::Removed | Removed::Gone | Removed::InUse)),
+        results.iter().all(
+            |r| matches!(r, Removed::Removed | Removed::Gone | Removed::InUse)
+                || (!REMOVES && matches!(r, Removed::CannotCheck | Removed::InUse))
+        ),
         "{results:?}"
     );
     // Windows waits out a handle held for a moment, so one try always removes it. On Linux each
@@ -715,7 +735,6 @@ fn a_lent_right_that_has_ended_removes_nothing() {
         let mut cx = pctwin_gate::Context {
             kept_words: " (kept by PCTwin undo)",
             room_for_words: 64,
-            others_closed: true,
             journal: &mut nothing,
         };
         dest.remove_checked(&lent, *copy, &private, &mut cx)

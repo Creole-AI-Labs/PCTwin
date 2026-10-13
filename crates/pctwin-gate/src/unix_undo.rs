@@ -17,11 +17,11 @@
 //! 2. `verify` through the handle (size, modified time, fingerprint).
 //! 3. A change in the last 10 ms is waited out and looked at again.
 //! 4. The caller takes an undo permit and records `Removing { private }` durably (in batches).
-//! 5. Linux: a write lease on the handle (nobody else has it open), or the person's batch
-//!    confirmation where the system cannot say. macOS: file coordination for deleting (apps
-//!    showing the file save and let go; steps 6 to 9 run while they wait, and a coordination that
-//!    does not answer in time removes nothing), then the system's list of programs with the file
-//!    open; if either cannot be asked, nothing is removed.
+//! 5. Linux: a write lease on the handle (nobody else has it open, and nobody can open it while
+//!    it is held). Where that cannot be proven (macOS, other Unix systems, a drive without
+//!    leases) the copy is kept, untouched, for the person to review (Security Design 3B undo
+//!    bullet, strengthened 13 October 2026); on macOS the system's list of programs with the
+//!    file open only makes the reason more specific ("in use" or "cannot check").
 //! 6. The name moves to the private name, never replacing.
 //! 7. What is under the private name is proven to be the held file, unchanged; else it goes back.
 //! 8. Right before the removal it is proven again, in every way, change time included
@@ -75,9 +75,6 @@ pub struct Context<'a> {
     pub kept_words: &'a str,
     /// The byte length of the longest of those words in any language.
     pub room_for_words: usize,
-    /// The person confirmed, once for this batch, that their other programs are closed: used
-    /// only where the system cannot say whether another program has a file open.
-    pub others_closed: bool,
     /// Records a step durably before it happens.
     pub journal: &'a mut dyn FnMut(Step<'_>) -> io::Result<()>,
 }
@@ -475,34 +472,24 @@ impl Destination {
         let unless_looked_again = |otherwise: Removed| -> Result<Removed, GateError> {
             Ok(looked_again(&dir, &name, &handle, &look0)?.unwrap_or(otherwise))
         };
-        // 5. Nobody else has it open.
+        // 5. Nobody else can write to it. Only a Linux write lease proves that. On macOS a list
+        // of programs with the file open is not proof that no program can still write to it
+        // (Security Design 3B undo bullet, strengthened 13 October 2026), so the copy is kept,
+        // untouched, for the person to review; the list only makes the reason more specific.
         #[cfg(target_os = "macos")]
-        let r = {
+        {
+            let _ = (private, &acts, &cx, &folder);
             let Some(path) = self.root_path.as_ref().map(|r| r.join(&folder).join(&name)) else {
                 return unless_looked_again(Removed::CannotCheck);
             };
-            // Apps presenting the file are told and let go; the rest happens while they wait. A
-            // coordination that does not answer in time, or fails, removes nothing.
-            let done = macos_check::coordinated_for_deleting(&path, || -> Result<_, GateError> {
-                if let Some(kept) = looked_again(&dir, &name, &handle, &look0)? {
-                    return Ok(kept);
-                }
-                match macos_check::others_have_it_open(&path) {
-                    Ok(true) => unless_looked_again(Removed::InUse),
-                    Err(_) => unless_looked_again(Removed::CannotCheck),
-                    Ok(false) => move_prove_remove(
-                        &dir, &folder, &name, &handle, look0, private, false, &acts, cx,
-                    ),
-                }
-            });
-            match done {
-                Ok(Some(r)) => r,
-                Ok(None) | Err(_) => unless_looked_again(Removed::CannotCheck),
+            match macos_check::others_have_it_open(&path) {
+                Ok(true) => unless_looked_again(Removed::InUse),
+                Ok(false) | Err(_) => unless_looked_again(Removed::CannotCheck),
             }
-        };
+        }
         #[cfg(not(target_os = "macos"))]
-        let r = {
-            let leased = match others_have_it_open(&handle, cx.others_closed) {
+        {
+            let leased = match others_have_it_open(&handle) {
                 Openers::None { leased } => leased,
                 Openers::Some => return unless_looked_again(Removed::InUse),
                 Openers::CannotCheck => return unless_looked_again(Removed::CannotCheck),
@@ -514,12 +501,11 @@ impl Destination {
             if leased {
                 let _ = pctwin_lease::release(&handle);
             }
-            r
-        };
-        let r = r?;
-        // On the disk before anyone records it, through the folder it happened in.
-        sync_folder(&dir)?;
-        Ok(r)
+            let r = r?;
+            // On the disk before anyone records it, through the folder it happened in.
+            sync_folder(&dir)?;
+            Ok(r)
+        }
     }
 }
 
@@ -887,8 +873,12 @@ enum Openers {
     CannotCheck,
 }
 
+/// Whether anyone else has the held file open, as far as the system can prove it. Only a Linux
+/// write lease proves nobody else has it (and stops new openers while held); where it cannot be
+/// asked, the answer is [`Openers::CannotCheck`] and the copy is kept. The person's word that
+/// other programs are closed is not proof and is not asked for.
 #[cfg(not(target_os = "macos"))]
-fn others_have_it_open(handle: &std::fs::File, others_closed: bool) -> Openers {
+fn others_have_it_open(handle: &std::fs::File) -> Openers {
     #[cfg(target_os = "linux")]
     {
         use pctwin_lease::Lease;
@@ -899,7 +889,6 @@ fn others_have_it_open(handle: &std::fs::File, others_closed: bool) -> Openers {
             match pctwin_lease::write_lease(handle) {
                 Lease::Held => return Openers::None { leased: true },
                 Lease::InUse => continue,
-                Lease::CannotCheck(_) if others_closed => return Openers::None { leased: false },
                 Lease::CannotCheck(_) => return Openers::CannotCheck,
             }
         }
@@ -907,14 +896,9 @@ fn others_have_it_open(handle: &std::fs::File, others_closed: bool) -> Openers {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // Other Unix systems: nothing can be asked; only the person's confirmation lets the
-        // removal go ahead.
+        // Other Unix systems: nothing can be asked, so the copy is kept.
         let _ = handle;
-        if others_closed {
-            Openers::None { leased: false }
-        } else {
-            Openers::CannotCheck
-        }
+        Openers::CannotCheck
     }
 }
 
@@ -1112,7 +1096,7 @@ impl Destination {
         if id == file && names == 1 && verify(&mut held)? && Look::of(&held)? == before {
             // A program that had it open before PCTwin stopped may still be writing to it: such
             // a file goes back under its name for another try, as at any other time.
-            match self.nobody_else_has(&held, folder, private, cx.others_closed) {
+            match self.nobody_else_has(&held, folder, private) {
                 Openers::None { leased } => {
                     let r = finish(dir, &held, name, private, before, leased, acts, cx);
                     #[cfg(target_os = "linux")]
@@ -1138,17 +1122,12 @@ impl Destination {
     }
 
     /// Whether another program has the held file (under `private` in `folder`) open, for
-    /// finishing a removal after PCTwin stopped.
-    fn nobody_else_has(
-        &self,
-        held: &std::fs::File,
-        folder: &str,
-        private: &str,
-        others_closed: bool,
-    ) -> Openers {
+    /// finishing a removal after PCTwin stopped. On macOS nothing can prove nobody else can write
+    /// to it, so the answer is never "nobody": the file goes back under its name, kept.
+    fn nobody_else_has(&self, held: &std::fs::File, folder: &str, private: &str) -> Openers {
         #[cfg(target_os = "macos")]
         {
-            let _ = (held, others_closed);
+            let _ = held;
             let Some(path) = self
                 .root_path
                 .as_ref()
@@ -1157,15 +1136,14 @@ impl Destination {
                 return Openers::CannotCheck;
             };
             match macos_check::others_have_it_open(&path) {
-                Ok(false) => Openers::None { leased: false },
                 Ok(true) => Openers::Some,
-                Err(_) => Openers::CannotCheck,
+                Ok(false) | Err(_) => Openers::CannotCheck,
             }
         }
         #[cfg(not(target_os = "macos"))]
         {
             let _ = (folder, private);
-            others_have_it_open(held, others_closed)
+            others_have_it_open(held)
         }
     }
 
@@ -1448,7 +1426,6 @@ mod tests {
         let mut cx = Context {
             kept_words: " (kept by PCTwin undo)",
             room_for_words: 64,
-            others_closed: false,
             journal: &mut journal,
         };
         let acts = Acts { in_force: &always };
@@ -1509,7 +1486,6 @@ mod tests {
         let mut cx = Context {
             kept_words: " (kept by PCTwin undo)",
             room_for_words: 64,
-            others_closed: false,
             journal: &mut journal,
         };
         // The right ends once the temporary file exists and the first part is copied.
@@ -1568,7 +1544,6 @@ mod tests {
         let mut cx = Context {
             kept_words: " (kept by PCTwin undo)",
             room_for_words: 64,
-            others_closed: false,
             journal: &mut journal,
         };
         let acts = Acts { in_force: &always };
@@ -1639,7 +1614,6 @@ mod tests {
         let mut cx = Context {
             kept_words: " (kept by PCTwin undo)",
             room_for_words: 64,
-            others_closed: false,
             journal: &mut journal,
         };
         let acts = Acts { in_force: &always };
