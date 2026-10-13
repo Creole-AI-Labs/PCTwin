@@ -1,4 +1,4 @@
-//! The safety gate's path checks (Security Design Part B): every path the old laptop sends is
+//! The safety gate's path checks (security design notes): every path the old laptop sends is
 //! relative to an approved folder, and anything that could climb out of it is refused.
 
 use pctwin_gate::{IncomingPath, MAX_COMPONENT_BYTES, MAX_DEPTH, MAX_PATH_BYTES, PathError};

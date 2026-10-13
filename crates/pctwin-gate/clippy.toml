@@ -1,5 +1,5 @@
 # fs_at opens files with full sharing (read, write and delete) and removes by name; the gate uses
-# only its delete-by-handle, on a handle it opened and checked itself (Security Design B, decided 8
+# only its delete-by-handle, on a handle it opened and checked itself (security design notes, decided 8
 # October 2026). Everything else in fs_at is refused here.
 disallowed-methods = [
     { path = "fs_at::OpenOptions::open_at", reason = "opens with full sharing; open through cap-std with the gate's own sharing" },

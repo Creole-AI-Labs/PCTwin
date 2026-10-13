@@ -1,4 +1,4 @@
-//! A whole move over several lanes (Security Design A, "Lanes share one plan"): one plan feeds
+//! A whole move over several lanes (security design notes, "Lanes share one plan"): one plan feeds
 //! every lane; a big file's sections go over several lanes at once and arrive whole; a lane that
 //! drops loses nothing; the main connection dropping is picked up again over new lanes; a file
 //! that changes while it is being sent arrives whole and current, never mixed with blocks of the

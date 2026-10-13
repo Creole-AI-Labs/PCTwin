@@ -1,4 +1,4 @@
-//! A whole move over a connection (Task List 1.5): files travel in priority order, taking turns;
+//! A whole move over a connection (the plan): files travel in priority order, taking turns;
 //! every block is checked and receipted; no more than the in-flight limit is ever unconfirmed;
 //! after a drop both sides keep what they have and the next connection continues each file from
 //! exactly where it stopped (or starts a changed file again); a file that changes while it is

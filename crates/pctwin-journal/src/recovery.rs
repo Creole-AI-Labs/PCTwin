@@ -1,5 +1,5 @@
-//! What each unfinished write needs after a restart (Task List 1.6: "reconcile partial work after
-//! a crash"; Engineering Plan: "on restart, reconcile partial actions instead of announcing
+//! What each unfinished write needs after a restart (the plan: "reconcile partial work after
+//! a crash"; engineering notes: "on restart, reconcile partial actions instead of announcing
 //! success").
 //!
 //! This part only decides; it looks at the disk through [`Look`] and changes nothing, so every

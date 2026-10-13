@@ -1,4 +1,4 @@
-//! The table of approved destinations (Security Design Part B): the new laptop lists the only
+//! The table of approved destinations (security design notes): the new laptop lists the only
 //! places it will write to. The old laptop can only name an entry; an unknown entry is refused like
 //! `..`, its IDs are never used as paths, and another person's account opens only through the admin
 //! helper.

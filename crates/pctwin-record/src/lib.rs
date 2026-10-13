@@ -1,4 +1,4 @@
-//! The shared move record (Product Spec "How PCTwin understands two real laptops"; Task List 0.6).
+//! The shared move record (product notes "How PCTwin understands two real laptops"; the plan).
 //!
 //! - Every item found on the old laptop gets one [`Item`]: a permanent [`ItemId`], where it really
 //!   lives ([`Place`]), whose it is ([`Owner`]), whether it can move ([`Portability`]), who manages
@@ -12,7 +12,7 @@
 //!   [`Fingerprint`]. A plan [`Approval`] holds for exactly one revision: any change, with or
 //!   without a new revision number, needs a new approval.
 //! - Every saved record carries [`FORMAT`]. A record from a newer app is refused safely
-//!   (Engineering Plan 9.11), and a loaded record is checked like a new one.
+//!   (engineering notes), and a loaded record is checked like a new one.
 
 use std::collections::{BTreeMap, HashSet};
 

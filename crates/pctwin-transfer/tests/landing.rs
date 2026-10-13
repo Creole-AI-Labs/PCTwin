@@ -1,4 +1,4 @@
-//! Where each item lands on the new laptop (Task List 1.5): in the new laptop's own folder for
+//! Where each item lands on the new laptop (the plan): in the new laptop's own folder for
 //! that role, wherever it is and whatever it is called; in a "from your old laptop" folder when the
 //! new laptop has no such folder; left to the cloud service when both laptops keep that folder in
 //! the same one; and never into another person's account without the administrator helper.

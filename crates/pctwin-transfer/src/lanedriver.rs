@@ -72,7 +72,7 @@ impl<C: Channel> Channel for Closable<C> {
 }
 
 /// Most refused lanes in one move before opening stops for good: a refusal may be a passing
-/// failure, or someone burning lane numbers (Security Design A), so lanes are tried again only a
+/// failure, or someone burning lane numbers (security design notes), so lanes are tried again only a
 /// few times, far apart.
 pub const MAX_LANE_REFUSALS: u32 = 3;
 /// Windows to wait after the first refusal before a lane may be opened again; doubled after each

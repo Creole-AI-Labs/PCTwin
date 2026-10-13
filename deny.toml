@@ -47,7 +47,7 @@ ignore = true
 multiple-versions = "warn"
 wildcards = "deny"
 allow-wildcard-paths = true
-# Raw file-system power is allowed only through the safety gate (Security Design B). `wrappers`
+# Raw file-system power is allowed only through the safety gate (security design notes). `wrappers`
 # lists the only crates that may depend on each one directly. No other pctwin crate is listed, so
 # a new direct use in, say, pctwin-transfer fails `cargo deny check bans`.
 deny = [
@@ -55,7 +55,7 @@ deny = [
   { crate = "cap-std", wrappers = ["pctwin-gate"] },
   { crate = "cap-primitives", wrappers = ["cap-std"] },
   { crate = "trash", wrappers = ["pctwin-gate"] },
-  # The one crate allowed to use unsafe (user-approved, October 2026; see scripts/unsafe-fence.sh).
+  # The one crate allowed to use unsafe (approved, October 2026; see scripts/unsafe-fence.sh).
   # Only the gate may use it, and only it may use signal-hook.
   { crate = "pctwin-lease", wrappers = ["pctwin-gate"] },
   { crate = "signal-hook", wrappers = ["pctwin-lease"] },

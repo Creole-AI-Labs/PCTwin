@@ -1,4 +1,4 @@
-//! Finding each special folder through the system (Task List 1.4 and the 0.7 probe): the answer
+//! Finding each special folder through the system (the plan and the 0.7 probe): the answer
 //! must match what the system itself reports, folders moved elsewhere must be found where they
 //! are, and a folder that isn't there is reported missing, never guessed.
 

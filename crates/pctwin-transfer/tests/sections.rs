@@ -1,4 +1,4 @@
-//! Big files split across lanes (Security Design A, "Lanes share one plan"): every piece of work
+//! Big files split across lanes (security design notes, "Lanes share one plan"): every piece of work
 //! runs in order on one lane. A big file is cut into sections; a lane that runs out of work takes
 //! the back half of the section with the most left to send (the aria2 approach), and never a range
 //! smaller than twice [`MIN_SECTION_BYTES`]. Done blocks are recorded block by block, so a dropped

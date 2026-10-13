@@ -1,5 +1,5 @@
-//! Undo's removal of a copy on Linux and macOS: move it aside first, then check (Security Design
-//! 3B, undo bullet, decided 9 October 2026). Only Linux removes, under a write lease; on macOS
+//! Undo's removal of a copy on Linux and macOS: move it aside first, then check (security design notes,
+//! decided 9 October 2026). Only Linux removes, under a write lease; on macOS
 //! the removal steps are not even compiled in, and every copy is kept (13 October 2026).
 //!
 //! These systems cannot remove a file through an open handle, so a name must be acted on. The
@@ -20,8 +20,8 @@
 //! 4. The caller takes an undo permit and records `Removing { private }` durably (in batches).
 //! 5. Linux: a write lease on the handle (nobody else has it open, and nobody can open it while
 //!    it is held). Where that cannot be proven (macOS, other Unix systems, a drive without
-//!    leases) the copy is kept, untouched, for the person to review (Security Design 3B undo
-//!    bullet, strengthened 13 October 2026); on macOS the system's list of programs with the
+//!    leases) the copy is kept, untouched, for the person to review (security design notes,
+//!    strengthened 13 October 2026); on macOS the system's list of programs with the
 //!    file open only makes the reason more specific ("in use" or "cannot check").
 //! 6. The name moves to the private name, never replacing.
 //! 7. What is under the private name is proven to be the held file, unchanged; else it goes back.
@@ -479,7 +479,7 @@ impl Destination {
         };
         // 5. Nobody else can write to it. Only a Linux write lease proves that. On macOS a list
         // of programs with the file open is not proof that no program can still write to it
-        // (Security Design 3B undo bullet, strengthened 13 October 2026), so the copy is kept,
+        // (security design notes, strengthened 13 October 2026), so the copy is kept,
         // untouched, for the person to review; the list only makes the reason more specific.
         #[cfg(target_os = "macos")]
         {

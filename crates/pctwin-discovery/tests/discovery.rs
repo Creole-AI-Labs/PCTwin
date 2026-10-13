@@ -1,4 +1,4 @@
-//! Finding each other on the same network (Product Spec, Finding each other).
+//! Finding each other on the same network (product notes, Finding each other).
 //!
 //! These tests use real multicast DNS on this computer. Each test uses its own unique name so
 //! tests running at the same time do not see each other's announcements by mistake.

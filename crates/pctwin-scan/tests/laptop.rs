@@ -1,4 +1,4 @@
-//! The whole scan of the old laptop (Task List 1.4): the people, the signed-in person's special
+//! The whole scan of the old laptop (the plan): the people, the signed-in person's special
 //! folders and the shared ones, the drives, all in one move record, with honest sizes for
 //! everyone and the system's own clutter recorded as left out.
 

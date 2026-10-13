@@ -1,4 +1,4 @@
-//! PCTwin connection doctor (Engineering Plan 9.3, screen C08): when the two laptops cannot find
+//! PCTwin connection doctor (engineering notes, screen C08): when the two laptops cannot find
 //! or reach each other, work out the likely reason and the fix, in plain words.
 //!
 //! Probes ([`probe`]) look at this laptop: its network connections, whether it can hear its own
