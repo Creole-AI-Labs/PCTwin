@@ -1,4 +1,4 @@
-//! Continuing a file after the app restarts (Task List 1.6, 1.5): the new laptop keeps each
+//! Continuing a file after the app restarts: the new laptop keeps each
 //! landed block's fingerprint in the journal (in batches), and after a restart picks the partly
 //! received file up again, trusting no block until its bytes in the file match its fingerprint
 //! (as Syncthing re-hashes temporary files), so the old laptop sends only what is really missing.

@@ -33,6 +33,10 @@ struct Mem {
     cut: Arc<AtomicBool>,
     sends: usize,
     cut_at: Option<usize>,
+    /// Messages received, counted across every connection that shares the counter, and the count
+    /// at which the line is cut: the receiver has then handled a known amount, whatever the
+    /// sender's pace (a slow runner cannot leave it with nothing).
+    received: Option<(Arc<std::sync::atomic::AtomicUsize>, usize)>,
     hook: Option<(usize, Hook)>,
     streams: Arc<Mutex<BTreeSet<u32>>>,
     /// Each file started on this end, with the stream it was started on.
@@ -49,6 +53,7 @@ fn pair() -> (Mem, Mem) {
         cut: cut.clone(),
         sends: 0,
         cut_at: None,
+        received: None,
         hook: None,
         streams: Arc::default(),
         starts: Arc::default(),
@@ -86,6 +91,11 @@ impl Channel for Mem {
     async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
         loop {
             if let Ok(m) = self.rx.try_recv() {
+                if let Some((count, at)) = &self.received
+                    && count.fetch_add(1, Ordering::SeqCst) + 1 == *at
+                {
+                    self.cut.store(true, Ordering::SeqCst);
+                }
                 return Ok(m);
             }
             if self.cut.load(Ordering::SeqCst) {
@@ -252,6 +262,9 @@ async fn an_extra_lane_that_drops_mid_move_loses_nothing() {
     assert!(sender.blocks_sent() > total_blocks(&l));
 }
 
+/// Messages the new laptop receives before the line drops in the test below.
+const CUT_AFTER: usize = 40;
+
 #[tokio::test]
 async fn the_main_connection_dropping_is_picked_up_again_over_new_lanes() {
     let l = laptops();
@@ -259,8 +272,13 @@ async fn the_main_connection_dropping_is_picked_up_again_over_new_lanes() {
     let mut sender = SenderSession::new(jobs(&l), 4);
     let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let mut conns = connections(2);
-    // Early, while the big file is still on its way (the main connection's 8th message).
-    conns.0.cut_at = Some(8);
+    // Early, while the big file is still on its way: once the new laptop has received CUT_AFTER
+    // messages over all its connections, so some of it has landed whatever the sender's pace.
+    let received = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    conns.2.received = Some((received.clone(), CUT_AFTER));
+    for lane in &mut conns.3 {
+        lane.received = Some((received.clone(), CUT_AFTER));
+    }
     // Every lane goes with it, as when the Wi-Fi drops.
     let cut = conns.0.cut.clone();
     for lane in &mut conns.1 {
