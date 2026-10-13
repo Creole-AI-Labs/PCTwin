@@ -1,5 +1,6 @@
 //! Undo's removal of a copy on Linux and macOS: move it aside first, then check (Security Design
-//! 3B, undo bullet, decided 9 October 2026).
+//! 3B, undo bullet, decided 9 October 2026). Only Linux removes, under a write lease; on macOS
+//! the removal steps are not even compiled in, and every copy is kept (13 October 2026).
 //!
 //! These systems cannot remove a file through an open handle, so a name must be acted on. The
 //! copy is opened and checked through a handle, then its name is moved, never replacing
@@ -118,6 +119,7 @@ pub fn private_name() -> io::Result<String> {
     Ok(format!(".pctwin-undo-{}", hex(&bits)))
 }
 
+#[cfg(not(target_os = "macos"))]
 /// A new private name for bytes being saved: `.pctwin-salvage-` and 128 random bits.
 fn salvage_name() -> io::Result<String> {
     let mut bits = [0u8; 16];
@@ -170,6 +172,7 @@ impl Acts<'_> {
         rustix::fs::renameat_with(dir, from, dir, to, RenameFlags::NOREPLACE)
     }
 
+    #[cfg(not(target_os = "macos"))]
     /// Removes the name `name` in `dir` (only ever from [`finish`]).
     fn unlink(&self, dir: &Dir, name: &str) -> Result<(), Errno> {
         if !(self.in_force)() {
@@ -509,6 +512,7 @@ impl Destination {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Steps 6 to 9 (see [`Destination::remove_checked`]); `leased` says a Linux write lease is held
 /// on `handle` (the caller gives it up afterwards).
 #[expect(clippy::too_many_arguments, reason = "the parts of one checked copy")]
@@ -581,6 +585,7 @@ fn move_prove_remove(
     )
 }
 
+#[cfg(not(target_os = "macos"))]
 /// How removing a copy proven under its private name ended.
 #[derive(Debug, PartialEq, Eq)]
 enum Finish {
@@ -592,6 +597,7 @@ enum Finish {
     NotProven(Unproven),
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Why a copy could not be proven right before its removal.
 #[derive(Debug, PartialEq, Eq)]
 enum Unproven {
@@ -607,6 +613,7 @@ enum Unproven {
     Gone,
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Steps 8 and 9: the one way a private name is ever removed, on the way through and after a
 /// crash alike. Right before the removal it proves, in this order: nobody has started to open
 /// the held file (Linux, `leased`); what is under `private` now is that very file; and the held
@@ -694,6 +701,7 @@ fn put_back(
     Err(GateError::TooManyClashes)
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Saves the held file's bytes, as they are now, under a new name beside `name` (or `name`
 /// itself first, if `first` says so and it is free), keeping its permissions, modified time and
 /// extended attributes. Never touches a file of the person's: the bytes go into a new private
@@ -760,6 +768,7 @@ fn salvage(
     Err(GateError::TooManyClashes)
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Copies every byte of `from` (read from its start, by position) into `to`, stopping if the
 /// undo right ends meanwhile.
 fn copy_from(
@@ -791,6 +800,7 @@ fn read_at(file: &std::fs::File, buf: &mut [u8], at: u64) -> io::Result<usize> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Copies extended attributes, best effort (a drive or attribute that refuses is skipped: the
 /// bytes, permissions and time matter most).
 fn copy_attributes(from: &std::fs::File, to: &std::fs::File) {
@@ -868,7 +878,11 @@ fn changed_lately(look: &Look) -> bool {
 
 /// Whether anyone else has the held file open.
 enum Openers {
-    None { leased: bool },
+    /// Nobody else has it open, proven by a Linux write lease (never on macOS).
+    #[cfg(not(target_os = "macos"))]
+    None {
+        leased: bool,
+    },
     Some,
     CannotCheck,
 }
@@ -902,6 +916,7 @@ fn others_have_it_open(handle: &std::fs::File) -> Openers {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn lease_still_held(handle: &std::fs::File) -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -935,8 +950,8 @@ pub enum Resolution {
     Home,
     /// Put back under its own name: another program has it open (try again later).
     InUse,
-    /// Put back under its own name: the system cannot say whether another program has it open,
-    /// and the person has not confirmed their other programs are closed.
+    /// Put back under its own name, kept: the system cannot prove that no other program can
+    /// still write to it.
     CannotCheck,
     /// Kept under the visible name `at` beside its own (the stored path).
     KeptAt { at: String },
@@ -1089,7 +1104,6 @@ impl Destination {
         acts: &Acts<'_>,
         cx: &mut Context<'_>,
     ) -> Result<Resolution, GateError> {
-        let at = |n: &str| crate::stored_path(folder, n);
         let before = Look::of(&held)?;
         let (id, names) = identity(&held)?;
         let mut kept = Resolution::Home;
@@ -1097,7 +1111,9 @@ impl Destination {
             // A program that had it open before PCTwin stopped may still be writing to it: such
             // a file goes back under its name for another try, as at any other time.
             match self.nobody_else_has(&held, folder, private) {
+                #[cfg(not(target_os = "macos"))]
                 Openers::None { leased } => {
+                    let at = |n: &str| crate::stored_path(folder, n);
                     let r = finish(dir, &held, name, private, before, leased, acts, cx);
                     #[cfg(target_os = "linux")]
                     if leased {
@@ -1379,10 +1395,12 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
 
+    #[cfg(not(target_os = "macos"))]
     fn always() -> bool {
         true
     }
 
+    #[cfg(not(target_os = "macos"))]
     fn names_in(dir: &std::path::Path) -> Vec<String> {
         let mut v: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
@@ -1396,6 +1414,7 @@ mod tests {
     /// a visible name beside it (never over the person's file), and leave nothing hidden. The
     /// salvage is recorded as not complete before the copy and complete only after it.
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn a_salvage_keeps_bytes_permissions_time_and_attributes_beside_the_name() {
         let root = tempfile::tempdir().unwrap();
         let p = root.path().join("a.txt");
@@ -1471,6 +1490,7 @@ mod tests {
     /// A salvage stopped while copying (its undo right ended) leaves its temporary file with no
     /// permissions at all and is never recorded complete or named (finding 1).
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn a_salvage_cut_short_has_no_permissions_and_is_never_recorded_complete() {
         let root = tempfile::tempdir().unwrap();
         let p = root.path().join("a.txt");
@@ -1535,6 +1555,7 @@ mod tests {
     /// of any kind since the last look (its change time included), or something else under the
     /// private name, removes nothing (finding 4).
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn a_private_name_is_removed_only_after_proving_it_again_right_before() {
         let root = tempfile::tempdir().unwrap();
         let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
@@ -1605,6 +1626,7 @@ mod tests {
     /// A second name made after the last look is said as such, never as a change, though making
     /// a name moves the change time too; and nothing is removed.
     #[test]
+    #[cfg(not(target_os = "macos"))]
     fn a_second_name_made_after_the_last_look_is_linked_not_changed() {
         let root = tempfile::tempdir().unwrap();
         let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();

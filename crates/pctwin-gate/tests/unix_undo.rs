@@ -1021,3 +1021,38 @@ fn a_salvage_cut_short_is_published_as_maybe_incomplete() {
     }
     assert!(hidden(&docs).is_empty());
 }
+
+/// macOS: a removal recorded by an older PCTwin and cut short after the move is never finished
+/// by removing the file. It goes back under its own name, kept, and nothing is removed
+/// (13 October 2026).
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_a_part_way_removal_is_put_back_and_kept() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let mut ok = |_: Step<'_>| Ok(());
+    let folder = dir_id(&dest, "Docs");
+    put(&root, "Docs/a.txt", b"copy");
+    let file = id(&dest, "Docs/a.txt");
+    let private = pctwin_gate::private_name().unwrap();
+    std::fs::rename(docs.join("a.txt"), docs.join(&private)).unwrap();
+    let r = dest
+        .resolve_removing(
+            &permit,
+            "Docs/a.txt",
+            file,
+            folder,
+            &private,
+            bytes_are(b"copy"),
+            &mut resolve_cx(&mut ok),
+        )
+        .unwrap();
+    assert!(
+        matches!(r, Resolution::CannotCheck | Resolution::InUse),
+        "{r:?}"
+    );
+    assert_eq!(names(&docs), ["a.txt"]);
+    assert_eq!(std::fs::read(docs.join("a.txt")).unwrap(), b"copy");
+}

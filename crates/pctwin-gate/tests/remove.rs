@@ -92,7 +92,6 @@ fn names(dir: &std::path::Path) -> Vec<String> {
     v
 }
 
-/// The caller's check: the bytes read through the held handle are exactly `want`.
 /// Undo removes a copy only where the system proves no other program can still write to it:
 /// Windows (the held handle) and Linux (a write lease). macOS cannot prove it, so a copy there is
 /// always kept for the person to review (Security Design 3B undo bullet, 13 October 2026).
@@ -107,6 +106,7 @@ fn removed_or_kept() -> Removed {
     }
 }
 
+/// The caller's check: the bytes read through the held handle are exactly `want`.
 fn bytes_are(want: &'static [u8]) -> impl FnOnce(&mut std::fs::File) -> std::io::Result<bool> {
     move |f| {
         let mut got = Vec::new();
@@ -306,11 +306,25 @@ fn removing_the_same_file_twice_at_once_removes_it_once() {
         tries.into_iter().map(|t| t.join().unwrap()).collect()
     });
     let removed = results.iter().filter(|r| **r == Removed::Removed).count();
+    if !REMOVES {
+        // macOS keeps the copy every time, whatever the others do.
+        assert!(
+            results
+                .iter()
+                .all(|r| matches!(r, Removed::CannotCheck | Removed::InUse)),
+            "{results:?}"
+        );
+        assert_eq!(removed, 0);
+        assert_eq!(
+            std::fs::read(root.path().join("Docs/a.txt")).unwrap(),
+            b"copy"
+        );
+        return;
+    }
     assert!(
-        results.iter().all(
-            |r| matches!(r, Removed::Removed | Removed::Gone | Removed::InUse)
-                || (!REMOVES && matches!(r, Removed::CannotCheck | Removed::InUse))
-        ),
+        results
+            .iter()
+            .all(|r| matches!(r, Removed::Removed | Removed::Gone | Removed::InUse)),
         "{results:?}"
     );
     // Windows waits out a handle held for a moment, so one try always removes it. On Linux each

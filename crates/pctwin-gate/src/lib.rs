@@ -663,7 +663,8 @@ impl Destination {
     ///
     /// Linux and macOS have no removal by handle: there undo moves the name aside first, then
     /// checks ([`check_copy`](Self::check_copy), [`remove_checked`](Self::remove_checked);
-    /// decided 9 October 2026).
+    /// decided 9 October 2026). Only Linux removes, under a write lease; macOS keeps every copy
+    /// (strengthened 13 October 2026).
     ///
     /// It takes an undo right (an open undo permit, or the ticket undo's close lends), so nothing
     /// can be removed once undo is closed for good (the type makes that impossible).
@@ -1254,8 +1255,9 @@ pub enum Removed {
     /// A database's working files, a lock file or an app's owner file is beside it, or it is a
     /// kind of file an app keeps open (a mail store, a password safe, a database): left as it is.
     AppKeepsOpen,
-    /// The system cannot say whether another program has it open, and the person has not
-    /// confirmed that their other programs are closed: left as it is, for another try.
+    /// The system cannot prove that no other program can still write to it (macOS, other
+    /// systems without Linux write leases, a drive without leases): kept as it is, for the
+    /// person to review.
     CannotCheck,
     /// Another file took its name meanwhile: it is kept, under the visible name `at` beside it.
     KeptBeside { at: String },

@@ -508,7 +508,8 @@ fn remove_copy(
 
 /// Linux and macOS: removes the checked copy by moving its name aside first and checking it
 /// there, each step recorded before it happens, and its folder flushed before it is recorded as
-/// done (Security Design 3B, decided 9 October 2026).
+/// done (Security Design 3B, decided 9 October 2026). Only Linux removes, under a write lease;
+/// on macOS the copy is kept and said so (strengthened 13 October 2026).
 #[cfg(unix)]
 fn remove_copy(
     journal: &Journal,
