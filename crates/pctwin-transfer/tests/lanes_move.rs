@@ -3,6 +3,8 @@
 //! drops loses nothing; the main connection dropping is picked up again over new lanes; a file
 //! that changes while it is being sent arrives whole and current, never mixed with blocks of the
 //! attempt before.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;

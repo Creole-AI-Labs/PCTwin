@@ -37,6 +37,10 @@
 //! - [`BlockMap`] records which blocks of a file are done, as runs joined when they touch, and is
 //!   what a resume message carries.
 
+// The type-resolved fence: clippy.toml bans every std/tokio/cap-std/fs_at/rustix way to change a
+// file or folder. Tests make files to test on, so they are exempt. The CI canary proves it fires.
+#![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
+
 mod allowance;
 mod blockmap;
 mod landing;
@@ -59,9 +63,12 @@ pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
-pub use message::{Message, PIECE_MAX, PieceBuffer, split_into_pieces};
+pub use message::{Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces};
 pub use netlanes::{LinkLanes, accept_lanes};
-pub use original::{MAX_ORIGINALS_PER_REQUEST, OriginalNow, answer_originals, original_unchanged};
+pub use original::{
+    Confirmed, MAX_CONFIRMED_AGE, MAX_ORIGINALS_PER_REQUEST, OriginalNow, OriginalsFault,
+    answer_originals, original_unchanged,
+};
 pub use partials::{
     KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,
     expire_partials, partials,
@@ -72,12 +79,17 @@ pub use reading::{ReadBudget, is_drive_error};
 pub use recovery::{Recovered, recover, recover_with};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
-    Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, ReceiveOutcome, ReceiverSession, SendJob,
-    SendOutcome, SenderSession, check_originals, serve_originals,
+    Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, MAX_ORIGINAL_REQUESTS_PER_SESSION,
+    MAX_ORIGINALS_PER_SESSION, ORIGINALS_REPLY_WAIT, ORIGINALS_REQUEST_TIME, OriginalsBudget,
+    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, check_originals,
+    serve_originals,
 };
 pub use undo::{
-    CHANGED_SINCE, CONNECT_OLD_LAPTOP, IN_USE, MOVED_SINCE, ONLINE_ONLY, ORIGINAL_CHANGED,
-    SECOND_NAME, UndoReport, Undone, undo, undo_items,
+    APP_KEEPS_OPEN, CANNOT_CHECK, CHANGED_SINCE, CONNECT_OLD_LAPTOP, FOLDER_MISSING, IN_USE,
+    KEPT_AT_CLOSE, KEPT_BESIDE, KEPT_WORDS, KEPT_WORDS_ROOM, MOVED_SINCE, ONLINE_ONLY,
+    ORIGINAL_CHANGED, ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, RESOLVE_WITHIN, SAVE_CUT_SHORT,
+    SAVED_AGAIN, SAVED_MAYBE_INCOMPLETE, SECOND_NAME, TOOK_TOO_LONG, UndoOptions, UndoReport,
+    Undone, close_undo, undo, undo_items, undo_with,
 };
 
 use std::fs::File;

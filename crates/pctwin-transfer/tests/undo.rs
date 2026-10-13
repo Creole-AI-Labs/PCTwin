@@ -5,22 +5,21 @@
 //! and said so; empty folders the move made are removed; every removal is recorded first, so undo
 //! cut short carries on safely; once the wipe starts, undo refuses everything. These tests never
 //! use the person's real Recycle Bin.
-
-// Tests make and remove files to set up each case; only the code under test is held to removing
-// nothing but through the gate.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
 #![allow(clippy::disallowed_methods)]
+
+mod common;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use pctwin_gate::{Approved, Destinations, temp_name};
-use pctwin_journal::{
-    Actor, FileId, Journal, JournalError, Landed, Permission, PlannedWrite, Undo, UndoOutcome,
-};
+use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    CHANGED_SINCE, CONNECT_OLD_LAPTOP, MOVED_SINCE, ORIGINAL_CHANGED, OriginalNow, SECOND_NAME,
-    UndoReport, block_size_for, fingerprint_reader, undo, undo_items,
+    CHANGED_SINCE, CONNECT_OLD_LAPTOP, Confirmed, KEPT_AT_CLOSE, MOVED_SINCE, ORIGINAL_CHANGED,
+    ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoOptions, UndoReport,
+    block_size_for, close_undo, fingerprint_reader, undo, undo_items,
 };
 
 struct World {
@@ -54,7 +53,8 @@ fn original(n: u8) -> (FileId, i64) {
     (
         FileId {
             volume: 7,
-            index: u64::from(n),
+            index: std::num::NonZeroU64::new(u64::from(n)).unwrap(),
+            born: None,
         },
         1_000 + i64::from(n),
     )
@@ -84,23 +84,14 @@ impl World {
                 source_modified_ns: Some(source_ns),
                 source_file: Some(source_file),
                 partial_keep: Default::default(),
-                place: Some(FileId {
-                    volume: place.volume,
-                    index: place.index,
-                }),
+                place: Some(place),
             })
             .unwrap();
         let mut made_ids = Vec::new();
         for f in made {
             std::fs::create_dir_all(self.root.join(f)).unwrap();
             let fid = dest.folder_identity(f).unwrap().unwrap();
-            made_ids.push((
-                f.to_string(),
-                Some(FileId {
-                    volume: fid.volume,
-                    index: fid.index,
-                }),
-            ));
+            made_ids.push((f.to_string(), Some(fid)));
         }
         if let Some(parent) = Path::new(stored).parent() {
             std::fs::create_dir_all(self.root.join(parent)).unwrap();
@@ -118,6 +109,9 @@ impl World {
         self.journal.verified(id, fp, None).unwrap();
         self.journal.applied(id, stored).unwrap();
         std::fs::write(self.root.join(stored), bytes).unwrap();
+        // PCTwin keeps each file and folder it makes open until 10 ms after it was made, so
+        // nothing made later shares its number and birth time; this stands in for that.
+        std::thread::sleep(std::time::Duration::from_millis(11));
         let stat = dest.stat(stored).unwrap().unwrap();
         self.journal
             .committed(
@@ -127,10 +121,7 @@ impl World {
                     modified_ns: stat.modified.map(|t| {
                         t.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
                     }),
-                    file: Some(FileId {
-                        volume: stat.id.volume,
-                        index: stat.id.index,
-                    }),
+                    file: Some(stat.id),
                 },
             )
             .unwrap();
@@ -156,8 +147,13 @@ impl World {
             .collect()
     }
 
+    /// The answers as the old laptop gives them, through the real check.
+    fn token(&self, answers: HashMap<ItemId, OriginalNow>) -> Confirmed {
+        common::confirmed_blocking(&self.journal, answers.into_iter().collect())
+    }
+
     fn undo(&self) -> UndoReport {
-        undo(&self.journal, &self.table, Some(&self.confirmed())).unwrap()
+        undo(&self.journal, &self.table, self.token(self.confirmed())).unwrap()
     }
 
     fn exists(&self, stored: &str) -> bool {
@@ -177,6 +173,48 @@ impl World {
             .unwrap()
             .modified()
             .unwrap()
+    }
+
+    /// The record of a removal about to happen, for a copy at the top of the destination.
+    fn removing(&self, entry: u64) -> Undo {
+        let file = self.file_of(entry);
+        Undo::Removing {
+            file,
+            dir_id: self
+                .table
+                .get("me")
+                .unwrap()
+                .folder_identity("")
+                .unwrap()
+                .unwrap(),
+            private: format!(".pctwin-undo-{:032x}", file.index.get()),
+        }
+    }
+
+    /// Closes undo, finishing anything part-way with `resolved`.
+    fn close(&self, resolved: pctwin_journal::Resolved) {
+        self.journal
+            .close_undo(&mut |_, _| Ok(resolved.clone()))
+            .unwrap();
+    }
+
+    /// Undo's own names left anywhere in the destination.
+    #[cfg(unix)]
+    fn hidden(&self) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut dirs = vec![self.root.clone()];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap() {
+                let e = e.unwrap();
+                let name = e.file_name().to_string_lossy().into_owned();
+                if name.starts_with(".pctwin-undo-") || name.starts_with(".pctwin-salvage-") {
+                    found.push(name);
+                } else if e.file_type().unwrap().is_dir() {
+                    dirs.push(e.path());
+                }
+            }
+        }
+        found
     }
 
     fn file_of(&self, entry: u64) -> FileId {
@@ -248,7 +286,7 @@ fn without_the_old_laptop_nothing_is_removed() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
     w.moved(2, "New/b.txt", b"b", &["New"]);
-    let r = undo(&w.journal, &w.table, None).unwrap();
+    let r = undo(&w.journal, &w.table, Confirmed::none(&w.journal)).unwrap();
     for p in ["a.txt", "New/b.txt"] {
         assert_eq!(
             outcome_of(&r, p),
@@ -277,7 +315,7 @@ fn an_original_the_old_laptop_could_not_confirm_keeps_its_copy() {
     let mut answers = w.confirmed();
     answers.remove(&item(1));
     answers.insert(item(2), OriginalNow::CannotLook);
-    let r = undo(&w.journal, &w.table, Some(&answers)).unwrap();
+    let r = undo(&w.journal, &w.table, w.token(answers)).unwrap();
     for p in ["unanswered.txt", "unseen.txt"] {
         assert_eq!(
             outcome_of(&r, p),
@@ -292,7 +330,7 @@ fn an_original_the_old_laptop_could_not_confirm_keeps_its_copy() {
 }
 
 #[test]
-fn a_copy_whose_original_changed_or_went_on_the_old_laptop_is_kept() {
+fn a_copy_whose_original_changed_on_the_old_laptop_is_kept() {
     let w = world();
     w.moved(1, "edited.txt", b"1", &[]);
     w.moved(2, "replaced.txt", b"2", &[]);
@@ -315,16 +353,121 @@ fn a_copy_whose_original_changed_or_went_on_the_old_laptop_is_kept() {
             modified_ns: Some(ns2),
             file: Some(FileId {
                 volume: 7,
-                index: 99,
+                index: std::num::NonZeroU64::new(99).unwrap(),
+                born: None,
             }),
         },
     );
     answers.insert(item(3), OriginalNow::Missing);
-    let r = undo(&w.journal, &w.table, Some(&answers)).unwrap();
-    for p in ["edited.txt", "replaced.txt", "gone.txt"] {
+    let r = undo(&w.journal, &w.table, w.token(answers)).unwrap();
+    for p in ["edited.txt", "replaced.txt"] {
         assert_eq!(outcome_of(&r, p), kept(ORIGINAL_CHANGED), "{p}");
         assert!(w.exists(p), "{p}");
     }
+    // Not found right now (its drive unplugged, say): kept for now, asked again next time.
+    assert_eq!(
+        outcome_of(&r, "gone.txt"),
+        UndoOutcome::NotDone {
+            why: ORIGINAL_NOT_FOUND.into()
+        }
+    );
+    assert!(w.exists("gone.txt"));
+}
+
+/// One answer "not found" while the old laptop's drive was unplugged for a moment is not the
+/// last word: once it is back, the next undo removes the copy.
+#[test]
+fn an_original_not_found_for_a_moment_does_not_keep_the_copy_for_good() {
+    let w = world();
+    w.moved(1, "a.txt", b"a", &[]);
+    let mut glitch = w.confirmed();
+    glitch.insert(item(1), OriginalNow::Missing);
+    let r = undo(&w.journal, &w.table, w.token(glitch)).unwrap();
+    assert!(matches!(
+        outcome_of(&r, "a.txt"),
+        UndoOutcome::NotDone { .. }
+    ));
+    assert_eq!(undo_items(&w.journal).unwrap(), [item(1)]);
+    assert_eq!(outcome_of(&w.undo(), "a.txt"), UndoOutcome::Deleted);
+}
+
+/// A copy whose original was never noted (an older record, or read from a snapshot) is kept,
+/// and said why in its own words.
+#[test]
+fn a_copy_whose_original_was_never_noted_is_kept_and_said_so() {
+    let w = world();
+    let place = w
+        .table
+        .get("me")
+        .unwrap()
+        .folder_identity("")
+        .unwrap()
+        .unwrap();
+    let id = w
+        .journal
+        .plan(&PlannedWrite {
+            item: item(6),
+            source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+            destination: "me".into(),
+            path: "a.txt".into(),
+            size: 1,
+            actor: Actor {
+                acting_account: "1001".into(),
+                for_account: "1001".into(),
+                permission: Permission::OwnFolders,
+            },
+            block_size: block_size_for(1),
+            source_modified_ns: Some(1),
+            source_file: None,
+            partial_keep: Default::default(),
+            place: Some(place),
+        })
+        .unwrap();
+    w.journal.staged(id, "x", &[]).unwrap();
+    w.journal.verified(id, [0; 32], None).unwrap();
+    w.journal.applied(id, "a.txt").unwrap();
+    std::fs::write(w.root.join("a.txt"), b"a").unwrap();
+    let st = w.table.get("me").unwrap().stat("a.txt").unwrap().unwrap();
+    w.journal
+        .committed(
+            id,
+            Landed {
+                size: 1,
+                modified_ns: None,
+                file: Some(st.id),
+            },
+        )
+        .unwrap();
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), kept(ORIGINAL_UNKNOWN));
+    assert!(w.exists("a.txt"));
+}
+
+/// Cut short after the copy was removed, then the old laptop says its original changed: the copy
+/// is gone, and the report says so (decided from the disk first), never "kept".
+#[test]
+fn a_removal_that_landed_before_a_crash_is_reported_gone_whatever_the_old_laptop_says() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
+    }
+    std::fs::remove_file(w.root.join("a.txt")).unwrap();
+    for answer in [OriginalNow::Missing, OriginalNow::CannotLook] {
+        let mut answers = w.confirmed();
+        answers.insert(item(1), answer);
+        let r = undo(&w.journal, &w.table, w.token(answers)).unwrap();
+        if let Some(u) = r.files.first() {
+            assert_eq!(u.outcome, UndoOutcome::AlreadyGone);
+        }
+    }
+    assert_eq!(
+        w.journal.undo_of(a).unwrap(),
+        Some(Undo::Done {
+            outcome: UndoOutcome::AlreadyGone
+        })
+    );
 }
 
 #[test]
@@ -489,10 +632,44 @@ fn once_the_wipe_starts_undo_refuses_everything() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
     w.moved(2, "New/b.txt", b"b", &["New"]);
-    w.journal.close_undo().unwrap();
-    let r = undo(&w.journal, &w.table, Some(&w.confirmed()));
-    assert!(matches!(r, Err(JournalError::UndoClosed)), "{r:?}");
+    w.close(pctwin_journal::Resolved::Kept {
+        why: "undo was cut short".into(),
+    });
+    let r = undo(&w.journal, &w.table, w.token(w.confirmed())).unwrap();
+    assert!(
+        r.closed && r.files.is_empty() && r.folders.is_empty(),
+        "{r:?}"
+    );
     assert!(w.exists("a.txt") && w.exists("New/b.txt"));
+}
+
+/// Closed part of the way (the wipe started while undo ran): it stops, says so, and reports
+/// what it did before.
+#[cfg(windows)]
+#[test]
+fn undo_closed_part_of_the_way_stops_and_reports_what_it_did() {
+    let w = world();
+    w.moved(1, "first.txt", b"1", &[]);
+    w.moved(2, "second.txt", b"2", &[]);
+    // The newest goes first, and is held by another program for a moment: undo is on it when
+    // the wipe starts.
+    let holder = std::fs::OpenOptions::new()
+        .write(true)
+        .open(w.root.join("second.txt"))
+        .unwrap();
+    let r = std::thread::scope(|s| {
+        let undoing = s.spawn(|| w.undo());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        w.close(pctwin_journal::Resolved::Kept {
+            why: "undo was cut short".into(),
+        });
+        undoing.join().unwrap()
+    });
+    drop(holder);
+    assert!(r.closed, "{r:?}");
+    assert_eq!(r.files.len(), 1, "{r:?}");
+    assert_eq!(r.files[0].path, "second.txt");
+    assert!(w.exists("first.txt"), "nothing after the close");
 }
 
 #[test]
@@ -502,13 +679,20 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
     // Cut short just after recording that it was about to remove it.
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
-    w.journal.close_undo().unwrap();
-    let r = undo(&w.journal, &w.table, Some(&w.confirmed()));
-    assert!(matches!(r, Err(JournalError::UndoClosed)), "{r:?}");
+    // Closing finishes it from the disk: nothing was moved, so the copy stays, said kept.
+    close_undo(&w.journal, &w.table, &UndoOptions::default()).unwrap();
+    assert_eq!(
+        w.journal.undo_of(a).unwrap(),
+        Some(Undo::Done {
+            outcome: UndoOutcome::Kept {
+                why: KEPT_AT_CLOSE.into()
+            }
+        })
+    );
+    let r = undo(&w.journal, &w.table, w.token(w.confirmed())).unwrap();
+    assert!(r.closed && r.files.is_empty(), "{r:?}");
     assert!(w.exists("a.txt"));
 }
 
@@ -518,13 +702,234 @@ fn undo_cut_short_before_removing_finishes_next_time() {
     let a = w.moved(1, "a.txt", b"a", &[]);
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
     let r = w.undo();
     assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted);
     assert!(!w.exists("a.txt"));
+}
+
+/// Linux and macOS: PCTwin stopped after moving the copy's name aside. The next undo finds it
+/// under exactly the recorded private name, proves it is the copy, unchanged, and removes it.
+#[cfg(unix)]
+#[test]
+fn undo_cut_short_after_moving_aside_is_finished_from_the_disk() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    assert!(!w.exists("a.txt"));
+}
+
+/// Linux and macOS: a copy changed while it was under its private name goes back under its own
+/// name, and is said to be kept.
+#[cfg(unix)]
+#[test]
+fn a_copy_changed_while_moved_aside_goes_back_under_its_name() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    std::fs::write(w.root.join(private), b"edited").unwrap();
+    let r = w.undo();
+    assert_eq!(
+        outcome_of(&r, "a.txt"),
+        UndoOutcome::Kept {
+            why: CHANGED_SINCE.into()
+        },
+        "{r:?}"
+    );
+    assert_eq!(std::fs::read(w.root.join("a.txt")).unwrap(), b"edited");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+}
+
+/// Linux and macOS: closing undo (the wipe starts) finishes a removal cut short after the move
+/// aside, so nothing is left under a hidden name once undo is gone.
+#[cfg(unix)]
+#[test]
+fn closing_finishes_a_removal_cut_short_after_moving_aside() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    close_undo(&w.journal, &w.table, &UndoOptions::default()).unwrap();
+    assert_eq!(
+        w.journal.undo_of(a).unwrap(),
+        Some(Undo::Done {
+            outcome: UndoOutcome::Deleted
+        })
+    );
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    assert!(!w.exists("a.txt"));
+}
+
+/// Linux and macOS: a salvage PCTwin stopped while copying is never said to be "saved again": it
+/// is named visibly and said to be possibly incomplete; one the journal recorded complete is
+/// "saved again" (Part J, finding 1).
+#[cfg(unix)]
+#[test]
+fn a_salvage_cut_short_is_said_to_be_maybe_incomplete_never_saved_again() {
+    use std::os::unix::fs::PermissionsExt;
+    for (complete, mode) in [(false, 0o644), (false, 0o000), (true, 0o644)] {
+        let w = world();
+        let a = w.moved(1, "a.txt", b"a", &[]);
+        let stage = w.removing(a);
+        let Undo::Removing { file, dir_id, .. } = stage.clone() else {
+            unreachable!()
+        };
+        let temp = format!(".pctwin-salvage-{}", "1".repeat(32));
+        let to = "a (kept by PCTwin undo).txt";
+        {
+            let permit = w.journal.begin_undo().unwrap();
+            w.journal.record_undo(&permit, a, &stage).unwrap();
+            w.journal
+                .record_undo(
+                    &permit,
+                    a,
+                    &Undo::Salvaging {
+                        file,
+                        dir_id,
+                        temp: temp.clone(),
+                        to: to.into(),
+                        complete,
+                    },
+                )
+                .unwrap();
+        }
+        // The copy was removed, then PCTwin stopped while saving what was written to it.
+        std::fs::remove_file(w.root.join("a.txt")).unwrap();
+        std::fs::write(w.root.join(&temp), b"part of the late byt").unwrap();
+        std::fs::set_permissions(w.root.join(&temp), std::fs::Permissions::from_mode(mode))
+            .unwrap();
+        let r = w.undo();
+        let why = if complete {
+            pctwin_transfer::SAVED_AGAIN
+        } else {
+            pctwin_transfer::SAVED_MAYBE_INCOMPLETE
+        };
+        assert_eq!(
+            outcome_of(&r, "a.txt"),
+            UndoOutcome::KeptAt {
+                at: to.into(),
+                why: why.into()
+            },
+            "complete {complete}, mode {mode:o}: {r:?}"
+        );
+        assert_eq!(
+            std::fs::read(w.root.join(to)).unwrap(),
+            b"part of the late byt"
+        );
+        assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    }
+}
+
+/// Linux: a copy put back under its name because another program had it open is tried again
+/// later and removed once it is free; it is never called "changed" for having been put back
+/// (Part J, finding 2).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_copy_put_back_because_it_was_in_use_is_removed_once_free() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing { private, .. } = &stage else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+    }
+    // PCTwin stopped after moving it aside; a program has it open.
+    std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
+    let holder = std::fs::File::open(w.root.join(private)).unwrap();
+    let r = w.undo();
+    assert_eq!(
+        outcome_of(&r, "a.txt"),
+        UndoOutcome::NotDone {
+            why: pctwin_transfer::IN_USE.into()
+        },
+        "{r:?}"
+    );
+    assert!(w.exists("a.txt"));
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    drop(holder);
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(!w.exists("a.txt"));
+}
+
+/// Linux and macOS: a put-back cut short (recorded, not yet done) of the copy itself ends with
+/// the copy under its name and looked at again as usual, so it is removed (Part J, finding 2).
+#[cfg(unix)]
+#[test]
+fn a_put_back_of_the_copy_cut_short_is_finished_and_the_copy_removed() {
+    let w = world();
+    let a = w.moved(1, "a.txt", b"a", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing {
+        file,
+        dir_id,
+        private,
+    } = stage.clone()
+    else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+        w.journal
+            .record_undo(
+                &permit,
+                a,
+                &Undo::Putting {
+                    file,
+                    dir_id,
+                    private: private.clone(),
+                    to: "a.txt".into(),
+                },
+            )
+            .unwrap();
+    }
+    std::fs::rename(w.root.join("a.txt"), w.root.join(&private)).unwrap();
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+}
+
+/// Every undo on Linux and macOS leaves no name of its own behind.
+#[cfg(unix)]
+#[test]
+fn undo_leaves_no_hidden_names() {
+    let w = world();
+    w.moved(1, "a.txt", b"a", &[]);
+    w.moved(2, "New/b.txt", b"b", &["New"]);
+    let r = w.undo();
+    assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted, "{r:?}");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
 }
 
 #[test]
@@ -533,9 +938,7 @@ fn undo_cut_short_after_removing_says_it_is_gone_and_claims_nothing_more() {
     let a = w.moved(1, "a.txt", b"a", &[]);
     {
         let permit = w.journal.begin_undo().unwrap();
-        w.journal
-            .record_undo(&permit, a, &Undo::Removing { file: w.file_of(a) })
-            .unwrap();
+        w.journal.record_undo(&permit, a, &w.removing(a)).unwrap();
     }
     std::fs::remove_file(w.root.join("a.txt")).unwrap();
     let r = w.undo();
@@ -543,10 +946,10 @@ fn undo_cut_short_after_removing_says_it_is_gone_and_claims_nothing_more() {
 }
 
 #[test]
-fn each_file_is_recorded_as_being_removed_before_it_goes() {
+fn a_file_is_recorded_as_being_removed_only_when_it_really_is() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
-    // Kept open by another program for the whole undo: recorded as under way, not done.
+    // Kept open by another program for the whole undo: never attempted, so nothing recorded.
     #[cfg(windows)]
     {
         let _holder = std::fs::OpenOptions::new()
@@ -560,10 +963,7 @@ fn each_file_is_recorded_as_being_removed_before_it_goes() {
                 why: pctwin_transfer::IN_USE.into()
             }
         );
-        assert_eq!(
-            w.journal.undo_of(a).unwrap(),
-            Some(Undo::Removing { file: w.file_of(a) })
-        );
+        assert_eq!(w.journal.undo_of(a).unwrap(), None);
         assert!(w.exists("a.txt"));
     }
     // Once nobody holds it, the next undo removes it.
@@ -716,13 +1116,11 @@ fn a_file_whose_identity_was_never_known_is_kept_and_said_so() {
             source_modified_ns: Some(1),
             source_file: Some(FileId {
                 volume: 1,
-                index: 1,
+                index: std::num::NonZeroU64::new(1).unwrap(),
+                born: None,
             }),
             partial_keep: Default::default(),
-            place: Some(FileId {
-                volume: place.volume,
-                index: place.index,
-            }),
+            place: Some(place),
         })
         .unwrap();
     w.journal.staged(id, "x", &[]).unwrap();

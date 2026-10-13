@@ -2,6 +2,8 @@
 //! block carries its fingerprint and is checked on arrival, compression is used only when it helps,
 //! a dropped connection resumes from the exact block, and a file that changes while it is being
 //! read is never finished.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
 
 use std::io::Write;
 use std::path::Path;

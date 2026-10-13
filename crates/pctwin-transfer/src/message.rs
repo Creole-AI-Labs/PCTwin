@@ -18,6 +18,13 @@ pub(crate) const BLOCK_WIRE_OVERHEAD: usize = 46;
 /// A whole block on the wire: the block's own header plus its largest contents.
 const MAX_WIRE_BLOCK: usize = BLOCK_WIRE_OVERHEAD + MAX_BLOCK as usize;
 
+/// How long a request's nonce is, in bytes (128 bits).
+pub const NONCE_LEN: usize = 16;
+
+/// A fresh random number the new laptop puts in each request about the originals; the old laptop
+/// must echo it, so an answer can only ever belong to the one question just asked.
+pub type Nonce = [u8; NONCE_LEN];
+
 /// One message of a transfer. `stream` tells files in flight apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
@@ -74,9 +81,13 @@ pub enum Message {
     Refused { stream: u32 },
     /// New laptop to old, for undo: are these originals still there, unchanged? Read-only on the
     /// old laptop, which answers only for files it sent. At most `MAX_ORIGINALS_PER_REQUEST`.
-    CheckOriginals { items: Vec<ItemId> },
-    /// Old laptop to new: what it sees now for each item asked.
-    Originals { answers: Vec<(ItemId, OriginalNow)> },
+    /// `nonce` is fresh for every request and comes back in the answer.
+    CheckOriginals { nonce: Nonce, items: Vec<ItemId> },
+    /// Old laptop to new: what it sees now for each item asked, with the request's `nonce` echoed.
+    Originals {
+        nonce: Nonce,
+        answers: Vec<(ItemId, OriginalNow)>,
+    },
 }
 
 const START: u8 = 1;
@@ -185,18 +196,20 @@ impl Message {
                 w.push(REFUSED);
                 w.extend_from_slice(&stream.to_be_bytes());
             }
-            Message::CheckOriginals { items } => {
+            Message::CheckOriginals { nonce, items } => {
                 w.push(CHECK_ORIGINALS);
                 w.extend_from_slice(&0u32.to_be_bytes());
+                w.extend_from_slice(nonce);
                 let count = u16::try_from(items.len()).unwrap_or(u16::MAX);
                 w.extend_from_slice(&count.to_be_bytes());
                 for item in items.iter().take(usize::from(count)) {
                     w.extend_from_slice(&item_bytes(item));
                 }
             }
-            Message::Originals { answers } => {
+            Message::Originals { nonce, answers } => {
                 w.push(ORIGINALS);
                 w.extend_from_slice(&0u32.to_be_bytes());
+                w.extend_from_slice(nonce);
                 let count = u16::try_from(answers.len()).unwrap_or(u16::MAX);
                 w.extend_from_slice(&count.to_be_bytes());
                 for (item, now) in answers.iter().take(usize::from(count)) {
@@ -279,21 +292,23 @@ impl Message {
             SKIP => Message::Skip { stream },
             REFUSED => Message::Refused { stream },
             CHECK_ORIGINALS if stream == 0 => {
+                let nonce = r.nonce()?;
                 let count = r.count()?;
                 let mut items = Vec::with_capacity(count);
                 for _ in 0..count {
                     items.push(r.item()?);
                 }
-                Message::CheckOriginals { items }
+                Message::CheckOriginals { nonce, items }
             }
             ORIGINALS if stream == 0 => {
+                let nonce = r.nonce()?;
                 let count = r.count()?;
                 let mut answers = Vec::with_capacity(count);
                 for _ in 0..count {
                     let item = r.item()?;
                     answers.push((item, r.original()?));
                 }
-                Message::Originals { answers }
+                Message::Originals { nonce, answers }
             }
             _ => return Err(damaged("unknown message")),
         };
@@ -370,7 +385,15 @@ fn put_file_id(w: &mut Vec<u8>, id: Option<&FileId>) {
         Some(id) => {
             w.push(1);
             w.extend_from_slice(&id.volume.to_be_bytes());
-            w.extend_from_slice(&id.index.to_be_bytes());
+            w.extend_from_slice(&id.index.get().to_be_bytes());
+            match id.born {
+                Some(born) => {
+                    w.push(1);
+                    w.extend_from_slice(&born.secs.to_be_bytes());
+                    w.extend_from_slice(&born.nanos.to_be_bytes());
+                }
+                None => w.push(0),
+            }
         }
         None => w.push(0),
     }
@@ -489,13 +512,33 @@ impl<'a> Reader<'a> {
 
     fn file_id(&mut self) -> Result<Option<FileId>, TransferError> {
         if self.flag()? {
+            let volume = self.u64()?;
+            let index =
+                std::num::NonZeroU64::new(self.u64()?).ok_or_else(|| damaged("file number 0"))?;
+            let born = if self.flag()? {
+                let secs = self.i64()?;
+                let nanos = self.u32()?;
+                if nanos >= 1_000_000_000 {
+                    return Err(damaged("bad birth time"));
+                }
+                Some(pctwin_journal::Born { secs, nanos })
+            } else {
+                None
+            };
             Ok(Some(FileId {
-                volume: self.u64()?,
-                index: self.u64()?,
+                volume,
+                index,
+                born,
             }))
         } else {
             Ok(None)
         }
+    }
+
+    fn nonce(&mut self) -> Result<Nonce, TransferError> {
+        let mut nonce = [0u8; NONCE_LEN];
+        nonce.copy_from_slice(self.take(NONCE_LEN)?);
+        Ok(nonce)
     }
 
     /// A count of items, refused above the per-request limit.

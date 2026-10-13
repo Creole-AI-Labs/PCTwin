@@ -4,9 +4,7 @@
 //! exactly where it stopped (or starts a changed file again); a file that changes while it is
 //! being sent arrives whole and current; a file for a place that was not approved fails on its
 //! own. Run over an in-memory connection that can be cut, and once over a real paired link.
-
-// Tests make and remove files to set up each case; only the code under test is held to removing
-// nothing but through the gate.
+// Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
 #![allow(clippy::disallowed_methods)]
 
 use std::path::{Path, PathBuf};

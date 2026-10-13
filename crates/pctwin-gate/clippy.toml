@@ -1,0 +1,12 @@
+# fs_at opens files with full sharing (read, write and delete) and removes by name; the gate uses
+# only its delete-by-handle, on a handle it opened and checked itself (Security Design B, decided 8
+# October 2026). Everything else in fs_at is refused here.
+disallowed-methods = [
+    { path = "fs_at::OpenOptions::open_at", reason = "opens with full sharing; open through cap-std with the gate's own sharing" },
+    { path = "fs_at::OpenOptions::open_dir_at", reason = "opens with full sharing" },
+    { path = "fs_at::OpenOptions::open_path_at", reason = "opens with full sharing" },
+    { path = "fs_at::OpenOptions::mkdir_at", reason = "not how the gate makes folders" },
+    { path = "fs_at::OpenOptions::symlink_at", reason = "the gate never makes links" },
+    { path = "fs_at::OpenOptions::unlink_at", reason = "removes by name; remove only through Destination::remove_if_unchanged" },
+    { path = "fs_at::OpenOptions::rmdir_at", reason = "removes by name" },
+]
