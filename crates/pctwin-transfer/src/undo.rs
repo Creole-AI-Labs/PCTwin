@@ -83,9 +83,10 @@ pub const IN_USE: &str = "another program is using it, so it was kept; close it 
 /// Why a copy an app keeps open (a database or mail store, or one with an app's working files
 /// beside it) was kept.
 pub const APP_KEEPS_OPEN: &str = "an app keeps this file open, so it was kept";
-/// Why a copy was not removed where the system cannot say whether another program has it open.
-pub const CANNOT_CHECK: &str =
-    "PCTwin can't tell if another program is using this. Close your other programs, then remove";
+/// Why a copy was kept where the system cannot prove that no other program can still change it
+/// (macOS and other systems without Linux write leases): kept for the person to look at, never
+/// removed on their word (Security Design 3B undo bullet, strengthened 13 October 2026).
+pub const CANNOT_CHECK: &str = "PCTwin can't be sure no other program is changing this file, so it was kept. If you don't need it, you can delete it yourself";
 /// The plain reason for a file stored online only.
 pub const ONLINE_ONLY: &str = "it is stored online only, so it was kept";
 /// The plain reason for a file with a second name on the drive.
@@ -152,10 +153,6 @@ pub fn undo_with(
 /// What the person's app passes in for one undo.
 #[derive(Debug, Clone, Copy)]
 pub struct UndoOptions<'a> {
-    /// The person confirmed, once for this undo, that their other programs are closed. Used only
-    /// where the system cannot say whether another program has a file open
-    /// ([`CANNOT_CHECK`]); never instead of asking it.
-    pub others_closed: bool,
     /// The words added to the name of a file kept beside its own, in the person's language, from
     /// the reviewed translations ([`KEPT_WORDS`] in English).
     pub kept_words: &'a str,
@@ -171,7 +168,6 @@ pub struct UndoOptions<'a> {
 impl Default for UndoOptions<'_> {
     fn default() -> Self {
         Self {
-            others_closed: false,
             kept_words: KEPT_WORDS,
             room_for_words: KEPT_WORDS_ROOM,
             resolve_within: RESOLVE_WITHIN,
@@ -446,7 +442,9 @@ fn outcome_of(removed: Removed) -> Result<UndoOutcome, String> {
             why: SAVED_AGAIN.into(),
         },
         Removed::InUse => return Err(IN_USE.into()),
-        Removed::CannotCheck => return Err(CANNOT_CHECK.into()),
+        // Final, not "try again": nothing will prove it later (macOS, a drive without leases),
+        // so the copy is kept for the person to look at, and undo does not ask about it again.
+        Removed::CannotCheck => kept(CANNOT_CHECK),
     })
 }
 
@@ -512,7 +510,8 @@ fn remove_copy(
 
 /// Linux and macOS: removes the checked copy by moving its name aside first and checking it
 /// there, each step recorded before it happens, and its folder flushed before it is recorded as
-/// done (Security Design 3B, decided 9 October 2026).
+/// done (Security Design 3B, decided 9 October 2026). Only Linux removes, under a write lease;
+/// on macOS the copy is kept and said so (strengthened 13 October 2026).
 #[cfg(unix)]
 fn remove_copy(
     journal: &Journal,
@@ -557,7 +556,6 @@ fn remove_copy(
     let mut cx = pctwin_gate::Context {
         kept_words: options.kept_words,
         room_for_words: options.room_for_words,
-        others_closed: options.others_closed,
         journal: &mut record,
     };
     // The gate flushes the folder it acted in before it answers, so the outcome is on the disk
@@ -645,11 +643,7 @@ fn finish_part_way(
         Err(e) => return Ok(PartWay::Unresolved(e.to_string())),
     };
     let (entry, stage) = (entry.clone(), stage.clone());
-    let (others_closed, kept_words, room_for_words) = (
-        options.others_closed,
-        options.kept_words.to_string(),
-        options.room_for_words,
-    );
+    let (kept_words, room_for_words) = (options.kept_words.to_string(), options.room_for_words);
     let ended = within(
         journal,
         right,
@@ -658,7 +652,6 @@ fn finish_part_way(
         options.resolve_within,
         move |lent, record| {
             let options = UndoOptions {
-                others_closed,
                 kept_words: &kept_words,
                 room_for_words,
                 resolve_within: RESOLVE_WITHIN,
@@ -816,7 +809,6 @@ fn on_the_disk(
         let mut cx = pctwin_gate::Context {
             kept_words: options.kept_words,
             room_for_words: options.room_for_words,
-            others_closed: options.others_closed,
             journal: &mut journal,
         };
         let resolved = match stage {
@@ -860,7 +852,7 @@ fn on_the_disk(
             // Something that is not the copy, or the copy changed since.
             Ok(Resolution::Home) => PartWay::Ended(kept(CHANGED_SINCE)),
             Ok(Resolution::InUse) => PartWay::BackForNow(IN_USE),
-            Ok(Resolution::CannotCheck) => PartWay::BackForNow(CANNOT_CHECK),
+            Ok(Resolution::CannotCheck) => PartWay::Ended(kept(CANNOT_CHECK)),
             Ok(Resolution::KeptAt { at }) => kept_at(at, KEPT_BESIDE),
             Ok(Resolution::SavedAgain { at }) => kept_at(at, SAVED_AGAIN),
             Ok(Resolution::SavedMaybeIncomplete { at }) => kept_at(at, SAVED_MAYBE_INCOMPLETE),

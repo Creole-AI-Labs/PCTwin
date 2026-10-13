@@ -1,76 +1,11 @@
-//! macOS: before undo moves a copy aside, it announces the removal through Apple's file
-//! coordination, so apps showing the file save it and let go, and then asks the system which
-//! programs have the file open (decided 9 October 2026, Security Design 3B undo bullet). A file
-//! any other program has open, in any way, is kept. If either cannot be asked, or the
-//! coordination does not answer in time, nothing is removed.
-//!
-//! Both work by path: they are a courtesy to other programs and a check, never the proof. The
-//! proof that PCTwin removes the very file it checked, unchanged, stays with the held handle and
-//! the private name (see `unix_undo`).
+//! macOS: the system's list of programs that have a file open (Security Design 3B undo bullet).
+//! macOS cannot prove that no other program can still write to a file, so undo never removes a
+//! copy there (strengthened 13 October 2026); this list only says whether the copy is kept
+//! because it is "in use" or because PCTwin "cannot check". It works by path, as a check, never
+//! as the proof.
 
-use std::cell::Cell;
 use std::io;
 use std::path::Path;
-use std::ptr::NonNull;
-use std::time::Duration;
-
-use objc2::AllocAnyThread;
-use objc2::rc::Retained;
-use objc2_foundation::{
-    NSError, NSFileCoordinator, NSFileCoordinatorWritingOptions, NSString, NSURL,
-};
-
-/// How long undo waits for apps showing a file to save and let go before it gives up on that
-/// file (nothing is removed then).
-pub(crate) const COORDINATION_WAIT: Duration = Duration::from_secs(30);
-
-/// Runs `then` while macOS file coordination holds the file at `path` for deleting: every app
-/// presenting it has been told, has saved, and has let go. The coordination is held by a worker
-/// thread, which never acts on the drive; `then` runs on this thread. `Ok(None)` if coordination
-/// did not answer within [`COORDINATION_WAIT`] (`then` never ran); an error if it failed.
-pub(crate) fn coordinated_for_deleting<R>(
-    path: &Path,
-    then: impl FnOnce() -> R,
-) -> io::Result<Option<R>> {
-    let path = path.to_path_buf();
-    crate::deadline::while_held(
-        COORDINATION_WAIT,
-        move |inside| coordinate(&path, inside),
-        then,
-    )
-}
-
-/// Holds the file at `path` for deleting through file coordination while `inside` runs.
-fn coordinate(path: &Path, inside: &dyn Fn()) -> io::Result<()> {
-    let text = path
-        .to_str()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path is not text"))?;
-    let url = NSURL::fileURLWithPath(&NSString::from_str(text));
-    let coordinator = NSFileCoordinator::initWithFilePresenter(NSFileCoordinator::alloc(), None);
-    let ran = Cell::new(false);
-    let accessor = block2::RcBlock::new(|_url: NonNull<NSURL>| {
-        ran.set(true);
-        inside();
-    });
-    let mut error: Option<Retained<NSError>> = None;
-    coordinator.coordinateWritingItemAtURL_options_error_byAccessor(
-        &url,
-        NSFileCoordinatorWritingOptions::ForDeleting,
-        Some(&mut error),
-        &accessor,
-    );
-    if let Some(e) = error {
-        return Err(io::Error::other(format!(
-            "file coordination refused: {}",
-            e.localizedDescription()
-        )));
-    }
-    if ran.get() {
-        Ok(())
-    } else {
-        Err(io::Error::other("file coordination did not run"))
-    }
-}
 
 /// How many times the system's list is asked for when it may have been cut short.
 const LIST_TRIES: usize = 3;
