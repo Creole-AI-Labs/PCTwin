@@ -1,12 +1,301 @@
-:root {
-  --blue: #2454f2;
-  --canvas: #f8faff;
-  --ink: #171b29;
-  font-family: Inter, "Segoe UI", Arial, sans-serif;
-  color: var(--ink);
-  background: var(--canvas);
+@import "./styles/tokens.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
-body { margin: 0; }
-.placeholder { min-height: 100vh; display: grid; place-content: center; text-align: center; gap: 8px; }
-.placeholder h1 { margin: 0; font-size: 32px; font-weight: 650; }
-.placeholder p { margin: 0; color: var(--blue); font-weight: 600; }
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  /* rem-based text follows the system text size (200% text included); layout reflows. */
+  font-size: calc(var(--type-body) / 16px * 1rem);
+  line-height: 1.5;
+  color: var(--colour-ink);
+  background: var(--colour-canvas);
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--colour-focus);
+  outline-offset: 2px;
+}
+
+/* App frame: header, scrolling content, footer. */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--content-padding);
+  border-bottom: 1px solid var(--colour-line);
+  background: var(--colour-paper);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 650;
+  font-size: 1.15rem;
+}
+
+.brand img {
+  width: 28px;
+  height: 28px;
+}
+
+.language select {
+  min-height: 32px;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-button);
+  background: var(--colour-paper);
+  padding: 0 var(--space-2);
+}
+
+.app-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6) var(--content-padding);
+  animation: page-in var(--motion-page) var(--motion-easing);
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--content-padding);
+  border-top: 1px solid var(--colour-line);
+  color: var(--colour-muted);
+  font-size: 0.93rem;
+}
+
+.app-footer .free {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Text */
+.eyebrow {
+  margin: 0 0 var(--space-3);
+  color: var(--colour-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 var(--space-3);
+  font-size: calc(var(--type-heading) / 16px * 1rem);
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+h1.welcome {
+  font-size: calc(var(--type-welcome) / 16px * 1rem);
+}
+
+h1.welcome span {
+  display: block;
+}
+
+.lead {
+  margin: 0 0 var(--space-6);
+  color: var(--colour-muted);
+  font-size: 1.07rem;
+}
+
+/* Buttons */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-button);
+  background: var(--colour-paper);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background var(--motion-feedback) var(--motion-easing),
+    transform var(--motion-feedback) var(--motion-easing);
+}
+
+.button:active {
+  transform: scale(0.99);
+}
+
+.button-primary {
+  width: 100%;
+  border-color: var(--colour-blue);
+  background: var(--colour-blue);
+  color: var(--colour-paper);
+  font-size: 1.07rem;
+}
+
+.button-primary:hover {
+  background: var(--colour-blue-hover);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--colour-blue);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Illustration */
+.illustration {
+  display: block;
+  width: min(100%, 320px);
+  margin: 0 auto var(--space-6);
+}
+
+/* Choice cards */
+.choices {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-6);
+  padding: 0;
+  list-style: none;
+}
+
+.choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-6) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-choice);
+  background: var(--colour-paper);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--motion-feedback) var(--motion-easing);
+}
+
+.choice:hover {
+  border-color: var(--colour-blue);
+}
+
+.choice-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.choice-text {
+  flex: 1;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.choice-title {
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.choice-body {
+  color: var(--colour-muted);
+}
+
+.note {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-muted);
+}
+
+.note-text {
+  margin: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.note svg {
+  flex: none;
+  color: var(--colour-blue);
+}
+
+.back {
+  margin-bottom: var(--space-4);
+  color: var(--colour-muted);
+}
+
+/* Icons that point along the reading direction flip in right-to-left languages. */
+[dir="rtl"] .flip {
+  transform: scaleX(-1);
+}
+
+/* Narrow windows and large text: tighter margins, nothing hidden. */
+@media (max-width: 400px) {
+  .app-main,
+  .app-header,
+  .app-footer {
+    padding-inline: var(--content-padding-narrow);
+  }
+}
+
+/* Windows high contrast and other forced colours: keep borders visible, let the system colour text. */
+@media (forced-colors: active) {
+  .button,
+  .choice,
+  .note {
+    border: 1px solid CanvasText;
+  }
+  .button-primary {
+    forced-color-adjust: none;
+    background: ButtonText;
+    color: ButtonFace;
+  }
+}

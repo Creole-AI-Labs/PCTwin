@@ -1,0 +1,69 @@
+/*
+ * PCTwin design tokens (from the approved mockups' design-tokens.json and design system notes).
+ * Logical CSS pixels. Every screen uses these variables, never raw values.
+ */
+:root {
+  /* Colour */
+  --colour-blue: #2454f2;
+  --colour-blue-hover: #1642d3;
+  --colour-citron: #e7f36a;
+  --colour-canvas: #f8faff;
+  --colour-ink: #171b29;
+  --colour-paper: #ffffff;
+  --colour-muted: #60687b;
+  --colour-line: #dce1eb;
+  --colour-soft: #eff3fb;
+  --colour-success-text: #176747;
+  --colour-success-surface: #eaf5ef;
+  --colour-attention-text: #85520b;
+  --colour-attention-surface: #fff4de;
+  --colour-focus: #2454f2;
+
+  /* Spacing (four-pixel base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --content-padding: 24px;
+  --content-padding-narrow: 20px;
+
+  /* Controls and radii */
+  --control-height: 44px;
+  --radius-choice: 14px;
+  --radius-content: 12px;
+  --radius-button: 11px;
+
+  /* Type: local fonts only, never fetched */
+  --font-family: Inter, "Segoe UI", system-ui, -apple-system, "Noto Sans", Arial, sans-serif;
+  --type-welcome: 32px;
+  --type-heading: 24px;
+  --type-body: 14px;
+  --type-row: 15px;
+  --type-supporting: 12px;
+  --type-tertiary: 11px;
+
+  /* Motion */
+  --motion-feedback: 120ms;
+  --motion-page: 180ms;
+  --motion-resize: 260ms;
+  --motion-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Reduced motion from the system: no transitions or decorative animation. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-feedback: 0ms;
+    --motion-page: 0ms;
+    --motion-resize: 0ms;
+  }
+}
+
+/* More contrast from the system: stronger lines and supporting text. */
+@media (prefers-contrast: more) {
+  :root {
+    --colour-muted: #3a4152;
+    --colour-line: #8a93a6;
+  }
+}
