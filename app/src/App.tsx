@@ -4,6 +4,7 @@ import logo from "../src-tauri/icons/128x128.png";
 import { HELP_URL, openExternal } from "./external";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { Lock } from "./icons";
+import { setTrayLabels } from "./native";
 import NextStep from "./screens/NextStep";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
@@ -21,7 +22,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   useEffect(() => {
     document.documentElement.lang = language;
     document.documentElement.dir = directionOf(language);
-  }, [language]);
+    void setTrayLabels(l10n.getString("tray-show"), l10n.getString("tray-quit")).catch(() => undefined);
+  }, [language, l10n]);
 
   // A new screen starts at the top and moves keyboard focus to its heading area.
   useEffect(() => {

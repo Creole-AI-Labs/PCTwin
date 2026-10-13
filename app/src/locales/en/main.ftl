@@ -32,3 +32,8 @@ role-note = Nothing moves until you review and approve the plan. Your old laptop
 next-title-old = This is the old laptop
 next-title-new = This is the new laptop
 next-body = Pairing the two laptops comes next. It is still being built, so nothing has been changed on this laptop.
+
+## Tray menu
+
+tray-show = Show PCTwin
+tray-quit = Quit PCTwin

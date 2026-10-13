@@ -1,10 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "The main window's screens: they may open our own site in the browser and nothing else. The app's own commands (window size by name, tray labels) take typed arguments only.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "opener:default"
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://getpctwin.com/*" }]
+    }
   ]
 }
