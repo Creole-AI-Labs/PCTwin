@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Nightly: the whole matrix again on unchanged code, to catch flaky tests and runner or
+  # toolchain changes before they meet a real change.
+  schedule:
+    - cron: "23 2 * * *"
 
 permissions:
   contents: read
@@ -17,7 +21,7 @@ env:
 
 jobs:
   ui:
-    name: Screens (type check and build)
+    name: Screens (type check, lint, unit tests, build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -40,6 +44,8 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
       - run: pnpm build
 
   rust:
@@ -95,6 +101,12 @@ jobs:
       - name: Formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check
+      # This checkout holds only the public repository, so every build here already proves the
+      # core builds without the private one; this step also refuses any dependency that would
+      # reach outside it (a path out of the checkout, or anything not from crates.io).
+      - name: Public core stands alone
+        if: matrix.os == 'ubuntu-latest'
+        run: bash scripts/public-only.sh
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Unsafe fence (only pctwin-lease may loosen unsafe_code)
@@ -114,6 +126,28 @@ jobs:
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
         run: cargo test --workspace --locked --no-fail-fast
+      # The desktop app, built and packaged on every system and kept unsigned for two weeks.
+      # One package type per system keeps the build free of extra downloads.
+      - name: Build the app
+        working-directory: app
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Windows) bundles=nsis ;;
+            macOS) bundles=app ;;
+            Linux) bundles=deb ;;
+          esac
+          pnpm tauri build --ci --bundles "$bundles"
+      - name: Keep the unsigned app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pctwin-unsigned-${{ matrix.os }}
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/macos/*.app
+            target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 14
       # macOS only: two probes that REPORT facts about the platform. They never fail the job.
       - name: macOS probe, file leases (F_SETLEASE)
         if: runner.os == 'macOS'
