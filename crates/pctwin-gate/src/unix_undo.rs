@@ -1395,6 +1395,7 @@ fn put_back_as(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_os = "macos"))]
     use std::os::unix::fs::PermissionsExt;
 
     #[cfg(not(target_os = "macos"))]
@@ -1674,12 +1675,14 @@ mod tests {
     }
 
     /// A step as kept by a test journal.
+    #[cfg(not(target_os = "macos"))]
     #[derive(Debug)]
     enum OwnedStep {
         Salvaging { to: String, complete: bool },
         Other,
     }
 
+    #[cfg(not(target_os = "macos"))]
     impl Step<'_> {
         fn into_owned(self) -> OwnedStep {
             match self {
