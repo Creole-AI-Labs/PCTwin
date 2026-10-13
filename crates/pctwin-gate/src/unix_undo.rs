@@ -181,6 +181,7 @@ impl Acts<'_> {
         rustix::fs::unlinkat(dir, name, AtFlags::empty())
     }
 
+    #[cfg(not(target_os = "macos"))]
     /// Makes the new file `name` in `dir`, with no permissions at all, open for writing.
     fn create(&self, dir: &Dir, name: &str) -> Result<std::fs::File, Errno> {
         if !(self.in_force)() {
@@ -225,6 +226,7 @@ impl Look {
         }
     }
 
+    #[cfg(not(target_os = "macos"))]
     /// The same contents as `other` as far as size and modified time tell (the change time moves
     /// with PCTwin's own rename and removal, so it is not compared across those).
     fn same_contents(&self, other: &Look) -> bool {
