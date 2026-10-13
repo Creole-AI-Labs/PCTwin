@@ -1,4 +1,4 @@
-//! Undo asks the old laptop whether it still has the original, unchanged (Security Design part B,
+//! Undo asks the old laptop whether it still has the original, unchanged (security design notes part B,
 //! "Undo removes only the file it checked, through one handle"). The old laptop answers read-only
 //! and only for what it sent; the new laptop trusts an answer only if it is exactly one answer to
 //! a question it asked, and removes a copy only if the original is the very same file, with the

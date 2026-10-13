@@ -1,4 +1,4 @@
-//! Moving one file in checked blocks (Engineering Plan section 3, Task List 1.5).
+//! Moving one file in checked blocks (engineering notes section 3, the plan).
 //!
 //! - A file is split into blocks of [`block_size_for`] its size: 128 KiB up to 16 MiB, so a file
 //!   has at most about 2,000 blocks (the Syncthing approach).

@@ -1,4 +1,4 @@
-//! Who is on the old laptop (Task List 1.4, "Who's moving?"): each person by the system's own
+//! Who is on the old laptop (the plan, "Who's moving?"): each person by the system's own
 //! account ID, read from the list every system keeps without opening anyone's files. A name is only
 //! a suggestion; system and service accounts are left out.
 

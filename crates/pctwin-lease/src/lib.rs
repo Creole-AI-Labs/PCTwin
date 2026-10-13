@@ -8,8 +8,8 @@
 //! safe API). [`still_held`] then says whether anyone started to open it meanwhile.
 //!
 //! This is the only crate in PCTwin that calls the system unsafely, in one function with whole
-//! numbers only (no pointers). Proven on ext4, XFS and btrfs, 9 October 2026 (scratchpad
-//! `lease-exp`): granted alone; refused for another reader, writer, mapping, or PCTwin's own
+//! numbers only (no pointers). Proven on ext4, XFS and btrfs, 9 October 2026 (a local
+//! experiment): granted alone; refused for another reader, writer, mapping, or PCTwin's own
 //! second handle; a new open waits and SIGIO is caught; PCTwin's own rename and removal keep it.
 //! On other systems nothing can be asked, and every answer is [`Lease::CannotCheck`]. On
 //! Windows the crate is empty (a held file there blocks other programs outright).

@@ -1,4 +1,4 @@
-//! Cross-system name rules (Engineering Plan 9.6): a name that a system cannot store is changed to
+//! Cross-system name rules (engineering notes): a name that a system cannot store is changed to
 //! a safe lookalike, and every change is reported so nothing is renamed silently.
 
 use pctwin_gate::{MAX_COMPONENT_BYTES, NameChange, Platform, convert_name};
@@ -149,7 +149,7 @@ fn renaming_a_reserved_name_at_the_length_limit_still_fits() {
     assert!(!name.ends_with('.') && !name.ends_with(' '));
 }
 
-// ---------- from the Skeptic's review of the redesign ----------
+// ---------- from an independent review of the redesign ----------
 
 #[test]
 fn short_name_aliases_with_trailing_spaces_or_dots_are_still_renamed() {

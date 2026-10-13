@@ -1,4 +1,4 @@
-//! The order things move in (Product Spec "Transfer, most important first"; Task List 1.5): what
+//! The order things move in (product notes "Transfer, most important first"; the plan): what
 //! the person asked for first (in Smart mode or by picking), then essentials (documents, the
 //! desktop, recent files), then everything else, newest first; several files take turns so one
 //! huge file never holds up the rest; a new "move this first" during the move jumps the queue.

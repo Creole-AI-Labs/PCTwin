@@ -1,4 +1,4 @@
-# The transfer crate changes nobody's files itself (Security Design B, decided 8 October 2026).
+# The transfer crate changes nobody's files itself (security design notes, decided 8 October 2026).
 # Every file or folder it makes, writes, renames or removes goes through pctwin-gate, which checks
 # what it acts on through a handle. Clippy resolves these names by type, so a renamed import or a
 # `use` alias cannot hide one. Reading is allowed (File::open, read_dir, metadata).

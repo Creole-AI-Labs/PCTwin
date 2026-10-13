@@ -1,4 +1,4 @@
-//! The lane driver on the new laptop (Security Design A, "Extra lanes"): each window it reports the
+//! The lane driver on the new laptop (security design notes, "Extra lanes"): each window it reports the
 //! speed to the tuner and opens or closes lanes to match. A lane that cannot be opened stops all
 //! further opening for the move (someone may be burning lane numbers); a closed lane fails at once,
 //! even mid-wait, so the old laptop sees it drop and sends its blocks on the others; a lane that

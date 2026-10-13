@@ -1,4 +1,4 @@
-//! The write lease on Linux (Security Design 3B undo, decided 9 October 2026): granted only when
+//! The write lease on Linux (security design notes, decided 9 October 2026): granted only when
 //! nothing else has the file open; a new open while it is held waits, is noticed, and does not
 //! end PCTwin; PCTwin's own rename and removal keep it.
 #![cfg(target_os = "linux")]

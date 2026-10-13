@@ -1,4 +1,4 @@
-//! The new laptop records every write in the change journal as it happens (Task List 1.6): an
+//! The new laptop records every write in the change journal as it happens (the plan): an
 //! entry is planned before anything is created, staged once its temporary file exists, verified
 //! only after every byte arrived, the original did not change while it was read and the file is on
 //! disk, applied with its real name before it gets it, and committed with what it landed as. A

@@ -1,5 +1,5 @@
-//! Undoing the files a move wrote (Task List 2.3; Product Spec "Restore point and one-click undo";
-//! Security Design B "Undo removes only the file it checked, through one handle", decided 8
+//! Undoing the files a move wrote (the plan; product notes "Restore point and one-click undo";
+//! security design notes "Undo removes only the file it checked, through one handle", decided 8
 //! October 2026).
 //!
 //! Undo is open only until the wipe of the old laptop starts; starting the wipe closes it for good
@@ -85,7 +85,7 @@ pub const IN_USE: &str = "another program is using it, so it was kept; close it 
 pub const APP_KEEPS_OPEN: &str = "an app keeps this file open, so it was kept";
 /// Why a copy was kept where the system cannot prove that no other program can still change it
 /// (macOS and other systems without Linux write leases): kept for the person to look at, never
-/// removed on their word (Security Design 3B undo bullet, strengthened 13 October 2026).
+/// removed on their word (security design notes, strengthened 13 October 2026).
 pub const CANNOT_CHECK: &str = "PCTwin can't be sure no other program is changing this file, so it was kept. If you don't need it, you can delete it yourself";
 /// The plain reason for a file stored online only.
 pub const ONLINE_ONLY: &str = "it is stored online only, so it was kept";
@@ -510,7 +510,7 @@ fn remove_copy(
 
 /// Linux and macOS: removes the checked copy by moving its name aside first and checking it
 /// there, each step recorded before it happens, and its folder flushed before it is recorded as
-/// done (Security Design 3B, decided 9 October 2026). Only Linux removes, under a write lease;
+/// done (security design notes, decided 9 October 2026). Only Linux removes, under a write lease;
 /// on macOS the copy is kept and said so (strengthened 13 October 2026).
 #[cfg(unix)]
 fn remove_copy(
@@ -913,7 +913,7 @@ pub fn close_undo(
 
 #[cfg(test)]
 mod tests {
-    //! The deadline on finishing a part-way removal (Part J, finding 8), shown with work that
+    //! The deadline on finishing a part-way removal (security review, finding 8), shown with work that
     //! stands in for a drive that stops answering.
     use super::*;
     use pctwin_journal::{Actor, Landed, Permission, PlannedWrite, UndoRight};

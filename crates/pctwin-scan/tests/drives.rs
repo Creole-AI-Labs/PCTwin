@@ -1,4 +1,4 @@
-//! Drives on the old laptop (Task List 1.4): every real drive with its type and what that type can
+//! Drives on the old laptop (the plan): every real drive with its type and what that type can
 //! keep, and never assuming the running system owns every drive: another installed system is found
 //! by its own marker files and read only through rescue, with permission.
 

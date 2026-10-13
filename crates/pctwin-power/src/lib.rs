@@ -1,4 +1,4 @@
-//! Keeping both laptops awake during a move, and watching the battery (Task List 1.5).
+//! Keeping both laptops awake during a move, and watching the battery (the plan).
 //!
 //! - [`stay_awake`] holds off *idle* sleep while a move runs, using each system's own request
 //!   (Windows `SetThreadExecutionState`, macOS power assertions, Linux systemd inhibitor locks,

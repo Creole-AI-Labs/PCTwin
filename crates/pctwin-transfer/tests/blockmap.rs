@@ -1,4 +1,4 @@
-//! Which blocks of a file have arrived (Task List 1.5, lanes, step 3): kept as runs of blocks,
+//! Which blocks of a file have arrived (the plan, lanes, step 3): kept as runs of blocks,
 //! joined when they touch, so the map stays small however sections were split, and travels in the
 //! resume message to tell the old laptop exactly what is still needed.
 

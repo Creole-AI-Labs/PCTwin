@@ -1,4 +1,4 @@
-//! Extra lanes (Security Design A, "Extra lanes"): more connections between two laptops that
+//! Extra lanes (security design notes, "Extra lanes"): more connections between two laptops that
 //! already paired, with no new code. Each lane runs its own Noise `NNpsk0` handshake with fresh
 //! ephemeral keys; its pre-shared key is derived from the paired session and the lane number.
 //!

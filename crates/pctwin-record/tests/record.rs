@@ -1,4 +1,4 @@
-//! The shared move record (Task List 0.6, decided 7 October 2026): one record for every item found,
+//! The shared move record (the plan, decided 7 October 2026): one record for every item found,
 //! one mapping table for where things go, kept as numbered revisions, with a plan approval bound to
 //! exactly one revision.
 

@@ -1,4 +1,4 @@
-//! Reading a weak or failing old drive (Task List 1.5, the ddrescue approach): what can be read is
+//! Reading a weak or failing old drive (the plan, the ddrescue approach): what can be read is
 //! copied first; a file that fails is skipped without retrying at once and tried once more at the
 //! end (never on a drive already found weak); errors in a row mean a dying drive, so reading stops
 //! cleanly and the rest is reported, not strained for; a missing file is not a drive error.

@@ -1,4 +1,4 @@
-//! Closing undo, complete by type (Security Design B, revised 9 October 2026): closing first
+//! Closing undo, complete by type (security design notes, revised 9 October 2026): closing first
 //! finishes every removal a crash or stop left part-way and records the close in the same step;
 //! undo cannot close while any file it moved is still under a hidden name; anything that cannot be
 //! finished leaves undo open, the wipe blocked, and nothing closed.

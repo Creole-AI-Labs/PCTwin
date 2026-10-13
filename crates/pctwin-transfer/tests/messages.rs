@@ -1,4 +1,4 @@
-//! The transfer's messages over the encrypted link (Task List 1.5): each fits the link's 64 KiB
+//! The transfer's messages over the encrypted link (the plan): each fits the link's 64 KiB
 //! limit, blocks travel as pieces and are rejoined with a size cap, and anything malformed is
 //! refused rather than guessed at.
 

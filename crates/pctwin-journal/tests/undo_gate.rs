@@ -1,4 +1,4 @@
-//! The undo gate (Security Design B, decided 8 October 2026): undo is open only until the wipe of
+//! The undo gate (security design notes, decided 8 October 2026): undo is open only until the wipe of
 //! the old laptop starts. Starting the wipe closes it for good in this journal, durably, before the
 //! wipe can be sent; a cancelled wipe leaves it closed; once closed, undo refuses everything,
 //! including finishing an undo a crash interrupted. Every undo write needs a permit taken while the

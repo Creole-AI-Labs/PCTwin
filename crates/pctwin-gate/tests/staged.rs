@@ -1,4 +1,4 @@
-//! What the change journal needs from the gate (Task List 1.6): a temporary file whose name the
+//! What the change journal needs from the gate (the plan): a temporary file whose name the
 //! journal knows before it exists, a finish split into steps the journal can record between
 //! (sealed: every byte on disk; the real name found and recorded first, then claimed; kept: done),
 //! and, after a restart, giving a sealed temporary file its real name without ever overwriting,

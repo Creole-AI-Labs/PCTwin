@@ -1,5 +1,5 @@
-//! Undo's removal on Linux and macOS: move aside first, then check (Security Design 3B, undo
-//! bullet, decided 9 October 2026). Since 13 October 2026 only Linux removes (a write lease proves
+//! Undo's removal on Linux and macOS: move aside first, then check (security design notes,
+//! decided 9 October 2026). Since 13 October 2026 only Linux removes (a write lease proves
 //! nobody else can write); macOS keeps every copy, so tests of the move aside run on Linux only. The copy is checked through a held handle, its name moved,
 //! never replacing, to a random private name the journal recorded first, proven there to be the
 //! very file unchanged, and only then removed. Anything else goes back under its name or beside
@@ -152,7 +152,7 @@ fn the_very_file_unchanged_is_removed_and_nothing_hidden_is_left() {
 
 /// macOS cannot prove that no other program can still write to a file, so an unchanged copy is
 /// kept, untouched, under its own name: nothing moved, nothing recorded, nothing hidden
-/// (Security Design 3B undo bullet, strengthened 13 October 2026).
+/// (security design notes, strengthened 13 October 2026).
 #[cfg(target_os = "macos")]
 #[test]
 fn on_macos_an_unchanged_copy_is_kept_untouched_and_nothing_is_moved() {
@@ -747,7 +747,7 @@ fn private_names_are_random_and_recognised_exactly() {
     assert!(a.starts_with(".pctwin-undo-") && a.len() == ".pctwin-undo-".len() + 32);
 }
 
-// ---- Part J review, 10 October 2026 -------------------------------------------------------
+// ---- security review, 10 October 2026 -------------------------------------------------------
 
 /// macOS: a file another program has open is kept, even one that only watches it for changes
 /// (opened with O_EVTONLY): any program but PCTwin counts (finding 7).

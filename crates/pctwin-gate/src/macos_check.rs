@@ -1,4 +1,4 @@
-//! macOS: the system's list of programs that have a file open (Security Design 3B undo bullet).
+//! macOS: the system's list of programs that have a file open (security design notes).
 //! macOS cannot prove that no other program can still write to a file, so undo never removes a
 //! copy there (strengthened 13 October 2026); this list only says whether the copy is kept
 //! because it is "in use" or because PCTwin "cannot check". It works by path, as a check, never
