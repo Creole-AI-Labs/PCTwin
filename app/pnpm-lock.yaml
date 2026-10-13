@@ -8,6 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@fluent/bundle':
+        specifier: ^0.19.1
+        version: 0.19.1
+      '@fluent/langneg':
+        specifier: ^0.7.0
+        version: 0.7.0
+      '@fluent/react':
+        specifier: ^0.15.2
+        version: 0.15.2(@fluent/bundle@0.19.1)(react@19.3.0)
       '@tauri-apps/api':
         specifier: ^2
         version: 2.12.1
@@ -39,6 +48,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.0.2
         version: 6.1.2(vite@8.3.2)
+      axe-core:
+        specifier: ^4.14.0
+        version: 4.14.0
       eslint:
         specifier: ^10.12.0
         version: 10.12.0
@@ -238,6 +250,27 @@ packages:
     peerDependenciesMeta:
       '@noble/hashes':
         optional: true
+
+  '@fluent/bundle@0.19.1':
+    resolution: {integrity: sha512-SWJLZrPamDPsJlFFOW1nkgN0j0rbPbmSdmK0XAoXlyqKieLtMVl4vzng3aR5pwKoUx0scug8+YY2oct3fdfy9A==}
+    engines: {node: '>=18.0.0', npm: '>=7.0.0'}
+
+  '@fluent/langneg@0.7.0':
+    resolution: {integrity: sha512-StAM0vgsD1QK+nFikaKs9Rxe3JGNipiXrpmemNGwM4gWERBXPe9gjzsBoKjgBgq1Vyiy+xy/C652QIWY+MPyYw==}
+    engines: {node: '>=14.0.0', npm: '>=7.0.0'}
+
+  '@fluent/react@0.15.2':
+    resolution: {integrity: sha512-M2klqXTUJTD8o2VDm6vEXApE/pSc16YtB7DSZ/Q8cPYF63FgDkvquVLHjzzG1PvrK9JlKJKPzl3wJ7hTAqSK4w==}
+    engines: {node: '>=14.0.0', npm: '>=7.0.0'}
+    peerDependencies:
+      '@fluent/bundle': '>=0.16.0'
+      react: '>=16.8.0'
+
+  '@fluent/sequence@0.8.0':
+    resolution: {integrity: sha512-eV5QlEEVV/wR3AFQLXO67x4yPRPQXyqke0c8yucyMSeW36B3ecZyVFlY1UprzrfFV8iPJB4TAehDy/dLGbvQ1Q==}
+    engines: {node: '>=14.0.0', npm: '>=7.0.0'}
+    peerDependencies:
+      '@fluent/bundle': '>= 0.13.0'
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -630,6 +663,10 @@ packages:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
 
+  axe-core@4.14.0:
+    resolution: {integrity: sha512-9WTZxEjsZ7b13TH8JPmbV2z8CHbl80/2hm3XPEG4JgNdQLK81IBRXmSxHfMAOkSqQeRxT/0dwNDz2GOm3zzpcQ==}
+    engines: {node: '>=4'}
+
   balanced-match@4.0.4:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
@@ -653,6 +690,10 @@ packages:
 
   cacheable@2.5.0:
     resolution: {integrity: sha512-60cyAOytib/OzBw1JNSoSV/boK1AtHryDIjvVBk7XbN4ugfkM3+Sry7fEjNgPMGgOjuaZPAp8ruZ0Cxafwyq9g==}
+
+  cached-iterable@0.3.0:
+    resolution: {integrity: sha512-MDqM6TpBVebZD4UDtmlFp8EjVtRcsB6xt9aRdWymjk0fWVUUGgmt/V7o0H0gkI2Tkvv8B0ucjidZm4mLosdlWw==}
+    engines: {node: '>=8.9.0'}
 
   caniuse-lite@1.0.30001816:
     resolution: {integrity: sha512-+8Yx7BXCoqk6IF8yTicjfUR6D/ldJzdlsodlEOiOSPmhK844WIgk67/zIQaGAOxNkZyyvBlrRFnLvqKIoqbAFw==}
@@ -1521,6 +1562,21 @@ snapshots:
 
   '@exodus/bytes@1.16.0': {}
 
+  '@fluent/bundle@0.19.1': {}
+
+  '@fluent/langneg@0.7.0': {}
+
+  '@fluent/react@0.15.2(@fluent/bundle@0.19.1)(react@19.3.0)':
+    dependencies:
+      '@fluent/bundle': 0.19.1
+      '@fluent/sequence': 0.8.0(@fluent/bundle@0.19.1)
+      cached-iterable: 0.3.0
+      react: 19.3.0
+
+  '@fluent/sequence@0.8.0(@fluent/bundle@0.19.1)':
+    dependencies:
+      '@fluent/bundle': 0.19.1
+
   '@humanfs/core@0.19.2':
     dependencies:
       '@humanfs/types': 0.15.0
@@ -1840,6 +1896,8 @@ snapshots:
 
   assertion-error@2.0.1: {}
 
+  axe-core@4.14.0: {}
+
   balanced-match@4.0.4: {}
 
   baseline-browser-mapping@2.11.28: {}
@@ -1867,6 +1925,8 @@ snapshots:
       hookified: 1.15.1
       keyv: 5.6.0
       qified: 0.10.1
+
+  cached-iterable@0.3.0: {}
 
   caniuse-lite@1.0.30001816: {}
 
