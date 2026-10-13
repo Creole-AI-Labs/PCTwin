@@ -442,7 +442,9 @@ fn outcome_of(removed: Removed) -> Result<UndoOutcome, String> {
             why: SAVED_AGAIN.into(),
         },
         Removed::InUse => return Err(IN_USE.into()),
-        Removed::CannotCheck => return Err(CANNOT_CHECK.into()),
+        // Final, not "try again": nothing will prove it later (macOS, a drive without leases),
+        // so the copy is kept for the person to look at, and undo does not ask about it again.
+        Removed::CannotCheck => kept(CANNOT_CHECK),
     })
 }
 
@@ -850,7 +852,7 @@ fn on_the_disk(
             // Something that is not the copy, or the copy changed since.
             Ok(Resolution::Home) => PartWay::Ended(kept(CHANGED_SINCE)),
             Ok(Resolution::InUse) => PartWay::BackForNow(IN_USE),
-            Ok(Resolution::CannotCheck) => PartWay::BackForNow(CANNOT_CHECK),
+            Ok(Resolution::CannotCheck) => PartWay::Ended(kept(CANNOT_CHECK)),
             Ok(Resolution::KeptAt { at }) => kept_at(at, KEPT_BESIDE),
             Ok(Resolution::SavedAgain { at }) => kept_at(at, SAVED_AGAIN),
             Ok(Resolution::SavedMaybeIncomplete { at }) => kept_at(at, SAVED_MAYBE_INCOMPLETE),

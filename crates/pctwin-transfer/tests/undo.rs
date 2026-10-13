@@ -1283,4 +1283,6 @@ fn on_macos_an_unchanged_copy_is_kept_and_said_so() {
     let r = w.undo();
     assert_eq!(outcome_of(&r, "a.txt"), kept(CANNOT_CHECK));
     assert!(w.exists("a.txt"));
+    // Final: undo does not keep asking about it.
+    assert!(undo_items(&w.journal).unwrap().is_empty());
 }
