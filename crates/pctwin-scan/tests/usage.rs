@@ -1,4 +1,4 @@
-//! What this person actually uses (Task List 1.5, personal essentials): read from the records the
+//! What this person actually uses (the plan, personal essentials): read from the records the
 //! old laptop already keeps for the person, never from anyone's file contents. Used only to set
 //! the order of the move; nothing here leaves the old laptop.
 

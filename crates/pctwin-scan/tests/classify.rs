@@ -1,4 +1,4 @@
-//! Where a special folder really is (Task List 1.4): on the system drive, another drive, a network
+//! Where a special folder really is (the plan): on the system drive, another drive, a network
 //! share, or inside a cloud storage folder. These rules are pure, so they are tested with made-up
 //! laptops on each system.
 

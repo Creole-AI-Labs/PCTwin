@@ -1,4 +1,4 @@
-//! Scanning a folder into the shared move record (Task List 1.4): every file and folder becomes an
+//! Scanning a folder into the shared move record (the plan): every file and folder becomes an
 //! item with a permanent ID, its owner and where it really lives; scanning again gives the same IDs;
 //! macOS packages are one item; what can't be read is recorded with the reason; photos, videos,
 //! music and documents are counted for the after-move check.

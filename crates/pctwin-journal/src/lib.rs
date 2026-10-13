@@ -1,4 +1,4 @@
-//! PCTwin change journal (Task List 1.6; Engineering Plan: "write durable intent and undo records
+//! PCTwin change journal (the plan; engineering notes: "write durable intent and undo records
 //! before any change").
 //!
 //! Every write on the new laptop is one entry that moves, one durable step at a time, through
@@ -242,7 +242,7 @@ pub struct PlannedWrite {
 }
 
 /// How long a partly copied file waits for the rest with nothing added to it, picked before the
-/// move (Product Spec, decided 8 October 2026): one of these, 30 days unless the person picks
+/// move (product notes, decided 8 October 2026): one of these, 30 days unless the person picks
 /// another.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PartialKeep {

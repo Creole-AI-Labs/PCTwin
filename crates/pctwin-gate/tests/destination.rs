@@ -265,7 +265,7 @@ fn shortening_never_leaves_a_trailing_space_on_windows() {
     );
 }
 
-// ---------- from the Skeptic's review of the redesign ----------
+// ---------- from an independent review of the redesign ----------
 
 #[test]
 fn folder_names_differing_only_in_case_do_not_slow_numbering() {

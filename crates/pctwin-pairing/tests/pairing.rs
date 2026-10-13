@@ -1,4 +1,4 @@
-//! Acceptance and attack tests for PCTwin pairing (Security Design Part A).
+//! Acceptance and attack tests for PCTwin pairing (security design notes).
 //!
 //! Flow: the sender (old laptop) shows a code; the receiver (new laptop) types it.
 //!

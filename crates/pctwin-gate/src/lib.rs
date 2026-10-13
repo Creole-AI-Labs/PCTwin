@@ -1,10 +1,10 @@
-//! PCTwin safety gate (Security Design Part B): the new laptop trusts nothing that arrives.
+//! PCTwin safety gate (security design notes): the new laptop trusts nothing that arrives.
 //!
 //! - [`IncomingPath::parse`] checks every path the old laptop sends. Paths are relative to an
 //!   approved folder, use `/` between folders, and anything that could climb out (`..`, an
 //!   absolute path, empty or `.` parts, NUL) is refused. Sizes and depth are capped. Names are
 //!   held in one Unicode form (NFC), so the same accented name never appears twice.
-//! - [`convert_name`] makes a name storable on the target system (Engineering Plan 9.6). On
+//! - [`convert_name`] makes a name storable on the target system (engineering notes). On
 //!   Windows: forbidden characters become lookalikes, names that look like short-name aliases
 //!   (`LONGFO~1`) are renamed, over-long names are shortened, trailing dots and spaces are trimmed
 //!   and reserved names such as `CON` are renamed, repeating until the name is stable. Every
@@ -654,7 +654,7 @@ impl Destination {
     /// Windows: removes the file at the stored path `stored` only if it is, right now, the very
     /// file `expect`, a regular file with one name, and `verify` (the caller's check, given the
     /// file opened for reading and held) says it is unchanged. Nothing is acted on by name after
-    /// a check (Security Design B, decided 8 October 2026): the file is opened relative to its
+    /// a check (security design notes, decided 8 October 2026): the file is opened relative to its
     /// folder with sharing that lets others only read, so while it is held nobody can write,
     /// rename, replace or remove it; it is checked on that handle, and that handle's file is
     /// removed (`fs_at`'s delete by handle). A file another program holds is
@@ -2098,7 +2098,7 @@ mod tests {
     }
 
     /// Unix: a folder that cannot be opened for its flush is an error, never a quiet "done"
-    /// (Part J, finding 5); only a drive that says it cannot flush folders at all is let go.
+    /// (security review, finding 5); only a drive that says it cannot flush folders at all is let go.
     #[cfg(unix)]
     #[test]
     fn a_folder_that_cannot_be_flushed_is_an_error() {

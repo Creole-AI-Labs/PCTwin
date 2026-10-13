@@ -1,4 +1,4 @@
-//! Scanning the old laptop (Task List 1.4). It only ever reads.
+//! Scanning the old laptop (the plan). It only ever reads.
 //!
 //! - [`find_special_folders`] asks the system where each special folder really is (Windows known
 //!   folders, the macOS standard folders, Linux user-dirs), so a Documents folder moved into

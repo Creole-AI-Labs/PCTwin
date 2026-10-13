@@ -1,4 +1,4 @@
-//! Undo for files (Task List 2.3; Security Design B "Undo removes only the file it checked,
+//! Undo for files (the plan; security design notes "Undo removes only the file it checked,
 //! through one handle", decided 8 October 2026): until the wipe starts, what the move wrote and
 //! nobody changed is removed outright, but only once the old laptop confirms it still has the
 //! original unchanged; anything changed since, in use, online only or with a second name is kept
@@ -835,7 +835,7 @@ fn closing_finishes_a_removal_cut_short_after_moving_aside() {
 
 /// Linux and macOS: a salvage PCTwin stopped while copying is never said to be "saved again": it
 /// is named visibly and said to be possibly incomplete; one the journal recorded complete is
-/// "saved again" (Part J, finding 1).
+/// "saved again" (security review, finding 1).
 #[cfg(unix)]
 #[test]
 fn a_salvage_cut_short_is_said_to_be_maybe_incomplete_never_saved_again() {
@@ -895,7 +895,7 @@ fn a_salvage_cut_short_is_said_to_be_maybe_incomplete_never_saved_again() {
 
 /// Linux: a copy put back under its name because another program had it open is tried again
 /// later and removed once it is free; it is never called "changed" for having been put back
-/// (Part J, finding 2).
+/// (security review, finding 2).
 #[cfg(target_os = "linux")]
 #[test]
 fn a_copy_put_back_because_it_was_in_use_is_removed_once_free() {
@@ -929,7 +929,7 @@ fn a_copy_put_back_because_it_was_in_use_is_removed_once_free() {
 }
 
 /// Linux and macOS: a put-back cut short (recorded, not yet done) of the copy itself ends with
-/// the copy under its name and looked at again as usual, so it is removed (Part J, finding 2).
+/// the copy under its name and looked at again as usual, so it is removed (security review, finding 2).
 #[cfg(unix)]
 #[test]
 #[cfg_attr(
@@ -1274,7 +1274,7 @@ fn a_file_stored_online_only_is_kept_and_said_so() {
 }
 
 /// macOS cannot prove that no other program can still write to a file, so undo keeps every copy
-/// there and says so; the file is untouched (Security Design 3B undo bullet, 13 October 2026).
+/// there and says so; the file is untouched (security design notes, 13 October 2026).
 #[cfg(target_os = "macos")]
 #[test]
 fn on_macos_an_unchanged_copy_is_kept_and_said_so() {

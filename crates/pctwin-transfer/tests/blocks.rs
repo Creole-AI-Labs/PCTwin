@@ -1,4 +1,4 @@
-//! Moving one file in checked blocks (Task List 1.5): block sizes follow the file's size, every
+//! Moving one file in checked blocks (the plan): block sizes follow the file's size, every
 //! block carries its fingerprint and is checked on arrival, compression is used only when it helps,
 //! a dropped connection resumes from the exact block, and a file that changes while it is being
 //! read is never finished.

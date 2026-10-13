@@ -1,4 +1,4 @@
-//! Measuring a folder without opening any file (Task List 1.4): how many files and bytes, which
+//! Measuring a folder without opening any file (the plan): how many files and bytes, which
 //! files are only in the cloud (never downloaded by the scan), and what could not be read, listed
 //! rather than hidden. Links are never followed.
 

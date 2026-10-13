@@ -1,5 +1,5 @@
 //! PCTwin link: runs pairing over a real network connection and then carries sealed data
-//! (Security Design, Part A).
+//! (security design notes).
 //!
 //! # How it works
 //!
@@ -30,7 +30,7 @@
 //! - Someone on the local network can still stop pairing on purpose: wrong guesses from several
 //!   addresses trigger the safety stop (pairing locks until the person chooses Start again), and
 //!   each new address can hold the single slot for one handshake limit. This is an accepted
-//!   nuisance, not a way in (Security Design, decided 6 October 2026).
+//!   nuisance, not a way in (security design notes, decided 6 October 2026).
 //! - "Local network" means private, link-local and loopback addresses. Some VPNs use such
 //!   addresses too, so the app should listen only on the chosen Wi-Fi interface's own address.
 //! - While the person is choosing the number, the host is not accepting: devices that connect then

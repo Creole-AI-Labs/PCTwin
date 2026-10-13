@@ -1,4 +1,4 @@
-//! Regression tests for the findings of the fresh-context security review (Security Design Part J).
+//! Regression tests for the findings of the fresh-context security review (security design notes).
 //! F1: only a person's pick on the sender (old laptop) can unlock it; approvals are checked;
 //!     nobody in the middle can steer the number (commit, then reveal).
 //! F2: failed attempts are budgeted: pauses, then a lockout until the person starts again.
@@ -66,7 +66,7 @@ fn sealed(tr: &mut snow::TransportState, kind: u8, plain: &[u8]) -> Vec<u8> {
 }
 
 /// An attacker who knows the code reimplements the RECEIVER from the public protocol and also
-/// computes the match number itself, exactly as the Skeptic's bypass did.
+/// computes the match number itself, exactly as a reviewer's bypass did.
 /// Returns the sender's choosing state and the number the attacker computed.
 fn raw_receiver(sender: &mut RotatingSender, now: Instant) -> (SenderChoosing, u8) {
     let nonce = [5u8; 32];
@@ -202,7 +202,7 @@ fn grind_receiver_towards(target: u8, now: Instant) -> u8 {
 
 #[test]
 fn a_code_holder_in_the_middle_cannot_steer_the_number_the_new_laptop_shows() {
-    // Found by the Skeptic: the sender's key comes last, so a fake sender could try keys until
+    // Found in review: the sender's key comes last, so a fake sender could try keys until
     // the new laptop shows the number the real old laptop offers. Each try must now be a blind
     // guess: about 1 in 90.
     let target = 42;

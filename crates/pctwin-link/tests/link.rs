@@ -1,4 +1,4 @@
-//! Acceptance tests for pairing over a real network connection (Security Design Part A).
+//! Acceptance tests for pairing over a real network connection (security design notes).
 //!
 //! The old laptop (host) listens; the new laptop (guest) connects after the person typed the code
 //! and says whether that code ends in an even or odd digit. Only one guest can be pairing at a

@@ -1,4 +1,4 @@
-//! The new laptop holds the plan the person approved (Security Design A, fresh-context review of
+//! The new laptop holds the plan the person approved (security design notes, fresh-context review of
 //! 8 October 2026): a file starts only if it is an included item of that exact approved revision,
 //! no bigger than its approved size allows, and within the plan's total. The old laptop's word
 //! for a size is never enough to reserve the new laptop's disk.

@@ -1,4 +1,4 @@
-//! Writing a file in sections (Security Design A, "Lanes share one plan"): a big file's sections
+//! Writing a file in sections (security design notes, "Lanes share one plan"): a big file's sections
 //! arrive on different lanes and are written at their place. The gate keeps exactly which bytes
 //! have arrived: nothing outside the announced size, nothing written twice, and a file with a hole
 //! is never finished. Space for the whole file can be reserved first, so a full disk shows at the

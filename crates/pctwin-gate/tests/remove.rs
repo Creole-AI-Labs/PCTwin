@@ -1,4 +1,4 @@
-//! Undo removes only the file it checked (Security Design B, decided 8 October 2026; Task List
+//! Undo removes only the file it checked (security design notes, decided 8 October 2026; the plan
 //! 2.3). The gate opens the copy relative to its approved folder and checks on that same handle
 //! that it is a regular file, the very file PCTwin wrote, with one name, and unchanged (the
 //! caller's check, read through the handle). On Windows it removes that handle's file; on Linux
@@ -94,7 +94,7 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 
 /// Undo removes a copy only where the system proves no other program can still write to it:
 /// Windows (the held handle) and Linux (a write lease). macOS cannot prove it, so a copy there is
-/// always kept for the person to review (Security Design 3B undo bullet, 13 October 2026).
+/// always kept for the person to review (security design notes, 13 October 2026).
 const REMOVES: bool = !cfg!(target_os = "macos");
 
 /// What undo says for a copy it may remove: removed, or on macOS kept as "cannot check".
@@ -722,7 +722,7 @@ fn a_removal_under_way_is_resumed_from_what_is_on_the_disk() {
 }
 
 /// A right lent to a worker that has ended (a resolution that ran out of time) removes nothing,
-/// even when every check passes (Part J, finding 8).
+/// even when every check passes (security review, finding 8).
 #[test]
 fn a_lent_right_that_has_ended_removes_nothing() {
     use pctwin_journal::UndoRight;

@@ -1,4 +1,4 @@
-//! Keeping both laptops awake during a move, and the battery (Task List 1.5). Only idle sleep is
+//! Keeping both laptops awake during a move, and the battery (the plan). Only idle sleep is
 //! held off, and only while a move runs; the person's own sleep (closing the lid, the power button)
 //! is never blocked, and their power settings are never changed.
 

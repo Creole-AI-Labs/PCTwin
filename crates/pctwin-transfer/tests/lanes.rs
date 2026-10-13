@@ -1,4 +1,4 @@
-//! How many lanes (connections) a move uses (Security Design A, "Extra lanes"): the tuner climbs
+//! How many lanes (connections) a move uses (security design notes, "Extra lanes"): the tuner climbs
 //! one lane at a time, keeps a lane only when total speed rises by at least 10%, and looks again
 //! when the network changes. Tested with simulated speeds.
 

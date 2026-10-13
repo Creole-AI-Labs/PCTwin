@@ -1,4 +1,4 @@
-//! The change journal (Task List 1.6, Engineering Plan: "write durable intent and undo records
+//! The change journal (the plan, engineering notes: "write durable intent and undo records
 //! before any change"): every write on the new laptop goes planned, staged, verified, applied,
 //! committed, each step a durable transaction, so after a crash the app knows exactly how far each
 //! file got, and a finished move can be undone.

@@ -1,5 +1,5 @@
 //! PCTwin pairing: turns a short one-time code into an authenticated, encrypted link
-//! between two laptops (Security Design, Part A).
+//! between two laptops (security design notes).
 //!
 //! # How it works
 //!

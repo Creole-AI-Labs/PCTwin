@@ -1,4 +1,4 @@
-//! Saving the scan (Task List 1.4): progress is saved after each folder so a restart resumes where
+//! Saving the scan (the plan): progress is saved after each folder so a restart resumes where
 //! it stopped; a later scan says exactly what was added, removed or changed; a damaged or newer
 //! saved scan is refused safely; saving never leaves a half-written file.
 
@@ -350,7 +350,7 @@ fn a_save_whose_record_breaks_the_rules_is_refused() {
 }
 
 // The temporary file a save writes first has a name nobody can guess, and is made only if nothing
-// is there (Security Design Part J): a file or link someone planted beside the save, at the name
+// is there (security design notes): a file or link someone planted beside the save, at the name
 // an older PCTwin used (`.scan.json.<process>.tmp`), is never followed, written or removed.
 
 fn finished_scan(base: &Path) -> ScanState {

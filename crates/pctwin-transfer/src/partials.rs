@@ -1,4 +1,4 @@
-//! Partly copied files kept to continue from (Task List 1.6, second review 9). A file the old
+//! Partly copied files kept to continue from (the plan, second review 9). A file the old
 //! laptop stopped sending is kept so the move can carry on later without sending it again; it is
 //! not kept forever: each move waits as long as the person chose before it (3 to 90 days, 30
 //! unless they picked another). Like Windows' own background transfers (which give up on a transfer with no

@@ -1,4 +1,4 @@
-//! Carrying out recovery after a restart (Task List 1.6): the journal decides
+//! Carrying out recovery after a restart (the plan): the journal decides
 //! ([`pctwin_journal::recovery`]), this looks at the disk for it through the safety gate and does
 //! what was decided, then cleans up the journal's own temporary files.
 //!

@@ -1,4 +1,4 @@
-//! The old drive's health (Task List 1.4): read from what each system already reports to a normal
+//! The old drive's health (the plan): read from what each system already reports to a normal
 //! user, never guessed. "Not supported" or no answer is Unknown, never Good. A weak drive switches
 //! the move to careful reading.
 
