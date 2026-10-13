@@ -25,6 +25,10 @@ struct Mem {
     cut: Arc<AtomicBool>,
     sends: usize,
     cut_at: Option<usize>,
+    recvs: usize,
+    /// Cut once this side has received this many messages: the receiver has then handled a
+    /// known amount, whatever the sender's pace (a slow disk cannot leave it with none).
+    recv_cut_at: Option<usize>,
 }
 
 fn mem_pair(cut_at: Option<usize>) -> (Mem, Mem) {
@@ -38,6 +42,8 @@ fn mem_pair(cut_at: Option<usize>) -> (Mem, Mem) {
             cut: cut.clone(),
             sends: 0,
             cut_at,
+            recvs: 0,
+            recv_cut_at: None,
         },
         Mem {
             tx: b_tx,
@@ -45,8 +51,17 @@ fn mem_pair(cut_at: Option<usize>) -> (Mem, Mem) {
             cut,
             sends: 0,
             cut_at: None,
+            recvs: 0,
+            recv_cut_at: None,
         },
     )
+}
+
+/// A pair cut once the second side (the receiver) has received `n` messages.
+fn mem_pair_cut_after_received(n: usize) -> (Mem, Mem) {
+    let (a, mut b) = mem_pair(None);
+    b.recv_cut_at = Some(n);
+    (a, b)
 }
 
 impl Channel for Mem {
@@ -64,6 +79,10 @@ impl Channel for Mem {
     async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
         loop {
             if let Ok(m) = self.rx.try_recv() {
+                self.recvs += 1;
+                if self.recv_cut_at == Some(self.recvs) {
+                    self.cut.store(true, Ordering::SeqCst);
+                }
                 return Ok(m);
             }
             if self.cut.load(Ordering::SeqCst) {
@@ -320,8 +339,9 @@ async fn blocks_are_checkpointed_as_they_land_and_a_crash_mid_move_continues_aft
     let w = world();
     let mut receiver = w.receiver();
     let mut sender = SenderSession::new(vec![w.job()], 1);
-    // Cut partway (each block goes as a few pieces).
-    let (mut a, mut b) = mem_pair(Some(300));
+    // Cut partway, once the new laptop has received 300 messages (each block goes as a few
+    // pieces): counted where they land, so a slow disk cannot leave it with none handled.
+    let (mut a, mut b) = mem_pair_cut_after_received(300);
     let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
