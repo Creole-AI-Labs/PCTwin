@@ -1,0 +1,43 @@
+# 3. Crate layout: one crate per job
+
+Date: 13 October 2026. Status: accepted.
+
+## Context
+
+The engine has jobs with very different risks: checking everything that arrives, pairing two
+laptops, moving files, recording what changed so it can be undone. Mixing them makes review and
+testing harder.
+
+## Decision
+
+One workspace (`Cargo.toml`), the app in `app/src-tauri`, and one crate per job in `crates/`:
+
+| Crate | Job |
+|---|---|
+| `pctwin-types` | Shared result statuses and their meaning |
+| `pctwin-record` | The shared move record: every item found, where it goes, the approved revision |
+| `pctwin-scan` | Scanning the old laptop: where each special folder really is, and what is in it |
+| `pctwin-discovery` | Finding the other laptop on the local network |
+| `pctwin-pairing` | Turning a short one-time code into an authenticated, encrypted link |
+| `pctwin-link` | Running pairing over a real connection, then carrying sealed data |
+| `pctwin-session` | Joining discovery and pairing into the journey up to the number pick |
+| `pctwin-doctor` | Working out why two laptops cannot reach each other, in plain words |
+| `pctwin-transfer` | Moving files in checked blocks: fingerprints, receipts and resume |
+| `pctwin-gate` | The safety gate: the new laptop trusts nothing that arrives |
+| `pctwin-journal` | The change journal, so a crash is reconciled and a move can be undone |
+| `pctwin-power` | Keeping both laptops awake and watching the battery |
+| `pctwin-lease` | The one place that calls the system unsafely (Linux write leases) |
+
+## Rules that come with it
+
+- `unsafe` code is forbidden in every crate except `pctwin-lease`; CI checks this fence.
+- Security-sensitive crates (`pctwin-gate`, `pctwin-pairing`, `pctwin-link`) get a second review
+  in a fresh context.
+- Dependencies point one way: the safety gate, the journal and the record never depend on the
+  transfer or the network crates; the transfer builds on them.
+
+## Consequences
+
+- More crates to version together; they share one workspace version.
+- New jobs (the recipe and executor crates for reinstalling apps) get their own crates when
+  their work starts.
