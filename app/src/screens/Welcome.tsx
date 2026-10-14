@@ -2,7 +2,7 @@ import { Localized } from "@fluent/react";
 import { ArrowForward, History, MoveIllustration, Wrench } from "../icons";
 import type { Soon } from "./ComingSoon";
 
-/** F01 Welcome: the free move first; restore, rescue and Cloud Twin sign-in as secondary choices. */
+/** F01 Welcome: the free move first; restore, rescue, Quick Send and Cloud Twin sign-in as secondary choices. */
 export default function Welcome({ onStart, onSoon }: { onStart: () => void; onSoon: (which: Soon) => void }) {
   return (
     <>
@@ -51,6 +51,18 @@ export default function Welcome({ onStart, onSoon }: { onStart: () => void; onSo
             <span>Rescue a laptop</span>
           </Localized>
           <Wrench />
+        </button>
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            onSoon("quick-send");
+          }}
+        >
+          <Localized id="welcome-quick-send">
+            <span>Quick Send</span>
+          </Localized>
+          <ArrowForward />
         </button>
       </div>
       <div className="account-invite">

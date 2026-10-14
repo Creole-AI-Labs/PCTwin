@@ -51,12 +51,13 @@ describe("screens", () => {
     ["Restore setup", "Restore setup"],
     ["Rescue a laptop", "Rescue a laptop"],
     ["Sign in", "Cloud Twin"],
+    ["Quick Send", "Quick Send"],
   ])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(button) }));
     expect(screen.getByText("Coming soon")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(heading);
-    expect(screen.getByText(/later version/)).toBeTruthy();
+    expect(screen.getByText(/later version|first release/)).toBeTruthy();
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
