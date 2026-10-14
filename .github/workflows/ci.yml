@@ -248,7 +248,9 @@ jobs:
         run: cargo build --locked -p pctwin-lab -p pctwin-labmove
       - name: Move between two accounts (Linux and macOS)
         if: runner.os != 'Windows'
-        run: bash fixtures/two-accounts/run.sh "$PWD/target/debug" "$RUNNER_TEMP/two-accounts"
+        # /tmp, not the runner's temp folder: that sits in the runner's home, which the two test
+        # accounts cannot enter.
+        run: bash fixtures/two-accounts/run.sh "$PWD/target/debug" /tmp/pctwin-two-accounts
       - name: Move between two accounts (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -259,7 +261,7 @@ jobs:
         with:
           name: two-accounts-${{ matrix.os }}
           path: |
-            ${{ runner.temp }}/two-accounts/report
+            /tmp/pctwin-two-accounts/report
             C:\pctwin-two-accounts\report
           if-no-files-found: warn
           retention-days: 14
