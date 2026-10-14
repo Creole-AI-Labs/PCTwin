@@ -58,6 +58,7 @@ mod recovery;
 mod sections;
 mod session;
 mod undo;
+mod version;
 
 pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
@@ -93,6 +94,7 @@ pub use undo::{
     SAVED_AGAIN, SAVED_MAYBE_INCOMPLETE, SECOND_NAME, STILL_FINISHING, TOOK_TOO_LONG, UndoOptions,
     UndoReport, Undone, WORK_STOPPED, close_undo, undo, undo_items, undo_with,
 };
+pub use version::{MOVE_PROTOCOL, VersionGap, Versions, agree_version, choose_version};
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -138,6 +140,8 @@ pub enum TransferError {
     Record(String),
     #[error("the old laptop's list of what it holds was refused: {0}")]
     Inventory(String),
+    #[error(transparent)]
+    VersionGap(#[from] VersionGap),
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the
