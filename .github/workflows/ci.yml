@@ -262,11 +262,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p lab-evidence
-          for d in /tmp/pctwin-two-accounts/report /tmp/pctwin-two-accounts/profile/report /tmp/pctwin-two-accounts/bad/report                    /c/pctwin-two-accounts/report /c/pctwin-two-accounts/profile/report; do
+          for base in /tmp/pctwin-two-accounts /c/pctwin-two-accounts; do
+          for d in "$base/report" "$base/profile/report" "$base/bad/report"; do
             if [ -d "$d" ]; then
               name=$(echo "$d" | sed 's#.*/pctwin-two-accounts/##; s#/#-#g')
               cp -r "$d" "lab-evidence/$name" 2>/dev/null || sudo cp -r "$d" "lab-evidence/$name" || true
             fi
+          done
           done
       - name: Keep the evidence
         if: always()
