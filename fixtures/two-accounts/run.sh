@@ -92,6 +92,23 @@ if [ "$(uname)" = Darwin ]; then
   new_home="/Users/$new_user"
 fi
 
+# Linux: a second drive, formatted exFAT (as USB drives often are), holding the new laptop's
+# Pictures and the marker files of a second installed system.
+exfat=""
+if [ "$(uname)" = Linux ]; then
+  sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update >/dev/null
+  sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y exfatprogs >/dev/null
+  sudo rm -f /tmp/pctwin-exfat.img
+  truncate -s 256M /tmp/pctwin-exfat.img
+  sudo mkfs.exfat -L PCTWINLAB /tmp/pctwin-exfat.img >/dev/null
+  exfat=/mnt/pctwin-exfat
+  sudo mkdir -p "$exfat"
+  sudo mount -o loop,uid="$(id -u "$new_user")",gid="$(id -g "$new_user")" /tmp/pctwin-exfat.img "$exfat"
+  sudo mkdir -p "$exfat/Windows/System32/config"
+  sudo touch "$exfat/Windows/System32/config/SYSTEM"
+  as_new mkdir -p "$exfat/Pictures"
+fi
+
 if [ "$(uname)" = Linux ]; then
   as_old mkdir -p "$old_home/.config" "$old_home/Desktop" "$old_home/Dokumente" "$old_home/Downloads" \
     "$old_home/写真" "$old_home/موسيقى" "$old_home/Videos"
@@ -104,12 +121,12 @@ XDG_MUSIC_DIR="$HOME/موسيقى"
 XDG_VIDEOS_DIR="$HOME/Videos"
 DIRS
   as_new mkdir -p "$new_home/.config" "$new_home/Desktop" "$new_home/Documentos" "$new_home/Downloads" \
-    "$new_home/Pictures" "$new_home/Music" "$new_home/Videos"
+    "$new_home/Music" "$new_home/Videos"
   as_new tee "$new_home/.config/user-dirs.dirs" >/dev/null <<'DIRS'
 XDG_DESKTOP_DIR="$HOME/Desktop"
 XDG_DOCUMENTS_DIR="$HOME/Documentos"
 XDG_DOWNLOAD_DIR="$HOME/Downloads"
-XDG_PICTURES_DIR="$HOME/Pictures"
+XDG_PICTURES_DIR="/mnt/pctwin-exfat/Pictures"
 XDG_MUSIC_DIR="$HOME/Music"
 XDG_VIDEOS_DIR="$HOME/Videos"
 DIRS
@@ -125,6 +142,21 @@ fi
 # Where each account's folders really are, against the plain guess; IDs stable across scans.
 as_old pctwin-labmove probe "$profile/report/probe-old.json"
 as_new pctwin-labmove probe "$profile/report/probe-new.json"
+if [ -n "$exfat" ]; then
+  # The second drive is seen as exFAT, with another system on it, and holds the new Pictures.
+  python3 - "$profile/report/probe-new.json" "$exfat" <<'PY'
+import json, sys
+probe = json.load(open(sys.argv[1]))["probe"]
+mount = sys.argv[2]
+drive = [d for d in probe["drives"] if d["mount"] == mount]
+assert drive, f"the exFAT drive at {mount} was not listed: {probe['drives']}"
+assert drive[0]["file_system"] == "ex-fat" or "fat" in json.dumps(drive[0]["file_system"]), drive[0]
+assert drive[0]["other_system"] == "windows", drive[0]
+pictures = [f for f in probe["folders"] if f["role"] == "pictures"][0]
+assert pictures["real"].startswith(mount) and "other-drive" in json.dumps(pictures["storage"]), pictures
+print("second drive:", drive[0]["file_system"], "with", drive[0]["other_system"], "| Pictures:", pictures["storage"])
+PY
+fi
 
 # The new laptop is already in use: its own file sits where an incoming one would land.
 as_new mkdir -p "$new_docs"

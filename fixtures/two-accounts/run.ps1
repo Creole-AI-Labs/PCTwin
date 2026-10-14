@@ -126,6 +126,11 @@ $shell = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Fol
 New-Item -ItemType Directory -Force (Join-Path $oldProfile 'OneDrive\Documents') | Out-Null
 Invoke-As $oldUser $reg @('add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Personal', '/v', 'UserFolder', '/d', (Join-Path $oldProfile 'OneDrive'), '/f') 'old-onedrive-account'
 Invoke-As $oldUser $reg @('add', $shell, '/v', 'Personal', '/t', 'REG_EXPAND_SZ', '/d', (Join-Path $oldProfile 'OneDrive\Documents'), '/f') 'old-documents-in-onedrive'
+# A work laptop too: the Desktop lives in an employer's OneDrive ("OneDrive - Contoso"). Telling
+# work data apart is Task List 1.4; until then this records what the move does with it.
+New-Item -ItemType Directory -Force (Join-Path $oldProfile 'OneDrive - Contoso\Desktop') | Out-Null
+Invoke-As $oldUser $reg @('add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Business1', '/v', 'UserFolder', '/d', (Join-Path $oldProfile 'OneDrive - Contoso'), '/f') 'old-work-onedrive-account'
+Invoke-As $oldUser $reg @('add', $shell, '/v', 'Desktop', '/t', 'REG_EXPAND_SZ', '/d', (Join-Path $oldProfile 'OneDrive - Contoso\Desktop'), '/f') 'old-desktop-in-work-onedrive'
 
 $otherDrive = if (Test-Path 'D:\') { 'D:' } else { $null }
 if ($otherDrive) {

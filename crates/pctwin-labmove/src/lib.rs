@@ -617,6 +617,8 @@ pub struct Probe {
     pub home: String,
     pub folders: Vec<ProbedFolder>,
     pub missing: Vec<FolderRole>,
+    /// Every real drive, its file system, and any other installed system found on it.
+    pub drives: Vec<pctwin_scan::Drive>,
     /// Item IDs from two scans of the same laptop are the same.
     pub ids_stable: bool,
     pub items: usize,
@@ -681,6 +683,7 @@ pub fn probe() -> Result<(Probe, Vec<String>), String> {
             home: home.display().to_string(),
             folders,
             missing,
+            drives: pctwin_scan::list_drives(),
             ids_stable,
             items: first.record.items.len(),
         },
