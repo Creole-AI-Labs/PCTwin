@@ -432,6 +432,9 @@ pub struct Checked {
     /// Could not be read on the old laptop (held open by another program) and honestly ended
     /// failed.
     pub unreadable: usize,
+    /// Not the lab's own files (with [`check_move`]'s `only`): each has an outcome on both sides,
+    /// whatever it is, and is not judged further.
+    pub others: usize,
 }
 
 /// Checks a finished move from its evidence: the source folder's snapshot before and after, the
@@ -441,6 +444,8 @@ pub struct Checked {
 /// - an item has no outcome, or only one side reports it;
 /// - an item failed, unless the old laptop's snapshot could not read it either (a file another
 ///   program holds open must end failed, never landed);
+/// - with `only` (the lab's own paths, when a real profile also holds the system's files), items
+///   outside it need an outcome on both sides but are not judged further;
 /// - a file that landed does not match its original byte for byte.
 pub fn check_move(
     before: &Snapshot,
@@ -448,7 +453,9 @@ pub fn check_move(
     dest: &Snapshot,
     sent: &Report,
     received: &Report,
+    only: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<Checked, Vec<String>> {
+    let judged = |path: &str| only.is_none_or(|o| o.contains(path));
     let mut problems: Vec<String> = compare(before, source_after)
         .into_iter()
         .map(|d| format!("the source changed: {d}"))
@@ -468,6 +475,16 @@ pub fn check_move(
     let unreadable =
         |path: &str| matches!(before.get(path), Some(Entry::File { blake3: None, .. }));
     for line in &sent.lines {
+        if !judged(&line.path) {
+            out.others += 1;
+            if line.outcome == "no outcome" {
+                problems.push(format!("old laptop: {} has no outcome", line.path));
+            }
+            if !got.contains_key(line.item.as_str()) {
+                problems.push(format!("new laptop has no outcome for {}", line.path));
+            }
+            continue;
+        }
         let failed = line.outcome.starts_with("failed");
         if failed && unreadable(&line.path) {
             out.unreadable += 1;
@@ -491,7 +508,18 @@ pub fn check_move(
         ));
     }
     for line in &received.lines {
-        let Some(final_path) = line.outcome.strip_prefix("landed: ") else {
+        if !judged(&line.path) {
+            if line.outcome == "no outcome" {
+                problems.push(format!("new laptop: {} has no outcome", line.path));
+            }
+            continue;
+        }
+        // An identical file already there is not copied again; it is checked like a landed one.
+        let landed = line
+            .outcome
+            .strip_prefix("landed: ")
+            .or_else(|| line.outcome.strip_prefix("already-there: "));
+        let Some(final_path) = landed else {
             // A file the old laptop could not read is never offered, so the new laptop may have
             // no outcome for it; the old laptop's report carries its failure.
             let not_offered = line.outcome.starts_with("failed") || line.outcome == "no outcome";

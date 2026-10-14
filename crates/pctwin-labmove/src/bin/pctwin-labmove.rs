@@ -2,7 +2,7 @@
 //!
 //!     pctwin-labmove send    <handoff> <report.json> [--lab <folder> <account>]
 //!     pctwin-labmove receive <handoff> <report.json> <journal> [--lab <folder> <account>]
-//!     pctwin-labmove check   <before.json> <source-after.json> <dest.json> <sent.json> <received.json>
+//!     pctwin-labmove check   <before.json> <source-after.json> <dest.json> <sent.json> <received.json> [--only <made.json>]
 //!     pctwin-labmove fill-profile [seed] [ordinary files] [big file bytes]
 //!     pctwin-labmove snapshot-profile <out.json>
 //!     pctwin-labmove probe <out.json>
@@ -62,13 +62,30 @@ async fn run(args: &[String]) -> Result<bool, String> {
             write(&r, out)?;
             Ok(true)
         }
-        [side, before, after, dest, sent, received] if side == "check" => {
+        [side, before, after, dest, sent, received, rest @ ..] if side == "check" => {
+            // `--only made.json`: judge only the lab's own files (`made[].path`).
+            let only = match rest {
+                [] => None,
+                [flag, made] if flag == "--only" => {
+                    let made: serde_json::Value = read(made)?;
+                    Some(
+                        made["made"]
+                            .as_array()
+                            .ok_or("the made file has no list of made files")?
+                            .iter()
+                            .filter_map(|m| m["path"].as_str().map(String::from))
+                            .collect::<std::collections::BTreeSet<String>>(),
+                    )
+                }
+                _ => return Err("expected --only <made.json> or nothing".into()),
+            };
             match check_move(
                 &read(before)?,
                 &read(after)?,
                 &read(dest)?,
                 &read(sent)?,
                 &read(received)?,
+                only.as_ref(),
             ) {
                 Ok(checked) => {
                     println!(

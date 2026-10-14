@@ -152,6 +152,7 @@ Set-Content -Path $mine -Value 'mine, before the move' -Encoding utf8
 icacls $mine /grant "${newUser}:F" | Out-Null
 
 Invoke-As $oldUser $labmove @('fill-profile', '31', '80', '2097152') 'fill-profile'
+Copy-Item (Join-Path $pReport 'fill-profile.out.txt') (Join-Path $pReport 'made.json')
 Invoke-As $oldUser $labmove @('snapshot-profile', (Join-Path $pReport 'before.json')) 'snapshot-before'
 $receiver = Start-As $newUser $labmove @('receive', $pHandoff, (Join-Path $pReport 'received.json'), (Join-Path $Work 'new\journal-profile.redb')) 'receive'
 $sender = Start-As $oldUser $labmove @('send', $pHandoff, (Join-Path $pReport 'sent.json')) 'send'
@@ -161,5 +162,7 @@ Invoke-As $oldUser $labmove @('snapshot-profile', (Join-Path $pReport 'after.jso
 Invoke-As $newUser $labmove @('snapshot-profile', (Join-Path $pReport 'dest.json')) 'snapshot-dest'
 
 if ((Get-Content $mine -Raw).Trim() -ne 'mine, before the move') { throw "the new laptop's own file was changed by the move" }
-& $labmove check (Join-Path $pReport 'before.json') (Join-Path $pReport 'after.json') (Join-Path $pReport 'dest.json') (Join-Path $pReport 'sent.json') (Join-Path $pReport 'received.json')
+# A real profile also holds the system's own files (shared desktop shortcuts and the like): each
+# must have an outcome on both sides, but only the lab's own files are judged.
+& $labmove check (Join-Path $pReport 'before.json') (Join-Path $pReport 'after.json') (Join-Path $pReport 'dest.json') (Join-Path $pReport 'sent.json') (Join-Path $pReport 'received.json') --only (Join-Path $pReport 'made.json')
 if ($LASTEXITCODE -ne 0) { throw 'the move check found problems (real folders)' }

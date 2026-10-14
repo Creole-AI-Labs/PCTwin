@@ -47,6 +47,7 @@ async fn a_synthetic_laptop_moves_and_the_source_stays_unchanged() {
         &snapshot(&new.path().join("home")).unwrap(),
         &sent,
         &received,
+        None,
     )
     .unwrap_or_else(|problems| panic!("{problems:#?}"));
     assert!(checked.landed >= 60, "{checked:?}");

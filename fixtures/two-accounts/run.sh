@@ -144,8 +144,11 @@ if [ "$(as_new cat "$new_docs/empty.txt")" != "mine, before the move" ]; then
   echo "the new laptop's own file was changed by the move" >&2
   exit 1
 fi
+# A real profile also holds the system's own files (shared shortcuts and the like): each must have
+# an outcome on both sides, but only the lab's own files are judged.
 pctwin-labmove check "$profile/report/before.json" "$profile/report/after.json" \
-  "$profile/report/dest.json" "$profile/report/sent.json" "$profile/report/received.json"
+  "$profile/report/dest.json" "$profile/report/sent.json" "$profile/report/received.json" \
+  --only "$profile/report/made.json"
 
 # ---------------------------------------------------------------------------------------------
 # Bad network (Linux): the lab move again with delay, jitter and loss on the loopback the two
