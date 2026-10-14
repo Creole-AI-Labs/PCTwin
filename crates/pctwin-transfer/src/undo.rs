@@ -726,6 +726,14 @@ impl Drop for Busy {
     }
 }
 
+/// What a worker holds: the file's busy mark and its only way to answer. Fields are dropped in
+/// the order written, so however the worker ends (an answer, or a panic that drops whatever it
+/// still holds), the file is free before its end can be heard.
+struct Finishing<T> {
+    busy: Busy,
+    asks: std::sync::mpsc::Sender<Ask<T>>,
+}
+
 /// How work given to a worker ended. Each way of not finishing is its own answer, so none can be
 /// mistaken for another (a turned-away try was once reported as a drive that did not answer).
 #[derive(Debug, PartialEq, Eq)]
@@ -777,16 +785,19 @@ fn within<T: Send + 'static>(
     std::thread::Builder::new()
         .name("pctwin-undo-finish".into())
         .spawn(move || {
-            let ask = asks.clone();
-            let record = move |stage: &Undo| -> Result<(), JournalError> {
+            let finishing = Finishing { busy, asks };
+            let record = |stage: &Undo| -> Result<(), JournalError> {
                 let gone = || JournalError::Storage("undo stopped here: it took too long".into());
                 let (answer, answered) = mpsc::channel();
-                ask.send(Ask::Record(stage.clone(), answer))
+                finishing
+                    .asks
+                    .send(Ask::Record(stage.clone(), answer))
                     .map_err(|_| gone())?;
                 answered.recv().map_err(|_| gone())?
             };
             let ended = work(&lent, &record);
             // Free before it says so: whoever hears it ended can start on the same file at once.
+            let Finishing { busy, asks } = finishing;
             drop(busy);
             let _ = asks.send(Ask::Ended(ended));
         })
@@ -1126,6 +1137,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(again, Within::Ended(1));
+    }
+
+    /// However a stopped worker's leftovers are cleaned up, the file is free before the stop is
+    /// heard, so a try straight after it is never turned away as busy (seen once on a slow runner).
+    #[test]
+    fn a_stopped_worker_frees_the_file_before_it_is_heard() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        for n in 0..300 {
+            let k = key(&format!("key-stops-{n}"));
+            let r: Within<()> = within(&j, &permit, a, &k, Duration::from_secs(10), |_, _| {
+                panic!("a worker that stops")
+            })
+            .unwrap();
+            assert_eq!(r, Within::Stopped);
+            let again = within(&j, &permit, a, &k, Duration::from_secs(10), |_, _| Ok(1)).unwrap();
+            assert_eq!(again, Within::Ended(1), "try {n}");
+        }
+        std::panic::set_hook(hook);
     }
 
     /// While a worker is still busy with a hidden name (given up on, but not ended), no second
