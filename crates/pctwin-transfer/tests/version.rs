@@ -6,8 +6,8 @@
 //! else from a stranger: one short message in exactly the agreed form, or the move stops.
 
 use pctwin_transfer::{
-    Channel, ChannelError, MOVE_PROTOCOL, TransferError, VersionGap, Versions, agree_version,
-    choose_version,
+    Channel, ChannelError, MOVE_PROTOCOL, TransferError, VERSION_WAIT, VersionGap, Versions,
+    agree_version, choose_version,
 };
 use std::future::Future;
 use std::time::Duration;
@@ -260,4 +260,24 @@ proptest! {
             prop_assert!(n >= MOVE_PROTOCOL.oldest() && n <= MOVE_PROTOCOL.newest());
         }
     }
+}
+
+/// A laptop that connects and then never answers is given up on, instead of leaving the other
+/// waiting for ever; an answer that comes just in time is taken.
+#[tokio::test(start_paused = true)]
+async fn a_laptop_that_never_answers_is_given_up_on() {
+    let (mut x, _y) = pair();
+    let t = tokio::time::Instant::now();
+    let got = agree_version(&mut x, MOVE_PROTOCOL).await;
+    assert!(matches!(got, Err(TransferError::NoAnswer(_))), "{got:?}");
+    assert!(t.elapsed() >= VERSION_WAIT, "{:?}", t.elapsed());
+    assert!(t.elapsed() < VERSION_WAIT + Duration::from_secs(1));
+
+    let (mut x, mut y) = pair();
+    let (a, b) = tokio::join!(agree_version(&mut x, MOVE_PROTOCOL), async {
+        tokio::time::sleep(VERSION_WAIT - Duration::from_secs(1)).await;
+        agree_version(&mut y, MOVE_PROTOCOL).await
+    });
+    assert_eq!(a.unwrap(), 1);
+    assert_eq!(b.unwrap(), 1);
 }
