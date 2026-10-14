@@ -40,8 +40,16 @@ sudo chown "$new_user" "$work/new"
 sudo chmod 0700 "$work/old" "$work/new"
 sudo chmod 1777 "$work/handoff" "$work/report"
 
-as_old() { sudo -u "$old_user" -H "$@"; }
-as_new() { sudo -u "$new_user" -H "$@"; }
+# Each account runs with its own settings: the runner's XDG folders (it sets XDG_CONFIG_HOME to
+# its own) must not leak in, or the accounts' own user-dirs files would never be read.
+as_user() {
+  local u="$1"
+  shift
+  sudo -u "$u" -H env -u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_STATE_HOME \
+    -u XDG_RUNTIME_DIR "$@"
+}
+as_old() { as_user "$old_user" "$@"; }
+as_new() { as_user "$new_user" "$@"; }
 
 as_old pctwin-lab make "$work/old/laptop" 21 150 4194304 >"$work/report/made.json"
 as_old pctwin-lab snapshot "$work/old/laptop" "$work/report/before.json"

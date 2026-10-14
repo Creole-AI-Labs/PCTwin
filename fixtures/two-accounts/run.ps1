@@ -109,22 +109,35 @@ New-Item -ItemType Directory -Force $pHandoff, $pReport | Out-Null
 foreach ($d in @($pHandoff, $pReport)) { icacls $d /grant "*S-1-1-0:(OI)(CI)M" | Out-Null }
 $report = $pReport
 
+# A program started as another account inherits this one's environment, so %USERPROFILE% would
+# name the administrator's folder: each account's real profile folder is looked up instead, and
+# Windows' own reg.exe is named in full (Git's tools come first on the runner's PATH).
+function Get-ProfileOf([string]$user) {
+    $sid = (Get-LocalUser -Name $user).SID.Value
+    return (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
+}
+$reg = Join-Path $env:SystemRoot 'System32\reg.exe'
+$oldProfile = Get-ProfileOf $oldUser
+$newProfile = Get-ProfileOf $newUser
+if (-not $oldProfile -or -not $newProfile) { throw 'a test account has no profile folder' }
+
 $shell = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
-Invoke-As $oldUser 'cmd.exe' @('/c', 'mkdir', '%USERPROFILE%\OneDrive\Documents') 'old-onedrive-folder'
-Invoke-As $oldUser 'cmd.exe' @('/c', 'reg', 'add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Personal', '/v', 'UserFolder', '/d', '%USERPROFILE%\OneDrive', '/f') 'old-onedrive-account'
-Invoke-As $oldUser 'cmd.exe' @('/c', 'reg', 'add', $shell, '/v', 'Personal', '/t', 'REG_EXPAND_SZ', '/d', '%USERPROFILE%\OneDrive\Documents', '/f') 'old-documents-in-onedrive'
+# Folders made inside a profile take that profile's permissions, so its owner can use them.
+New-Item -ItemType Directory -Force (Join-Path $oldProfile 'OneDrive\Documents') | Out-Null
+Invoke-As $oldUser $reg @('add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Personal', '/v', 'UserFolder', '/d', (Join-Path $oldProfile 'OneDrive'), '/f') 'old-onedrive-account'
+Invoke-As $oldUser $reg @('add', $shell, '/v', 'Personal', '/t', 'REG_EXPAND_SZ', '/d', (Join-Path $oldProfile 'OneDrive\Documents'), '/f') 'old-documents-in-onedrive'
 
 $otherDrive = if (Test-Path 'D:\') { 'D:' } else { $null }
 if ($otherDrive) {
     $pictures = "$otherDrive\pctwin-new-bob-pictures"
     New-Item -ItemType Directory -Force $pictures | Out-Null
     icacls $pictures /grant "${newUser}:(OI)(CI)F" | Out-Null
-    Invoke-As $newUser 'cmd.exe' @('/c', 'reg', 'add', $shell, '/v', 'My Pictures', '/t', 'REG_EXPAND_SZ', '/d', $pictures, '/f') 'new-pictures-on-d'
+    Invoke-As $newUser $reg @('add', $shell, '/v', 'My Pictures', '/t', 'REG_EXPAND_SZ', '/d', $pictures, '/f') 'new-pictures-on-d'
 } else {
     Write-Host 'No D: drive on this runner: Pictures stays on the system drive.'
 }
-Invoke-As $newUser 'cmd.exe' @('/c', 'mkdir', '%USERPROFILE%\Musik') 'new-musik-folder'
-Invoke-As $newUser 'cmd.exe' @('/c', 'reg', 'add', $shell, '/v', 'My Music', '/t', 'REG_EXPAND_SZ', '/d', '%USERPROFILE%\Musik', '/f') 'new-music-german'
+New-Item -ItemType Directory -Force (Join-Path $newProfile 'Musik') | Out-Null
+Invoke-As $newUser $reg @('add', $shell, '/v', 'My Music', '/t', 'REG_EXPAND_SZ', '/d', (Join-Path $newProfile 'Musik'), '/f') 'new-music-german'
 
 # Where each account's folders really are, against the plain guess; IDs stable across scans.
 Invoke-As $oldUser $labmove @('probe', (Join-Path $pReport 'probe-old.json')) 'probe-old'
@@ -134,7 +147,6 @@ $docs = $probeOld.probe.folders | Where-Object { $_.role -eq 'documents' }
 if (-not $docs.moved -or -not $docs.storage.cloud) { throw "the old laptop's Documents in OneDrive was not seen as moved into OneDrive" }
 
 # The new laptop is already in use: its own file sits where an incoming one would land.
-$newProfile = (Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -like "*\$newUser" }).LocalPath
 $mine = Join-Path $newProfile 'Documents\empty.txt'
 Set-Content -Path $mine -Value 'mine, before the move' -Encoding utf8
 icacls $mine /grant "${newUser}:F" | Out-Null

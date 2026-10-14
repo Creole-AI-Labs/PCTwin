@@ -574,6 +574,15 @@ pub struct ProbedFolder {
     pub moved: bool,
 }
 
+/// The folder's plain name on this system: macOS keeps videos in `Movies`.
+fn plain_name(role: FolderRole, name: &'static str) -> &'static str {
+    if cfg!(target_os = "macos") && role == FolderRole::Videos {
+        "Movies"
+    } else {
+        name
+    }
+}
+
 /// What the probe found (Task List 0.7: "probe first").
 #[derive(Debug, Clone, Serialize)]
 pub struct Probe {
@@ -603,7 +612,7 @@ pub fn probe() -> Result<(Probe, Vec<String>), String> {
                 let Some((_, name)) = ROLES.iter().find(|(r, _)| *r == f.role) else {
                     continue;
                 };
-                let guess = home.join(name);
+                let guess = home.join(plain_name(f.role, name));
                 let same = std::fs::canonicalize(&f.path).ok()
                     == std::fs::canonicalize(&guess).ok()
                     && guess.exists();
