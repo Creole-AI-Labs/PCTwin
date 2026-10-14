@@ -474,3 +474,21 @@ fn the_saved_format_1_example_still_reads_exactly() {
     assert_eq!(back, record);
     assert_eq!(back.fingerprint(), record.fingerprint());
 }
+
+/// Regression (fresh-context review of PR 20): an approval is two numbers anyone can write. One
+/// written by hand for a record that could never be approved (something tied to the old laptop
+/// included) must be refused when checked.
+#[test]
+fn a_hand_made_approval_of_an_unapprovable_record_is_refused() {
+    let mut record = record_with(vec![ada_file("a.txt"), ada_file("b.txt")]);
+    record.items[0].portability = Portability::DeviceBound;
+    assert!(record.approve().is_err());
+    let forged = Approval {
+        revision: record.revision,
+        fingerprint: record.fingerprint(),
+    };
+    assert!(matches!(
+        record.check(&forged),
+        Err(RecordError::DeviceBoundIncluded)
+    ));
+}

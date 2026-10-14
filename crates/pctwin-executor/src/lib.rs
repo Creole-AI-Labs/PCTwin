@@ -4,17 +4,21 @@
 //! else:
 //!
 //! - A [`Plan`] can only be made from a move record together with the person's
-//!   [`Approval`] of that exact revision, and only for items in that record that are part of the
-//!   move. A changed record needs a new approval.
+//!   [`Approval`] of that exact revision (re-checked against every approval rule, so a hand-made
+//!   approval of a record that could not be approved fails), and only for apps and settings in
+//!   that record that are part of the move. A changed record needs a new approval.
+//! - Known gap until recipes join the record (Task List 2.1): the approval covers the record, not
+//!   which recipe version rebuilds each item.
 //! - Each planned item runs one checked [`Recipe`] through an OS [`Adapter`], step by typed step.
 //!   The adapter is where each operating system does the work; it receives typed steps only,
 //!   never a command line or an address.
-//! - Every item ends with one honest [`ItemResult`]: reinstalled only when the recipe's own checks
-//!   pass; failed or needs-action with its reason otherwise. A recipe that does not support the
+//! - Every item ends with one honest [`ItemResult`]: each changing step is checked right after it
+//!   runs against what it changed; reinstalled only when something was installed and every check
+//!   passed; failed or needs-action with its reason otherwise. A recipe that does not support the
 //!   new laptop's system fails with [`Reason::NoEquivalent`] before anything runs.
 
 use pctwin_recipe::{Catalog, Check, Platform, Recipe, SettingValue, SettingsPlace, Step};
-use pctwin_record::{Approval, Inclusion, ItemId, Record, RecordError};
+use pctwin_record::{Approval, Inclusion, ItemId, ItemKind, Record, RecordError};
 use pctwin_types::{ItemResult, ItemStatus, Reason};
 
 /// Why a plan was refused.
@@ -28,6 +32,8 @@ pub enum PlanError {
     LeftOut(String),
     #[error("item {0} is planned twice")]
     Twice(String),
+    #[error("item {0} is not an app or a setting, so no recipe rebuilds it")]
+    NotRebuildable(String),
     #[error("a recipe in the plan is not valid: {0}")]
     BadRecipe(String),
 }
@@ -76,6 +82,9 @@ impl Plan {
             if found.inclusion != Inclusion::Included {
                 return Err(PlanError::LeftOut(hex));
             }
+            if !matches!(found.kind, ItemKind::App | ItemKind::Setting) {
+                return Err(PlanError::NotRebuildable(hex));
+            }
             if !seen.insert(p.item) {
                 return Err(PlanError::Twice(hex));
             }
@@ -99,38 +108,58 @@ impl Plan {
     }
 }
 
-/// Runs one recipe. It stops at the first step that does not succeed.
+/// Runs one recipe. Each step that changes something is checked right after it runs, against
+/// what it changed; it stops at the first step that does not succeed. The item is reinstalled only
+/// when the recipe installed something and every check passed; a recipe that only changed
+/// settings converted them.
 fn run_recipe(recipe: &Recipe, adapter: &mut dyn Adapter) -> ItemResult {
     if !recipe.supports(adapter.platform()) {
         return ItemResult::because(Reason::NoEquivalent);
     }
     let mut by_hand = false;
+    let mut installed = false;
     for step in &recipe.steps {
         let done = match step {
-            Step::Install { catalog, package } => adapter.install(*catalog, package),
+            Step::Install { catalog, package } => {
+                installed = true;
+                adapter.install(*catalog, package)
+            }
             Step::CopySettings { from, to } => adapter.copy_settings(from, to),
             Step::ApplySetting { key, value } => adapter.apply_setting(key, value),
-            Step::Verify { check } => {
-                if adapter.verify(check) {
-                    Ok(())
-                } else {
-                    Err(Reason::NotVerified)
-                }
-            }
+            Step::Verify { check } => checked(adapter, check),
             Step::Checklist { .. } => {
                 by_hand = true;
                 Ok(())
             }
         };
+        let done = done.and_then(|()| match step.check() {
+            Some(check) => checked(adapter, &check),
+            None => Ok(()),
+        });
         if let Err(reason) = done {
             return ItemResult::because(reason);
         }
     }
-    if by_hand {
-        ItemResult::because(Reason::FinishByHand)
+    let status = if installed {
+        ItemStatus::Reinstalled
     } else {
-        // A valid recipe that changes anything has a check, and every check passed.
-        ItemResult::done(ItemStatus::Reinstalled)
-            .unwrap_or(ItemResult::because(Reason::NotVerified))
+        ItemStatus::Converted
+    };
+    let changed = recipe.steps.iter().any(|s| s.check().is_some());
+    match (by_hand, changed) {
+        (true, _) => ItemResult::because(Reason::FinishByHand),
+        (false, true) => {
+            ItemResult::done(status).unwrap_or(ItemResult::because(Reason::NotVerified))
+        }
+        // Validation refuses recipes that change nothing; never report one as done.
+        (false, false) => ItemResult::because(Reason::NotVerified),
+    }
+}
+
+fn checked(adapter: &mut dyn Adapter, check: &Check) -> Result<(), Reason> {
+    if adapter.verify(check) {
+        Ok(())
+    } else {
+        Err(Reason::NotVerified)
     }
 }

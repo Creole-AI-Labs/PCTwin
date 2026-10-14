@@ -46,6 +46,13 @@ pub enum FormatError {
 impl Format {
     /// Classifies a found version.
     pub fn check(&self, found: u32) -> Result<Verdict, FormatError> {
+        // 0 is never a real version, even in a format set up with 0 by mistake.
+        if found == 0 {
+            return Err(FormatError::Unknown {
+                name: self.name,
+                found,
+            });
+        }
         if found == self.current {
             Ok(Verdict::Current)
         } else if found > self.current {
@@ -126,6 +133,13 @@ mod tests {
             ..F
         };
         assert!(odd.check(0).is_err());
+        // Regression (fresh-context review of PR 20): nor when the current version is 0.
+        let zero = Format {
+            current: 0,
+            readable: &[],
+            ..F
+        };
+        assert!(zero.check(0).is_err());
     }
 
     #[test]

@@ -114,18 +114,58 @@ fn ids_and_package_names_cannot_carry_addresses_or_commands() {
 }
 
 #[test]
-fn a_recipe_that_changes_something_must_check_it() {
+fn every_changing_step_carries_its_own_check() {
+    let install = Step::Install {
+        catalog: Catalog::Winget,
+        package: "X".into(),
+    };
+    assert_eq!(
+        install.check(),
+        Some(Check::PackageInstalled {
+            catalog: Catalog::Winget,
+            package: "X".into()
+        })
+    );
+    let copy = Step::CopySettings {
+        from: place("a"),
+        to: place("b"),
+    };
+    assert_eq!(
+        copy.check(),
+        Some(Check::SettingsPresent { place: place("b") })
+    );
+    let set = Step::ApplySetting {
+        key: "k".into(),
+        value: SettingValue::Bool(true),
+    };
+    assert_eq!(
+        set.check(),
+        Some(Check::SettingIs {
+            key: "k".into(),
+            value: SettingValue::Bool(true)
+        })
+    );
+    // A recipe with no separate Verify step is fine: each change is checked on its own.
+    assert!(Recipe::new(RecipeId::new("x").unwrap(), 1, vec![win()], vec![install]).is_ok());
+}
+
+/// Regression (fresh-context review of PR 20): a recipe made only of checks would report an app
+/// rebuilt that nothing rebuilt.
+#[test]
+fn a_recipe_of_only_checks_is_refused() {
     let r = Recipe::new(
         RecipeId::new("x").unwrap(),
         1,
         vec![win()],
-        vec![Step::Install {
-            catalog: Catalog::Winget,
-            package: "X".into(),
+        vec![Step::Verify {
+            check: Check::PackageInstalled {
+                catalog: Catalog::Winget,
+                package: "Already.There".into(),
+            },
         }],
     );
-    assert_eq!(r, Err(RecipeError::NoVerify));
-    // A recipe that only hands the person a checklist changes nothing, so needs no check.
+    assert_eq!(r, Err(RecipeError::NothingToDo));
+    // A recipe that only hands the person a checklist is fine.
     assert!(
         Recipe::new(
             RecipeId::new("x").unwrap(),
@@ -137,6 +177,78 @@ fn a_recipe_that_changes_something_must_check_it() {
         )
         .is_ok()
     );
+}
+
+/// Regression (fresh-context review of PR 20): text, keys, package names and paths that could
+/// inject lines, read as flags or files, hide their direction, or open a device.
+#[test]
+fn hostile_text_keys_packages_and_paths_are_refused() {
+    let one = |step: Step| Recipe::new(RecipeId::new("x").unwrap(), 1, vec![win()], vec![step]);
+    for text in [
+        "a\nproxy=evil",
+        "a\r\nb",
+        "nul\0",
+        "abc\u{202E}txt.exe",
+        "zero\u{200B}width",
+        "\u{FEFF}bom",
+    ] {
+        assert_eq!(
+            one(Step::ApplySetting {
+                key: "k".into(),
+                value: SettingValue::Text(text.into())
+            }),
+            Err(RecipeError::BadText),
+            "{text:?}"
+        );
+        assert_eq!(
+            one(Step::Checklist { what: text.into() }),
+            Err(RecipeError::BadText),
+            "{text:?}"
+        );
+    }
+    for key in ["--help", "-rf", ".hidden"] {
+        assert!(matches!(
+            one(Step::ApplySetting {
+                key: key.into(),
+                value: SettingValue::Bool(true)
+            }),
+            Err(RecipeError::BadKey(_))
+        ));
+    }
+    for package in [
+        "foo.rpm",
+        "foo.snap",
+        "foo.rb",
+        "setup.EXE",
+        "x.msi",
+        "app.flatpakref",
+    ] {
+        assert!(matches!(
+            one(Step::Install {
+                catalog: Catalog::Dnf,
+                package: package.into()
+            }),
+            Err(RecipeError::BadPackage(_))
+        ));
+    }
+    for path in [
+        "nul",
+        "a/NUL.txt",
+        "con",
+        "COM1",
+        "lpt9.log",
+        "COM\u{B9}",
+        "a/b.",
+        "a/b ",
+        "...",
+        "a\u{202E}b",
+        "a\u{200B}b",
+    ] {
+        assert!(RelPath::new(path).is_err(), "{path:?}");
+    }
+    for fine in ["console.ini", "Company/Settings", "com10", "nullable.cfg"] {
+        assert!(RelPath::new(fine).is_ok(), "{fine:?}");
+    }
 }
 
 #[test]

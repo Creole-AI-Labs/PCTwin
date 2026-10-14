@@ -563,9 +563,12 @@ impl Record {
         })
     }
 
-    /// Checks `approval` was given for exactly this revision, unchanged.
+    /// Checks `approval` was given for exactly this revision, unchanged, and that this revision
+    /// still passes every rule [`approve`](Self::approve) applies. An approval is only a pair of
+    /// numbers anyone can write, so it never stands in for those rules: a record that could not be
+    /// approved is refused here too, whatever approval comes with it.
     pub fn check(&self, approval: &Approval) -> Result<(), RecordError> {
-        if approval.revision == self.revision && approval.fingerprint == self.fingerprint() {
+        if self.approve()? == *approval {
             Ok(())
         } else {
             Err(RecordError::StaleApproval)

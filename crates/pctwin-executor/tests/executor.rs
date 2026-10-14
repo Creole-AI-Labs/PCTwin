@@ -59,12 +59,16 @@ fn install_and_check(package: &str) -> Recipe {
     ])
 }
 
-/// A pretend new laptop that records every step it is asked to do.
+/// A pretend new laptop that records every step it is asked to do. It knows what it really
+/// installed; `lies` makes an install report success and do nothing.
 #[derive(Default)]
 struct Fake {
     platform: Option<Platform>,
     done: Vec<String>,
     fail_install: Option<Reason>,
+    lies: bool,
+    installed: std::collections::HashSet<String>,
+    /// Whether checks other than "is it installed" pass.
     checks_pass: bool,
 }
 
@@ -74,7 +78,13 @@ impl Adapter for Fake {
     }
     fn install(&mut self, _: Catalog, package: &str) -> Result<(), Reason> {
         self.done.push(format!("install {package}"));
-        self.fail_install.map_or(Ok(()), Err)
+        if let Some(reason) = self.fail_install {
+            return Err(reason);
+        }
+        if !self.lies {
+            self.installed.insert(package.to_string());
+        }
+        Ok(())
     }
     fn copy_settings(&mut self, _: &SettingsPlace, _: &SettingsPlace) -> Result<(), Reason> {
         self.done.push("copy".into());
@@ -84,9 +94,12 @@ impl Adapter for Fake {
         self.done.push(format!("set {key}"));
         Ok(())
     }
-    fn verify(&mut self, _: &Check) -> bool {
+    fn verify(&mut self, check: &Check) -> bool {
         self.done.push("check".into());
-        self.checks_pass
+        match check {
+            Check::PackageInstalled { package, .. } => self.installed.contains(package),
+            _ => self.checks_pass,
+        }
     }
 }
 
@@ -118,13 +131,15 @@ fn an_approved_app_is_reinstalled_only_when_its_check_passes() {
         ..Fake::default()
     };
     assert_eq!(plan.run(&mut good)[0].1.status(), ItemStatus::Reinstalled);
-    assert_eq!(good.done, ["install Mozilla.Firefox", "check"]);
+    // The install is checked right after it runs, then the recipe's own check runs.
+    assert_eq!(good.done, ["install Mozilla.Firefox", "check", "check"]);
 
-    let mut unchecked = Fake::default();
-    assert_eq!(
-        plan.run(&mut unchecked)[0].1.reason(),
-        Some(Reason::NotVerified)
-    );
+    let mut liar = Fake {
+        lies: true,
+        checks_pass: true,
+        ..Fake::default()
+    };
+    assert_eq!(plan.run(&mut liar)[0].1.reason(), Some(Reason::NotVerified));
 }
 
 #[test]
@@ -227,4 +242,100 @@ fn a_plan_cannot_add_items_outside_the_move() {
         ],
     );
     assert!(matches!(twice, Err(PlanError::Twice(_))));
+}
+
+/// Regression (fresh-context review of PR 20): a check of something else, placed before the
+/// install, let an install that did nothing count as reinstalled.
+#[test]
+fn an_install_that_did_nothing_is_never_reinstalled() {
+    let a = app("Firefox");
+    let (record, approval) = approved(vec![a.clone()]);
+    let recipe = recipe(vec![
+        Step::Verify {
+            check: Check::PackageInstalled {
+                catalog: Catalog::Winget,
+                package: "Already.There".into(),
+            },
+        },
+        Step::Install {
+            catalog: Catalog::Winget,
+            package: "Mozilla.Firefox".into(),
+        },
+    ]);
+    let plan =
+        Plan::approved(&record, &approval, vec![PlannedItem { item: a.id, recipe }]).unwrap();
+    let mut liar = Fake {
+        lies: true,
+        checks_pass: true,
+        ..Fake::default()
+    };
+    liar.installed.insert("Already.There".into());
+    let result = plan.run(&mut liar)[0].1;
+    assert_eq!(result.status(), ItemStatus::Failed);
+    assert_eq!(result.reason(), Some(Reason::NotVerified));
+}
+
+#[test]
+fn settings_alone_are_converted_and_each_change_is_checked() {
+    let a = app("Editor");
+    let (record, approval) = approved(vec![a.clone()]);
+    let recipe = recipe(vec![Step::ApplySetting {
+        key: "editor.font".into(),
+        value: SettingValue::Int(14),
+    }]);
+    let plan =
+        Plan::approved(&record, &approval, vec![PlannedItem { item: a.id, recipe }]).unwrap();
+    let mut ok = Fake {
+        checks_pass: true,
+        ..Fake::default()
+    };
+    assert_eq!(plan.run(&mut ok)[0].1.status(), ItemStatus::Converted);
+    assert_eq!(ok.done, ["set editor.font", "check"]);
+    let mut wrong = Fake::default();
+    assert_eq!(
+        plan.run(&mut wrong)[0].1.reason(),
+        Some(Reason::NotVerified)
+    );
+}
+
+/// Regression (fresh-context review of PR 20): a hand-made approval of a record that could not be
+/// approved, and a recipe planned for a file, are refused.
+#[test]
+fn forged_approvals_and_recipes_for_files_are_refused() {
+    let a = app("Firefox");
+    let mut bound = app("Authenticator");
+    bound.portability = Portability::DeviceBound;
+    let mut record = Record::new(laptop());
+    record.items = vec![a.clone(), bound];
+    assert!(record.approve().is_err());
+    let forged = Approval {
+        revision: record.revision,
+        fingerprint: record.fingerprint(),
+    };
+    assert!(matches!(
+        Plan::approved(
+            &record,
+            &forged,
+            vec![PlannedItem {
+                item: a.id,
+                recipe: install_and_check("Mozilla.Firefox"),
+            }],
+        ),
+        Err(PlanError::Record(_))
+    ));
+
+    let mut file = app("notes.txt");
+    file.kind = ItemKind::File;
+    let (record, approval) = approved(vec![file.clone()]);
+    assert!(matches!(
+        Plan::approved(
+            &record,
+            &approval,
+            vec![PlannedItem {
+                item: file.id,
+                recipe: install_and_check("X"),
+            }],
+        ),
+        Err(PlanError::NotRebuildable(_))
+    ));
 }
