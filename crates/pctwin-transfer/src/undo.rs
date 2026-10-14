@@ -635,7 +635,7 @@ fn finish_part_way(
     stage: &Undo,
     options: &UndoOptions<'_>,
 ) -> Result<PartWay, JournalError> {
-    let Some(key) = hidden_name(stage) else {
+    let Some(key) = hidden_file(stage) else {
         return Ok(PartWay::StillThere);
     };
     let dest = match dest.try_clone() {
@@ -648,7 +648,7 @@ fn finish_part_way(
         journal,
         right,
         entry.id,
-        key,
+        &key,
         options.resolve_within,
         move |lent, record| {
             let options = UndoOptions {
@@ -662,31 +662,45 @@ fn finish_part_way(
     Ok(ended.unwrap_or_else(|| PartWay::Unresolved(TOOK_TOO_LONG.into())))
 }
 
-/// The hidden name a stage before Done is about (for telling one part-way removal from another).
-fn hidden_name(stage: &Undo) -> Option<&str> {
-    match stage {
-        Undo::Removing { private, .. } | Undo::Putting { private, .. } => Some(private),
-        Undo::Salvaging { temp, .. } => Some(temp),
-        Undo::Done { .. } => None,
-    }
+/// One hidden file on the disk: its folder's identity and its name there. A name alone is not
+/// one file: the same name in two folders is two files, and two workers on them never wait on
+/// each other.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HiddenFile {
+    dir: FileId,
+    name: String,
 }
 
-/// The hidden names whose part-way removal a worker is finishing right now (one worker each).
-static BUSY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// The hidden file a stage before Done is about (for telling one part-way removal from another).
+fn hidden_file(stage: &Undo) -> Option<HiddenFile> {
+    let name = match stage {
+        Undo::Removing { private, .. } | Undo::Putting { private, .. } => private,
+        Undo::Salvaging { temp, .. } => temp,
+        Undo::Done { .. } => return None,
+    };
+    Some(HiddenFile {
+        dir: stage.dir_id()?,
+        name: name.clone(),
+    })
+}
 
-/// Marks a hidden name busy for as long as it lives (moved into the worker).
-struct Busy(String);
+/// The hidden files whose part-way removal a worker is finishing right now (one worker each).
+static BUSY: std::sync::Mutex<Vec<HiddenFile>> = std::sync::Mutex::new(Vec::new());
+
+/// Marks a hidden file busy for as long as it lives (moved into the worker, and dropped there the
+/// moment its work ends, before it says so).
+struct Busy(HiddenFile);
 
 impl Busy {
-    fn claim(key: &str) -> Option<Busy> {
+    fn claim(key: &HiddenFile) -> Option<Busy> {
         let mut busy = BUSY
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if busy.iter().any(|k| k == key) {
+        if busy.contains(key) {
             return None;
         }
-        busy.push(key.to_string());
-        Some(Busy(key.to_string()))
+        busy.push(key.clone());
+        Some(Busy(key.clone()))
     }
 }
 
@@ -707,7 +721,7 @@ enum Ask<T> {
     Ended(Result<T, JournalError>),
 }
 
-/// Runs `work` on a worker thread, within `wait`, for entry `id`, about the hidden name `key`:
+/// Runs `work` on a worker thread, within `wait`, for entry `id`, about the hidden file `key`:
 /// `work` gets a right lent from `right` and a way to journal its steps (journaled by this
 /// thread, with `right`, before the worker goes on). `Ok(None)` if it did not end in time, or if
 /// another worker is still busy with `key`: then the lent right has ended (the gate refuses
@@ -716,7 +730,7 @@ fn within<T: Send + 'static>(
     journal: &Journal,
     right: &impl pctwin_journal::UndoRight,
     id: u64,
-    key: &str,
+    key: &HiddenFile,
     wait: std::time::Duration,
     work: impl FnOnce(
         &pctwin_journal::LentRight,
@@ -735,7 +749,6 @@ fn within<T: Send + 'static>(
     std::thread::Builder::new()
         .name("pctwin-undo-finish".into())
         .spawn(move || {
-            let _busy = busy;
             let ask = asks.clone();
             let record = move |stage: &Undo| -> Result<(), JournalError> {
                 let gone = || JournalError::Storage("undo stopped here: it took too long".into());
@@ -745,6 +758,8 @@ fn within<T: Send + 'static>(
                 answered.recv().map_err(|_| gone())?
             };
             let ended = work(&lent, &record);
+            // Free before it says so: whoever hears it ended can start on the same file at once.
+            drop(busy);
             let _ = asks.send(Ask::Ended(ended));
         })
         .map_err(|e| JournalError::Storage(e.to_string()))?;
@@ -969,6 +984,14 @@ mod tests {
         id
     }
 
+    /// A hidden file named `name` in the folder `file()`.
+    fn key(name: &str) -> HiddenFile {
+        HiddenFile {
+            dir: file(),
+            name: name.into(),
+        }
+    }
+
     fn removing(n: u8) -> Undo {
         Undo::Removing {
             file: file(),
@@ -988,7 +1011,7 @@ mod tests {
             &j,
             &permit,
             a,
-            "key-in-time",
+            &key("key-in-time"),
             Duration::from_secs(10),
             |lent, record| {
                 assert!(lent.in_force());
@@ -1015,7 +1038,7 @@ mod tests {
             &j,
             &permit,
             a,
-            "key-too-long",
+            &key("key-too-long"),
             Duration::from_millis(100),
             move |lent, record| {
                 std::thread::sleep(Duration::from_millis(600));
@@ -1051,7 +1074,7 @@ mod tests {
             &j,
             &permit,
             a,
-            "key-busy",
+            &key("key-busy"),
             Duration::from_millis(50),
             move |_, _| {
                 let _ = go_rx.recv();
@@ -1068,7 +1091,7 @@ mod tests {
             &j,
             &permit,
             a,
-            "key-busy",
+            &key("key-busy"),
             Duration::from_secs(10),
             move |_, _| {
                 ran2.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1081,14 +1104,14 @@ mod tests {
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
         go_tx.send(()).unwrap();
         ended_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-        // The busy mark goes as the worker's thread ends, just after it said so.
+        // The busy mark goes as the worker's work ends, before it says so.
         let deadline = Instant::now() + Duration::from_secs(5);
         let third = loop {
             let r = within(
                 &j,
                 &permit,
                 a,
-                "key-busy",
+                &key("key-busy"),
                 Duration::from_secs(10),
                 |_, _| Ok(3),
             )
@@ -1099,5 +1122,68 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         };
         assert_eq!(third, Some(3));
+    }
+
+    /// The same hidden name in another folder is another file: a worker busy with one never
+    /// turns the other away (which undo would report as a drive that did not answer in time).
+    #[test]
+    fn the_same_hidden_name_in_another_folder_is_never_turned_away() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let here = key("key-two-folders");
+        let elsewhere = HiddenFile {
+            dir: FileId {
+                index: std::num::NonZeroU64::new(6).unwrap(),
+                ..file()
+            },
+            ..here.clone()
+        };
+        let first = within(
+            &j,
+            &permit,
+            a,
+            &here,
+            Duration::from_millis(50),
+            move |_, _| {
+                let _ = go_rx.recv();
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(first, None, "still busy with the first folder's file");
+        let second = within(
+            &j,
+            &permit,
+            a,
+            &elsewhere,
+            Duration::from_secs(10),
+            |_, _| Ok(2),
+        )
+        .unwrap();
+        go_tx.send(()).unwrap();
+        assert_eq!(second, Some(2));
+    }
+
+    /// Once a worker has said it ended, its file is free at once: the very next try on it runs,
+    /// never turned away by a mark the worker has not let go of yet.
+    #[test]
+    fn a_file_is_free_as_soon_as_its_worker_says_it_ended() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        for n in 0..200 {
+            let r = within(
+                &j,
+                &permit,
+                a,
+                &key("key-free-at-once"),
+                Duration::from_secs(10),
+                move |_, _| Ok(n),
+            )
+            .unwrap();
+            assert_eq!(r, Some(n), "try {n} was turned away");
+        }
     }
 }
