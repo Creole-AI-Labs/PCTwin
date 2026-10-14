@@ -1,6 +1,6 @@
 import { LocalizationProvider, Localized } from "@fluent/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import logo from "../src-tauri/icons/128x128.png";
+import lockup from "./assets/pctwin-lockup.png";
 import { HELP_URL, openExternal } from "./external";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { Lock } from "./icons";
@@ -42,12 +42,23 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     <LocalizationProvider l10n={l10n}>
       <div className="app">
         <header className="app-header">
-          <span className="brand">
-            <img src={logo} alt="" />
-            <Localized id="app-name">
-              <span>PCTwin</span>
-            </Localized>
-          </span>
+          <Localized id="brand-home" attrs={{ "aria-label": true }}>
+            <button
+              type="button"
+              className="brand"
+              aria-label="PCTwin home"
+              onClick={() => {
+                setScreen({ id: "welcome" });
+              }}
+            >
+              <span className="brand-mark">
+                <img src={lockup} alt="" />
+              </span>
+              <Localized id="app-name">
+                <span>PCTwin</span>
+              </Localized>
+            </button>
+          </Localized>
           <label className="language">
             <Localized id="language-label">
               <span className="visually-hidden">Language</span>

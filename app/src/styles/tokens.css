@@ -1,8 +1,11 @@
 /*
- * PCTwin design tokens (from the approved mockups' design-tokens.json and design system notes).
- * Logical CSS pixels. Every screen uses these variables, never raw values.
+ * PCTwin design tokens, taken from the approved mockups (design batch 01: design-tokens.json and the
+ * foundation reference). Logical CSS pixels. Text sizes are in rem with a 14px base, so the system's
+ * text size (200% included) scales every size together.
  */
 :root {
+  color-scheme: light;
+
   /* Colour */
   --colour-blue: #2454f2;
   --colour-blue-hover: #1642d3;
@@ -12,11 +15,14 @@
   --colour-paper: #ffffff;
   --colour-muted: #60687b;
   --colour-line: #dce1eb;
+  --colour-line-quiet: #e8ecf4;
   --colour-soft: #eff3fb;
   --colour-success-text: #176747;
   --colour-success-surface: #eaf5ef;
   --colour-attention-text: #85520b;
   --colour-attention-surface: #fff4de;
+  --colour-error-text: #a93240;
+  --colour-error-surface: #fff0f0;
   --colour-focus: #2454f2;
 
   /* Spacing (four-pixel base) */
@@ -24,31 +30,62 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
   --content-padding: 24px;
   --content-padding-narrow: 20px;
 
+  /* Window chrome */
+  --chrome-height: 48px;
+
   /* Controls and radii */
   --control-height: 44px;
+  --control-small: 32px;
+  --radius-window: 20px;
   --radius-choice: 14px;
   --radius-content: 12px;
   --radius-button: 11px;
 
-  /* Type: local fonts only, never fetched */
+  /* Type: local fonts only, never fetched. 1rem = 14px. */
   --font-family: Inter, "Segoe UI", system-ui, -apple-system, "Noto Sans", Arial, sans-serif;
-  --type-welcome: 32px;
-  --type-heading: 24px;
-  --type-body: 14px;
-  --type-row: 15px;
-  --type-supporting: 12px;
-  --type-tertiary: 11px;
+  --type-welcome: 2.286rem; /* 32px */
+  --type-title: 2rem; /* 28px */
+  --type-heading: 1.714rem; /* 24px */
+  --type-subheading: 1.571rem; /* 22px */
+  --type-row-title: 1.143rem; /* 16px */
+  --type-row: 1.071rem; /* 15px */
+  --type-body: 1rem; /* 14px */
+  --type-small: 0.929rem; /* 13px */
+  --type-supporting: 0.857rem; /* 12px */
+  --type-tertiary: 0.786rem; /* 11px */
+  --type-pairing: 2.286rem; /* 32px */
+  --type-progress: 2.714rem; /* 38px */
 
   /* Motion */
   --motion-feedback: 120ms;
   --motion-page: 180ms;
   --motion-resize: 260ms;
   --motion-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Dark theme, from the mockups (used when the person chooses it in Settings). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --colour-canvas: #171d2b;
+  --colour-paper: #202737;
+  --colour-ink: #f4f7ff;
+  --colour-muted: #b4bdd0;
+  --colour-line: #424d66;
+  --colour-line-quiet: #424d66;
+  --colour-soft: #293348;
+  --colour-success-text: #a5e2c4;
+  --colour-success-surface: #233f35;
+  --colour-attention-text: #f1ca80;
+  --colour-attention-surface: #3b301d;
+  --colour-blue: #86a7ff;
+  --colour-blue-hover: #a7bfff;
+  --colour-focus: #86a7ff;
 }
 
 /* Reduced motion from the system: no transitions or decorative animation. */
@@ -65,5 +102,6 @@
   :root {
     --colour-muted: #3a4152;
     --colour-line: #8a93a6;
+    --colour-line-quiet: #8a93a6;
   }
 }

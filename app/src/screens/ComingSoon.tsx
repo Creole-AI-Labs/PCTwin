@@ -16,12 +16,14 @@ const ENGLISH: Record<Soon, { title: string; body: string }> = {
 export default function ComingSoon({ which, onBack }: { which: Soon; onBack: () => void }) {
   return (
     <>
-      <button type="button" className="link back" onClick={onBack}>
-        <ArrowBack />
-        <Localized id="role-back">
-          <span>Back</span>
-        </Localized>
-      </button>
+      <div className="pair-strip">
+        <button type="button" className="back" onClick={onBack}>
+          <ArrowBack />
+          <Localized id="role-back">
+            <span>Back</span>
+          </Localized>
+        </button>
+      </div>
       <Localized id="soon-eyebrow">
         <p className="eyebrow">Coming soon</p>
       </Localized>
@@ -29,7 +31,7 @@ export default function ComingSoon({ which, onBack }: { which: Soon; onBack: () 
         <h1>{ENGLISH[which].title}</h1>
       </Localized>
       <Localized id={`soon-${which}-body`}>
-        <p className="lead">{ENGLISH[which].body}</p>
+        <p className="subhead">{ENGLISH[which].body}</p>
       </Localized>
     </>
   );

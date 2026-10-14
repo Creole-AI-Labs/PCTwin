@@ -7,12 +7,19 @@ export type Role = "old" | "new";
 export default function WhichLaptop({ onBack, onChoose }: { onBack: () => void; onChoose: (role: Role) => void }) {
   return (
     <>
-      <button type="button" className="link back" onClick={onBack}>
-        <ArrowBack />
-        <Localized id="role-back">
-          <span>Back</span>
-        </Localized>
-      </button>
+      <div className="pair-strip">
+        <button type="button" className="back" onClick={onBack}>
+          <ArrowBack />
+          <Localized id="role-back">
+            <span>Back</span>
+          </Localized>
+        </button>
+        <span className="connection-dots" aria-hidden="true">
+          <span />
+          <span className="active" />
+          <span />
+        </span>
+      </div>
       <Localized id="role-eyebrow">
         <p className="eyebrow">Start a move</p>
       </Localized>
@@ -20,7 +27,7 @@ export default function WhichLaptop({ onBack, onChoose }: { onBack: () => void; 
         <h1>Which laptop is this?</h1>
       </Localized>
       <Localized id="role-body">
-        <p className="lead">Open PCTwin on both laptops. Choose the role for this one.</p>
+        <p className="subhead role-subhead">Open PCTwin on both laptops. Choose the role for this one.</p>
       </Localized>
       <ul className="choices">
         <li>
