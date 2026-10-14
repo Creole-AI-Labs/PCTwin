@@ -52,6 +52,12 @@ button {
   outline-offset: 3px;
 }
 
+/* A new screen moves focus to its content for screen readers; the mockups show no ring there.
+   The content is not in the tab order, so every control keeps its own ring. */
+.app-main:focus-visible {
+  outline: none;
+}
+
 .tabular {
   font-variant-numeric: tabular-nums;
 }
