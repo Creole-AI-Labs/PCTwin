@@ -1,0 +1,18 @@
+[package]
+name = "pctwin-executor"
+description = "Runs an approved plan of typed actions through an OS adapter; nothing outside the plan runs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-record = { path = "../pctwin-record" }
+pctwin-recipe = { path = "../pctwin-recipe" }
+pctwin-types = { path = "../pctwin-types" }
+thiserror = "2.0.21"
+
+[lints]
+workspace = true

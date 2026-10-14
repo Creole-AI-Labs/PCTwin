@@ -3249,6 +3249,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-ai"
+version = "0.1.0"
+dependencies = [
+ "pctwin-recipe",
+ "pctwin-record",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pctwin-app"
 version = "0.1.0"
 dependencies = [
@@ -3280,6 +3291,16 @@ dependencies = [
  "mdns-sd",
  "serde",
  "wmi",
+]
+
+[[package]]
+name = "pctwin-executor"
+version = "0.1.0"
+dependencies = [
+ "pctwin-recipe",
+ "pctwin-record",
+ "pctwin-types",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -3358,11 +3379,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-recipe"
+version = "0.1.0"
+dependencies = [
+ "pctwin-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pctwin-record"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
  "hex",
+ "pctwin-types",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3377,6 +3409,7 @@ dependencies = [
  "dirs",
  "lnk",
  "pctwin-record",
+ "pctwin-types",
  "plist",
  "proptest",
  "roxmltree",
@@ -3425,6 +3458,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+pctwin-types = { path = "../pctwin-types" }
 cfb = "0.14"
 dirs = "7.0.0"
 lnk = "0.6.4"

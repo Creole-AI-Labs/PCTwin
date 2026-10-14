@@ -1,6 +1,15 @@
 //! Shared types used across the PCTwin engine and app.
+//!
+//! - [`ItemStatus`]: how each selected item ended (the honest-results rule).
+//! - [`ItemResult`]: a status with the [`Reason`] the person sees whenever an item did not finish.
+//! - [`format`]: the one rule every saved format follows (engineering notes 9.11).
 
 use serde::{Deserialize, Serialize};
+
+pub mod format;
+mod result;
+
+pub use result::{ItemResult, Reason, ResultError};
 
 /// How a single selected item ended up after a move.
 ///

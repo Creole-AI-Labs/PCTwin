@@ -191,3 +191,44 @@ fn a_journal_claiming_format_0_is_reported_damaged() {
     ));
     assert_eq!(format_on_disk(&path), Some(0));
 }
+
+/// The saved example of format 2 (one committed write), read by every later build (engineering
+/// notes 9.11). Set `PCTWIN_WRITE_FORMAT_FIXTURES=1` to write it, only when a new format number is
+/// introduced: the old file must then stay.
+#[test]
+fn the_saved_format_2_example_still_opens() {
+    let saved = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/formats/journal-2.redb");
+    if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_journal::FORMAT == 2 {
+        let _ = std::fs::remove_file(&saved);
+        let j = Journal::open(&saved).unwrap();
+        let id = j.plan(&planned()).unwrap();
+        j.staged(
+            id,
+            "Documents/.pctwin-x.part",
+            &[("Documents".into(), None)],
+        )
+        .unwrap();
+        j.verified(id, [1; 32], None).unwrap();
+        j.applied(id, "Documents/f1.txt").unwrap();
+        j.committed(
+            id,
+            Landed {
+                size: 1000,
+                modified_ns: None,
+                file: None,
+            },
+        )
+        .unwrap();
+    }
+    // Opened from a copy: opening may write, and the saved example must never change.
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("journal.redb");
+    std::fs::copy(&saved, &copy).unwrap();
+    let j = Journal::open(&copy).unwrap();
+    let entries = j.entries().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].write, planned());
+    assert!(j.unfinished().unwrap().is_empty());
+    drop(j);
+    assert_eq!(format_on_disk(&copy), Some(2));
+}
