@@ -459,6 +459,13 @@ pub const SAVE_CUT_SHORT: &str = "undo stopped while saving changes made to this
 /// Why a copy saved again under a new name needs a look: undo stopped while saving it, so it may
 /// not hold everything.
 pub const SAVED_MAYBE_INCOMPLETE: &str = "a program changed it while undo removed it, and undo stopped while saving it again under a new name, so the saved copy may be incomplete; check it";
+/// Why a copy was not undone this time: another try was still finishing it.
+pub const STILL_FINISHING: &str =
+    "another undo was still finishing it, so it was left as it is for now; undo again in a moment";
+
+/// Why a copy was not undone this time: the work on it stopped unexpectedly.
+pub const WORK_STOPPED: &str = "undoing it stopped unexpectedly, so it was left as it is for now; undo again, and if it happens again, tell us";
+
 /// Why a copy was not undone this time: its drive did not answer in time.
 pub const TOOK_TOO_LONG: &str = "its drive did not answer in time, so it was left as it is for now; check the drive is connected and working, then undo again";
 /// Internal: a copy put back under its own name, to be looked at again from the start.
@@ -644,7 +651,7 @@ fn finish_part_way(
     };
     let (entry, stage) = (entry.clone(), stage.clone());
     let (kept_words, room_for_words) = (options.kept_words.to_string(), options.room_for_words);
-    let ended = within(
+    let ended = match within(
         journal,
         right,
         entry.id,
@@ -658,8 +665,14 @@ fn finish_part_way(
             };
             on_the_disk(record, lent, &dest, &entry, &stage, &options)
         },
-    )?;
-    Ok(ended.unwrap_or_else(|| PartWay::Unresolved(TOOK_TOO_LONG.into())))
+    )? {
+        Within::Ended(ended) => ended,
+        // Each way of not finishing says what really happened.
+        Within::TookTooLong => PartWay::Unresolved(TOOK_TOO_LONG.into()),
+        Within::Busy => PartWay::Unresolved(STILL_FINISHING.into()),
+        Within::Stopped => PartWay::Unresolved(WORK_STOPPED.into()),
+    };
+    Ok(ended)
 }
 
 /// One hidden file on the disk: its folder's identity and its name there. A name alone is not
@@ -713,6 +726,20 @@ impl Drop for Busy {
     }
 }
 
+/// How work given to a worker ended. Each way of not finishing is its own answer, so none can be
+/// mistaken for another (a turned-away try was once reported as a drive that did not answer).
+#[derive(Debug, PartialEq, Eq)]
+enum Within<T> {
+    /// It ended in time, with its answer.
+    Ended(T),
+    /// The deadline passed first (a drive that stopped answering).
+    TookTooLong,
+    /// Another worker is still busy with the same hidden file; nothing was started.
+    Busy,
+    /// The worker stopped without an answer (it panicked).
+    Stopped,
+}
+
 /// What a worker asks of the thread that lent it its right.
 enum Ask<T> {
     /// Journal this step of entry's undo, and answer.
@@ -723,9 +750,10 @@ enum Ask<T> {
 
 /// Runs `work` on a worker thread, within `wait`, for entry `id`, about the hidden file `key`:
 /// `work` gets a right lent from `right` and a way to journal its steps (journaled by this
-/// thread, with `right`, before the worker goes on). `Ok(None)` if it did not end in time, or if
-/// another worker is still busy with `key`: then the lent right has ended (the gate refuses
-/// whatever the worker would still do), and nothing it asks to journal is journaled any more.
+/// thread, with `right`, before the worker goes on). If it did not end in time, or the worker
+/// stopped, the lent right has ended (the gate refuses whatever the worker would still do) and
+/// nothing it asks to journal is journaled any more; if another worker is still busy with `key`,
+/// nothing starts.
 fn within<T: Send + 'static>(
     journal: &Journal,
     right: &impl pctwin_journal::UndoRight,
@@ -738,10 +766,10 @@ fn within<T: Send + 'static>(
     ) -> Result<T, JournalError>
     + Send
     + 'static,
-) -> Result<Option<T>, JournalError> {
+) -> Result<Within<T>, JournalError> {
     use std::sync::mpsc;
     let Some(busy) = Busy::claim(key) else {
-        return Ok(None);
+        return Ok(Within::Busy);
     };
     let deadline = std::time::Instant::now() + wait;
     let (lending, lent) = right.lend();
@@ -769,11 +797,15 @@ fn within<T: Send + 'static>(
             Ok(Ask::Record(stage, answer)) => {
                 let _ = answer.send(journal.record_undo(right, id, &stage));
             }
-            Ok(Ask::Ended(ended)) => return ended.map(Some),
-            Err(_) => {
+            Ok(Ask::Ended(ended)) => return ended.map(Within::Ended),
+            Err(why) => {
                 // Ended here, before anything else: from now the worker can act on nothing.
                 drop(lending);
-                return Ok(None);
+                return Ok(match why {
+                    mpsc::RecvTimeoutError::Timeout => Within::TookTooLong,
+                    // Every sender is gone without an answer: the worker panicked.
+                    mpsc::RecvTimeoutError::Disconnected => Within::Stopped,
+                });
             }
         }
     }
@@ -1020,7 +1052,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(r, Some(7));
+        assert_eq!(r, Within::Ended(7));
         assert_eq!(j.undo_of(a).unwrap(), Some(removing(1)));
     }
 
@@ -1049,7 +1081,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(r, None);
+        assert_eq!(r, Within::TookTooLong);
         assert!(
             start.elapsed() < Duration::from_millis(500),
             "{:?}",
@@ -1059,6 +1091,41 @@ mod tests {
         assert!(!in_force, "a late worker's right has ended");
         assert!(!recorded, "a late worker's step is never journaled");
         assert_eq!(j.undo_of(a).unwrap(), None);
+    }
+
+    /// A worker that panics is reported as stopped, never as a drive that did not answer, and
+    /// the file is free again at once.
+    #[test]
+    fn a_worker_that_stops_is_never_called_a_slow_drive() {
+        let (_d, j) = journal();
+        let a = committed(&j);
+        let permit = j.begin_undo().unwrap();
+        let start = Instant::now();
+        let r: Within<()> = within(
+            &j,
+            &permit,
+            a,
+            &key("key-stops"),
+            Duration::from_secs(10),
+            |_, _| panic!("a worker that stops"),
+        )
+        .unwrap();
+        assert_eq!(r, Within::Stopped);
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        let again = within(
+            &j,
+            &permit,
+            a,
+            &key("key-stops"),
+            Duration::from_secs(10),
+            |_, _| Ok(1),
+        )
+        .unwrap();
+        assert_eq!(again, Within::Ended(1));
     }
 
     /// While a worker is still busy with a hidden name (given up on, but not ended), no second
@@ -1083,7 +1150,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(first, None);
+        assert_eq!(first, Within::TookTooLong);
         let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let ran2 = std::sync::Arc::clone(&ran);
         let start = Instant::now();
@@ -1099,7 +1166,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(second, None);
+        assert_eq!(second, Within::Busy);
         assert!(start.elapsed() < Duration::from_secs(1));
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
         go_tx.send(()).unwrap();
@@ -1116,12 +1183,12 @@ mod tests {
                 |_, _| Ok(3),
             )
             .unwrap();
-            if r.is_some() || Instant::now() > deadline {
+            if matches!(r, Within::Ended(_)) || Instant::now() > deadline {
                 break r;
             }
             std::thread::sleep(Duration::from_millis(10));
         };
-        assert_eq!(third, Some(3));
+        assert_eq!(third, Within::Ended(3));
     }
 
     /// The same hidden name in another folder is another file: a worker busy with one never
@@ -1152,7 +1219,11 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(first, None, "still busy with the first folder's file");
+        assert_eq!(
+            first,
+            Within::TookTooLong,
+            "still busy with the first folder's file"
+        );
         let second = within(
             &j,
             &permit,
@@ -1163,7 +1234,7 @@ mod tests {
         )
         .unwrap();
         go_tx.send(()).unwrap();
-        assert_eq!(second, Some(2));
+        assert_eq!(second, Within::Ended(2));
     }
 
     /// Once a worker has said it ended, its file is free at once: the very next try on it runs,
@@ -1183,7 +1254,7 @@ mod tests {
                 move |_, _| Ok(n),
             )
             .unwrap();
-            assert_eq!(r, Some(n), "try {n} was turned away");
+            assert_eq!(r, Within::Ended(n), "try {n} was turned away");
         }
     }
 }
