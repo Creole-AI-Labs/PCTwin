@@ -36,6 +36,71 @@ fn set_window_mode(window: WebviewWindow, mode: WindowMode) -> Result<(), String
         .map_err(|e| e.to_string())
 }
 
+/// The approved symbol in one colour (scripts/make-tray-icons.py): black for macOS's menu bar
+/// (as a template image the system recolours) and light Windows taskbars, white for dark ones.
+/// Raw RGBA pixels, so no image decoder is needed.
+const TRAY_BLACK: &[u8] = include_bytes!("../icons/tray/tray-black.rgba");
+const TRAY_WHITE: &[u8] = include_bytes!("../icons/tray/tray-white.rgba");
+const TRAY_SIZE: u32 = 64;
+
+fn tray_image(rgba: &'static [u8]) -> tauri::image::Image<'static> {
+    tauri::image::Image::new(rgba, TRAY_SIZE, TRAY_SIZE)
+}
+
+/// Whether a Windows registry answer (`reg query ... /v SystemUsesLightTheme`) says the taskbar is
+/// light. Windows 11's taskbar is dark unless the person chose light, so anything unclear is dark.
+pub fn taskbar_is_light(reg_output: &str) -> bool {
+    reg_output
+        .lines()
+        .find(|l| l.contains("SystemUsesLightTheme"))
+        .and_then(|l| l.split_whitespace().last())
+        .is_some_and(|v| v.eq_ignore_ascii_case("0x1"))
+}
+
+/// Sets the tray picture that suits the system's bar.
+fn refresh_tray_icon<R: Runtime>(app: &AppHandle<R>) {
+    let Some(tray) = app.tray_by_id("main") else {
+        return;
+    };
+    if cfg!(target_os = "macos") {
+        let _ = tray.set_icon(Some(tray_image(TRAY_BLACK)));
+        let _ = tray.set_icon_as_template(true);
+    } else if cfg!(windows) {
+        let light = windows_taskbar_light();
+        let _ = tray.set_icon(Some(tray_image(if light {
+            TRAY_BLACK
+        } else {
+            TRAY_WHITE
+        })));
+    } else if let Some(icon) = app.default_window_icon() {
+        // Linux panels come in every colour and do not say which: the blue mark reads on both.
+        let _ = tray.set_icon(Some(icon.clone()));
+    }
+}
+
+#[cfg(windows)]
+fn windows_taskbar_light() -> bool {
+    use std::os::windows::process::CommandExt;
+    // No console window flashes up while asking.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            "/v",
+            "SystemUsesLightTheme",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| taskbar_is_light(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn windows_taskbar_light() -> bool {
+    false
+}
+
 const TRAY_SHOW: &str = "show";
 const TRAY_QUIT: &str = "quit";
 
@@ -105,7 +170,14 @@ pub fn run() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            refresh_tray_icon(app.handle());
             Ok(())
+        })
+        // The person can switch the taskbar between light and dark at any time.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::ThemeChanged(_) = event {
+                refresh_tray_icon(window.app_handle());
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running PCTwin");
@@ -127,6 +199,32 @@ mod tests {
         assert!(serde_json::from_str::<WindowMode>("\"mini\"").is_ok());
         assert!(serde_json::from_str::<WindowMode>("\"fullscreen\"").is_err());
         assert!(serde_json::from_str::<WindowMode>("{\"width\":9999}").is_err());
+    }
+
+    #[test]
+    fn the_tray_picture_follows_the_taskbar() {
+        let reg = |v: &str| {
+            format!(
+                "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\r\n    SystemUsesLightTheme    REG_DWORD    {v}\r\n"
+            )
+        };
+        assert!(taskbar_is_light(&reg("0x1")));
+        assert!(!taskbar_is_light(&reg("0x0")));
+        // Unreadable or missing: Windows 11's default dark taskbar.
+        assert!(!taskbar_is_light(""));
+        assert!(!taskbar_is_light(
+            "ERROR: The system was unable to find the specified registry key"
+        ));
+    }
+
+    #[test]
+    fn both_tray_pictures_are_real_images() {
+        for bytes in [TRAY_BLACK, TRAY_WHITE] {
+            assert_eq!(bytes.len(), (TRAY_SIZE * TRAY_SIZE * 4) as usize);
+            // Transparent around the mark, solid in it.
+            let alpha: Vec<u8> = bytes.chunks(4).map(|p| p[3]).collect();
+            assert!(alpha.contains(&0) && alpha.contains(&255));
+        }
     }
 
     #[test]
