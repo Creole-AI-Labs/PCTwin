@@ -55,3 +55,18 @@ soon-rescue-title = Rescue a laptop
 soon-rescue-body = Bring files back from a laptop that will not start, by connecting its drive to a working one. This is coming in a later version.
 soon-sign-in-title = Cloud Twin
 soon-sign-in-body = Signing in to see your saved setup comes with Cloud Twin, in a later version. Moving your own laptops will always be free, with no account.
+
+## Item results (every item ends with one of these)
+
+status-copied = Copied
+status-reinstalled = Reinstalled
+status-converted = Converted
+status-needs-action = Needs action
+status-skipped = Skipped
+status-failed = Failed
+
+## Component kit
+
+dialog-close = Close
+toast-dismiss = Dismiss
+code-label = Six-digit code
