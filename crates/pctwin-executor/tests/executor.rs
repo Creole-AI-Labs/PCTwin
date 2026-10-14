@@ -2,7 +2,8 @@
 
 use pctwin_executor::{Adapter, Plan, PlanError, PlannedItem};
 use pctwin_recipe::{
-    Arch, Catalog, Check, Os, Platform, Recipe, RecipeId, SettingValue, SettingsPlace, Step,
+    Arch, Catalog, Check, ChecklistKey, Os, Platform, Recipe, RecipeId, SettingValue,
+    SettingsPlace, Step,
 };
 use pctwin_record::{
     Approval, FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId,
@@ -70,6 +71,10 @@ struct Fake {
     installed: std::collections::HashSet<String>,
     /// Whether checks other than "is it installed" pass.
     checks_pass: bool,
+    /// Settings places whose contents really match their source.
+    copied: std::collections::HashSet<String>,
+    /// Makes a settings copy report success and copy nothing.
+    copy_lies: bool,
 }
 
 impl Adapter for Fake {
@@ -86,8 +91,11 @@ impl Adapter for Fake {
         }
         Ok(())
     }
-    fn copy_settings(&mut self, _: &SettingsPlace, _: &SettingsPlace) -> Result<(), Reason> {
+    fn copy_settings(&mut self, _: &SettingsPlace, to: &SettingsPlace) -> Result<(), Reason> {
         self.done.push("copy".into());
+        if !self.copy_lies {
+            self.copied.insert(format!("{to:?}"));
+        }
         Ok(())
     }
     fn apply_setting(&mut self, key: &str, _: &SettingValue) -> Result<(), Reason> {
@@ -98,6 +106,7 @@ impl Adapter for Fake {
         self.done.push("check".into());
         match check {
             Check::PackageInstalled { package, .. } => self.installed.contains(package),
+            Check::SettingsMatch { to, .. } => self.copied.contains(&format!("{to:?}")),
             _ => self.checks_pass,
         }
     }
@@ -181,7 +190,7 @@ fn a_checklist_step_leaves_the_item_for_the_person() {
         vec![PlannedItem {
             item: a.id,
             recipe: recipe(vec![Step::Checklist {
-                what: "Download it from its maker".into(),
+                what: ChecklistKey::new("download-from-maker").unwrap(),
             }]),
         }],
     )
@@ -337,5 +346,51 @@ fn forged_approvals_and_recipes_for_files_are_refused() {
             }],
         ),
         Err(PlanError::NotRebuildable(_))
+    ));
+}
+
+/// Regression (second fresh-context review of PR 20): a settings file that already existed (an
+/// app's defaults) must not make a copy that did nothing count as done.
+#[test]
+fn a_copy_onto_existing_defaults_is_checked_by_contents() {
+    let a = app("Editor");
+    let (record, approval) = approved(vec![a.clone()]);
+    let place = SettingsPlace {
+        root: pctwin_recipe::SettingsRoot::Config,
+        path: pctwin_recipe::RelPath::new("Editor/settings.json").unwrap(),
+    };
+    let recipe = recipe(vec![Step::CopySettings {
+        from: place.clone(),
+        to: place,
+    }]);
+    let plan =
+        Plan::approved(&record, &approval, vec![PlannedItem { item: a.id, recipe }]).unwrap();
+    // The defaults are there, so "is a file there" would pass; the copy itself did nothing.
+    let mut liar = Fake {
+        copy_lies: true,
+        checks_pass: true,
+        ..Fake::default()
+    };
+    assert_eq!(plan.run(&mut liar)[0].1.reason(), Some(Reason::NotVerified));
+    let mut honest = Fake::default();
+    assert_eq!(plan.run(&mut honest)[0].1.status(), ItemStatus::Converted);
+}
+
+/// Regression (second fresh-context review of PR 20): a setting is never "reinstalled".
+#[test]
+fn a_recipe_for_a_setting_may_not_install() {
+    let mut setting = app("Wallpaper");
+    setting.kind = ItemKind::Setting;
+    let (record, approval) = approved(vec![setting.clone()]);
+    assert!(matches!(
+        Plan::approved(
+            &record,
+            &approval,
+            vec![PlannedItem {
+                item: setting.id,
+                recipe: install_and_check("X"),
+            }],
+        ),
+        Err(PlanError::InstallForSetting(_))
     ));
 }

@@ -60,6 +60,8 @@ pub enum RecipeError {
     NothingToDo,
     #[error("a text value holds control characters or hidden marks")]
     BadText,
+    #[error("the checklist key {0:?} is not allowed (lowercase letters, digits and `-` only)")]
+    BadChecklistKey(String),
 }
 
 /// A recipe's stable ID, such as `org.mozilla.firefox`.
@@ -203,19 +205,94 @@ impl From<RelPath> for String {
     }
 }
 
-/// Whether text is free of control characters and of invisible marks that change how it reads
-/// (direction overrides, zero-width characters, the byte-order mark).
+/// Whether text is free of characters that are invisible or change how text reads: controls,
+/// line and paragraph separators, direction marks and overrides, and every default-ignorable code
+/// point (Unicode's own list: zero-width spaces, soft hyphens, invisible tag characters and the
+/// rest). Two kinds are kept because real words need them: the zero-width joiner and non-joiner
+/// (Hindi, Persian and other scripts spell with them) and the variation selectors (emoji).
 pub fn text_ok(text: &str) -> bool {
-    !text.chars().any(|c| {
-        c.is_control()
-            || matches!(
-                c,
-                '\u{200B}'..='\u{200F}'
-                    | '\u{202A}'..='\u{202E}'
-                    | '\u{2060}'..='\u{2069}'
-                    | '\u{FEFF}'
-            )
-    })
+    !text.chars().any(hidden)
+}
+
+/// Characters [`text_ok`] refuses. The default-ignorable ranges are Unicode's
+/// `Default_Ignorable_Code_Point` property (DerivedCoreProperties.txt); the other format
+/// characters are Unicode's category Cf outside that property.
+fn hidden(c: char) -> bool {
+    if matches!(c, '\u{200C}' | '\u{200D}' | '\u{FE00}'..='\u{FE0F}' | '\u{E0100}'..='\u{E01EF}') {
+        return false;
+    }
+    c.is_control()
+        || matches!(
+            c,
+            // Default_Ignorable_Code_Point
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'..='\u{1160}'
+                | '\u{17B4}'..='\u{17B5}'
+                | '\u{180B}'..='\u{180F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{3164}'
+                | '\u{FFA0}'
+                | '\u{FFF0}'..='\u{FFF8}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+                | '\u{1D173}'..='\u{1D17A}'
+                | '\u{E0000}'..='\u{E0FFF}'
+                // Line and paragraph separators (Zl, Zp)
+                | '\u{2028}'..='\u{2029}'
+                // Other format characters (Cf)
+                | '\u{0600}'..='\u{0605}'
+                | '\u{06DD}'
+                | '\u{070F}'
+                | '\u{0890}'..='\u{0891}'
+                | '\u{08E2}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{110BD}'
+                | '\u{110CD}'
+                | '\u{13430}'..='\u{1343F}'
+        )
+}
+
+/// A checklist entry: the key of a message every language has, so the person sees translated
+/// words made ahead of time, never text a recipe wrote. Lowercase letters, digits and `-`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ChecklistKey(String);
+
+impl ChecklistKey {
+    pub fn new(key: &str) -> Result<Self, RecipeError> {
+        let ok = !key.is_empty()
+            && key.len() <= 80
+            && key
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            && !key.starts_with('-');
+        if ok {
+            Ok(Self(key.to_string()))
+        } else {
+            Err(RecipeError::BadChecklistKey(key.to_string()))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ChecklistKey {
+    type Error = RecipeError;
+    fn try_from(s: String) -> Result<Self, RecipeError> {
+        Self::new(&s)
+    }
+}
+
+impl From<ChecklistKey> for String {
+    fn from(k: ChecklistKey) -> Self {
+        k.0
+    }
 }
 
 /// Windows device names (`CON`, `nul.txt`, `COM1`, `LPT²`), which open a device, not a file.
@@ -265,6 +342,11 @@ pub enum Check {
     PackageInstalled { catalog: Catalog, package: String },
     /// A settings file exists where it was put.
     SettingsPresent { place: SettingsPlace },
+    /// The settings at `to` hold exactly what `from` held on the old laptop.
+    SettingsMatch {
+        from: SettingsPlace,
+        to: SettingsPlace,
+    },
     /// A named setting holds this value.
     SettingIs { key: String, value: SettingValue },
 }
@@ -285,7 +367,7 @@ pub enum Step {
     /// Check the result.
     Verify { check: Check },
     /// This part cannot be done automatically: the person gets a checklist entry instead.
-    Checklist { what: String },
+    Checklist { what: ChecklistKey },
 }
 
 /// How one app is rebuilt on a new laptop.
@@ -308,7 +390,10 @@ impl Step {
                 catalog: *catalog,
                 package: package.clone(),
             }),
-            Step::CopySettings { to, .. } => Some(Check::SettingsPresent { place: to.clone() }),
+            Step::CopySettings { from, to } => Some(Check::SettingsMatch {
+                from: from.clone(),
+                to: to.clone(),
+            }),
             Step::ApplySetting { key, value } => Some(Check::SettingIs {
                 key: key.clone(),
                 value: value.clone(),
@@ -437,18 +522,9 @@ impl Recipe {
                 Step::Verify { check } => match check {
                     Check::PackageInstalled { package, .. } => check_package(package)?,
                     Check::SettingIs { key, value } => check_setting(key, value)?,
-                    Check::SettingsPresent { .. } => {}
+                    Check::SettingsPresent { .. } | Check::SettingsMatch { .. } => {}
                 },
-                Step::Checklist { what } => {
-                    if what.is_empty() || what.len() > MAX_TEXT * 4 {
-                        return Err(RecipeError::Damaged(
-                            "a checklist entry is empty or too long".into(),
-                        ));
-                    }
-                    if !text_ok(what) {
-                        return Err(RecipeError::BadText);
-                    }
-                }
+                Step::Checklist { .. } => {}
                 Step::CopySettings { .. } => {}
             }
         }

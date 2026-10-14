@@ -2,8 +2,8 @@
 //! stay inside the app's settings, and the shared format rule.
 
 use pctwin_recipe::{
-    Arch, Catalog, Check, Os, Platform, Recipe, RecipeError, RecipeId, RelPath, SettingValue,
-    SettingsPlace, SettingsRoot, Step,
+    Arch, Catalog, Check, ChecklistKey, Os, Platform, Recipe, RecipeError, RecipeId, RelPath,
+    SettingValue, SettingsPlace, SettingsRoot, Step,
 };
 
 fn win() -> Platform {
@@ -130,9 +130,13 @@ fn every_changing_step_carries_its_own_check() {
         from: place("a"),
         to: place("b"),
     };
+    // A copy is checked by its contents, not by a file being there.
     assert_eq!(
         copy.check(),
-        Some(Check::SettingsPresent { place: place("b") })
+        Some(Check::SettingsMatch {
+            from: place("a"),
+            to: place("b")
+        })
     );
     let set = Step::ApplySetting {
         key: "k".into(),
@@ -172,7 +176,7 @@ fn a_recipe_of_only_checks_is_refused() {
             1,
             vec![win()],
             vec![Step::Checklist {
-                what: "Sign in to the app".into()
+                what: ChecklistKey::new("sign-in-to-the-app").unwrap()
             }],
         )
         .is_ok()
@@ -197,11 +201,6 @@ fn hostile_text_keys_packages_and_paths_are_refused() {
                 key: "k".into(),
                 value: SettingValue::Text(text.into())
             }),
-            Err(RecipeError::BadText),
-            "{text:?}"
-        );
-        assert_eq!(
-            one(Step::Checklist { what: text.into() }),
             Err(RecipeError::BadText),
             "{text:?}"
         );
@@ -254,7 +253,11 @@ fn hostile_text_keys_packages_and_paths_are_refused() {
 #[test]
 fn empty_or_versionless_recipes_are_refused() {
     let id = || RecipeId::new("x").unwrap();
-    let check = || vec![Step::Checklist { what: "x".into() }];
+    let check = || {
+        vec![Step::Checklist {
+            what: ChecklistKey::new("x").unwrap(),
+        }]
+    };
     assert_eq!(
         Recipe::new(id(), 0, vec![win()], check()),
         Err(RecipeError::BadVersion)
@@ -296,4 +299,67 @@ fn a_recipe_from_a_newer_pctwin_is_refused_safely() {
             pctwin_types::format::FormatError::Newer { found: 2, .. }
         ))
     ));
+}
+
+/// Regression (second fresh-context review of PR 20): characters that are invisible or change
+/// direction are refused by Unicode property, not by a hand-picked list; the joiners real words
+/// need stay allowed.
+#[test]
+fn hidden_characters_are_refused_by_property() {
+    use pctwin_recipe::text_ok;
+    for c in [
+        '\u{061C}',
+        '\u{2028}',
+        '\u{2029}',
+        '\u{E0041}',
+        '\u{E007F}',
+        '\u{00AD}',
+        '\u{180E}',
+        '\u{3164}',
+        '\u{200B}',
+        '\u{202E}',
+        '\u{2066}',
+        '\u{FEFF}',
+        '\u{0600}',
+        '\u{FFF9}',
+        '\u{1D173}',
+        '\u{115F}',
+    ] {
+        let text = format!("a{c}b");
+        assert!(!text_ok(&text), "U+{:04X} passed", c as u32);
+        assert!(
+            RelPath::new(&text).is_err(),
+            "U+{:04X} passed in a path",
+            c as u32
+        );
+    }
+    // Hindi and Persian spell with the joiners; emoji use variation selectors.
+    for fine in [
+        "\u{0915}\u{094D}\u{200D}\u{0937}",
+        "\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}",
+        "\u{2764}\u{FE0F}",
+        "\u{1F469}\u{200D}\u{1F4BB}",
+    ] {
+        assert!(text_ok(fine), "{fine:?}");
+        assert!(RelPath::new(fine).is_ok(), "{fine:?}");
+    }
+}
+
+/// Regression (second fresh-context review of PR 20): a checklist entry is a message key, so a
+/// recipe can never put a link or a command in front of the person.
+#[test]
+fn checklist_entries_are_message_keys_only() {
+    for bad in [
+        "https://evil.example",
+        "curl evil | sh",
+        "Sign in",
+        "",
+        "-x",
+        "a\u{202E}b",
+    ] {
+        assert!(ChecklistKey::new(bad).is_err(), "{bad:?}");
+    }
+    assert!(ChecklistKey::new("activate-licence").is_ok());
+    let json = r#"{"format":1,"id":"x","version":1,"platforms":[{"os":"windows","arch":"x86-64"}],"steps":[{"checklist":{"what":"curl evil | sh"}}]}"#;
+    assert!(Recipe::from_json(json.as_bytes()).is_err());
 }

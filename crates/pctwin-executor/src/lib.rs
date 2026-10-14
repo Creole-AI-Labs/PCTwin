@@ -34,6 +34,8 @@ pub enum PlanError {
     Twice(String),
     #[error("item {0} is not an app or a setting, so no recipe rebuilds it")]
     NotRebuildable(String),
+    #[error("item {0} is a setting, so its recipe may not install anything")]
+    InstallForSetting(String),
     #[error("a recipe in the plan is not valid: {0}")]
     BadRecipe(String),
 }
@@ -84,6 +86,14 @@ impl Plan {
             }
             if !matches!(found.kind, ItemKind::App | ItemKind::Setting) {
                 return Err(PlanError::NotRebuildable(hex));
+            }
+            if found.kind == ItemKind::Setting
+                && p.recipe
+                    .steps
+                    .iter()
+                    .any(|s| matches!(s, Step::Install { .. }))
+            {
+                return Err(PlanError::InstallForSetting(hex));
             }
             if !seen.insert(p.item) {
                 return Err(PlanError::Twice(hex));
