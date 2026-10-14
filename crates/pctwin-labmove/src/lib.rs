@@ -522,3 +522,114 @@ pub fn check_move(
         Err(problems)
     }
 }
+
+/// The signed-in person's special folders that a lab laptop uses, by plain name (`Documents`),
+/// wherever they really are (OneDrive, another drive, a translated name).
+pub fn profile_places() -> BTreeMap<String, PathBuf> {
+    pctwin_scan::find_special_folders()
+        .into_iter()
+        .filter_map(|f| match f {
+            FolderLookup::Found(f) => ROLES
+                .iter()
+                .find(|(r, _)| *r == f.role)
+                .map(|(_, name)| (name.to_string(), f.path)),
+            FolderLookup::Missing { .. } => None,
+        })
+        .collect()
+}
+
+/// A snapshot of the signed-in person's special folders, named the way lab reports name them.
+pub fn snapshot_profile() -> std::io::Result<Snapshot> {
+    let named: Vec<(String, PathBuf)> = profile_places().into_iter().collect();
+    pctwin_lab::snapshot_named(&named)
+}
+
+/// One special folder as the probe found it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProbedFolder {
+    pub role: FolderRole,
+    /// Where the system says it is.
+    pub real: String,
+    /// Where the plain guess (`home/Documents`) would put it.
+    pub guess: String,
+    pub storage: Storage,
+    /// What the scan says: the folder is not where its plain name would put it.
+    pub moved: bool,
+}
+
+/// What the probe found (Task List 0.7: "probe first").
+#[derive(Debug, Clone, Serialize)]
+pub struct Probe {
+    pub home: String,
+    pub folders: Vec<ProbedFolder>,
+    pub missing: Vec<FolderRole>,
+    /// Item IDs from two scans of the same laptop are the same.
+    pub ids_stable: bool,
+    pub items: usize,
+}
+
+/// Compares where the system says each special folder is with the plain guess, and scans the
+/// laptop twice to check every item keeps its ID. Returns the findings and any problem: a folder
+/// the scan calls moved that sits at the guess (or the other way round), or IDs that changed.
+pub fn probe() -> Result<(Probe, Vec<String>), String> {
+    let home = pctwin_scan::list_people()
+        .into_iter()
+        .find(|p| p.is_me)
+        .map(|p| p.home)
+        .ok_or("no signed-in person")?;
+    let mut folders = Vec::new();
+    let mut missing = Vec::new();
+    let mut problems = Vec::new();
+    for lookup in pctwin_scan::find_special_folders() {
+        match lookup {
+            FolderLookup::Found(f) => {
+                let Some((_, name)) = ROLES.iter().find(|(r, _)| *r == f.role) else {
+                    continue;
+                };
+                let guess = home.join(name);
+                let same = std::fs::canonicalize(&f.path).ok()
+                    == std::fs::canonicalize(&guess).ok()
+                    && guess.exists();
+                if f.moved == same {
+                    problems.push(format!(
+                        "{name}: the scan says moved={} but the real folder {} is {}the guess {}",
+                        f.moved,
+                        f.path.display(),
+                        if same { "" } else { "not " },
+                        guess.display()
+                    ));
+                }
+                folders.push(ProbedFolder {
+                    role: f.role,
+                    real: f.path.display().to_string(),
+                    guess: guess.display().to_string(),
+                    storage: f.storage,
+                    moved: f.moved,
+                });
+            }
+            FolderLookup::Missing { role } => missing.push(role),
+        }
+    }
+    let laptop = LaptopId::generate().map_err(err)?;
+    let first = pctwin_scan::scan_this_laptop(laptop).map_err(err)?;
+    let second = pctwin_scan::scan_this_laptop(laptop).map_err(err)?;
+    let ids = |r: &Record| {
+        let mut v: Vec<String> = r.items.iter().map(|i| i.id.to_hex()).collect();
+        v.sort();
+        v
+    };
+    let ids_stable = ids(&first.record) == ids(&second.record);
+    if !ids_stable {
+        problems.push("item IDs changed between two scans of the same laptop".into());
+    }
+    Ok((
+        Probe {
+            home: home.display().to_string(),
+            folders,
+            missing,
+            ids_stable,
+            items: first.record.items.len(),
+        },
+        problems,
+    ))
+}

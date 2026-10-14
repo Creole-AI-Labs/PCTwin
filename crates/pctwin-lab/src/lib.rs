@@ -101,6 +101,8 @@ pub struct Skipped {
 #[derive(Debug)]
 pub struct Made {
     pub root: PathBuf,
+    /// Top-level folders put somewhere other than under `root` (see [`build_with`]).
+    pub places: BTreeMap<String, PathBuf>,
     pub made: Vec<MadeItem>,
     pub skipped: Vec<Skipped>,
     /// Files held open with no sharing; dropping [`Made`] (or [`Made::release`]) lets them go.
@@ -118,7 +120,7 @@ impl Made {
     pub fn release(&mut self) -> io::Result<()> {
         self.held.clear();
         for m in self.made.iter().filter(|m| m.case == Case::ReadOnly) {
-            let p = self.root.join(&m.path);
+            let p = resolve(&self.root, &self.places, Path::new(&m.path));
             let mut perm = fs::metadata(&p)?.permissions();
             #[allow(clippy::permissions_set_readonly_false)]
             perm.set_readonly(false);
@@ -216,8 +218,21 @@ fn part_name(part: &OsStr) -> String {
     }
 }
 
+/// Where a path under the laptop really is: under its top-level folder's place if it has one,
+/// else under `root`.
+fn resolve(root: &Path, places: &BTreeMap<String, PathBuf>, rel: &Path) -> PathBuf {
+    let mut parts = rel.components();
+    if let Some(first) = parts.next()
+        && let Some(place) = first.as_os_str().to_str().and_then(|f| places.get(f))
+    {
+        return place.join(parts.as_path());
+    }
+    root.join(rel)
+}
+
 struct Maker {
     root: PathBuf,
+    places: BTreeMap<String, PathBuf>,
     made: Vec<MadeItem>,
     skipped: Vec<Skipped>,
     held: Vec<File>,
@@ -242,7 +257,7 @@ impl Maker {
         let rel_path: PathBuf = rel.iter().collect();
         let what = name_of(&rel_path);
         let result = (|| -> io::Result<()> {
-            let full = long(&self.root.join(&rel_path))?;
+            let full = long(&resolve(&self.root, &self.places, &rel_path))?;
             if let Some(parent) = full.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -281,9 +296,22 @@ fn os(s: &str) -> &OsStr {
 
 /// Builds a synthetic laptop profile under `root` (which must exist and should be empty).
 pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
+    build_with(root, spec, &BTreeMap::new())
+}
+
+/// As [`build`], with some top-level folders put elsewhere: `places` maps a folder name
+/// (`Documents`) to where it really is, as a laptop whose Documents live in OneDrive or on
+/// another drive has it. Paths in the result are still named from the top-level folder
+/// (`Documents/...`).
+pub fn build_with(
+    root: &Path,
+    spec: &Spec,
+    places: &BTreeMap<String, PathBuf>,
+) -> io::Result<Made> {
     let mut rng = Rng::new(spec.seed);
     let mut m = Maker {
         root: root.to_path_buf(),
+        places: places.clone(),
         made: Vec::new(),
         skipped: Vec::new(),
         held: Vec::new(),
@@ -396,7 +424,7 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
         &[os("Documents"), os("read-only.txt")],
         b"keep",
     ) {
-        let p = long(&root.join("Documents").join("read-only.txt"))?;
+        let p = long(&resolve(root, places, Path::new("Documents/read-only.txt")))?;
         let mut perm = fs::metadata(&p)?.permissions();
         perm.set_readonly(true);
         fs::set_permissions(&p, perm)?;
@@ -413,6 +441,7 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
 
     Ok(Made {
         root: root.to_path_buf(),
+        places: m.places,
         made: m.made,
         skipped: m.skipped,
         held: m.held,
@@ -420,7 +449,7 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
 }
 
 fn links(m: &mut Maker) {
-    let dir = m.root.join("Documents").join("Links");
+    let dir = resolve(&m.root, &m.places, Path::new("Documents/Links"));
     let target_ok = m.file(
         Case::Link,
         &[os("Documents"), os("Links"), os("target.txt")],
@@ -479,8 +508,12 @@ fn locked(m: &mut Maker) {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        let held = long(&m.root.join("Documents").join("locked.pst"))
-            .and_then(|p| File::options().read(true).share_mode(0).open(p));
+        let held = long(&resolve(
+            &m.root,
+            &m.places,
+            Path::new("Documents/locked.pst"),
+        ))
+        .and_then(|p| File::options().read(true).share_mode(0).open(p));
         match held {
             Ok(f) => m.held.push(f),
             Err(e) => {
@@ -587,6 +620,22 @@ fn walk(base: &Path, rel: &Path, out: &mut Snapshot) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Records several folders as one snapshot, each under its own name (`Documents/...`), the way a
+/// laptop's special folders are named whatever drive or cloud folder they really live in.
+pub fn snapshot_named(folders: &[(String, PathBuf)]) -> io::Result<Snapshot> {
+    let mut out = Snapshot::new();
+    for (name, path) in folders {
+        if !path.exists() {
+            continue;
+        }
+        out.insert(name.clone(), Entry::Folder);
+        for (k, v) in snapshot(path)? {
+            out.insert(format!("{name}/{k}"), v);
+        }
+    }
+    Ok(out)
 }
 
 /// Every difference between two snapshots, one line each; empty when they match.

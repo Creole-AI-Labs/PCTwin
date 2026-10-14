@@ -255,13 +255,24 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./fixtures/two-accounts/run.ps1 -Bin "$PWD\target\debug" -Work 'C:\pctwin-two-accounts'
+      # The evidence sits outside the workspace (the test accounts cannot enter the runner's
+      # folders), so it is copied in before it is kept.
+      - name: Gather the evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p lab-evidence
+          for d in /tmp/pctwin-two-accounts/report /tmp/pctwin-two-accounts/profile/report                    /c/pctwin-two-accounts/report /c/pctwin-two-accounts/profile/report; do
+            if [ -d "$d" ]; then
+              name=$(echo "$d" | sed 's#.*/pctwin-two-accounts/##; s#/#-#g')
+              cp -r "$d" "lab-evidence/$name" 2>/dev/null || sudo cp -r "$d" "lab-evidence/$name" || true
+            fi
+          done
       - name: Keep the evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: two-accounts-${{ matrix.os }}
-          path: |
-            /tmp/pctwin-two-accounts/report
-            C:\pctwin-two-accounts\report
+          path: lab-evidence
           if-no-files-found: warn
           retention-days: 14

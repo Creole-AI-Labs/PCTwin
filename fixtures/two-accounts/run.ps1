@@ -95,3 +95,59 @@ Invoke-As $newUser $lab @('snapshot', $newHome, (Join-Path $report 'dest.json'))
 
 & $labmove check (Join-Path $report 'before.json') (Join-Path $report 'after.json') (Join-Path $report 'dest.json') (Join-Path $report 'sent.json') (Join-Path $report 'received.json')
 if ($LASTEXITCODE -ne 0) { throw 'the move check found problems' }
+
+# ---------------------------------------------------------------------------------------------
+# Real-laptop fixtures: the same move between the accounts' real special folders, set up the way
+# real laptops are. The old laptop keeps Documents in OneDrive. The new laptop keeps Pictures on
+# another drive (D:) and Music under a German name, and is already in use: its own file sits
+# where an incoming one would land and must be left exactly as it was.
+Write-Host '== real special folders =='
+$profileWork = Join-Path $Work 'profile'
+$pHandoff = Join-Path $profileWork 'handoff'
+$pReport = Join-Path $profileWork 'report'
+New-Item -ItemType Directory -Force $pHandoff, $pReport | Out-Null
+foreach ($d in @($pHandoff, $pReport)) { icacls $d /grant "*S-1-1-0:(OI)(CI)M" | Out-Null }
+$report = $pReport
+
+$shell = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders'
+Invoke-As $oldUser 'cmd.exe' @('/c', 'mkdir', '%USERPROFILE%\OneDrive\Documents') 'old-onedrive-folder'
+Invoke-As $oldUser 'cmd.exe' @('/c', 'reg', 'add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Personal', '/v', 'UserFolder', '/d', '%USERPROFILE%\OneDrive', '/f') 'old-onedrive-account'
+Invoke-As $oldUser 'cmd.exe' @('/c', 'reg', 'add', $shell, '/v', 'Personal', '/t', 'REG_EXPAND_SZ', '/d', '%USERPROFILE%\OneDrive\Documents', '/f') 'old-documents-in-onedrive'
+
+$otherDrive = if (Test-Path 'D:\') { 'D:' } else { $null }
+if ($otherDrive) {
+    $pictures = "$otherDrive\pctwin-new-bob-pictures"
+    New-Item -ItemType Directory -Force $pictures | Out-Null
+    icacls $pictures /grant "${newUser}:(OI)(CI)F" | Out-Null
+    Invoke-As $newUser 'cmd.exe' @('/c', 'reg', 'add', $shell, '/v', 'My Pictures', '/t', 'REG_EXPAND_SZ', '/d', $pictures, '/f') 'new-pictures-on-d'
+} else {
+    Write-Host 'No D: drive on this runner: Pictures stays on the system drive.'
+}
+Invoke-As $newUser 'cmd.exe' @('/c', 'mkdir', '%USERPROFILE%\Musik') 'new-musik-folder'
+Invoke-As $newUser 'cmd.exe' @('/c', 'reg', 'add', $shell, '/v', 'My Music', '/t', 'REG_EXPAND_SZ', '/d', '%USERPROFILE%\Musik', '/f') 'new-music-german'
+
+# Where each account's folders really are, against the plain guess; IDs stable across scans.
+Invoke-As $oldUser $labmove @('probe', (Join-Path $pReport 'probe-old.json')) 'probe-old'
+Invoke-As $newUser $labmove @('probe', (Join-Path $pReport 'probe-new.json')) 'probe-new'
+$probeOld = Get-Content (Join-Path $pReport 'probe-old.json') -Raw | ConvertFrom-Json
+$docs = $probeOld.probe.folders | Where-Object { $_.role -eq 'documents' }
+if (-not $docs.moved -or -not $docs.storage.cloud) { throw "the old laptop's Documents in OneDrive was not seen as moved into OneDrive" }
+
+# The new laptop is already in use: its own file sits where an incoming one would land.
+$newProfile = (Get-CimInstance Win32_UserProfile | Where-Object { $_.LocalPath -like "*\$newUser" }).LocalPath
+$mine = Join-Path $newProfile 'Documents\empty.txt'
+Set-Content -Path $mine -Value 'mine, before the move' -Encoding utf8
+icacls $mine /grant "${newUser}:F" | Out-Null
+
+Invoke-As $oldUser $labmove @('fill-profile', '31', '80', '2097152') 'fill-profile'
+Invoke-As $oldUser $labmove @('snapshot-profile', (Join-Path $pReport 'before.json')) 'snapshot-before'
+$receiver = Start-As $newUser $labmove @('receive', $pHandoff, (Join-Path $pReport 'received.json'), (Join-Path $Work 'new\journal-profile.redb')) 'receive'
+$sender = Start-As $oldUser $labmove @('send', $pHandoff, (Join-Path $pReport 'sent.json')) 'send'
+Wait-Ok $sender 'the old laptop (send, real folders)' 'send'
+Wait-Ok $receiver 'the new laptop (receive, real folders)' 'receive'
+Invoke-As $oldUser $labmove @('snapshot-profile', (Join-Path $pReport 'after.json')) 'snapshot-after'
+Invoke-As $newUser $labmove @('snapshot-profile', (Join-Path $pReport 'dest.json')) 'snapshot-dest'
+
+if ((Get-Content $mine -Raw).Trim() -ne 'mine, before the move') { throw "the new laptop's own file was changed by the move" }
+& $labmove check (Join-Path $pReport 'before.json') (Join-Path $pReport 'after.json') (Join-Path $pReport 'dest.json') (Join-Path $pReport 'sent.json') (Join-Path $pReport 'received.json')
+if ($LASTEXITCODE -ne 0) { throw 'the move check found problems (real folders)' }

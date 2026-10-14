@@ -3,6 +3,14 @@
 //!     pctwin-labmove send    <handoff> <report.json> [--lab <folder> <account>]
 //!     pctwin-labmove receive <handoff> <report.json> <journal> [--lab <folder> <account>]
 //!     pctwin-labmove check   <before.json> <source-after.json> <dest.json> <sent.json> <received.json>
+//!     pctwin-labmove fill-profile [seed] [ordinary files] [big file bytes]
+//!     pctwin-labmove snapshot-profile <out.json>
+//!     pctwin-labmove probe <out.json>
+//!
+//! `fill-profile` builds a lab laptop into the signed-in person's real special folders, wherever
+//! they are; `snapshot-profile` records those folders the way reports name them. `probe` compares
+//! where each special folder really is with the plain guess and checks item IDs stay the same
+//! across two scans; it exits 1 on any disagreement.
 //!
 //! Without `--lab`, each side uses the signed-in person's real special folders. The handoff
 //! folder must be writable by both accounts. `send` and `receive` exit 0 when the side finished
@@ -12,7 +20,9 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use pctwin_labmove::{Folders, Report, check_move, receive, send};
+use pctwin_labmove::{
+    Folders, Report, check_move, probe, profile_places, receive, send, snapshot_profile,
+};
 
 fn folders(rest: &[String]) -> Result<Folders, String> {
     match rest {
@@ -70,7 +80,66 @@ async fn run(args: &[String]) -> Result<bool, String> {
                 }
             }
         }
-        _ => Err("usage: pctwin-labmove send|receive|check ...".into()),
+        [side, rest @ ..] if side == "fill-profile" => {
+            let num = |i: usize, d: u64| -> Result<u64, String> {
+                rest.get(i)
+                    .map(|s| s.parse::<u64>().map_err(|e| format!("{s}: {e}")))
+                    .unwrap_or(Ok(d))
+            };
+            let d = pctwin_lab::Spec::default();
+            let spec = pctwin_lab::Spec {
+                seed: num(0, d.seed)?,
+                ordinary_files: usize::try_from(num(1, d.ordinary_files as u64)?)
+                    .map_err(|e| e.to_string())?,
+                big_file: num(2, d.big_file)?,
+            };
+            let places = profile_places();
+            if places.is_empty() {
+                return Err("this account has no special folders".into());
+            }
+            let home = places
+                .values()
+                .next()
+                .and_then(|p| p.parent())
+                .map(PathBuf::from)
+                .ok_or("no home folder")?;
+            let mut made =
+                pctwin_lab::build_with(&home, &spec, &places).map_err(|e| e.to_string())?;
+            let report =
+                serde_json::json!({ "places": places, "made": made.made, "skipped": made.skipped });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+            );
+            made.release().map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+        [side, out] if side == "snapshot-profile" => {
+            let snap = snapshot_profile().map_err(|e| e.to_string())?;
+            std::fs::write(
+                out,
+                serde_json::to_vec_pretty(&snap).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+        [side, out] if side == "probe" => {
+            let (found, problems) = probe()?;
+            let json = serde_json::json!({ "probe": found, "problems": problems });
+            std::fs::write(
+                out,
+                serde_json::to_vec_pretty(&json).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            for p in &problems {
+                println!("PROBLEM: {p}");
+            }
+            Ok(problems.is_empty())
+        }
+        _ => Err(
+            "usage: pctwin-labmove send|receive|check|fill-profile|snapshot-profile|probe ..."
+                .into(),
+        ),
     }
 }
 
