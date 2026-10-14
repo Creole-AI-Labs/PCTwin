@@ -524,3 +524,29 @@ fn a_save_waits_out_another_program_briefly_holding_the_old_save() {
     assert_eq!(ScanState::load(&file).unwrap(), state);
     assert_eq!(names_in(saves.path()), ["scan.json"]);
 }
+
+/// The saved example of format 1, read by every later build (engineering notes 9.11). Set
+/// `PCTWIN_WRITE_FORMAT_FIXTURES=1` to write it, only when a new format number is introduced.
+#[test]
+fn the_saved_format_1_example_still_loads() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/formats/scan-state-1.json");
+    if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_scan::STATE_FORMAT == 1
+    {
+        let base = tempfile::tempdir().unwrap();
+        let folders = two_folders(base.path());
+        let scan = build_scan_resumable(
+            laptop(),
+            me(base.path()),
+            folders,
+            Vec::new(),
+            None,
+            &mut |_| Flow::Continue,
+        )
+        .unwrap();
+        scan.state.save(&path).unwrap();
+    }
+    let back = ScanState::load(&path).unwrap();
+    assert!(back.is_finished());
+    assert_eq!(item_names(&back), ["a.txt", "b.jpg"]);
+}

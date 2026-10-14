@@ -16,11 +16,19 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use pctwin_types::format::{Format, FormatError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// The record format this app writes and reads.
 pub const FORMAT: u32 = 1;
+
+/// The record's place in the shared format rule (no older formats yet).
+pub const RECORD_FORMAT: Format = Format {
+    name: "move record",
+    current: FORMAT,
+    readable: &[],
+};
 
 /// Why a record was refused.
 #[derive(Debug, thiserror::Error)]
@@ -446,11 +454,6 @@ pub struct Approval {
     pub fingerprint: Fingerprint,
 }
 
-#[derive(Deserialize)]
-struct FormatOnly {
-    format: u32,
-}
-
 impl Record {
     /// The first revision of an empty record for `source_laptop`. Shared things go to the shared
     /// folder unless the person chooses otherwise.
@@ -479,14 +482,10 @@ impl Record {
     /// Loads a saved record. The format is checked first, so a newer record is refused safely even
     /// if its shape has changed; then the record is checked like a new one.
     pub fn from_json(bytes: &[u8]) -> Result<Self, RecordError> {
-        let FormatOnly { format } =
-            serde_json::from_slice(bytes).map_err(|e| RecordError::BadFormat(e.to_string()))?;
-        if format > FORMAT {
-            return Err(RecordError::NewerFormat { found: format });
-        }
-        if format != FORMAT {
-            return Err(RecordError::BadFormat(format!("unknown format {format}")));
-        }
+        RECORD_FORMAT.check_json(bytes).map_err(|e| match e {
+            FormatError::Newer { found, .. } => RecordError::NewerFormat { found },
+            other => RecordError::BadFormat(other.to_string()),
+        })?;
         let record: Self =
             serde_json::from_slice(bytes).map_err(|e| RecordError::BadFormat(e.to_string()))?;
         record.validate()?;
@@ -564,9 +563,12 @@ impl Record {
         })
     }
 
-    /// Checks `approval` was given for exactly this revision, unchanged.
+    /// Checks `approval` was given for exactly this revision, unchanged, and that this revision
+    /// still passes every rule [`approve`](Self::approve) applies. An approval is only a pair of
+    /// numbers anyone can write, so it never stands in for those rules: a record that could not be
+    /// approved is refused here too, whatever approval comes with it.
     pub fn check(&self, approval: &Approval) -> Result<(), RecordError> {
-        if approval.revision == self.revision && approval.fingerprint == self.fingerprint() {
+        if self.approve()? == *approval {
             Ok(())
         } else {
             Err(RecordError::StaleApproval)

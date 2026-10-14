@@ -449,3 +449,46 @@ fn ids_and_fingerprints_never_change_between_versions() {
         "b9e1dd2c2fa8b0fed192a539ae8667b2c87526cb9cad393a966766eae96f6f70"
     );
 }
+
+// ---------- saved examples of every released format (engineering notes 9.11) ----------
+
+/// The saved example of format 1, read by every later build. Set `PCTWIN_WRITE_FORMAT_FIXTURES=1`
+/// to write it, only when a new format number is introduced: the old file must then stay.
+#[test]
+fn the_saved_format_1_example_still_reads_exactly() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/formats/record-1.json");
+    let mut odd = ada_file("x");
+    odd.path = ItemPath::new(vec![ItemName::from_unix_bytes(b"caf\xe9.txt")]).unwrap();
+    odd.id = ItemId::derive(&laptop(), &odd.owner, &odd.place, &odd.path);
+    let mut left = ada_file("old.iso");
+    left.inclusion = Inclusion::LeftOut {
+        reason: LeftOutReason::ChosenByUser,
+    };
+    let record = record_with(vec![ada_file("2025.pdf"), odd, left]);
+    if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && FORMAT == 1 {
+        std::fs::write(&path, record.to_json()).unwrap();
+    }
+    let saved = std::fs::read(&path).unwrap();
+    let back = Record::from_json(&saved).unwrap();
+    assert_eq!(back, record);
+    assert_eq!(back.fingerprint(), record.fingerprint());
+}
+
+/// Regression (fresh-context review of PR 20): an approval is two numbers anyone can write. One
+/// written by hand for a record that could never be approved (something tied to the old laptop
+/// included) must be refused when checked.
+#[test]
+fn a_hand_made_approval_of_an_unapprovable_record_is_refused() {
+    let mut record = record_with(vec![ada_file("a.txt"), ada_file("b.txt")]);
+    record.items[0].portability = Portability::DeviceBound;
+    assert!(record.approve().is_err());
+    let forged = Approval {
+        revision: record.revision,
+        fingerprint: record.fingerprint(),
+    };
+    assert!(matches!(
+        record.check(&forged),
+        Err(RecordError::DeviceBoundIncluded)
+    ));
+}

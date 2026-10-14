@@ -3,12 +3,20 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use pctwin_record::{FolderRole, ItemId, LaptopId, Record};
+use pctwin_types::format::{Format, FormatError};
 use serde::{Deserialize, Serialize};
 
 use crate::scan::{Counts, Stamp};
 
 /// The saved-scan format this app writes and reads.
 pub const STATE_FORMAT: u32 = 1;
+
+/// The saved scan's place in the shared format rule (no older formats yet).
+pub const STATE_FORMAT_RULE: Format = Format {
+    name: "saved scan",
+    current: STATE_FORMAT,
+    readable: &[],
+};
 
 /// A file counts as "maybe changed" if it was modified this close to (or after) the start of the
 /// scan it is compared with: an edit in the same clock tick can leave size and time unchanged
@@ -53,11 +61,6 @@ struct Wire {
     /// The move record in its own format, checked on load like any record.
     record: String,
     stamps: Vec<(ItemId, Stamp)>,
-}
-
-#[derive(Deserialize)]
-struct FormatOnly {
-    format: u32,
 }
 
 /// Why a saved scan was not used.
@@ -144,14 +147,10 @@ impl ScanState {
     /// its shape changed; the record inside is checked like any record.
     pub fn load(path: &Path) -> Result<Self, StateError> {
         let bytes = std::fs::read(path)?;
-        let FormatOnly { format } =
-            serde_json::from_slice(&bytes).map_err(|e| StateError::Damaged(e.to_string()))?;
-        if format > STATE_FORMAT {
-            return Err(StateError::NewerFormat { found: format });
-        }
-        if format != STATE_FORMAT {
-            return Err(StateError::Damaged(format!("unknown format {format}")));
-        }
+        STATE_FORMAT_RULE.check_json(&bytes).map_err(|e| match e {
+            FormatError::Newer { found, .. } => StateError::NewerFormat { found },
+            other => StateError::Damaged(other.to_string()),
+        })?;
         let wire: Wire =
             serde_json::from_slice(&bytes).map_err(|e| StateError::Damaged(e.to_string()))?;
         let record = Record::from_json(wire.record.as_bytes())
