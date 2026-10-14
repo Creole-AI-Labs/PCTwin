@@ -262,7 +262,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p lab-evidence
-          for d in /tmp/pctwin-two-accounts/report /tmp/pctwin-two-accounts/profile/report                    /c/pctwin-two-accounts/report /c/pctwin-two-accounts/profile/report; do
+          for d in /tmp/pctwin-two-accounts/report /tmp/pctwin-two-accounts/profile/report /tmp/pctwin-two-accounts/bad/report                    /c/pctwin-two-accounts/report /c/pctwin-two-accounts/profile/report; do
             if [ -d "$d" ]; then
               name=$(echo "$d" | sed 's#.*/pctwin-two-accounts/##; s#/#-#g')
               cp -r "$d" "lab-evidence/$name" 2>/dev/null || sudo cp -r "$d" "lab-evidence/$name" || true
