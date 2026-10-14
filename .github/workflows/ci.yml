@@ -8,6 +8,8 @@ on:
   # toolchain changes before they meet a real change.
   schedule:
     - cron: "23 2 * * *"
+  # The same full run on demand (after a fix to the nightly, say).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -104,8 +106,9 @@ jobs:
           - ubuntu-24.04-arm
     runs-on: ${{ matrix.os }}
     # A stuck runner (an apt mirror once hung for over an hour) is stopped instead of waiting
-    # for GitHub's six-hour limit.
-    timeout-minutes: 60
+    # for GitHub's six-hour limit. The Intel Mac is the slowest runner: with a cold cache (the
+    # first nightly run) it needed more than an hour, so it gets 90 minutes.
+    timeout-minutes: ${{ matrix.os == 'macos-15-intel' && 90 || 60 }}
     steps:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         if: runner.os == 'Linux'
