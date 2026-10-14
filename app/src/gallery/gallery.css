@@ -1,0 +1,56 @@
+/* Layout of the review page only. */
+.gallery {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--content-padding);
+}
+
+.gallery > h1 {
+  font-size: var(--type-heading);
+}
+
+.gallery-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.gallery-spread {
+  justify-content: space-between;
+  padding: var(--space-4) 0;
+}
+
+.gallery-muted {
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.gallery-heading {
+  font-size: var(--type-heading);
+  font-weight: 650;
+  letter-spacing: -0.65px;
+}
+
+.gallery-space {
+  margin: var(--space-6) 0 var(--space-4);
+}
+
+.gallery-card {
+  overflow: hidden;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+}
+
+.gallery-mini {
+  width: 360px;
+  max-width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: 16px;
+  background: var(--colour-canvas);
+}
+
+.gallery .kit-field + .kit-field {
+  margin-top: var(--space-4);
+}
