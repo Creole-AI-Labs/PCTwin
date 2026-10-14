@@ -7,9 +7,8 @@
 //!
 //! What a person does on screen is done through a shared "handoff" folder instead: the old laptop
 //! writes its address and code there, the new laptop writes the number it shows, and the old
-//! laptop picks it. The scanned record also travels through the handoff folder, because sending
-//! it over the connection is still to be built (Phase 1); the new laptop checks it exactly as it
-//! will check one that arrives over the connection.
+//! laptop picks it. The scanned record then travels over the sealed connection, before any file,
+//! and the new laptop checks it as coming from a stranger.
 //!
 //! Each side ends by writing a report of every item it handled. A side never claims a file moved
 //! unless the engine said so.
@@ -245,7 +244,6 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     }
     jobs.extend(by_item.into_values());
 
-    hand(handoff, "record.json", &record.to_json())?;
     let config = LinkConfig::default();
     let host = pctwin_link::Host::bind(bind.parse().map_err(err)?, config)
         .await
@@ -290,6 +288,9 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     let number = String::from_utf8(take(handoff, "number.txt").await?).map_err(err)?;
     let number: u8 = number.trim().parse().map_err(err)?;
     let mut link = pending.choose(number, Instant::now()).await.map_err(err)?;
+    pctwin_transfer::send_inventory(&mut link, &record)
+        .await
+        .map_err(err)?;
 
     let mut sender = SenderSession::new(jobs.clone(), 4);
     sender.run(&mut link).await.map_err(err)?;
@@ -344,27 +345,6 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         Folders::Package { .. } => {}
     }
 
-    let mut record = Record::from_json(&take(handoff, "record.json").await?).map_err(err)?;
-    // The person's choice on screen: the old laptop's person lands in this account.
-    let people: Vec<String> = record
-        .items
-        .iter()
-        .filter_map(|i| match &i.owner {
-            pctwin_record::Owner::Person { account_id } => Some(account_id.clone()),
-            _ => None,
-        })
-        .collect();
-    for person in people {
-        record.mapping.people.insert(
-            person,
-            PersonTarget::ExistingAccount {
-                account_id: account.clone(),
-            },
-        );
-    }
-    let approval = record.approve().map_err(err)?;
-    let allowance = Allowance::from_record(&record, &approval).map_err(err)?;
-
     let addr: std::net::SocketAddr = String::from_utf8(take(handoff, "addr.txt").await?)
         .map_err(err)?
         .trim()
@@ -388,6 +368,28 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         pending.match_number().to_string().as_bytes(),
     )?;
     let mut link = pending.approval().await.map_err(err)?;
+    let mut record = pctwin_transfer::receive_inventory(&mut link)
+        .await
+        .map_err(err)?;
+    // The person's choice on screen: the old laptop's person lands in this account.
+    let people: Vec<String> = record
+        .items
+        .iter()
+        .filter_map(|i| match &i.owner {
+            pctwin_record::Owner::Person { account_id } => Some(account_id.clone()),
+            _ => None,
+        })
+        .collect();
+    for person in people {
+        record.mapping.people.insert(
+            person,
+            PersonTarget::ExistingAccount {
+                account_id: account.clone(),
+            },
+        );
+    }
+    let approval = record.approve().map_err(err)?;
+    let allowance = Allowance::from_record(&record, &approval).map_err(err)?;
 
     let journal = Journal::open(journal).map_err(err)?;
     let mut receiver = ReceiverSession::new(&table, allowance, &journal, &account);
