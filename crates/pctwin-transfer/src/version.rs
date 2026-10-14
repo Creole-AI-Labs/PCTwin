@@ -11,7 +11,13 @@
 //! This message's form is fixed for every release, since it is what a laptop on another version
 //! reads first: a kind byte, then the oldest and the newest version as big-endian 16-bit numbers.
 
+use std::time::Duration;
+
 use crate::{Channel, TransferError};
+
+/// How long a laptop waits for the other to say which versions it speaks. Both send at once, so
+/// a laptop that is there answers straight away.
+pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 
 /// The move protocol versions this release speaks. Each new version keeps the one before it
 /// (Engineering Plan 9.2: the current protocol and at least one version back).
@@ -75,7 +81,8 @@ pub fn choose_version(ours: Versions, theirs: Versions) -> Result<u16, VersionGa
 }
 
 /// Sends `ours`, reads the other laptop's range and returns the version both use. Run on both
-/// laptops as the first step on the sealed link.
+/// laptops as the first step on the sealed link. A laptop that does not answer within
+/// [`VERSION_WAIT`] is given up on.
 pub async fn agree_version(ch: &mut impl Channel, ours: Versions) -> Result<u16, TransferError> {
     let mut msg = Vec::with_capacity(LEN);
     msg.push(KIND);
@@ -85,9 +92,9 @@ pub async fn agree_version(ch: &mut impl Channel, ours: Versions) -> Result<u16,
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
 
-    let got = ch
-        .recv()
+    let got = tokio::time::timeout(VERSION_WAIT, ch.recv())
         .await
+        .map_err(|_| TransferError::NoAnswer("it did not say which PCTwin it has".into()))?
         .map_err(|_| TransferError::ConnectionDropped)?;
     let theirs = decode(&got).ok_or_else(|| {
         TransferError::Protocol("its PCTwin version could not be read".to_string())

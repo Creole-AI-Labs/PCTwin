@@ -15,8 +15,8 @@ use pctwin_record::{
     PersonTarget, Place, Portability, Record, SharedTarget, Storage,
 };
 use pctwin_transfer::{
-    Channel, ChannelError, InventoryFrame, MAX_INVENTORY_BYTES, Message, PIECE_MAX, TransferError,
-    receive_inventory, send_inventory,
+    Channel, ChannelError, INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, Message,
+    PIECE_MAX, TransferError, receive_inventory, send_inventory,
 };
 use tokio::sync::mpsc;
 
@@ -236,26 +236,38 @@ async fn an_empty_packed_record_is_refused() {
     refused(got);
 }
 
+/// The old laptop sends full pieces until the last, so the number of pieces is fixed by the
+/// announced size and a sender cannot drag the exchange out over countless tiny ones.
 #[tokio::test]
-async fn pieces_of_any_size_down_to_one_byte_add_up() {
-    let sent = record(3);
-    let json = sent.to_json();
+async fn a_short_piece_before_the_last_is_refused_at_once() {
+    let json = record(40_000).to_json();
     let packed = zstd::bulk::compress(&json, 3).unwrap();
-    let mut frames = vec![start(json.len() as u64, packed.len() as u64)];
-    frames.extend(packed.chunks(1).map(part));
-    let count = frames.len();
+    assert!(packed.len() > 2 * PIECE_MAX);
+    let mut frames = vec![
+        start(json.len() as u64, packed.len() as u64),
+        part(&packed[..PIECE_MAX - 1]),
+    ];
+    frames.extend(packed[PIECE_MAX - 1..].chunks(PIECE_MAX).map(part));
     let (got, read) = hostile(frames).await;
-    assert_eq!(got.unwrap(), sent);
-    assert_eq!(read, count);
+    refused(got);
+    assert_eq!(read, 2);
+
+    let small = record(3).to_json();
+    let packed = zstd::bulk::compress(&small, 3).unwrap();
+    let mut frames = vec![start(small.len() as u64, packed.len() as u64)];
+    frames.extend(packed.chunks(1).map(part));
+    let (got, read) = hostile(frames).await;
+    refused(got);
+    assert_eq!(read, 2);
 }
 
 #[tokio::test]
 async fn a_second_start_part_way_through_is_refused() {
-    let json = record(5).to_json();
-    let packed = zstd::bulk::compress(&json, 3).unwrap();
-    let (a, b) = packed.split_at(packed.len() / 2);
-    let announce = start(json.len() as u64, packed.len() as u64);
-    let (got, read) = hostile(vec![announce.clone(), part(a), announce, part(b)]).await;
+    let json = record(40_000).to_json();
+    let mut frames = honest(&json);
+    let announce = frames[0].clone();
+    frames.insert(2, announce);
+    let (got, read) = hostile(frames).await;
     refused(got);
     assert_eq!(read, 3);
 }
@@ -279,16 +291,9 @@ async fn more_bytes_than_announced_are_refused_at_the_piece_that_overflows() {
 
 #[tokio::test]
 async fn a_connection_that_ends_before_every_piece_arrived_is_a_dropped_connection() {
-    let json = record(5).to_json();
+    let json = record(40_000).to_json();
     let mut frames = honest(&json);
-    let declared = match InventoryFrame::decode(&frames[0]).unwrap() {
-        InventoryFrame::Start {
-            raw_len,
-            packed_len,
-        } => (raw_len, packed_len),
-        InventoryFrame::Part(_) => unreachable!(),
-    };
-    frames[0] = start(declared.0, declared.1 + 10);
+    frames.truncate(2);
     let (got, _) = hostile(frames).await;
     assert!(
         matches!(got, Err(TransferError::ConnectionDropped)),
@@ -489,4 +494,74 @@ fn frames_decode_to_what_was_encoded_and_reject_damage() {
     // The transfer never mistakes an inventory frame for one of its own.
     assert!(Message::decode(&enc).is_err());
     assert!(Message::decode(&p.encode()).is_err());
+}
+
+fn no_answer(got: &Result<Record, TransferError>) -> bool {
+    matches!(got, Err(TransferError::NoAnswer(_)))
+}
+
+/// An old laptop that connects and then says nothing is given up on, instead of leaving the new
+/// laptop waiting for ever.
+#[tokio::test(start_paused = true)]
+async fn an_old_laptop_that_never_starts_is_given_up_on() {
+    let (_old, mut new) = pair();
+    let t = tokio::time::Instant::now();
+    let got = receive_inventory(&mut new).await;
+    assert!(no_answer(&got), "{got:?}");
+    assert!(t.elapsed() >= INVENTORY_PIECE_WAIT, "{:?}", t.elapsed());
+    assert!(t.elapsed() < INVENTORY_PIECE_WAIT + Duration::from_secs(1));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_old_laptop_that_stops_part_way_is_given_up_on() {
+    let json = record(40_000).to_json();
+    let frames = honest(&json);
+    let (mut old, mut new) = pair();
+    for f in &frames[..2] {
+        old.send(f).await.unwrap();
+    }
+    let t = tokio::time::Instant::now();
+    let got = receive_inventory(&mut new).await;
+    assert!(no_answer(&got), "{got:?}");
+    assert!(t.elapsed() < INVENTORY_PIECE_WAIT + Duration::from_secs(1));
+    drop(old);
+}
+
+/// Sends a start for `pieces` full pieces, then one full piece every `every`, from a pretend old
+/// laptop that never hangs up.
+fn steady(pieces: u64, every: Duration) -> Mem {
+    let (mut old, new) = pair();
+    tokio::spawn(async move {
+        let n = pieces * PIECE_MAX as u64;
+        old.send(&start(n, n)).await.unwrap();
+        for _ in 0..pieces {
+            tokio::time::sleep(every).await;
+            if old.send(&part(&vec![0u8; PIECE_MAX])).await.is_err() {
+                return;
+            }
+        }
+        std::future::pending::<()>().await;
+    });
+    new
+}
+
+/// A slow link is not a stall: an old laptop that sends a full piece just inside the wait each
+/// time is never cut off, however long the whole list takes (it is then refused here only
+/// because its bytes are not a record).
+#[tokio::test(start_paused = true)]
+async fn a_slow_but_steady_old_laptop_is_never_cut_off() {
+    let pieces = 10;
+    let mut new = steady(pieces, INVENTORY_PIECE_WAIT - Duration::from_secs(1));
+    let t = tokio::time::Instant::now();
+    let got = receive_inventory(&mut new).await;
+    refused(got);
+    assert!(t.elapsed() >= (INVENTORY_PIECE_WAIT - Duration::from_secs(1)) * pieces as u32);
+}
+
+/// A piece that comes later than the wait ends the exchange, even after many on time.
+#[tokio::test(start_paused = true)]
+async fn one_piece_later_than_the_wait_is_given_up_on() {
+    let mut new = steady(3, INVENTORY_PIECE_WAIT + Duration::from_secs(1));
+    let got = receive_inventory(&mut new).await;
+    assert!(no_answer(&got), "{got:?}");
 }

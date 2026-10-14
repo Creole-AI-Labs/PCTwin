@@ -62,7 +62,9 @@ mod version;
 
 pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
-pub use inventory::{InventoryFrame, MAX_INVENTORY_BYTES, receive_inventory, send_inventory};
+pub use inventory::{
+    INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, receive_inventory, send_inventory,
+};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
@@ -94,7 +96,9 @@ pub use undo::{
     SAVED_AGAIN, SAVED_MAYBE_INCOMPLETE, SECOND_NAME, STILL_FINISHING, TOOK_TOO_LONG, UndoOptions,
     UndoReport, Undone, WORK_STOPPED, close_undo, undo, undo_items, undo_with,
 };
-pub use version::{MOVE_PROTOCOL, VersionGap, Versions, agree_version, choose_version};
+pub use version::{
+    MOVE_PROTOCOL, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
+};
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -142,6 +146,10 @@ pub enum TransferError {
     Inventory(String),
     #[error(transparent)]
     VersionGap(#[from] VersionGap),
+    #[error(
+        "the other laptop stopped answering ({0}); check that both laptops are awake and on the same network, then start again"
+    )]
+    NoAnswer(String),
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the

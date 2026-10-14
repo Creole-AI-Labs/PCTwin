@@ -8,7 +8,16 @@
 //! record must be no larger than [`MAX_INVENTORY_BYTES`], its packed size no larger than
 //! compression can make it, the pieces must add up to exactly the packed size, and it must unpack
 //! to exactly the announced size (unpacking stops one byte past it). Then it is checked like a
-//! saved record. Where people and shared things go on the new laptop is decided there ("Who's
+//! saved record. Every piece but the last is full, so the number of pieces is fixed by the
+//! announced size.
+//!
+//! Time: each frame must arrive within [`INVENTORY_PIECE_WAIT`], so a laptop that connects and
+//! then says nothing, or stalls part way through a frame, is given up on instead of leaving the
+//! new laptop waiting for ever. There is no deadline on the whole list: any pace fast enough for
+//! a full piece every 30 seconds (about 16 kbit/s) is a slow link, not a stall, and is never cut
+//! off (a minimum pace for the whole list would refuse honest laptops on slow connections). A
+//! sender that keeps sending real pieces slowly is shown to the person as slow progress, which
+//! they can cancel. Where people and shared things go on the new laptop is decided there ("Who's
 //! moving?"), never by the old laptop, so a record that arrives with those choices made is refused,
 //! as is one that is not a fresh scan (revisions are made on the new laptop).
 //!
@@ -18,6 +27,7 @@
 //! the largest record allowed.
 
 use std::io::Read;
+use std::time::Duration;
 
 use pctwin_record::Record;
 
@@ -25,6 +35,9 @@ use crate::{Channel, PIECE_MAX, TransferError};
 
 /// The largest record accepted, as JSON before compression (about 1.3 million items).
 pub const MAX_INVENTORY_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Longest wait for each frame of the list.
+pub const INVENTORY_PIECE_WAIT: Duration = Duration::from_secs(30);
 
 /// Message kinds, kept apart from the transfer's own (1 to 13), so neither is mistaken for the
 /// other.
@@ -123,7 +136,7 @@ pub async fn receive_inventory(ch: &mut impl Channel) -> Result<Record, Transfer
     let InventoryFrame::Start {
         raw_len,
         packed_len,
-    } = InventoryFrame::decode(&recv(ch).await?)?
+    } = InventoryFrame::decode(&recv_in_time(ch).await?)?
     else {
         return Err(refused("it did not begin with its size"));
     };
@@ -143,7 +156,7 @@ pub async fn receive_inventory(ch: &mut impl Channel) -> Result<Record, Transfer
 
     let mut packed = Vec::with_capacity(packed_len.min(1024 * 1024));
     while packed.len() < packed_len {
-        let InventoryFrame::Part(piece) = InventoryFrame::decode(&recv(ch).await?)? else {
+        let InventoryFrame::Part(piece) = InventoryFrame::decode(&recv_in_time(ch).await?)? else {
             return Err(refused("it started again part way through"));
         };
         if piece.is_empty() || piece.len() > PIECE_MAX {
@@ -151,6 +164,9 @@ pub async fn receive_inventory(ch: &mut impl Channel) -> Result<Record, Transfer
         }
         if piece.len() > packed_len - packed.len() {
             return Err(refused("more of it arrived than was announced"));
+        }
+        if piece.len() < PIECE_MAX && piece.len() < packed_len - packed.len() {
+            return Err(refused("a piece before the last was not full"));
         }
         packed.extend_from_slice(&piece);
     }
@@ -208,9 +224,11 @@ async fn send(ch: &mut impl Channel, data: &[u8]) -> Result<(), TransferError> {
         .map_err(|_| TransferError::ConnectionDropped)
 }
 
-async fn recv(ch: &mut impl Channel) -> Result<Vec<u8>, TransferError> {
-    ch.recv()
+/// The next frame, if it arrives within [`INVENTORY_PIECE_WAIT`].
+async fn recv_in_time(ch: &mut impl Channel) -> Result<Vec<u8>, TransferError> {
+    tokio::time::timeout(INVENTORY_PIECE_WAIT, ch.recv())
         .await
+        .map_err(|_| TransferError::NoAnswer("its list stopped arriving".into()))?
         .map_err(|_| TransferError::ConnectionDropped)
 }
 
