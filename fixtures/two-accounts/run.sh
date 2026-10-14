@@ -138,3 +138,28 @@ if [ "$(as_new cat "$new_docs/empty.txt")" != "mine, before the move" ]; then
 fi
 pctwin-labmove check "$profile/report/before.json" "$profile/report/after.json" \
   "$profile/report/dest.json" "$profile/report/sent.json" "$profile/report/received.json"
+
+# ---------------------------------------------------------------------------------------------
+# Bad network (Linux): the lab move again with delay, jitter and loss on the loopback the two
+# accounts talk over. It must finish with the same honest result.
+if [ "$(uname)" = Linux ]; then
+  echo "== bad network =="
+  netsim="$(cd "$(dirname "$0")/../netsim" && pwd)/linux-netem.sh"
+  bad="$work/bad"
+  sudo rm -rf "$bad" "$work/new/home-bad"
+  sudo mkdir -p "$bad/handoff" "$bad/report"
+  sudo chmod 1777 "$bad/handoff" "$bad/report"
+  sudo bash "$netsim" on lo 20ms 5ms 1%
+  trap 'sudo bash "$netsim" off lo >/dev/null' EXIT
+  as_new pctwin-labmove receive "$bad/handoff" "$bad/report/received.json" \
+    "$work/new/journal-bad.redb" --lab "$work/new/home-bad" "$(id -u "$new_user")" &
+  receiver=$!
+  as_old pctwin-labmove send "$bad/handoff" "$bad/report/sent.json" \
+    --lab "$work/old/laptop" "$(id -u "$old_user")"
+  wait "$receiver"
+  sudo bash "$netsim" off lo
+  as_old pctwin-lab snapshot "$work/old/laptop" "$bad/report/after.json"
+  as_new pctwin-lab snapshot "$work/new/home-bad" "$bad/report/dest.json"
+  pctwin-labmove check "$work/report/before.json" "$bad/report/after.json" \
+    "$bad/report/dest.json" "$bad/report/sent.json" "$bad/report/received.json"
+fi
