@@ -1,0 +1,28 @@
+[package]
+name = "pctwin-labmove"
+description = "Test lab: a headless move between two processes (two user accounts) through the real engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-lab = { path = "../pctwin-lab" }
+pctwin-gate = { path = "../pctwin-gate" }
+pctwin-journal = { path = "../pctwin-journal" }
+pctwin-link = { path = "../pctwin-link" }
+pctwin-pairing = { path = "../pctwin-pairing" }
+pctwin-record = { path = "../pctwin-record" }
+pctwin-scan = { path = "../pctwin-scan" }
+pctwin-transfer = { path = "../pctwin-transfer" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

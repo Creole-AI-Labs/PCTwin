@@ -3336,6 +3336,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-lab"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "pctwin-labmove"
+version = "0.1.0"
+dependencies = [
+ "pctwin-gate",
+ "pctwin-journal",
+ "pctwin-lab",
+ "pctwin-link",
+ "pctwin-pairing",
+ "pctwin-record",
+ "pctwin-scan",
+ "pctwin-transfer",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "pctwin-lease"
 version = "0.1.0"
 dependencies = [
