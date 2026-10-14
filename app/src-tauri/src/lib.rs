@@ -84,6 +84,31 @@ pub fn run() {
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![set_window_mode, set_tray_labels])
+        // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
+        // file path, the app opens as usual, writes which page its window loaded once the screens
+        // have finished loading, and quits. Without it, nothing here runs.
+        .on_page_load(|webview, payload| {
+            if payload.event() != tauri::webview::PageLoadEvent::Finished {
+                return;
+            }
+            let Some(out) = std::env::var_os("PCTWIN_SMOKE_TEST") else {
+                return;
+            };
+            let page = webview.url().map(|u| u.to_string()).unwrap_or_default();
+            let title = webview.window().title().unwrap_or_default();
+            let _ = std::fs::write(
+                out,
+                format!(
+                    "opened {page} titled {title}
+"
+                ),
+            );
+            let app = webview.app_handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                app.exit(0);
+            });
+        })
         .setup(|app| {
             let menu = tray_menu(app.handle(), "PCTwin", "PCTwin")?;
             let mut tray = TrayIconBuilder::with_id("main")

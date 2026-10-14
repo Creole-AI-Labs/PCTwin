@@ -122,7 +122,7 @@ jobs:
         run: |
           # Bounded network waits and retries: a slow package mirror hung this step twice.
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf xvfb
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
         with:
           toolchain: 1.99.0
@@ -182,6 +182,29 @@ jobs:
             Linux) bundles=deb ;;
           esac
           pnpm tauri build --ci --bundles "$bundles"
+      # Phase 0 exit gate, "the blank app opens": the built app starts, its window loads the
+      # screens, and it quits by itself (PCTWIN_SMOKE_TEST); a crash or a hang fails here.
+      - name: The app opens
+        shell: bash
+        run: |
+          for b in target/release/pctwin-app target/release/pctwin-app.exe target/release/PCTwin target/release/PCTwin.exe; do
+            [ -x "$b" ] && app="$b" && break
+          done
+          echo "app: $app"
+          marker="$RUNNER_TEMP/opened.txt"
+          rm -f "$marker"
+          export PCTWIN_SMOKE_TEST="$marker"
+          if [ "$RUNNER_OS" = Linux ]; then xvfb-run -a "$app" & else "$app" & fi
+          pid=$!
+          for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            echo "the app did not quit within two minutes" >&2
+            exit 1
+          fi
+          wait "$pid"
+          cat "$marker"
+          grep -q "titled PCTwin" "$marker"
       - name: Keep the unsigned app
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
