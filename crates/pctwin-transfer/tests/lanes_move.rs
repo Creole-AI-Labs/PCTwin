@@ -7,7 +7,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -17,6 +18,7 @@ use pctwin_transfer::{
     Channel, ChannelError, Message, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier,
     block_size_for,
 };
+use pctwin_transfer::{Opener, Source, Stamp};
 use tokio::sync::mpsc;
 
 mod common;
@@ -299,28 +301,87 @@ async fn the_main_connection_dropping_is_picked_up_again_over_new_lanes() {
     assert!(receiver.continued() >= 1);
 }
 
+/// Opens files from the disk; the first time `target` is opened, another program saves `newer`
+/// over it once `after` bytes have been read. The change always lands while the file is being
+/// read, however the lanes happen to be scheduled (counting messages on one connection did not:
+/// on a busy machine the other lanes could finish the file first).
+struct SavesMidRead {
+    target: PathBuf,
+    newer: Vec<u8>,
+    after: usize,
+    opened: AtomicBool,
+}
+
+impl Opener for SavesMidRead {
+    fn open(&self, path: &Path) -> std::io::Result<Box<dyn Source>> {
+        let file = std::fs::File::open(path)?;
+        if path == self.target && !self.opened.swap(true, Ordering::SeqCst) {
+            Ok(Box::new(Midway {
+                file,
+                read: 0,
+                after: self.after,
+                save: Some((path.to_path_buf(), self.newer.clone())),
+            }))
+        } else {
+            Ok(Box::new(file))
+        }
+    }
+}
+
+struct Midway {
+    file: std::fs::File,
+    read: usize,
+    after: usize,
+    save: Option<(PathBuf, Vec<u8>)>,
+}
+
+impl Read for Midway {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.file.read(buf)?;
+        self.read += n;
+        if self.read >= self.after
+            && let Some((path, bytes)) = self.save.take()
+        {
+            std::fs::write(&path, &bytes)?;
+            let f = std::fs::OpenOptions::new().write(true).open(&path)?;
+            f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))?;
+        }
+        Ok(n)
+    }
+}
+
+impl Seek for Midway {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+impl Source for Midway {
+    fn stamp(&mut self) -> std::io::Result<Stamp> {
+        self.file.stamp()
+    }
+
+    fn identity(&mut self) -> std::io::Result<Option<pctwin_journal::FileId>> {
+        self.file.identity()
+    }
+}
+
 #[tokio::test]
 async fn a_file_changed_while_sent_over_lanes_arrives_whole_and_current() {
     let l = laptops();
     let table = table(&l);
-    let mut sender = SenderSession::new(jobs(&l), 4);
-    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
-    let mut conns = connections(2);
-    let starts = conns.0.starts.clone();
-    // Partway through, another program saves a new version of the big file (same size).
-    let big = l.files[0].0.clone();
+    // Partway through reading it, another program saves a new version of the big file (same
+    // size).
     let newer = pattern(80 * MIB, 99);
-    let written = newer.clone();
-    // On the main connection, which always carries blocks.
-    conns.0.hook = Some((
-        8,
-        Box::new(move || {
-            std::fs::write(&big, &written).unwrap();
-            let f = std::fs::OpenOptions::new().write(true).open(&big).unwrap();
-            f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
-                .unwrap();
-        }),
-    ));
+    let mut sender = SenderSession::new(jobs(&l), 4).with_opener(Arc::new(SavesMidRead {
+        target: l.files[0].0.clone(),
+        newer: newer.clone(),
+        after: 4 * MIB,
+        opened: AtomicBool::new(false),
+    }));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let conns = connections(2);
+    let starts = conns.0.starts.clone();
     assert_eq!(run(&mut sender, &mut receiver, conns).await, (true, true));
     let got = std::fs::read(l.new.path().join("f0.bin")).unwrap();
     assert!(got == newer, "the copy is not the current version");
