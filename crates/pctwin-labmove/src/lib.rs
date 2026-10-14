@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::Journal;
+use pctwin_lab::{Entry, Snapshot, compare};
 use pctwin_link::LinkConfig;
 use pctwin_pairing::{PairingCode, RotatingSender};
 use pctwin_record::{
@@ -32,7 +33,7 @@ use pctwin_transfer::{
     Allowance, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier,
     plan_order, role_label,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// How long either side waits for the other before giving up.
 pub const WAIT: Duration = Duration::from_secs(180);
@@ -57,7 +58,7 @@ pub enum Folders {
 }
 
 /// One item in a side's report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
     pub item: String,
     pub path: String,
@@ -65,7 +66,7 @@ pub struct Line {
 }
 
 /// A side's report: every item it handled, and anything that stopped it.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Report {
     pub lines: Vec<Line>,
     /// Items in the record that were not sent, with why (left out, folders, no place).
@@ -245,7 +246,9 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     hand(handoff, "addr.txt", addr.to_string().as_bytes())?;
 
     // The code changes every minute, as on screen; the current one is always in the handoff.
-    let rotating = Arc::new(Mutex::new(RotatingSender::new(Instant::now()).map_err(err)?));
+    let rotating = Arc::new(Mutex::new(
+        RotatingSender::new(Instant::now()).map_err(err)?,
+    ));
     let ticker = {
         let rotating = rotating.clone();
         let dir = handoff.to_path_buf();
@@ -297,14 +300,17 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
 /// The new laptop: checks and approves the record, connects with the code, receives into
 /// `folders`, and reports. `account` is this side's account ID.
 pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result<Report, String> {
-    let (account, mut table) = (match &folders {
-        Folders::Lab { account, .. } => account.clone(),
-        Folders::Profile => pctwin_scan::list_people()
-            .into_iter()
-            .find(|p| p.is_me)
-            .map(|p| p.account_id)
-            .ok_or("no signed-in person")?,
-    }, Destinations::new());
+    let (account, mut table) = (
+        match &folders {
+            Folders::Lab { account, .. } => account.clone(),
+            Folders::Profile => pctwin_scan::list_people()
+                .into_iter()
+                .find(|p| p.is_me)
+                .map(|p| p.account_id)
+                .ok_or("no signed-in person")?,
+        },
+        Destinations::new(),
+    );
     match &folders {
         Folders::Lab { root, .. } => {
             for (role, name) in ROLES {
@@ -359,7 +365,11 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
         }
     };
-    hand(handoff, "number.txt", pending.match_number().to_string().as_bytes())?;
+    hand(
+        handoff,
+        "number.txt",
+        pending.match_number().to_string().as_bytes(),
+    )?;
     let mut link = pending.approval().await.map_err(err)?;
 
     let journal = Journal::open(journal).map_err(err)?;
@@ -393,4 +403,122 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         });
     }
     Ok(report)
+}
+
+/// What a checked move came to.
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Checked {
+    pub sent: usize,
+    pub landed: usize,
+    /// Landed under another name the gate chose (a reserved or clashing name).
+    pub renamed: usize,
+    /// Could not be read on the old laptop (held open by another program) and honestly ended
+    /// failed.
+    pub unreadable: usize,
+}
+
+/// Checks a finished move from its evidence: the source folder's snapshot before and after, the
+/// destination's snapshot, and both reports. Returns every problem found:
+///
+/// - the source changed (the old laptop is read-only);
+/// - an item has no outcome, or only one side reports it;
+/// - an item failed, unless the old laptop's snapshot could not read it either (a file another
+///   program holds open must end failed, never landed);
+/// - a file that landed does not match its original byte for byte.
+pub fn check_move(
+    before: &Snapshot,
+    source_after: &Snapshot,
+    dest: &Snapshot,
+    sent: &Report,
+    received: &Report,
+) -> Result<Checked, Vec<String>> {
+    let mut problems: Vec<String> = compare(before, source_after)
+        .into_iter()
+        .map(|d| format!("the source changed: {d}"))
+        .collect();
+    if sent.lines.is_empty() {
+        problems.push("nothing was sent".into());
+    }
+    let got: BTreeMap<&str, &Line> = received
+        .lines
+        .iter()
+        .map(|l| (l.item.as_str(), l))
+        .collect();
+    let mut out = Checked {
+        sent: sent.lines.len(),
+        ..Checked::default()
+    };
+    let unreadable =
+        |path: &str| matches!(before.get(path), Some(Entry::File { blake3: None, .. }));
+    for line in &sent.lines {
+        let failed = line.outcome.starts_with("failed");
+        if failed && unreadable(&line.path) {
+            out.unreadable += 1;
+        } else if line.outcome == "no outcome" || failed {
+            problems.push(format!("old laptop: {} ended {}", line.path, line.outcome));
+        } else if unreadable(&line.path) {
+            problems.push(format!(
+                "old laptop: {} could not be read, yet ended {}",
+                line.path, line.outcome
+            ));
+        }
+        if !got.contains_key(line.item.as_str()) {
+            problems.push(format!("new laptop has no outcome for {}", line.path));
+        }
+    }
+    if sent.lines.len() != received.lines.len() {
+        problems.push(format!(
+            "the old laptop reports {} files, the new laptop {}",
+            sent.lines.len(),
+            received.lines.len()
+        ));
+    }
+    for line in &received.lines {
+        let Some(final_path) = line.outcome.strip_prefix("landed: ") else {
+            // A file the old laptop could not read is never offered, so the new laptop may have
+            // no outcome for it; the old laptop's report carries its failure.
+            let not_offered = line.outcome.starts_with("failed") || line.outcome == "no outcome";
+            if !(not_offered && unreadable(&line.path)) {
+                problems.push(format!("new laptop: {} ended {}", line.path, line.outcome));
+            }
+            continue;
+        };
+        out.landed += 1;
+        if final_path != line.path {
+            out.renamed += 1;
+        }
+        let copy = dest.get(final_path);
+        // A name that is not valid text is shown with a replacement mark, so its original is
+        // found by its contents instead of by name.
+        let original = before.get(&line.path).or_else(|| {
+            if line.path.contains('\u{FFFD}') {
+                copy.and_then(|c| before.values().find(|v| *v == c))
+            } else {
+                None
+            }
+        });
+        match (original, copy) {
+            (
+                Some(Entry::File {
+                    size: a,
+                    blake3: ha,
+                    ..
+                }),
+                Some(Entry::File {
+                    size: b,
+                    blake3: hb,
+                    ..
+                }),
+            ) if a == b && ha == hb && ha.is_some() => {}
+            other => problems.push(format!(
+                "{} does not match its original: {other:?}",
+                line.path
+            )),
+        }
+    }
+    if problems.is_empty() {
+        Ok(out)
+    } else {
+        Err(problems)
+    }
 }

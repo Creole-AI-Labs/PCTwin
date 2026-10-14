@@ -290,7 +290,14 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
     };
 
     // Ordinary files: mostly small, some medium, a few large, in the usual folders.
-    const FOLDERS: [&str; 6] = ["Documents", "Pictures", "Music", "Videos", "Desktop", "Downloads"];
+    const FOLDERS: [&str; 6] = [
+        "Documents",
+        "Pictures",
+        "Music",
+        "Videos",
+        "Desktop",
+        "Downloads",
+    ];
     const EXT: [&str; 8] = ["docx", "pdf", "jpg", "png", "mp3", "txt", "xlsx", "zip"];
     for i in 0..spec.ordinary_files {
         let folder = FOLDERS[rng.below(FOLDERS.len() as u64) as usize];
@@ -307,7 +314,11 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
 
     m.file(Case::Empty, &[os("Documents"), os("empty.txt")], &[]);
     let block = 128 * 1024;
-    for (name, size) in [("edge-under.bin", block - 1), ("edge-exact.bin", block), ("edge-over.bin", block + 1)] {
+    for (name, size) in [
+        ("edge-under.bin", block - 1),
+        ("edge-exact.bin", block),
+        ("edge-over.bin", block + 1),
+    ] {
         let bytes = contents(&mut rng, size);
         m.file(Case::BlockEdge, &[os("Documents"), os(name)], &bytes);
     }
@@ -315,17 +326,45 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
     m.file(Case::Big, &[os("Videos"), os("holiday.mp4")], &big);
 
     // Unicode: composed then decomposed "café".
-    m.file(Case::UnicodeForms, &[os("Documents"), os("caf\u{e9}.txt")], b"composed");
-    m.file(Case::UnicodeForms, &[os("Documents"), os("cafe\u{301}.txt")], b"decomposed");
+    m.file(
+        Case::UnicodeForms,
+        &[os("Documents"), os("caf\u{e9}.txt")],
+        b"composed",
+    );
+    m.file(
+        Case::UnicodeForms,
+        &[os("Documents"), os("cafe\u{301}.txt")],
+        b"decomposed",
+    );
 
-    m.file(Case::CaseCollision, &[os("Documents"), os("Report.txt")], b"upper");
-    m.file(Case::CaseCollision, &[os("Documents"), os("report.txt")], b"lower");
+    m.file(
+        Case::CaseCollision,
+        &[os("Documents"), os("Report.txt")],
+        b"upper",
+    );
+    m.file(
+        Case::CaseCollision,
+        &[os("Documents"), os("report.txt")],
+        b"lower",
+    );
 
     for name in ["CON", "NUL.txt", "COM1", "aux.log", "LPT9.doc"] {
-        m.file(Case::Reserved, &[os("Documents"), os("Reserved"), os(name)], name.as_bytes());
+        m.file(
+            Case::Reserved,
+            &[os("Documents"), os("Reserved"), os(name)],
+            name.as_bytes(),
+        );
     }
-    m.file(Case::TrailingDotOrSpace, &[os("Documents"), os("notes.")], b"dot");
-    m.file(Case::TrailingDotOrSpace, &[os("Documents"), os("draft ")], b"space");
+    m.file(
+        Case::TrailingDotOrSpace,
+        &[os("Documents"), os("notes.")],
+        b"dot",
+    );
+    m.file(
+        Case::TrailingDotOrSpace,
+        &[os("Documents"), os("draft ")],
+        b"space",
+    );
 
     for name in [
         "\u{1F600} smile.txt",
@@ -334,10 +373,16 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
         "\u{939}\u{93F}\u{928}\u{94D}\u{926}\u{940}.txt",
         "\u{5D0}\u{5D1}\u{5D2}\u{200F}.txt",
     ] {
-        m.file(Case::ScriptMix, &[os("Documents"), os("Scripts"), os(name)], name.as_bytes());
+        m.file(
+            Case::ScriptMix,
+            &[os("Documents"), os("Scripts"), os(name)],
+            name.as_bytes(),
+        );
     }
 
-    let deep: Vec<String> = (0..8).map(|i| format!("{i} a fairly long folder name to pass the old limit")).collect();
+    let deep: Vec<String> = (0..8)
+        .map(|i| format!("{i} a fairly long folder name to pass the old limit"))
+        .collect();
     let mut parts: Vec<&OsStr> = vec![os("Documents")];
     parts.extend(deep.iter().map(|s| os(s)));
     parts.push(os("deep file.txt"));
@@ -346,7 +391,11 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
     m.file(Case::Dotfile, &[os(".config-synthetic")], b"dotfile");
 
     // Read-only.
-    if m.file(Case::ReadOnly, &[os("Documents"), os("read-only.txt")], b"keep") {
+    if m.file(
+        Case::ReadOnly,
+        &[os("Documents"), os("read-only.txt")],
+        b"keep",
+    ) {
         let p = long(&root.join("Documents").join("read-only.txt"))?;
         let mut perm = fs::metadata(&p)?.permissions();
         perm.set_readonly(true);
@@ -372,13 +421,25 @@ pub fn build(root: &Path, spec: &Spec) -> io::Result<Made> {
 
 fn links(m: &mut Maker) {
     let dir = m.root.join("Documents").join("Links");
-    let target_ok = m.file(Case::Link, &[os("Documents"), os("Links"), os("target.txt")], b"target");
+    let target_ok = m.file(
+        Case::Link,
+        &[os("Documents"), os("Links"), os("target.txt")],
+        b"target",
+    );
     // The target itself is an ordinary file; only the links count as link cases.
     if target_ok {
         m.made.pop();
     }
-    let outside = if cfg!(windows) { r"C:\Windows\System32" } else { "/etc" };
-    for (name, to) in [("to-target", "target.txt"), ("to-nothing", "missing.txt"), ("to-outside", outside)] {
+    let outside = if cfg!(windows) {
+        r"C:\Windows\System32"
+    } else {
+        "/etc"
+    };
+    for (name, to) in [
+        ("to-target", "target.txt"),
+        ("to-nothing", "missing.txt"),
+        ("to-outside", outside),
+    ] {
         let what = format!("Documents/Links/{name}");
         let made = (|| -> io::Result<()> {
             let link = long(&dir.join(name))?;
@@ -408,7 +469,11 @@ fn links(m: &mut Maker) {
 
 fn locked(m: &mut Maker) {
     let what = "Documents/locked.pst";
-    if !m.file(Case::Locked, &[os("Documents"), os("locked.pst")], b"mail store") {
+    if !m.file(
+        Case::Locked,
+        &[os("Documents"), os("locked.pst")],
+        b"mail store",
+    ) {
         return;
     }
     #[cfg(windows)]
@@ -451,7 +516,11 @@ fn not_text(m: &mut Maker) {
     };
     #[cfg(not(any(unix, windows)))]
     let name = OsString::from("not-text.txt");
-    m.file(Case::NotText, &[os("Documents"), name.as_os_str()], b"not text");
+    m.file(
+        Case::NotText,
+        &[os("Documents"), name.as_os_str()],
+        b"not text",
+    );
 }
 
 /// One thing under a snapshot's root.
@@ -465,7 +534,9 @@ pub enum Entry {
         blake3: Option<String>,
         read_only: bool,
     },
-    Link { to: String },
+    Link {
+        to: String,
+    },
 }
 
 /// Every name under a folder with what it holds.

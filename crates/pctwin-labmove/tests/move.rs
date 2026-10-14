@@ -2,10 +2,8 @@
 //! file ends with an outcome on both sides, each one that landed matches its original byte for
 //! byte, and the old laptop's folder is unchanged.
 
-use std::collections::BTreeMap;
-
-use pctwin_lab::{Entry, Spec, build, compare, snapshot};
-use pctwin_labmove::{Folders, receive, send};
+use pctwin_lab::{Spec, build, snapshot};
+use pctwin_labmove::{Folders, check_move, receive, send};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_synthetic_laptop_moves_and_the_source_stays_unchanged() {
@@ -43,43 +41,18 @@ async fn a_synthetic_laptop_moves_and_the_source_stays_unchanged() {
     let (sent, received) = tokio::join!(sending, receiving);
     let (sent, received) = (sent.unwrap(), received.unwrap());
 
-    // The old laptop is read-only.
-    assert_eq!(compare(&before, &snapshot(old.path()).unwrap()), Vec::<String>::new());
-
-    // Both sides account for the same files, each with an outcome.
-    assert!(!sent.lines.is_empty());
-    assert_eq!(sent.lines.len(), received.lines.len());
-    let got: BTreeMap<_, _> = received.lines.iter().map(|l| (l.item.clone(), l)).collect();
-    for line in &sent.lines {
-        assert_ne!(line.outcome, "no outcome", "{line:?}");
-        assert!(got.contains_key(&line.item), "{line:?} missing on the new laptop");
+    let checked = check_move(
+        &before,
+        &snapshot(old.path()).unwrap(),
+        &snapshot(&new.path().join("home")).unwrap(),
+        &sent,
+        &received,
+    )
+    .unwrap_or_else(|problems| panic!("{problems:#?}"));
+    assert!(checked.landed >= 60, "{checked:?}");
+    // The file held open by another program cannot be read, so it must end failed.
+    if made.cases().contains(&pctwin_lab::Case::Locked) {
+        assert_eq!(checked.unreadable, 1, "{checked:?}");
     }
-
-    // Every file that landed matches its original.
-    let after = snapshot(&new.path().join("home")).unwrap();
-    let mut landed = 0;
-    for line in &received.lines {
-        let Some(final_path) = line.outcome.strip_prefix("landed: ") else {
-            continue;
-        };
-        landed += 1;
-        let Some(original) = before.get(&line.path) else {
-            // Only a name that is not valid text is shown differently from its key.
-            assert!(line.path.contains('\u{FFFD}'), "{line:?} has no original");
-            continue;
-        };
-        let original = Some(original);
-        let copy = after.get(final_path);
-        match (original, copy) {
-            (
-                Some(Entry::File { size: a, blake3: ha, .. }),
-                Some(Entry::File { size: b, blake3: hb, .. }),
-            ) => {
-                assert_eq!((a, ha), (b, hb), "{line:?}");
-            }
-            other => panic!("{line:?}: {other:?}"),
-        }
-    }
-    assert!(landed >= 60, "only {landed} files landed: {:#?}", received.lines);
     made.release().unwrap();
 }

@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use pctwin_lab::{Spec, Snapshot, build, compare, snapshot};
+use pctwin_lab::{Snapshot, Spec, build, compare, snapshot};
 
 fn arg_num(args: &[String], i: usize, default: u64) -> Result<u64, String> {
     args.get(i)
@@ -33,13 +33,19 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             std::fs::create_dir_all(dir).map_err(s)?;
             let mut made = build(Path::new(dir), &spec).map_err(s)?;
             let report = serde_json::json!({ "made": made.made, "skipped": made.skipped });
-            println!("{}", serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+            );
             // A command-line run cannot keep files locked after it ends.
             made.release().map_err(s)?;
             Ok(ExitCode::SUCCESS)
         }
         Some("snapshot") => {
-            let (dir, out) = (args.get(1).ok_or("snapshot needs a folder")?, args.get(2).ok_or("snapshot needs an output file")?);
+            let (dir, out) = (
+                args.get(1).ok_or("snapshot needs a folder")?,
+                args.get(2).ok_or("snapshot needs an output file")?,
+            );
             let snap = snapshot(Path::new(dir)).map_err(s)?;
             let json = serde_json::to_vec_pretty(&snap).map_err(|e| e.to_string())?;
             std::fs::write(out, json).map_err(s)?;
@@ -56,7 +62,11 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             for line in &diff {
                 println!("{line}");
             }
-            Ok(if diff.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+            Ok(if diff.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
         }
         _ => Err("usage: pctwin-lab make|snapshot|compare ...".into()),
     }

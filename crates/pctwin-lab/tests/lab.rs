@@ -51,7 +51,11 @@ fn every_case_is_made_or_skipped_with_a_reason() {
         Case::LongPath,
         Case::ReadOnly,
     ] {
-        assert!(made.cases().contains(&case), "{case:?} was skipped: {:?}", made.skipped);
+        assert!(
+            made.cases().contains(&case),
+            "{case:?} was skipped: {:?}",
+            made.skipped
+        );
     }
     made.release().unwrap();
 }
@@ -104,7 +108,11 @@ fn links_are_recorded_not_followed() {
             Some(pctwin_lab::Entry::Link { .. })
         ));
         // Nothing from outside the profile appears in the snapshot.
-        assert!(!snap.keys().any(|k| k.contains("passwd") || k.contains("kernel32")));
+        assert!(
+            !snap
+                .keys()
+                .any(|k| k.contains("passwd") || k.contains("kernel32"))
+        );
     }
     made.release().unwrap();
 }

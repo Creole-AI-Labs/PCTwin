@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+pctwin-lab = { path = "../pctwin-lab" }
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-journal = { path = "../pctwin-journal" }
 pctwin-link = { path = "../pctwin-link" }
@@ -21,7 +22,6 @@ serde_json = "1"
 tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
-pctwin-lab = { path = "../pctwin-lab" }
 tempfile = "3"
 
 [lints]
