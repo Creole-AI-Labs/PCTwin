@@ -1240,3 +1240,34 @@ async fn every_connection_is_watched_so_a_dead_laptop_is_noticed() {
     assert!(accepted.unwrap().keeps_alive());
     assert!(opened.unwrap().keeps_alive());
 }
+
+/// Whether nothing answers at `addr` any more.
+async fn nothing_listens_at(addr: std::net::SocketAddr) -> bool {
+    matches!(
+        tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await,
+        Ok(Err(_))
+    )
+}
+
+/// When the session ends the port closes, so nothing on the network can reach PCTwin
+/// afterwards (Security Design A: close listening sockets when the session ends). The port lives
+/// exactly as long as the old laptop's host, then its lane listener during the move.
+#[tokio::test]
+async fn the_port_closes_when_pairing_ends_without_a_move() {
+    let (host, _sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    assert!(!nothing_listens_at(addr).await, "listening while pairing");
+    drop(host);
+    assert!(nothing_listens_at(addr).await);
+}
+
+#[tokio::test]
+async fn the_port_stays_open_for_lanes_during_the_move_and_closes_after() {
+    let (mut old, _new, host) = paired_with_host().await;
+    let addr = host.local_addr().unwrap();
+    let keys = old.take_lane_keys().unwrap();
+    let lanes = host.into_lanes(keys, old.peer_addr());
+    assert!(!nothing_listens_at(addr).await, "lanes can still be opened");
+    drop(lanes);
+    assert!(nothing_listens_at(addr).await);
+}

@@ -25,6 +25,14 @@
 //! Every frame on the wire is `[kind][length, 2 bytes big-endian][body]`. Pairing frames are
 //! limited to [`MAX_MESSAGE_LEN`]; anything larger ends that connection before it is read.
 //!
+//! # Ending a session
+//!
+//! The listening port belongs to the [`Host`], and during the move to its [`LaneListener`]: it
+//! closes the moment the app drops them, so nothing on the network can reach PCTwin after the
+//! session ends (proven in this crate's tests). The secrets PCTwin itself holds (the code, the
+//! pre-shared and lane keys, the receiver's nonce, decrypted messages) are wiped from memory when
+//! dropped; the keys inside `snow` and `spake2` are not (see `pctwin_pairing`'s known limits).
+//!
 //! # Known limits
 //!
 //! - Someone on the local network can still stop pairing on purpose: wrong guesses from several
