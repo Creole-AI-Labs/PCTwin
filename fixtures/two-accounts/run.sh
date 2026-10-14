@@ -101,6 +101,11 @@ if [ "$(uname)" = Linux ]; then
   sudo rm -f /tmp/pctwin-exfat.img
   truncate -s 256M /tmp/pctwin-exfat.img
   sudo mkfs.exfat -L PCTWINLAB /tmp/pctwin-exfat.img >/dev/null
+  # The runner's kernel keeps exFAT among its extra modules.
+  if ! sudo modprobe exfat 2>/dev/null; then
+    sudo apt-get -o Acquire::Retries=3 install -y "linux-modules-extra-$(uname -r)" >/dev/null
+    sudo modprobe exfat
+  fi
   exfat=/mnt/pctwin-exfat
   sudo mkdir -p "$exfat"
   sudo mount -o loop,uid="$(id -u "$new_user")",gid="$(id -g "$new_user")" /tmp/pctwin-exfat.img "$exfat"
