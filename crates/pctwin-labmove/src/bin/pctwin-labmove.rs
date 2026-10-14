@@ -6,6 +6,8 @@
 //!     pctwin-labmove fill-profile [seed] [ordinary files] [big file bytes]
 //!     pctwin-labmove snapshot-profile <out.json>
 //!     pctwin-labmove probe <out.json>
+//!     pctwin-labmove pack <lab folder> <account> <package folder>
+//!     pctwin-labmove send <handoff> <report.json> --package <package folder>
 //!
 //! `fill-profile` builds a lab laptop into the signed-in person's real special folders, wherever
 //! they are; `snapshot-profile` records those folders the way reports name them. `probe` compares
@@ -30,6 +32,9 @@ fn folders(rest: &[String]) -> Result<Folders, String> {
         [flag, root, account] if flag == "--lab" => Ok(Folders::Lab {
             root: PathBuf::from(root),
             account: account.clone(),
+        }),
+        [flag, dir] if flag == "--package" => Ok(Folders::Package {
+            dir: PathBuf::from(dir),
         }),
         _ => Err("expected --lab <folder> <account> or nothing".into()),
     }
@@ -121,6 +126,11 @@ async fn run(args: &[String]) -> Result<bool, String> {
                 serde_json::to_vec_pretty(&snap).map_err(|e| e.to_string())?,
             )
             .map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+        [side, root, account, out] if side == "pack" => {
+            let held = pctwin_labmove::pack(root.as_ref(), account, out.as_ref())?;
+            println!("packed {held} files");
             Ok(true)
         }
         [side, out] if side == "probe" => {

@@ -55,6 +55,9 @@ pub enum Folders {
     Lab { root: PathBuf, account: String },
     /// The signed-in person's real special folders, as the app finds them.
     Profile,
+    /// A lab package made by [`pack`], possibly on another system: the old laptop's record as that
+    /// system scanned it, and each file stored under its item ID.
+    Package { dir: PathBuf },
 }
 
 /// One item in a side's report.
@@ -149,7 +152,7 @@ fn compressible(path: &str) -> bool {
 /// The old laptop: scans, hosts pairing on `bind`, sends, and reports.
 pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report, String> {
     let laptop = LaptopId::generate().map_err(err)?;
-    let (scan, places) = match &folders {
+    let (record, places, blobs) = match &folders {
         Folders::Lab { root, account } => {
             let me = Person {
                 account_id: account.clone(),
@@ -160,15 +163,19 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
             let found = lab_folders(root);
             let scan = pctwin_scan::build_scan(laptop, vec![me], found.clone(), Vec::new())
                 .map_err(err)?;
-            (scan, found)
+            (scan.record, found, None)
         }
         Folders::Profile => {
             let scan = pctwin_scan::scan_this_laptop(laptop).map_err(err)?;
             let found = scan.folders.clone();
-            (scan, found)
+            (scan.record, found, None)
+        }
+        Folders::Package { dir } => {
+            let bytes = std::fs::read(dir.join("record.json")).map_err(err)?;
+            let record = Record::from_json(&bytes).map_err(err)?;
+            (record, Vec::new(), Some(dir.join("blobs")))
         }
     };
-    let record = scan.record.clone();
     let roots: BTreeMap<FolderRole, PathBuf> = places
         .iter()
         .filter_map(|f| match f {
@@ -201,14 +208,19 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
             report.not_sent.push(line(&format!("left out: {reason:?}")));
             continue;
         }
-        let Some(root) = roots.get(&item.place.role) else {
-            report.not_sent.push(line("no folder for its role"));
-            continue;
+        let source = if let Some(blobs) = &blobs {
+            blobs.join(item.id.to_hex())
+        } else {
+            let Some(root) = roots.get(&item.place.role) else {
+                report.not_sent.push(line("no folder for its role"));
+                continue;
+            };
+            let mut source = root.clone();
+            for part in item.path.parts() {
+                source.push(on_disk(part));
+            }
+            source
         };
-        let mut source = root.clone();
-        for part in item.path.parts() {
-            source.push(on_disk(part));
-        }
         shown_of.insert(item.id, shown.clone());
         by_item.insert(
             item.id,
@@ -303,6 +315,9 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
     let (account, mut table) = (
         match &folders {
             Folders::Lab { account, .. } => account.clone(),
+            Folders::Package { .. } => {
+                return Err("a package is only sent, never received into".into());
+            }
             Folders::Profile => pctwin_scan::list_people()
                 .into_iter()
                 .find(|p| p.is_me)
@@ -325,6 +340,8 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
             pctwin_transfer::approve_new_places(&mut table, &pctwin_scan::find_special_folders())
                 .map_err(err)?;
         }
+        // Refused above.
+        Folders::Package { .. } => {}
     }
 
     let mut record = Record::from_json(&take(handoff, "record.json").await?).map_err(err)?;
@@ -632,4 +649,59 @@ pub fn probe() -> Result<(Probe, Vec<String>), String> {
         },
         problems,
     ))
+}
+
+/// Makes a lab package from a lab laptop at `root` (Task List 0.7, cross-system handoff): the
+/// record as this system scans it (`record.json`), each included file copied under its item ID
+/// (`blobs/<id>`, so no name of the old system touches the next one's disk before its safety gate
+/// sees it), and a snapshot of the laptop (`before.json`) for checking. Another system then sends
+/// it with [`Folders::Package`]. Not encrypted: the encrypted package for drives is the archive
+/// format of Release 2, which will replace this one. Returns how many files it holds.
+pub fn pack(root: &Path, account: &str, out: &Path) -> Result<usize, String> {
+    let me = Person {
+        account_id: account.to_string(),
+        suggested_name: account.to_string(),
+        home: root.to_path_buf(),
+        is_me: true,
+    };
+    let found = lab_folders(root);
+    let laptop = LaptopId::generate().map_err(err)?;
+    let scan = pctwin_scan::build_scan(laptop, vec![me], found.clone(), Vec::new()).map_err(err)?;
+    let roots: BTreeMap<FolderRole, PathBuf> = found
+        .iter()
+        .filter_map(|f| match f {
+            FolderLookup::Found(f) => Some((f.role, f.path.clone())),
+            _ => None,
+        })
+        .collect();
+    let blobs = out.join("blobs");
+    std::fs::create_dir_all(&blobs).map_err(err)?;
+    let mut held = 0;
+    for item in &scan.record.items {
+        if item.kind != ItemKind::File || item.inclusion != Inclusion::Included {
+            continue;
+        }
+        let Some(root) = roots.get(&item.place.role) else {
+            continue;
+        };
+        let mut source = root.clone();
+        for part in item.path.parts() {
+            source.push(on_disk(part));
+        }
+        let source = pctwin_lab::long(&source).map_err(err)?;
+        // A file the system will not let us read stays out of the package; the receiving side
+        // then reports it failed, as a live move would.
+        if std::fs::copy(&source, blobs.join(item.id.to_hex())).is_ok() {
+            held += 1;
+        }
+    }
+    std::fs::write(out.join("record.json"), scan.record.to_json()).map_err(err)?;
+    let snap = pctwin_lab::snapshot(root).map_err(err)?;
+    std::fs::write(
+        out.join("before.json"),
+        serde_json::to_vec_pretty(&snap).map_err(err)?,
+    )
+    .map_err(err)?;
+    std::fs::write(out.join("origin.txt"), std::env::consts::OS).map_err(err)?;
+    Ok(held)
 }
