@@ -43,6 +43,7 @@
 
 mod allowance;
 mod blockmap;
+mod inventory;
 mod landing;
 mod lanedriver;
 mod lanes;
@@ -60,6 +61,7 @@ mod undo;
 
 pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
+pub use inventory::{InventoryFrame, MAX_INVENTORY_BYTES, receive_inventory, send_inventory};
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
@@ -134,6 +136,8 @@ pub enum TransferError {
     Protocol(String),
     #[error("the move's record on this laptop could not be written, so the move stopped: {0}")]
     Record(String),
+    #[error("the old laptop's list of what it holds was refused: {0}")]
+    Inventory(String),
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the
