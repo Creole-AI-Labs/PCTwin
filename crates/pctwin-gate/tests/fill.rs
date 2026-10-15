@@ -405,3 +405,106 @@ fn a_fill_that_cannot_be_recorded_stops_and_leaves_nothing_under_the_name() {
     drop(back);
     assert!(names(root.path()).is_empty(), "{:?}", names(root.path()));
 }
+
+/// What a fill copies before the test's other program acts, and the tag PCTwin chose.
+type Shared = Arc<std::sync::Mutex<Option<pctwin_gate::Born>>>;
+
+/// Runs a fill of 3000 bytes in 1000-byte pieces where, after the first piece, `act` plays
+/// another program on the folder and the drive then fails. Returns what the journal was told.
+fn fail_after(
+    name: &str,
+    act: impl Fn(&Path, Option<pctwin_gate::Born>) + Send + Sync + 'static,
+) -> (tempfile::TempDir, Vec<String>) {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().to_path_buf();
+    let tag: Shared = Arc::default();
+    let seen = Arc::clone(&tag);
+    let dest = fill_in(root.path()).with_fill_hook(1000, move |written| {
+        if written == 1000 {
+            act(&path, *seen.lock().unwrap());
+            return Err(io::Error::other("the drive was pulled out"));
+        }
+        Ok(())
+    });
+    let bytes = vec![4u8; 3000];
+    let s = sealed(&dest, name, &bytes);
+    let plan = s.fill_plan().unwrap();
+    *tag.lock().unwrap() = plan.tag.born;
+    let mut st = steps(&bytes);
+    let Claim::Failed(_, back) = s.fill_as(name, &plan, &mut st) else {
+        panic!("a failed copy was named");
+    };
+    back.persist();
+    drop(dest);
+    (root, st.log)
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn set_created(path: &Path, born: pctwin_gate::Born) {
+    #[cfg(target_os = "macos")]
+    use std::os::macos::fs::FileTimesExt;
+    #[cfg(windows)]
+    use std::os::windows::fs::FileTimesExt;
+    let t = std::time::UNIX_EPOCH
+        + std::time::Duration::new(u64::try_from(born.secs).unwrap(), born.nanos);
+    let f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+    f.set_times(std::fs::FileTimes::new().set_created(t))
+        .unwrap();
+}
+
+/// Another program wrote more into PCTwin's file: it is no longer only PCTwin's copy, so a
+/// failure leaves it.
+#[test]
+fn a_failure_leaves_pctwin_s_file_once_another_program_wrote_into_it() {
+    let (root, log) = fail_after("m.bin", |dir, _| {
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dir.join("m.bin"))
+            .unwrap();
+        f.write_all(b"theirs").unwrap();
+    });
+    assert_eq!(log, ["made"]);
+    assert_eq!(
+        std::fs::metadata(root.path().join("m.bin")).unwrap().len(),
+        1006
+    );
+}
+
+/// Another program's file put at the name, exactly as long as what PCTwin had copied and even
+/// carrying PCTwin's tag: not the same file, so a failure leaves it.
+#[test]
+fn a_failure_never_removes_a_look_alike_file_put_at_the_name() {
+    let (root, log) = fail_after("n.bin", |dir, tag| {
+        let other = dir.join("other.tmp");
+        std::fs::write(&other, vec![4u8; 1000]).unwrap();
+        #[cfg(any(windows, target_os = "macos"))]
+        if let Some(tag) = tag {
+            set_created(&other, tag);
+        }
+        let _ = tag;
+        replace(&other, &dir.join("n.bin")).unwrap();
+    });
+    assert_eq!(log, ["made"]);
+    assert_eq!(
+        std::fs::read(root.path().join("n.bin")).unwrap(),
+        vec![4u8; 1000]
+    );
+}
+
+/// PCTwin's file with its tag changed by another program: no longer provably PCTwin's (where a
+/// drive's identities are not to be trusted, the tag is the proof), so a failure leaves it.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn a_failure_leaves_pctwin_s_file_once_its_tag_was_changed() {
+    let (root, log) = fail_after("o.bin", |dir, _| {
+        set_created(
+            &dir.join("o.bin"),
+            pctwin_gate::Born {
+                secs: 1_700_000_000,
+                nanos: 0,
+            },
+        );
+    });
+    assert_eq!(log, ["made"]);
+    assert!(root.path().join("o.bin").exists());
+}

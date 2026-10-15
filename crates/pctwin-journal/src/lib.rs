@@ -1957,6 +1957,20 @@ pub trait Ledger {
         file: Option<FileId>,
     ) -> Result<(), JournalError>;
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError>;
+    /// See [`Journal::filling`].
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: FillTag,
+        proof: Proof,
+    ) -> Result<(), JournalError>;
+    /// See [`Journal::fill_made`].
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError>;
+    /// See [`Journal::filled`].
+    fn filled(&self, id: u64) -> Result<(), JournalError>;
+    /// See [`Journal::fill_cleared`].
+    fn fill_cleared(&self, id: u64) -> Result<(), JournalError>;
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
@@ -1995,6 +2009,24 @@ impl Ledger for Journal {
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         Journal::applied(self, id, final_path)
+    }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: FillTag,
+        proof: Proof,
+    ) -> Result<(), JournalError> {
+        Journal::filling(self, id, final_path, tag, proof)
+    }
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        Journal::fill_made(self, id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), JournalError> {
+        Journal::filled(self, id)
+    }
+    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+        Journal::fill_cleared(self, id)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         Journal::committed(self, id, landed)

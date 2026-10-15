@@ -299,6 +299,12 @@ fn without_a_lasting_proof_the_file_is_left_and_reported() {
         let a = decide(filled(f.clone()), &t().at_name(SIZE, MADE, None));
         assert!(noting(&a), "{proof:?}: {a:?}");
     }
+    // Even a matching tag proves nothing where the record says nothing lasts.
+    for proof in [Proof::SameMountId, Proof::None] {
+        let f = fill(proof, Some(MADE), Some(TOKEN));
+        let a = decide(filling(f), &t().at_name(40, MADE, Some(TOKEN)));
+        assert!(noting(&a), "{proof:?}: {a:?}");
+    }
     // A tag recorded but never set by the drive (no creation time kept): no proof either.
     let f = fill(Proof::Token, Some(MADE), None);
     assert!(noting(&decide(filling(f), &t().at_name(40, MADE, None))));
@@ -314,6 +320,19 @@ fn another_program_s_file_at_the_name_is_never_touched() {
             let a = decide(state.clone(), &t().theirs(len));
             assert!(noting(&a), "{len}: {a:?}");
         }
+    }
+}
+
+/// Another program's file at the name, and PCTwin's checked file gone: nothing can be named
+/// again, so the write fails, and the other file is still never touched.
+#[test]
+fn another_program_s_file_and_no_checked_file_fails_honestly() {
+    for state in [filling(token(Some(MADE))), filled(token(Some(MADE)))] {
+        let a = decide(state, &Disk::default().theirs(40));
+        assert!(
+            matches!(&a, Action::Fail(why) if why.contains(NAME)),
+            "{a:?}"
+        );
     }
 }
 

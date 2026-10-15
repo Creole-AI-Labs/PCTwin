@@ -447,6 +447,28 @@ impl Ledger for Breaks<'_> {
         self.check("applied")?;
         self.inner.applied(id, final_path)
     }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: pctwin_journal::FillTag,
+        proof: pctwin_journal::Proof,
+    ) -> Result<(), JournalError> {
+        self.check("filling")?;
+        self.inner.filling(id, final_path, tag, proof)
+    }
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        self.check("fill-made")?;
+        self.inner.fill_made(id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), JournalError> {
+        self.check("filled")?;
+        self.inner.filled(id)
+    }
+    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+        self.check("fill-cleared")?;
+        self.inner.fill_cleared(id)
+    }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.check("committed")?;
         self.inner.committed(id, landed)
@@ -724,6 +746,24 @@ impl Ledger for Counting<'_> {
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         self.inner.applied(id, final_path)
+    }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: pctwin_journal::FillTag,
+        proof: pctwin_journal::Proof,
+    ) -> Result<(), JournalError> {
+        self.inner.filling(id, final_path, tag, proof)
+    }
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        self.inner.fill_made(id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), JournalError> {
+        self.inner.filled(id)
+    }
+    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+        self.inner.fill_cleared(id)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.inner.committed(id, landed)

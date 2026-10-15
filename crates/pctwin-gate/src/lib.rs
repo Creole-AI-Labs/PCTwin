@@ -2100,6 +2100,18 @@ impl Destinations {
         self.admit(id, place, destination)
     }
 
+    /// For tests: approves an already opened place (one given a drive profile or a fill hook).
+    #[doc(hidden)]
+    pub fn approve_opened(
+        &mut self,
+        id: &str,
+        place: Approved,
+        destination: Destination,
+    ) -> Result<(), GateError> {
+        self.check_new(id)?;
+        self.admit(id, place, destination)
+    }
+
     /// Tests the place's drive once, when it is chosen (security design notes): a drive with no
     /// safe way to name files is refused here, with the reason, before anything is sent. A test
     /// that could not be run (a folder PCTwin may not write to, say) refuses nothing here, as

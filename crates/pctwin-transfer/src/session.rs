@@ -2213,6 +2213,7 @@ fn land(
         sealed.persist();
         Ok(ReceiveOutcome::Failed(format!("{why}; {FINISHED_LATER}")))
     };
+    let (size, block_size) = (assembly.header().size, assembly.header().block_size);
     let (mut sealed, fingerprint) = match assembly.seal(trailer) {
         Ok(sealed) => sealed,
         Err(e) => return fail(e.to_string()),
@@ -2235,11 +2236,22 @@ fn land(
             Ok(name) => name,
             Err(e) => return later(sealed, &e),
         };
-        if let Err(e) = journal.applied(entry, &name) {
-            sealed.persist();
-            return Err(record(e));
-        }
-        match sealed.claim_as(&name) {
+        let whole = crate::naming::Whole {
+            size,
+            block_size,
+            fingerprint,
+        };
+        // Recorded first, then named the way the drive allows (filled in, on a drive with no
+        // safe rename).
+        let named = match crate::naming::name_as(journal, entry, sealed, &name, whole) {
+            Ok(named) => named,
+            Err(broke) => {
+                let (e, back) = *broke;
+                back.persist();
+                return Err(record(e));
+            }
+        };
+        match named.claim {
             Claim::Named(c) => break c,
             // Another program took the name first: another name, recorded first again.
             Claim::Taken(back) => sealed = back,
