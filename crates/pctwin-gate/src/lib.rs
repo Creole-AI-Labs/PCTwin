@@ -40,11 +40,13 @@ use unicode_normalization::UnicodeNormalization;
 mod birth_hold;
 #[cfg(target_os = "macos")]
 mod macos_check;
+mod marks;
 mod original;
 mod siblings;
 #[cfg(unix)]
 mod unix_undo;
 
+pub use marks::download_mark_of;
 pub use original::open_original;
 pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
@@ -397,6 +399,11 @@ pub struct Destination {
     /// stay fast. Only a hint: the exact name is always tried first and every name is claimed
     /// without replacing anything, so a wrong or shared hint can only skip numbers.
     clash_hints: Mutex<ClashHints>,
+    /// How many names were checked while choosing free names (see [`name_checks`](Self::name_checks)).
+    name_checks: std::sync::atomic::AtomicU64,
+    /// Behave as on a drive that cannot keep download markers (see
+    /// [`as_if_no_markers`](Self::as_if_no_markers)).
+    no_markers: bool,
 }
 
 /// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
@@ -437,6 +444,22 @@ impl Destination {
         Ok(dest)
     }
 
+    /// How many names have been checked so far while choosing free names for files written here.
+    /// A few per file is normal; a count that grows with the number of files already there means
+    /// numbering has become slow (the gate's tests assert it, rather than timing it).
+    pub fn name_checks(&self) -> u64 {
+        self.name_checks.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// For tests: behave as on a drive that cannot keep download markers (FAT, exFAT, some network
+    /// drives), which no test machine has. Files still land; [`Finished::mark_not_kept`] says
+    /// which marker was lost.
+    #[doc(hidden)]
+    pub fn as_if_no_markers(mut self) -> Self {
+        self.no_markers = true;
+        self
+    }
+
     /// Another handle on the very same approved folder (for a worker that finishes part of an
     /// undo with a deadline, which must own what it works on).
     pub fn try_clone(&self) -> io::Result<Self> {
@@ -444,6 +467,8 @@ impl Destination {
             root: self.root.try_clone()?,
             root_path: self.root_path.clone(),
             clash_hints: Mutex::new(ClashHints::default()),
+            name_checks: Default::default(),
+            no_markers: self.no_markers,
         })
     }
 
@@ -452,6 +477,8 @@ impl Destination {
             root,
             root_path: None,
             clash_hints: Mutex::new(ClashHints::default()),
+            name_checks: Default::default(),
+            no_markers: false,
         }
     }
 
@@ -532,6 +559,7 @@ impl Destination {
             sent_path: path.original().to_string(),
             changes,
             modified: None,
+            mark: None,
             created,
         })
     }
@@ -782,6 +810,7 @@ impl Destination {
             sent_path: sent.original().to_string(),
             changes,
             modified: None,
+            mark: None,
             created: Vec::new(),
         })
     }
@@ -834,6 +863,7 @@ impl Destination {
             // whichever way naming it ends (the journal's clean-up decides).
             kept_if_dropped: true,
             held: Some(held),
+            mark_not_kept: None,
         })
     }
 
@@ -931,6 +961,11 @@ impl Destination {
     /// such as `name (2).ext`. Nothing is claimed: another program can still take it first, so a
     /// claim never replaces anything and a taken name is simply tried again.
     fn free_name(&self, dir: &Dir, folder: &str, name: &str) -> Result<(String, bool), GateError> {
+        let name_taken = |dir: &Dir, name: &str| {
+            self.name_checks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            name_taken(dir, name)
+        };
         if !name_taken(dir, name)? {
             return Ok((name.to_string(), false));
         }
@@ -1065,7 +1100,7 @@ fn rename_no_replace(
     Err(GateError::NoSafeName)
 }
 
-pub use pctwin_journal::{Born, FileId};
+pub use pctwin_journal::{Born, DownloadMark, FileId};
 
 /// A stored file's size, modified time and identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1664,6 +1699,11 @@ pub struct Finished {
     /// The path as the old laptop sent it.
     pub sent_path: String,
     pub changes: Vec<NameChange>,
+    /// The download marker the file should have had but could not keep, because the drive cannot
+    /// hold one (FAT and exFAT drives, some network drives): the copy is there, and the report
+    /// must say plainly that the system no longer knows it came from the internet. `None` when
+    /// every marker was kept (or there was none).
+    pub mark_not_kept: Option<DownloadMark>,
 }
 
 /// A file being received. Writing more than announced fails; [`finish`](Self::finish) checks the
@@ -1687,6 +1727,8 @@ pub struct IncomingFile<'d> {
     changes: Vec<NameChange>,
     /// The modified time to give the finished file (the original's).
     modified: Option<std::time::SystemTime>,
+    /// The download marker to keep, if the original had one.
+    mark: Option<DownloadMark>,
     /// Folders made for this file (stored paths, outermost first).
     created: Vec<String>,
 }
@@ -1803,6 +1845,12 @@ impl<'d> IncomingFile<'d> {
         self.modified = Some(time);
     }
 
+    /// Marks the file as from the internet when it is sealed, as its original was on the old
+    /// laptop (see [`DownloadMark`]), before it gets its real name, so it never appears unmarked.
+    pub fn keep_download_mark(&mut self, mark: DownloadMark) {
+        self.mark = Some(mark);
+    }
+
     /// Where the temporary file is: its stored path inside the approved folder.
     pub fn temp_path(&self) -> String {
         stored_path(&self.folder, self.temp_name.as_deref().unwrap_or_default())
@@ -1833,6 +1881,16 @@ impl<'d> IncomingFile<'d> {
         }
         let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
         file.sync_all()?;
+        let temp_name = self.temp_name.as_deref().ok_or(GateError::Conflict)?;
+        let mut mark_not_kept = None;
+        if let Some(mark) = self.mark {
+            // Before the time: writing Windows' marker can change the file's modified time.
+            let kept =
+                !self.destination.no_markers && marks::put(&self.dir, temp_name, &file, mark)?;
+            if !kept {
+                mark_not_kept = Some(mark);
+            }
+        }
         if let Some(time) = self.modified {
             file.set_modified(time)?;
             file.sync_all()?;
@@ -1849,6 +1907,7 @@ impl<'d> IncomingFile<'d> {
             changes: std::mem::take(&mut self.changes),
             kept_if_dropped: false,
             held: Some(file),
+            mark_not_kept,
         })
     }
 }
@@ -1876,6 +1935,8 @@ pub struct Sealed<'d> {
     /// The file itself, held open until it is kept under its real name: while it is held, the
     /// drive cannot give its number to another file.
     held: Option<std::fs::File>,
+    /// The marker that could not be kept on this drive, if any.
+    mark_not_kept: Option<DownloadMark>,
 }
 
 impl<'d> Sealed<'d> {
@@ -1972,6 +2033,7 @@ impl<'d> Sealed<'d> {
                 final_path: stored_path(&self.folder, &name),
                 sent_path: std::mem::take(&mut self.sent_path),
                 changes,
+                mark_not_kept: self.mark_not_kept,
             },
             _destination: std::marker::PhantomData,
         }

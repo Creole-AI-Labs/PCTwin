@@ -212,6 +212,19 @@ impl Born {
     }
 }
 
+/// A download marker: the old laptop's system noted that a file came from the internet (Mark of
+/// the Web on Windows, the quarantine flag on a Mac), so the new laptop's system must stay just as
+/// cautious with the copy. Only the level travels, never a web address or anything else.
+/// Ordered from least to most cautious, so the stricter of two is their maximum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DownloadMark {
+    /// From the internet (Windows zone 3; every Mac quarantine flag).
+    Internet,
+    /// From a restricted site (Windows zone 4).
+    Restricted,
+}
+
 /// What is about to be written.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlannedWrite {
@@ -239,6 +252,9 @@ pub struct PlannedWrite {
     /// as the person chose before the move.
     #[serde(default)]
     pub partial_keep: PartialKeep,
+    /// The original's download marker, if it had one, kept on the copy (also after a restart).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_mark: Option<DownloadMark>,
 }
 
 /// How long a partly copied file waits for the rest with nothing added to it, picked before the

@@ -163,21 +163,27 @@ fn a_link_named_like_the_file_is_not_followed() {
 
 // ---------- from the fresh-context security review ----------
 
+/// Choosing a free name must take a few name checks per file, not more and more as files pile
+/// up (each slow-down found so far searched again from the start: the work grew with the square
+/// of the count). Counting the checks, not the seconds, so a busy machine cannot fail it.
+fn assert_few_checks_per_file(dest: &Destination, before: u64, files: u64) {
+    let checks = dest.name_checks() - before;
+    assert!(
+        checks <= 3 * files,
+        "{checks} name checks for {files} files"
+    );
+}
+
 #[test]
 fn thousands_of_files_with_one_name_are_numbered_quickly() {
     let root = tempfile::tempdir().unwrap();
     let dest = Destination::open(root.path()).unwrap();
-    let started = std::time::Instant::now();
-    // Before the fix, 1,000 same-name files took over two minutes.
+    // Before the fix, 1,000 same-name files took over two minutes (about 500,000 checks).
     for _ in 0..1_000 {
         write(&dest, "a.txt", b"x").unwrap();
     }
     assert!(root.path().join("a (1000).txt").exists());
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(60),
-        "{:?}",
-        started.elapsed()
-    );
+    assert_few_checks_per_file(&dest, 0, 1_000);
 }
 
 #[test]
@@ -271,7 +277,6 @@ fn shortening_never_leaves_a_trailing_space_on_windows() {
 fn folder_names_differing_only_in_case_do_not_slow_numbering() {
     let root = tempfile::tempdir().unwrap();
     let dest = Destination::open(root.path()).unwrap();
-    let started = std::time::Instant::now();
     // Each spelling is a different folder on Linux and the same folder on Windows and Mac.
     // Before the fix, 500 spellings took over a minute on Windows.
     for mask in 0u32..600 {
@@ -288,11 +293,7 @@ fn folder_names_differing_only_in_case_do_not_slow_numbering() {
             .collect();
         write(&dest, &format!("{folder}/a.txt"), b"x").unwrap();
     }
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(45),
-        "{:?}",
-        started.elapsed()
-    );
+    assert_few_checks_per_file(&dest, 0, 600);
 }
 
 #[test]
@@ -393,18 +394,14 @@ fn long_names_that_shorten_to_the_same_start_do_not_slow_numbering() {
     for name in &names {
         write(&dest, name, b"x").unwrap();
     }
-    let started = std::time::Instant::now();
+    let before = dest.name_checks();
     // Each second copy is numbered on the shortened start the names share. Before the fix every
     // name searched again from 2, so 600 names took over two minutes.
     for name in &names {
         let written = write(&dest, name, b"x").unwrap();
         assert!(written.len() <= pctwin_gate::MAX_COMPONENT_BYTES);
     }
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(30),
-        "{:?}",
-        started.elapsed()
-    );
+    assert_few_checks_per_file(&dest, before, names.len() as u64);
 }
 
 // ---------- keeping times and looking files up ----------

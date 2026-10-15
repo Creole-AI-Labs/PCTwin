@@ -1394,3 +1394,72 @@ async fn a_reply_of_another_kind_is_refused_as_unexpected() {
     assert!(matches!(got, Err(LinkError::Unexpected)), "{:?}", got.err());
     answering.abort();
 }
+
+/// Whether nothing answers at `addr` any more.
+async fn nothing_listens_at(addr: std::net::SocketAddr) -> bool {
+    // Refused, or no answer at all (a Mac has no 127.0.0.2, so connecting there just waits):
+    // either way nothing is listening. Only a connection that opens counts as listening.
+    !matches!(
+        tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
+}
+
+/// When the session ends the port closes, so nothing on the network can reach PCTwin
+/// afterwards (Security Design A: close listening sockets when the session ends). The port lives
+/// exactly as long as the old laptop's host, then its lane listener during the move.
+#[tokio::test]
+async fn the_port_closes_when_pairing_ends_without_a_move() {
+    let (host, _sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    assert!(!nothing_listens_at(addr).await, "listening while pairing");
+    drop(host);
+    assert!(nothing_listens_at(addr).await);
+}
+
+#[tokio::test]
+async fn the_port_stays_open_for_lanes_during_the_move_and_closes_after() {
+    let (mut old, _new, host) = paired_with_host().await;
+    let addr = host.local_addr().unwrap();
+    let keys = old.take_lane_keys().unwrap();
+    let lanes = host.into_lanes(keys, old.peer_addr());
+    assert!(!nothing_listens_at(addr).await, "lanes can still be opened");
+    drop(lanes);
+    assert!(nothing_listens_at(addr).await);
+}
+
+/// While pairing, the old laptop listens only on the chosen connection's own addresses (IPv4 and
+/// IPv6, one port), never on every connection: a VPN or virtual-machine network cannot reach it.
+#[tokio::test]
+async fn the_host_listens_on_each_chosen_address_with_one_port_and_nowhere_else() {
+    let chosen: Vec<std::net::SocketAddr> =
+        vec!["127.0.0.1:0".parse().unwrap(), "[::1]:0".parse().unwrap()];
+    let host = match Host::bind_all(&chosen, fast()).await {
+        Ok(h) => h,
+        // A runner without IPv6 loopback: the IPv4 address alone is still served.
+        Err(_) => Host::bind_all(&chosen[..1], fast()).await.unwrap(),
+    };
+    let addrs = host.local_addrs();
+    assert!(!addrs.is_empty());
+    let port = addrs[0].port();
+    assert!(addrs.iter().all(|a| a.port() == port), "{addrs:?}");
+    let sender = Arc::new(Mutex::new(RotatingSender::new(Instant::now()).unwrap()));
+    // A device pairs through every chosen address.
+    for addr in addrs.clone() {
+        let code = shown_code(&sender);
+        let guest = tokio::spawn(async move { connect(addr, &code, fast()).await });
+        let pending = host.next_peer(&sender).await.unwrap();
+        let guest = guest.await.unwrap().unwrap();
+        let old = pending.choose(guest.match_number(), Instant::now()).await;
+        assert!(old.is_ok(), "{addr}");
+        assert!(guest.approval().await.is_ok());
+    }
+    // Another address of this laptop, not chosen, reaches nothing.
+    let elsewhere: std::net::SocketAddr = format!("127.0.0.2:{port}").parse().unwrap();
+    assert!(nothing_listens_at(elsewhere).await, "{elsewhere}");
+}
+
+#[tokio::test]
+async fn a_host_needs_at_least_one_address() {
+    assert!(Host::bind_all(&[], fast()).await.is_err());
+}

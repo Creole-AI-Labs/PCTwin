@@ -14,7 +14,6 @@
 //! unless the engine said so.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,12 +24,12 @@ use pctwin_lab::{Entry, Snapshot, compare};
 use pctwin_link::LinkConfig;
 use pctwin_pairing::{PairingCode, RotatingSender};
 use pctwin_record::{
-    FolderRole, Inclusion, ItemKind, ItemName, LaptopId, PersonTarget, RawName, Record, Storage,
+    FolderRole, Inclusion, Item, ItemKind, LaptopId, PersonTarget, Record, Storage,
 };
 use pctwin_scan::{FolderLookup, FoundFolder, Person};
 use pctwin_transfer::{
-    Allowance, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier,
-    plan_order, role_label,
+    Allowance, LandingPlace, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
+    Tier, plan_order, role_label, shown_path,
 };
 use serde::{Deserialize, Serialize};
 
@@ -83,6 +82,13 @@ pub fn role_name(role: FolderRole) -> &'static str {
         .map_or("Other", |(_, n)| n)
 }
 
+/// Where an item lands in the lab: its role's folder, at its path as shown. Both sides use this
+/// one function (the old laptop to say where it sends each file, the new laptop to check it), so
+/// they cannot disagree.
+pub fn lab_landing(item: &Item) -> LandingPlace {
+    LandingPlace::new(role_label(item.place.role), shown_path(&item.path))
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -118,26 +124,10 @@ fn lab_folders(root: &Path) -> Vec<FolderLookup> {
                 path: root.join(name),
                 storage: Storage::SystemDrive,
                 moved: false,
+                managed_by: pctwin_record::ManagedBy::Personal,
             })
         })
         .collect()
-}
-
-/// The name on disk, exactly as the scan recorded it.
-fn on_disk(name: &ItemName) -> OsString {
-    match name.exact() {
-        #[cfg(unix)]
-        Some(RawName::Unix(bytes)) => {
-            use std::os::unix::ffi::OsStringExt;
-            OsString::from_vec(bytes.clone())
-        }
-        #[cfg(windows)]
-        Some(RawName::Windows(units)) => {
-            use std::os::windows::ffi::OsStringExt;
-            OsString::from_wide(units)
-        }
-        _ => OsString::from(name.display()),
-    }
 }
 
 fn compressible(path: &str) -> bool {
@@ -187,14 +177,8 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     let mut by_item = BTreeMap::new();
     let mut shown_of = BTreeMap::new();
     for item in &record.items {
-        let path = item
-            .path
-            .parts()
-            .iter()
-            .map(ItemName::display)
-            .collect::<Vec<_>>()
-            .join("/");
-        let shown = format!("{}/{path}", role_name(item.place.role));
+        let place = lab_landing(item);
+        let shown = format!("{}/{}", role_name(item.place.role), place.path);
         let line = |outcome: &str| Line {
             item: item.id.to_hex(),
             path: shown.clone(),
@@ -216,7 +200,7 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
             };
             let mut source = root.clone();
             for part in item.path.parts() {
-                source.push(on_disk(part));
+                source.push(part.on_disk());
             }
             source
         };
@@ -226,9 +210,9 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
             SendJob {
                 item: item.id,
                 source,
-                destination: role_label(item.place.role).to_string(),
-                path: path.clone(),
-                compressible: compressible(&path),
+                compressible: compressible(&place.path),
+                destination: place.destination,
+                path: place.path,
                 tier: Tier::Rest,
             },
         );
@@ -395,7 +379,8 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         );
     }
     let approval = record.approve().map_err(err)?;
-    let allowance = Allowance::from_record(&record, &approval).map_err(err)?;
+    let allowance =
+        Allowance::from_record(&record, &approval, |i| Some(lab_landing(i))).map_err(err)?;
 
     let journal = Journal::open(journal).map_err(err)?;
     let mut receiver = ReceiverSession::new(&table, allowance, &journal, &account);
@@ -415,15 +400,7 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         };
         report.lines.push(Line {
             item: item.id.to_hex(),
-            path: format!(
-                "{folder}/{}",
-                item.path
-                    .parts()
-                    .iter()
-                    .map(ItemName::display)
-                    .collect::<Vec<_>>()
-                    .join("/")
-            ),
+            path: format!("{folder}/{}", shown_path(&item.path)),
             outcome,
         });
     }
@@ -734,7 +711,7 @@ pub fn pack(root: &Path, account: &str, out: &Path) -> Result<usize, String> {
         };
         let mut source = root.clone();
         for part in item.path.parts() {
-            source.push(on_disk(part));
+            source.push(part.on_disk());
         }
         let source = pctwin_lab::long(&source).map_err(err)?;
         // A file the system will not let us read stays out of the package; the receiving side
