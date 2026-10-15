@@ -412,7 +412,22 @@ export function Banner({ tone = "info", title, children }: { tone?: "info" | "re
  * A modal dialog: the native element keeps focus inside it and closes on Escape; focus returns to
  * where it was. The title names it for screen readers.
  */
-export function Dialog({ open, title, onClose, children, actions }: { open: boolean; title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+export function Dialog({
+  open,
+  title,
+  onClose,
+  children,
+  actions,
+  closeLabel,
+}: {
+  open: boolean;
+  title: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  actions?: ReactNode;
+  /** What the button that closes the dialog says, when "Close" is not the right word (for example "Keep sending"). */
+  closeLabel?: ReactNode;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
   const { l10n } = useLocalization();
@@ -457,7 +472,7 @@ export function Dialog({ open, title, onClose, children, actions }: { open: bool
           <div className="kit-dialog-body">{children}</div>
           <div className="kit-dialog-actions">
             {actions}
-            <Button onClick={onClose}>{l10n.getString("dialog-close")}</Button>
+            <Button onClick={onClose}>{closeLabel ?? l10n.getString("dialog-close")}</Button>
           </div>
         </>
       )}
