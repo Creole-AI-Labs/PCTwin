@@ -28,6 +28,10 @@ pub enum SessionError {
     Search,
     #[error("this laptop is not on a Wi-Fi or wired network it can pair on")]
     NoNetwork,
+    /// More than one connection could be the Wi-Fi: the person picks one (by its name, with
+    /// [`OldLaptop::start_on`]); PCTwin does not guess.
+    #[error("this laptop is on more than one network; choose the one the other laptop is on")]
+    ChooseNetwork(Vec<String>),
 }
 
 /// The connection the old laptop pairs on: its name and its own local-network addresses (one
@@ -38,25 +42,67 @@ pub struct Network {
     pub addrs: Vec<SocketAddr>,
 }
 
-/// The connection to pair on: the one named `chosen`, or else the first real network connection
-/// (Wi-Fi or wired, not a VPN, virtual machine or loopback) with a private IPv4 address. Only its
-/// own local-network addresses: a private or link-local IPv4 address, and an IPv6 link-local
-/// address (with the connection's number, without which it cannot be used) or else a private
-/// one. `None` if there is no such connection or it has no such address.
+/// Whether `i` is a connection pairing can run over: running, not a VPN, virtual machine or
+/// loopback by its name, not a tunnel to a single other end, with an address on a shared network
+/// (not a single-address /32, as VPN tunnels have). Judged by what the system reports about the
+/// connection, so a VPN with an ordinary-looking name (Proton's "ProTUN") is still left out.
+fn can_pair_on(i: &Interface) -> bool {
+    i.kind == InterfaceKind::Network
+        && i.up
+        && !i.point_to_point
+        && i.prefix_len != Some(32)
+        && i.prefix_len != Some(128)
+}
+
+/// The connections this laptop could pair on, by name, in the order the system lists them: each
+/// has a private IPv4 address on a shared network (see `can_pair_on`).
+pub fn pairing_candidates(interfaces: &[Interface]) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for i in interfaces.iter().filter(|i| can_pair_on(i)) {
+        if matches!(i.ip, IpAddr::V4(v4) if v4.is_private()) && !names.contains(&i.name) {
+            names.push(i.name.clone());
+        }
+    }
+    names
+}
+
+/// The connection to pair on without asking: the only candidate, or else the only candidate
+/// named like Wi-Fi (Wi-Fi, WLAN, wireless, wlan0, wlp2s0). `None` when it cannot tell (two wired
+/// connections, a Mac's en0 and en1): then the person is asked.
+pub fn likely_wifi(interfaces: &[Interface]) -> Option<String> {
+    let candidates = pairing_candidates(interfaces);
+    if let [only] = candidates.as_slice() {
+        return Some(only.clone());
+    }
+    let wifi: Vec<&String> = candidates.iter().filter(|n| looks_like_wifi(n)).collect();
+    match wifi.as_slice() {
+        [only] => Some((*only).clone()),
+        _ => None,
+    }
+}
+
+fn looks_like_wifi(name: &str) -> bool {
+    let n = name.to_lowercase();
+    ["wi-fi", "wifi", "wlan", "wireless"]
+        .iter()
+        .any(|w| n.contains(w))
+        || n.starts_with("wlp")
+        || n.starts_with("wlx")
+}
+
+/// The connection to pair on: the one named `chosen` (one of [`pairing_candidates`]), or else
+/// [`likely_wifi`]. Only its own local-network addresses: a private or link-local IPv4 address,
+/// and an IPv6 link-local address (with the connection's number, without which it cannot be
+/// used) or else a private one. `None` if there is no such connection, it cannot be told which
+/// one, or it has no such address.
 pub fn pairing_network(interfaces: &[Interface], chosen: Option<&str>) -> Option<Network> {
-    let real = |i: &&Interface| i.kind == InterfaceKind::Network;
     let name = match chosen {
         Some(name) => name.to_string(),
-        None => interfaces
-            .iter()
-            .filter(real)
-            .find(|i| matches!(i.ip, IpAddr::V4(v4) if v4.is_private()))?
-            .name
-            .clone(),
+        None => likely_wifi(interfaces)?,
     };
     let own: Vec<&Interface> = interfaces
         .iter()
-        .filter(real)
+        .filter(|i| can_pair_on(i))
         .filter(|i| i.name == name)
         .collect();
     let v4 = own.iter().find_map(|i| match i.ip {
@@ -91,11 +137,19 @@ pub struct OldLaptop {
 }
 
 impl OldLaptop {
-    /// Starts pairing on the likely Wi-Fi connection ([`pairing_network`] with no choice made):
-    /// see [`start_on`](Self::start_on).
+    /// Starts pairing on the likely Wi-Fi connection ([`likely_wifi`]): see
+    /// [`start_on`](Self::start_on). When it cannot tell which connection that is, fails with
+    /// [`SessionError::ChooseNetwork`] listing the candidates, so the app asks the person.
     pub async fn start(label: Label, config: LinkConfig) -> Result<Self, SessionError> {
         let interfaces = pctwin_doctor::probe::interfaces().ok_or(SessionError::NoNetwork)?;
-        let network = pairing_network(&interfaces, None).ok_or(SessionError::NoNetwork)?;
+        let Some(network) = pairing_network(&interfaces, None) else {
+            let candidates = pairing_candidates(&interfaces);
+            return Err(if candidates.len() > 1 {
+                SessionError::ChooseNetwork(candidates)
+            } else {
+                SessionError::NoNetwork
+            });
+        };
         Self::start_on(label, config, &network).await
     }
 

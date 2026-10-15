@@ -5,12 +5,24 @@
 use std::net::{IpAddr, SocketAddr};
 
 use pctwin_doctor::Interface;
-use pctwin_session::pairing_network;
+use pctwin_session::{likely_wifi, pairing_candidates, pairing_network};
 
+/// A connection's address, up, on an ordinary shared network (/24, or /64 for IPv6).
 fn iface(name: &str, ip: &str, index: u32) -> Interface {
+    let ip = ip.parse::<IpAddr>().unwrap();
     Interface {
         index: Some(index),
-        ..Interface::new(name, ip.parse::<IpAddr>().unwrap())
+        prefix_len: Some(if ip.is_ipv4() { 24 } else { 64 }),
+        ..Interface::new(name, ip)
+    }
+}
+
+/// A VPN tunnel as Windows lists it: a single address (/32), reaching one other end.
+fn tunnel(name: &str, ip: &str, index: u32) -> Interface {
+    Interface {
+        prefix_len: Some(32),
+        point_to_point: true,
+        ..iface(name, ip, index)
     }
 }
 
@@ -87,6 +99,11 @@ fn a_real_connection_without_a_private_address_is_passed_over() {
         iface("Wi-Fi", "192.168.1.23", 4),
     ];
     assert_eq!(pairing_network(&v, None).unwrap().name, "Wi-Fi");
+    assert_eq!(
+        pairing_candidates(&v),
+        ["Wi-Fi"],
+        "a public address cannot pair"
+    );
 }
 
 /// When the connection has both, the link-local IPv6 address (always there on Wi-Fi, and only
@@ -100,4 +117,100 @@ fn link_local_ipv6_is_preferred_to_a_private_one() {
     ];
     let net = pairing_network(&v, None).unwrap();
     assert_eq!(net.addrs[1], "[fe80::1%6]:0".parse::<SocketAddr>().unwrap());
+}
+
+/// The laptop this was found on: Proton VPN's tunnel, "ProTUN" (10.2.0.2/32), is listed before
+/// the Wi-Fi. Judged by what the connection is (a single-address tunnel), not by its name, the
+/// tunnel is never chosen.
+#[test]
+fn a_vpn_tunnel_listed_first_is_never_chosen() {
+    let v = vec![
+        tunnel("ProTUN", "10.2.0.2", 34),
+        iface("Wi-Fi", "192.168.0.3", 13),
+        iface("Loopback Pseudo-Interface 1", "127.0.0.1", 1),
+    ];
+    assert_eq!(pairing_candidates(&v), ["Wi-Fi"]);
+    assert_eq!(pairing_network(&v, None).unwrap().name, "Wi-Fi");
+    assert!(pairing_network(&v, Some("ProTUN")).is_none());
+}
+
+#[test]
+fn a_single_address_or_point_to_point_connection_is_never_a_candidate() {
+    let single = Interface {
+        point_to_point: false,
+        ..tunnel("Ethernet 3", "10.8.0.6", 21)
+    };
+    let p2p = Interface {
+        prefix_len: Some(24),
+        ..tunnel("Ethernet 4", "10.9.0.6", 22)
+    };
+    assert!(pairing_candidates(&[single, p2p]).is_empty());
+}
+
+#[test]
+fn a_connection_that_is_down_is_never_a_candidate() {
+    let down = Interface {
+        up: false,
+        ..iface("Wi-Fi", "192.168.1.5", 4)
+    };
+    assert!(pairing_candidates(&[down]).is_empty());
+}
+
+/// A VPN adapter that looks like an ordinary network (OpenVPN's "Ethernet 2", a /24) beside the
+/// Wi-Fi: the Wi-Fi is the likely choice, by its name.
+#[test]
+fn beside_another_real_looking_connection_the_wifi_is_chosen() {
+    let v = vec![
+        iface("Ethernet 2", "10.8.0.6", 21),
+        iface("Wi-Fi", "192.168.1.23", 4),
+    ];
+    assert_eq!(likely_wifi(&v).as_deref(), Some("Wi-Fi"));
+    let linux = vec![
+        iface("eth0", "192.168.1.9", 2),
+        iface("wlp2s0", "192.168.1.10", 3),
+    ];
+    assert_eq!(likely_wifi(&linux).as_deref(), Some("wlp2s0"));
+}
+
+/// When it cannot tell (two wired connections, or a Mac's en0 and en1), PCTwin does not guess:
+/// the person is asked which connection their Wi-Fi is on.
+#[test]
+fn when_it_cannot_tell_it_asks_instead_of_guessing() {
+    let v = vec![
+        iface("Ethernet", "192.168.1.9", 5),
+        iface("Ethernet 2", "10.8.0.6", 21),
+    ];
+    assert_eq!(likely_wifi(&v), None);
+    assert_eq!(pairing_candidates(&v), ["Ethernet", "Ethernet 2"]);
+    assert!(pairing_network(&v, None).is_none());
+    assert_eq!(
+        pairing_network(&v, Some("Ethernet")).unwrap().name,
+        "Ethernet"
+    );
+    let mac = vec![
+        iface("en0", "192.168.1.9", 6),
+        iface("en1", "192.168.1.10", 7),
+    ];
+    assert_eq!(likely_wifi(&mac), None);
+}
+
+/// One real connection, whatever its name, is the choice.
+#[test]
+fn a_single_real_connection_is_chosen_whatever_its_name() {
+    let v = vec![
+        iface("Ethernet", "192.168.1.9", 5),
+        tunnel("ProTUN", "10.2.0.2", 34),
+    ];
+    assert_eq!(likely_wifi(&v).as_deref(), Some("Ethernet"));
+}
+
+/// Two connections named like Wi-Fi (a second adapter plugged in): it cannot tell, so it asks.
+#[test]
+fn two_wifi_connections_are_a_question_not_a_guess() {
+    let v = vec![
+        iface("Wi-Fi", "192.168.1.23", 4),
+        iface("Wi-Fi 2", "192.168.50.7", 9),
+    ];
+    assert_eq!(likely_wifi(&v), None);
+    assert_eq!(pairing_candidates(&v), ["Wi-Fi", "Wi-Fi 2"]);
 }
