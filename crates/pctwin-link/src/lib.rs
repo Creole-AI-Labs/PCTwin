@@ -64,6 +64,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use zeroize::Zeroizing;
 
+/// Most addresses the old laptop listens on while pairing: the chosen connection's IPv4 and IPv6.
+pub const MAX_LISTEN_ADDRS: usize = 2;
 /// Default longest wait for each step the new laptop waits on, and for each send.
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default longest time one device may hold the old laptop's single pairing slot.
@@ -205,7 +207,8 @@ fn honest(error: impl Into<LinkError>) -> Failure {
 
 /// The old laptop's listener. Serves one device at a time.
 pub struct Host {
-    listener: TcpListener,
+    /// One listener per chosen address (the connection's IPv4 and IPv6 addresses), one port.
+    listeners: Vec<TcpListener>,
     config: LinkConfig,
     refusals: Arc<Semaphore>,
     penalised: Mutex<HashMap<IpAddr, Instant>>,
@@ -220,8 +223,32 @@ impl Host {
     /// Starts listening on `addr` (use port 0 for any free port). Bind the local network
     /// interface's own address, not every interface.
     pub async fn bind(addr: SocketAddr, config: LinkConfig) -> io::Result<Self> {
+        Self::bind_all(&[addr], config).await
+    }
+
+    /// Starts listening on each of `addrs`, the chosen connection's own addresses (an IPv4 and an
+    /// IPv6 address, say), all on one port: the first address's (port 0 picks a free one), so one
+    /// port is announced. Nothing listens on any other address of this laptop.
+    pub async fn bind_all(addrs: &[SocketAddr], config: LinkConfig) -> io::Result<Self> {
+        // One IPv4 and one IPv6 address at most: every listener is served (see `accept_local`).
+        if addrs.len() > MAX_LISTEN_ADDRS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "at most one IPv4 and one IPv6 address",
+            ));
+        }
+        let (first, rest) = addrs.split_first().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "no address to listen on")
+        })?;
+        let mut listeners = vec![TcpListener::bind(first).await?];
+        let port = listeners[0].local_addr()?.port();
+        for addr in rest {
+            let mut at = *addr;
+            at.set_port(port);
+            listeners.push(TcpListener::bind(at).await?);
+        }
         Ok(Self {
-            listener: TcpListener::bind(addr).await?,
+            listeners,
             config,
             refusals: Arc::new(Semaphore::new(MAX_REFUSALS)),
             penalised: Mutex::new(HashMap::new()),
@@ -230,9 +257,17 @@ impl Host {
         })
     }
 
-    /// The address and port to announce.
+    /// The address and port to announce (the first chosen address).
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
+        self.listeners[0].local_addr()
+    }
+
+    /// Every address being listened on, all with the same port.
+    pub fn local_addrs(&self) -> Vec<SocketAddr> {
+        self.listeners
+            .iter()
+            .filter_map(|l| l.local_addr().ok())
+            .collect()
     }
 
     /// Serves devices one at a time until one completes the handshake and the person can pick
@@ -334,7 +369,18 @@ impl Host {
     /// Accepts one connection from the local network. Connections from elsewhere are closed at
     /// once; an accept error (for example, out of handles) pauses briefly and is not fatal.
     async fn accept_local(&self) -> Option<(TcpStream, SocketAddr)> {
-        match self.listener.accept().await {
+        // Whichever chosen address a device arrives on (each accept can be dropped unfinished).
+        let next = async {
+            match self.listeners.as_slice() {
+                [only] => only.accept().await,
+                [first, second, ..] => tokio::select! {
+                    a = first.accept() => a,
+                    b = second.accept() => b,
+                },
+                [] => std::future::pending().await,
+            }
+        };
+        match next.await {
             Ok((stream, peer)) if (self.allowed)(peer.ip()) => {
                 keep_alive(&stream);
                 Some((stream, peer))

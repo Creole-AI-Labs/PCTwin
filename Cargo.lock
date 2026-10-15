@@ -3454,6 +3454,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
  "pctwin-discovery",
+ "pctwin-doctor",
  "pctwin-link",
  "pctwin-pairing",
  "thiserror 2.0.21",

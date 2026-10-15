@@ -45,6 +45,16 @@ pub struct Interface {
     pub name: String,
     pub ip: IpAddr,
     pub kind: InterfaceKind,
+    /// The system's number for the connection (needed to use an IPv6 link-local address), if
+    /// known.
+    pub index: Option<u32>,
+    /// How many leading bits of the address name its network (24 for an ordinary home network;
+    /// 32 means a single address, as a VPN tunnel has), if known.
+    pub prefix_len: Option<u8>,
+    /// Whether the system says the connection runs to a single other end (a tunnel).
+    pub point_to_point: bool,
+    /// Whether the connection is running (`false` only when the system says it is down).
+    pub up: bool,
 }
 
 impl Interface {
@@ -59,6 +69,10 @@ impl Interface {
             name: name.to_string(),
             ip,
             kind,
+            index: None,
+            prefix_len: None,
+            point_to_point: false,
+            up: true,
         }
     }
 
@@ -335,7 +349,21 @@ pub mod probe {
     pub fn interfaces() -> Option<Vec<Interface>> {
         if_addrs::get_if_addrs().ok().map(|list| {
             list.iter()
-                .map(|i| Interface::new(&i.name, i.ip()))
+                .map(|i| Interface {
+                    index: i.index,
+                    prefix_len: Some(match &i.addr {
+                        if_addrs::IfAddr::V4(a) => a.prefixlen,
+                        if_addrs::IfAddr::V6(a) => a.prefixlen,
+                    }),
+                    point_to_point: i.is_p2p,
+                    up: !matches!(
+                        i.oper_status,
+                        if_addrs::IfOperStatus::Down
+                            | if_addrs::IfOperStatus::LowerLayerDown
+                            | if_addrs::IfOperStatus::NotPresent
+                    ),
+                    ..Interface::new(&i.name, i.ip())
+                })
                 .collect()
         })
     }

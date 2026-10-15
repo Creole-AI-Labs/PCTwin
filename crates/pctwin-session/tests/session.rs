@@ -50,6 +50,23 @@ async fn within<T>(step: impl std::future::Future<Output = T>) -> T {
         .expect("the step finished within 10 seconds")
 }
 
+/// Starts the old laptop as the app does once the connection is known: the likely Wi-Fi, or
+/// (on a test machine with several adapters, where the app would ask) the first candidate.
+async fn start_old(label: Label) -> OldLaptop {
+    let interfaces = pctwin_doctor::probe::interfaces().unwrap();
+    let name = pctwin_session::likely_wifi(&interfaces)
+        .or_else(|| {
+            pctwin_session::pairing_candidates(&interfaces)
+                .into_iter()
+                .next()
+        })
+        .expect("a network to pair on");
+    let network = pctwin_session::pairing_network(&interfaces, Some(&name)).unwrap();
+    OldLaptop::start_on(label, config(), &network)
+        .await
+        .unwrap()
+}
+
 fn closed_port() -> SocketAddr {
     let spare = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = spare.local_addr().unwrap();
@@ -60,7 +77,7 @@ fn closed_port() -> SocketAddr {
 #[tokio::test]
 async fn the_new_laptop_finds_the_old_laptop_by_its_label_and_pairs() {
     let label = unique("journey");
-    let old = OldLaptop::start(label.clone(), config()).await.unwrap();
+    let old = start_old(label.clone()).await;
     assert_eq!(old.label(), &label);
     let sender = sender();
     let code = shown_code(&sender);
@@ -84,7 +101,7 @@ async fn the_new_laptop_finds_the_old_laptop_by_its_label_and_pairs() {
 #[tokio::test]
 async fn shuffle_or_a_new_name_changes_what_the_new_laptop_sees() {
     let first = unique("before");
-    let mut old = OldLaptop::start(first.clone(), config()).await.unwrap();
+    let mut old = start_old(first.clone()).await;
     let second = unique("after");
     old.relabel(second.clone()).unwrap();
     assert_eq!(old.label(), &second);
@@ -96,7 +113,7 @@ async fn shuffle_or_a_new_name_changes_what_the_new_laptop_sees() {
 #[tokio::test]
 async fn when_pairing_ends_the_old_laptop_disappears_and_stops_listening() {
     let label = unique("ending");
-    let old = OldLaptop::start(label.clone(), config()).await.unwrap();
+    let old = start_old(label.clone()).await;
     let found = search(WAIT).await.unwrap();
     let chosen = mine(&found, &label)[0].clone();
     drop(old);
@@ -110,7 +127,7 @@ async fn when_pairing_ends_the_old_laptop_disappears_and_stops_listening() {
 #[tokio::test]
 async fn an_unreachable_address_is_skipped_for_the_next_one() {
     let label = unique("skip");
-    let old = OldLaptop::start(label.clone(), config()).await.unwrap();
+    let old = start_old(label.clone()).await;
     let sender = sender();
     let code = shown_code(&sender);
     let found = search(WAIT).await.unwrap();
@@ -130,8 +147,8 @@ async fn an_unreachable_address_is_skipped_for_the_next_one() {
 #[tokio::test]
 async fn a_wrong_code_is_never_tried_at_a_second_address() {
     // Two old laptops; the found entry wrongly lists the second one's address after the first.
-    let first = OldLaptop::start(unique("first"), config()).await.unwrap();
-    let second = OldLaptop::start(unique("second"), config()).await.unwrap();
+    let first = start_old(unique("first")).await;
+    let second = start_old(unique("second")).await;
     let first_sender = sender();
     let second_sender = sender();
     let found = search(WAIT).await.unwrap();
@@ -237,9 +254,7 @@ async fn once_an_address_answers_no_other_address_is_ever_tried() {
 
 #[tokio::test]
 async fn pairing_works_after_a_shuffle() {
-    let mut old = OldLaptop::start(unique("before shuffle"), config())
-        .await
-        .unwrap();
+    let mut old = start_old(unique("before shuffle")).await;
     let after = unique("after shuffle");
     old.relabel(after.clone()).unwrap();
     let sender = sender();

@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 pctwin-discovery = { path = "../pctwin-discovery" }
+pctwin-doctor = { path = "../pctwin-doctor" }
 pctwin-link = { path = "../pctwin-link" }
 pctwin-pairing = { path = "../pctwin-pairing" }
 thiserror = "2.0.21"
