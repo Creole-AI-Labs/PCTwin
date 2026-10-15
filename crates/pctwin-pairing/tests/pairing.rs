@@ -233,8 +233,10 @@ fn codes_vary_across_all_digit_positions() {
 
 #[test]
 fn typed_codes_ignore_spaces_and_reject_anything_else() {
+    // Full-width and other scripts' digits, and dashes, are read too (Language Design; see
+    // tests/digits.rs). A dash in the wrong place still leaves the wrong number of digits.
     assert_eq!(PairingCode::parse(" 123 456 ").unwrap().digits(), "123456");
-    for bad in ["12345", "1234567", "12345a", "", "１２３４５６", "12-456"] {
+    for bad in ["12345", "1234567", "12345a", "", "12-45"] {
         assert!(
             matches!(PairingCode::parse(bad), Err(PairingError::InvalidCode)),
             "accepted {bad:?}"
