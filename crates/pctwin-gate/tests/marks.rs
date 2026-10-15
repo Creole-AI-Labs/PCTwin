@@ -4,6 +4,8 @@
 //! Only the marker's level travels (internet or restricted), never the web address or anything
 //! else the old laptop wrote. Linux has no standard marker, so there is nothing to keep there.
 
+mod common;
+
 use std::io::Write;
 use std::path::Path;
 
@@ -19,7 +21,7 @@ fn receive(dest: &Destination, name: &str, mark: Option<DownloadMark>) -> String
     }
     let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
     file.keep_modified_time(when);
-    file.finish().unwrap().final_path
+    common::finish(file).unwrap().final_path
 }
 
 /// What the new laptop's system now says about the file at `path`.
@@ -177,7 +179,7 @@ fn a_drive_that_cannot_keep_markers_still_gets_the_file_and_says_so() {
         .unwrap();
     file.write_all(b"abc").unwrap();
     file.keep_download_mark(DownloadMark::Restricted);
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.mark_not_kept, Some(DownloadMark::Restricted));
     assert_eq!(
         std::fs::read(root.path().join("setup.exe")).unwrap(),
@@ -190,7 +192,7 @@ fn a_drive_that_cannot_keep_markers_still_gets_the_file_and_says_so() {
         .create_file(&IncomingPath::parse("notes.txt").unwrap(), 1)
         .unwrap();
     file.write_all(b"x").unwrap();
-    assert_eq!(file.finish().unwrap().mark_not_kept, None);
+    assert_eq!(common::finish(file).unwrap().mark_not_kept, None);
 }
 
 /// Where the marker is kept, nothing is reported lost.
@@ -203,7 +205,7 @@ fn a_kept_marker_is_not_reported_lost() {
         .unwrap();
     file.write_all(b"x").unwrap();
     file.keep_download_mark(DownloadMark::Internet);
-    assert_eq!(file.finish().unwrap().mark_not_kept, None);
+    assert_eq!(common::finish(file).unwrap().mark_not_kept, None);
 }
 
 /// Restricted is stricter than internet, and any marker stricter than none: when two answers
