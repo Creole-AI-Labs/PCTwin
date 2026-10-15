@@ -665,7 +665,10 @@ impl Paired {
     fn new(transport: Transport, lane_secret: Zeroizing<[u8; 32]>, opens_lanes: bool) -> Self {
         Self {
             transport,
-            lanes: LaneKeys(Openings::new(lane_secret, opens_lanes, &LANES, None)),
+            lanes: LaneKeys {
+                lanes: Openings::new(lane_secret, opens_lanes, &LANES, None),
+                resumes_taken: false,
+            },
         }
     }
 
@@ -697,14 +700,18 @@ impl Paired {
 
 /// What a paired session needs to open (new laptop) or accept (old laptop) extra lanes: a secret
 /// bound to exactly this pairing, and which lane numbers are used. Wiped from memory when dropped.
-pub struct LaneKeys(Openings);
+pub struct LaneKeys {
+    lanes: Openings,
+    /// Whether the resume keys were already handed out (once per pairing).
+    resumes_taken: bool,
+}
 
 impl LaneKeys {
     /// New laptop: starts an extra lane at time `now`, returning lane message 1 to send on a new
     /// connection to the old laptop. Each call uses the next lane number, never one used before,
     /// even if that lane failed. Only the new laptop opens lanes.
     pub fn open_lane(&mut self, now: Instant) -> Result<(LaneOpening, Vec<u8>), PairingError> {
-        self.0.open(now)
+        self.lanes.open(now)
     }
 
     /// Old laptop: handles lane message 1 from a new connection at time `now`, returning lane
@@ -716,17 +723,27 @@ impl LaneKeys {
         msg1: &[u8],
         now: Instant,
     ) -> Result<(LaneAccepting, Vec<u8>), PairingError> {
-        self.0.accept(msg1, now)
+        self.lanes.accept(msg1, now)
     }
 
     /// Both laptops, once the person approved the plan whose fingerprint is `plan`, at time
     /// `now`: the keys to reconnect after a drop without a new code ([`ResumeKeys`]). They work
-    /// only for this pairing and this plan, until [`RESUME_LIFETIME`] after `now`.
-    pub fn resume_keys(&self, plan: &[u8; 32], now: Instant) -> Result<ResumeKeys, PairingError> {
-        let secret = derive_resume_secret(&self.0.secret, plan)?;
+    /// only for this pairing and this plan, until [`RESUME_LIFETIME`] after `now`. Handed out
+    /// once per pairing: asking again is refused, so neither the time limit nor the record of
+    /// used attempts can be started afresh.
+    pub fn resume_keys(
+        &mut self,
+        plan: &[u8; 32],
+        now: Instant,
+    ) -> Result<ResumeKeys, PairingError> {
+        if self.resumes_taken {
+            return Err(PairingError::LaneRefused);
+        }
+        self.resumes_taken = true;
+        let secret = derive_resume_secret(&self.lanes.secret, plan)?;
         Ok(ResumeKeys(Openings::new(
             secret,
-            self.0.opens,
+            self.lanes.opens,
             &RESUMES,
             Some(now + RESUME_LIFETIME),
         )))
@@ -1696,6 +1713,8 @@ mod tests {
             APPROVE_LABEL,
             COMMIT_LABEL,
             LANE_READY_LABEL,
+            CONFIRM_SALT,
+            REVEAL_LABEL,
             RESUME_SALT,
             RESUME_PSK_SALT,
             RESUME_PROLOGUE_LABEL,

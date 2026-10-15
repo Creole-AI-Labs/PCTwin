@@ -14,8 +14,8 @@
 //! the keys stop working [`RESUME_LIFETIME`] after the plan was approved.
 
 use pctwin_pairing::{
-    LaneKeys, MAX_RESUMES, Paired, PairingCode, PairingError, RESUME_LIFETIME, ReceiverSession,
-    ResumeKeys, SenderSession, Transport,
+    MAX_RESUMES, Paired, PairingCode, PairingError, RESUME_LIFETIME, ReceiverSession, ResumeKeys,
+    SenderSession, Transport,
 };
 use std::time::{Duration, Instant};
 
@@ -44,8 +44,8 @@ fn approved(
     at: Instant,
 ) -> (ResumeKeys, ResumeKeys, Transport, Transport) {
     let (old, new) = pair();
-    let (old_t, old_lanes) = old.into_parts();
-    let (new_t, new_lanes) = new.into_parts();
+    let (old_t, mut old_lanes) = old.into_parts();
+    let (new_t, mut new_lanes) = new.into_parts();
     (
         old_lanes.resume_keys(old_plan, at).unwrap(),
         new_lanes.resume_keys(new_plan, at).unwrap(),
@@ -141,17 +141,49 @@ fn a_lane_is_never_taken_for_a_resume_or_the_other_way_round() {
     let (old, new) = pair();
     let (_, mut old_lanes) = old.into_parts();
     let (_, mut new_lanes) = new.into_parts();
-    let mut old_resume = clone_resume(&old_lanes, now);
-    let mut new_resume = clone_resume(&new_lanes, now);
+    let mut old_resume = old_lanes.resume_keys(&PLAN, now).unwrap();
+    let mut new_resume = new_lanes.resume_keys(&PLAN, now).unwrap();
 
     let (_, lane_1) = new_lanes.open_lane(now).unwrap();
     assert!(old_resume.accept(&lane_1, now).is_err());
     let (_, resume_1) = new_resume.open(now).unwrap();
     assert!(old_lanes.accept_lane(&resume_1, now).is_err());
+    // Even relabelled as the other kind, the keys refuse it, and no number is spent: the genuine
+    // message for each still works afterwards.
+    let mut as_resume = lane_1.clone();
+    as_resume[1] = resume_1[1];
+    assert_eq!(
+        old_resume.accept(&as_resume, now).map(|_| ()).unwrap_err(),
+        PairingError::HandshakeFailed
+    );
+    let mut as_lane = resume_1.clone();
+    as_lane[1] = lane_1[1];
+    assert_eq!(
+        old_lanes
+            .accept_lane(&as_lane, now)
+            .map(|_| ())
+            .unwrap_err(),
+        PairingError::HandshakeFailed
+    );
+    assert!(old_resume.accept(&resume_1, now).is_ok());
+    assert!(old_lanes.accept_lane(&lane_1, now).is_ok());
 }
 
-fn clone_resume(lanes: &LaneKeys, now: Instant) -> ResumeKeys {
-    lanes.resume_keys(&PLAN, now).unwrap()
+/// Resume keys are handed out once per pairing, so the time limit and the record of used attempts
+/// cannot be started afresh by asking again.
+#[test]
+fn resume_keys_are_handed_out_once() {
+    let now = Instant::now();
+    let (old, _) = pair();
+    let (_, mut lanes) = old.into_parts();
+    let _first = lanes.resume_keys(&PLAN, now).unwrap();
+    assert_eq!(
+        lanes
+            .resume_keys(&PLAN, now + RESUME_LIFETIME)
+            .map(|_| ())
+            .unwrap_err(),
+        PairingError::LaneRefused
+    );
 }
 
 #[test]
