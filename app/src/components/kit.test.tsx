@@ -51,8 +51,8 @@ describe("kit components", () => {
   });
 
   it("every result chip shows an icon and a word, never colour alone", () => {
-    const results: Result[] = ["copied", "reinstalled", "converted", "needs-action", "skipped", "failed"];
-    const words = ["Copied", "Reinstalled", "Converted", "Needs action", "Skipped", "Failed"];
+    const results: Result[] = ["copied", "reinstalled", "converted", "needs-action", "skipped-by-user", "failed"];
+    const words = ["Copied", "Reinstalled", "Converted", "Needs action", "Skipped by you", "Failed"];
     withL10n(
       <>
         {results.map((r) => (
