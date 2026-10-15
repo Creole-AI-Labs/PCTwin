@@ -487,3 +487,298 @@ fn the_new_messages_read_back_as_written() {
 fn this_release_speaks_the_move_protocol_that_can_send_again() {
     assert_eq!(pctwin_transfer::MOVE_PROTOCOL.newest(), 2);
 }
+
+/// Plays the new laptop against a real old laptop: takes every piece of every block until the
+/// end, answering each block with a receipt. Returns the blocks taken and the end.
+async fn take_blocks_until_end(new: &mut Mem) -> (u64, Message) {
+    let mut blocks = 0;
+    loop {
+        match hear(new).await {
+            Message::Piece {
+                stream, last: true, ..
+            } => {
+                blocks += 1;
+                say(
+                    new,
+                    &Message::Receipt {
+                        stream,
+                        block: 0,
+                        written: true,
+                    },
+                )
+                .await;
+            }
+            Message::Piece { .. } => {}
+            end @ Message::EndFile { .. } => return (blocks, end),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_new_laptop_that_keeps_asking_again_is_answered_twice_then_the_file_fails() {
+    let l = laptops(&[300_000]);
+    let header = FileSender::open(&l.files[0].0, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let count = header.block_count;
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        say(&mut new, &Message::Ready).await;
+        assert!(matches!(
+            hear(&mut new).await,
+            Message::StartFile { stream: 0, .. }
+        ));
+        say(
+            &mut new,
+            &Message::Have {
+                stream: 0,
+                same_size: None,
+            },
+        )
+        .await;
+        let (first, _) = take_blocks_until_end(&mut new).await;
+        assert_eq!(first, count);
+        let ask = Message::SendAgain {
+            stream: 0,
+            ticket: ResumeTicket {
+                done: BlockMap::new(count),
+                block_size: header.block_size,
+                stamp: header.stamp,
+            },
+        };
+        for round in 0..2 {
+            say(&mut new, &ask).await;
+            let (got, end) = take_blocks_until_end(&mut new).await;
+            assert_eq!(got, count, "round {round}");
+            assert!(
+                matches!(end, Message::EndFile { changed: false, .. }),
+                "{end:?}"
+            );
+        }
+        // A third time: nothing more is read or sent, and the file ends.
+        say(&mut new, &ask).await;
+        let (got, end) = take_blocks_until_end(&mut new).await;
+        assert_eq!(got, 0);
+        assert!(
+            matches!(end, Message::EndFile { changed: true, .. }),
+            "{end:?}"
+        );
+        say(
+            &mut new,
+            &Message::FileDone {
+                stream: 0,
+                ok: false,
+            },
+        )
+        .await;
+        assert_eq!(hear(&mut new).await, Message::AllSent);
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, sender.run(&mut old))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(sender.blocks_sent(), 3 * count);
+    assert!(matches!(
+        sender.outcome(id(0)),
+        Some(SendOutcome::Failed(_))
+    ));
+}
+
+#[tokio::test]
+async fn being_asked_again_for_a_file_not_just_ended_changes_nothing() {
+    let l = laptops(&[300_000, 300_000]);
+    let header = FileSender::open(&l.files[0].0, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let count = header.block_count;
+    let empty = ResumeTicket {
+        done: BlockMap::new(count),
+        block_size: header.block_size,
+        stamp: header.stamp,
+    };
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        say(&mut new, &Message::Ready).await;
+        assert!(matches!(
+            hear(&mut new).await,
+            Message::StartFile { stream: 0, .. }
+        ));
+        // Not ended yet: ignored.
+        say(
+            &mut new,
+            &Message::SendAgain {
+                stream: 0,
+                ticket: empty.clone(),
+            },
+        )
+        .await;
+        say(
+            &mut new,
+            &Message::Have {
+                stream: 0,
+                same_size: None,
+            },
+        )
+        .await;
+        let (got, end) = take_blocks_until_end(&mut new).await;
+        assert_eq!(got, count);
+        assert!(matches!(
+            end,
+            Message::EndFile {
+                stream: 0,
+                changed: false,
+                ..
+            }
+        ));
+        say(
+            &mut new,
+            &Message::FileDone {
+                stream: 0,
+                ok: true,
+            },
+        )
+        .await;
+        // Already done: ignored too.
+        assert!(matches!(
+            hear(&mut new).await,
+            Message::StartFile { stream: 1, .. }
+        ));
+        say(
+            &mut new,
+            &Message::SendAgain {
+                stream: 0,
+                ticket: empty.clone(),
+            },
+        )
+        .await;
+        say(
+            &mut new,
+            &Message::Have {
+                stream: 1,
+                same_size: None,
+            },
+        )
+        .await;
+        let (got, end) = take_blocks_until_end(&mut new).await;
+        assert_eq!(got, count);
+        assert!(matches!(end, Message::EndFile { stream: 1, .. }));
+        say(
+            &mut new,
+            &Message::FileDone {
+                stream: 1,
+                ok: true,
+            },
+        )
+        .await;
+        assert_eq!(hear(&mut new).await, Message::AllSent);
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, sender.run(&mut old))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(sender.blocks_sent(), 2 * count);
+}
+
+/// Damages the first block of every file once, on the way.
+struct DamageFirstBlockOfEach {
+    inner: Mem,
+    seen: std::collections::HashSet<u32>,
+}
+
+impl Channel for DamageFirstBlockOfEach {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        if let Ok(Message::Piece {
+            stream,
+            last: true,
+            mut bytes,
+        }) = Message::decode(data)
+            && self.seen.insert(stream)
+        {
+            let at = bytes.len() - 1;
+            bytes[at] ^= 0x5A;
+            let m = Message::Piece {
+                stream,
+                last: true,
+                bytes,
+            };
+            return self.inner.send(&m.encode()).await;
+        }
+        self.inner.send(data).await
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+#[tokio::test]
+async fn many_files_each_asked_again_never_crowd_out_the_rest() {
+    // More files than the new laptop keeps open at once, each needing a block again.
+    const FILES: usize = 80;
+    let l = laptops(&vec![10_000usize; FILES]);
+    let table = table(&l, None);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (a, mut b) = mem_pair();
+    let mut a = DamageFirstBlockOfEach {
+        inner: a,
+        seen: Default::default(),
+    };
+    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    s.unwrap();
+    r.unwrap();
+    for n in 0..FILES {
+        assert!(
+            matches!(
+                receiver.outcome(id(n as u8)),
+                Some(ReceiveOutcome::Finished(_))
+            ),
+            "file {n}: {:?}",
+            receiver.outcome(id(n as u8))
+        );
+        assert_eq!(std::fs::read(landed(&l, n)).unwrap(), l.files[n].1);
+    }
+}
+
+#[tokio::test]
+async fn on_a_drive_that_reads_every_file_back_wrong_each_file_fails_for_that_reason() {
+    const FILES: usize = 80;
+    let l = laptops(&vec![10_000usize; FILES]);
+    let table = table(&l, Some(Flip::OnRead { at: 0 }));
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (s, r) = {
+        let (mut a, mut b) = mem_pair();
+        tokio::time::timeout(std::time::Duration::from_secs(120), async {
+            tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+        })
+        .await
+        .expect("hung")
+    };
+    s.unwrap();
+    r.unwrap();
+    for n in 0..FILES {
+        match receiver.outcome(id(n as u8)) {
+            Some(ReceiveOutcome::Failed(why)) => {
+                assert!(
+                    why.contains("could not store this file correctly"),
+                    "file {n}: {why}"
+                );
+            }
+            other => panic!("file {n}: {other:?}"),
+        }
+    }
+}

@@ -443,6 +443,9 @@ pub struct SenderSession {
     checks: Vec<(usize, [u8; 32])>,
     /// Jobs opened at least once: opening one again starts a new attempt on a new stream.
     attempted: HashSet<usize>,
+    /// Per job: times the new laptop asked for some of its blocks again, kept across connections,
+    /// so a new laptop that keeps asking cannot make this one read and send it without end.
+    asked_again: Vec<u8>,
 }
 
 impl SenderSession {
@@ -456,6 +459,7 @@ impl SenderSession {
             by_item.insert(job.item, i);
         }
         let states = jobs.iter().map(|_| SendState::Waiting).collect();
+        let jobs_len = jobs.len();
         let streams: Vec<u32> = (0..jobs.len())
             .map(|i| u32::try_from(i).unwrap_or(u32::MAX))
             .collect();
@@ -484,6 +488,7 @@ impl SenderSession {
             dirty: false,
             checks: Vec::new(),
             attempted: HashSet::new(),
+            asked_again: vec![0; jobs_len],
         }
     }
 
@@ -1106,6 +1111,21 @@ impl SenderSession {
             return;
         }
         self.dirty = true;
+        if self.asked_again[job] >= SEND_AGAIN_ROUNDS {
+            // Asked more often than any new laptop does: it ends here, reported, never read again.
+            self.ends.push(Message::EndFile {
+                stream: self.streams[job],
+                stamp_after: ticket.stamp,
+                changed: true,
+            });
+            self.states[job] = SendState::Ended {
+                retry: false,
+                failure: Some("the new laptop kept asking for it again".into()),
+                later: false,
+            };
+            return;
+        }
+        self.asked_again[job] += 1;
         let j = &self.jobs[job];
         let reopened =
             FileSender::open_with(&*self.opener, &j.source, Some(ticket), j.compressible).and_then(
@@ -1119,7 +1139,7 @@ impl SenderSession {
             );
         match reopened {
             Ok((reader, sections)) => {
-                self.scheduler.push(j.item, j.tier);
+                self.scheduler.push_again(j.item, j.tier);
                 self.states[job] = SendState::Open {
                     reader,
                     sections,
