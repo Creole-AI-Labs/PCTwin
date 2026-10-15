@@ -3,8 +3,10 @@ import { useId, useState } from "react";
 import { Badge, Button } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
 import { chosenTotals, type FolderChoice } from "../plan";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
-import { AttentionMark, FolderIcon, RemoveIcon, FolderTitle, PathText, PlanBack, leaf, useFolderName, useFormat } from "./PlanParts";
+import { AttentionMark, FolderIcon, RemoveIcon, FolderTitle, PathText, leaf, useFolderName, useFormat } from "./PlanParts";
 
 export interface ChooseFoldersProps {
   folders: FolderChoice[];
@@ -41,7 +43,7 @@ export default function ChooseFolders({ folders, onToggle, onAddFolder, onRemove
 
   return (
     <div className="plan-screen">
-      <PlanBack onBack={onBack} eyebrow="files-eyebrow" />
+      <TopStrip onBack={onBack} labelId="files-eyebrow" />
       <Heading id="files-title" />
       <Localized id="files-body">
         <p className="subhead" />
@@ -83,11 +85,11 @@ export default function ChooseFolders({ folders, onToggle, onAddFolder, onRemove
           ? l10n.getString("files-total", { count: totals.count, size: fmt.total(totals.bytes, totals.atLeast) })
           : l10n.getString("files-none")}
       </p>
-      <div className="plan-actions">
-        <Button variant="primary" icon={<ArrowForward />} disabled={totals.count === 0} aria-describedby="files-total" onClick={onContinue}>
-          {l10n.getString("files-continue")}
-        </Button>
-      </div>
+      <FrameFooter>
+          <Button variant="primary" icon={<ArrowForward />} disabled={totals.count === 0} aria-describedby="files-total" onClick={onContinue}>
+            {l10n.getString("files-continue")}
+          </Button>
+      </FrameFooter>
     </div>
   );
 }

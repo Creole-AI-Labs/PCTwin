@@ -25,6 +25,7 @@ import Destination from "./Destination";
 import Overview from "./Overview";
 import PlanReview from "./PlanReview";
 import ScanProgress from "./ScanProgress";
+import { FooterProvider } from "./FrameFooter";
 
 const l10n = localization("en");
 const text = (id: string, vars?: Record<string, string | number>) => l10n.getString(id, vars);
@@ -185,8 +186,8 @@ describe("M02 scan progress and resume", () => {
     const bar = screen.getByRole("progressbar", { name: attr("scan-progress", "aria-label") });
     expect(bar.getAttribute("aria-valuenow")).toBe("43");
     // Each step says where it is in words, not by colour.
-    expect(within(screen.getByText(text("scan-step-usual-title")).closest("li") as HTMLElement).getByText(text("scan-step-current"))).toBeTruthy();
-    expect(within(screen.getByText(text("scan-step-other-title")).closest("li") as HTMLElement).getByText(text("scan-step-todo"))).toBeTruthy();
+    expect(within(screen.getByText(text("scan-step-usual-title")).closest("li") as HTMLElement).getByText(text("frame-step-current"))).toBeTruthy();
+    expect(within(screen.getByText(text("scan-step-other-title")).closest("li") as HTMLElement).getByText(text("frame-step-todo"))).toBeTruthy();
     expect(screen.getByRole("button", { name: text("scan-pause") })).toBeTruthy();
     expect(screen.queryByRole("button", { name: text("scan-continue") })).toBeNull();
     expect(screen.queryByRole("button", { name: text("scan-resume") })).toBeNull();
@@ -262,7 +263,7 @@ describe("M02 scan progress and resume", () => {
     expect(screen.getAllByText(text("scan-status-not-searched"))).toHaveLength(2);
     expect(screen.getByText("D:\\Archive\\Locked")).toBeTruthy();
     // The protected step is still to come, in words.
-    expect(within(screen.getByText(text("scan-step-protected-title")).closest("li") as HTMLElement).getByText(text("scan-step-todo"))).toBeTruthy();
+    expect(within(screen.getByText(text("scan-step-protected-title")).closest("li") as HTMLElement).getByText(text("frame-step-todo"))).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: text("scan-allow") })[1]);
     expect(onAllowAccess).toHaveBeenCalledWith("D:\\Archive\\Locked");
     fireEvent.click(screen.getByRole("button", { name: text("scan-continue") }));
@@ -725,5 +726,51 @@ describe("M23 plan review and approval", () => {
     inApp(view(sample.plan, good, { onEdit }));
     fireEvent.click(screen.getByRole("button", { name: text("plan-edit") }));
     expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ---------- The main action sits in the window footer ---------- */
+
+describe("the primary action is in the footer bar", () => {
+  function inFrame(ui: ReactNode) {
+    return render(
+      <LocalizationProvider l10n={l10n}>
+        <FooterProvider>
+          <main>{ui}</main>
+        </FooterProvider>
+      </LocalizationProvider>,
+    );
+  }
+  const footer = () => within(document.querySelector("footer") as HTMLElement);
+
+  it("M02 (finished): Preview inventory; the current step is marked", () => {
+    inFrame(<ScanProgress scan={sample.finished} onPause={noop} onResume={noop} onContinue={noop} />);
+    expect(footer().getByRole("button", { name: text("scan-continue") })).toBeTruthy();
+  });
+
+  it("M02 (scanning): the current step has aria-current", () => {
+    inFrame(<ScanProgress scan={sample.scanning} onPause={noop} onResume={noop} onContinue={noop} />);
+    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain(text("scan-step-usual-title"));
+    expect(footer().getByRole("button", { name: text("scan-pause") })).toBeTruthy();
+  });
+
+  it("M03, M04, M05 keep Continue in the footer", () => {
+    const a = inFrame(<Overview view={sample.overview} onOpen={noop} onContinue={noop} />);
+    expect(footer().getByRole("button", { name: text("overview-continue") })).toBeTruthy();
+    a.unmount();
+    const b = inFrame(<ChooseFolders folders={sample.foldersDefault} onToggle={noop} onAddFolder={noop} onRemove={noop} onAllowAccess={noop} onContinue={noop} onBack={noop} />);
+    expect(footer().getByRole("button", { name: text("files-continue") })).toBeTruthy();
+    b.unmount();
+    inFrame(<Destination groups={sample.groupsMapped} drives={sample.drivesMapped} onSetDestination={noop} onSetAll={noop} onChooseFolder={noop} onContinue={noop} onBack={noop} />);
+    expect(footer().getByRole("button", { name: text("dest-continue") })).toBeTruthy();
+  });
+
+  it("M23: Start the move is in the footer and stays closed until the matching approval", () => {
+    const good = { revision: sample.plan.revision, fingerprint: sample.plan.fingerprint };
+    const { unmount } = inFrame(<PlanReview plan={sample.plan} approval={null} onApprovalChange={noop} onStart={noop} onEdit={noop} />);
+    expect(footer().getByRole<HTMLButtonElement>("button", { name: text("plan-start") }).disabled).toBe(true);
+    unmount();
+    inFrame(<PlanReview plan={sample.plan} approval={good} onApprovalChange={noop} onStart={noop} onEdit={noop} />);
+    expect(footer().getByRole<HTMLButtonElement>("button", { name: text("plan-start") }).disabled).toBe(false);
   });
 });

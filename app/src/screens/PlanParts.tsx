@@ -1,30 +1,8 @@
 /** Pieces shared by the plan screens (M02 to M23): Back, folder names, sizes and numbers in the person's language, and the step icons. */
 import { Localized, useLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
-import { ArrowBack } from "../icons";
 import { sizeParts, type FolderRole, type Size } from "../plan";
 import "./plan.css";
-
-/** The top strip every plan screen has in the mockups: Back on one side, the small label of the step on the other. */
-export function PlanBack({ onBack, eyebrow }: { onBack?: () => void; eyebrow: string }) {
-  return (
-    <div className="plan-strip">
-      {onBack ? (
-        <button type="button" className="back" onClick={onBack}>
-          <ArrowBack />
-          <Localized id="plan-back">
-            <span />
-          </Localized>
-        </button>
-      ) : (
-        <span />
-      )}
-      <Localized id={eyebrow}>
-        <p className="eyebrow plan-eyebrow" />
-      </Localized>
-    </div>
-  );
-}
 
 /** A card with a title, like the boxes in the mockups. */
 export function PlanBox({ title, children }: { title: ReactNode; children: ReactNode }) {

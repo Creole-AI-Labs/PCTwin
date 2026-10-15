@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
 import { approvalHolds, leftOutByHand, type Approval, type PlanView } from "../plan";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
-import { FolderTitle, PathText, PlanBack, PlanBox, useFormat } from "./PlanParts";
+import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
 
 export interface PlanReviewProps {
   plan: PlanView;
@@ -66,7 +68,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
 
   return (
     <div className="plan-screen plan-wide">
-      <PlanBack onBack={onBack} eyebrow="plan-eyebrow" />
+      <TopStrip onBack={onBack} labelId="plan-eyebrow" />
       <Heading id="plan-title" />
       <Localized id="plan-body">
         <p className="subhead" />
@@ -173,19 +175,21 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
 
       <div className="plan-actions">
         <Button onClick={onEdit}>{l10n.getString("plan-edit")}</Button>
-        <Button
-          variant="primary"
-          icon={<ArrowForward />}
-          disabled={!canStart}
-          aria-describedby={holds ? undefined : "plan-hint"}
-          onClick={() => {
-            // Checked again at the moment of the click: the approval must still be for this exact plan.
-            if (approval && approvalHolds(plan, approval) && !blocked) onStart(approval);
-          }}
-        >
-          {l10n.getString("plan-start")}
-        </Button>
       </div>
+      <FrameFooter>
+          <Button
+            variant="primary"
+            icon={<ArrowForward />}
+            disabled={!canStart}
+            aria-describedby={holds ? undefined : "plan-hint"}
+            onClick={() => {
+              // Checked again at the moment of the click: the approval must still be for this exact plan.
+              if (approval && approvalHolds(plan, approval) && !blocked) onStart(approval);
+            }}
+          >
+            {l10n.getString("plan-start")}
+          </Button>
+      </FrameFooter>
     </div>
   );
 }
