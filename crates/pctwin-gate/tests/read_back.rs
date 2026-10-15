@@ -412,3 +412,18 @@ fn a_file_in_a_compressed_folder_is_said_to_be_checked_from_memory() {
     assert!(check.passed());
     assert_eq!(check.from, CheckedFrom::Memory(WhyMemory::StoredSpecially));
 }
+
+#[test]
+fn a_file_compressed_while_it_is_read_back_never_says_drive() {
+    let (_root, dest) = with_faults(FaultPlan {
+        stored_specially_while_read: true,
+        ..FaultPlan::default()
+    });
+    let data = content(200_000);
+    let mut file = written(&dest, "a.bin", &data, 4096);
+    let check = file.verify(4096, &hashes(&data, 4096)).unwrap();
+    assert!(check.passed());
+    assert_ne!(check.from, CheckedFrom::Drive);
+    let done = file.finish().unwrap();
+    assert_ne!(done.checked_from, Some(CheckedFrom::Drive));
+}

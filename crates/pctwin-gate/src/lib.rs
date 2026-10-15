@@ -429,6 +429,9 @@ pub struct FaultPlan {
     /// The drive takes reads past the cache, but each file is read through memory anyway (as
     /// compressed or encrypted files are).
     pub served_from_memory: bool,
+    /// Each file is read from the drive at first, then another program compresses it while it
+    /// is read, so the rest comes through memory.
+    pub stored_specially_while_read: bool,
 }
 
 /// For tests: when a byte goes wrong.
@@ -615,12 +618,16 @@ impl Destination {
             }
             CheckedFrom::Memory(_) => dir.open(name)?.into_std(),
         };
-        // The drive passed, but this very file may still be read through memory.
-        if from == CheckedFrom::Drive
-            && let Err(why) = self.this_file_from_drive(&file)
-        {
-            from = CheckedFrom::Memory(why);
-        }
+        // The drive passed, but this very file may still be read through memory: then it is read
+        // through an ordinary handle (some drives refuse a direct read of such a file).
+        let file = match (from, self.this_file_from_drive(&file)) {
+            (CheckedFrom::Drive, Err(why)) => {
+                from = CheckedFrom::Memory(why);
+                drop(file);
+                dir.open(name)?.into_std()
+            }
+            _ => file,
+        };
         // Never check some other file put under the same name meanwhile.
         if let (Some(id), Ok((found, _))) = (id, identity(&file))
             && found != id
@@ -641,6 +648,20 @@ impl Destination {
     #[cfg(not(feature = "fault-plan"))]
     fn this_file_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
         read_back::this_file_from_drive(file)
+    }
+
+    /// As [`this_file_from_drive`](Self::this_file_from_drive), after the last read.
+    #[cfg(feature = "fault-plan")]
+    fn still_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        if self.faults.plan.stored_specially_while_read {
+            return Err(WhyMemory::StoredSpecially);
+        }
+        self.this_file_from_drive(file)
+    }
+
+    #[cfg(not(feature = "fault-plan"))]
+    fn still_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        self.this_file_from_drive(file)
     }
 
     #[cfg(feature = "fault-plan")]
@@ -2131,7 +2152,10 @@ impl<'d> IncomingFile<'d> {
         let mut reader =
             self.destination
                 .read_back_of(&self.dir, temp, &held, self.pages_kept_out)?;
-        let check = read_back::check_blocks(&mut reader, self.announced, block_size, hashes)?;
+        let mut check = read_back::check_blocks(&mut reader, self.announced, block_size, hashes)?;
+        // Judged again after the last read: a file whose storage changed while it was read (another
+        // program compressed it) was not read from the drive throughout.
+        check.from = reader.judged_after(|f| self.destination.still_from_drive(f));
         if check.passed() {
             self.read_back = Some(check.from);
         }
