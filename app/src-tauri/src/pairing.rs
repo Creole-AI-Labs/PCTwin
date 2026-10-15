@@ -67,15 +67,18 @@ impl<S: Serving> Pairing<S> {
     }
 
     /// Starts the old laptop's side with `start`, never replacing pairing already under way or
-    /// done. Returns the screen updates to pass on.
+    /// done, and never while this laptop is pairing as the new laptop. Returns the screen updates
+    /// to pass on.
     async fn begin_old(
         &self,
         start: impl Future<
             Output = Result<(OldJourney<S>, mpsc::UnboundedReceiver<OldUpdate>), Problem>,
         >,
     ) -> Result<mpsc::UnboundedReceiver<OldUpdate>, Problem> {
+        // Each side's lock is looked at on its own, never held together with the other's.
+        let new_running = self.new_running().await;
         let mut old = self.old.lock().await;
-        if old.is_some() || self.link.lock().await.is_some() {
+        if old.is_some() || self.link.lock().await.is_some() || new_running {
             return Err(Problem::Failed);
         }
         let (journey, updates) = start.await?;
@@ -107,16 +110,28 @@ impl<S: Serving> Pairing<S> {
         self.found.lock().await.clear();
     }
 
+    /// Whether this laptop is waiting, as the new laptop, for an approval.
+    async fn new_running(&self) -> bool {
+        self.approval
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|a| !a.inner().is_finished())
+    }
+
     /// The new laptop connects with `connect` and returns the number to show; the approval (or
-    /// the attempt's end) goes to `tell` later. Only one attempt at a time, and none once paired.
+    /// the attempt's end) goes to `tell` later. Only one attempt at a time, none once paired, and
+    /// none while this laptop is pairing as the old laptop.
     async fn begin_new(
         self: &Arc<Self>,
         connect: impl Future<Output = Result<Waiting, Problem>>,
         tell: impl FnOnce(NewView) + Send + 'static,
     ) -> Result<u8, Problem> {
+        let old_running = self.old.lock().await.is_some();
         let mut approval = self.approval.lock().await;
         if approval.as_ref().is_some_and(|a| !a.inner().is_finished())
             || self.link.lock().await.is_some()
+            || old_running
         {
             return Err(Problem::Failed);
         }
@@ -191,6 +206,7 @@ pub enum OldView {
     },
     Paired,
     TimedOut,
+    Left,
 }
 
 impl From<OldUpdate> for OldView {
@@ -203,6 +219,7 @@ impl From<OldUpdate> for OldView {
             OldUpdate::Choose { round, numbers } => Self::Choose { round, numbers },
             OldUpdate::Paired => Self::Paired,
             OldUpdate::TimedOut => Self::TimedOut,
+            OldUpdate::Left => Self::Left,
         }
     }
 }
@@ -549,6 +566,74 @@ mod tests {
         next(&mut first, code_of).await;
     }
 
+    /// A new laptop that left during the pick never pairs: the old laptop keeps no link, says so,
+    /// and can start pairing again.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_new_laptop_that_left_never_pairs_and_the_old_laptop_can_start_again() {
+        let old = Pairing::<Loopback>::default();
+        let new = Arc::new(Pairing::<Loopback>::default());
+        let (mut updates, found) = start_old(&old).await.unwrap();
+        let code = next(&mut updates, code_of).await;
+        let number = new
+            .begin_new(
+                async { NewJourney::new(quick()).connect(&found, &code).await },
+                |_| {},
+            )
+            .await
+            .unwrap();
+        let round = next(&mut updates, round_of).await;
+        new.stop().await;
+        next(&mut updates, |u| (*u == OldUpdate::Left).then_some(())).await;
+        assert!(old.pick(round, number).await.is_err());
+        assert!(old.link.lock().await.is_none());
+        old.stop().await;
+        assert!(
+            start_old(&old).await.is_ok(),
+            "stuck after a new laptop left"
+        );
+    }
+
+    /// One new-laptop attempt at a time, and a laptop is never both laptops at once.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_attempt_at_a_time_and_never_both_sides() {
+        let old = Pairing::<Loopback>::default();
+        let new = Arc::new(Pairing::<Loopback>::default());
+        let (mut updates, found) = start_old(&old).await.unwrap();
+        let code = next(&mut updates, code_of).await;
+        new.begin_new(
+            async { NewJourney::new(quick()).connect(&found, &code).await },
+            |_| {},
+        )
+        .await
+        .unwrap();
+        let again = new
+            .begin_new(async { Err(Problem::Unreachable) }, |_| {})
+            .await;
+        assert_eq!(
+            again.err(),
+            Some(Problem::Failed),
+            "a second attempt started"
+        );
+        assert_eq!(
+            start_old(&new).await.err(),
+            Some(Problem::Failed),
+            "the new laptop also became an old laptop"
+        );
+        let other = Arc::new(Pairing::<Loopback>::default());
+        let _ = start_old(&other).await.unwrap();
+        assert_eq!(
+            other
+                .begin_new(async { Err(Problem::Unreachable) }, |_| {})
+                .await
+                .err(),
+            Some(Problem::Failed),
+            "the old laptop also became a new laptop"
+        );
+        // Leaving clears this laptop's side, so it can start afresh.
+        new.stop().await;
+        assert!(start_old(&new).await.is_ok());
+    }
+
     /// Leaving pairing ends the new laptop's wait for an approval: nothing is told afterwards.
     #[tokio::test(flavor = "multi_thread")]
     async fn stop_ends_the_wait_for_an_approval() {
@@ -611,6 +696,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(OldView::from(OldUpdate::TimedOut)).unwrap(),
             serde_json::json!({ "kind": "timed-out" })
+        );
+        assert_eq!(
+            serde_json::to_value(OldView::from(OldUpdate::Left)).unwrap(),
+            serde_json::json!({ "kind": "left" })
         );
     }
 

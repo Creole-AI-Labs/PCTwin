@@ -165,6 +165,9 @@ pub enum OldUpdate {
     Paired,
     /// The person did not pick in time; a fresh code follows.
     TimedOut,
+    /// The new laptop left (or its connection broke) before a number was picked; a fresh code
+    /// follows.
+    Left,
 }
 
 /// What the old laptop serves pairing through: the real [`OldLaptop`] (listening and announced
@@ -215,7 +218,7 @@ struct Turn {
 /// The old laptop's side of the journey. Dropping it ends pairing and stops listening; pairing
 /// also stops listening and announcing on its own, once paired.
 pub struct OldJourney<S: Serving> {
-    /// Taken (and so dropped, closing the port) once paired.
+    /// Taken by the serving task (and so dropped, closing the port) once paired.
     serving: Arc<Mutex<Option<Arc<S>>>>,
     sender: Arc<Mutex<RotatingSender>>,
     /// The round waiting for the person's answer, if any.
@@ -271,6 +274,7 @@ impl<S: Serving> OldJourney<S> {
         )));
         journey.tasks.push(tokio::spawn(serve(
             serving,
+            journey.serving.clone(),
             journey.sender.clone(),
             journey.pending.clone(),
             journey.finished.clone(),
@@ -287,11 +291,7 @@ impl<S: Serving> OldJourney<S> {
         let (outcome, picked) = oneshot::channel();
         self.answer(round, Decision::Pick(number, outcome))?;
         // No outcome means the pick's deadline came first: serving has moved on.
-        let link = picked.await.map_err(|_| Problem::TimedOut)??;
-        // Our share of the serving side; the serving task has already let go of its own, so the
-        // port and the announcement close.
-        drop(lock_serving(&self.serving).take());
-        Ok(link)
+        picked.await.map_err(|_| Problem::TimedOut)?
     }
 
     /// None of the three numbers shown for `round` matches the new laptop's (or it shows none):
@@ -409,10 +409,12 @@ async fn show_codes(
 }
 
 /// Serves new laptops one at a time: each that reaches the number pick waits for the person's
-/// answer or the pick's deadline, whichever comes first, then the next is served. Once paired,
-/// serving ends, and with it this task's hold on the port and the announcement.
+/// answer, the pick's deadline, or the new laptop leaving, whichever comes first, then the next is
+/// served. Once paired, serving ends and lets go of the serving side (`shared` is the journey's
+/// own share), which closes the port and the announcement.
 async fn serve<S: Serving>(
     serving: Arc<S>,
+    shared: Arc<Mutex<Option<Arc<S>>>>,
     sender: Arc<Mutex<RotatingSender>>,
     pending: Arc<Mutex<Option<Turn>>>,
     finished: Arc<AtomicBool>,
@@ -439,19 +441,21 @@ async fn serve<S: Serving>(
         let decision = tokio::select! {
             // An answer that came in just as the time ran out still counts.
             biased;
-            d = decided => d.ok(),
-            () = tokio::time::sleep_until(deadline) => None,
+            d = decided => d.ok().map(Ended::Answered),
+            () = tokio::time::sleep_until(deadline) => Some(Ended::TimeRanOut),
+            () = peer.gone() => Some(Ended::Left),
         };
         // Whatever happened, this round can no longer be answered.
         pending
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take_if(|t| t.round == round);
-        match decision {
-            Some(Decision::Pick(number, outcome)) => {
+        match decision.unwrap_or(Ended::TimeRanOut) {
+            Ended::Answered(Decision::Pick(number, outcome)) => {
                 match peer.choose(number, Instant::now()).await {
                     Ok(link) => {
                         finished.store(true, Ordering::SeqCst);
+                        drop(lock_serving(&shared).take());
                         let _ = updates.send(OldUpdate::Paired);
                         let _ = outcome.send(Ok(link));
                         return;
@@ -461,16 +465,26 @@ async fn serve<S: Serving>(
                     }
                 }
             }
-            Some(Decision::Decline(told)) => {
+            Ended::Answered(Decision::Decline(told)) => {
                 peer.decline().await;
                 let _ = told.send(());
             }
-            None => {
+            Ended::TimeRanOut => {
                 peer.time_out().await;
                 let _ = updates.send(OldUpdate::TimedOut);
             }
+            Ended::Left => {
+                let _ = updates.send(OldUpdate::Left);
+            }
         }
     }
+}
+
+/// How one round of numbers ended.
+enum Ended {
+    Answered(Decision),
+    TimeRanOut,
+    Left,
 }
 
 /// A pick that did not pair, as the old laptop's screen says it: one that came too late is the
