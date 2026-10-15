@@ -11,10 +11,10 @@ import StopMove from "../../screens/StopMove";
 import type { MoveProgress } from "../../move";
 
 const nothing = () => undefined;
-const handlers = { onPause: nothing, onResume: nothing, onStop: nothing, onSeeNeedsAction: nothing };
+const handlers = { onPause: nothing, onResume: nothing, onSeeNeedsAction: nothing };
 
-const compact = (progress: MoveProgress) => <ProgressCompact progress={progress} onExpand={nothing} onMinimise={nothing} {...handlers} />;
-const detail = (progress: MoveProgress) => <ProgressDetail progress={progress} onCollapse={nothing} {...handlers} />;
+const compact = (progress: MoveProgress) => <ProgressCompact progress={progress} onMinimise={nothing} {...handlers} />;
+const detail = (progress: MoveProgress) => <ProgressDetail progress={progress} onCollapse={nothing} onSeeNeedsAction={nothing} />;
 const mini = (progress: MoveProgress, kind: "move" | "send" = "move") => <MiniPanel kind={kind} progress={progress} onPause={nothing} onResume={nothing} onOpen={nothing} />;
 
 export const samples: Sample[] = [
@@ -29,12 +29,12 @@ export const samples: Sample[] = [
   { id: "F09-moving", title: "Mini panel", size: "mini", render: () => mini(data.running) },
   { id: "F09-paused", title: "Mini panel, paused", size: "mini", render: () => mini(data.paused) },
   { id: "F09-send", title: "Mini panel, Quick Send", size: "mini", render: () => mini(data.running, "send") },
-  { id: "X05-pausing", title: "Pausing, file still finishing", size: "everyday", render: () => <Paused progress={data.pausing} onResume={nothing} onStop={nothing} /> },
-  { id: "X05-paused", title: "Paused at a safe point", size: "everyday", render: () => <Paused progress={data.paused} onResume={nothing} onStop={nothing} /> },
+  { id: "X05-pausing", title: "Pausing, file still finishing", size: "everyday", render: () => <Paused progress={data.pausing} onResume={nothing} /> },
+  { id: "X05-paused", title: "Paused at a safe point", size: "everyday", render: () => <Paused progress={data.paused} onResume={nothing} /> },
   { id: "X10-stop", title: "Stop the rest of the move?", size: "everyday", render: () => <StopMove open onStop={nothing} onKeep={nothing} /> },
-  { id: "R01-clean", title: "Outcome, everything copied", size: "everyday", render: () => <Outcome outcome={data.finishedClean} onReport={nothing} onHome={nothing} /> },
-  { id: "R01-mixed", title: "Outcome, some need you or failed", size: "everyday", render: () => <Outcome outcome={data.finishedMixed} onReport={nothing} onHome={nothing} /> },
-  { id: "R01-memory", title: "Outcome, checked from memory", size: "everyday", render: () => <Outcome outcome={data.finishedMemory} onReport={nothing} onHome={nothing} /> },
-  { id: "R01-stopped", title: "Outcome, stopped by the person", size: "everyday", render: () => <Outcome outcome={data.finishedStopped} onReport={nothing} onHome={nothing} /> },
+  { id: "R01-clean", title: "Outcome, everything copied", size: "everyday", render: () => <Outcome outcome={data.finishedClean} onReport={nothing} /> },
+  { id: "R01-mixed", title: "Outcome, some need you or failed", size: "everyday", render: () => <Outcome outcome={data.finishedMixed} onReport={nothing} /> },
+  { id: "R01-memory", title: "Outcome, checked from memory", size: "everyday", render: () => <Outcome outcome={data.finishedMemory} onReport={nothing} /> },
+  { id: "R01-stopped", title: "Outcome, stopped by the person", size: "everyday", render: () => <Outcome outcome={data.finishedStopped} onReport={nothing} /> },
   { id: "R02-report", title: "Report, item by item", size: "expanded", render: () => <Report items={data.report} onBack={nothing} /> },
 ];

@@ -22,6 +22,7 @@ import {
 } from "../move";
 import * as sample from "../moveSamples";
 import { counts } from "../moveSamples";
+import { FooterProvider } from "./FrameFooter";
 import MiniPanel from "./MiniPanel";
 import Outcome from "./Outcome";
 import Paused from "./Paused";
@@ -65,6 +66,23 @@ function inApp(ui: ReactNode) {
       <main>{ui}</main>
     </LocalizationProvider>,
   );
+}
+
+/** The window as the app draws it: content, then the footer the screens draw their actions into. */
+function inFrame(ui: ReactNode) {
+  return render(
+    <LocalizationProvider l10n={l10n}>
+      <FooterProvider>
+        <main>{ui}</main>
+      </FooterProvider>
+    </LocalizationProvider>,
+  );
+}
+
+function footerEl(): HTMLElement {
+  const el = document.querySelector<HTMLElement>("footer.app-footer");
+  if (!el) throw new Error("no footer");
+  return el;
 }
 
 async function violations(): Promise<string[]> {
@@ -211,7 +229,7 @@ describe("X01 Move progress, compact", () => {
   const groupRow = (name: string) => screen.getAllByRole("listitem").find((li) => li.textContent.includes(name)) as HTMLElement;
 
   it("shows what is measured: the bar, sizes, the two laptops and each group", async () => {
-    inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(text("progress-title"));
     expect(document.activeElement).toBe(heading);
@@ -233,12 +251,12 @@ describe("X01 Move progress, compact", () => {
   });
 
   it("time left and speed are ranges, and only when measured", () => {
-    const { unmount } = inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    const { unmount } = inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     const range = text("progress-minutes", { low: 15, high: 20 });
     expect(screen.getByText(withText(text("progress-time-left", { range })))).toBeTruthy();
     expect(screen.getByText(withText(text("progress-speed", { speed: text("progress-speed-range", { low: 58, high: 66, unit: "MB/s" }) })))).toBeTruthy();
     unmount();
-    inApp(<ProgressCompact progress={sample.starting} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.starting} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.getByText(text("progress-time-measuring"))).toBeTruthy();
     expect(screen.queryByText(hasText("MB/s"))).toBeNull();
     expect(screen.queryByText(hasText("About"))).toBeNull();
@@ -247,12 +265,12 @@ describe("X01 Move progress, compact", () => {
 
   it("a range of one number still reads as a range", () => {
     const p: MoveProgress = { ...sample.running, minutesLeft: { low: 7, high: 7 } };
-    inApp(<ProgressCompact progress={p} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={p} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.getByText(hasText(text("progress-minutes", { low: 7, high: 8 })))).toBeTruthy();
   });
 
   it("never says 100 or done while anything is still being checked", () => {
-    inApp(<ProgressCompact progress={sample.almost} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.almost} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     const bar = screen.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("99");
     expect(document.body.textContent).not.toMatch(/100\s*%/);
@@ -265,7 +283,7 @@ describe("X01 Move progress, compact", () => {
 
   it("with nothing measured the bar is empty and says no number", () => {
     const p: MoveProgress = { ...sample.starting, bytes: { checked: 0, total: 0 } };
-    inApp(<ProgressCompact progress={p} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={p} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.getByRole("progressbar").hasAttribute("aria-valuenow")).toBe(false);
     expect(screen.getByText(text("progress-percent-unknown"))).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/\d\s*%/);
@@ -273,7 +291,7 @@ describe("X01 Move progress, compact", () => {
 
   it("items that need the person are counted apart and do not stop the rest", () => {
     const onSee = vi.fn();
-    inApp(<ProgressCompact progress={sample.withNeedsAction} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={onSee} />);
+    inApp(<ProgressCompact progress={sample.withNeedsAction} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={onSee} />);
     const docs = groupRow("Documents");
     expect(within(docs).getByText(withText(text("progress-count-needs-action", { count: 3 })))).toBeTruthy();
     // Nothing unfinished in it, so it is shown as needing the person, not as verified.
@@ -287,7 +305,7 @@ describe("X01 Move progress, compact", () => {
   });
 
   it("items that could not be copied stay visible", () => {
-    inApp(<ProgressCompact progress={sample.withFailures} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.withFailures} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     const pictures = groupRow("Pictures");
     expect(within(pictures).getByText(withText(text("progress-count-failed", { count: 1 })))).toBeTruthy();
     // Still being worked on, so its state is a working one; the failure is counted under its name.
@@ -295,49 +313,52 @@ describe("X01 Move progress, compact", () => {
   });
 
   it("no line for needs-action or failed when there are none", () => {
-    inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.queryByText(hasText("need your action"))).toBeNull();
     expect(screen.queryByText(hasText("could not be copied"))).toBeNull();
   });
 
   it("says when the connection dropped, and when a laptop is low on battery", () => {
-    const { unmount } = inApp(<ProgressCompact progress={sample.linkLost} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    const { unmount } = inApp(<ProgressCompact progress={sample.linkLost} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.getByText(text("progress-interrupted"))).toBeTruthy();
     unmount();
-    inApp(<ProgressCompact progress={sample.lowBattery} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.lowBattery} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.getByText(withText(text("progress-low-battery", { label: "Blue Fox" })))).toBeTruthy();
   });
 
-  it("its buttons do what they say", () => {
-    const h = { onPause: vi.fn(), onResume: vi.fn(), onExpand: vi.fn(), onMinimise: vi.fn(), onStop: vi.fn() };
-    inApp(<ProgressCompact progress={sample.running} {...h} onSeeNeedsAction={noop} />);
-    fireEvent.click(screen.getByRole("button", { name: text("progress-pause") }));
-    fireEvent.click(screen.getByRole("button", { name: text("progress-expand") }));
-    fireEvent.click(screen.getByRole("button", { name: text("progress-compact") }));
-    fireEvent.click(screen.getByRole("button", { name: text("progress-stop") }));
+  it("its footer, as in the mockup, holds Pause move and Keep compact and nothing else is a button", () => {
+    const h = { onPause: vi.fn(), onResume: vi.fn(), onMinimise: vi.fn() };
+    inFrame(<ProgressCompact progress={sample.running} {...h} onSeeNeedsAction={noop} />);
+    const footer = footerEl();
+    fireEvent.click(within(footer).getByRole("button", { name: text("progress-pause") }));
+    fireEvent.click(within(footer).getByRole("button", { name: text("progress-compact") }));
     expect(h.onPause).toHaveBeenCalledOnce();
-    expect(h.onExpand).toHaveBeenCalledOnce();
     expect(h.onMinimise).toHaveBeenCalledOnce();
-    expect(h.onStop).toHaveBeenCalledOnce();
     expect(h.onResume).not.toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: text("progress-resume") })).toBeNull();
+    // No other buttons in the content: no "see the whole move", no stop.
+    const inContent = within(screen.getByRole("main")).queryAllByRole("button");
+    expect(inContent.filter((b) => !footer.contains(b))).toEqual([]);
+    expect(screen.queryByRole("button", { name: text("progress-expand") })).toBeNull();
+    expect(screen.queryByRole("button", { name: text("progress-stop") })).toBeNull();
+    // No Back strip on X01.
+    expect(screen.queryByRole("button", { name: text("frame-back") })).toBeNull();
   });
 
   it("a paused move shows the paused screen, not a running one", () => {
-    inApp(<ProgressCompact progress={sample.paused} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.paused} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("pause-title"));
     expect(screen.queryByRole("button", { name: text("progress-pause") })).toBeNull();
   });
 
   it("works right to left", async () => {
     document.documentElement.dir = "rtl";
-    inApp(<ProgressCompact progress={sample.withFailures} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
+    inApp(<ProgressCompact progress={sample.withFailures} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
     expect(await violations()).toEqual([]);
   });
 });
 
 describe("X02 Move progress, expanded", () => {
-  const props = { progress: sample.running, onPause: noop, onResume: noop, onCollapse: noop, onStop: noop, onSeeNeedsAction: noop };
+  const props = { progress: sample.running, onCollapse: noop, onSeeNeedsAction: noop };
   const rowOf = (name: string) => screen.getAllByRole("row").find((r) => r.textContent.includes(name)) as HTMLElement;
 
   it("shows one table row for each group, with its source and its state in words", async () => {
@@ -388,15 +409,15 @@ describe("X02 Move progress, expanded", () => {
     expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("can go back to the compact view and still pause or stop", () => {
-    const h = { onCollapse: vi.fn(), onPause: vi.fn(), onStop: vi.fn() };
-    inApp(<ProgressDetail {...props} {...h} />);
-    fireEvent.click(screen.getByRole("button", { name: text("report-back") }));
-    fireEvent.click(screen.getByRole("button", { name: text("progress-pause") }));
-    fireEvent.click(screen.getByRole("button", { name: text("progress-stop") }));
-    expect(h.onCollapse).toHaveBeenCalledOnce();
-    expect(h.onPause).toHaveBeenCalledOnce();
-    expect(h.onStop).toHaveBeenCalledOnce();
+  it("has the approved-job strip with Back to the compact view, and no footer action", () => {
+    const onCollapse = vi.fn();
+    inFrame(<ProgressDetail {...props} onCollapse={onCollapse} />);
+    expect(screen.getByText(text("progress-approved-job"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(onCollapse).toHaveBeenCalledOnce();
+    // The footer is the usual one: no screen action is drawn into it.
+    expect(within(footerEl()).queryByRole("button", { name: text("progress-pause") })).toBeNull();
+    expect(within(footerEl()).getByText(text("footer-free"))).toBeTruthy();
   });
 
   it("shows three measured numbers, never 100 while something is checking", () => {
@@ -467,6 +488,17 @@ describe("F09 Mini panel", () => {
     expect(screen.getByRole("group", { name: text("pause-title-finishing") })).toBeTruthy();
   });
 
+  it("its Open button sits in the footer with the free note", () => {
+    const onOpen = vi.fn();
+    inFrame(<MiniPanel progress={sample.running} onPause={noop} onResume={noop} onOpen={onOpen} />);
+    const footer = footerEl();
+    expect(within(footer).getByText(text("footer-note-move"))).toBeTruthy();
+    fireEvent.click(within(footer).getByRole("button", { name: text("mini-open") }));
+    expect(onOpen).toHaveBeenCalledOnce();
+    // The panel itself holds only Pause.
+    expect(within(screen.getByRole("group", { name: text("mini-title") })).getAllByRole("button")).toHaveLength(1);
+  });
+
   it("has none of the paid states", () => {
     inApp(<MiniPanel progress={sample.running} onPause={noop} onResume={noop} onOpen={noop} />);
     expect(document.body.textContent).not.toMatch(/cloud|storage|backup|saved|protection/i);
@@ -482,7 +514,7 @@ describe("F09 Mini panel", () => {
 
 describe("X05 Paused at a safe point", () => {
   it("says what is kept and what waits", async () => {
-    inApp(<Paused progress={sample.paused} onResume={noop} onStop={noop} />);
+    inApp(<Paused progress={sample.paused} onResume={noop} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(text("pause-title"));
     expect(document.activeElement).toBe(heading);
@@ -497,7 +529,7 @@ describe("X05 Paused at a safe point", () => {
   });
 
   it("while the current file finishes it says so, and is not yet paused", () => {
-    inApp(<Paused progress={sample.pausing} onResume={noop} onStop={noop} />);
+    inApp(<Paused progress={sample.pausing} onResume={noop} />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("pause-title-finishing"));
     expect(screen.getByText(withText(text("pause-finishing", { name: "Holiday 2024 / IMG_2043.jpg" })))).toBeTruthy();
     expect(screen.queryByText(text("pause-title"))).toBeNull();
@@ -507,11 +539,11 @@ describe("X05 Paused at a safe point", () => {
   });
 
   it("focus moves to the new heading when the pause completes", () => {
-    const view = inApp(<Paused progress={sample.pausing} onResume={noop} onStop={noop} />);
+    const view = inApp(<Paused progress={sample.pausing} onResume={noop} />);
     view.rerender(
       <LocalizationProvider l10n={l10n}>
         <main>
-          <Paused progress={sample.paused} onResume={noop} onStop={noop} />
+          <Paused progress={sample.paused} onResume={noop} />
         </main>
       </LocalizationProvider>,
     );
@@ -521,18 +553,20 @@ describe("X05 Paused at a safe point", () => {
   });
 
   it("items that need the person are still counted", () => {
-    inApp(<Paused progress={{ ...sample.paused, counts: counts({ done: 10, waiting: 5, needsAction: 2 }) }} onResume={noop} onStop={noop} />);
+    inApp(<Paused progress={{ ...sample.paused, counts: counts({ done: 10, waiting: 5, needsAction: 2 }) }} onResume={noop} />);
     expect(screen.getByText(withText(text("progress-count-needs-action", { count: 2 })))).toBeTruthy();
   });
 
-  it("continues or stops", () => {
-    const h = { onResume: vi.fn(), onStop: vi.fn() };
-    inApp(<Paused progress={sample.paused} {...h} />);
-    fireEvent.click(screen.getByRole("button", { name: text("pause-resume") }));
-    fireEvent.click(screen.getByRole("button", { name: text("pause-stop") }));
-    expect(h.onResume).toHaveBeenCalledOnce();
-    expect(h.onStop).toHaveBeenCalledOnce();
+  it("its one action, Resume, sits in the footer", () => {
+    const onResume = vi.fn();
+    inFrame(<Paused progress={sample.paused} onResume={onResume} />);
+    expect(screen.getByText(text("progress-approved-job"))).toBeTruthy();
+    const footer = footerEl();
+    fireEvent.click(within(footer).getByRole("button", { name: text("pause-resume") }));
+    expect(onResume).toHaveBeenCalledOnce();
+    expect(within(screen.getByRole("main")).queryAllByRole("button").filter((b) => !footer.contains(b))).toEqual([]);
   });
+
 });
 
 describe("X10 Stop the rest of the move?", () => {
@@ -614,7 +648,7 @@ describe("X10 Stop the rest of the move?", () => {
 });
 
 describe("R01 Welcome to your next laptop", () => {
-  const props = { onReport: noop, onHome: noop };
+  const props = { onReport: noop };
   const chip = () => screen.getByRole("listitem");
 
   it("a clean move shows two numbers and one Selected files row marked verified", async () => {
@@ -681,13 +715,15 @@ describe("R01 Welcome to your next laptop", () => {
     expect(screen.queryByText(hasText("not the drive"))).toBeNull();
   });
 
-  it("opens the report or goes home", () => {
-    const h = { onReport: vi.fn(), onHome: vi.fn() };
-    inApp(<Outcome outcome={sample.finishedMixed} {...h} />);
-    fireEvent.click(screen.getByRole("button", { name: text("outcome-report") }));
-    fireEvent.click(screen.getByRole("button", { name: text("outcome-home") }));
-    expect(h.onReport).toHaveBeenCalledOnce();
-    expect(h.onHome).toHaveBeenCalledOnce();
+  it("its action, View complete report, sits in the footer, and there is no Back to start", () => {
+    const onReport = vi.fn();
+    inFrame(<Outcome outcome={sample.finishedMixed} onReport={onReport} />);
+    expect(screen.getByText(text("outcome-eyebrow"))).toBeTruthy();
+    const footer = footerEl();
+    fireEvent.click(within(footer).getByRole("button", { name: text("outcome-report") }));
+    expect(onReport).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: text("outcome-home") })).toBeNull();
+    expect(within(screen.getByRole("main")).queryAllByRole("button").filter((b) => !footer.contains(b))).toEqual([]);
   });
 
   it("every state is accessible, also right to left", async () => {
@@ -772,6 +808,15 @@ describe("R02 Your move, item by item", () => {
     expect(screen.queryByText(hasText("not the drive."), { selector: "p.eyebrow, .kit-banner p" })).toBeNull();
   });
 
+  it("has the move-results strip with Back and no footer action", () => {
+    const onBack = vi.fn();
+    inFrame(<Report items={sample.report} onBack={onBack} />);
+    expect(screen.getByText(text("outcome-eyebrow"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(onBack).toHaveBeenCalledOnce();
+    expect(within(footerEl()).getByText(text("footer-free"))).toBeTruthy();
+  });
+
   it("a report with no items says so", () => {
     inApp(<Report items={[]} onBack={noop} />);
     expect(screen.getByText(text("report-none"))).toBeTruthy();
@@ -793,7 +838,7 @@ describe("R02 Your move, item by item", () => {
   it("goes back", () => {
     const onBack = vi.fn();
     inApp(<Report items={sample.report} onBack={onBack} />);
-    fireEvent.click(screen.getByRole("button", { name: text("report-back") }));
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
     expect(onBack).toHaveBeenCalledOnce();
   });
 

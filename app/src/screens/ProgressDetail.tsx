@@ -1,9 +1,9 @@
 import { useLocalization } from "@fluent/react";
-import { Banner, Button, Metrics } from "../components/kit";
+import { Banner, Metrics } from "../components/kit";
 import { formatBytes, groupState, measuredPercent, minutesRange, pageLocale, type MoveProgress } from "../move";
 import { labelText } from "../pairing";
-import type { ProgressHandlers } from "./ProgressCompact";
-import { GroupBadge, GroupLabel, Heading, Notices, Topline } from "./ProgressParts";
+import { TopStrip } from "./FrameParts";
+import { GroupBadge, GroupLabel, Heading, Notices } from "./ProgressParts";
 
 /**
  * X02 Move progress, expanded (760 x 620): three measured numbers, then one table row for each
@@ -12,19 +12,16 @@ import { GroupBadge, GroupLabel, Heading, Notices, Topline } from "./ProgressPar
  */
 export default function ProgressDetail({
   progress,
-  onPause,
-  onResume,
   onCollapse,
-  onStop,
   onSeeNeedsAction,
-}: { progress: MoveProgress; onCollapse: () => void } & ProgressHandlers) {
+}: { progress: MoveProgress; onCollapse: () => void; onSeeNeedsAction: () => void }) {
   const { l10n } = useLocalization();
   const paused = progress.state !== "running";
   const pct = measuredPercent(progress);
   const timeLeft = progress.minutesLeft ? l10n.getString("progress-minutes", minutesRange(progress.minutesLeft)) : "—";
   return (
     <>
-      <Topline onBack={onCollapse} eyebrow="progress-eyebrow" />
+      <TopStrip onBack={onCollapse} labelId="progress-approved-job" />
       <Heading id="progress-all-title" />
       <p className="subhead">{l10n.getString("progress-all-body")}</p>
       <Metrics
@@ -69,20 +66,6 @@ export default function ProgressDetail({
       )}
       <div className="mv-note">
         <Banner tone="info">{l10n.getString("progress-checked-note")}</Banner>
-      </div>
-      <div className="mv-actions">
-        {paused ? (
-          <Button variant="primary" onClick={onResume}>
-            {l10n.getString("progress-resume")}
-          </Button>
-        ) : (
-          <Button variant="primary" onClick={onPause}>
-            {l10n.getString("progress-pause")}
-          </Button>
-        )}
-        <Button variant="quiet" className="mv-danger" onClick={onStop}>
-          {l10n.getString("progress-stop")}
-        </Button>
       </div>
     </>
   );

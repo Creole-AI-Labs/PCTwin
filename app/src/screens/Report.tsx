@@ -2,7 +2,8 @@ import { useLocalization } from "@fluent/react";
 import { useState } from "react";
 import { Button, ResultChip } from "../components/kit";
 import type { ReportItem } from "../move";
-import { Heading, EvidenceLine, ReasonText, Topline } from "./ProgressParts";
+import { TopStrip } from "./FrameParts";
+import { Heading, EvidenceLine, ReasonText } from "./ProgressParts";
 
 /** How many items show at once; "Show more" adds this many. A report has no cap, only pages. */
 const PAGE = 100;
@@ -19,7 +20,7 @@ export default function Report({ items, onBack }: { items: ReportItem[]; onBack:
   const visible = items.slice(0, shown);
   return (
     <>
-      <Topline onBack={onBack} eyebrow="outcome-eyebrow" />
+      <TopStrip onBack={onBack} labelId="outcome-eyebrow" />
       <Heading id="report-title" />
       <p className="subhead">{l10n.getString("report-body")}</p>
       {items.length === 0 ? (

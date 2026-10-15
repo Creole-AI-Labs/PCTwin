@@ -1011,6 +1011,7 @@ progress-count-failed =
        *[other] { $count } items could not be copied
     }
 progress-queue-empty = Nothing has started yet.
+progress-approved-job = Approved job
 progress-route-old = Old laptop
 progress-route-new = New laptop
 progress-panel-pausing = Pausing

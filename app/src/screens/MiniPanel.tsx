@@ -1,6 +1,7 @@
 import { useLocalization } from "@fluent/react";
 import { Button, MiniProgress } from "../components/kit";
 import { measuredPercent, type MoveProgress } from "../move";
+import FrameFooter from "./FrameFooter";
 import { useAttribute, useTimeLeft } from "./ProgressParts";
 
 /**
@@ -34,29 +35,31 @@ export default function MiniPanel({
         ? l10n.getString(send ? "mini-title-send-paused" : "mini-title-paused")
         : l10n.getString(send ? "mini-title-send" : "mini-title");
   return (
-    <MiniProgress
-      kind={kind}
-      title={title}
-      value={pct === null ? null : pct / 100}
-      label={attr(send ? "mini-progress-send" : "mini-progress", "aria-label")}
-      left={send ? l10n.getString("mini-what-send") : l10n.getString("mini-what")}
-      right={idle ? undefined : (timeLeft ?? undefined)}
-      pause={
-        idle ? (
-          <Button variant="quiet" onClick={onResume}>
-            {l10n.getString("mini-resume")}
-          </Button>
-        ) : (
-          <Button variant="quiet" onClick={onPause}>
-            {l10n.getString("mini-pause")}
-          </Button>
-        )
-      }
-      open={
+    <>
+      <MiniProgress
+        kind={kind}
+        title={title}
+        value={pct === null ? null : pct / 100}
+        label={attr(send ? "mini-progress-send" : "mini-progress", "aria-label")}
+        left={send ? l10n.getString("mini-what-send") : l10n.getString("mini-what")}
+        right={idle ? undefined : (timeLeft ?? undefined)}
+        pause={
+          idle ? (
+            <Button variant="quiet" onClick={onResume}>
+              {l10n.getString("mini-resume")}
+            </Button>
+          ) : (
+            <Button variant="quiet" onClick={onPause}>
+              {l10n.getString("mini-pause")}
+            </Button>
+          )
+        }
+      />
+      <FrameFooter note={send ? "send" : "move"}>
         <Button variant="primary" onClick={onOpen}>
           {l10n.getString(send ? "mini-open-send" : "mini-open")}
         </Button>
-      }
-    />
+      </FrameFooter>
+    </>
   );
 }
