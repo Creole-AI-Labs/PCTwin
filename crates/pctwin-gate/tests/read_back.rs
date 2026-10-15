@@ -60,6 +60,17 @@ fn expect_drive() -> bool {
     cfg!(windows) || std::env::var_os("PCTWIN_REQUIRE_READ_BACK_DRIVE").is_some()
 }
 
+/// Where a file of `len` bytes is read back from on such a drive: on Windows a file under 4 KiB
+/// may live inside the drive's own records, which are read through memory, so it never counts as
+/// read from the drive.
+fn expected_from(len: usize) -> CheckedFrom {
+    if cfg!(windows) && len < 4096 {
+        CheckedFrom::Memory(WhyMemory::TooSmall)
+    } else {
+        CheckedFrom::Drive
+    }
+}
+
 #[test]
 fn every_size_reads_back_and_matches() {
     let (root, dest) = setup();
@@ -86,7 +97,7 @@ fn every_size_reads_back_and_matches() {
             );
             assert!(check.bad_blocks.is_empty());
             if expect_drive() {
-                assert_eq!(check.from, CheckedFrom::Drive, "{len} bytes");
+                assert_eq!(check.from, expected_from(len), "{len} bytes");
             }
             let done = file.finish().unwrap();
             assert_eq!(done.final_path, name);
@@ -279,6 +290,7 @@ fn from_memory_still_catches_a_damaged_block() {
     let (_root, dest) = with_faults(FaultPlan {
         uncached_refused: true,
         flip: Some(Flip::OnWriteOnce),
+        ..FaultPlan::default()
     });
     let data = content(3000);
     let mut file = written(&dest, "a.bin", &data, 1024);
@@ -298,7 +310,7 @@ fn a_finished_file_reads_back_exactly() {
         let stored = file.finish().unwrap().final_path;
         let mut reader = dest.open_read_back(&stored).unwrap();
         if expect_drive() {
-            assert_eq!(reader.from(), CheckedFrom::Drive);
+            assert_eq!(reader.from(), expected_from(len), "{len} bytes");
         }
         let mut back = Vec::new();
         std::io::Read::read_to_end(&mut reader, &mut back).unwrap();
@@ -339,4 +351,64 @@ fn a_drive_that_tested_fine_but_refuses_later_is_still_checked_and_says_so() {
     let check = file.verify(4096, &hashes(&data, 4096)).unwrap();
     assert!(check.passed());
     assert_eq!(check.from, CheckedFrom::Memory(WhyMemory::CannotSkipCache));
+}
+
+#[test]
+fn a_drive_that_reads_files_through_memory_anyway_never_says_drive() {
+    let (_root, dest) = with_faults(FaultPlan {
+        served_from_memory: true,
+        ..FaultPlan::default()
+    });
+    let data = content(200_000);
+    let mut file = written(&dest, "a.bin", &data, 4096);
+    let check = file.verify(4096, &hashes(&data, 4096)).unwrap();
+    assert!(check.passed());
+    assert_eq!(check.from, CheckedFrom::Memory(WhyMemory::NotShown));
+    let done = file.finish().unwrap();
+    assert_eq!(
+        done.checked_from,
+        Some(CheckedFrom::Memory(WhyMemory::NotShown))
+    );
+}
+
+#[test]
+fn a_different_file_put_at_its_place_is_never_checked_in_its_stead() {
+    let (root, dest) = setup();
+    let data = content(20_000);
+    let mut file = written(&dest, "a.bin", &data, 4096);
+    let temp = root.path().join(file.temp_path());
+    // Another program swaps in a file of the very same bytes under the temporary name.
+    let aside = root.path().join("aside.bin");
+    std::fs::rename(&temp, &aside).unwrap();
+    std::fs::write(&temp, &data).unwrap();
+    assert!(file.verify(4096, &hashes(&data, 4096)).is_err());
+}
+
+/// The case the first review found: Windows reads a compressed folder's files through memory
+/// even when asked not to, so a file there is never said to be read from the drive.
+#[cfg(windows)]
+#[test]
+fn a_file_in_a_compressed_folder_is_said_to_be_checked_from_memory() {
+    use std::os::windows::fs::MetadataExt;
+    const COMPRESSED: u32 = 0x0000_0800;
+    let root = tempfile::tempdir().unwrap();
+    let folder = root.path().join("packed");
+    std::fs::create_dir(&folder).unwrap();
+    let packed = std::process::Command::new("compact")
+        .args(["/c", "/q"])
+        .arg(&folder)
+        .output()
+        .is_ok_and(|o| o.status.success());
+    let compressed = std::fs::metadata(&folder).unwrap().file_attributes() & COMPRESSED != 0;
+    if !(packed && compressed) {
+        // A drive that cannot compress (FAT, exFAT, ReFS) has no such case to test.
+        eprintln!("this drive cannot compress folders; nothing to test here");
+        return;
+    }
+    let dest = Destination::open(&folder).unwrap();
+    let data = content(300_000);
+    let mut file = written(&dest, "a.bin", &data, 4096);
+    let check = file.verify(4096, &hashes(&data, 4096)).unwrap();
+    assert!(check.passed());
+    assert_eq!(check.from, CheckedFrom::Memory(WhyMemory::StoredSpecially));
 }

@@ -75,6 +75,9 @@ struct Run {
     files: u64,
     bad_files: u64,
     bytes: u64,
+    /// Bytes of the files said to be read back from the drive (the CI checks the disk really
+    /// read at least that much).
+    drive_bytes: u64,
     seconds: f64,
 }
 
@@ -104,8 +107,9 @@ impl Run {
         let mb = self.bytes as f64 / 1_000_000.0;
         let _ = write!(
             s,
-            ",\"bytes\":{},\"seconds\":{:.3},\"mb_per_s\":{:.1}}}",
+            ",\"bytes\":{},\"drive_bytes\":{},\"seconds\":{:.3},\"mb_per_s\":{:.1}}}",
             self.bytes,
+            self.drive_bytes,
             self.seconds,
             if self.seconds > 0.0 {
                 mb / self.seconds
@@ -255,6 +259,7 @@ fn main() {
                 files: 0,
                 bad_files: 0,
                 bytes: 0,
+                drive_bytes: 0,
                 seconds: t.elapsed().as_secs_f64(),
             }
         }
@@ -271,6 +276,7 @@ fn main() {
                 files: 1,
                 bad_files: 0,
                 bytes,
+                drive_bytes: 0,
                 seconds: t.elapsed().as_secs_f64(),
             }
         }
@@ -295,6 +301,7 @@ fn main() {
                 files: count,
                 bad_files: 0,
                 bytes: total,
+                drive_bytes: 0,
                 seconds: t.elapsed().as_secs_f64(),
             }
         }
@@ -311,6 +318,7 @@ fn main() {
                 files: 1,
                 bad_files: 0,
                 bytes,
+                drive_bytes: 0,
                 seconds: t.elapsed().as_secs_f64(),
             }
         }
@@ -327,6 +335,7 @@ fn main() {
                 files: 1,
                 bad_files: 0,
                 bytes,
+                drive_bytes: if from == CheckedFrom::Drive { bytes } else { 0 },
                 seconds: t.elapsed().as_secs_f64(),
             }
         }
@@ -352,6 +361,7 @@ fn main() {
                 files: entries.len() as u64,
                 bad_files,
                 bytes: total,
+                drive_bytes: 0,
                 seconds: t.elapsed().as_secs_f64(),
             }
         }
@@ -361,7 +371,7 @@ fn main() {
             let entries = read_manifest(manifest);
             let t = Instant::now();
             let (mut bad, mut bad_files, mut total) = (Vec::new(), 0, 0);
-            let (mut first, mut mixed) = (None, false);
+            let (mut first, mut mixed, mut drive_bytes) = (None, false, 0);
             for (i, e) in entries.iter().enumerate() {
                 let (from, b) = verify_one(
                     &dest,
@@ -375,6 +385,9 @@ fn main() {
                     None => first = Some(from),
                     Some(f) if f != from => mixed = true,
                     _ => {}
+                }
+                if from == CheckedFrom::Drive {
+                    drive_bytes += e.bytes;
                 }
                 if !b.is_empty() {
                     bad_files += 1;
@@ -390,6 +403,7 @@ fn main() {
                 files: entries.len() as u64,
                 bad_files,
                 bytes: total,
+                drive_bytes,
                 seconds: t.elapsed().as_secs_f64(),
             }
         }

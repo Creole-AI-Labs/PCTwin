@@ -12,6 +12,13 @@
 //! - Each drive is tested once ([`probe`]): the uncached handle must open, read the probe file
 //!   back exactly, and show it really bypasses the cache. Where it does not, the check still runs,
 //!   through the cache, and says so ([`CheckedFrom::Memory`]); it is never a silent success.
+//! - Then each file is judged on its own ([`this_file_from_drive`]): a system can quietly read a
+//!   file through its memory even on a drive that passed, because of how that file is stored
+//!   (Windows: compressed, encrypted, or so small it lives in the drive's own records; Linux:
+//!   kept inline, journalled, compressed, encrypted or verity-protected). Such a file is still
+//!   checked, and its result says it came from memory. "Drive" is said only when it is known.
+//! - An input or output error while reading back fails the check with that error (the file is
+//!   removed, never named), rather than as blocks that did not match.
 
 use std::io::{self, Read, Write};
 
@@ -45,6 +52,12 @@ pub enum WhyMemory {
     NotShown,
     /// This system has no way to read this drive past its cache.
     NoWay,
+    /// The file is stored in a way the system reads through its memory (compressed, encrypted,
+    /// kept inline or journalled), whatever the drive allows.
+    StoredSpecially,
+    /// The file is so small the drive may keep it inside its own records, which the system reads
+    /// through its memory.
+    TooSmall,
 }
 
 impl std::fmt::Display for CheckedFrom {
@@ -65,6 +78,10 @@ impl std::fmt::Display for WhyMemory {
             Self::CannotSkipCache => "this drive cannot be read without the system's memory cache",
             Self::NotShown => "this drive could not show that it was read directly",
             Self::NoWay => "this system cannot read this drive directly",
+            Self::StoredSpecially => {
+                "this file is stored compressed or protected, which the system reads through memory"
+            }
+            Self::TooSmall => "this file is too small to be sure the drive itself was read",
         })
     }
 }
@@ -307,6 +324,65 @@ pub(crate) fn keep_pages_out(_file: &std::fs::File) -> bool {
     true
 }
 
+/// Files smaller than this may be kept inside the drive's own records on Windows (NTFS keeps small
+/// files in the master file table, up to most of a record, and records can be 4 KiB), and are
+/// then read through the system's memory whatever the handle asks.
+#[cfg(windows)]
+const SMALLEST_FROM_DRIVE: u64 = 4096;
+
+/// Whether this very file, opened past the cache on a drive that passed [`probe`], is really read
+/// from the drive; else why not. Decided from the file's own attributes, never assumed.
+#[cfg(windows)]
+pub(crate) fn this_file_from_drive(file: &std::fs::File) -> Result<(), WhyMemory> {
+    use std::os::windows::fs::MetadataExt;
+    /// Sparse, compressed, offline, encrypted, and the two cloud "recall" attributes: each makes
+    /// the system read the file through its memory, or from somewhere else.
+    const READ_THROUGH_MEMORY: u32 =
+        0x0000_0200 | 0x0000_0800 | 0x0000_1000 | 0x0000_4000 | 0x0004_0000 | 0x0040_0000;
+    let meta = file.metadata().map_err(|_| WhyMemory::NotShown)?;
+    if meta.file_attributes() & READ_THROUGH_MEMORY != 0 {
+        Err(WhyMemory::StoredSpecially)
+    } else if meta.len() < SMALLEST_FROM_DRIVE {
+        Err(WhyMemory::TooSmall)
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether this very file, opened past the cache on a drive that passed [`probe`], is really read
+/// from the drive; else why not. Linux quietly reads some files through its memory even with
+/// `O_DIRECT`: those its flags mark inline, journalled, compressed, encrypted or verity-protected.
+/// Then the file itself must show a direct read (`statx` alignment, or refusing a read only the
+/// cache could do).
+#[cfg(target_os = "linux")]
+pub(crate) fn this_file_from_drive(file: &std::fs::File) -> Result<(), WhyMemory> {
+    use rustix::io::Errno;
+    /// `FS_COMPR_FL`, `FS_ENCRYPT_FL`, `FS_JOURNAL_DATA_FL`, `FS_VERITY_FL`, `FS_INLINE_DATA_FL`.
+    const READ_THROUGH_MEMORY: u32 =
+        0x0000_0004 | 0x0000_0800 | 0x0000_4000 | 0x0010_0000 | 0x1000_0000;
+    match rustix::fs::ioctl_getflags(file) {
+        Ok(flags) if flags.bits() & READ_THROUGH_MEMORY != 0 => {
+            return Err(WhyMemory::StoredSpecially);
+        }
+        Ok(_) => {}
+        // A drive without such flags at all (FAT, exFAT) cannot store a file that way.
+        Err(e) if [Errno::NOTTY, Errno::OPNOTSUPP, Errno::INVAL, Errno::NOSYS].contains(&e) => {}
+        Err(_) => return Err(WhyMemory::NotShown),
+    }
+    if direct_io_reported(file) || odd_read_refused(file) {
+        Ok(())
+    } else {
+        Err(WhyMemory::NotShown)
+    }
+}
+
+/// macOS decides per drive (see [`shown_uncached`]): the gate writes every file with `F_NOCACHE`,
+/// so none of its pages are cached for a read to take, and files it writes are never compressed.
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn this_file_from_drive(_file: &std::fs::File) -> Result<(), WhyMemory> {
+    Ok(())
+}
+
 /// Tests once whether files in `dir` can be read back past this laptop's cache, with a small
 /// probe file written there, read back and removed.
 pub(crate) fn probe(dir: &Dir, name: &str, refused: bool) -> CheckedFrom {
@@ -349,13 +425,22 @@ fn probe_file(dir: &Dir, name: &str, pattern: &[u8], refused: bool) -> CheckedFr
 /// memory somewhere. Linux can also say so directly (`statx` direct-I/O alignment, since 6.1).
 #[cfg(any(windows, target_os = "linux"))]
 fn shown_uncached(dir: &Dir, name: &str) -> bool {
-    let Ok(mut file) = open_uncached_os(dir, name) else {
+    let Ok(file) = open_uncached_os(dir, name) else {
         return false;
     };
     #[cfg(target_os = "linux")]
     if direct_io_reported(&file) {
         return true;
     }
+    odd_read_refused(&file)
+}
+
+/// Whether `file` refuses a read the drive itself could not do (one byte into memory at an odd
+/// address), as a handle that bypasses the cache does. On Windows the system refuses it on its
+/// length alone, so there it shows only that the handle asks to bypass the cache, not that the
+/// file is read that way: [`this_file_from_drive`] decides each file.
+#[cfg(any(windows, target_os = "linux"))]
+fn odd_read_refused(mut file: &std::fs::File) -> bool {
     let mut store = vec![0u8; 2 * ALIGN];
     let odd = store.as_ptr().align_offset(ALIGN) + 1;
     matches!(file.read(&mut store[odd..=odd]), Err(e) if e.kind() == io::ErrorKind::InvalidInput)

@@ -426,6 +426,9 @@ pub struct FaultPlan {
     pub flip: Option<Flip>,
     /// The drive refuses to be read past the cache (some network drives and USB sticks).
     pub uncached_refused: bool,
+    /// The drive takes reads past the cache, but each file is read through memory anyway (as
+    /// compressed or encrypted files are).
+    pub served_from_memory: bool,
 }
 
 /// For tests: when a byte goes wrong.
@@ -612,6 +615,12 @@ impl Destination {
             }
             CheckedFrom::Memory(_) => dir.open(name)?.into_std(),
         };
+        // The drive passed, but this very file may still be read through memory.
+        if from == CheckedFrom::Drive
+            && let Err(why) = self.this_file_from_drive(&file)
+        {
+            from = CheckedFrom::Memory(why);
+        }
         // Never check some other file put under the same name meanwhile.
         if let (Some(id), Ok((found, _))) = (id, identity(&file))
             && found != id
@@ -619,6 +628,19 @@ impl Destination {
             return Err(io::Error::other("a different file is there now"));
         }
         ReadBack::new(file, from, self.flip_on_read())
+    }
+
+    #[cfg(feature = "fault-plan")]
+    fn this_file_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        if self.faults.plan.served_from_memory {
+            return Err(WhyMemory::NotShown);
+        }
+        read_back::this_file_from_drive(file)
+    }
+
+    #[cfg(not(feature = "fault-plan"))]
+    fn this_file_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        read_back::this_file_from_drive(file)
     }
 
     #[cfg(feature = "fault-plan")]
