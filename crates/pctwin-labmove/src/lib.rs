@@ -14,7 +14,6 @@
 //! unless the engine said so.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,8 +24,7 @@ use pctwin_lab::{Entry, Snapshot, compare};
 use pctwin_link::LinkConfig;
 use pctwin_pairing::{PairingCode, RotatingSender};
 use pctwin_record::{
-    FolderRole, Inclusion, Item, ItemKind, ItemName, LaptopId, PersonTarget, RawName, Record,
-    Storage,
+    FolderRole, Inclusion, Item, ItemKind, LaptopId, PersonTarget, Record, Storage,
 };
 use pctwin_scan::{FolderLookup, FoundFolder, Person};
 use pctwin_transfer::{
@@ -132,23 +130,6 @@ fn lab_folders(root: &Path) -> Vec<FolderLookup> {
         .collect()
 }
 
-/// The name on disk, exactly as the scan recorded it.
-fn on_disk(name: &ItemName) -> OsString {
-    match name.exact() {
-        #[cfg(unix)]
-        Some(RawName::Unix(bytes)) => {
-            use std::os::unix::ffi::OsStringExt;
-            OsString::from_vec(bytes.clone())
-        }
-        #[cfg(windows)]
-        Some(RawName::Windows(units)) => {
-            use std::os::windows::ffi::OsStringExt;
-            OsString::from_wide(units)
-        }
-        _ => OsString::from(name.display()),
-    }
-}
-
 fn compressible(path: &str) -> bool {
     let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     !matches!(
@@ -219,7 +200,7 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
             };
             let mut source = root.clone();
             for part in item.path.parts() {
-                source.push(on_disk(part));
+                source.push(part.on_disk());
             }
             source
         };
@@ -730,7 +711,7 @@ pub fn pack(root: &Path, account: &str, out: &Path) -> Result<usize, String> {
         };
         let mut source = root.clone();
         for part in item.path.parts() {
-            source.push(on_disk(part));
+            source.push(part.on_disk());
         }
         let source = pctwin_lab::long(&source).map_err(err)?;
         // A file the system will not let us read stays out of the package; the receiving side

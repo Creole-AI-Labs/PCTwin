@@ -3419,6 +3419,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-quicksend"
+version = "0.1.0"
+dependencies = [
+ "pctwin-gate",
+ "pctwin-journal",
+ "pctwin-record",
+ "pctwin-scan",
+ "pctwin-transfer",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "pctwin-recipe"
 version = "0.1.0"
 dependencies = [
