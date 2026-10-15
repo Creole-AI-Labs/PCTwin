@@ -198,6 +198,35 @@ describe("old laptop", () => {
     noMissingText();
   });
 
+  it("says when the new laptop left during the pick, and shows the next code", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "left" });
+    expect(screen.getByText(text("pair-old-left"))).toBeTruthy();
+    expect(heading().textContent).toBe(text("pair-old-title"));
+    noMissingText();
+  });
+
+  it("a pick rejected after Paired arrived leaves the screen on Paired", async () => {
+    let reject: (e: unknown) => void = () => undefined;
+    replies.pairing_old_pick = () =>
+      new Promise((_, r) => {
+        reject = r;
+      });
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
+    await emit("pairing-old", { kind: "paired" });
+    await act(async () => {
+      reject(problem("pairing-failed"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(heading().textContent).toBe(text("pair-done-title"));
+  });
+
   it("a pick after newer numbers names the newer round", async () => {
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
@@ -445,5 +474,20 @@ describe("new laptop", () => {
     expect(await violations()).toEqual([]);
     await emit("pairing-new", { kind: "paired" });
     expect(await violations()).toEqual([]);
+  });
+});
+
+describe("the new laptop once paired", () => {
+  it("stays on Paired whatever arrives afterwards", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    await emit("pairing-new", { kind: "paired" });
+    expect(heading().textContent).toBe(text("pair-done-title"));
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-timed-out", networks: [] } });
+    expect(heading().textContent).toBe(text("pair-done-title"));
   });
 });

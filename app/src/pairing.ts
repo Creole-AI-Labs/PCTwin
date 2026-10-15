@@ -16,7 +16,8 @@ export type OldEvent =
   | { kind: "locked" }
   | { kind: "choose"; round: number; numbers: number[] }
   | { kind: "paired" }
-  | { kind: "timed-out" };
+  | { kind: "timed-out" }
+  | { kind: "left" };
 
 export type Problem = { key: string; networks: string[] };
 

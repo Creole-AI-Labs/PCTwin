@@ -35,9 +35,13 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   const [problem, setProblem] = useState<Problem | null>(null);
   const fieldId = useId();
   const wasBusy = useRef(false);
+  // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
+  const paired = useRef(false);
 
   const handle = useCallback((event: NewEvent) => {
+    if (paired.current) return;
     if (event.kind === "paired") {
+      paired.current = true;
       setPhase("paired");
     } else {
       setBusy(false);

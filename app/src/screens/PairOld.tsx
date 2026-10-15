@@ -21,7 +21,13 @@ import Paired from "./Paired";
 import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
 type Phase = "starting" | "code" | "wait" | "locked" | "choose" | "network" | "error" | "paired";
-type Notice = "timed-out" | "declined";
+type Notice = "timed-out" | "declined" | "left";
+
+const NOTICE_TEXT: Record<Notice, string> = {
+  "timed-out": "pair-old-timed-out",
+  declined: "pair-old-declined",
+  left: "pair-old-left",
+};
 
 /**
  * C03 and C05 on the old laptop. The engine drives it: a label, then a code that changes, then (when a
@@ -81,6 +87,11 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
       case "timed-out":
         setChecking(false);
         setNotice("timed-out");
+        setPhase("code");
+        break;
+      case "left":
+        setChecking(false);
+        setNotice("left");
         setPhase("code");
         break;
     }
@@ -154,7 +165,8 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const pick = async (number: number) => {
     setChecking(true);
     // The right number ends in the paired event. A rejection means this try is over.
-    if (!(await attempt(() => oldPick(round, number)))) {
+    // Once paired, a late reply to this pick changes nothing.
+    if (!(await attempt(() => oldPick(round, number))) && !paired.current) {
       setChecking(false);
       setPhase(code ? "code" : "starting");
     }
@@ -282,7 +294,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
           <div role="status" className="pair-notice">
             {notice && (
               <Banner tone="info">
-                <Localized id={notice === "timed-out" ? "pair-old-timed-out" : "pair-old-declined"}>
+                <Localized id={NOTICE_TEXT[notice]}>
                   <p />
                 </Localized>
               </Banner>

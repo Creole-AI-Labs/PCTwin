@@ -68,6 +68,7 @@ pair-old-locked-body = There were too many wrong tries, so pairing stopped to ke
 pair-old-start-again = Start again
 pair-old-timed-out = No number was picked in time, so here is a new code.
 pair-old-declined = The numbers did not match, so nothing was shared. Here is a new code.
+pair-old-left = The new laptop stopped pairing before a number was picked, so nothing was shared. Here is a new code.
 pair-network-title = Choose your Wi-Fi
 pair-network-hint = Pick the network your new laptop is on.
 
