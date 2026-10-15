@@ -4,7 +4,9 @@ import type { ReactNode } from "react";
 import { Badge, Banner, Button, Row, RowList } from "../components/kit";
 import type { Laptop, PeerReadiness } from "../connection";
 import { ArrowForward, Attention, Check, Laptop as LaptopIcon, Shield } from "../icons";
-import { Eyebrow, Heading, PairStrip } from "./PairParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./PairParts";
 import "./connection.css";
 
 /**
@@ -16,8 +18,7 @@ export default function MeetLaptop({ readiness, onContinue, onBack }: { readines
   const { state, sending, receiving } = readiness;
   return (
     <>
-      <PairStrip step={2} onBack={onBack} />
-      <Eyebrow id="peer-eyebrow" />
+      <TopStrip onBack={onBack} labelId="peer-eyebrow" />
       <Heading key={state} id="peer-title" />
       <Localized id="peer-body">
         <p className="subhead" />
@@ -54,13 +55,13 @@ export default function MeetLaptop({ readiness, onContinue, onBack }: { readines
           </Banner>
         </div>
       )}
-      <div className="connect-actions">
-        <Button variant="primary" icon={<ArrowForward />} className="connect-block" disabled={state !== "ready"} onClick={onContinue}>
+      <FrameFooter>
+        <Button variant="primary" icon={<ArrowForward />} disabled={state !== "ready"} onClick={onContinue}>
           <Localized id="peer-continue">
             <span />
           </Localized>
         </Button>
-      </div>
+      </FrameFooter>
     </>
   );
 }

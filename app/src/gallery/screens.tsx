@@ -11,6 +11,7 @@ import ReactDOM from "react-dom/client";
 import { LANGUAGES, directionOf, localization, type LanguageCode } from "../i18n";
 import "../styles.css";
 import "./gallery.css";
+import { FooterProvider } from "../screens/FrameFooter";
 import { FRAME, SAMPLES, type Sample } from "./samples";
 
 function param(name: string): string | null {
@@ -63,9 +64,11 @@ function Screens() {
       </div>
       <LocalizationProvider l10n={l10n}>
         <div className="app screens-frame" data-sample={sample?.id} style={{ inlineSize: `${String(width ?? frame.width)}px`, blockSize: `${String(frame.height)}px` }}>
-          <main className="app-main" tabIndex={-1} key={`${sample?.id ?? ""}-${language}`}>
-            {sample?.render()}
-          </main>
+          <FooterProvider key={`${sample?.id ?? ""}-${language}`}>
+            <main className="app-main" tabIndex={-1}>
+              {sample?.render()}
+            </main>
+          </FooterProvider>
         </div>
       </LocalizationProvider>
     </div>
