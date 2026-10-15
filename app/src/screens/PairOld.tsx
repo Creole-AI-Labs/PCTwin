@@ -432,11 +432,11 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
           </Localized>
           {problem && <ProblemNotice problem={problem} />}
           <ul className="pair-numbers">
-            {numbers.map((n) => (
+            {numbers.map((n, i) => (
               <li key={n}>
                 <button
                   type="button"
-                  className="pair-number"
+                  className="pair-tile pair-number"
                   dir="ltr"
                   disabled={checking}
                   aria-label={l10n.getString("pair-choose-number", { number: n })}
@@ -444,7 +444,12 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
                     void pick(n);
                   }}
                 >
-                  <span aria-hidden="true">{n}</span>
+                  <span className="pair-tile-index" aria-hidden="true">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="pair-tile-value" aria-hidden="true">
+                    {n}
+                  </span>
                 </button>
               </li>
             ))}
