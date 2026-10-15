@@ -86,6 +86,8 @@ const KIND_LOCKED: u8 = 7;
 const KIND_WRONG_CODE: u8 = 8;
 /// The person on the old laptop said the numbers did not match (or picked another).
 const KIND_NO_MATCH: u8 = 12;
+/// The person on the old laptop did not pick a number in time.
+const KIND_PICK_TIMED_OUT: u8 = 13;
 const KIND_LANE: u8 = 9;
 /// A quiet connection is probed after this long, every [`KEEPALIVE_INTERVAL`], up to
 /// [`KEEPALIVE_PROBES`] times: a laptop that went away (lid closed, out of Wi-Fi range) is noticed
@@ -486,6 +488,11 @@ impl HostPending {
     /// new laptop is told the numbers did not match.
     pub async fn decline(mut self) {
         notify(&mut self.stream, KIND_NO_MATCH).await;
+    }
+
+    /// The person did not pick a number in time: pairing ends, and the new laptop is told so.
+    pub async fn time_out(mut self) {
+        notify(&mut self.stream, KIND_PICK_TIMED_OUT).await;
     }
 }
 
@@ -906,6 +913,7 @@ async fn read_from_host(stream: &mut TcpStream, wait: Duration) -> Result<Vec<u8
         KIND_LOCKED => Err(PairingError::Locked.into()),
         KIND_WRONG_CODE => Err(PairingError::HandshakeFailed.into()),
         KIND_NO_MATCH => Err(PairingError::WrongNumber.into()),
+        KIND_PICK_TIMED_OUT => Err(LinkError::Timeout),
         _ => Err(LinkError::Unexpected),
     }
 }

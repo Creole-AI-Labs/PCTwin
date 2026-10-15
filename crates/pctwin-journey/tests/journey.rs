@@ -308,3 +308,44 @@ async fn two_picks_at_once_pair_exactly_once() {
     assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
     assert!(approved.is_ok());
 }
+
+/// Start again only acts when pairing is locked: during the wait after a wrong code it changes
+/// nothing, so the wait (and the count of failed attempts) stands.
+#[tokio::test]
+async fn start_again_does_not_cut_short_the_wait_after_a_wrong_code() {
+    let (old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let first = if code.starts_with('9') { '0' } else { '9' };
+    let wrong = format!("{first}{}", &code[1..]);
+    let new = NewJourney::new(config());
+    assert_eq!(
+        new.connect(&found, &wrong).await.err(),
+        Some(Problem::WrongCode)
+    );
+    old.start_again().unwrap();
+    assert_eq!(new.connect(&found, &code).await.err(), Some(Problem::Wait));
+}
+
+/// When the person on the old laptop does not pick in time, the new laptop is told the time ran
+/// out (not that the numbers did not match, nor that the connection was lost).
+#[tokio::test]
+async fn no_pick_in_time_tells_the_new_laptop_the_time_ran_out() {
+    let (_old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let waiting = NewJourney::new(config())
+        .connect(&found, &code)
+        .await
+        .unwrap();
+    next(&mut updates, round_of).await;
+    // Nothing else happens until the pick's deadline: let the clock run ahead to it.
+    tokio::time::pause();
+    let (approved, ()) = tokio::join!(waiting.approval(), async {
+        while let Some(u) = updates.recv().await {
+            if u == OldUpdate::TimedOut {
+                return;
+            }
+        }
+        panic!("the old laptop said the time ran out");
+    });
+    assert_eq!(approved.err(), Some(Problem::TimedOut));
+}
