@@ -36,6 +36,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const [code, setCode] = useState<{ digits: string; secondsLeft: number } | null>(null);
   const [waitLeft, setWaitLeft] = useState(0);
   const [numbers, setNumbers] = useState<number[]>([]);
+  const [round, setRound] = useState(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [checking, setChecking] = useState(false);
@@ -64,6 +65,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
         break;
       case "choose":
         setNumbers(event.numbers);
+        setRound(event.round);
         setChecking(false);
         setNotice(null);
         setProblem(null);
@@ -148,14 +150,14 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const pick = async (number: number) => {
     setChecking(true);
     // The right number ends in the paired event. A rejection means this try is over.
-    if (!(await attempt(() => oldPick(number)))) {
+    if (!(await attempt(() => oldPick(round, number)))) {
       setChecking(false);
       setPhase(code ? "code" : "starting");
     }
   };
 
   const decline = async () => {
-    if (await attempt(oldDecline)) {
+    if (await attempt(() => oldDecline(round))) {
       setNotice("declined");
       setPhase(code ? "code" : "starting");
     }

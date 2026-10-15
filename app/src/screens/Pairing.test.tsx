@@ -151,7 +151,7 @@ describe("old laptop", () => {
   it("offers the three numbers; picking one sends it, and the note is always there", async () => {
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
-    await emit("pairing-old", { kind: "choose", numbers: [142, 317, 859] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [142, 317, 859] });
 
     expect(heading().textContent).toBe(text("pair-choose-title"));
     expect(screen.getByText(text("pair-choose-note"))).toBeTruthy();
@@ -161,7 +161,7 @@ describe("old laptop", () => {
     expect(heading().textContent).toBe(text("pair-choose-title"));
 
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 317 })) }));
-    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { number: 317 });
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 7, number: 317 });
     expect(await screen.findByText(text("pair-choose-checking"))).toBeTruthy();
     noMissingText();
   });
@@ -169,10 +169,10 @@ describe("old laptop", () => {
   it("None of these match tells the engine and shows the next code with a notice", async () => {
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
-    await emit("pairing-old", { kind: "choose", numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
     fireEvent.click(button("pair-choose-none"));
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_decline");
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_decline", { round: 7 });
     });
     expect(await screen.findByText(text("pair-old-declined"))).toBeTruthy();
     expect(heading().textContent).toBe(text("pair-old-title"));
@@ -182,7 +182,7 @@ describe("old laptop", () => {
   it("says when the person did not pick in time, and keeps showing the next code", async () => {
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
-    await emit("pairing-old", { kind: "choose", numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
     await emit("pairing-old", { kind: "timed-out" });
     expect(screen.getByText(text("pair-old-timed-out"))).toBeTruthy();
     expect(screen.getByRole("group", { name: /1 2 3 4 5 6$/ })).toBeTruthy();
@@ -226,7 +226,7 @@ describe("old laptop", () => {
     };
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
-    await emit("pairing-old", { kind: "choose", numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
     expect(await screen.findByText(text("pairing-wrong-number"))).toBeTruthy();
     noMissingText();
@@ -295,7 +295,7 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "label", label: fox });
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
     expect(await violations()).toEqual([]);
-    await emit("pairing-old", { kind: "choose", numbers: [142, 317, 859] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [142, 317, 859] });
     expect(await violations()).toEqual([]);
     await emit("pairing-old", { kind: "paired" });
     expect(await violations()).toEqual([]);
@@ -371,6 +371,8 @@ describe("new laptop", () => {
 
     await emit("pairing-new", { kind: "problem", problem: { key: "pairing-timed-out", networks: [] } });
     expect(await screen.findByText(text("pairing-timed-out"))).toBeTruthy();
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-no-match", networks: [] } });
+    expect(await screen.findByText(text("pairing-no-match"))).toBeTruthy();
     expect(screen.getByLabelText<HTMLInputElement>(text("pair-new-code-label")).value).toBe("");
     noMissingText();
   });

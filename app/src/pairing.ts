@@ -14,7 +14,7 @@ export type OldEvent =
   | { kind: "code"; code: string; secondsLeft: number }
   | { kind: "wait"; secondsLeft: number }
   | { kind: "locked" }
-  | { kind: "choose"; numbers: number[] }
+  | { kind: "choose"; round: number; numbers: number[] }
   | { kind: "paired" }
   | { kind: "timed-out" };
 
@@ -55,8 +55,9 @@ export function useLabelText(label: Label | null): string {
 /* ---------- Commands ---------- */
 
 export const oldStart = (network: string | null) => invoke<undefined>("pairing_old_start", { network });
-export const oldPick = (number: number) => invoke<undefined>("pairing_old_pick", { number });
-export const oldDecline = () => invoke<undefined>("pairing_old_decline");
+/** A pick or a decline names the round of numbers it answers, so a late one never applies to the next. */
+export const oldPick = (round: number, number: number) => invoke<undefined>("pairing_old_pick", { round, number });
+export const oldDecline = (round: number) => invoke<undefined>("pairing_old_decline", { round });
 export const oldShuffle = () => invoke<undefined>("pairing_old_shuffle");
 export const oldRename = (name: string) => invoke<undefined>("pairing_old_rename", { name });
 export const oldStartAgain = () => invoke<undefined>("pairing_old_start_again");
