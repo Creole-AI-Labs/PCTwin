@@ -134,6 +134,11 @@ async fn the_right_pick_on_the_old_laptop_pairs_both() {
     .await;
     new_link.send(b"hello").await.unwrap();
     assert_eq!(&old_link.recv().await.unwrap()[..], b"hello");
+    // Paired: no more codes are shown or served.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    while let Ok(u) = updates.try_recv() {
+        assert!(code_of(&u).is_none(), "a code shown after pairing: {u:?}");
+    }
 }
 
 #[tokio::test]
@@ -160,7 +165,11 @@ async fn numbers_that_do_not_match_can_be_declined_on_the_old_laptop() {
     next(&mut updates, choices_of).await;
     old.decline().await;
     assert!(waiting.approval().await.is_err());
-    next(&mut updates, |u| code_of(u).filter(|(c, _)| *c != code)).await;
+    // Serving carries on: another new laptop with the fresh code reaches the pick.
+    let (fresh, _) = next(&mut updates, |u| code_of(u).filter(|(c, _)| *c != code)).await;
+    let again = new.connect(&found, &fresh).await.unwrap();
+    let choices = next(&mut updates, choices_of).await;
+    assert!(choices.contains(&again.number()));
 }
 
 #[tokio::test]

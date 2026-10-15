@@ -152,8 +152,8 @@ async fn a_wrong_code_is_never_tried_at_a_second_address() {
     let first_sender = sender();
     let second_sender = sender();
     let found = search(WAIT).await.unwrap();
-    let mut chosen = mine(&found, first.label())[0].clone();
-    let other = mine(&found, second.label())[0].addrs[0];
+    let mut chosen = mine(&found, &first.label())[0].clone();
+    let other = mine(&found, &second.label())[0].addrs[0];
     chosen.addrs.truncate(1);
     chosen.addrs.push(other);
 
