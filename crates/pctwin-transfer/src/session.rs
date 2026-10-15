@@ -443,9 +443,13 @@ pub struct SenderSession {
     checks: Vec<(usize, [u8; 32])>,
     /// Jobs opened at least once: opening one again starts a new attempt on a new stream.
     attempted: HashSet<usize>,
-    /// Per job: times the new laptop asked for some of its blocks again, kept across connections,
-    /// so a new laptop that keeps asking cannot make this one read and send it without end.
+    /// Per job: times the new laptop asked for some of its blocks again in the current attempt,
+    /// kept across connections (a new attempt starts again from 0, as on the new laptop), so a
+    /// new laptop that keeps asking cannot make this one read and send it without end.
     asked_again: Vec<u8>,
+    /// Per job: how important it was when it last ended (raised if the person asked for it
+    /// first), so a file asked for again keeps its place.
+    ended_tier: Vec<Tier>,
 }
 
 impl SenderSession {
@@ -460,6 +464,7 @@ impl SenderSession {
         }
         let states = jobs.iter().map(|_| SendState::Waiting).collect();
         let jobs_len = jobs.len();
+        let tiers = jobs.iter().map(|j| j.tier).collect();
         let streams: Vec<u32> = (0..jobs.len())
             .map(|i| u32::try_from(i).unwrap_or(u32::MAX))
             .collect();
@@ -489,6 +494,7 @@ impl SenderSession {
             checks: Vec::new(),
             attempted: HashSet::new(),
             asked_again: vec![0; jobs_len],
+            ended_tier: tiers,
         }
     }
 
@@ -808,6 +814,8 @@ impl SenderSession {
         match opened {
             Ok((reader, sections)) => {
                 self.new_stream(job);
+                // A new attempt: the new laptop counts its rounds from 0 again, and so does this.
+                self.asked_again[job] = 0;
                 self.states[job] = SendState::Open {
                     reader,
                     sections,
@@ -846,7 +854,9 @@ impl SenderSession {
     fn end(&mut self, job: usize, reader: FileSender) -> Message {
         let stream = self.streams[job];
         let stamp = reader.header().stamp;
-        self.scheduler.finished(self.jobs[job].item);
+        let item = self.jobs[job].item;
+        self.ended_tier[job] = self.scheduler.tier_of(item).unwrap_or(self.jobs[job].tier);
+        self.scheduler.finished(item);
         match reader.finish() {
             Ok(trailer) => {
                 // On a weak drive each file is read only once: a file that changed is not read again.
@@ -1112,15 +1122,14 @@ impl SenderSession {
         }
         self.dirty = true;
         if self.asked_again[job] >= SEND_AGAIN_ROUNDS {
-            // Asked more often than any new laptop does: it ends here, reported, never read again.
-            self.ends.push(Message::EndFile {
+            // Asked more often in this attempt than an honest new laptop asks: this attempt stops
+            // here and the file fails, said as it is (never as a file that changed).
+            self.ends.push(Message::GiveUp {
                 stream: self.streams[job],
-                stamp_after: ticket.stamp,
-                changed: true,
             });
             self.states[job] = SendState::Ended {
                 retry: false,
-                failure: Some("the new laptop kept asking for it again".into()),
+                failure: Some(GAVE_UP.into()),
                 later: false,
             };
             return;
@@ -1139,7 +1148,7 @@ impl SenderSession {
             );
         match reopened {
             Ok((reader, sections)) => {
-                self.scheduler.push_again(j.item, j.tier);
+                self.scheduler.push_again(j.item, self.ended_tier[job]);
                 self.states[job] = SendState::Open {
                     reader,
                     sections,
@@ -1971,6 +1980,16 @@ impl<'d> ReceiverSession<'d> {
                     self.end(s.item, stream, outcome, None);
                 }
             }
+            Message::GiveUp { stream } => {
+                // The old laptop stopped sending this attempt: it fails, with the true reason.
+                if let Some(s) = self.streams.remove(&stream) {
+                    drop(s.assembly);
+                    let _ = self.journal.failed(s.entry, GAVE_UP);
+                    self.allowance.ended(s.item, false);
+                    self.end(s.item, stream, ReceiveOutcome::Failed(GAVE_UP.into()), None);
+                }
+                replies.push(Message::FileDone { stream, ok: false });
+            }
             Message::AllSent => return Ok((replies, true)),
             _ => return Err(protocol("unexpected message from the old laptop")),
         }
@@ -2272,6 +2291,9 @@ impl Drop for ReceiverSession<'_> {
         }
     }
 }
+
+/// Said of a file whose blocks were asked for again more often than one attempt allows.
+const GAVE_UP: &str = "parts of it kept arriving damaged or being stored wrong, so it was not finished. Your original is untouched";
 
 /// How many times a file's missing or wrongly stored blocks are asked for again before it fails.
 const SEND_AGAIN_ROUNDS: u8 = 2;

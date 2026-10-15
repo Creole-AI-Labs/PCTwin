@@ -28,7 +28,7 @@ pub const MOVE_PROTOCOL: Versions = Versions {
     newest: 2,
 };
 
-/// Message kind, kept apart from the transfer's own (1 to 14) and the inventory's (32, 33).
+/// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33).
 const KIND: u8 = 34;
 const LEN: usize = 5;
 

@@ -186,7 +186,7 @@ async fn a_range_that_starts_at_zero_or_runs_backwards_is_refused() {
 #[tokio::test]
 async fn the_message_form_is_fixed_for_every_release() {
     let kind = sent_by(v(1, 1)).await[0];
-    // Apart from the transfer's kinds (1 to 14) and the inventory's (32, 33).
+    // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33).
     assert_eq!(kind, 34);
     assert_eq!(sent_by(v(2, 0x0103)).await, vec![kind, 0, 2, 1, 3]);
     // A later laptop that speaks versions 1 to 3 still agrees with this one on 2.

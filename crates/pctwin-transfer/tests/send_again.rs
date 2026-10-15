@@ -12,7 +12,7 @@ use pctwin_gate::{Approved, Destinations, FaultPlan, Flip};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
     BlockMap, Channel, ChannelError, FileSender, Message, ReceiveOutcome, ReceiverSession,
-    ResumeTicket, SendJob, SendOutcome, SenderSession, Stamp, Tier, block_size_for,
+    ResumeTicket, Scheduler, SendJob, SendOutcome, SenderSession, Stamp, Tier, block_size_for,
     split_into_pieces,
 };
 use tokio::sync::mpsc;
@@ -458,6 +458,7 @@ fn the_new_messages_read_back_as_written() {
             block: 7,
             written: true,
         },
+        Message::GiveUp { stream: 9 },
         Message::SendAgain {
             stream: 4,
             ticket: ResumeTicket {
@@ -558,14 +559,10 @@ async fn a_new_laptop_that_keeps_asking_again_is_answered_twice_then_the_file_fa
                 "{end:?}"
             );
         }
-        // A third time: nothing more is read or sent, and the file ends.
+        // A third time in this attempt: nothing more is read or sent, and the old laptop says it
+        // stops (never that the file changed).
         say(&mut new, &ask).await;
-        let (got, end) = take_blocks_until_end(&mut new).await;
-        assert_eq!(got, 0);
-        assert!(
-            matches!(end, Message::EndFile { changed: true, .. }),
-            "{end:?}"
-        );
+        assert_eq!(hear(&mut new).await, Message::GiveUp { stream: 0 });
         say(
             &mut new,
             &Message::FileDone {
@@ -781,4 +778,201 @@ async fn on_a_drive_that_reads_every_file_back_wrong_each_file_fails_for_that_re
             other => panic!("file {n}: {other:?}"),
         }
     }
+}
+
+/// The old laptop's side of an honest move where the person saves the file during a resend: the
+/// first block of every attempt is damaged on the way; on the first attempt the file is saved
+/// just before the block is sent again; on later attempts the block sent again is damaged once
+/// more, so each attempt needs both of its rounds.
+struct SavedDuringResend {
+    inner: Mem,
+    first: Option<u32>,
+    sends: std::collections::BTreeMap<u32, u32>,
+    src: PathBuf,
+}
+
+impl Channel for SavedDuringResend {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        match Message::decode(data) {
+            Ok(Message::StartFile { stream, .. }) if self.first.is_none() => {
+                self.first = Some(stream);
+            }
+            Ok(Message::Piece {
+                stream,
+                last: true,
+                mut bytes,
+            }) => {
+                let n = self.sends.entry(stream).or_default();
+                *n += 1;
+                let first = self.first == Some(stream);
+                if first && *n == 4 {
+                    std::fs::write(&self.src, pattern(300_001, 1234)).unwrap();
+                }
+                if *n == 1 || (!first && *n == 4) {
+                    let at = bytes.len() - 1;
+                    bytes[at] ^= 0x5A;
+                    let m = Message::Piece {
+                        stream,
+                        last: true,
+                        bytes,
+                    };
+                    return self.inner.send(&m.encode()).await;
+                }
+            }
+            _ => {}
+        }
+        self.inner.send(data).await
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+#[tokio::test]
+async fn a_file_saved_during_a_resend_starts_again_with_its_own_rounds_and_arrives() {
+    let l = laptops(&[300_000]);
+    let table = table(&l, None);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (a, mut b) = mem_pair();
+    let mut a = SavedDuringResend {
+        inner: a,
+        first: None,
+        sends: Default::default(),
+        src: l.files[0].0.clone(),
+    };
+    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    s.unwrap();
+    r.unwrap();
+    assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Finished(_))
+    ));
+    assert_eq!(
+        std::fs::read(landed(&l, 0)).unwrap(),
+        std::fs::read(&l.files[0].0).unwrap()
+    );
+}
+
+/// The new laptop's main connection, cut as soon as the old laptop starts its second round.
+struct CutAfterSecondRound {
+    inner: Option<Mem>,
+    asked: u32,
+}
+
+impl Channel for CutAfterSecondRound {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        let Some(inner) = self.inner.as_mut() else {
+            return Err(ChannelError);
+        };
+        if let Ok(Message::SendAgain { .. }) = Message::decode(data) {
+            self.asked += 1;
+        }
+        inner.send(data).await
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        let Some(inner) = self.inner.as_mut() else {
+            return Err(ChannelError);
+        };
+        let d = inner.recv().await?;
+        if self.asked >= 2 && matches!(Message::decode(&d), Ok(Message::Piece { .. })) {
+            self.inner = None;
+            return Err(ChannelError);
+        }
+        Ok(d)
+    }
+}
+
+#[tokio::test]
+async fn after_the_new_laptop_restarts_a_file_out_of_rounds_fails_with_the_true_reason() {
+    let l = laptops(&[300_000]);
+    let jdir = tempfile::tempdir().unwrap();
+    let journal = pctwin_journal::Journal::open(&jdir.path().join("j.redb")).unwrap();
+    // Every file reads back wrong from this drive.
+    let table = table(&l, Some(Flip::OnRead { at: 0 }));
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    {
+        let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+        let (mut a, b) = mem_pair();
+        let mut b = CutAfterSecondRound {
+            inner: Some(b),
+            asked: 0,
+        };
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+        })
+        .await
+        .expect("hung");
+        assert_eq!(b.asked, 2);
+        // The app on the new laptop quits here.
+    }
+    pctwin_transfer::recover(&journal, &table).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+    receiver.restore().unwrap();
+    let (mut a, mut b) = mem_pair();
+    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    s.unwrap();
+    r.unwrap();
+    match receiver.outcome(id(0)) {
+        Some(ReceiveOutcome::Failed(why)) => {
+            assert!(
+                !why.contains("changed"),
+                "never said to have changed: {why}"
+            );
+            assert!(why.contains("Your original is untouched"), "{why}");
+        }
+        other => panic!("expected the file to fail, got {other:?}"),
+    }
+    assert!(matches!(
+        sender.outcome(id(0)),
+        Some(SendOutcome::Failed(_))
+    ));
+    assert!(!landed(&l, 0).exists());
+}
+
+fn order(s: &mut Scheduler) -> Vec<ItemId> {
+    let mut out = Vec::new();
+    while let Some(&x) = s.in_flight().first() {
+        out.push(x);
+        s.finished(x);
+    }
+    out
+}
+
+#[test]
+fn a_file_asked_again_goes_ahead_of_its_own_importance_only() {
+    let (x, y, z, w, v, u) = (id(1), id(2), id(3), id(4), id(5), id(6));
+    let mut s = Scheduler::new(1);
+    s.push(x, Tier::AskedFirst { rank: 0 });
+    s.push(y, Tier::AskedFirst { rank: 1 });
+    s.push(z, Tier::Rest);
+    assert_eq!(s.in_flight(), vec![x]);
+    s.push_again(w, Tier::Rest);
+    s.push_again(v, Tier::AskedFirst { rank: 5 });
+    s.push_again(u, Tier::Essential);
+    s.finished(x);
+    assert_eq!(order(&mut s), vec![y, v, u, w, z]);
+    // One more important than every file in flight goes in at once.
+    let mut s = Scheduler::new(1);
+    s.push(z, Tier::Rest);
+    s.push(w, Tier::Rest);
+    assert_eq!(s.in_flight(), vec![z]);
+    s.push_again(v, Tier::Essential);
+    assert_eq!(s.in_flight()[0], v);
+    // A file raised by the person keeps that place: its tier now is what it ends with.
+    let mut s = Scheduler::new(1);
+    s.push(z, Tier::Rest);
+    s.ask_first(&[z]);
+    assert!(matches!(s.tier_of(z), Some(Tier::AskedFirst { .. })));
 }

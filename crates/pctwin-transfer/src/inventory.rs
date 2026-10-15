@@ -39,7 +39,7 @@ pub const MAX_INVENTORY_BYTES: u64 = 512 * 1024 * 1024;
 /// Longest wait for each frame of the list.
 pub const INVENTORY_PIECE_WAIT: Duration = Duration::from_secs(30);
 
-/// Message kinds, kept apart from the transfer's own (1 to 14), so neither is mistaken for the
+/// Message kinds, kept apart from the transfer's own (1 to 15), so neither is mistaken for the
 /// other.
 const START: u8 = 32;
 const PART: u8 = 33;

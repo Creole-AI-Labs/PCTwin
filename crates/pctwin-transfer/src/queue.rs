@@ -150,6 +150,16 @@ impl Scheduler {
         self.waiting.insert(at, (item, tier));
     }
 
+    /// How important `item` is now (raised if the person asked for it first), while it waits or
+    /// is in flight.
+    pub fn tier_of(&self, item: ItemId) -> Option<Tier> {
+        self.active
+            .iter()
+            .chain(&self.waiting)
+            .find(|(i, _)| *i == item)
+            .map(|(_, t)| *t)
+    }
+
     /// The person asked for these to move first, in this order, during the move.
     pub fn ask_first(&mut self, items: &[ItemId]) {
         for &item in items {
