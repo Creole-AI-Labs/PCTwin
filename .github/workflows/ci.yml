@@ -30,7 +30,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -81,7 +81,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 10
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -91,6 +91,74 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  fuzz:
+    # Everything that arrives from the other laptop or the person, fuzzed for a minute per
+    # target with cargo-fuzz (libFuzzer, nightly compiler): a crash, hang or failed check fails CI.
+    name: Fuzzing (messages, frames, the record, paths, pairing input)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            uploads.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            static.rust-lang.org:443
+            index.crates.io:443
+            static.crates.io:443
+            crates.io:443
+            registry.npmjs.org:443
+            nodejs.org:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            azure.archive.ubuntu.com:80
+            azure.archive.ubuntu.com:443
+            archive.ubuntu.com:80
+            security.ubuntu.com:80
+            ports.ubuntu.com:80
+            esm.ubuntu.com:443
+            motd.ubuntu.com:443
+            packages.microsoft.com:443
+            ppa.launchpadcontent.net:443
+            api.osv.dev:443
+            osv-vulnerabilities.storage.googleapis.com:443
+            api.deps.dev:443
+            api.securityscorecards.dev:443
+            api.scorecard.dev:443
+            www.bestpractices.dev:443
+            oss-fuzz-build-logs.storage.googleapis.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
+      - name: Fuzz each target for a minute
+        shell: bash
+        run: |
+          for t in messages inventory_frames record paths pairing_messages typed_digits; do
+            echo "== $t"
+            cargo +nightly fuzz run "$t" -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
+          done
 
   rust:
     name: Rust (${{ matrix.os }})
@@ -110,7 +178,7 @@ jobs:
     # first nightly run) it needed more than an hour, so it gets 90 minutes.
     timeout-minutes: ${{ matrix.os == 'macos-15-intel' && 90 || 60 }}
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
         with:
           # Audit only: these tests send to the local multicast group (device discovery), which a
@@ -139,7 +207,7 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
@@ -148,7 +216,7 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 10
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -222,7 +290,7 @@ jobs:
           cat "$marker"
           grep -q "titled PCTwin" "$marker"
       - name: Keep the unsigned app
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pctwin-unsigned-${{ matrix.os }}
           path: |
@@ -258,7 +326,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -303,7 +371,7 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -335,7 +403,7 @@ jobs:
           done
       - name: Keep the evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: two-accounts-${{ matrix.os }}
           path: lab-evidence
@@ -355,7 +423,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -392,7 +460,7 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -403,7 +471,7 @@ jobs:
           ./target/debug/pctwin-lab make "$RUNNER_TEMP/laptop" 41 60 1048576 > "$RUNNER_TEMP/made.json"
           ./target/debug/pctwin-labmove pack "$RUNNER_TEMP/laptop" lab-person lab-package
           cp "$RUNNER_TEMP/made.json" lab-package/
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lab-package-${{ matrix.os }}
           path: lab-package
@@ -424,7 +492,7 @@ jobs:
     runs-on: ${{ matrix.to }}
     timeout-minutes: 30
     steps:
-      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
@@ -461,7 +529,7 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -486,7 +554,7 @@ jobs:
             evidence/dest.json evidence/sent.json evidence/received.json | tee evidence/check.txt
       - name: Keep the evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lab-handoff-${{ matrix.from }}-to-${{ matrix.to }}
           path: evidence
