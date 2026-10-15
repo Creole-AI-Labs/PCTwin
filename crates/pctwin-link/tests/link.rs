@@ -1243,9 +1243,11 @@ async fn every_connection_is_watched_so_a_dead_laptop_is_noticed() {
 
 /// Whether nothing answers at `addr` any more.
 async fn nothing_listens_at(addr: std::net::SocketAddr) -> bool {
-    matches!(
+    // Refused, or no answer at all (a Mac has no 127.0.0.2, so connecting there just waits):
+    // either way nothing is listening. Only a connection that opens counts as listening.
+    !matches!(
         tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await,
-        Ok(Err(_))
+        Ok(Ok(_))
     )
 }
 
@@ -1270,4 +1272,40 @@ async fn the_port_stays_open_for_lanes_during_the_move_and_closes_after() {
     assert!(!nothing_listens_at(addr).await, "lanes can still be opened");
     drop(lanes);
     assert!(nothing_listens_at(addr).await);
+}
+
+/// While pairing, the old laptop listens only on the chosen connection's own addresses (IPv4 and
+/// IPv6, one port), never on every connection: a VPN or virtual-machine network cannot reach it.
+#[tokio::test]
+async fn the_host_listens_on_each_chosen_address_with_one_port_and_nowhere_else() {
+    let chosen: Vec<std::net::SocketAddr> =
+        vec!["127.0.0.1:0".parse().unwrap(), "[::1]:0".parse().unwrap()];
+    let host = match Host::bind_all(&chosen, fast()).await {
+        Ok(h) => h,
+        // A runner without IPv6 loopback: the IPv4 address alone is still served.
+        Err(_) => Host::bind_all(&chosen[..1], fast()).await.unwrap(),
+    };
+    let addrs = host.local_addrs();
+    assert!(!addrs.is_empty());
+    let port = addrs[0].port();
+    assert!(addrs.iter().all(|a| a.port() == port), "{addrs:?}");
+    let sender = Arc::new(Mutex::new(RotatingSender::new(Instant::now()).unwrap()));
+    // A device pairs through every chosen address.
+    for addr in addrs.clone() {
+        let code = shown_code(&sender);
+        let guest = tokio::spawn(async move { connect(addr, &code, fast()).await });
+        let pending = host.next_peer(&sender).await.unwrap();
+        let guest = guest.await.unwrap().unwrap();
+        let old = pending.choose(guest.match_number(), Instant::now()).await;
+        assert!(old.is_ok(), "{addr}");
+        assert!(guest.approval().await.is_ok());
+    }
+    // Another address of this laptop, not chosen, reaches nothing.
+    let elsewhere: std::net::SocketAddr = format!("127.0.0.2:{port}").parse().unwrap();
+    assert!(nothing_listens_at(elsewhere).await, "{elsewhere}");
+}
+
+#[tokio::test]
+async fn a_host_needs_at_least_one_address() {
+    assert!(Host::bind_all(&[], fast()).await.is_err());
 }

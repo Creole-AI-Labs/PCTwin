@@ -35,6 +35,7 @@ fn windows_facts() -> Facts {
             (CloudProvider::Dropbox, PathBuf::from(r"E:\Dropbox")),
         ],
         icloud_desktop_and_documents: false,
+        work_roots: Vec::new(),
     }
 }
 
@@ -114,6 +115,7 @@ fn unix_facts() -> Facts {
             (CloudProvider::Dropbox, PathBuf::from("/Users/ada/Dropbox")),
         ],
         icloud_desktop_and_documents: false,
+        work_roots: Vec::new(),
     }
 }
 
@@ -159,6 +161,7 @@ fn the_longest_matching_cloud_folder_wins() {
             (CloudProvider::Dropbox, inner.clone()),
         ],
         icloud_desktop_and_documents: false,
+        work_roots: Vec::new(),
     };
     assert_eq!(
         classify(&inner.join("x"), &f),
