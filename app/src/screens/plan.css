@@ -428,6 +428,7 @@
 
 .plan-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
