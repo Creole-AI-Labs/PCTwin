@@ -267,7 +267,7 @@ jobs:
         run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast -- --nocapture
       # A copy killed part way through on each drive; after the remount, recovery: nothing partly
       # copied under a real name, an honest record, nothing lost.
-      - name: Recovery on real drives (before the remount: a copy is killed mid-way)
+      - name: Recovery on real drives (before the remount, a copy killed part way)
         if: "!cancelled()"
         timeout-minutes: 15
         shell: bash
