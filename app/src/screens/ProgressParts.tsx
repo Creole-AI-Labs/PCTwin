@@ -112,7 +112,7 @@ export function ProgressPanel({ title, progress, note }: { title: string; progre
 /** A group's name: its role in words, or the folder's own name in its own direction. */
 function GroupLabel({ name }: { name: GroupName }) {
   const { l10n } = useLocalization();
-  return name.kind === "role" ? <>{l10n.getString(`progress-role-${name.role}`)}</> : <bdi dir="auto">{name.name}</bdi>;
+  return name.kind === "role" ? <>{l10n.getString(`plan-role-${name.role}`)}</> : <bdi dir="auto">{name.name}</bdi>;
 }
 
 /** A group's state as an icon and a word. "Verified" only for a group whose every item is copied and checked. */

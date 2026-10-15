@@ -25,6 +25,7 @@
  */
 
 import type { Label } from "./pairing";
+import type { FolderRole } from "./plan";
 
 /* ---------- Results: the engine's ItemStatus and Reason ---------- */
 
@@ -138,10 +139,7 @@ export type Counts = {
 
 export type Range = { low: number; high: number };
 
-/** What a folder is for (`FolderRole` in the engine, as lane C's plan.ts also names it). */
-export type FolderRole = "home" | "desktop" | "documents" | "downloads" | "pictures" | "music" | "videos" | "public" | "app-data" | "other";
-
-/** A group of the move: a folder by its role, or a folder the person added, by its name. */
+/** A group of the move: a folder by its role (named as the plan names it), or a folder the person added, by its name. */
 export type GroupName = { kind: "role"; role: FolderRole } | { kind: "folder"; name: string };
 
 /** Where a group stands. "copied" means every item in it is copied and checked, and nothing else. */
