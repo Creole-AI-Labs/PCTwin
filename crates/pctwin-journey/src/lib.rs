@@ -452,6 +452,15 @@ async fn serve<S: Serving>(
             .unwrap_or_else(PoisonError::into_inner)
             .take_if(|t| t.round == round);
         match decision.unwrap_or(Ended::TimeRanOut) {
+            // A pick handed over at or after the deadline is late, whatever the new laptop has
+            // done since: the deadline here decides, not whichever side noticed first.
+            Ended::Answered(Decision::Pick(_, outcome))
+                if tokio::time::Instant::now() >= deadline =>
+            {
+                peer.time_out().await;
+                let _ = updates.send(OldUpdate::TimedOut);
+                let _ = outcome.send(Err(Problem::TimedOut));
+            }
             Ended::Answered(Decision::Pick(number, outcome)) => {
                 match peer.choose(number, Instant::now()).await {
                     Ok(link) => {
