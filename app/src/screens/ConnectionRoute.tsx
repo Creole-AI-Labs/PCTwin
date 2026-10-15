@@ -1,7 +1,9 @@
 import { Localized } from "@fluent/react";
 import { Badge, Button } from "../components/kit";
 import { ArrowForward, Check, Info, Wifi } from "../icons";
-import { Eyebrow, Heading, PairStrip } from "./PairParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./PairParts";
 import "./connection.css";
 
 /**
@@ -11,8 +13,7 @@ import "./connection.css";
 export default function ConnectionRoute({ onBack, onWifi }: { onBack: () => void; onWifi: () => void }) {
   return (
     <>
-      <PairStrip onBack={onBack} />
-      <Eyebrow id="connect-eyebrow" />
+      <TopStrip onBack={onBack} labelId="connect-eyebrow" />
       <Heading id="connect-title" />
       <Localized id="connect-body">
         <p className="subhead" />
@@ -35,13 +36,6 @@ export default function ConnectionRoute({ onBack, onWifi }: { onBack: () => void
           </Localized>
         </Badge>
       </section>
-      <div className="connect-actions">
-        <Button variant="primary" icon={<ArrowForward />} className="connect-block" onClick={onWifi}>
-          <Localized id="connect-use-wifi">
-            <span />
-          </Localized>
-        </Button>
-      </div>
       <Localized id="connect-later">
         <p className="connect-quiet" />
       </Localized>
@@ -51,6 +45,13 @@ export default function ConnectionRoute({ onBack, onWifi }: { onBack: () => void
           <p className="note-text" />
         </Localized>
       </div>
+      <FrameFooter>
+        <Button variant="primary" icon={<ArrowForward />} onClick={onWifi}>
+          <Localized id="connect-use-wifi">
+            <span />
+          </Localized>
+        </Button>
+      </FrameFooter>
     </>
   );
 }

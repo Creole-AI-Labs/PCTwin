@@ -110,17 +110,17 @@ export function ProgressPanel({ title, progress, note }: { title: string; progre
 }
 
 /** A group's name: its role in words, or the folder's own name in its own direction. */
-function GroupLabel({ name }: { name: GroupName }) {
+export function GroupLabel({ name }: { name: GroupName }) {
   const { l10n } = useLocalization();
   return name.kind === "role" ? <>{l10n.getString(`plan-role-${name.role}`)}</> : <bdi dir="auto">{name.name}</bdi>;
 }
 
 /** A group's state as an icon and a word. "Verified" only for a group whose every item is copied and checked. */
-function GroupBadge({ state }: { state: GroupState }) {
+export function GroupBadge({ state, paused = false }: { state: GroupState; paused?: boolean }) {
   const { l10n } = useLocalization();
   if (state === "copied") return <Badge tone="good" icon={<Check className="mv-icon" />}>{l10n.getString("progress-state-verified")}</Badge>;
   if (state === "needs-action" || state === "failed") return <ResultChip result={state} />;
-  return <PhaseBadge phase={state} paused={false} />;
+  return <PhaseBadge phase={state} paused={paused} />;
 }
 
 /**

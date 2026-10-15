@@ -1,24 +1,23 @@
 import { useLocalization } from "@fluent/react";
 import { Banner, Button, Metrics } from "../components/kit";
-import { formatBytes, measuredPercent, minutesRange, pageLocale, type MoveProgress, type QueueItem } from "../move";
+import { formatBytes, groupState, measuredPercent, minutesRange, pageLocale, type MoveProgress } from "../move";
+import { labelText } from "../pairing";
 import type { ProgressHandlers } from "./ProgressCompact";
-import { Heading, Notices, PhaseBadge, ResultCell, Topline } from "./ProgressParts";
+import { GroupBadge, GroupLabel, Heading, Notices, Topline } from "./ProgressParts";
 
 /**
- * X02 Move progress, expanded (760 x 620): the same measured numbers as X01, then every item in
- * flight and the latest to end, each with its own state in words. An item says "copied" only once
- * it has ended as copied; nothing here counts a file as done while it is still being checked.
- * The whole list lives in the report (R02); this shows what is moving now.
+ * X02 Move progress, expanded (760 x 620): three measured numbers, then one table row for each
+ * group with its source and state. The state words are X01's, derived from the group's counts, so
+ * a group still being checked is never shown as verified. The item-by-item list is the report (R02).
  */
 export default function ProgressDetail({
   progress,
-  queue,
   onPause,
   onResume,
   onCollapse,
   onStop,
   onSeeNeedsAction,
-}: { progress: MoveProgress; queue: QueueItem[]; onCollapse: () => void } & ProgressHandlers) {
+}: { progress: MoveProgress; onCollapse: () => void } & ProgressHandlers) {
   const { l10n } = useLocalization();
   const paused = progress.state !== "running";
   const pct = measuredPercent(progress);
@@ -36,7 +35,7 @@ export default function ProgressDetail({
         ]}
       />
       <Notices progress={progress} onSeeNeedsAction={onSeeNeedsAction} />
-      {queue.length === 0 ? (
+      {progress.groups.length === 0 ? (
         <p className="mv-empty">{l10n.getString("progress-queue-empty")}</p>
       ) : (
         <div className="mv-table-wrap">
@@ -49,17 +48,19 @@ export default function ProgressDetail({
               </tr>
             </thead>
             <tbody>
-              {queue.map((item) => (
-                <tr key={item.id}>
+              {progress.groups.map((g) => (
+                <tr key={g.id}>
                   <th scope="row">
-                    <bdi dir="auto">{item.name}</bdi>
+                    <GroupLabel name={g.name} />
                   </th>
                   <td>
-                    <bdi dir="auto" className="mv-path">
-                      {item.source}
-                    </bdi>
+                    <bdi dir="auto">{labelText(l10n, progress.laptops.old)}</bdi>
                   </td>
-                  <td>{item.phase === "ended" ? <ResultCell outcome={item.outcome} /> : <PhaseBadge phase={item.phase} paused={paused} />}</td>
+                  <td>
+                    <GroupBadge state={groupState(g.counts)} paused={paused} />
+                    {g.counts.needsAction > 0 && <p className="mv-reason">{l10n.getString("progress-count-needs-action", { count: g.counts.needsAction })}</p>}
+                    {g.counts.failed > 0 && <p className="mv-reason">{l10n.getString("progress-count-failed", { count: g.counts.failed })}</p>}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -224,7 +224,7 @@
   content: "";
   position: absolute;
   top: 3px;
-  left: 3px;
+  inset-inline-start: 3px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -239,6 +239,10 @@
 
 .kit-toggle[aria-checked="true"] .kit-toggle-track::before {
   transform: translateX(16px);
+}
+
+[dir="rtl"] .kit-toggle[aria-checked="true"] .kit-toggle-track::before {
+  transform: translateX(-16px);
 }
 
 /* Checkbox rows */
@@ -385,6 +389,16 @@
   font-size: var(--type-supporting);
 }
 
+/* Narrow windows: the status and its action may stack under the name instead of pushing the row wider. */
+@media (max-width: 400px) {
+  .kit-row-end {
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-inline-size: 100%;
+  }
+}
+
 /* Chips: always an icon and a word */
 .kit-chip {
   display: inline-flex;
@@ -396,10 +410,11 @@
   color: var(--colour-muted);
   font-size: var(--type-tertiary);
   font-weight: 600;
-  white-space: nowrap;
+  max-inline-size: 100%;
 }
 
 .kit-chip svg {
+  flex: none;
   width: 13px;
   height: 13px;
 }

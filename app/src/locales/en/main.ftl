@@ -29,6 +29,17 @@ role-new-title = My new laptop
 role-new-body = Receive my setup from another laptop.
 role-note = Nothing moves until you review and approve the plan. Your old laptop stays unchanged during the move.
 
+## Frame parts (footer note, Back, steps)
+
+footer-note-move = Free personal moves
+footer-note-send = Free nearby sending
+frame-back = Back
+# Read out by screen readers only; the step shapes carry the meaning on screen.
+frame-step-done = Done
+frame-step-current = Now
+frame-step-todo = Next
+frame-step-position = Step { $number } of { $total }
+
 ## F01 Unfinished move
 
 resume-open = Resume your move
@@ -60,10 +71,6 @@ connect-prep-step-2-title = Allow local-network access
 connect-prep-step-2-body = Use the genuine OS prompt if it appears.
 connect-prep-step-3-title = Choose a role on each laptop
 connect-prep-step-3-body = One sends. The other receives.
-connect-step-done = Done
-connect-step-current = Now
-connect-step-todo = Next
-connect-step-position = Step { $number } of { $total }
 connect-prep-note = Guest Wi-Fi or client isolation can block the link.
 connect-prep-continue = Continue to pairing
 
@@ -1005,35 +1012,25 @@ progress-queue-empty = Nothing has started yet.
 progress-route-old = Old laptop
 progress-route-new = New laptop
 progress-panel-pausing = Pausing
-outcome-metric-size = copied and checked
-outcome-metric-done = items in place
+outcome-metric-size = verified copies
 outcome-metric-action = need your action
 progress-percent-unknown = PCTwin is still working out the size of this move.
 mini-title-send-paused = Send paused.
 cancel-ack-hint = Tick the box above to turn on the stop button.
-outcome-not-copied-chip = Not copied
 progress-state-placing = Putting in place
 progress-state-existing = Already there
 outcome-stopped-title = Your move was stopped.
 outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
-outcome-not-copied =
+# $done and $total are counts of items: what was copied and checked, and everything the person approved.
+outcome-files-summary = { $done } of { $total } items copied and checked.
+outcome-files-memory =
     { NUMBER($count) ->
-        [one] { $count } item was not copied
-       *[other] { $count } items were not copied
-    }
-outcome-checked-memory =
-    { NUMBER($count) ->
-        [one] { $count } file was checked from this laptop’s memory, not the drive. It was still compared with the original, and the report marks it.
-       *[other] { $count } files were checked from this laptop’s memory, not the drive. They were still compared with the originals, and the report marks each one.
+        [one] { $count } checked from this laptop’s memory, not the drive.
+       *[other] { $count } checked from this laptop’s memory, not the drive.
     }
 report-show-more = Show more
 # $shown and $total are counts of items.
 report-showing = Showing { $shown } of { $total }
-report-memory-summary =
-    { NUMBER($count) ->
-        [one] { $count } file was checked from this laptop’s memory, not the drive. It is marked below.
-       *[other] { $count } files were checked from this laptop’s memory, not the drive. Each one is marked below.
-    }
 
 ## Component kit
 

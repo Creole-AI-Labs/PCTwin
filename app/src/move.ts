@@ -15,7 +15,6 @@
  * Events (Tauri `listen`):
  * - `move-progress`: a `MoveProgress` (the pairing labels, each group's measured counts, the totals), whenever a measured number changes (a few times a second at most).
  * - `move-state`: `{ state: RunState }` when the run state changes.
- * - `move-queue`: `QueueItem[]` (X02), the items in flight and recently ended.
  * - `move-finished`: `MoveOutcome` once nothing is waiting, copying or checking.
  *
  * Mirrors: `ItemStatus` and `Reason` in crates/pctwin-types (result.rs), the write steps in
@@ -217,9 +216,6 @@ export const PHASE_STEP: Record<Phase, string> = {
   "putting-in-place": "verified or applied",
   "already-there": "existing",
 };
-
-/** One item in the expanded view (X02): still moving, or ended with its result. */
-export type QueueItem = { id: string; name: string; source: string } & ({ phase: Phase; outcome?: never } | { phase: "ended"; outcome: Outcome });
 
 /** What R01 shows when a move ends. `stopped` means the person stopped it early. */
 export type MoveOutcome = {
