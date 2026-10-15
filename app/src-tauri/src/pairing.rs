@@ -130,7 +130,10 @@ impl<S: Serving> Pairing<S> {
                 if inner.epoch != epoch {
                     return;
                 }
-                tell(update.into());
+                // Paired is told by `keep`, once the link is really kept and watched.
+                if update != OldUpdate::Paired {
+                    tell(update.into());
+                }
             }
         });
         Ok(())
@@ -155,15 +158,25 @@ impl<S: Serving> Pairing<S> {
             }
         };
         let link = journey.pick(round, number).await?;
-        self.keep(epoch, link, move || tell(OldView::Lost)).await
+        let paired = tell.clone();
+        self.keep(
+            epoch,
+            link,
+            move || paired(OldView::Paired),
+            move || tell(OldView::Lost),
+        )
+        .await
     }
 
-    /// Keeps `link` as paired for work of `epoch`, watched until the move takes it: if it dies
-    /// first, it is let go and `lost` is told. If pairing was left meanwhile, the link is let go.
+    /// Keeps `link` as paired for work of `epoch`, watched until the move takes it, and only then
+    /// tells `paired` (so a screen shows Paired only for a link really kept). If it dies before
+    /// the move, it is let go and `lost` is told. If pairing was left meanwhile, the link is let
+    /// go and nothing is told.
     async fn keep(
         self: &Arc<Self>,
         epoch: u64,
         link: Link,
+        paired: impl FnOnce(),
         lost: impl FnOnce() + Send + 'static,
     ) -> Result<(), Problem> {
         let mut inner = self.inner.lock().await;
@@ -190,6 +203,7 @@ impl<S: Serving> Pairing<S> {
             link: Box::new(link),
             watch,
         };
+        paired();
         Ok(())
     }
 
@@ -236,26 +250,35 @@ impl<S: Serving> Pairing<S> {
         let number = waiting.number();
         let pairing = Arc::clone(self);
         let approval = tauri::async_runtime::spawn(async move {
-            let view = match waiting.approval().await {
+            let problem = match waiting.approval().await {
                 Ok(link) => {
-                    let lost = tell.clone();
-                    match pairing.keep(epoch, link, move || lost(NewView::Lost)).await {
-                        Ok(()) => NewView::Paired,
-                        Err(p) => NewView::Problem { problem: p.into() },
-                    }
+                    let (paired, lost) = (tell.clone(), tell.clone());
+                    pairing
+                        .keep(
+                            epoch,
+                            link,
+                            move || paired(NewView::Paired),
+                            move || lost(NewView::Lost),
+                        )
+                        .await
+                        .err()
                 }
                 Err(p) => {
                     let mut inner = pairing.inner.lock().await;
                     if inner.epoch == epoch && matches!(inner.side, Side::New(_)) {
                         inner.side = Side::Idle;
                     }
-                    NewView::Problem { problem: p.into() }
+                    Some(p)
                 }
             };
-            // Only to this attempt's screen: once the person left, nothing more is told.
-            let inner = pairing.inner.lock().await;
-            if inner.epoch == epoch {
-                tell(view);
+            // Only to this attempt's screen: once the person left, nothing more is told. Once the
+            // link is kept this task can no longer be aborted, so this check is what keeps a late
+            // word from reaching the next attempt.
+            if let Some(p) = problem {
+                let inner = pairing.inner.lock().await;
+                if inner.epoch == epoch {
+                    tell(NewView::Problem { problem: p.into() });
+                }
             }
         });
         // Set before the wait can end: the wait takes this lock to finish.
@@ -665,9 +688,16 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn both_laptops_keep_the_link_once_paired() {
         let (old, new) = (laptop(), laptop());
-        let _ = pair(&old, &new).await;
+        let (mut old_views, _) = pair(&old, &new).await;
         assert!(old.is_paired().await);
         assert!(new.is_paired().await);
+        // The old laptop's screen hears Paired once, from the bridge, once the link is kept.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let mut paired = 0;
+        while let Ok(view) = old_views.try_recv() {
+            paired += usize::from(view == OldView::Paired);
+        }
+        assert_eq!(paired, 1);
     }
 
     /// Once paired, neither laptop starts pairing again until it leaves pairing.
@@ -993,6 +1023,137 @@ mod tests {
             start_old(&new).await.is_ok(),
             "the late connect held the laptop"
         );
+    }
+
+    /// Leaving pairing just as the approval is being kept: the approval and leaving are taken in
+    /// turn, so the screen hears at most the Paired that came first, then nothing more, and the
+    /// laptop keeps no link once it has left.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_right_as_the_approval_lands_tells_nothing() {
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let (number, round, mut new_views) = connect(&new, &mut old_views, &found).await;
+        // Hold the new laptop's state so its approval queues in keep().
+        let held = new.inner.lock().await;
+        assert_eq!(old.pick(round, number).await, Ok(()));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // The person leaves: stop queues behind the approval (the lock is first come, first served).
+        let stopping = {
+            let new = Arc::clone(&new);
+            tokio::spawn(async move { new.stop().await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+        stopping.await.unwrap();
+        let mut heard = Vec::new();
+        let ended = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(view) = new_views.recv().await {
+                heard.push(view);
+            }
+        })
+        .await;
+        assert!(ended.is_ok(), "the screen kept being told after leaving");
+        assert!(
+            heard.is_empty() || heard == [NewView::Paired],
+            "told after leaving: {heard:?}"
+        );
+        assert!(!new.is_paired().await);
+    }
+
+    /// An old-laptop start that ends after leaving, while a newer start is under way, is
+    /// refused and never takes the newer start's place.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_late_start_never_takes_a_newer_starts_place() {
+        let me = laptop();
+        let gated = |gate: tokio::sync::oneshot::Receiver<()>| {
+            let me = Arc::clone(&me);
+            tokio::spawn(async move {
+                let host = Host::bind("127.0.0.1:0".parse().unwrap(), quick())
+                    .await
+                    .unwrap();
+                let (tell, _) = screen();
+                me.begin_old(
+                    async move {
+                        let _ = gate.await;
+                        OldJourney::begin(Loopback(host))
+                    },
+                    tell,
+                )
+                .await
+            })
+        };
+        let (go_a, gate_a) = tokio::sync::oneshot::channel::<()>();
+        let a = gated(gate_a);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        me.stop().await;
+        let (go_b, gate_b) = tokio::sync::oneshot::channel::<()>();
+        let b = gated(gate_b);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = go_a.send(());
+        assert_eq!(
+            a.await.unwrap().err(),
+            Some(Problem::Failed),
+            "the late start took over"
+        );
+        let _ = go_b.send(());
+        assert!(b.await.unwrap().is_ok(), "the newer start was refused");
+    }
+
+    /// After the paired link dies, the old laptop starts again: nothing from the earlier
+    /// start reaches the screen.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn after_a_lost_link_the_earlier_start_stays_silent() {
+        let (old, new) = (laptop(), laptop());
+        let (tell, mut views) = screen();
+        let found = start_old_telling(&old, tell.clone()).await.unwrap();
+        let (number, round, mut new_views) = connect(&new, &mut views, &found).await;
+        assert_eq!(old.pick(round, number).await, Ok(()));
+        next(&mut new_views, is(NewView::Paired)).await;
+        new.stop().await;
+        next(&mut views, is(OldView::Lost)).await;
+        let _ = start_old_telling(&old, tell).await.unwrap();
+        let first_code = next(&mut views, code_of).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        while let Ok(view) = views.try_recv() {
+            assert!(
+                !matches!(
+                    view,
+                    OldView::Paired | OldView::Lost | OldView::Choose { .. }
+                ),
+                "stale: {view:?}"
+            );
+            if let OldView::Code { code, .. } = view {
+                assert_eq!(code, first_code, "another start's code reached the screen");
+            }
+        }
+    }
+
+    /// An attempt that ends (the numbers did not match) just as the person leaves: its problem
+    /// is never told once they have left.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_problem_that_lands_as_the_person_leaves_is_not_told() {
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let (_, round, mut new_views) = connect(&new, &mut old_views, &found).await;
+        // Hold the new laptop's state so the attempt's end queues first, then leaving.
+        let held = new.inner.lock().await;
+        old.old().await.unwrap().decline(round).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let stopping = {
+            let new = Arc::clone(&new);
+            tokio::spawn(async move { new.stop().await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(held);
+        stopping.await.unwrap();
+        let mut heard = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(view) = new_views.recv().await {
+                heard.push(view);
+            }
+        })
+        .await;
+        assert!(heard.is_empty(), "told after leaving: {heard:?}");
     }
 
     /// An attempt that fails to start frees the laptop for the next one.
