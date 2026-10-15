@@ -3,7 +3,7 @@ import { ArrowForward, History, MoveIllustration, Wrench } from "../icons";
 import type { Soon } from "./ComingSoon";
 
 /** F01 Welcome: the free move first; restore, rescue and Quick Send as secondary choices. Nothing paid, no sign-in. */
-export default function Welcome({ onStart, onSoon }: { onStart: () => void; onSoon: (which: Soon) => void }) {
+export default function Welcome({ onStart, onSoon, onQuick }: { onStart: () => void; onSoon: (which: Soon) => void; onQuick: () => void }) {
   return (
     <>
       <Localized id="welcome-eyebrow">
@@ -55,9 +55,7 @@ export default function Welcome({ onStart, onSoon }: { onStart: () => void; onSo
         <button
           type="button"
           className="button"
-          onClick={() => {
-            onSoon("quick-send");
-          }}
+          onClick={onQuick}
         >
           <Localized id="welcome-quick-send">
             <span>Quick Send</span>
