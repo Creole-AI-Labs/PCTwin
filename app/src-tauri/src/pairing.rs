@@ -101,7 +101,7 @@ impl<S: Serving> Pairing<S> {
     /// Starts the old laptop's side with `start`, only when this laptop is doing nothing in
     /// pairing. Its updates go to `tell`.
     async fn begin_old(
-        &self,
+        self: &Arc<Self>,
         start: impl Future<
             Output = Result<(OldJourney<S>, mpsc::UnboundedReceiver<OldUpdate>), Problem>,
         >,
@@ -121,8 +121,15 @@ impl<S: Serving> Pairing<S> {
             return Err(Problem::Failed);
         }
         inner.side = Side::Old(Arc::new(journey), tell.clone());
+        let pairing = Arc::clone(self);
         tauri::async_runtime::spawn(async move {
             while let Some(update) = updates.recv().await {
+                // Only while this start is the current one: a journey kept alive by a pick still
+                // running after the person left never reaches the next start's screen.
+                let inner = pairing.inner.lock().await;
+                if inner.epoch != epoch {
+                    return;
+                }
                 tell(update.into());
             }
         });
@@ -245,7 +252,11 @@ impl<S: Serving> Pairing<S> {
                     NewView::Problem { problem: p.into() }
                 }
             };
-            tell(view);
+            // Only to this attempt's screen: once the person left, nothing more is told.
+            let inner = pairing.inner.lock().await;
+            if inner.epoch == epoch {
+                tell(view);
+            }
         });
         // Set before the wait can end: the wait takes this lock to finish.
         inner.side = Side::New(approval);
@@ -561,6 +572,14 @@ mod tests {
     async fn start_old(
         pairing: &Laptop,
     ) -> Result<(mpsc::UnboundedReceiver<OldView>, Found), Problem> {
+        let (tell, views) = screen();
+        let found = start_old_telling(pairing, tell).await?;
+        Ok((views, found))
+    }
+
+    /// Starts the old laptop's side on loopback, telling `tell` (one screen for every start, as
+    /// in the app): how to reach it.
+    async fn start_old_telling(pairing: &Laptop, tell: Tell<OldView>) -> Result<Found, Problem> {
         let host = Host::bind("127.0.0.1:0".parse().unwrap(), quick())
             .await
             .unwrap();
@@ -569,11 +588,10 @@ mod tests {
             addrs: vec![host.local_addr().unwrap()],
             same_label_nearby: false,
         };
-        let (tell, views) = screen();
         pairing
             .begin_old(async { OldJourney::begin(Loopback(host)) }, tell)
             .await?;
-        Ok((views, found))
+        Ok(found)
     }
 
     /// The next view `want` picks out, within five seconds.
@@ -824,6 +842,156 @@ mod tests {
         assert!(
             !old.is_paired().await,
             "a stale pick landed in the new start"
+        );
+    }
+
+    /// A journey kept alive by a pick still running after the person left never reaches the
+    /// next start's screen: no Paired, no codes from the earlier start.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_earlier_start_never_reaches_the_next_starts_screen() {
+        let old = laptop();
+        // One screen for both starts, as in the app.
+        let (tell, mut views) = screen();
+        let found = start_old_telling(&old, tell.clone()).await.unwrap();
+        let code = next(&mut views, code_of).await;
+        let waiting = NewJourney::new(quick())
+            .connect(&found, &code)
+            .await
+            .unwrap();
+        let round = next(&mut views, round_of).await;
+        let number = waiting.number();
+        let picking = {
+            let old = Arc::clone(&old);
+            tokio::spawn(async move { old.pick(round, number).await })
+        };
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        old.stop().await;
+        while views.try_recv().is_ok() {}
+        let _ = start_old_telling(&old, tell).await.unwrap();
+        let first_code = next(&mut views, code_of).await;
+        // The earlier pick completes now, after the person started again.
+        let _new_link = waiting.approval().await.unwrap();
+        let _ = picking.await.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        while let Ok(view) = views.try_recv() {
+            assert_ne!(view, OldView::Paired, "the earlier start showed Paired");
+            if let OldView::Code { code, .. } = view {
+                assert_eq!(code, first_code, "another start's code reached the screen");
+            }
+        }
+        assert!(!old.is_paired().await);
+    }
+
+    /// Work started before the person left never lands after: a start or a connect that ends
+    /// late is refused, and never frees or takes over what was started since.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_start_or_connect_that_ends_after_leaving_is_refused() {
+        // The old laptop's start ends after leaving.
+        let me = laptop();
+        let (go, gate) = tokio::sync::oneshot::channel::<()>();
+        let starting = {
+            let me = Arc::clone(&me);
+            tokio::spawn(async move {
+                let host = Host::bind("127.0.0.1:0".parse().unwrap(), quick())
+                    .await
+                    .unwrap();
+                let (tell, _) = screen();
+                me.begin_old(
+                    async move {
+                        let _ = gate.await;
+                        OldJourney::begin(Loopback(host))
+                    },
+                    tell,
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        me.stop().await;
+        let _ = go.send(());
+        assert_eq!(starting.await.unwrap().err(), Some(Problem::Failed));
+        assert!(
+            start_old(&me).await.is_ok(),
+            "the late start blocked the laptop"
+        );
+
+        // The new laptop's connect fails after leaving, while a newer attempt is connecting:
+        // the newer attempt is not freed by it.
+        let me = laptop();
+        let (fail, failing) = tokio::sync::oneshot::channel::<()>();
+        let first = {
+            let me = Arc::clone(&me);
+            tokio::spawn(async move {
+                let (tell, _) = screen();
+                me.begin_new(
+                    async move {
+                        let _ = failing.await;
+                        Err(Problem::Unreachable)
+                    },
+                    tell,
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        me.stop().await;
+        let (_hold, held) = tokio::sync::oneshot::channel::<()>();
+        let second = {
+            let me = Arc::clone(&me);
+            tokio::spawn(async move {
+                let (tell, _) = screen();
+                me.begin_new(
+                    async move {
+                        let _ = held.await;
+                        Err(Problem::Unreachable)
+                    },
+                    tell,
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = fail.send(());
+        let _ = first.await.unwrap();
+        let (tell, _) = screen();
+        assert_eq!(
+            me.begin_new(async { Err(Problem::Unreachable) }, tell)
+                .await
+                .err(),
+            Some(Problem::Failed),
+            "the earlier connect freed the newer attempt's place"
+        );
+        second.abort();
+    }
+
+    /// A connect that succeeds only after the person left is refused, and the laptop stays free.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_connect_that_succeeds_after_leaving_is_refused() {
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let code = next(&mut old_views, code_of).await;
+        let (go, gate) = tokio::sync::oneshot::channel::<()>();
+        let connecting = {
+            let new = Arc::clone(&new);
+            tokio::spawn(async move {
+                let (tell, _) = screen();
+                new.begin_new(
+                    async move {
+                        let _ = gate.await;
+                        NewJourney::new(quick()).connect(&found, &code).await
+                    },
+                    tell,
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        new.stop().await;
+        let _ = go.send(());
+        assert_eq!(connecting.await.unwrap().err(), Some(Problem::Failed));
+        assert!(
+            start_old(&new).await.is_ok(),
+            "the late connect held the laptop"
         );
     }
 
