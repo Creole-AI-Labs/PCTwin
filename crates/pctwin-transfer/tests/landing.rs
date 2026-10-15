@@ -14,7 +14,9 @@ use pctwin_record::{
     ManagedBy, Owner, Place, Portability, Storage,
 };
 use pctwin_scan::{FolderLookup, FoundFolder};
-use pctwin_transfer::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
+use pctwin_transfer::{
+    Landing, LandingPlace, NewPlaces, approve_new_places, landing_for, role_label, shown_path,
+};
 
 fn item(owner: Owner, role: FolderRole, storage: Storage, path: &[&str]) -> Item {
     let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
@@ -235,4 +237,35 @@ fn the_new_laptops_folders_become_its_approved_destinations() {
         &pctwin_gate::Approved::MyFolders
     );
     assert!(places.has(FolderRole::Documents) && !places.has(FolderRole::Music));
+}
+
+#[test]
+fn only_an_item_that_is_copied_has_a_place_for_the_receiver_to_check() {
+    let docs = item(
+        me(),
+        FolderRole::Documents,
+        Storage::SystemDrive,
+        &["Taxes", "2026.pdf"],
+    );
+    let copied = landing_for(&docs, "S-1-5-21-1001", &places(), &fallback);
+    assert_eq!(
+        copied.place(),
+        Some(LandingPlace::new("documents", shown_path(&docs.path)))
+    );
+    assert_eq!(shown_path(&docs.path), "Taxes/2026.pdf");
+    let pictures = item(me(), FolderRole::Pictures, onedrive(), &["cat.jpg"]);
+    let others = item(
+        Owner::Person {
+            account_id: "S-1-5-21-1002".into(),
+        },
+        FolderRole::Documents,
+        Storage::SystemDrive,
+        &["theirs.txt"],
+    );
+    for not_copied in [pictures, others] {
+        assert_eq!(
+            landing_for(&not_copied, "S-1-5-21-1001", &places(), &fallback).place(),
+            None
+        );
+    }
 }

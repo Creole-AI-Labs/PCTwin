@@ -181,12 +181,16 @@ fn jobs(l: &Laptops) -> Vec<SendJob> {
     ]
 }
 
-/// The plan the person approved: exactly the three files, at their sizes.
+/// The plan the person approved: exactly the three files, at their sizes, each landing where
+/// its job says.
 fn plan(l: &Laptops) -> pctwin_transfer::Allowance {
-    let files: Vec<(ItemId, u64)> = (0..3u8)
-        .map(|n| (id(n), l.files[n as usize].1.len() as u64))
+    let jobs = jobs(l);
+    let files: Vec<(&SendJob, u64)> = jobs
+        .iter()
+        .enumerate()
+        .map(|(n, j)| (j, l.files[n].1.len() as u64))
         .collect();
-    common::approved(&files)
+    common::approved_jobs(&files)
 }
 
 fn total_blocks(l: &Laptops) -> u64 {
@@ -1098,7 +1102,10 @@ async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
     let l = laptops();
     let table = table(&l);
     let n = pctwin_transfer::MAX_OPEN_FILES as u8 + 1;
-    let files: Vec<(ItemId, u64)> = (0..n).map(|k| (id(k), 1000)).collect();
+    let paths: Vec<String> = (0..n).map(|k| format!("Documents/f{k}.bin")).collect();
+    let files: Vec<(ItemId, u64, &str, &str)> = (0..n)
+        .map(|k| (id(k), 1000, "me", paths[usize::from(k)].as_str()))
+        .collect();
     let mut receiver =
         ReceiverSession::new(&table, common::approved(&files), common::journal(), "1001");
     let header = |size| Header {
@@ -1472,8 +1479,15 @@ async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
         // block: a real block of another file goes straight through.
         let mut medium = FileSender::open(&l.files[1].0, None, true).unwrap();
         let mut m = self::start(medium.header(), 0, id(1));
-        if let Message::StartFile { stream, path, .. } = &mut m {
+        if let Message::StartFile {
+            stream,
+            destination,
+            path,
+            ..
+        } = &mut m
+        {
             *stream = 1;
+            *destination = "shared".into();
             *path = "Public/medium.bin".into();
         }
         say(&mut old, &m).await;
@@ -1518,8 +1532,9 @@ async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
     r.unwrap();
     // Nothing of the overflowed file was left behind.
     assert!(!l.new_mine.path().join("Documents/small.bin").exists());
-    // The only file is the second file's partial copy.
-    assert_eq!(files_under(l.new_mine.path()), 1);
+    // The only file is the second file's partial copy, in its approved place.
+    assert_eq!(files_under(l.new_mine.path()), 0);
+    assert_eq!(files_under(l.new_shared.path()), 1);
 }
 
 #[tokio::test]
@@ -1731,4 +1746,326 @@ fn mark(path: &Path, zone: u8) {
             .success();
         assert!(ok);
     }
+}
+
+/// A description of a file of `size` bytes, as an old laptop would send it.
+fn header_of(size: u64) -> Header {
+    let block_size = block_size_for(size);
+    Header {
+        size,
+        block_size,
+        block_count: size.div_ceil(block_size),
+        stamp: pctwin_transfer::Stamp {
+            size,
+            modified_ns: None,
+        },
+        source_file: None,
+        mark: None,
+    }
+}
+
+#[tokio::test]
+async fn an_old_laptop_cannot_choose_where_an_approved_file_lands() {
+    // The review's repro: an approved file, announced under another path (a startup folder) or in
+    // another approved place. Only the approved plan says where a file lands.
+    let l = laptops();
+    let table = table(&l);
+    let jdir = tempfile::tempdir().unwrap();
+    let journal = pctwin_journal::Journal::open(&jdir.path().join("journal.redb")).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        let (honest, _) = small_start(&l, 0);
+        let Message::StartFile { header, .. } = honest else {
+            unreachable!()
+        };
+        let elsewhere = |stream: u32, destination: &str, path: &str| Message::StartFile {
+            stream,
+            item: id(0),
+            destination: destination.into(),
+            path: path.into(),
+            header: header.clone(),
+            resumed_done: 0,
+        };
+        // Another path in the right place.
+        say(
+            &mut old,
+            &elsewhere(
+                0,
+                "me",
+                "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/run.cmd",
+            ),
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: false
+            }
+        );
+        // The right path in another approved place.
+        say(&mut old, &elsewhere(1, "shared", "Documents/small.bin")).await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 1,
+                ok: false
+            }
+        );
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    // Nothing was written anywhere, not even planned in the journal.
+    assert!(everything_under(l.new_mine.path()).is_empty());
+    assert!(everything_under(l.new_shared.path()).is_empty());
+    assert!(journal.entries().unwrap().is_empty());
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Failed(why)) if why.contains("plan")
+    ));
+    // The honest start of the same file still lands, in its approved place.
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        assert_eq!(
+            send_small(&mut old, &l, 2).await,
+            Message::FileDone {
+                stream: 2,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(
+        std::fs::read(l.new_mine.path().join("Documents/small.bin")).unwrap(),
+        l.files[0].1
+    );
+    assert_eq!(files_under(l.new_mine.path()), 1);
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Finished(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_file_that_landed_keeps_its_line_whatever_is_started_after_it() {
+    // The review's repro: a landed file started again on the same stream wiped its line, so the
+    // report said failed while the file was on disk.
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let big = FileSender::open(&l.files[2].0, None, true)
+        .unwrap()
+        .header()
+        .clone();
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        assert_eq!(
+            send_small(&mut old, &l, 0).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        // The same file on the same stream: refused, it is already here.
+        let (again, _) = small_start(&l, 0);
+        say(&mut old, &again).await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: false
+            }
+        );
+        // Another file on the same stream.
+        say(&mut old, &start(&big, 0, id(2))).await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert!(
+        matches!(receiver.outcome(id(0)), Some(ReceiveOutcome::Finished(_))),
+        "{:?}",
+        receiver.outcome(id(0))
+    );
+    // Checked again after copying, it is still there, so it is still copied.
+    assert!(receiver.recheck().is_empty());
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Finished(_))
+    ));
+}
+
+/// With a marker floor (Quick Send: files from another person's laptop), every file lands at
+/// least as marked as the floor, whatever the old laptop's description says; a stricter marker
+/// of its own is kept.
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn with_a_marker_floor_an_unmarked_file_still_lands_marked() {
+    use pctwin_gate::{DownloadMark, download_mark_of};
+    let l = laptops();
+    mark(&l.files[2].0, 4);
+    let table = table(&l);
+    let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l).with_mark_floor(DownloadMark::Internet),
+        common::journal(),
+        "1001",
+    ));
+    assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
+    assert_arrived(&l);
+    let restricted = if cfg!(windows) {
+        DownloadMark::Restricted
+    } else {
+        // A Mac's quarantine flag has one level.
+        DownloadMark::Internet
+    };
+    let landed = |dir: &tempfile::TempDir, p: &str| download_mark_of(&dir.path().join(p));
+    assert_eq!(
+        landed(&l.new_mine, "Documents/small.bin"),
+        Some(DownloadMark::Internet)
+    );
+    assert_eq!(
+        landed(&l.new_shared, "Public/medium.bin"),
+        Some(DownloadMark::Internet)
+    );
+    assert_eq!(landed(&l.new_mine, "Videos/big.bin"), Some(restricted));
+}
+
+#[tokio::test]
+async fn with_no_growth_one_byte_over_the_approved_size_is_refused() {
+    let l = laptops();
+    let table = table(&l);
+    let approved = l.files[0].1.len() as u64;
+    let mut receiver = ReceiverSession::new(
+        &table,
+        plan(&l).with_size_room(pctwin_transfer::SizeRoom::NoGrowth),
+        common::journal(),
+        "1001",
+    );
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        let (honest, _) = small_start(&l, 0);
+        let mut over = honest.clone();
+        if let Message::StartFile { header, .. } = &mut over {
+            *header = header_of(approved + 1);
+        }
+        say(&mut old, &over).await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: false
+            }
+        );
+        // Nothing was created or reserved for it.
+        assert!(everything_under(l.new_mine.path()).is_empty());
+        // Exactly the approved size is fine.
+        let mut exact = honest;
+        if let Message::StartFile { stream, .. } = &mut exact {
+            *stream = 1;
+        }
+        say(&mut old, &exact).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 1, .. }
+        ));
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Failed(_))
+    ));
+}
+
+#[tokio::test]
+async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
+    // A refused start must not end, replace or continue the attempt already open for that file.
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let mut fs = FileSender::open(&l.files[2].0, None, true).unwrap();
+    let header = fs.header().clone();
+    let blocks: Vec<Block> = std::iter::from_fn(|| fs.next_block().unwrap()).collect();
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        say(&mut old, &start(&header, 0, id(2))).await;
+        assert!(matches!(
+            hear(&mut old).await,
+            Message::Have { stream: 0, .. }
+        ));
+        for piece in split_into_pieces(0, &blocks[0].encode()) {
+            say(&mut old, &piece).await;
+        }
+        assert_eq!(
+            hear(&mut old).await,
+            Message::Receipt {
+                stream: 0,
+                block: 0
+            }
+        );
+        // The same file on the same stream, announced somewhere else: as a fresh start, and as a
+        // continuation of what is here.
+        for resumed_done in [0, 1] {
+            let mut elsewhere = start(&header, resumed_done, id(2));
+            if let Message::StartFile { path, .. } = &mut elsewhere {
+                *path = "Startup/run.cmd".into();
+            }
+            say(&mut old, &elsewhere).await;
+            assert_eq!(
+                hear(&mut old).await,
+                Message::FileDone {
+                    stream: 0,
+                    ok: false
+                },
+                "{resumed_done}"
+            );
+        }
+        // The attempt under way goes on as if nothing had been said.
+        for piece in split_into_pieces(0, &blocks[1].encode()) {
+            say(&mut old, &piece).await;
+        }
+        assert_eq!(
+            hear(&mut old).await,
+            Message::Receipt {
+                stream: 0,
+                block: 1
+            }
+        );
+        old.cut.store(true, Ordering::SeqCst);
+    };
+    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    assert_eq!(receiver.continued(), 0);
+    assert_eq!(receiver.partway(), 1);
+    assert!(!l.new_mine.path().join("Startup").exists());
 }

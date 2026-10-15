@@ -5,14 +5,39 @@ use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, ManagedBy, Owner,
     PersonTarget, Place, Portability, Record, Storage,
 };
-use pctwin_transfer::Allowance;
+use pctwin_transfer::{Allowance, LandingPlace, SendJob};
 
-/// The approved plan for these files (each with its size), as the new laptop holds it.
+/// The approved plan for these files, each with its size and where it lands (the approved
+/// destination's label and the path inside it), as the new laptop holds it.
 #[allow(dead_code)]
-pub fn approved(files: &[(ItemId, u64)]) -> Allowance {
+pub fn approved(files: &[(ItemId, u64, &str, &str)]) -> Allowance {
+    let (record, approval) = record_of(files);
+    let places: std::collections::HashMap<ItemId, LandingPlace> = files
+        .iter()
+        .map(|(id, _, destination, path)| (*id, LandingPlace::new(*destination, *path)))
+        .collect();
+    Allowance::from_record(&record, &approval, |i| places.get(&i.id).cloned()).unwrap()
+}
+
+/// The approved plan for exactly what `jobs` send, each `(job, size)`: each lands where its job
+/// says.
+#[allow(dead_code)]
+pub fn approved_jobs(jobs: &[(&SendJob, u64)]) -> Allowance {
+    let files: Vec<(ItemId, u64, &str, &str)> = jobs
+        .iter()
+        .map(|(j, size)| (j.item, *size, j.destination.as_str(), j.path.as_str()))
+        .collect();
+    approved(&files)
+}
+
+/// A record of these files, approved the way the app does.
+#[allow(dead_code)]
+pub fn record_of(
+    files: &[(ItemId, u64, &str, &str)],
+) -> (pctwin_record::Record, pctwin_record::Approval) {
     let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
     let mut record = Record::new(laptop);
-    for (n, (id, size)) in files.iter().enumerate() {
+    for (n, (id, size, _, _)) in files.iter().enumerate() {
         record.items.push(Item {
             id: *id,
             kind: ItemKind::File,
@@ -38,7 +63,7 @@ pub fn approved(files: &[(ItemId, u64)]) -> Allowance {
         },
     );
     let approval = record.approve().unwrap();
-    Allowance::from_record(&record, &approval).unwrap()
+    (record, approval)
 }
 
 /// A change journal for a test's receiver, kept until the test run ends.

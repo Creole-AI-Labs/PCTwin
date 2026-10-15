@@ -116,10 +116,13 @@ impl World {
 
     /// Moves the jobs for real and returns what the new laptop's journal planned for each.
     async fn move_all(&self, jobs: &[(SendJob, Vec<u8>)]) -> HashMap<ItemId, PlannedWrite> {
-        let files: Vec<(ItemId, u64)> =
-            jobs.iter().map(|(j, d)| (j.item, d.len() as u64)).collect();
-        let mut receiver =
-            ReceiverSession::new(&self.table, common::approved(&files), &self.journal, "1001");
+        let files: Vec<(&SendJob, u64)> = jobs.iter().map(|(j, d)| (j, d.len() as u64)).collect();
+        let mut receiver = ReceiverSession::new(
+            &self.table,
+            common::approved_jobs(&files),
+            &self.journal,
+            "1001",
+        );
         let mut sender = SenderSession::new(jobs.iter().map(|(j, _)| j.clone()).collect(), 2);
         let (a, b) = mem_pair();
         let send_side = async {
