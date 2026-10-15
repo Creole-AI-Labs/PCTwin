@@ -686,7 +686,10 @@ impl LaneListener {
     }
 
     /// Waits for the next genuine lane, or (once [`allow_resumes`](Self::allow_resumes) was
-    /// called) the new laptop's reconnection after a drop.
+    /// called) the new laptop's reconnection after a drop. A resume can arrive while the old main
+    /// connection still looks alive (the new laptop gave up on it first): the app then drops the
+    /// old one and carries the move on over the resumed one, so there is only ever one main
+    /// connection.
     pub async fn accept_any(&mut self) -> Result<Arrival, LinkError> {
         self.serve(true).await
     }

@@ -724,9 +724,10 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
             "{n}"
         );
     }
-    // It carried on rather than starting over: well under twice the blocks in all.
+    // It carried on rather than starting over: only blocks in flight at the drop (unconfirmed,
+    // at most a few per stream) are sent twice; restarting even one big file would be dozens.
     assert!(
-        sender.blocks_sent() < total_blocks(&l) + before,
+        sender.blocks_sent() <= total_blocks(&l) + 16,
         "{} sent for {} blocks",
         sender.blocks_sent(),
         total_blocks(&l)
