@@ -1347,10 +1347,29 @@ pub struct ReceiverSession<'d> {
     streams: BTreeMap<u32, Incoming<'d>>,
     /// Files picked up again after the app restarted, waiting for the old laptop to continue them.
     restored: BTreeMap<ItemId, Incoming<'d>>,
-    done: BTreeMap<u32, (ItemId, ReceiveOutcome)>,
+    /// How each file's last attempt ended, kept per file (never per stream), so nothing started
+    /// later can rewrite the line of a file that landed.
+    ended: BTreeMap<ItemId, Ended>,
     continued: u64,
-    /// For each finished file: its destination and size, to check again after copying.
-    landed: BTreeMap<u32, (String, u64)>,
+}
+
+/// How one file's last attempt ended.
+struct Ended {
+    /// The stream it ended on, to tell the old laptop again on the next connection.
+    stream: u32,
+    outcome: ReceiveOutcome,
+    /// For a file that landed: its destination and size, to check again after copying.
+    landed: Option<(String, u64)>,
+}
+
+impl Ended {
+    /// It is on this laptop (copied, or already there): its line is final.
+    fn spent(&self) -> bool {
+        matches!(
+            self.outcome,
+            ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_)
+        )
+    }
 }
 
 impl<'d> ReceiverSession<'d> {
@@ -1373,9 +1392,8 @@ impl<'d> ReceiverSession<'d> {
             to_fingerprint: None,
             streams: BTreeMap::new(),
             restored: BTreeMap::new(),
-            done: BTreeMap::new(),
+            ended: BTreeMap::new(),
             continued: 0,
-            landed: BTreeMap::new(),
         }
     }
 
@@ -1431,7 +1449,11 @@ impl<'d> ReceiverSession<'d> {
             if w.place.is_some() && here != w.place {
                 continue;
             }
-            if let Err(refusal) = self.allowance.admit(w.item, w.size) {
+            // Only what the approved plan says, where it says: the journal's word is checked too.
+            if let Err(refusal) = self
+                .allowance
+                .admit(w.item, &w.destination, &w.path, w.size)
+            {
                 self.journal
                     .failed(e.id, &refusal.to_string())
                     .map_err(record)?;
@@ -1508,16 +1530,18 @@ impl<'d> ReceiverSession<'d> {
         }
     }
 
+    /// How `item` ended: a file on this laptop keeps that line whatever came after it; otherwise
+    /// the latest of its refusal or its last attempt's end.
     pub fn outcome(&self, item: ItemId) -> Option<ReceiveOutcome> {
-        self.done
-            .values()
-            .find(|(i, _)| *i == item)
-            .map(|(_, o)| o.clone())
-            .or_else(|| {
-                self.refused
-                    .get(&item)
-                    .map(|why| ReceiveOutcome::Failed(why.clone()))
-            })
+        let ended = self.ended.get(&item);
+        if let Some(e) = ended.filter(|e| e.spent()) {
+            return Some(e.outcome.clone());
+        }
+        // A refusal is kept only while it is newer than the file's last end (see `end`).
+        self.refused
+            .get(&item)
+            .map(|why| ReceiveOutcome::Failed(why.clone()))
+            .or_else(|| ended.map(|e| e.outcome.clone()))
     }
 
     /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
@@ -1631,13 +1655,10 @@ impl<'d> ReceiverSession<'d> {
                 });
             }
         }
-        for (stream, (_, outcome)) in &self.done {
+        for e in self.ended.values() {
             list.push(Message::FileDone {
-                stream: *stream,
-                ok: matches!(
-                    outcome,
-                    ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_)
-                ),
+                stream: e.stream,
+                ok: e.spent(),
             });
         }
         list.push(Message::Ready);
@@ -1661,7 +1682,16 @@ impl<'d> ReceiverSession<'d> {
                 header,
                 resumed_done,
             } => {
-                self.done.remove(&stream);
+                // Only the approved plan says where a file lands: a start anywhere else is
+                // refused before anything here is touched (nothing created, reserved or ended).
+                if let Err(refusal) = self.allowance.check_place(item, &destination, &path) {
+                    self.refuse(item, refusal.to_string());
+                    replies.push(Message::FileDone { stream, ok: false });
+                    return Ok((replies, false));
+                }
+                // The copy is marked at least as strictly as the plan requires.
+                let mut header = header;
+                header.mark = self.allowance.mark_for(header.mark);
                 // The old laptop continues from this side's ticket, which never claims more
                 // than is here (it may carry only the earliest runs).
                 let continuing = resumed_done > 0
@@ -1728,7 +1758,9 @@ impl<'d> ReceiverSession<'d> {
                 } else if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
                     Err("the old laptop started too many files at once".to_string())
                 } else {
-                    self.allowance.admit(item, size).map_err(|r| r.to_string())
+                    self.allowance
+                        .admit(item, &destination, &path, size)
+                        .map_err(|r| r.to_string())
                 };
                 if let Err(why) = admitted {
                     // Kept per file, not per start, so refusals cannot pile up.
@@ -1743,8 +1775,7 @@ impl<'d> ReceiverSession<'d> {
                     Err(Start::Record(e)) => return Err(record(e)),
                     Err(Start::Refused(why)) => {
                         self.allowance.ended(item, false);
-                        self.done
-                            .insert(stream, (item, ReceiveOutcome::Failed(why)));
+                        self.end(item, stream, ReceiveOutcome::Failed(why), None);
                         replies.push(Message::FileDone { stream, ok: false });
                         return Ok((replies, false));
                     }
@@ -1814,10 +1845,8 @@ impl<'d> ReceiverSession<'d> {
                 };
                 let ok = matches!(outcome, ReceiveOutcome::Finished(_));
                 self.allowance.ended(s.item, ok);
-                if ok {
-                    self.landed.insert(stream, (s.destination.clone(), s.size));
-                }
-                self.done.insert(stream, (s.item, outcome));
+                let landed = ok.then(|| (s.destination.clone(), s.size));
+                self.end(s.item, stream, outcome, landed);
                 replies.push(Message::FileDone { stream, ok });
             }
             Message::Skip { stream } => {
@@ -1839,7 +1868,7 @@ impl<'d> ReceiverSession<'d> {
                     // Already there: spent, like a file that landed.
                     self.allowance
                         .ended(s.item, matches!(outcome, ReceiveOutcome::AlreadyThere(_)));
-                    self.done.insert(stream, (s.item, outcome));
+                    self.end(s.item, stream, outcome, None);
                 }
             }
             Message::AllSent => return Ok((replies, true)),
@@ -1953,6 +1982,30 @@ impl<'d> ReceiverSession<'d> {
         }
     }
 
+    /// Records how `item`'s attempt on `stream` ended. A file already on this laptop keeps its
+    /// line (nothing can start it again, see [`Allowance::admit`]; this holds even if something
+    /// did). Its older refusal, if any, is replaced by this end.
+    fn end(
+        &mut self,
+        item: ItemId,
+        stream: u32,
+        outcome: ReceiveOutcome,
+        landed: Option<(String, u64)>,
+    ) {
+        if self.ended.get(&item).is_some_and(Ended::spent) {
+            return;
+        }
+        self.refused.remove(&item);
+        self.ended.insert(
+            item,
+            Ended {
+                stream,
+                outcome,
+                landed,
+            },
+        );
+    }
+
     /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path,
     /// opened to fingerprint.
     fn same_file(
@@ -1976,11 +2029,11 @@ impl<'d> ReceiverSession<'d> {
     /// Returns the items that changed to failed.
     pub fn recheck(&mut self) -> Vec<ItemId> {
         let mut gone = Vec::new();
-        for (stream, (item, outcome)) in &mut self.done {
-            let ReceiveOutcome::Finished(finished) = outcome else {
+        for (item, e) in &mut self.ended {
+            let ReceiveOutcome::Finished(finished) = &e.outcome else {
                 continue;
             };
-            let Some((destination, size)) = self.landed.get(stream) else {
+            let Some((destination, size)) = &e.landed else {
                 continue;
             };
             let still_there = self
@@ -1991,7 +2044,7 @@ impl<'d> ReceiverSession<'d> {
                 .and_then(|(dest, path)| dest.find(&path))
                 .is_some_and(|(_, len)| len == *size);
             if !still_there {
-                *outcome = ReceiveOutcome::Failed(
+                e.outcome = ReceiveOutcome::Failed(
                     "it was removed or changed soon after copying, often by security software"
                         .into(),
                 );
@@ -2395,5 +2448,78 @@ mod originals_limits {
         let r =
             check_originals_within(&mut new, &journal, &[id(1)], Duration::from_millis(50)).await;
         assert!(matches!(r, Err(TransferError::Protocol(_))), "{r:?}");
+    }
+}
+
+#[cfg(test)]
+mod outcomes {
+    use super::*;
+    use pctwin_record::{LaptopId, Record};
+
+    /// A receiver for a plan with nothing in it: only its own record-keeping is under test.
+    fn with_receiver(test: impl FnOnce(&mut ReceiverSession<'_>)) {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = Journal::open(&dir.path().join("journal.redb")).unwrap();
+        let table = Destinations::new();
+        let record = Record::new(LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap());
+        let approval = record.approve().unwrap();
+        let allowance = Allowance::from_record(&record, &approval, |_| None).unwrap();
+        let mut receiver = ReceiverSession::new(&table, allowance, &journal, "1001");
+        test(&mut receiver);
+    }
+
+    fn id(n: u8) -> ItemId {
+        ItemId::from_hex(&format!("{n:02x}{}", "0".repeat(30))).unwrap()
+    }
+
+    #[test]
+    fn a_file_on_this_laptop_keeps_its_line_whatever_ends_after_it() {
+        with_receiver(|r| {
+            let there = ReceiveOutcome::AlreadyThere("Documents/a.txt".into());
+            r.end(id(1), 0, there.clone(), None);
+            // Even if something got past the plan's own check, nothing rewrites it.
+            r.end(
+                id(1),
+                0,
+                ReceiveOutcome::Failed("it was started again".into()),
+                None,
+            );
+            r.end(
+                id(1),
+                7,
+                ReceiveOutcome::Failed("it was started again".into()),
+                None,
+            );
+            r.refuse(id(1), "it has already been moved".into());
+            assert_eq!(r.outcome(id(1)), Some(there));
+            // And the next connection is told it is done, on the stream it ended on.
+            assert_eq!(
+                r.hello(),
+                vec![
+                    Message::FileDone {
+                        stream: 0,
+                        ok: true
+                    },
+                    Message::Ready
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn a_file_not_on_this_laptop_shows_the_latest_of_its_end_and_its_refusal() {
+        with_receiver(|r| {
+            r.end(id(2), 3, ReceiveOutcome::Failed("first".into()), None);
+            r.refuse(id(2), "second".into());
+            assert_eq!(
+                r.outcome(id(2)),
+                Some(ReceiveOutcome::Failed("second".into()))
+            );
+            r.end(id(2), 4, ReceiveOutcome::Failed("third".into()), None);
+            assert_eq!(
+                r.outcome(id(2)),
+                Some(ReceiveOutcome::Failed("third".into()))
+            );
+        });
     }
 }
