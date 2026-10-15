@@ -499,9 +499,15 @@ describe("the new laptop once paired", () => {
     fireEvent.click(button("pair-new-connect"));
     await screen.findByText(text("pair-new-number-title"));
     await emit("pairing-new", { kind: "paired" });
+    const searches = () => tauri.invoke.mock.calls.filter((c) => c[0] === "pairing_new_search").length;
+    const before = searches();
     await emit("pairing-new", { kind: "lost" });
+    // The old laptop starts again elsewhere, so it is looked for again rather than retried.
+    await waitFor(() => {
+      expect(searches()).toBe(before + 1);
+    });
     expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
-    expect(screen.getByText(text("pair-new-code-title"))).toBeTruthy();
+    expect(await screen.findByText(text("pair-new-code-title"))).toBeTruthy();
     noMissingText();
   });
 });
@@ -514,5 +520,8 @@ describe("the old laptop once paired", () => {
     expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
     expect(button("pair-try-again")).toBeTruthy();
     noMissingText();
+    // No longer paired: the next start's updates show again.
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    expect(screen.getByRole("group", { name: /1 2 3 4 5 6$/ })).toBeTruthy();
   });
 });

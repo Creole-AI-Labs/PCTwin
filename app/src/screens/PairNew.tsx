@@ -38,24 +38,10 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
   const paired = useRef(false);
 
-  const handle = useCallback((event: NewEvent) => {
-    // Once paired, only the paired connection dying before the move moves the screen.
-    if (paired.current && event.kind !== "lost") return;
-    if (event.kind === "paired") {
-      paired.current = true;
-      setPhase("paired");
-    } else {
-      paired.current = false;
-      setBusy(false);
-      setNumber(null);
-      setCode("");
-      setProblem(event.kind === "lost" ? LOST : event.problem);
-      setPhase("code");
-    }
-  }, []);
 
-  const search = useCallback(async () => {
-    setProblem(null);
+  // `notice` is shown while looking again (after a lost connection).
+  const search = useCallback(async (notice: Problem | null = null) => {
+    setProblem(notice);
     setPhase("searching");
     try {
       const found = await newSearch();
@@ -76,6 +62,28 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       setPhase("error");
     }
   }, []);
+
+  const handle = useCallback((event: NewEvent) => {
+    // Once paired, only the paired connection dying before the move moves the screen.
+    if (paired.current && event.kind !== "lost") return;
+    if (event.kind === "paired") {
+      paired.current = true;
+      setPhase("paired");
+    } else if (event.kind === "lost") {
+      // The old laptop starts again elsewhere after a lost connection: look for it again.
+      paired.current = false;
+      setBusy(false);
+      setNumber(null);
+      setCode("");
+      void search(LOST);
+    } else {
+      setBusy(false);
+      setNumber(null);
+      setCode("");
+      setProblem(event.problem);
+      setPhase("code");
+    }
+  }, [search]);
 
   // Listen first, then search, so the answer to a code is never missed. Leaving the screen stops listening.
   useEffect(() => {
