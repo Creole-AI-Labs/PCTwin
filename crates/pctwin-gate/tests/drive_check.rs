@@ -60,12 +60,31 @@ fn only_probe_files_holding_the_probe_s_own_bytes_are_cleared_away() {
     .unwrap();
     std::fs::write(root.path().join(".pctwin-probe-99-a"), [a, b"x"].concat()).unwrap();
     std::fs::create_dir(root.path().join(".pctwin-probe-5-a")).unwrap();
+    // A probe file of a test running now (another handle on the drive): never disturbed.
+    std::fs::write(root.path().join(".pctwin-probe-77-a"), a).unwrap();
+    // Left by a crash: older than any test takes.
+    let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    for leftover in [
+        ".pctwin-probe-0123abcd-a",
+        ".pctwin-probe-0123abcd-b",
+        ".pctwin-probe-77-b",
+        ".pctwin-probe-0123abcd-c",
+        ".pctwin-probe-99-a",
+    ] {
+        std::fs::File::options()
+            .write(true)
+            .open(root.path().join(leftover))
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+    }
     dest.check_drive().unwrap();
     assert_eq!(
         names(root.path()),
         [
             ".pctwin-probe-0123abcd-c",
             ".pctwin-probe-5-a",
+            ".pctwin-probe-77-a",
             ".pctwin-probe-99-a"
         ]
     );

@@ -679,13 +679,14 @@ impl Destination {
             return Ok(forced);
         }
         let key = drive::volume_key(dir)?;
-        let checks = || self.checks.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(check) = checks().get(&key) {
+        // Held through the test, so this place never tests a drive twice at once.
+        let mut checks = self.checks.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(check) = checks.get(&key) {
             return Ok(*check);
         }
         let folder_path = || self.folder_path(dir, folder);
         let check = naming::probe(dir, &folder_path, move_no_replace)?;
-        checks().insert(key, check);
+        checks.insert(key, check);
         Ok(check)
     }
 

@@ -4,15 +4,20 @@
 //!
 //! The test, in a folder of the drive:
 //! 1. Probe files a crash left behind (`.pctwin-probe-<random>-a`, `-b`, `-c`) are removed, but
-//!    only those holding the probe's own bytes; anything else with such a name stays.
+//!    only those holding the probe's own bytes and older than [`LEFTOVER_AGE`] (a test running
+//!    now, from another handle on the drive, is never disturbed); anything else stays.
 //! 2. Two probe files `a` and `b` are made, each only if nothing has its name; making `a` again
 //!    must then be refused (exclusive create works).
 //! 3. A hard link from `a` to a new name `c`, and from `a` onto `b`, which must be refused.
-//! 4. A no-replace move of `a` onto `b`: refused because `b` exists ("exists") means the drive
-//!    honours it; refused as unsupported ("invalid", "not implemented", "not supported") means
-//!    it has no such move; done, with `b` silently replaced, means it ignores the request, which
-//!    is recorded ([`DriveCheck::replaced_silently`]) for the report.
-//! 5. All probe files are removed.
+//! 4. A no-replace move of `a` onto `b`: refused because `b` exists ("exists"), with `b` intact,
+//!    is half the answer; refused as unsupported ("invalid", "not implemented", "not supported")
+//!    means it has no such move; done, with `b` silently replaced, means it ignores the request,
+//!    which is recorded ([`DriveCheck::replaced_silently`]) for the report.
+//! 5. Then the same move of `a` onto the free name `c`, which must simply work. Both halves are
+//!    needed: macOS's exFAT driver answers "exists" for a name that is taken before it answers
+//!    "not supported" for the move itself, so "exists" alone proves nothing (found on real
+//!    drives in CI, 15 October 2026).
+//! 6. All probe files are removed.
 //!
 //! A hard link or an honoured no-replace move makes the whole file appear at once
 //! ([`Naming::Atomic`]). Without either, the name is created only if free and then filled
@@ -98,10 +103,11 @@ pub(crate) fn classify(
     link_onto_existing_refused: bool,
     moved: &Moved,
     b_intact: bool,
+    moved_to_free_name: bool,
     exclusive_create: bool,
 ) -> DriveCheck {
     let hard_links = link_new && link_onto_existing_refused;
-    let no_replace_move = matches!(moved, Moved::Taken) && b_intact;
+    let no_replace_move = matches!(moved, Moved::Taken) && b_intact && moved_to_free_name;
     let replaced_silently =
         matches!(moved, Moved::Done) || !b_intact || (link_new && !link_onto_existing_refused);
     let naming = if !exclusive_create {
@@ -144,14 +150,27 @@ fn is_probe_name(name: &str) -> bool {
         })
 }
 
+/// How old a probe file must be before it is taken as left by a crash: a test takes moments.
+pub(crate) const LEFTOVER_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 /// Removes the probe file `name` in `dir` if it is a regular file holding exactly the probe's
-/// own bytes; anything else is left. Never follows a link.
-fn remove_if_probe(dir: &Dir, name: &str) -> io::Result<()> {
+/// own bytes (and, for a leftover, older than [`LEFTOVER_AGE`]); anything else is left. Never
+/// follows a link.
+fn remove_if_probe(dir: &Dir, name: &str, leftover: bool) -> io::Result<()> {
     let meta = match dir.symlink_metadata(name) {
         Ok(meta) => meta,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
+    if leftover {
+        let modified = meta.modified()?.into_std();
+        let old = std::time::SystemTime::now()
+            .duration_since(modified)
+            .is_ok_and(|age| age >= LEFTOVER_AGE);
+        if !old {
+            return Ok(());
+        }
+    }
     let longest = PROBE_A.len().max(PROBE_B.len()) as u64;
     if !meta.is_file() || meta.len() > longest {
         return Ok(());
@@ -187,7 +206,7 @@ pub(crate) fn probe(
     for entry in dir.entries()? {
         let name = entry?.file_name();
         if let Some(name) = name.to_str().filter(|n| is_probe_name(n)) {
-            remove_if_probe(dir, name)?;
+            remove_if_probe(dir, name, true)?;
         }
     }
     let n = PROBES.fetch_add(1, Ordering::Relaxed);
@@ -197,7 +216,7 @@ pub(crate) fn probe(
     // Every probe file goes, whatever the test found.
     let mut cleared = Ok(());
     for name in [&a, &b, &c] {
-        if let Err(e) = remove_if_probe(dir, name) {
+        if let Err(e) = remove_if_probe(dir, name, false) {
             cleared = Err(e);
         }
     }
@@ -237,11 +256,22 @@ fn run(
     }
     let mut now = Vec::new();
     dir.open(b)?.read_to_end(&mut now)?;
+    // Refused onto a taken name: does the same move onto a free name work at all? (`c` is free:
+    // the hard link test made it only for a moment.)
+    let moved_to_free_name = match &moved {
+        Moved::Taken => match move_no_replace(dir, a, c, folder_path) {
+            Moved::Done => true,
+            Moved::Failed(e) => return Err(e),
+            _ => false,
+        },
+        _ => false,
+    };
     Ok(classify(
         link_new,
         link_onto_existing_refused,
         &moved,
         now == PROBE_B,
+        moved_to_free_name,
         exclusive_create,
     ))
 }
@@ -254,8 +284,9 @@ mod tests {
     fn what_each_answer_means() {
         use Naming::*;
         let err = || Moved::Failed(io::Error::other("x"));
-        // (link to a new name, link onto b refused, the move, b intact, exclusive create)
-        for (link_new, refused, moved, intact, excl, naming, hard, mv, silent) in [
+        // (link to a new name, link onto b refused, the move onto b, b intact, the move onto a
+        // free name worked, exclusive create)
+        for (link_new, refused, moved, intact, free, excl, naming, hard, mv, silent) in [
             // NTFS, ext4, APFS: hard links.
             (
                 true,
@@ -263,29 +294,44 @@ mod tests {
                 Moved::Taken,
                 true,
                 true,
+                true,
                 Atomic,
                 true,
                 true,
                 false,
             ),
-            // FAT, exFAT on Linux and Windows: only the no-replace move.
+            // FAT, exFAT on Linux and Windows; FAT32 on a Mac: only the no-replace move.
             (
                 false,
                 false,
                 Moved::Taken,
                 true,
                 true,
+                true,
                 Atomic,
                 false,
                 true,
                 false,
             ),
-            // exFAT on a Mac: neither.
+            // exFAT on a Mac: "exists" for a taken name, yet "not supported" onto a free one.
+            (
+                false,
+                false,
+                Moved::Taken,
+                true,
+                false,
+                true,
+                FillIn,
+                false,
+                false,
+                false,
+            ),
             (
                 false,
                 false,
                 Moved::Invalid,
                 true,
+                false,
                 true,
                 FillIn,
                 false,
@@ -297,6 +343,7 @@ mod tests {
                 false,
                 Moved::Unsupported,
                 true,
+                false,
                 true,
                 FillIn,
                 false,
@@ -308,6 +355,7 @@ mod tests {
                 false,
                 false,
                 Moved::Done,
+                false,
                 false,
                 true,
                 FillIn,
@@ -322,6 +370,7 @@ mod tests {
                 Moved::Taken,
                 false,
                 true,
+                true,
                 FillIn,
                 false,
                 false,
@@ -333,6 +382,7 @@ mod tests {
                 false,
                 Moved::Invalid,
                 true,
+                false,
                 true,
                 FillIn,
                 false,
@@ -345,6 +395,7 @@ mod tests {
                 true,
                 Moved::Unsupported,
                 true,
+                false,
                 true,
                 Atomic,
                 true,
@@ -358,6 +409,7 @@ mod tests {
                 Moved::Invalid,
                 true,
                 false,
+                false,
                 NoSafeMethod,
                 false,
                 false,
@@ -367,6 +419,7 @@ mod tests {
                 true,
                 true,
                 Moved::Taken,
+                true,
                 true,
                 false,
                 NoSafeMethod,
@@ -380,6 +433,7 @@ mod tests {
                 false,
                 Moved::Name,
                 true,
+                false,
                 true,
                 FillIn,
                 false,
@@ -387,7 +441,7 @@ mod tests {
                 false,
             ),
         ] {
-            let c = classify(link_new, refused, &moved, intact, excl);
+            let c = classify(link_new, refused, &moved, intact, free, excl);
             assert_eq!(
                 (
                     c.naming,
@@ -396,12 +450,12 @@ mod tests {
                     c.replaced_silently
                 ),
                 (naming, hard, mv, silent),
-                "{link_new} {refused} {moved:?} {intact} {excl}"
+                "{link_new} {refused} {moved:?} {intact} {free} {excl}"
             );
             assert_eq!(c.exclusive_create, excl);
         }
         // A step that failed for another reason is no answer at all (the test is run again).
-        assert!(!classify(false, false, &err(), true, true).no_replace_move);
+        assert!(!classify(false, false, &err(), true, true, true).no_replace_move);
     }
 
     #[test]
