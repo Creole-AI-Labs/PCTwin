@@ -642,7 +642,6 @@ plan-body = This versioned plan is the only authority for execution.
 plan-what-title = Selected scope
 # $size is already formatted, for example "120 GB". $count is passed but not shown.
 plan-what-body = { $size } of files. Selected folders and mapped destinations.
-plan-where-title = Where it goes
 plan-where-body =
     { NUMBER($count) ->
         [one] To { $count } place on the new laptop.
