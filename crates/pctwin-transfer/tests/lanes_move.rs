@@ -600,3 +600,135 @@ async fn a_lane_that_goes_silent_is_let_go_and_its_blocks_go_to_the_others() {
     r.unwrap();
     assert_arrived(&l);
 }
+
+/// The old laptop's end of the main connection, cut after it has sent `left` messages: as if
+/// the Wi-Fi dropped part way through the move.
+struct CutAfter<C> {
+    inner: C,
+    left: usize,
+}
+
+impl<C: Channel> Channel for CutAfter<C> {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        if self.left == 0 {
+            return Err(ChannelError);
+        }
+        self.left -= 1;
+        self.inner.send(data).await
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+/// The plan's fingerprint both laptops bind their resume keys to.
+const APPROVED_PLAN: [u8; 32] = [0x55; 32];
+
+/// Security Design A, "Resume": the main connection drops part way through a real move; the new
+/// laptop reconnects with its resume keys (no new code), the old laptop's listener takes it as
+/// the new main connection, and the move carries on from where it stopped and finishes.
+#[tokio::test]
+async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
+    use std::time::Instant;
+    let l = laptops();
+    let table = table(&l);
+    let config = pctwin_link::LinkConfig {
+        step_timeout: std::time::Duration::from_secs(5),
+        handshake_timeout: std::time::Duration::from_secs(5),
+        silence_penalty: std::time::Duration::ZERO,
+        connect_timeout: std::time::Duration::from_secs(5),
+    };
+    let host = pctwin_link::Host::bind("127.0.0.1:0".parse().unwrap(), config)
+        .await
+        .unwrap();
+    let addr = host.local_addr().unwrap();
+    let rotating = Arc::new(Mutex::new(
+        pctwin_pairing::RotatingSender::new(Instant::now()).unwrap(),
+    ));
+    let code = {
+        let mut s = rotating.lock().unwrap();
+        s.tick(Instant::now()).unwrap();
+        pctwin_pairing::PairingCode::parse(&s.code().unwrap()).unwrap()
+    };
+    let guest =
+        tokio::spawn(async move { pctwin_link::connect(addr, &code, config).await.unwrap() });
+    let pending_host = host.next_peer(&rotating).await.unwrap();
+    let pending_guest = guest.await.unwrap();
+    let number = pending_guest.match_number();
+    let old_link = pending_host.choose(number, Instant::now()).await.unwrap();
+    let mut new_link = pending_guest.approval().await.unwrap();
+
+    // The person approved the plan: both laptops make their resume keys for it.
+    let mut old_link = old_link;
+    let approved = Instant::now();
+    let mut old_keys = old_link.take_lane_keys().unwrap();
+    let mut new_keys = new_link.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&APPROVED_PLAN, approved).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&APPROVED_PLAN, approved).unwrap();
+    let mut listener = host.into_lanes(old_keys, old_link.peer_addr());
+    listener.allow_resumes(old_resumes);
+    let old_addr = new_link.peer_addr();
+
+    let mut sender = SenderSession::new(jobs(&l), 4);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+
+    // Part way through, the connection drops.
+    let cut = CutAfter {
+        inner: old_link,
+        left: 200,
+    };
+    let sending = &mut sender;
+    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        tokio::join!(
+            async move {
+                // The old laptop lets its end go when sending fails, so the new laptop sees the
+                // connection close (as the app does when a move's connection drops).
+                let mut cut = cut;
+                let r = sending.run(&mut cut).await;
+                drop(cut);
+                r
+            },
+            receiver.run(&mut new_link)
+        )
+    })
+    .await
+    .expect("the move hung at the drop");
+    assert!(sent.is_err(), "the old laptop noticed the drop");
+    assert!(received.is_err(), "the new laptop noticed the drop");
+    drop(new_link);
+    let before = sender.blocks_sent();
+    assert!(before > 0 && before < total_blocks(&l), "{before}");
+
+    // The new laptop reconnects with its resume keys; the old laptop takes it as the main one.
+    let (arrived, opened) = tokio::join!(
+        listener.accept_any(),
+        pctwin_link::open_resume(old_addr, &mut new_resumes, config)
+    );
+    let pctwin_link::Arrival::Resumed(mut old_main) = arrived.unwrap() else {
+        panic!("a resume, not a lane");
+    };
+    let mut new_main = opened.unwrap();
+    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        tokio::join!(sender.run(&mut old_main), receiver.run(&mut new_main))
+    })
+    .await
+    .expect("the resumed move hung");
+    sent.unwrap();
+    received.unwrap();
+    assert_arrived(&l);
+    for n in 0..l.files.len() {
+        assert_eq!(
+            sender.outcome(id(n as u8)),
+            Some(&SendOutcome::Arrived),
+            "{n}"
+        );
+    }
+    // It carried on rather than starting over: well under twice the blocks in all.
+    assert!(
+        sender.blocks_sent() < total_blocks(&l) + before,
+        "{} sent for {} blocks",
+        sender.blocks_sent(),
+        total_blocks(&l)
+    );
+}

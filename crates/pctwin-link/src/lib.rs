@@ -46,10 +46,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 /// The keys for extra lanes (see [`Link::take_lane_keys`]).
-pub use pctwin_pairing::LaneKeys;
+pub use pctwin_pairing::{LaneKeys, ResumeKeys};
 use pctwin_pairing::{
-    MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval, ReceiverSession,
-    RotatingSender, SenderChoosing, SenderStatus, Transport,
+    LaneOpening, MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval,
+    ReceiverSession, RotatingSender, SenderChoosing, SenderStatus, Transport,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -75,6 +75,7 @@ const KIND_EXPIRED: u8 = 6;
 const KIND_LOCKED: u8 = 7;
 const KIND_WRONG_CODE: u8 = 8;
 const KIND_LANE: u8 = 9;
+const KIND_RESUME: u8 = 10;
 /// A quiet connection is probed after this long, every [`KEEPALIVE_INTERVAL`], up to
 /// [`KEEPALIVE_PROBES`] times: a laptop that went away (lid closed, out of Wi-Fi range) is noticed
 /// in about half a minute rather than the systems' default of up to two hours. The operating
@@ -578,7 +579,7 @@ macro_rules! redacted_debug {
         }
     )*};
 }
-redacted_debug!(Host, HostPending, GuestPending, Link, LaneListener);
+redacted_debug!(Host, HostPending, GuestPending, Link, LaneListener, Arrival);
 
 /// New laptop: opens an extra lane to the old laptop at `addr` (the main link's
 /// [`Link::peer_addr`]), with no new code: the lane's own short handshake proves both laptops hold
@@ -589,21 +590,42 @@ pub async fn open_lane(
     keys: &mut LaneKeys,
     config: LinkConfig,
 ) -> Result<Link, LinkError> {
+    open_numbered(addr, KIND_LANE, |now| keys.open_lane(now), config).await
+}
+
+/// New laptop, after the main connection dropped: reconnects to the old laptop at `addr` with the
+/// move's resume keys, no new code. The returned link has fresh keys and becomes the move's main
+/// connection. Each try uses the next attempt number, even if it fails.
+pub async fn open_resume(
+    addr: SocketAddr,
+    keys: &mut ResumeKeys,
+    config: LinkConfig,
+) -> Result<Link, LinkError> {
+    open_numbered(addr, KIND_RESUME, |now| keys.open(now), config).await
+}
+
+/// Opens a lane or a resume: the three-message handshake on a new connection.
+async fn open_numbered(
+    addr: SocketAddr,
+    kind: u8,
+    start: impl FnOnce(Instant) -> Result<(LaneOpening, Vec<u8>), PairingError>,
+    config: LinkConfig,
+) -> Result<Link, LinkError> {
     let wait = config.step_timeout;
     let mut stream = tokio::time::timeout(config.connect_timeout, TcpStream::connect(addr))
         .await
         .map_err(|_| LinkError::Unreachable)?
         .map_err(|_| LinkError::Unreachable)?;
     keep_alive(&stream);
-    let (opening, msg1) = keys.open_lane(Instant::now())?;
-    write_frame(&mut stream, KIND_LANE, &msg1, wait).await?;
+    let (opening, msg1) = start(Instant::now())?;
+    write_frame(&mut stream, kind, &msg1, wait).await?;
     let msg2 = match read_timed(&mut stream, wait).await? {
-        (KIND_LANE, body) => body,
+        (k, body) if k == kind => body,
         (KIND_BUSY, _) => return Err(LinkError::Busy),
         _ => return Err(LinkError::Unexpected),
     };
     let (transport, msg3) = opening.receive(&msg2, Instant::now())?;
-    write_frame(&mut stream, KIND_LANE, &msg3, wait).await?;
+    write_frame(&mut stream, kind, &msg3, wait).await?;
     Ok(Link {
         transport,
         lanes: None,
@@ -621,7 +643,17 @@ pub async fn open_lane(
 pub struct LaneListener {
     host: Host,
     keys: LaneKeys,
+    /// Once the plan is approved: the keys to accept the new laptop's reconnection after a drop.
+    resumes: Option<ResumeKeys>,
     peer: IpAddr,
+}
+
+/// What arrived at the old laptop's listener during the move.
+pub enum Arrival {
+    /// An extra lane beside the main connection.
+    Lane(Link),
+    /// The new laptop reconnecting after the main connection dropped: the new main connection.
+    Resumed(Link),
 }
 
 impl Host {
@@ -630,14 +662,36 @@ impl Host {
         LaneListener {
             host: self,
             keys,
+            resumes: None,
             peer: penalty_key(peer.ip()),
         }
     }
 }
 
 impl LaneListener {
-    /// Waits for the next genuine lane and returns it.
+    /// Once the person approved the plan: also accept the new laptop's reconnection after a drop,
+    /// with these resume keys (see [`accept_any`](Self::accept_any)).
+    pub fn allow_resumes(&mut self, keys: ResumeKeys) {
+        self.resumes = Some(keys);
+    }
+
+    /// Waits for the next genuine lane and returns it. A resume is not accepted here; the move
+    /// uses [`accept_any`](Self::accept_any).
     pub async fn accept(&mut self) -> Result<Link, LinkError> {
+        loop {
+            if let Arrival::Lane(link) = self.serve(false).await? {
+                return Ok(link);
+            }
+        }
+    }
+
+    /// Waits for the next genuine lane, or (once [`allow_resumes`](Self::allow_resumes) was
+    /// called) the new laptop's reconnection after a drop.
+    pub async fn accept_any(&mut self) -> Result<Arrival, LinkError> {
+        self.serve(true).await
+    }
+
+    async fn serve(&mut self, resumes: bool) -> Result<Arrival, LinkError> {
         loop {
             let Some((mut stream, from)) = self.host.accept_local().await else {
                 continue;
@@ -647,32 +701,41 @@ impl LaneListener {
                 continue;
             }
             let wait = self.host.config.step_timeout;
-            let keys = &mut self.keys;
+            let lanes = &mut self.keys;
+            let resume_keys = if resumes { self.resumes.as_mut() } else { None };
             let attempt = async {
-                let msg1 = match read_timed(&mut stream, wait).await? {
-                    (KIND_LANE, body) => body,
+                let (kind, msg1) = match read_timed(&mut stream, wait).await? {
                     (KIND_HELLO, _) => {
                         notify(&mut stream, KIND_BUSY).await;
                         return Err(LinkError::Busy);
                     }
+                    other => other,
+                };
+                let (accepting, msg2) = match (kind, resume_keys) {
+                    (KIND_LANE, _) => lanes.accept_lane(&msg1, Instant::now())?,
+                    (KIND_RESUME, Some(keys)) => keys.accept(&msg1, Instant::now())?,
                     _ => return Err(LinkError::Unexpected),
                 };
-                let (accepting, msg2) = keys.accept_lane(&msg1, Instant::now())?;
-                write_frame(&mut stream, KIND_LANE, &msg2, wait).await?;
+                write_frame(&mut stream, kind, &msg2, wait).await?;
                 let msg3 = match read_timed(&mut stream, wait).await? {
-                    (KIND_LANE, body) => body,
+                    (k, body) if k == kind => body,
                     _ => return Err(LinkError::Unexpected),
                 };
-                Ok(accepting.confirm(&msg3, Instant::now())?)
+                Ok((kind, accepting.confirm(&msg3, Instant::now())?))
             };
-            if let Ok(transport) = attempt.await {
-                return Ok(Link {
+            if let Ok((kind, transport)) = attempt.await {
+                let link = Link {
                     transport,
                     lanes: None,
                     stream,
                     peer: from,
                     send_timeout: wait,
                     broken: false,
+                };
+                return Ok(if kind == KIND_RESUME {
+                    Arrival::Resumed(link)
+                } else {
+                    Arrival::Lane(link)
                 });
             }
         }
