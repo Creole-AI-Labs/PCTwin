@@ -18,7 +18,8 @@ use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
-    OriginalNow, OriginalsFault, ResumeTicket, Trailer, TransferError, answer_originals,
+    OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
+    answer_originals,
 };
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -1067,6 +1068,12 @@ impl SenderSession {
                 }
                 Ok(())
             }
+            Message::SendAgain { stream, ticket } if lane == 0 => {
+                if let Some(&job) = self.job_of.get(&stream) {
+                    self.send_again(job, &ticket);
+                }
+                Ok(())
+            }
             Message::Have { stream, same_size } if lane == 0 => {
                 let Some(&job) = self.job_of.get(&stream) else {
                     return Ok(());
@@ -1080,6 +1087,62 @@ impl SenderSession {
                 Ok(())
             }
             _ => Err(protocol("unexpected message from the new laptop")),
+        }
+    }
+
+    /// The new laptop asked, at the end of `job`, for the blocks `ticket` does not list. They are
+    /// read again from the file, opened afresh read-only, only if it has not changed since it was
+    /// read (else it ends as changed, and is sent again whole or reported, as any file that
+    /// changed while being read). Ignored for a file not just ended.
+    fn send_again(&mut self, job: usize, ticket: &ResumeTicket) {
+        if !matches!(
+            self.states[job],
+            SendState::Ended {
+                failure: None,
+                later: false,
+                retry: false,
+            }
+        ) {
+            return;
+        }
+        self.dirty = true;
+        let j = &self.jobs[job];
+        let reopened =
+            FileSender::open_with(&*self.opener, &j.source, Some(ticket), j.compressible).and_then(
+                |reader| {
+                    let sections = sections_for(reader.header(), &ticket.done.to_bools())
+                        .ok_or_else(|| {
+                            TransferError::Damaged("the file is too big to send".into())
+                        })?;
+                    Ok((reader, sections))
+                },
+            );
+        match reopened {
+            Ok((reader, sections)) => {
+                self.scheduler.push(j.item, j.tier);
+                self.states[job] = SendState::Open {
+                    reader,
+                    sections,
+                    // The new laptop keeps the file open: no new start.
+                    announced: true,
+                    resumed_done: ticket.done.done_count(),
+                    cleared: true,
+                };
+            }
+            Err(e) => {
+                let retry =
+                    matches!(e, TransferError::ChangedSince) && self.budget.try_again_later();
+                self.ends.push(Message::EndFile {
+                    stream: self.streams[job],
+                    stamp_after: ticket.stamp,
+                    changed: true,
+                });
+                self.states[job] = SendState::Ended {
+                    retry,
+                    failure: (!retry).then(|| e.to_string()),
+                    later: false,
+                };
+            }
         }
     }
 
@@ -1331,6 +1394,8 @@ struct Incoming<'d> {
     size: u64,
     /// The stored path of a same-size file already there, offered as possibly identical.
     same: Option<String>,
+    /// Times its blocks were asked for again (see [`SEND_AGAIN_ROUNDS`]).
+    rounds: u8,
 }
 
 /// The new laptop's side of a move. A file starts only if the approved plan allows it (see
@@ -1501,6 +1566,7 @@ impl<'d> ReceiverSession<'d> {
                             destination: w.destination.clone(),
                             size: w.size,
                             same: None,
+                            rounds: 0,
                         },
                     );
                     picked += 1;
@@ -1811,6 +1877,7 @@ impl<'d> ReceiverSession<'d> {
                         destination,
                         size,
                         same: stored,
+                        rounds: 0,
                     },
                 );
             }
@@ -1828,11 +1895,15 @@ impl<'d> ReceiverSession<'d> {
                 stamp_after,
                 changed,
             } => {
+                let trailer = Trailer::new(stamp_after, changed);
+                if let Some(again) = self.send_again(stream, &trailer) {
+                    replies.push(again);
+                    return Ok((replies, false));
+                }
                 let Some(s) = self.streams.remove(&stream) else {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 };
-                let trailer = Trailer::new(stamp_after, changed);
                 let outcome = match (s.assembly, s.failure) {
                     (Some(a), None) => {
                         let dest = self
@@ -1931,14 +2002,20 @@ impl<'d> ReceiverSession<'d> {
             }
         }
         Ok(last.then_some(match written {
-            Some(block) => Message::Receipt { stream, block },
+            Some((block, written)) => Message::Receipt {
+                stream,
+                block,
+                written,
+            },
             None => Message::Refused { stream },
         }))
     }
 
-    /// Checks and writes one whole block of an open file; returns its number, or `None` if it was
-    /// refused (then the file fails and its partial copy is removed).
-    fn write_block(&mut self, stream: u32, whole: &[u8]) -> Option<u64> {
+    /// Checks and writes one whole block of an open file; returns its number and whether it was
+    /// written. A block that arrived damaged is not written and the file carries on (it is asked
+    /// for again when the file ends; its number is `u64::MAX` if even that could not be read).
+    /// `None` if it could not be written (then the file fails and its partial copy is removed).
+    fn write_block(&mut self, stream: u32, whole: &[u8]) -> Option<(u64, bool)> {
         let journal = self.journal;
         let s = self.streams.get_mut(&stream)?;
         let accepted = Block::decode(whole, s.block_size).and_then(|b| {
@@ -1963,13 +2040,42 @@ impl<'d> ReceiverSession<'d> {
                         flush_checkpoint(journal, s, false);
                     }
                 }
-                Some(receipt.block)
+                Some((receipt.block, true))
+            }
+            Err(TransferError::Damaged(_)) => {
+                Some((Block::number_in(whole).unwrap_or(u64::MAX), false))
             }
             Err(e) => {
                 self.fail_stream(stream, e.to_string());
                 None
             }
         }
+    }
+
+    /// At the end of the file on `stream`: if blocks are missing (they arrived damaged) or read
+    /// back wrong from the drive, and it has not been asked for again [`SEND_AGAIN_ROUNDS`] times
+    /// yet, asks for those blocks again and keeps the file open. `None` to end it now (it was
+    /// stored right, it changed on the old laptop, or it is out of rounds).
+    fn send_again(&mut self, stream: u32, trailer: &Trailer) -> Option<Message> {
+        let s = self.streams.get_mut(&stream)?;
+        if s.failure.is_some() || s.rounds >= SEND_AGAIN_ROUNDS {
+            return None;
+        }
+        let a = s.assembly.as_mut()?;
+        // A file that changed on the old laptop is never patched: it is sent again whole.
+        if trailer.changed || trailer.stamp_after != a.header().stamp {
+            return None;
+        }
+        let fixable = a.blocks_done() < a.header().block_count
+            || matches!(a.check_stored(), Ok(StoredCheck::TakenBack(_)));
+        if !fixable {
+            return None;
+        }
+        s.rounds += 1;
+        Some(Message::SendAgain {
+            stream,
+            ticket: a.resume_ticket(),
+        })
     }
 
     /// The file on `stream` failed: its partial copy is removed (it ends when the old laptop ends
@@ -2146,6 +2252,9 @@ impl Drop for ReceiverSession<'_> {
         }
     }
 }
+
+/// How many times a file's missing or wrongly stored blocks are asked for again before it fails.
+const SEND_AGAIN_ROUNDS: u8 = 2;
 
 /// Blocks written before they are checkpointed in the journal together.
 const CHECKPOINT_BLOCKS: usize = 64;

@@ -52,8 +52,14 @@ pub enum Message {
         stamp_after: Stamp,
         changed: bool,
     },
-    /// Receiver: this block is written.
-    Receipt { stream: u32, block: u64 },
+    /// Receiver: this block is written (`written`), or it arrived damaged and was not; either way
+    /// the old laptop counts it answered, and a block not written is asked for again when its
+    /// file ends.
+    Receipt {
+        stream: u32,
+        block: u64,
+        written: bool,
+    },
     /// Receiver, after a new connection: continue this file (`item`; `stream` as it was, 0 after
     /// the new laptop's app restarted) from here.
     ResumeFrom {
@@ -88,6 +94,9 @@ pub enum Message {
         nonce: Nonce,
         answers: Vec<(ItemId, OriginalNow)>,
     },
+    /// Receiver, answering an end in place of `FileDone`: some blocks are missing or read back
+    /// wrong; send again those `ticket` does not list (the file stays open).
+    SendAgain { stream: u32, ticket: ResumeTicket },
 }
 
 const START: u8 = 1;
@@ -103,6 +112,7 @@ const SKIP: u8 = 10;
 const REFUSED: u8 = 11;
 const CHECK_ORIGINALS: u8 = 12;
 const ORIGINALS: u8 = 13;
+const SEND_AGAIN: u8 = 14;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -144,10 +154,15 @@ impl Message {
                 put_stamp(&mut w, stamp_after);
                 w.push(u8::from(*changed));
             }
-            Message::Receipt { stream, block } => {
+            Message::Receipt {
+                stream,
+                block,
+                written,
+            } => {
                 w.push(RECEIPT);
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.extend_from_slice(&block.to_be_bytes());
+                w.push(u8::from(*written));
             }
             Message::ResumeFrom {
                 stream,
@@ -157,12 +172,12 @@ impl Message {
                 w.push(RESUME);
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.extend_from_slice(&item_bytes(item));
-                w.extend_from_slice(&ticket.block_size.to_be_bytes());
-                put_stamp(&mut w, &ticket.stamp);
-                let map = ticket.done.encode();
-                // A map's wire form is at most a few tens of KiB, which fits in a u32.
-                w.extend_from_slice(&u32::try_from(map.len()).unwrap_or(u32::MAX).to_be_bytes());
-                w.extend_from_slice(&map);
+                put_ticket(&mut w, ticket);
+            }
+            Message::SendAgain { stream, ticket } => {
+                w.push(SEND_AGAIN);
+                w.extend_from_slice(&stream.to_be_bytes());
+                put_ticket(&mut w, ticket);
             }
             Message::FileDone { stream, ok } => {
                 w.push(DONE);
@@ -263,15 +278,16 @@ impl Message {
             RECEIPT => Message::Receipt {
                 stream,
                 block: r.u64()?,
+                written: r.flag()?,
             },
             RESUME => Message::ResumeFrom {
                 stream,
                 item: r.item()?,
-                ticket: ResumeTicket {
-                    block_size: r.u64()?,
-                    stamp: r.stamp()?,
-                    done: r.map()?,
-                },
+                ticket: r.ticket()?,
+            },
+            SEND_AGAIN => Message::SendAgain {
+                stream,
+                ticket: r.ticket()?,
             },
             DONE => Message::FileDone {
                 stream,
@@ -426,6 +442,15 @@ fn put_original(w: &mut Vec<u8>, now: &OriginalNow) {
     }
 }
 
+fn put_ticket(w: &mut Vec<u8>, ticket: &ResumeTicket) {
+    w.extend_from_slice(&ticket.block_size.to_be_bytes());
+    put_stamp(w, &ticket.stamp);
+    let map = ticket.done.encode();
+    // A map's wire form is at most a few tens of KiB, which fits in a u32.
+    w.extend_from_slice(&u32::try_from(map.len()).unwrap_or(u32::MAX).to_be_bytes());
+    w.extend_from_slice(&map);
+}
+
 fn put_stamp(w: &mut Vec<u8>, s: &Stamp) {
     w.extend_from_slice(&s.size.to_be_bytes());
     match s.modified_ns {
@@ -576,6 +601,14 @@ impl<'a> Reader<'a> {
             2 => Ok(OriginalNow::CannotLook),
             _ => Err(damaged("bad answer")),
         }
+    }
+
+    fn ticket(&mut self) -> Result<ResumeTicket, TransferError> {
+        Ok(ResumeTicket {
+            block_size: self.u64()?,
+            stamp: self.stamp()?,
+            done: self.map()?,
+        })
     }
 
     fn map(&mut self) -> Result<BlockMap, TransferError> {
