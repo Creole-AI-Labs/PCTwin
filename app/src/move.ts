@@ -1,0 +1,246 @@
+/**
+ * The move in progress and its results, as the screens see them (X01, X02, F09, X05, X10, R01, R02).
+ *
+ * Every screen here is a view model: props in, events out. The bridge that fills them does not
+ * exist yet, so nothing here calls the engine. What the shell must provide:
+ *
+ * Commands (Tauri `invoke`):
+ * - `move_pause()`: ask the move to pause at a safe point. The file being written finishes first.
+ *   Replies at once; the state then reads "pausing" until `move-state` says "paused".
+ * - `move_resume()`: continue a paused move, or withdraw a pause that has not completed.
+ * - `move_stop()`: stop the rest of the move. What is already copied and checked stays. Not undo.
+ * - `move_report(filter?)`: the finished move's items, as `ReportItem[]` (paged by the shell for big moves).
+ * - `set_window_mode("mini" | "everyday" | "expanded")`: exists already (native.ts).
+ *
+ * Events (Tauri `listen`):
+ * - `move-progress`: a `MoveProgress`, whenever a measured number changes (a few times a second at most).
+ * - `move-state`: `{ state: RunState }` when the run state changes.
+ * - `move-queue`: `QueueItem[]` (X02), the items in flight and recently ended.
+ * - `move-finished`: `MoveOutcome` once nothing is waiting, copying or checking.
+ *
+ * Mirrors: `ItemStatus` and `Reason` in crates/pctwin-types (result.rs), the write steps in
+ * crates/pctwin-journal (State), and `CheckedFrom` / `WhyMemory` in the gate's read-back
+ * (crates/pctwin-gate, read_back.rs). Names are the engine's kebab-case names, which are also the
+ * keys of their translated text.
+ */
+
+/* ---------- Results: the engine's ItemStatus and Reason ---------- */
+
+/** Finished and verified. */
+export type DoneStatus = "copied" | "reinstalled" | "converted";
+
+/** The reasons that belong to `failed` (PCTwin could not finish it). */
+export const FAILED_REASONS = [
+  "not-enough-space",
+  "changed-during-move",
+  "unreadable",
+  "not-verified",
+  "refused-by-safety-check",
+  "name-not-allowed",
+  "install-failed",
+  "no-equivalent",
+] as const;
+export type FailedReason = (typeof FAILED_REASONS)[number];
+
+/** The reasons that belong to `needs-action` (the person must finish a step). */
+export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand"] as const;
+export type NeedsActionReason = (typeof NEEDS_ACTION_REASONS)[number];
+
+export type Reason = FailedReason | NeedsActionReason;
+
+/** Every reason, in report order (as `Reason::ALL`). */
+export const ALL_REASONS: readonly Reason[] = [...FAILED_REASONS, ...NEEDS_ACTION_REASONS];
+
+/** The one status a reason belongs to (as `Reason::status`). */
+export function statusOfReason(reason: Reason): "failed" | "needs-action" {
+  return (FAILED_REASONS as readonly string[]).includes(reason) ? "failed" : "needs-action";
+}
+
+/** The six ways an item can end, in report order (as `ItemStatus::ALL`). */
+export const ITEM_STATUSES = ["copied", "reinstalled", "converted", "needs-action", "skipped-by-user", "failed"] as const;
+export type ItemStatus = (typeof ITEM_STATUSES)[number];
+
+/**
+ * An item's result. The shape is the engine's rule (`ItemResult`): a failed or needs-action item
+ * always has a reason that fits its status; a finished or skipped one has none. A wrong pairing
+ * does not type-check, and `parseResult` refuses it at the boundary.
+ */
+export type ItemResult =
+  | { status: DoneStatus | "skipped-by-user"; reason?: never }
+  | { status: "failed"; reason: FailedReason }
+  | { status: "needs-action"; reason: NeedsActionReason };
+
+/** Reads a result sent by the shell, refusing any status and reason that do not fit (as the engine does). */
+export function parseResult(value: unknown): ItemResult | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { status, reason, ...extra } = value as Record<string, unknown>;
+  if (Object.keys(extra).length > 0) return null;
+  if (typeof status !== "string" || !(ITEM_STATUSES as readonly string[]).includes(status)) return null;
+  if (status === "failed" || status === "needs-action") {
+    if (typeof reason !== "string" || !(ALL_REASONS as readonly string[]).includes(reason)) return null;
+    if (statusOfReason(reason as Reason) !== status) return null;
+    return { status, reason } as ItemResult;
+  }
+  return reason === undefined ? ({ status } as ItemResult) : null;
+}
+
+/* ---------- Evidence: where a check read from ---------- */
+
+/** Why a check could not read past this laptop's cache (the gate's `WhyMemory`). */
+export type WhyMemory = "cannot-skip-cache" | "not-shown" | "no-way";
+export const WHY_MEMORY: readonly WhyMemory[] = ["cannot-skip-cache", "not-shown", "no-way"];
+
+/**
+ * Where the bytes of a check came from (the gate's `CheckedFrom`). Both are real checks; they are
+ * never shown as the same line. A file checked through the cache says so, and why.
+ */
+export type Evidence = { from: "drive" } | { from: "memory"; why: WhyMemory };
+
+/**
+ * A finished item and how it was checked. Only a copied file carries evidence: it was read back,
+ * either from the drive or from this laptop's memory, and the report must say which.
+ */
+export type Outcome =
+  | { status: "copied"; evidence: Evidence; reason?: never }
+  | { status: "reinstalled" | "converted" | "skipped-by-user"; evidence?: never; reason?: never }
+  | { status: "failed"; reason: FailedReason; evidence?: never }
+  | { status: "needs-action"; reason: NeedsActionReason; evidence?: never };
+
+/** One line of the detailed report (R02). Names and paths are the person's own text. */
+export type ReportItem = { id: string; name: string; source: string; destination?: string } & Outcome;
+
+/* ---------- Progress: measured numbers only ---------- */
+
+/** What the move is doing now. */
+export type RunState = "running" | "pausing" | "paused";
+
+/**
+ * Counts of items by what is happening to them now. All measured by the engine and all separate: a
+ * file being written, a file being read back, a finished one and one that needs the person are
+ * never merged. They add up to `total`.
+ */
+export type Counts = {
+  total: number;
+  /** Not started. */
+  waiting: number;
+  /** Being written on the new laptop (journal step staged). */
+  copying: number;
+  /** Being read back and checked. */
+  checking: number;
+  /** Copied (or reinstalled or converted) and checked. */
+  done: number;
+  needsAction: number;
+  failed: number;
+  skippedByUser: number;
+};
+
+export type Range = { low: number; high: number };
+
+export type MoveProgress = {
+  state: RunState;
+  counts: Counts;
+  /** Bytes written and read back so far, and bytes in the approved plan. Never estimated. */
+  bytes: { checked: number; total: number };
+  /** The item being worked on, when one is. */
+  current?: { name: string; step: "copying" | "checking" };
+  /** Measured, as a range in bytes a second; absent until there is enough to measure. */
+  speed?: Range;
+  /** Whole minutes left as a range; absent until it can be measured. Never a promise. */
+  minutesLeft?: Range;
+  /** Something the person may need to act on. `label` is the laptop that is low on battery. */
+  notice?: { kind: "low-battery"; label: string } | { kind: "link-lost" };
+  /** The other laptop's name, for the title. */
+  laptop?: string;
+};
+
+/** A count of zero for every status, to fill in. */
+export function noStatuses(): Record<ItemStatus, number> {
+  return { copied: 0, reinstalled: 0, converted: 0, "needs-action": 0, "skipped-by-user": 0, failed: 0 };
+}
+
+/** Items that are still waiting, being copied or being checked. */
+export function unfinished(c: Counts): number {
+  return c.waiting + c.copying + c.checking;
+}
+
+/** Items that ended some way other than done: they stay visible everywhere. */
+export function notDone(c: Counts): number {
+  return c.needsAction + c.failed;
+}
+
+/**
+ * The percent to show, from bytes written and checked, rounded down. It is never 100 while anything
+ * is waiting, copying or checking, and it is `null` (no number at all) when the plan has no size.
+ */
+export function measuredPercent(p: Pick<MoveProgress, "bytes" | "counts">): number | null {
+  const { checked, total } = p.bytes;
+  if (!(total > 0)) return null;
+  const pct = Math.floor((Math.max(0, checked) / total) * 100);
+  if (unfinished(p.counts) > 0) return Math.min(pct, 99);
+  return Math.min(pct, 100);
+}
+
+/** The write step each phase shows, as the journal names them (crates/pctwin-journal State). */
+export type Phase = "waiting" | "copying" | "checking" | "putting-in-place" | "already-there";
+export const PHASE_STEP: Record<Phase, string> = {
+  waiting: "planned",
+  copying: "staged",
+  checking: "staged",
+  "putting-in-place": "verified or applied",
+  "already-there": "existing",
+};
+
+/** One item in the expanded view (X02): still moving, or ended with its result. */
+export type QueueItem = { id: string; name: string; source: string } & ({ phase: Phase; outcome?: never } | { phase: "ended"; outcome: Outcome });
+
+/** What R01 shows when a move ends. `stopped` means the person stopped it early. */
+export type MoveOutcome = {
+  /** Items by how they ended: one count for each of the engine's six statuses. */
+  byStatus: Record<ItemStatus, number>;
+  /** Items that never started or never finished because the move was stopped. Zero unless `stopped`. */
+  notCopied: number;
+  /** Bytes written and read back. */
+  bytesChecked: number;
+  stopped: boolean;
+  /** Copied files checked from this laptop's memory, not the drive. */
+  checkedFromMemory: number;
+};
+
+/* ---------- Formatting ---------- */
+
+const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
+
+/** A size in the reader's language: 1.2 GB. Decimal units, one decimal at most. */
+export function formatBytes(bytes: number, locale: string): string {
+  let n = Math.max(0, bytes);
+  let u = 0;
+  while (n >= 1000 && u < UNITS.length - 1) {
+    n /= 1000;
+    u++;
+  }
+  return new Intl.NumberFormat(locale, { style: "unit", unit: UNITS[u], unitDisplay: "short", maximumFractionDigits: u === 0 ? 0 : 1 }).format(n);
+}
+
+/** A speed range's two ends in one unit, so the unit is said once: "40" "55" and "MB/s". */
+export function formatSpeed(r: Range, locale: string): { low: string; high: string; unit: string } {
+  let u = 0;
+  let n = Math.max(r.low, r.high);
+  while (n >= 1000 && u < UNITS.length - 1) {
+    n /= 1000;
+    u++;
+  }
+  const f = new Intl.NumberFormat(locale, { maximumFractionDigits: u === 0 ? 0 : 1 });
+  const unit = ["B/s", "kB/s", "MB/s", "GB/s", "TB/s"][u];
+  return { low: f.format(r.low / 1000 ** u), high: f.format(r.high / 1000 ** u), unit };
+}
+
+/** A range of whole minutes is always two different numbers, so it reads as a range. */
+export function minutesRange(r: Range): { low: number; high: number } {
+  const low = Math.max(0, Math.round(r.low));
+  return { low, high: Math.max(low + 1, Math.round(r.high)) };
+}
+
+/** The language the page is in (set by the app), for number formats. */
+export function pageLocale(): string {
+  return typeof document === "undefined" ? "en" : document.documentElement.lang || "en";
+}
