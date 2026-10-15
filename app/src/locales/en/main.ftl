@@ -771,25 +771,10 @@ progress-time-left = About { $range } left
 progress-time-measuring = Working out the time left…
 # $speed is measured and already formatted, for example "62 MB/s".
 progress-speed = { $speed }, measured
-progress-count-copied =
-    { NUMBER($count) ->
-        [one] { $count } item copied and checked
-       *[other] { $count } items copied and checked
-    }
-progress-count-checking =
-    { NUMBER($count) ->
-        [one] { $count } item being checked
-       *[other] { $count } items being checked
-    }
 progress-count-needs-action =
     { NUMBER($count) ->
         [one] { $count } item needs your action
        *[other] { $count } items need your action
-    }
-progress-count-waiting =
-    { NUMBER($count) ->
-        [one] { $count } item still to copy
-       *[other] { $count } items still to copy
     }
 progress-current-copying = Now copying: { $name }
 progress-current-checking = Now checking: { $name }
@@ -803,7 +788,6 @@ progress-interrupted = The connection to the other laptop dropped. PCTwin is try
 progress-low-battery = { $label } is low on battery. Plug it in so the move is not interrupted.
 progress-old-safe = Your old laptop stays unchanged.
 progress-pause = Pause move
-progress-resume = Resume move
 progress-compact = Keep it compact
 progress-expand = See the whole move
 progress-stop = Stop the move
@@ -824,13 +808,11 @@ progress-state-verified = Verified
 progress-state-checking = Checking
 progress-state-paused = Paused
 progress-checked-note = An item counts as copied only after it is checked.
-progress-collapse = Show less
 
 ## F09 Mini panel
 
 mini-title = Your move, nearby.
 mini-title-paused = Move paused.
-mini-body = The full window is one tap away.
 mini-what = moving your selected files
 mini-progress =
     .aria-label = Move progress
@@ -862,7 +844,6 @@ pause-status-kept = Paused
 pause-status-waiting = Waiting
 pause-note = Pausing does not undo anything. Your old laptop stays unchanged.
 pause-resume = Resume saved move
-pause-stop = Stop the move
 
 ## X10 Stop the remaining move? (danger dialog)
 
@@ -885,55 +866,9 @@ cancel-keep = Keep moving
 outcome-eyebrow = Move results
 outcome-title = Welcome to your next laptop.
 outcome-body = Here is what happened to the scope you approved.
-# $size is already formatted, for example "118 GB".
-outcome-size = { $size } verified copies
 outcome-files-title = Selected files
-outcome-files-body =
-    { NUMBER($count) ->
-        [one] Captured bytes verified; { $count } location still excluded.
-       *[other] Captured bytes verified; { $count } locations still excluded.
-    }
 outcome-status-partial = Partial
-outcome-copied =
-    { NUMBER($count) ->
-        [one] { $count } item copied
-       *[other] { $count } items copied
-    }
-outcome-reinstalled =
-    { NUMBER($count) ->
-        [one] { $count } item reinstalled
-       *[other] { $count } items reinstalled
-    }
-outcome-converted =
-    { NUMBER($count) ->
-        [one] { $count } item converted
-       *[other] { $count } items converted
-    }
-outcome-needs-action =
-    { NUMBER($count) ->
-        [one] { $count } needs your action
-       *[other] { $count } need your action
-    }
-outcome-skipped-by-user =
-    { NUMBER($count) ->
-        [one] { $count } item skipped by you
-       *[other] { $count } items skipped by you
-    }
-outcome-failed =
-    { NUMBER($count) ->
-        [one] { $count } item failed
-       *[other] { $count } items failed
-    }
-outcome-all-done = Every item you chose was copied and checked.
-outcome-unfinished =
-    { NUMBER($count) ->
-        [one] { $count } item did not finish. The report says why and what to do next.
-       *[other] { $count } items did not finish. The report says why and what to do next.
-    }
 outcome-next-title = What to do next
-outcome-next-needs-action = Finish the steps marked Needs action. Each one says what to do.
-outcome-next-failed = Look at the items marked Failed. Each one says what happened and how to try again.
-outcome-next-check = Open a few of your files here to make sure they are as you expect.
 outcome-old-safe = Unresolved selected work stays visible. The source has not been cleaned or wiped.
 outcome-report = View complete report
 outcome-home = Return home
@@ -943,12 +878,6 @@ outcome-home = Return home
 report-title = Your move, item by item.
 report-body = A factual local record with reasons and source-to-target mappings.
 report-filter-label = Show
-report-filter-all = All
-report-count =
-    { NUMBER($count) ->
-        [one] { $count } item
-       *[other] { $count } items
-    }
 report-col-item = Item
 report-col-result = Outcome
 report-col-details = Evidence / next step
@@ -956,7 +885,6 @@ report-from = From: { $path }
 report-to = To: { $path }
 report-none = No items have this result.
 report-more-details = More details
-report-back = Back
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Checked by reading it back from the drive.
