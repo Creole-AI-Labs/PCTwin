@@ -69,7 +69,9 @@
 }
 
 .qs-rows .kit-row-end {
+  flex: 0 1 auto;
   flex-wrap: wrap;
+  max-inline-size: 100%;
 }
 
 .qs-rows .kit-hint {
@@ -261,6 +263,13 @@
   background: var(--colour-paper);
 }
 
+/* Narrow windows use the tighter margins (styles.css), so the footer's bleed must match them. */
+@media (max-width: 400px) {
+  .qs-footer {
+    --content-padding: var(--content-padding-narrow);
+  }
+}
+
 .qs-footer-note {
   color: var(--colour-muted);
   font-size: var(--type-supporting);
@@ -444,6 +453,7 @@
 
 .qs-progress-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--space-3);
