@@ -179,6 +179,34 @@ describe("old laptop", () => {
     noMissingText();
   });
 
+  it("stays on Paired whatever arrives afterwards", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "paired" });
+    expect(heading().textContent).toBe(text("pair-done-title"));
+    for (const late of [
+      { kind: "code", code: "654321", secondsLeft: 59 },
+      { kind: "choose", round: 2, numbers: [4, 5, 6] },
+      { kind: "timed-out" },
+      { kind: "wait", secondsLeft: 9 },
+      { kind: "locked" },
+    ]) {
+      await emit("pairing-old", late);
+      expect(heading().textContent).toBe(text("pair-done-title"));
+    }
+    noMissingText();
+  });
+
+  it("a pick after newer numbers names the newer round", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "choose", round: 8, numbers: [4, 5, 6] });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 5 })) }));
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 8, number: 5 });
+  });
+
   it("says when the person did not pick in time, and keeps showing the next code", async () => {
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });

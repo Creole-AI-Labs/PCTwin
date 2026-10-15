@@ -45,8 +45,11 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const [networks, setNetworks] = useState<string[]>([]);
   const renameButton = useRef<HTMLButtonElement>(null);
   const wasRenaming = useRef(false);
+  // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
+  const paired = useRef(false);
 
   const handle = useCallback((event: OldEvent) => {
+    if (paired.current) return;
     switch (event.kind) {
       case "label":
         setLabel(event.label);
@@ -72,6 +75,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
         setPhase("choose");
         break;
       case "paired":
+        paired.current = true;
         setPhase("paired");
         break;
       case "timed-out":
