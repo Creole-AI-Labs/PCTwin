@@ -82,6 +82,7 @@ pair-choose-title = Choose the matching number.
 pair-choose-body = Look at your new laptop. Choose the number it shows.
 pair-choose-number = Number { $number }
 pair-choose-confirm = Confirm these laptops
+pair-choose-renewed = New numbers are shown. Choose the one on your new laptop.
 pair-choose-none = None of these match
 pair-choose-note = If the new laptop shows no number, or none of these match it, choose None of these match.
 pair-choose-safe = Nothing has been shared yet.

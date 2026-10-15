@@ -39,12 +39,22 @@ const NOTICE_TEXT: Record<Notice, string> = {
 export default function PairOld({ onBack }: { onBack: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("starting");
+  const phaseNow = useRef<Phase>("starting");
+  useEffect(() => {
+    phaseNow.current = phase;
+  }, [phase]);
   const [label, setLabel] = useState<Label | null>(null);
   const [code, setCode] = useState<{ digits: string; secondsLeft: number } | null>(null);
   const [waitLeft, setWaitLeft] = useState(0);
   const [numbers, setNumbers] = useState<number[]>([]);
   // The number chosen on this round, sent only once the person confirms it (a mis-tap can be changed).
   const [selected, setSelected] = useState<number | null>(null);
+  // The round of numbers on screen now: a reply to an earlier round's choice changes nothing.
+  const roundNow = useRef(0);
+  // Said (and focused) when a fresh round of numbers replaces one the person was looking at.
+  const [renewed, setRenewed] = useState(false);
+  const checkingNote = useRef<HTMLDivElement>(null);
+  const firstNumber = useRef<HTMLButtonElement>(null);
   const [round, setRound] = useState(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -77,6 +87,8 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
         setPhase("locked");
         break;
       case "choose":
+        setRenewed(roundNow.current !== 0 && phaseNow.current === "choose");
+        roundNow.current = event.round;
         setNumbers(event.numbers);
         setSelected(null);
         setRound(event.round);
@@ -174,22 +186,50 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
     }
   };
 
+  // Whether a reply to something sent for round `sent` still applies: only while that round is
+  // on screen and the laptops are not paired (a newer round, or Paired, has moved the screen on).
+  const stillOn = (sent: number) => roundNow.current === sent && !paired.current;
+
   const pick = async (number: number) => {
+    const sent = roundNow.current;
     setChecking(true);
-    // The right number ends in the paired event. A rejection means this try is over.
-    // Once paired, a late reply to this pick changes nothing.
-    if (!(await attempt(() => oldPick(round, number))) && !paired.current) {
+    setProblem(null);
+    try {
+      // The right number ends in the paired event.
+      await oldPick(sent, number);
+    } catch (error) {
+      if (!stillOn(sent)) return;
       setChecking(false);
+      const p = toProblem(error);
+      // A choice that came too late: the timed-out notice already says so, once.
+      if (p.key !== "pairing-timed-out") setProblem(p);
       setPhase(code ? "code" : "starting");
     }
   };
 
   const decline = async () => {
-    if (await attempt(() => oldDecline(round))) {
-      setNotice("declined");
-      setPhase(code ? "code" : "starting");
+    const sent = roundNow.current;
+    setProblem(null);
+    try {
+      await oldDecline(sent);
+    } catch (error) {
+      if (stillOn(sent)) setProblem(toProblem(error));
+      return;
     }
+    if (!stillOn(sent)) return;
+    setNotice("declined");
+    setPhase(code ? "code" : "starting");
   };
+
+  // Confirm disables itself while checking: keep the person's place on the checking note.
+  useEffect(() => {
+    if (checking) checkingNote.current?.focus();
+  }, [checking]);
+
+  // A fresh round replaced the numbers being looked at: its first number takes the focus.
+  useEffect(() => {
+    if (renewed) firstNumber.current?.focus();
+  }, [renewed, round]);
 
   const saveName = async (e: SyntheticEvent) => {
     e.preventDefault();
@@ -461,6 +501,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
                   type="button"
                   className="pair-tile pair-number"
                   dir="ltr"
+                  ref={i === 0 ? firstNumber : undefined}
                   aria-pressed={selected === n}
                   disabled={checking}
                   onClick={() => {
@@ -492,9 +533,14 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
               <span />
             </Localized>
           </Button>
-          <div role="status" className="pair-checking">
+          <div role="status" className="pair-checking" ref={checkingNote} tabIndex={-1}>
             {checking && (
               <Localized id="pair-choose-checking">
+                <p />
+              </Localized>
+            )}
+            {!checking && renewed && (
+              <Localized id="pair-choose-renewed">
                 <p />
               </Localized>
             )}

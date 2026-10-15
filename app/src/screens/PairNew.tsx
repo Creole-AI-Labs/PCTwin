@@ -60,7 +60,8 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
         setPhase("list");
       }
     } catch (error) {
-      setProblem(toProblem(error));
+      // What happened before looking again stays the first thing said.
+      setProblem(notice ?? toProblem(error));
       setPhase("error");
     }
   }, []);
@@ -80,7 +81,9 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       setBusy(false);
       setNumber(null);
       setCode("");
-      void search(event.kind === "lost" ? LOST_NEW : event.problem);
+      // A dropped connection is said in this laptop's words (it has no Try again of its own).
+      const dropped = event.kind === "lost" || event.problem.key === "pairing-connection-lost";
+      void search(dropped ? LOST_NEW : event.problem);
     }
   }, [search]);
 
@@ -128,14 +131,14 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
     setProblem(null);
     try {
       const shown = await newConnect(chosen.index, code.trim());
-      // The attempt may already have ended (its end can arrive before this reply): then the
-      // screen has moved on, and this number is not shown.
-      if (attempt.current !== mine) return;
+      // The attempt may already have ended, or even paired (either can arrive before this
+      // reply): then the screen has moved on, and this number is not shown.
+      if (attempt.current !== mine || paired.current) return;
       setNumber(shown);
       setBusy(false);
       setPhase("number");
     } catch (error) {
-      if (attempt.current !== mine) return;
+      if (attempt.current !== mine || paired.current) return;
       setBusy(false);
       setProblem(toProblem(error));
     }

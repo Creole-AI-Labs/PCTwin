@@ -562,7 +562,9 @@ describe("the new laptop after an attempt ends", () => {
     await waitFor(() => {
       expect(searches()).toBe(before + 1);
     });
-    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    // Said in the new laptop's own words: it has no Try again button.
+    expect(await screen.findByText(text("pairing-connection-lost-new"))).toBeTruthy();
+    expect(screen.queryByText(text("pairing-connection-lost"))).toBeNull();
     noMissingText();
   });
 
@@ -613,5 +615,145 @@ describe("choosing the matching number", () => {
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
     await emit("pairing-old", { kind: "choose", round: 2, numbers: [4, 5, 6] });
     expect((button("pair-choose-confirm") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("late replies never move a screen off what it shows", () => {
+  const tile = (n: number) => screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: n })) });
+
+  it("a rejected choice from an earlier round leaves the newer numbers alone", async () => {
+    let reject: (e: unknown) => void = () => undefined;
+    replies.pairing_old_pick = () =>
+      new Promise((_, r) => {
+        reject = r;
+      });
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
+    fireEvent.click(tile(2));
+    fireEvent.click(button("pair-choose-confirm"));
+    await emit("pairing-old", { kind: "choose", round: 8, numbers: [4, 5, 6] });
+    await act(async () => {
+      reject(problem("pairing-timed-out"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(heading().textContent).toBe(text("pair-choose-title"));
+    expect(tile(5)).toBeTruthy();
+  });
+
+  it("a decline answered after newer numbers leaves them alone", async () => {
+    let answer: () => void = () => undefined;
+    replies.pairing_old_decline = () =>
+      new Promise((resolve) => {
+        answer = () => { resolve(undefined); };
+      });
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
+    fireEvent.click(button("pair-choose-none"));
+    await emit("pairing-old", { kind: "choose", round: 8, numbers: [4, 5, 6] });
+    await act(async () => {
+      answer();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(heading().textContent).toBe(text("pair-choose-title"));
+    expect(screen.queryByText(text("pair-old-declined"))).toBeNull();
+  });
+
+  it("a choice that came too late says so once", async () => {
+    replies.pairing_old_pick = () => {
+      throw problem("pairing-timed-out");
+    };
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    fireEvent.click(tile(2));
+    fireEvent.click(button("pair-choose-confirm"));
+    await emit("pairing-old", { kind: "timed-out" });
+    await waitFor(() => {
+      expect(screen.getByText(text("pair-old-timed-out"))).toBeTruthy();
+    });
+    expect(screen.queryByText(text("pairing-timed-out"))).toBeNull();
+  });
+
+  it("Confirm keeps the person's place, and a double press sends one choice", async () => {
+    replies.pairing_old_pick = () => new Promise(() => undefined);
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    fireEvent.click(tile(2));
+    const confirm = button("pair-choose-confirm");
+    confirm.focus();
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(tauri.invoke.mock.calls.filter((c) => c[0] === "pairing_old_pick")).toHaveLength(1);
+    await waitFor(() => {
+      expect(document.activeElement?.classList.contains("pair-checking")).toBe(true);
+    });
+  });
+
+  it("new numbers are announced and take the focus", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "choose", round: 2, numbers: [4, 5, 6] });
+    expect(await screen.findByText(text("pair-choose-renewed"))).toBeTruthy();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(tile(4));
+    });
+    noMissingText();
+  });
+
+  it("the new laptop stays Paired when Paired arrives before its own reply", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    let answer: (n: number) => void = () => undefined;
+    replies.pairing_new_connect = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await emit("pairing-new", { kind: "paired" });
+    await act(async () => {
+      answer(57);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(heading().textContent).toBe(text("pair-done-title"));
+  });
+
+  it("when looking again fails, what happened is still what is said", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    replies.pairing_new_search = () => {
+      throw problem("pairing-failed");
+    };
+    await emit("pairing-new", { kind: "lost" });
+    expect(await screen.findByText(text("pairing-connection-lost-new"))).toBeTruthy();
+  });
+
+  it("pairs again after a lost connection", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    const connect = async () => {
+      fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+      fireEvent.click(button("pair-new-connect"));
+      await screen.findByText(text("pair-new-number-title"));
+    };
+    await connect();
+    await emit("pairing-new", { kind: "paired" });
+    await emit("pairing-new", { kind: "lost" });
+    await screen.findByText(text("pair-new-code-title"));
+    await connect();
+    await emit("pairing-new", { kind: "paired" });
+    expect(heading().textContent).toBe(text("pair-done-title"));
   });
 });
