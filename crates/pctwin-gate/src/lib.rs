@@ -1118,7 +1118,9 @@ impl Destination {
     /// can be removed once undo is closed for good (the type makes that impossible).
     /// `about_to_remove` is called once, after the last check and just before the removal (to
     /// record it first); nothing is removed if it fails. A file whose drive gives it no number (0)
-    /// cannot be told apart from others, so it is never removed.
+    /// cannot be told apart from others, so it is never removed; nor is any file on a drive
+    /// without hard links (FAT, exFAT), whose numbers do not stay with a file
+    /// ([`Removed::Unsupported`]).
     #[cfg(windows)]
     pub fn remove_if_unchanged(
         &self,
@@ -1143,6 +1145,13 @@ impl Destination {
             return Err(GateError::Io(invalid("not a copy undo removes")));
         }
         let folder = stored.rsplit_once('/').map_or("", |(f, _)| f);
+        // A drive without hard links (FAT, exFAT) numbers a file by where its entry sits in its
+        // folder, so another file made there later can carry the very number recorded: the
+        // number proves nothing, and the copy is kept (decided 15 October 2026). A drive that
+        // cannot be tested now is not trusted either.
+        if !self.check_for(&dir, folder).is_ok_and(|c| c.hard_links) {
+            return Ok(Removed::Unsupported);
+        }
         // The right is looked at again just before the removal (a lent right may have ended).
         let about_to_remove = || {
             if right.in_force() {
