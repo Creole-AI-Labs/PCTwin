@@ -6,5 +6,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
+    // Accessibility checks over a whole screen take a few seconds on a busy machine; a slow run is
+    // not a failure. Each waitFor keeps its own one-second limit, so a hang still fails fast.
+    testTimeout: 20000,
   },
 });
