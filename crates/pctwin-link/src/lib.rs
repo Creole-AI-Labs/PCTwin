@@ -599,8 +599,9 @@ pub struct LinkWatch {
 
 impl LinkWatch {
     /// Resolves when the other laptop hung up or the connection broke (the operating system's
-    /// keep-alive probes notice a laptop that vanished). Only looks, never reads: while messages
-    /// wait unread, it looks again now and then.
+    /// keep-alive probes notice a laptop that vanished). Only looks, never reads. While a message
+    /// waits unread it can only see a broken connection, not a clean close, so it keeps looking
+    /// now and then until the link is taken.
     pub async fn closed(&self) {
         let mut byte = [0u8; 1];
         loop {
@@ -654,8 +655,10 @@ impl Link {
     }
 
     /// A watch on this link that tells when the other laptop has gone, without reading anything
-    /// (whoever later uses the link still gets every message). For the time between pairing and
-    /// the move, so a link that died is let go instead of shown as paired.
+    /// (whoever later uses the link still gets every message). For the quiet time between pairing
+    /// and the move, so a link that died is let go instead of shown as paired. Whoever takes the
+    /// link for the move ends the watch first: the watch holds the connection open while it
+    /// lives, and once a message waits unread it can no longer see a clean close.
     pub fn watch(&self) -> Result<LinkWatch, LinkError> {
         let copy = socket2::SockRef::from(&self.stream)
             .try_clone()
