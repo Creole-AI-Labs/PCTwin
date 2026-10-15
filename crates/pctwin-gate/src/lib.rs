@@ -397,6 +397,8 @@ pub struct Destination {
     /// stay fast. Only a hint: the exact name is always tried first and every name is claimed
     /// without replacing anything, so a wrong or shared hint can only skip numbers.
     clash_hints: Mutex<ClashHints>,
+    /// How many names were checked while choosing free names (see [`name_checks`](Self::name_checks)).
+    name_checks: std::sync::atomic::AtomicU64,
 }
 
 /// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
@@ -437,6 +439,13 @@ impl Destination {
         Ok(dest)
     }
 
+    /// How many names have been checked so far while choosing free names for files written here.
+    /// A few per file is normal; a count that grows with the number of files already there means
+    /// numbering has become slow (the gate's tests assert it, rather than timing it).
+    pub fn name_checks(&self) -> u64 {
+        self.name_checks.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// Another handle on the very same approved folder (for a worker that finishes part of an
     /// undo with a deadline, which must own what it works on).
     pub fn try_clone(&self) -> io::Result<Self> {
@@ -444,6 +453,7 @@ impl Destination {
             root: self.root.try_clone()?,
             root_path: self.root_path.clone(),
             clash_hints: Mutex::new(ClashHints::default()),
+            name_checks: Default::default(),
         })
     }
 
@@ -452,6 +462,7 @@ impl Destination {
             root,
             root_path: None,
             clash_hints: Mutex::new(ClashHints::default()),
+            name_checks: Default::default(),
         }
     }
 
@@ -931,6 +942,11 @@ impl Destination {
     /// such as `name (2).ext`. Nothing is claimed: another program can still take it first, so a
     /// claim never replaces anything and a taken name is simply tried again.
     fn free_name(&self, dir: &Dir, folder: &str, name: &str) -> Result<(String, bool), GateError> {
+        let name_taken = |dir: &Dir, name: &str| {
+            self.name_checks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            name_taken(dir, name)
+        };
         if !name_taken(dir, name)? {
             return Ok((name.to_string(), false));
         }
