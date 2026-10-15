@@ -184,6 +184,7 @@ fn flatten(c: &Confirmed, journal: &Journal, items: &[ItemId]) -> HashMap<ItemId
 
 fn planned(source_file: Option<FileId>, modified: Option<i64>, size: u64) -> PlannedWrite {
     PlannedWrite {
+        download_mark: None,
         item: id(1),
         source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
         destination: "me".into(),

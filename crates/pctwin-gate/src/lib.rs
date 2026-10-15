@@ -40,11 +40,13 @@ use unicode_normalization::UnicodeNormalization;
 mod birth_hold;
 #[cfg(target_os = "macos")]
 mod macos_check;
+mod marks;
 mod original;
 mod siblings;
 #[cfg(unix)]
 mod unix_undo;
 
+pub use marks::download_mark_of;
 pub use original::open_original;
 pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
@@ -543,6 +545,7 @@ impl Destination {
             sent_path: path.original().to_string(),
             changes,
             modified: None,
+            mark: None,
             created,
         })
     }
@@ -793,6 +796,7 @@ impl Destination {
             sent_path: sent.original().to_string(),
             changes,
             modified: None,
+            mark: None,
             created: Vec::new(),
         })
     }
@@ -1081,7 +1085,7 @@ fn rename_no_replace(
     Err(GateError::NoSafeName)
 }
 
-pub use pctwin_journal::{Born, FileId};
+pub use pctwin_journal::{Born, DownloadMark, FileId};
 
 /// A stored file's size, modified time and identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1703,6 +1707,8 @@ pub struct IncomingFile<'d> {
     changes: Vec<NameChange>,
     /// The modified time to give the finished file (the original's).
     modified: Option<std::time::SystemTime>,
+    /// The download marker to keep, if the original had one.
+    mark: Option<DownloadMark>,
     /// Folders made for this file (stored paths, outermost first).
     created: Vec<String>,
 }
@@ -1819,6 +1825,12 @@ impl<'d> IncomingFile<'d> {
         self.modified = Some(time);
     }
 
+    /// Marks the file as from the internet when it is sealed, as its original was on the old
+    /// laptop (see [`DownloadMark`]), before it gets its real name, so it never appears unmarked.
+    pub fn keep_download_mark(&mut self, mark: DownloadMark) {
+        self.mark = Some(mark);
+    }
+
     /// Where the temporary file is: its stored path inside the approved folder.
     pub fn temp_path(&self) -> String {
         stored_path(&self.folder, self.temp_name.as_deref().unwrap_or_default())
@@ -1849,6 +1861,11 @@ impl<'d> IncomingFile<'d> {
         }
         let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
         file.sync_all()?;
+        let temp_name = self.temp_name.as_deref().ok_or(GateError::Conflict)?;
+        if let Some(mark) = self.mark {
+            // Before the time: writing Windows' marker can change the file's modified time.
+            marks::put(&self.dir, temp_name, &file, mark)?;
+        }
         if let Some(time) = self.modified {
             file.set_modified(time)?;
             file.sync_all()?;

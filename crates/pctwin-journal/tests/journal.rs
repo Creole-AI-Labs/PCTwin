@@ -18,6 +18,7 @@ fn laptop() -> LaptopId {
 
 fn planned(n: u8) -> PlannedWrite {
     PlannedWrite {
+        download_mark: None,
         item: item(n),
         source_laptop: laptop(),
         destination: "me".into(),

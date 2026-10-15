@@ -195,6 +195,7 @@ impl World {
         let entry = self
             .journal
             .plan(&PlannedWrite {
+                download_mark: None,
                 item: id(1),
                 source_laptop: LaptopId::from_hex(laptop).unwrap(),
                 destination: "me".into(),
@@ -484,6 +485,7 @@ async fn a_restored_file_is_never_continued_with_another_description() {
             modified_ns: w.modified_ns().map(|n| n + 1),
         },
         source_file: None,
+        mark: None,
     };
     let (mut old, mut new) = mem_pair(None);
     let script = async {
@@ -615,6 +617,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
         let entry = w
             .journal
             .plan(&PlannedWrite {
+                download_mark: None,
                 item: *item,
                 source_laptop: LaptopId::from_hex(LAPTOP).unwrap(),
                 destination: "me".into(),
@@ -675,6 +678,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
                     modified_ns: None,
                 },
                 source_file: None,
+                mark: None,
             },
             resumed_done: 0,
         };
@@ -695,4 +699,122 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
             ok: false
         }
     );
+}
+
+/// A marked file that was part way when the app stopped still arrives marked: the marker is kept
+/// in the journal with the planned write and comes back with it after the restart.
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn a_marked_file_continued_after_a_restart_still_arrives_marked() {
+    use pctwin_gate::{DownloadMark, download_mark_of};
+    let w = world();
+    mark_internet(&w.source);
+    let mut receiver = w.receiver();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    let (mut a, mut b) = mem_pair_cut_after_received(300);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    let entry = w.journal.unfinished().unwrap()[0].id;
+    assert_eq!(
+        w.journal.entry(entry).unwrap().unwrap().write.download_mark,
+        Some(DownloadMark::Internet),
+        "kept in the journal"
+    );
+    std::mem::forget(receiver);
+    drop(sender);
+    recover(&w.journal, &w.table).unwrap();
+    let mut receiver = w.receiver();
+    assert_eq!(receiver.restore().unwrap(), 1);
+    // The old laptop's new start no longer says the file is marked: only the journal remembers.
+    // (Removing the marker may touch the file's time; it is put back, as the file is unchanged.)
+    let was = std::fs::metadata(&w.source).unwrap().modified().unwrap();
+    clear_mark(&w.source);
+    std::fs::File::options()
+        .write(true)
+        .open(&w.source)
+        .unwrap()
+        .set_modified(was)
+        .unwrap();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    send_all(&mut sender, &mut receiver).await;
+    let landed = w.mine.path().join("Videos/big.bin");
+    assert_eq!(std::fs::read(&landed).unwrap(), w.data);
+    assert_eq!(download_mark_of(&landed), Some(DownloadMark::Internet));
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn mark_internet(path: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        std::fs::write(stream, "[ZoneTransfer]\r\nZoneId=3\r\n").unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    assert!(
+        std::process::Command::new("xattr")
+            .args(["-w", "com.apple.quarantine", "0083;62e09bd1;Safari;"])
+            .arg(path)
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn clear_mark(path: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        std::fs::remove_file(stream).unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    assert!(
+        std::process::Command::new("xattr")
+            .args(["-d", "com.apple.quarantine"])
+            .arg(path)
+            .status()
+            .unwrap()
+            .success()
+    );
+}
+
+/// The other way round: a file not yet marked when it started, marked by the time the old laptop
+/// continues it after a restart, also arrives marked (the stricter of the two wins).
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn a_file_marked_by_the_time_it_is_continued_arrives_marked() {
+    use pctwin_gate::{DownloadMark, download_mark_of};
+    let w = world();
+    let mut receiver = w.receiver();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    let (mut a, mut b) = mem_pair_cut_after_received(300);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    std::mem::forget(receiver);
+    drop(sender);
+    recover(&w.journal, &w.table).unwrap();
+    let mut receiver = w.receiver();
+    assert_eq!(receiver.restore().unwrap(), 1);
+    let was = std::fs::metadata(&w.source).unwrap().modified().unwrap();
+    mark_internet(&w.source);
+    std::fs::File::options()
+        .write(true)
+        .open(&w.source)
+        .unwrap()
+        .set_modified(was)
+        .unwrap();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    send_all(&mut sender, &mut receiver).await;
+    assert!(sender.blocks_sent() < 100, "continued, not started again");
+    let landed = w.mine.path().join("Videos/big.bin");
+    assert_eq!(std::fs::read(&landed).unwrap(), w.data);
+    assert_eq!(download_mark_of(&landed), Some(DownloadMark::Internet));
 }

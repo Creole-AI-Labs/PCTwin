@@ -1110,6 +1110,7 @@ async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
             modified_ns: None,
         },
         source_file: None,
+        mark: None,
     };
     let (mut old, mut new) = mem_pair();
     let script = async {
@@ -1673,4 +1674,61 @@ async fn a_stream_started_again_with_another_file_ends_the_first_in_the_journal_
         entries[1].state,
         pctwin_journal::State::Staged { .. }
     ));
+}
+
+/// A file the old laptop's system marked as from the internet arrives marked, at the same level,
+/// and an unmarked file arrives unmarked (Security Design B). Linux has no standard marker.
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn download_markers_travel_with_their_files() {
+    use pctwin_gate::{DownloadMark, download_mark_of};
+    let l = laptops();
+    mark(&l.files[0].0, 3);
+    mark(&l.files[2].0, 4);
+    let table = table(&l);
+    let sender = Mutex::new(SenderSession::new(jobs(&l), 2));
+    let receiver = Mutex::new(ReceiverSession::new(
+        &table,
+        plan(&l),
+        common::journal(),
+        "1001",
+    ));
+    assert_eq!(run_both(&sender, &receiver, mem_pair()).await, (true, true));
+    assert_arrived(&l);
+    let restricted = if cfg!(windows) {
+        DownloadMark::Restricted
+    } else {
+        // A Mac's quarantine flag has one level.
+        DownloadMark::Internet
+    };
+    let landed = |dir: &tempfile::TempDir, p: &str| download_mark_of(&dir.path().join(p));
+    assert_eq!(
+        landed(&l.new_mine, "Documents/small.bin"),
+        Some(DownloadMark::Internet)
+    );
+    assert_eq!(landed(&l.new_shared, "Public/medium.bin"), None);
+    assert_eq!(landed(&l.new_mine, "Videos/big.bin"), Some(restricted));
+}
+
+/// Marks `path` as its system would after a download: Windows zone `zone`, or a Mac's
+/// quarantine flag.
+#[cfg(any(windows, target_os = "macos"))]
+fn mark(path: &Path, zone: u8) {
+    #[cfg(windows)]
+    {
+        let mut stream = path.as_os_str().to_owned();
+        stream.push(":Zone.Identifier");
+        std::fs::write(stream, format!("[ZoneTransfer]\r\nZoneId={zone}\r\n")).unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = zone;
+        let ok = std::process::Command::new("xattr")
+            .args(["-w", "com.apple.quarantine", "0083;62e09bd1;Safari;"])
+            .arg(path)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+    }
 }
