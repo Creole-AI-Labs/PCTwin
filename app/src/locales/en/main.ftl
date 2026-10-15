@@ -40,12 +40,12 @@ pair-old-eyebrow = Old laptop
 pair-old-title = Let’s connect your laptops.
 pair-old-body = On your new laptop, enter the code below.
 pair-old-next = Next, you’ll match a number shown on both laptops.
-pair-old-network = Both laptops on the same Wi-Fi
-pair-old-waiting = Waiting for the new laptop
+pair-old-network = Keep both laptops on the same Wi-Fi.
+pair-old-waiting = Waiting for your new laptop…
 pair-old-starting = Getting a code ready…
 pair-old-label-title = This laptop’s name for now
 pair-old-label-hint = Your new laptop will find this one by this name.
-pair-old-shuffle = Pick another name
+pair-old-shuffle = Choose another name
 pair-old-rename = Type a name
 pair-old-rename-label = Name for this laptop
 pair-old-rename-note = Anyone on this Wi-Fi can see this name.
@@ -58,22 +58,22 @@ pair-old-code-meta =
     }
 pair-old-steps-title = On your new laptop
 pair-old-step-1 = Open PCTwin and choose My new laptop.
-pair-old-step-2 = If a list appears, pick this laptop’s name.
+pair-old-step-2 = If a list appears, choose this laptop’s name.
 pair-old-step-3 = Type the six-digit code shown here.
-pair-old-wait-title = A new code is on its way
+pair-old-wait-title = A new code is on its way.
 pair-old-wait-body =
     { $seconds ->
         [one] That try did not work. A new code appears in { $seconds } second.
        *[other] That try did not work. A new code appears in { $seconds } seconds.
     }
-pair-old-locked-title = Pairing stopped
+pair-old-locked-title = Pairing stopped.
 pair-old-locked-body = There were too many wrong tries, so pairing stopped to keep this laptop safe. Nothing was shared. Start again when you are ready.
 pair-old-start-again = Start again
-pair-old-timed-out = No number was picked in time, so here is a new code.
+pair-old-timed-out = No number was chosen in time, so here is a new code.
 pair-old-declined = The numbers did not match, so nothing was shared. Here is a new code.
 pair-old-left = The new laptop stopped pairing before a number was picked, so nothing was shared. Here is a new code.
-pair-network-title = Choose your Wi-Fi
-pair-network-hint = Pick the network your new laptop is on.
+pair-network-title = Choose your Wi-Fi.
+pair-network-hint = Choose the network your new laptop is on.
 
 ## C05 Old laptop: match the number
 
@@ -94,10 +94,10 @@ pair-new-searching-body = Keep PCTwin open on your old laptop, on the same Wi-Fi
 pair-new-list-title = Which one is your old laptop?
 pair-new-list-body = Choose the name your old laptop shows on its screen.
 pair-new-same-label = Another laptop nearby has this name. Check the old laptop’s screen.
-pair-new-none-title = No old laptop found
+pair-new-none-title = No old laptop found.
 pair-new-none-body = Check that PCTwin is open on your old laptop and showing a code, and that both laptops are on the same Wi-Fi. Then search again.
 pair-new-search-again = Search again
-pair-new-code-title = Enter the code
+pair-new-code-title = Enter the code.
 pair-new-code-body = Type the code shown on { $label }.
 pair-new-code-label = Six-digit code
 pair-new-code-hint = Read it from your old laptop’s screen. It changes every minute.
@@ -105,7 +105,7 @@ pair-new-connect = Connect
 pair-new-connecting = Connecting…
 pair-new-other-laptop = Choose a different laptop
 pair-new-number-eyebrow = Confirm the connection
-pair-new-number-title = Pick this number on your old laptop
+pair-new-number-title = Choose this number on your old laptop.
 pair-new-number-tile = Your number
 pair-new-number-label = Your number is { $number }
 pair-new-number-body = Your old laptop shows three numbers. Choose this one there.
@@ -114,7 +114,7 @@ pair-new-number-waiting = Waiting for your old laptop…
 ## Paired (both laptops)
 
 pair-done-eyebrow = All set
-pair-done-title = Paired
+pair-done-title = Your laptops are paired.
 pair-done-body = Your two laptops are connected. Choosing what to move comes next, and it is still being built, so nothing has moved yet.
 
 ## Pairing problems (each says what happened, then what to do)
