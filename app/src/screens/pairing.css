@@ -135,6 +135,10 @@ button.pair-number {
   width: 100%;
 }
 
+.pair-number-tile {
+  margin-top: var(--space-6);
+}
+
 .pair-tile-index {
   color: var(--colour-muted);
   font-size: var(--type-tertiary);

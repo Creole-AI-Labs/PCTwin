@@ -388,7 +388,7 @@ describe("new laptop", () => {
       expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_connect", { index: 0, code: "123 456" });
     });
     expect(await screen.findByText(text("pair-new-number-title"))).toBeTruthy();
-    expect(screen.getByRole("group", { name: nameIs(text("pair-new-number-label", { number: 57 })) }).textContent).toBe("57");
+    expect(screen.getByRole("group", { name: nameIs(text("pair-new-number-label", { number: 57 })) }).textContent).toBe(`${text("pair-new-number-tile")}57`);
     expect(screen.getByText(text("pair-new-number-waiting"))).toBeTruthy();
 
     await emit("pairing-new", { kind: "paired" });

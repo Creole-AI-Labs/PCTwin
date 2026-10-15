@@ -103,6 +103,7 @@ pair-new-connecting = Connecting…
 pair-new-other-laptop = Choose a different laptop
 pair-new-number-eyebrow = Confirm the connection
 pair-new-number-title = Pick this number on your old laptop
+pair-new-number-tile = Your number
 pair-new-number-label = Your number is { $number }
 pair-new-number-body = Your old laptop shows three numbers. Choose this one there.
 pair-new-number-waiting = Waiting for your old laptop…

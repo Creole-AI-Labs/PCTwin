@@ -1,7 +1,7 @@
 ﻿import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
-import { Attention, Laptop } from "../icons";
+import { Attention, Laptop, Shield } from "../icons";
 import { LOST, labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
 import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
@@ -298,16 +298,25 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
           <Localized id="pair-new-number-body">
             <p className="subhead" />
           </Localized>
-          <div className="kit-code-box">
-            <div className="pair-bignumber" dir="ltr" role="group" aria-label={l10n.getString("pair-new-number-label", { number })}>
-              <span aria-hidden="true">{number}</span>
-            </div>
+          <div className="pair-tile pair-number-tile" dir="ltr" role="group" aria-label={l10n.getString("pair-new-number-label", { number })}>
+            <Localized id="pair-new-number-tile">
+              <span className="pair-tile-index" aria-hidden="true" />
+            </Localized>
+            <span className="pair-tile-value" aria-hidden="true">
+              {number}
+            </span>
           </div>
           <div role="status" className="pair-waiting">
             <Localized id="pair-new-number-waiting">
               <p />
             </Localized>
           </div>
+          <p className="pair-safe">
+            <Shield />
+            <Localized id="pair-choose-safe">
+              <span />
+            </Localized>
+          </p>
         </>
       )}
     </>
