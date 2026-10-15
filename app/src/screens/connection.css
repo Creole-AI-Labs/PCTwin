@@ -1,0 +1,356 @@
+/* Connection screens (F01 resume banner, C01, C02, C06, C07, C09, C10). Only the app's tokens; logical
+   properties so right-to-left just works; sizes in rem so large text grows things instead of clipping them. */
+
+.connect-block {
+  width: 100%;
+}
+
+.connect-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+.connect-notice:not(:empty) {
+  margin-top: var(--space-4);
+}
+
+.connect-notice p {
+  margin: 0;
+}
+
+.connect-quiet {
+  margin-top: var(--space-4);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.55;
+}
+
+/* C01: the one way to connect */
+.connect-card {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-blue);
+  border-radius: var(--radius-choice);
+  background: var(--colour-paper);
+}
+
+.connect-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: 48px;
+  block-size: 48px;
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.connect-card-text {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
+}
+
+.connect-card-text h2 {
+  font-size: var(--type-row-title);
+  font-weight: 600;
+}
+
+.connect-card-text p {
+  margin-top: var(--space-1);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.connect-step-network {
+  color: var(--colour-ink);
+  font-weight: 600;
+}
+
+/* C06: the two laptops side by side, stacking when the window or the text is narrow */
+.connect-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+.connect-laptop {
+  min-inline-size: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.connect-laptop-side {
+  font-size: var(--type-row-title);
+  font-weight: 650;
+}
+
+.connect-laptop-role {
+  margin-top: var(--space-1);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+.connect-facts {
+  margin: var(--space-3) 0 0;
+}
+
+.connect-facts > div {
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--colour-line-quiet);
+}
+
+.connect-facts dt {
+  color: var(--colour-ink);
+  font-size: var(--type-body);
+  font-weight: 650;
+}
+
+.connect-facts dd {
+  margin: var(--space-1) 0 0;
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+  overflow-wrap: anywhere;
+}
+
+.connect-note-good {
+  background: var(--colour-success-surface);
+  color: var(--colour-success-text);
+}
+
+.connect-note-good svg {
+  color: var(--colour-success-text);
+}
+
+.connect-laptop-status {
+  margin-top: var(--space-3);
+}
+
+/* C07: the two measured numbers, then the rows */
+.connect-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
+  gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-3);
+}
+
+.connect-metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.connect-metric span {
+  order: 2;
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.connect-metric strong {
+  color: var(--colour-blue);
+  font-size: var(--type-subheading);
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.connect-measuring {
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-muted);
+}
+
+.connect-line {
+  display: block;
+}
+
+/* Rows inside one bordered card, as in the mockups */
+.connect-panel {
+  padding: 0 var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.connect-panel .kit-row {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.connect-panel .kit-row-name {
+  flex: 1 1 12rem;
+}
+
+.connect-panel .kit-row-name > span:last-child {
+  font-weight: 650;
+}
+
+.connect-panel .kit-hint {
+  margin-top: var(--space-1);
+  font-weight: 400;
+}
+
+.connect-panel .kit-row-icon {
+  align-items: center;
+  justify-content: center;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: 10px;
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+/* C09: the saved share of the move, as a card with its measured percent */
+.connect-saved {
+  margin-block: var(--space-6) var(--space-3);
+  padding: var(--space-4);
+}
+
+.connect-saved-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block-end: var(--space-3);
+}
+
+.connect-saved-head h2 {
+  font-size: var(--type-row-title);
+  font-weight: 650;
+}
+
+.connect-notice + .connect-panel,
+.connect-saved + .connect-panel {
+  margin-top: var(--space-3);
+}
+
+.connect-pair-rows {
+  margin-top: var(--space-6);
+}
+
+/* C10 */
+.connect-keep {
+  margin: var(--space-4) 0 0;
+  list-style: none;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+.connect-keep > li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.connect-keep > li + li {
+  border-block-start: 1px solid var(--colour-line-quiet);
+}
+
+.connect-keep-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: 36px;
+  block-size: 36px;
+  border-radius: 10px;
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.connect-keep-icon svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+.connect-keep strong {
+  display: block;
+  color: var(--colour-ink);
+  font-weight: 650;
+}
+
+.connect-keep li span:last-child span {
+  display: block;
+  margin-top: var(--space-1);
+}
+
+.kit-dialog-actions .connect-action-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  inline-size: 100%;
+  min-block-size: 76px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-choice);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  text-align: start;
+}
+
+.kit-dialog-actions .connect-action-card:hover {
+  border-color: var(--colour-blue);
+  background: var(--colour-soft);
+}
+
+.connect-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: 44px;
+  block-size: 44px;
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.connect-action-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.connect-action-text strong {
+  font-size: var(--type-body);
+  font-weight: 600;
+}
+
+.connect-action-text small {
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.connect-action-card > svg {
+  flex: none;
+  inline-size: 18px;
+}
+
+:root[dir="rtl"] .connect-action-card > svg,
+:root[dir="rtl"] .connect-card + .connect-actions svg {
+  transform: scaleX(-1);
+}
