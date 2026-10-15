@@ -38,6 +38,7 @@ use cap_std::fs::{File, OpenOptions};
 use unicode_normalization::UnicodeNormalization;
 
 mod birth_hold;
+mod drive;
 #[cfg(target_os = "macos")]
 mod macos_check;
 mod marks;
@@ -46,6 +47,7 @@ mod siblings;
 #[cfg(unix)]
 mod unix_undo;
 
+pub use drive::{DriveKind, DriveProfile, FAT_LARGEST_FILE};
 pub use marks::download_mark_of;
 pub use original::open_original;
 pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
@@ -175,6 +177,27 @@ impl Platform {
     }
 }
 
+/// Which names a drive takes. The drive decides, not the system ([`DriveProfile`]); a
+/// [`Platform`] still names its own drives' rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameRules {
+    /// Windows' rules: no `< > : " / \ | ? *` or control characters, no trailing dot or space, no
+    /// reserved names (`CON`) or short-name lookalikes (`LONGFO~1`). FAT, exFAT, NTFS, network
+    /// and unknown drives, on every system.
+    Windows,
+    /// Any name the system allows: known POSIX drives on Linux and macOS.
+    Posix,
+}
+
+impl From<Platform> for NameRules {
+    fn from(platform: Platform) -> Self {
+        match platform {
+            Platform::Windows => Self::Windows,
+            Platform::MacOs | Platform::Linux => Self::Posix,
+        }
+    }
+}
+
 /// A change made to a name so it could be stored, for the report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameChange {
@@ -200,9 +223,9 @@ pub struct Converted {
     pub changes: Vec<NameChange>,
 }
 
-/// Makes `name` storable on `platform`. The name is stored composed (NFC); other changes are
-/// reported.
-pub fn convert_name(name: &str, platform: Platform) -> Converted {
+/// Makes `name` storable under `rules` (a drive's [`DriveProfile::name_rules`], or a
+/// [`Platform`]'s own). The name is stored composed (NFC); other changes are reported.
+pub fn convert_name(name: &str, rules: impl Into<NameRules>) -> Converted {
     let mut name: String = name.nfc().collect();
     let mut changes = Vec::new();
     let note = |c: NameChange, changes: &mut Vec<NameChange>| {
@@ -210,7 +233,7 @@ pub fn convert_name(name: &str, platform: Platform) -> Converted {
             changes.push(c);
         }
     };
-    let windows = platform == Platform::Windows;
+    let windows = rules.into() == NameRules::Windows;
     if windows {
         // No later step adds a forbidden character, so this runs once.
         let replaced: String = name.chars().map(windows_safe_char).collect();
@@ -385,6 +408,16 @@ pub enum GateError {
     BadTag,
     #[error("this drive cannot give the file its name without risking another file")]
     NoSafeName,
+    /// The drive refused the name itself (its own rules), on a drive whose way of naming files
+    /// is known to work: never reported as an unsafe drive.
+    #[error("this drive won't accept this file's name")]
+    NameRejected,
+    /// The file is bigger than this drive holds in one file (FAT32: 4 GB less one byte).
+    #[error(
+        "this file is too big for this drive, which holds files of up to {} GB each",
+        (largest + 1) >> 30
+    )]
+    TooBigForDrive { largest: u64 },
     #[error("writing failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -401,9 +434,8 @@ pub struct Destination {
     clash_hints: Mutex<ClashHints>,
     /// How many names were checked while choosing free names (see [`name_checks`](Self::name_checks)).
     name_checks: std::sync::atomic::AtomicU64,
-    /// Behave as on a drive that cannot keep download markers (see
-    /// [`as_if_no_markers`](Self::as_if_no_markers)).
-    no_markers: bool,
+    /// The drive it is on, read when it was opened: its name rules and limits.
+    profile: DriveProfile,
 }
 
 /// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
@@ -415,8 +447,14 @@ struct ClashHints {
 }
 
 impl ClashHints {
-    fn key(&self, folder: &str, name: &str) -> u64 {
+    /// The key for `name` in `folder`. Folded to one case unless the drive tells case apart
+    /// (then `A.jpg` and `a.jpg` are different names, and numbering one never skips numbers of
+    /// the other).
+    fn key(&self, folder: &str, name: &str, case_apart: bool) -> u64 {
         let fold = |s: &str| -> String {
+            if case_apart {
+                return s.to_string();
+            }
             s.chars()
                 .flat_map(char::to_uppercase)
                 .flat_map(char::to_lowercase)
@@ -451,13 +489,25 @@ impl Destination {
         self.name_checks.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// For tests: behave as on a drive that cannot keep download markers (FAT, exFAT, some network
-    /// drives), which no test machine has. Files still land; [`Finished::mark_not_kept`] says
-    /// which marker was lost.
+    /// For tests: behave as on a drive with `profile` (a FAT drive, say, which no test machine
+    /// has), whatever drive the folder is really on. Everything that depends on the drive
+    /// follows it: name rules, the largest file, download markers.
     #[doc(hidden)]
-    pub fn as_if_no_markers(mut self) -> Self {
-        self.no_markers = true;
+    #[must_use]
+    pub fn with_profile(mut self, profile: DriveProfile) -> Self {
+        self.profile = profile;
         self
+    }
+
+    /// What is known about the drive this place is on, read when it was opened.
+    pub fn profile(&self) -> DriveProfile {
+        self.profile
+    }
+
+    /// The largest single file this place's drive holds, if it has a limit (FAT32: 4 GB less
+    /// one byte), so the plan can refuse a file that is too big before the move starts.
+    pub fn largest_file(&self) -> Option<u64> {
+        self.profile.largest_file()
     }
 
     /// Another handle on the very same approved folder (for a worker that finishes part of an
@@ -468,17 +518,46 @@ impl Destination {
             root_path: self.root_path.clone(),
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
-            no_markers: self.no_markers,
+            profile: self.profile,
         })
     }
 
     fn from_dir(root: Dir) -> Self {
+        let profile = DriveProfile::read(&root);
         Self {
             root,
             root_path: None,
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
-            no_markers: false,
+            profile,
+        }
+    }
+
+    /// The file name a file sent as `sent` is stored under on this drive, and every change made
+    /// to its folders' and its own names on the way.
+    fn converted(&self, sent: &IncomingPath) -> Result<(String, Vec<NameChange>), GateError> {
+        let rules = self.profile.name_rules();
+        let mut changes: Vec<NameChange> = Vec::new();
+        for part in sent.components() {
+            for c in convert_name(part, rules).changes {
+                if !changes.contains(&c) {
+                    changes.push(c);
+                }
+            }
+        }
+        let name = sent
+            .components()
+            .last()
+            .map(|n| convert_name(n, rules).name)
+            .ok_or(GateError::Path(PathError::Empty))?;
+        Ok((name, changes))
+    }
+
+    /// Refuses a file bigger than this place's drive holds, before anything is made.
+    fn check_fits(&self, announced: u64) -> Result<(), GateError> {
+        match self.profile.largest_file() {
+            Some(largest) if announced > largest => Err(GateError::TooBigForDrive { largest }),
+            _ => Ok(()),
         }
     }
 
@@ -515,7 +594,8 @@ impl Destination {
         announced: u64,
         tag: Option<&str>,
     ) -> Result<IncomingFile<'d>, GateError> {
-        let host = Platform::host();
+        self.check_fits(announced)?;
+        let rules = self.profile.name_rules();
         let (file_name, folders) = path
             .components()
             .split_last()
@@ -525,7 +605,7 @@ impl Destination {
         let mut created = Vec::new();
         let mut dir = self.root.try_clone()?;
         for folder in folders {
-            let converted = convert_name(folder, host);
+            let converted = convert_name(folder, rules);
             changes.extend(converted.changes.iter().copied());
             let (opened, made) = open_or_create_folder(&dir, &converted.name)?;
             dir = opened;
@@ -534,7 +614,7 @@ impl Destination {
                 created.push(shown.join("/"));
             }
         }
-        let converted = convert_name(file_name, host);
+        let converted = convert_name(file_name, rules);
         changes.extend(converted.changes.iter().copied());
         let (file, temp_name) = match tag {
             Some(tag) => {
@@ -567,11 +647,11 @@ impl Destination {
     /// The folder (inside the approved folder, `/` between folders) a file sent as `path` lands
     /// in, with names converted exactly as for writing. Nothing on disk is looked at.
     pub fn folder_of(&self, path: &IncomingPath) -> String {
-        let host = Platform::host();
+        let rules = self.profile.name_rules();
         let parts = path.components();
         parts[..parts.len().saturating_sub(1)]
             .iter()
-            .map(|f| convert_name(f, host).name)
+            .map(|f| convert_name(f, rules).name)
             .collect::<Vec<_>>()
             .join("/")
     }
@@ -779,23 +859,11 @@ impl Destination {
         if meta.len() > announced {
             return Err(GateError::OutsideFile);
         }
+        self.check_fits(announced)?;
         let mut options = OpenOptions::new();
         options.read(true).write(true);
         let file = dir.open_with(temp_name, &options)?;
-        let host = Platform::host();
-        let mut changes: Vec<NameChange> = Vec::new();
-        for part in sent.components() {
-            for c in convert_name(part, host).changes {
-                if !changes.contains(&c) {
-                    changes.push(c);
-                }
-            }
-        }
-        let name = sent
-            .components()
-            .last()
-            .map(|n| convert_name(n, host).name)
-            .ok_or(GateError::Path(PathError::Empty))?;
+        let (name, changes) = self.converted(sent)?;
         Ok(IncomingFile {
             destination: self,
             dir,
@@ -833,20 +901,7 @@ impl Destination {
         {
             return Err(not_temp());
         }
-        let host = Platform::host();
-        let mut changes: Vec<NameChange> = Vec::new();
-        for part in sent.components() {
-            for c in convert_name(part, host).changes {
-                if !changes.contains(&c) {
-                    changes.push(c);
-                }
-            }
-        }
-        let name = sent
-            .components()
-            .last()
-            .map(|n| convert_name(n, host).name)
-            .ok_or(GateError::Path(PathError::Empty))?;
+        let (name, changes) = self.converted(sent)?;
         let held = dir.open(temp_name)?.into_std();
         if !held.metadata()?.is_file() {
             return Err(not_temp());
@@ -915,19 +970,19 @@ impl Destination {
     /// and size. Names are converted exactly as for writing; nothing is created and no link is
     /// followed out of the approved folder.
     pub fn find(&self, path: &IncomingPath) -> Option<(String, u64)> {
-        let host = Platform::host();
+        let rules = self.profile.name_rules();
         let (file_name, folders) = path.components().split_last()?;
         let mut dir = self.root.try_clone().ok()?;
         let mut shown = Vec::new();
         for folder in folders {
-            let name = convert_name(folder, host).name;
+            let name = convert_name(folder, rules).name;
             if !dir.symlink_metadata(&name).ok()?.is_dir() {
                 return None;
             }
             dir = dir.open_dir(&name).ok()?;
             shown.push(name);
         }
-        let name = convert_name(file_name, host).name;
+        let name = convert_name(file_name, rules).name;
         let meta = dir.symlink_metadata(&name).ok()?;
         if !meta.is_file() {
             return None;
@@ -981,7 +1036,11 @@ impl Destination {
             stem,
             MAX_COMPONENT_BYTES.saturating_sub(ext.len() + MAX_NUMBER_BYTES),
         );
-        let key = hints().key(folder, &format!("{base}{ext}"));
+        let key = hints().key(
+            folder,
+            &format!("{base}{ext}"),
+            self.profile.tells_case_apart(),
+        );
         let start = hints().next.get(&key).copied().unwrap_or(2).max(2);
         for attempt in start..start.saturating_add(MAX_CLASH_ATTEMPTS) {
             let suffix = format!(" ({attempt}){ext}");
@@ -1057,6 +1116,9 @@ fn rename_no_replace(
     match renameat_with(dir, temp, dir, name, RenameFlags::NOREPLACE) {
         Ok(()) => Ok(true),
         Err(Errno::EXIST) => Ok(false),
+        // The drive's own name rules: the name, not the drive, is the problem. (A bare
+        // "invalid" can mean either until the drive's way of naming files has been tested.)
+        Err(Errno::NAMETOOLONG | Errno::ILSEQ) => Err(GateError::NameRejected),
         Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => Err(GateError::NoSafeName),
         Err(e) => Err(GateError::Io(e.into())),
     }
@@ -1083,6 +1145,9 @@ fn rename_no_replace(
                 || matches!(e.error.raw_os_error(), Some(80 | 183));
             if taken {
                 Ok(false)
+            } else if matches!(e.error.raw_os_error(), Some(123 | 206)) {
+                // ERROR_INVALID_NAME, ERROR_FILENAME_EXCED_RANGE: the drive refused the name.
+                Err(GateError::NameRejected)
             } else {
                 Err(GateError::Io(e.error))
             }
@@ -1885,8 +1950,8 @@ impl<'d> IncomingFile<'d> {
         let mut mark_not_kept = None;
         if let Some(mark) = self.mark {
             // Before the time: writing Windows' marker can change the file's modified time.
-            let kept =
-                !self.destination.no_markers && marks::put(&self.dir, temp_name, &file, mark)?;
+            let kept = self.destination.profile.tries_markers()
+                && marks::put(&self.dir, temp_name, &file, mark)?;
             if !kept {
                 mark_not_kept = Some(mark);
             }
