@@ -1447,6 +1447,7 @@ impl<'d> ReceiverSession<'d> {
                     modified_ns: w.source_modified_ns,
                 },
                 source_file: w.source_file,
+                mark: w.download_mark,
             };
             let claimed = self.journal.blocks(e.id).map_err(record)?;
             let resumed = IncomingPath::parse(&w.path)
@@ -1676,10 +1677,14 @@ impl<'d> ReceiverSession<'d> {
                     && resumed_done > 0
                     && self.restored.get(&item).is_some_and(|s| {
                         s.assembly.as_ref().is_some_and(|a| {
-                            resumed_done <= a.blocks_done() && *a.header() == header
+                            resumed_done <= a.blocks_done() && a.header().same_file(&header)
                         })
                     });
-                if restored && let Some(s) = self.restored.remove(&item) {
+                if restored && let Some(mut s) = self.restored.remove(&item) {
+                    // Whichever said so, the copy keeps the stricter marker.
+                    if let Some(a) = s.assembly.as_mut() {
+                        a.keep_stricter_mark(header.mark);
+                    }
                     if let Some(old) = self.streams.remove(&stream) {
                         self.allowance.ended(old.item, false);
                         drop(old.assembly);
@@ -2019,6 +2024,7 @@ impl<'d> ReceiverSession<'d> {
             }
         };
         let write = PlannedWrite {
+            download_mark: header.mark,
             item,
             source_laptop: self.allowance.source_laptop(),
             destination: destination.to_string(),
