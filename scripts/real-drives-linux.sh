@@ -29,15 +29,24 @@ mount_one() {
     exfat) sudo mount -t exfat -o "loop,uid=$(id -u),gid=$(id -g),iocharset=utf8" "$img" "$mnt" ;;
     # The FUSE driver through its own helper, so it is the FUSE driver even with the kernel module
     # loaded. As root: the helper asks for allow_other, which a plain user may not (fuse.conf).
-    exfat-fuse) sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g)" "$img" "$mnt" ;;
+    # It needs a block device (a plain file gives "Block device required"), so a loop device.
+    exfat-fuse)
+      local dev
+      dev="$(sudo losetup --find --show "$img")"
+      sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g)" "$dev" "$mnt"
+      ;;
   esac
 }
 
 unmount_one() {
-  local kind="$1" mnt="$2" i
+  local kind="$1" img="$2" mnt="$3" i
   sync
   for i in 1 2 3 4 5; do
-    sudo umount "$mnt" && return 0
+    if sudo umount "$mnt"; then
+      # Free the loop device the FUSE drive used; the next mount makes a new one.
+      if [ "$kind" = exfat-fuse ]; then sudo losetup -j "$img" -O NAME -n | xargs -r -n1 sudo losetup -d; fi
+      return 0
+    fi
     sleep 2
   done
   return 1
@@ -100,7 +109,7 @@ remount)
   while IFS='|' read -r kind img mnt; do
     # A marker written from the shell must survive the round trip.
     echo "kept" >"$mnt/.pctwin-remount-marker"
-    unmount_one "$kind" "$mnt"
+    unmount_one "$kind" "$img" "$mnt"
     if mountpoint -q "$mnt"; then
       echo "::error::$mnt is still mounted after unmounting"
       exit 1
