@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop } from "../icons";
-import { labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
+import { LOST, labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
 import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
@@ -39,15 +39,17 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   const paired = useRef(false);
 
   const handle = useCallback((event: NewEvent) => {
-    if (paired.current) return;
+    // Once paired, only the paired connection dying before the move moves the screen.
+    if (paired.current && event.kind !== "lost") return;
     if (event.kind === "paired") {
       paired.current = true;
       setPhase("paired");
     } else {
+      paired.current = false;
       setBusy(false);
       setNumber(null);
       setCode("");
-      setProblem(event.problem);
+      setProblem(event.kind === "lost" ? LOST : event.problem);
       setPhase("code");
     }
   }, []);

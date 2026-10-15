@@ -17,11 +17,16 @@ export type OldEvent =
   | { kind: "choose"; round: number; numbers: number[] }
   | { kind: "paired" }
   | { kind: "timed-out" }
-  | { kind: "left" };
+  | { kind: "left" }
+  /** The paired connection died before the move began: pairing is over, start again. */
+  | { kind: "lost" };
 
 export type Problem = { key: string; networks: string[] };
 
-export type NewEvent = { kind: "paired" } | { kind: "problem"; problem: Problem };
+export type NewEvent = { kind: "paired" } | { kind: "problem"; problem: Problem } | { kind: "lost" };
+
+/** What a lost connection shows: the connection dropped, nothing was shared, try again. */
+export const LOST: Problem = { key: "pairing-connection-lost", networks: [] };
 
 export type Nearby = { index: number; label: Label; sameLabelNearby: boolean };
 

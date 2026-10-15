@@ -490,4 +490,29 @@ describe("the new laptop once paired", () => {
     await emit("pairing-new", { kind: "problem", problem: { key: "pairing-timed-out", networks: [] } });
     expect(heading().textContent).toBe(text("pair-done-title"));
   });
+
+  it("leaves Paired only when the paired connection is lost, and says so", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    await emit("pairing-new", { kind: "paired" });
+    await emit("pairing-new", { kind: "lost" });
+    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    expect(screen.getByText(text("pair-new-code-title"))).toBeTruthy();
+    noMissingText();
+  });
+});
+
+describe("the old laptop once paired", () => {
+  it("leaves Paired only when the paired connection is lost, and offers Try again", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "paired" });
+    await emit("pairing-old", { kind: "lost" });
+    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    expect(button("pair-try-again")).toBeTruthy();
+    noMissingText();
+  });
 });

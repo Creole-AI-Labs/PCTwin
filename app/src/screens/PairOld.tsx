@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from "r
 import { Banner, Button, CodeDisplay, TextField } from "../components/kit";
 import { ArrowForward, Info, Laptop, Lock, Shield } from "../icons";
 import {
+  LOST,
   labelText,
   listenOld,
   oldDecline,
@@ -51,11 +52,12 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const [networks, setNetworks] = useState<string[]>([]);
   const renameButton = useRef<HTMLButtonElement>(null);
   const wasRenaming = useRef(false);
-  // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
+  // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it, except
+  // the paired connection dying before the move began.
   const paired = useRef(false);
 
   const handle = useCallback((event: OldEvent) => {
-    if (paired.current) return;
+    if (paired.current && event.kind !== "lost") return;
     switch (event.kind) {
       case "label":
         setLabel(event.label);
@@ -93,6 +95,13 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
         setChecking(false);
         setNotice("left");
         setPhase("code");
+        break;
+      case "lost":
+        paired.current = false;
+        setChecking(false);
+        setNotice(null);
+        setProblem(LOST);
+        setPhase("error");
         break;
     }
   }, []);
