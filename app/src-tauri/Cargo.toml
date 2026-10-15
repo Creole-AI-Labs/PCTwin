@@ -23,6 +23,12 @@ tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+pctwin-discovery = { path = "../../crates/pctwin-discovery" }
+pctwin-doctor = { path = "../../crates/pctwin-doctor" }
+pctwin-journey = { path = "../../crates/pctwin-journey" }
+pctwin-link = { path = "../../crates/pctwin-link" }
+pctwin-session = { path = "../../crates/pctwin-session" }
+tokio = { version = "1.53.2", features = ["sync"] }
 
 [lints]
 workspace = true

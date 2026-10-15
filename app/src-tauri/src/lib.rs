@@ -1,5 +1,7 @@
 //! PCTwin desktop app entry point: the window, the tray icon and the lock-down around the screens.
 
+mod pairing;
+
 use serde::Deserialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -148,7 +150,20 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![set_window_mode, set_tray_labels])
+        .manage(pairing::Pairing::default())
+        .invoke_handler(tauri::generate_handler![
+            set_window_mode,
+            set_tray_labels,
+            pairing::pairing_old_start,
+            pairing::pairing_old_pick,
+            pairing::pairing_old_decline,
+            pairing::pairing_old_shuffle,
+            pairing::pairing_old_rename,
+            pairing::pairing_old_start_again,
+            pairing::pairing_stop,
+            pairing::pairing_new_search,
+            pairing::pairing_new_connect,
+        ])
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens
         // have finished loading, and quits. Without it, nothing here runs.
