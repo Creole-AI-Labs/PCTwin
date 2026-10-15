@@ -208,6 +208,24 @@ impl ItemName {
     pub fn exact(&self) -> Option<&RawName> {
         self.exact.as_ref()
     }
+
+    /// The name as this system's file APIs take it, exactly as the scan recorded it (a name that
+    /// is not valid text keeps its exact bytes on the system it came from).
+    pub fn on_disk(&self) -> std::ffi::OsString {
+        match &self.exact {
+            #[cfg(unix)]
+            Some(RawName::Unix(bytes)) => {
+                use std::os::unix::ffi::OsStringExt;
+                std::ffi::OsString::from_vec(bytes.clone())
+            }
+            #[cfg(windows)]
+            Some(RawName::Windows(units)) => {
+                use std::os::windows::ffi::OsStringExt;
+                std::ffi::OsString::from_wide(units)
+            }
+            _ => std::ffi::OsString::from(&self.text),
+        }
+    }
 }
 
 impl TryFrom<NameWire> for ItemName {
