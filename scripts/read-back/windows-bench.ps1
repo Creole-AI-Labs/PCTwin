@@ -1,7 +1,9 @@
 # Windows read-back benchmark: cached read-back vs the gate's uncached one (verify), with the raw
 # physical disk read counter around each read phase, so the numbers show whether the read reached
 # the disk. Fails only on things that are definitely wrong (tool crash, a clean file reported
-# damaged, NTFS not read from the Drive); never on timings or byte counts.
+# damaged, NTFS not read from the Drive, files said to be read from the drive while the disk read
+# less than they hold, a compressed folder's files said to be read from the drive); never on
+# timings.
 param(
     [Parameter(Mandatory = $true)][string]$Tool,
     [Parameter(Mandatory = $true)][string]$Work,
@@ -72,7 +74,22 @@ $mw = Measure-Phase "write $Count small files" @('write-many', $dest, "$Count", 
 $manyCached = Measure-Phase "$Count small, cached read-back (warm)" @('cached-many', $dest, $manifest, "$seed")
 $manyVerify = Measure-Phase "$Count small, uncached read-back (verify)" @('verify-many', $dest, $manifest, "$seed")
 
+# A compressed folder: Windows reads its files through memory whatever the handle asks, so none
+# may be said to be read from the drive (the first review's finding).
+$packed = Join-Path $Work 'packed'
+New-Item -ItemType Directory -Force -Path $packed | Out-Null
+& compact.exe /c /q $packed | Out-Null
+$packedOn = ((Get-Item $packed).Attributes -band [IO.FileAttributes]::Compressed) -ne 0
+$packedManifest = Join-Path $Work 'packed.tsv'
+if ($packedOn) {
+    $null = Invoke-Tool @('write-many', $packed, '1000', "$seed", $packedManifest)
+    $packedVerify = Measure-Phase '1000 small, compressed folder (verify)' @('verify-many', $packed, $packedManifest, "$seed")
+} else {
+    Write-Host "This drive cannot compress folders; the compressed case is not run."
+}
+
 $phases = @($bigCached, $bigVerify, $manyCached, $manyVerify)
+if ($packedOn) { $phases += $packedVerify }
 
 $rows = foreach ($p in $phases) {
     $mb = [math]::Round($p.PhysicalBytes / 1MB, 1)
@@ -91,6 +108,18 @@ $table = @(
 )
 $table | ForEach-Object { Write-Host $_ }
 if ($Summary) { $table | Out-File -FilePath $Summary -Append -Encoding utf8 }
+
+# Definitely wrong: files said to be read from the drive while the disk read less than they hold
+# (the counter also counts other programs, so it can only be more, never less).
+foreach ($p in @($bigVerify, $manyVerify) + $(if ($packedOn) { @($packedVerify) } else { @() })) {
+    $claimed = [int64]$p.Result.drive_bytes
+    if ($claimed -gt 0 -and $p.PhysicalBytes -lt [int64]($claimed * 0.9)) {
+        throw "$($p.Label): $claimed bytes said to be read from the drive, but the disk read only $($p.PhysicalBytes)"
+    }
+}
+if ($packedOn -and [int64]$packedVerify.Result.drive_bytes -ne 0) {
+    throw "compressed folder: $($packedVerify.Result.drive_bytes) bytes said to be read from the drive"
+}
 
 # Definitely wrong: a clean file reported damaged.
 foreach ($p in $phases) {
