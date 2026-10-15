@@ -83,7 +83,7 @@ fn a_private_ipv6_address_is_kept_when_there_is_no_link_local_one() {
         iface("en0", "192.168.0.9", 6),
         iface("en0", "fd12:3456::7", 6),
     ];
-    let net = pairing_network(&v, None).unwrap();
+    let net = pairing_network(&v, Some("en0")).unwrap();
     assert_eq!(
         net.addrs[1],
         "[fd12:3456::7]:0".parse::<SocketAddr>().unwrap()
@@ -115,7 +115,7 @@ fn link_local_ipv6_is_preferred_to_a_private_one() {
         iface("en0", "fd12:3456::7", 6),
         iface("en0", "fe80::1", 6),
     ];
-    let net = pairing_network(&v, None).unwrap();
+    let net = pairing_network(&v, Some("en0")).unwrap();
     assert_eq!(net.addrs[1], "[fe80::1%6]:0".parse::<SocketAddr>().unwrap());
 }
 
@@ -194,14 +194,38 @@ fn when_it_cannot_tell_it_asks_instead_of_guessing() {
     assert_eq!(likely_wifi(&mac), None);
 }
 
-/// One real connection, whatever its name, is the choice.
+/// A lone connection not named like Wi-Fi is offered, not assumed: when the real Wi-Fi has no
+/// private address (a carrier-shared 100.64 address, say), the only candidate left may be a VPN
+/// that looks like an ordinary network, so the person confirms it.
 #[test]
-fn a_single_real_connection_is_chosen_whatever_its_name() {
-    let v = vec![
+fn a_lone_connection_not_named_like_wifi_is_offered_not_assumed() {
+    let desk = vec![
         iface("Ethernet", "192.168.1.9", 5),
         tunnel("ProTUN", "10.2.0.2", 34),
     ];
-    assert_eq!(likely_wifi(&v).as_deref(), Some("Ethernet"));
+    assert_eq!(likely_wifi(&desk), None);
+    assert_eq!(pairing_candidates(&desk), ["Ethernet"]);
+    let cgnat = vec![
+        iface("Wi-Fi", "100.64.12.7", 4),
+        iface("office", "10.20.0.5", 30),
+    ];
+    assert_eq!(
+        likely_wifi(&cgnat),
+        None,
+        "the WireGuard tunnel is never assumed"
+    );
+    assert_eq!(pairing_candidates(&cgnat), ["office"]);
+}
+
+#[test]
+fn linux_wifi_names_are_recognised() {
+    for name in ["wlo1", "wls1", "wlp2s0", "wlx00c0ca", "wlan0"] {
+        let v = vec![
+            iface("eth0", "192.168.1.9", 2),
+            iface(name, "192.168.1.10", 3),
+        ];
+        assert_eq!(likely_wifi(&v).as_deref(), Some(name), "{name}");
+    }
 }
 
 /// Two connections named like Wi-Fi (a second adapter plugged in): it cannot tell, so it asks.

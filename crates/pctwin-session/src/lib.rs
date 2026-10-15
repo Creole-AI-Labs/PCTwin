@@ -28,9 +28,10 @@ pub enum SessionError {
     Search,
     #[error("this laptop is not on a Wi-Fi or wired network it can pair on")]
     NoNetwork,
-    /// More than one connection could be the Wi-Fi: the person picks one (by its name, with
+    /// PCTwin cannot tell which connection is the Wi-Fi (several could be, or the only one is not
+    /// named like Wi-Fi): the person picks or confirms one (by its name, with
     /// [`OldLaptop::start_on`]); PCTwin does not guess.
-    #[error("this laptop is on more than one network; choose the one the other laptop is on")]
+    #[error("choose the network the other laptop is on")]
     ChooseNetwork(Vec<String>),
 }
 
@@ -66,14 +67,12 @@ pub fn pairing_candidates(interfaces: &[Interface]) -> Vec<String> {
     names
 }
 
-/// The connection to pair on without asking: the only candidate, or else the only candidate
-/// named like Wi-Fi (Wi-Fi, WLAN, wireless, wlan0, wlp2s0). `None` when it cannot tell (two wired
-/// connections, a Mac's en0 and en1): then the person is asked.
+/// The connection to pair on without asking: the only candidate named like Wi-Fi (Wi-Fi, WLAN,
+/// wireless, wlan0, wlp2s0, wlo1). `None` otherwise, even with a single candidate: a lone wired or
+/// unrecognised connection may be a VPN or overlay network that looks ordinary (when the real
+/// Wi-Fi has no private address), so the person confirms it rather than PCTwin assuming it.
 pub fn likely_wifi(interfaces: &[Interface]) -> Option<String> {
     let candidates = pairing_candidates(interfaces);
-    if let [only] = candidates.as_slice() {
-        return Some(only.clone());
-    }
     let wifi: Vec<&String> = candidates.iter().filter(|n| looks_like_wifi(n)).collect();
     match wifi.as_slice() {
         [only] => Some((*only).clone()),
@@ -86,8 +85,9 @@ fn looks_like_wifi(name: &str) -> bool {
     ["wi-fi", "wifi", "wlan", "wireless"]
         .iter()
         .any(|w| n.contains(w))
-        || n.starts_with("wlp")
-        || n.starts_with("wlx")
+        || ["wlp", "wlx", "wlo", "wls"]
+            .iter()
+            .any(|p| n.starts_with(p))
 }
 
 /// The connection to pair on: the one named `chosen` (one of [`pairing_candidates`]), or else
@@ -144,10 +144,10 @@ impl OldLaptop {
         let interfaces = pctwin_doctor::probe::interfaces().ok_or(SessionError::NoNetwork)?;
         let Some(network) = pairing_network(&interfaces, None) else {
             let candidates = pairing_candidates(&interfaces);
-            return Err(if candidates.len() > 1 {
-                SessionError::ChooseNetwork(candidates)
-            } else {
+            return Err(if candidates.is_empty() {
                 SessionError::NoNetwork
+            } else {
+                SessionError::ChooseNetwork(candidates)
             });
         };
         Self::start_on(label, config, &network).await
