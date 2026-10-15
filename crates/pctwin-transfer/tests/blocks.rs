@@ -88,6 +88,61 @@ fn a_file_arrives_exactly_and_gets_its_name_only_when_complete() {
 }
 
 #[test]
+fn a_file_is_read_back_from_the_drive_before_it_gets_its_name() {
+    let src = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir().unwrap();
+    let bytes = mixed_content(300 * 1024 + 5);
+    let path = source(src.path(), "a.bin", &bytes);
+    let mut sender = FileSender::open(&path, None, true).unwrap();
+    let dest = Destination::open(dst.path()).unwrap();
+    let mut assembly = Assembly::start(
+        &dest,
+        &IncomingPath::parse("a.bin").unwrap(),
+        sender.header().clone(),
+    )
+    .unwrap();
+    send_all(&mut sender, &mut assembly);
+    let done = assembly.finish(sender.finish().unwrap()).unwrap();
+    assert!(done.checked_from.is_some(), "how it was checked is kept");
+    if cfg!(windows) {
+        assert_eq!(done.checked_from, Some(pctwin_gate::CheckedFrom::Drive));
+    }
+}
+
+#[test]
+fn a_file_the_drive_stores_wrong_never_gets_its_name() {
+    let src = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir().unwrap();
+    let bytes = mixed_content(300 * 1024 + 5);
+    let path = source(src.path(), "a.bin", &bytes);
+    let mut sender = FileSender::open(&path, None, true).unwrap();
+    // Every block arrives intact (its fingerprint matches) but one byte is stored wrong.
+    let dest = Destination::open(dst.path())
+        .unwrap()
+        .with_faults(pctwin_gate::FaultPlan {
+            flip: Some(pctwin_gate::Flip::OnWriteOnce),
+            ..Default::default()
+        });
+    let mut assembly = Assembly::start(
+        &dest,
+        &IncomingPath::parse("a.bin").unwrap(),
+        sender.header().clone(),
+    )
+    .unwrap();
+    send_all(&mut sender, &mut assembly);
+    match assembly.finish(sender.finish().unwrap()) {
+        Err(TransferError::NotStored { bad_blocks: 1 }) => {}
+        other => panic!("expected the file to fail its read-back, got {other:?}"),
+    }
+    assert!(!dst.path().join("a.bin").exists());
+    assert_eq!(
+        std::fs::read_dir(dst.path()).unwrap().count(),
+        0,
+        "nothing left behind"
+    );
+}
+
+#[test]
 fn an_empty_file_arrives_too() {
     let src = tempfile::tempdir().unwrap();
     let dst = tempfile::tempdir().unwrap();

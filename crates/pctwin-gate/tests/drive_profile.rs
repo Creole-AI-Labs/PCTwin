@@ -7,6 +7,8 @@
 
 use std::io::Write;
 
+mod common;
+
 use pctwin_gate::{
     Destination, DriveKind, DriveProfile, FAT_LARGEST_FILE, GateError, IncomingPath,
     MAX_COMPONENT_BYTES, NameChange, NameRules, Platform, convert_name,
@@ -140,7 +142,7 @@ fn a_system_still_names_its_own_rules() {
 fn write(dest: &Destination, path: &str, bytes: &[u8]) -> Result<String, GateError> {
     let mut file = dest.create_file(&IncomingPath::parse(path).unwrap(), bytes.len() as u64)?;
     file.write_all(bytes).unwrap();
-    Ok(file.finish()?.final_path)
+    Ok(common::finish(file)?.final_path)
 }
 
 /// On a FAT drive a Mac or Linux laptop would otherwise write `?` and `:` as they are, which

@@ -9,13 +9,19 @@
 //! CI runs the file twice with the drives unmounted and mounted again in between:
 //! PCTWIN_FAT_PHASE=before, then =after. Unset, the phase is "single" (a local run). Tests that
 //! need to survive the remount leave notes in the folder named by PCTWIN_FAT_STATE.
+//!
+//! PCTWIN_FAT_REFUSES lists drive kinds (comma-separated) where the gate must refuse to name a
+//! file safely, for now (exFAT on a Mac, until files can be filled in under their names there):
+//! on those, each file is refused with nothing under a real name, rather than the test skipped.
 // Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
 #![allow(clippy::disallowed_methods)]
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use pctwin_gate::{Destination, IncomingPath};
+use pctwin_gate::{Destination, GateError, IncomingPath};
+
+mod common;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
@@ -96,11 +102,49 @@ fn each_drive(check: impl Fn(&Drive)) {
 }
 
 fn write(dest: &Destination, p: &str, bytes: &[u8]) -> String {
-    let mut file = dest
-        .create_file(&IncomingPath::parse(p).unwrap(), bytes.len() as u64)
-        .unwrap();
+    try_write(dest, p, bytes).unwrap()
+}
+
+fn try_write(dest: &Destination, p: &str, bytes: &[u8]) -> Result<String, GateError> {
+    let mut file = dest.create_file(&IncomingPath::parse(p).unwrap(), bytes.len() as u64)?;
     file.write_all(bytes).unwrap();
-    file.finish().unwrap().final_path
+    Ok(common::finish(file)?.final_path)
+}
+
+/// Whether the gate is to refuse naming files on this drive, for now (PCTWIN_FAT_REFUSES).
+fn refuses(drive: &Drive) -> bool {
+    std::env::var("PCTWIN_FAT_REFUSES")
+        .unwrap_or_default()
+        .split(',')
+        .any(|k| k == drive.kind)
+}
+
+/// On a drive the gate refuses: a file is refused as unsafe to name, and nothing at all is left
+/// under a real name (or, once waited for, under PCTwin's own).
+fn assert_refused_cleanly(drive: &Drive, dir: &Path) {
+    let dest = Destination::open(dir).unwrap();
+    let r = try_write(&dest, "Notes/May?.txt", b"x");
+    assert!(
+        matches!(r, Err(GateError::NoSafeName)),
+        "{}: {r:?}",
+        drive.show()
+    );
+    let left = settled_names(dir);
+    assert!(left.is_empty(), "{}: {left:?}", drive.show());
+}
+
+/// The names under `dir`, once a drive served by a program (FUSE) has let go of files PCTwin
+/// closed a moment ago: it shows a removed file that was still open as `.fuse_hidden...` until
+/// the last handle on it closes (PCTwin holds each new file for 10 ms). Waits up to 2 seconds.
+fn settled_names(dir: &Path) -> Vec<String> {
+    for _ in 0..40 {
+        let names = names_under(dir);
+        if !names.iter().any(|n| n.contains(".fuse_hidden")) {
+            return names;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    names_under(dir)
 }
 
 /// A fresh, empty folder on the drive for one test.
@@ -149,6 +193,9 @@ fn files_land_whole_with_numbered_clashes_and_nothing_left_behind() {
             drive.show()
         );
         std::fs::remove_file(dir.join("probe")).unwrap();
+        if refuses(drive) {
+            return assert_refused_cleanly(drive, &dir);
+        }
 
         let dest = Destination::open(&dir).unwrap();
         assert_eq!(write(&dest, "Photos/a.jpg", b"one"), "Photos/a.jpg");
@@ -162,7 +209,7 @@ fn files_land_whole_with_numbered_clashes_and_nothing_left_behind() {
             b"three"
         );
         assert_eq!(
-            names_under(&dir),
+            settled_names(&dir),
             ["Photos/A (3).JPG", "Photos/a (2).jpg", "Photos/a.jpg"],
             "no temporary file left on {}",
             drive.show()
@@ -185,12 +232,8 @@ fn an_unfinished_file_leaves_nothing_behind() {
             file.write_all(&[0u8; 40]).unwrap();
             // Dropped part way.
         }
-        assert!(
-            names_under(&dir).is_empty(),
-            "{}: {:?}",
-            drive.show(),
-            names_under(&dir)
-        );
+        let left = settled_names(&dir);
+        assert!(left.is_empty(), "{}: {left:?}", drive.show());
     });
 }
 
@@ -201,6 +244,9 @@ fn names_fat_cannot_hold_are_changed_and_still_land() {
     }
     each_drive(|drive| {
         let dir = fresh(&drive.path, "pctwin-fat-names");
+        if refuses(drive) {
+            return assert_refused_cleanly(drive, &dir);
+        }
         let dest = Destination::open(&dir).unwrap();
         let landed = write(&dest, "Notes/May?.txt", b"x");
         assert_ne!(landed, "Notes/May?.txt", "{}", drive.show());
@@ -232,6 +278,12 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
             .as_ref()
             .map(|s| s.join(format!("remount-{}.txt", drive.kind)));
         let dir = drive.path.join("pctwin-fat-remount");
+        if refuses(drive) {
+            if phase != Phase::After {
+                assert_refused_cleanly(drive, &fresh(&drive.path, "pctwin-fat-remount"));
+            }
+            return;
+        }
         if phase != Phase::After {
             let dir = fresh(&drive.path, "pctwin-fat-remount");
             let dest = Destination::open(&dir).unwrap();

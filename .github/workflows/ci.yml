@@ -264,6 +264,9 @@ jobs:
         env:
           PCTWIN_REQUIRE_FAT: "1"
           PCTWIN_FAT_PHASE: before
+          # exFAT on a Mac has neither hard links nor a no-replace move: until files can be filled
+          # in under their names there, the gate must refuse it safely.
+          PCTWIN_FAT_REFUSES: exfat-mac
         run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast
       # Run even when the first run failed: the remount and the second run are still worth seeing.
       - name: Unmount and mount every drive again (Linux)
@@ -288,6 +291,9 @@ jobs:
         env:
           PCTWIN_REQUIRE_FAT: "1"
           PCTWIN_FAT_PHASE: after
+          # exFAT on a Mac has neither hard links nor a no-replace move: until files can be filled
+          # in under their names there, the gate must refuse it safely.
+          PCTWIN_FAT_REFUSES: exfat-mac
         run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast
 
   rust:

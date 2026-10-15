@@ -43,6 +43,7 @@ mod drive;
 mod macos_check;
 mod marks;
 mod original;
+mod read_back;
 mod siblings;
 #[cfg(unix)]
 mod unix_undo;
@@ -50,6 +51,7 @@ mod unix_undo;
 pub use drive::{DriveKind, DriveProfile, FAT_LARGEST_FILE};
 pub use marks::download_mark_of;
 pub use original::open_original;
+pub use read_back::{CheckedFrom, ReadBack, Verification, WhyMemory};
 pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
 pub use unix_undo::{Check, Checked, Context, Resolution, Step, private_name};
@@ -418,6 +420,10 @@ pub enum GateError {
         (largest + 1) >> 30
     )]
     TooBigForDrive { largest: u64 },
+    #[error("the file was not read back and checked before getting its name")]
+    NotReadBack,
+    #[error("the read-back was given the wrong list of block fingerprints")]
+    BadBlockList,
     #[error("writing failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -436,6 +442,47 @@ pub struct Destination {
     name_checks: std::sync::atomic::AtomicU64,
     /// The drive it is on, read when it was opened: its name rules and limits.
     profile: DriveProfile,
+    /// Whether files can be read back past the cache, tested once per drive (by its number):
+    /// an approved folder can hold another drive mounted inside it.
+    read_back: Mutex<HashMap<u64, CheckedFrom>>,
+    /// For tests: the faults this place fakes.
+    #[cfg(feature = "fault-plan")]
+    faults: Faults,
+}
+
+/// For tests (feature `fault-plan`): faults a destination fakes, to prove the read-back's guards.
+#[cfg(feature = "fault-plan")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FaultPlan {
+    /// A byte stored or read back wrong.
+    pub flip: Option<Flip>,
+    /// The drive refuses to be read past the cache (some network drives and USB sticks).
+    pub uncached_refused: bool,
+    /// The drive takes reads past the cache, but each file is read through memory anyway (as
+    /// compressed or encrypted files are).
+    pub served_from_memory: bool,
+    /// Each file is read from the drive at first, then another program compresses it while it
+    /// is read, so the rest comes through memory.
+    pub stored_specially_while_read: bool,
+}
+
+/// For tests: when a byte goes wrong.
+#[cfg(feature = "fault-plan")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flip {
+    /// The first byte of the first write on this destination is stored flipped.
+    OnWriteOnce,
+    /// The first byte of every write is stored flipped.
+    OnEveryWrite,
+    /// The byte at `at` in each file is stored right but reads back flipped.
+    OnRead { at: u64 },
+}
+
+#[cfg(feature = "fault-plan")]
+#[derive(Default)]
+struct Faults {
+    plan: FaultPlan,
+    flipped_once: std::sync::atomic::AtomicBool,
 }
 
 /// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
@@ -519,6 +566,12 @@ impl Destination {
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
             profile: self.profile,
+            read_back: Mutex::new(self.read_back_known()),
+            #[cfg(feature = "fault-plan")]
+            faults: Faults {
+                plan: self.faults.plan,
+                flipped_once: Default::default(),
+            },
         })
     }
 
@@ -530,6 +583,9 @@ impl Destination {
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
             profile,
+            read_back: Mutex::default(),
+            #[cfg(feature = "fault-plan")]
+            faults: Faults::default(),
         }
     }
 
@@ -558,6 +614,165 @@ impl Destination {
         match self.profile.largest_file() {
             Some(largest) if announced > largest => Err(GateError::TooBigForDrive { largest }),
             _ => Ok(()),
+        }
+    }
+
+    /// For tests (feature `fault-plan`): fake `plan`'s faults on this destination.
+    #[cfg(feature = "fault-plan")]
+    pub fn with_faults(mut self, plan: FaultPlan) -> Self {
+        self.faults.plan = plan;
+        self
+    }
+
+    /// Whether files written here can be read back from the drive past this laptop's cache,
+    /// tested once (at the start of a move) with a small probe file written, read back and
+    /// removed. Where they cannot, every file is still read back and checked, through the cache,
+    /// and its result says so.
+    pub fn read_back_check(&self) -> CheckedFrom {
+        let volume = self
+            .root
+            .try_clone()
+            .ok()
+            .and_then(|d| identity(&d.into_std_file()).ok())
+            .map(|(id, _)| id.volume);
+        self.read_back_mode(volume, &self.root)
+    }
+
+    /// The tested answer for the drive numbered `volume` (tested in `dir` if not yet known).
+    fn read_back_mode(&self, volume: Option<u64>, dir: &Dir) -> CheckedFrom {
+        let known = |v| {
+            self.read_back
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&v)
+                .copied()
+        };
+        if let Some(found) = volume.and_then(known) {
+            return found;
+        }
+        let n = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let probe_name = temp_name(&format!("probe-{}-{n}", std::process::id()));
+        let found = read_back::probe(dir, &probe_name, self.uncached_refused());
+        if let Some(v) = volume {
+            self.read_back
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(v, found);
+        }
+        found
+    }
+
+    fn read_back_known(&self) -> HashMap<u64, CheckedFrom> {
+        self.read_back
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// A reader on the file `name` in `dir` (the very file `held` is, when the drive can tell
+    /// files apart) that reads past the cache where this drive allows it.
+    fn read_back_of(
+        &self,
+        dir: &Dir,
+        name: &str,
+        held: &std::fs::File,
+        pages_kept_out: bool,
+    ) -> io::Result<ReadBack> {
+        let id = identity(held).ok().map(|(id, _)| id);
+        let mut from = self.read_back_mode(id.map(|i| i.volume), dir);
+        if !pages_kept_out && from == CheckedFrom::Drive {
+            // macOS: the file's pages may still be cached, and a read past the cache takes them.
+            from = CheckedFrom::Memory(WhyMemory::CannotSkipCache);
+        }
+        let file = match from {
+            CheckedFrom::Drive => {
+                match read_back::open_uncached(dir, name, self.uncached_refused()) {
+                    Ok(file) => file,
+                    // Tested fine for this drive but refused now: still checked, and said so.
+                    Err(_) => {
+                        from = CheckedFrom::Memory(WhyMemory::CannotSkipCache);
+                        dir.open(name)?.into_std()
+                    }
+                }
+            }
+            CheckedFrom::Memory(_) => dir.open(name)?.into_std(),
+        };
+        // The drive passed, but this very file may still be read through memory: then it is read
+        // through an ordinary handle (some drives refuse a direct read of such a file).
+        let file = match (from, self.this_file_from_drive(&file)) {
+            (CheckedFrom::Drive, Err(why)) => {
+                from = CheckedFrom::Memory(why);
+                drop(file);
+                dir.open(name)?.into_std()
+            }
+            _ => file,
+        };
+        // Never check some other file put under the same name meanwhile.
+        if let (Some(id), Ok((found, _))) = (id, identity(&file))
+            && found != id
+        {
+            return Err(io::Error::other("a different file is there now"));
+        }
+        ReadBack::new(file, from, self.flip_on_read())
+    }
+
+    #[cfg(feature = "fault-plan")]
+    fn this_file_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        if self.faults.plan.served_from_memory {
+            return Err(WhyMemory::NotShown);
+        }
+        read_back::this_file_from_drive(file)
+    }
+
+    #[cfg(not(feature = "fault-plan"))]
+    fn this_file_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        read_back::this_file_from_drive(file)
+    }
+
+    /// As [`this_file_from_drive`](Self::this_file_from_drive), after the last read.
+    #[cfg(feature = "fault-plan")]
+    fn still_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        if self.faults.plan.stored_specially_while_read {
+            return Err(WhyMemory::StoredSpecially);
+        }
+        self.this_file_from_drive(file)
+    }
+
+    #[cfg(not(feature = "fault-plan"))]
+    fn still_from_drive(&self, file: &std::fs::File) -> Result<(), WhyMemory> {
+        self.this_file_from_drive(file)
+    }
+
+    #[cfg(feature = "fault-plan")]
+    fn uncached_refused(&self) -> bool {
+        self.faults.plan.uncached_refused
+    }
+
+    #[cfg(not(feature = "fault-plan"))]
+    fn uncached_refused(&self) -> bool {
+        false
+    }
+
+    #[cfg(feature = "fault-plan")]
+    fn flip_on_read(&self) -> Option<u64> {
+        match self.faults.plan.flip {
+            Some(Flip::OnRead { at }) => Some(at),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(feature = "fault-plan"))]
+    fn flip_on_read(&self) -> Option<u64> {
+        None
+    }
+
+    /// For tests: whether this write's first byte is to be stored flipped.
+    #[cfg(feature = "fault-plan")]
+    fn flip_this_write(&self) -> bool {
+        match self.faults.plan.flip {
+            Some(Flip::OnEveryWrite) => true,
+            Some(Flip::OnWriteOnce) => !self.faults.flipped_once.swap(true, Ordering::Relaxed),
+            _ => false,
         }
     }
 
@@ -625,6 +840,9 @@ impl Destination {
             }
             None => create_temp_file(&dir)?,
         };
+        let file = file.into_std();
+        let pages_kept_out = read_back::keep_pages_out(&file);
+        let file = File::from_std(file);
         Ok(IncomingFile {
             destination: self,
             dir,
@@ -641,6 +859,8 @@ impl Destination {
             modified: None,
             mark: None,
             created,
+            read_back: None,
+            pages_kept_out,
         })
     }
 
@@ -862,7 +1082,9 @@ impl Destination {
         self.check_fits(announced)?;
         let mut options = OpenOptions::new();
         options.read(true).write(true);
-        let file = dir.open_with(temp_name, &options)?;
+        let file = dir.open_with(temp_name, &options)?.into_std();
+        let pages_kept_out = read_back::keep_pages_out(&file);
+        let file = File::from_std(file);
         let (name, changes) = self.converted(sent)?;
         Ok(IncomingFile {
             destination: self,
@@ -880,6 +1102,8 @@ impl Destination {
             modified: None,
             mark: None,
             created: Vec::new(),
+            read_back: None,
+            pages_kept_out,
         })
     }
 
@@ -919,6 +1143,7 @@ impl Destination {
             kept_if_dropped: true,
             held: Some(held),
             mark_not_kept: None,
+            checked_from: None,
         })
     }
 
@@ -1010,6 +1235,16 @@ impl Destination {
             return Err(not_found());
         }
         Ok(dir.open(file_name)?.into_std())
+    }
+
+    /// Opens a stored file (by its stored path) to read it back from the drive, past this
+    /// laptop's cache where the drive allows it ([`ReadBack::from`] says which). Never follows a
+    /// link. Recovery proves a file found after a restart through this same reader.
+    pub fn open_read_back(&self, stored: &str) -> io::Result<ReadBack> {
+        let held = self.open_read(stored)?;
+        let not_found = || io::Error::new(io::ErrorKind::NotFound, "not a stored file");
+        let (dir, name) = self.open_stored_folder(stored)?.ok_or_else(not_found)?;
+        self.read_back_of(&dir, name, &held, true)
     }
 
     /// The first name for `name` in `dir` that nothing uses now: `name` itself, or a numbered one
@@ -1729,7 +1964,8 @@ fn reserve_outcome(result: io::Result<()>) -> Result<bool, GateError> {
 /// Creates a temporary `.pctwin-` file in `dir` that no other name uses.
 fn create_temp_file(dir: &Dir) -> Result<(File, String), GateError> {
     let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    // Readable too: a reopened file is read through it to check what it holds.
+    options.read(true).write(true).create_new(true);
     for _ in 0..64 {
         let n = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let name = format!(".pctwin-{}-{n}.part", std::process::id());
@@ -1769,6 +2005,10 @@ pub struct Finished {
     /// must say plainly that the system no longer knows it came from the internet. `None` when
     /// every marker was kept (or there was none).
     pub mark_not_kept: Option<DownloadMark>,
+    /// How its contents were checked before it got its name: read back from the drive, or from
+    /// this laptop's memory (and why), for the report's "more details". `None` for a file checked
+    /// before a restart and proven again by recovery.
+    pub checked_from: Option<CheckedFrom>,
 }
 
 /// A file being received. Writing more than announced fails; [`finish`](Self::finish) checks the
@@ -1796,6 +2036,11 @@ pub struct IncomingFile<'d> {
     mark: Option<DownloadMark>,
     /// Folders made for this file (stored paths, outermost first).
     created: Vec<String>,
+    /// Where the latest read-back that matched read from; `None` until one has, and again after
+    /// anything changes the file. Only a matched file can be sealed and named.
+    read_back: Option<CheckedFrom>,
+    /// The file is written so its pages stay out of the cache where that matters (macOS).
+    pages_kept_out: bool,
 }
 
 impl<'d> IncomingFile<'d> {
@@ -1810,6 +2055,7 @@ impl<'d> IncomingFile<'d> {
         if self.announced > MAX_FILE_BYTES {
             return Err(GateError::NoSpace);
         }
+        self.read_back = None;
         let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
         // On Windows the reservation lasts while the file is open; it stays open until finish.
         let result = fs4::FileExt::allocate(&file, self.announced);
@@ -1826,6 +2072,20 @@ impl<'d> IncomingFile<'d> {
         let Some(part) = self.new_part(offset, buf.len() as u64)? else {
             return Ok(());
         };
+        self.read_back = None;
+        #[cfg(feature = "fault-plan")]
+        let flipped;
+        #[cfg(feature = "fault-plan")]
+        let buf = if self.destination.flip_this_write() {
+            flipped = {
+                let mut b = buf.to_vec();
+                b[0] ^= 0xFF;
+                b
+            };
+            &flipped[..]
+        } else {
+            buf
+        };
         let file = self.file.as_mut().ok_or(GateError::Conflict)?;
         file.seek(SeekFrom::Start(offset))?;
         file.write_all(buf)?;
@@ -1838,6 +2098,7 @@ impl<'d> IncomingFile<'d> {
     /// as [`write_at`](Self::write_at): inside the announced size, never counted twice.
     pub fn count_arrived(&mut self, offset: u64, len: u64) -> Result<(), GateError> {
         if let Some(part) = self.new_part(offset, len)? {
+            self.read_back = None;
             self.count(part);
         }
         Ok(())
@@ -1927,6 +2188,45 @@ impl<'d> IncomingFile<'d> {
         &self.created
     }
 
+    /// Reads the whole file back from the drive and checks it against the sender's block
+    /// fingerprints (`hashes`, BLAKE3, one per block of `block_size` bytes, the last over its real
+    /// length): flushes it, then re-reads it through a second, read-only handle that skips this
+    /// laptop's cache where the drive allows it (tested once per drive, see
+    /// [`Destination::read_back_check`]). Says which blocks did not match and where the bytes came
+    /// from. Only after a check that matched can the file be sealed and named; anything that
+    /// changes the file afterwards, or a later check that fails, undoes that.
+    pub fn verify(
+        &mut self,
+        block_size: u64,
+        hashes: &[[u8; 32]],
+    ) -> Result<Verification, GateError> {
+        self.read_back = None;
+        if self.received != self.announced {
+            return Err(GateError::SizeMismatch {
+                announced: self.announced,
+                received: self.received,
+            });
+        }
+        if block_size == 0 || hashes.len() as u64 != self.announced.div_ceil(block_size) {
+            return Err(GateError::BadBlockList);
+        }
+        let file = self.file.as_ref().ok_or(GateError::Conflict)?;
+        file.sync_all()?;
+        let held = file.try_clone()?.into_std();
+        let temp = self.temp_name.as_deref().ok_or(GateError::Conflict)?;
+        let mut reader =
+            self.destination
+                .read_back_of(&self.dir, temp, &held, self.pages_kept_out)?;
+        let mut check = read_back::check_blocks(&mut reader, self.announced, block_size, hashes)?;
+        // Judged again after the last read: a file whose storage changed while it was read (another
+        // program compressed it) was not read from the drive throughout.
+        check.from = reader.judged_after(|f| self.destination.still_from_drive(f));
+        if check.passed() {
+            self.read_back = Some(check.from);
+        }
+        Ok(check)
+    }
+
     /// Checks every announced byte arrived, makes sure it is on disk, and gives the file its real
     /// name. On any failure the partial file is removed.
     pub fn finish(self) -> Result<Finished, GateError> {
@@ -1944,8 +2244,10 @@ impl<'d> IncomingFile<'d> {
                 received: self.received,
             });
         }
+        // Only a file read back from the drive and matched gets this far; the read-back flushed
+        // it, and nothing has changed it since.
+        let checked_from = self.read_back.ok_or(GateError::NotReadBack)?;
         let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
-        file.sync_all()?;
         let temp_name = self.temp_name.as_deref().ok_or(GateError::Conflict)?;
         let mut mark_not_kept = None;
         if let Some(mark) = self.mark {
@@ -1973,6 +2275,7 @@ impl<'d> IncomingFile<'d> {
             kept_if_dropped: false,
             held: Some(file),
             mark_not_kept,
+            checked_from: Some(checked_from),
         })
     }
 }
@@ -2002,6 +2305,8 @@ pub struct Sealed<'d> {
     held: Option<std::fs::File>,
     /// The marker that could not be kept on this drive, if any.
     mark_not_kept: Option<DownloadMark>,
+    /// Where its read-back read from (`None`: checked before a restart).
+    checked_from: Option<CheckedFrom>,
 }
 
 impl<'d> Sealed<'d> {
@@ -2099,6 +2404,7 @@ impl<'d> Sealed<'d> {
                 sent_path: std::mem::take(&mut self.sent_path),
                 changes,
                 mark_not_kept: self.mark_not_kept,
+                checked_from: self.checked_from,
             },
             _destination: std::marker::PhantomData,
         }

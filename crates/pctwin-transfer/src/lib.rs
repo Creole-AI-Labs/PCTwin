@@ -130,6 +130,11 @@ pub enum TransferError {
     OutOfOrder { expected: u64, got: u64 },
     #[error("only {received} of {expected} blocks arrived")]
     Incomplete { received: u64, expected: u64 },
+    /// Every block arrived intact, but read back from this laptop's drive the file did not match.
+    #[error(
+        "this laptop could not store this file correctly: {bad_blocks} part(s) read back different from what arrived. Your original is untouched"
+    )]
+    NotStored { bad_blocks: u64 },
     #[error("the file changed since the transfer stopped, so it starts again")]
     ChangedSince,
     #[error("the file changed while it was being read, so it is sent again")]
@@ -791,6 +796,16 @@ impl<'d> Assembly<'d> {
             self.header.block_size,
             self.hashes.values(),
         );
-        Ok((self.file.seal()?, fingerprint))
+        // Read back from the drive, past this laptop's cache, against the sender's fingerprints:
+        // only a file stored correctly gets its name. A failed one is removed with the assembly.
+        let sent: Vec<[u8; 32]> = self.hashes.values().copied().collect();
+        let mut file = self.file;
+        let check = file.verify(self.header.block_size, &sent)?;
+        if !check.passed() {
+            return Err(TransferError::NotStored {
+                bad_blocks: (check.bad_blocks.len() as u64).max(1),
+            });
+        }
+        Ok((file.seal()?, fingerprint))
     }
 }
