@@ -336,6 +336,7 @@ button.pair-number {
   margin-top: var(--space-4);
   color: var(--colour-muted);
   font-size: var(--type-small);
+  text-align: center;
 }
 
 .pair-paired-badge {
