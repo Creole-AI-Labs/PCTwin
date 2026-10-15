@@ -24,15 +24,37 @@ pub const NEW_EVENT: &str = "pairing-new";
 /// How long the new laptop looks for old laptops nearby.
 const SEARCH_WAIT: Duration = Duration::from_secs(3);
 
+/// Where a screen's updates go.
+pub type Tell<V> = Arc<dyn Fn(V) + Send + Sync>;
+
+/// What this laptop is doing in pairing. Exactly one at a time, so it is never both laptops,
+/// and a link is kept only while paired.
+enum Side<S: Serving> {
+    Idle,
+    /// Starting as the old laptop, or connecting as the new one: nothing else may start.
+    Busy,
+    Old(Arc<OldJourney<S>>, Tell<OldView>),
+    /// Waiting, as the new laptop, for the old laptop's approval.
+    New(JoinHandle<()>),
+    /// Paired: the link for the move, and the watch that lets it go if it dies before then.
+    Paired {
+        #[expect(dead_code, reason = "kept for the move, which takes it when it starts")]
+        link: Box<Link>,
+        watch: JoinHandle<()>,
+    },
+}
+
+struct Inner<S: Serving> {
+    side: Side<S>,
+    /// Counts each time pairing is left, so work started before then never lands after.
+    epoch: u64,
+}
+
 /// Pairing in progress on this laptop, and its result. The commands below are thin wrappers
 /// over its methods; `S` is how the old laptop serves pairing (the real [`OldLaptop`] in the app).
 pub struct Pairing<S: Serving = OldLaptop> {
-    old: Mutex<Option<OldJourney<S>>>,
+    inner: Mutex<Inner<S>>,
     found: Mutex<Vec<Found>>,
-    /// The new laptop's wait for the old laptop's approval, ended if the person leaves pairing.
-    approval: Mutex<Option<JoinHandle<()>>>,
-    /// The paired connection, kept for the move. Only the first is kept.
-    link: Mutex<Option<Link>>,
 }
 
 /// The app's pairing state, as the commands find it.
@@ -46,113 +68,187 @@ pub fn new_state() -> AppPairing {
 impl<S: Serving> Default for Pairing<S> {
     fn default() -> Self {
         Self {
-            old: Mutex::new(None),
+            inner: Mutex::new(Inner {
+                side: Side::Idle,
+                epoch: 0,
+            }),
             found: Mutex::new(Vec::new()),
-            approval: Mutex::new(None),
-            link: Mutex::new(None),
         }
     }
 }
 
 impl<S: Serving> Pairing<S> {
-    /// Keeps `link` as the paired connection, unless one is already kept (it is then dropped,
-    /// which closes it): a laptop pairs once.
-    async fn keep(&self, link: Link) -> bool {
-        let mut slot = self.link.lock().await;
-        if slot.is_some() {
-            return false;
+    /// Marks this laptop busy, only if it is doing nothing in pairing: returns the epoch the
+    /// work belongs to.
+    async fn reserve(&self) -> Result<u64, Problem> {
+        let mut inner = self.inner.lock().await;
+        if !matches!(inner.side, Side::Idle) {
+            return Err(Problem::Failed);
         }
-        *slot = Some(link);
-        true
+        inner.side = Side::Busy;
+        Ok(inner.epoch)
     }
 
-    /// Starts the old laptop's side with `start`, never replacing pairing already under way or
-    /// done, and never while this laptop is pairing as the new laptop. Returns the screen updates
-    /// to pass on.
+    /// Ends work of `epoch` that did not get going: back to doing nothing, unless pairing was
+    /// left meanwhile.
+    async fn release(&self, epoch: u64) {
+        let mut inner = self.inner.lock().await;
+        if inner.epoch == epoch && matches!(inner.side, Side::Busy) {
+            inner.side = Side::Idle;
+        }
+    }
+
+    /// Starts the old laptop's side with `start`, only when this laptop is doing nothing in
+    /// pairing. Its updates go to `tell`.
     async fn begin_old(
         &self,
         start: impl Future<
             Output = Result<(OldJourney<S>, mpsc::UnboundedReceiver<OldUpdate>), Problem>,
         >,
-    ) -> Result<mpsc::UnboundedReceiver<OldUpdate>, Problem> {
-        // Each side's lock is looked at on its own, never held together with the other's.
-        let new_running = self.new_running().await;
-        let mut old = self.old.lock().await;
-        if old.is_some() || self.link.lock().await.is_some() || new_running {
+        tell: Tell<OldView>,
+    ) -> Result<(), Problem> {
+        let epoch = self.reserve().await?;
+        let (journey, mut updates) = match start.await {
+            Ok(started) => started,
+            Err(p) => {
+                self.release(epoch).await;
+                return Err(p);
+            }
+        };
+        let mut inner = self.inner.lock().await;
+        if inner.epoch != epoch || !matches!(inner.side, Side::Busy) {
+            // Pairing was left while it started.
             return Err(Problem::Failed);
         }
-        let (journey, updates) = start.await?;
-        *old = Some(journey);
-        Ok(updates)
+        inner.side = Side::Old(Arc::new(journey), tell.clone());
+        tauri::async_runtime::spawn(async move {
+            while let Some(update) = updates.recv().await {
+                tell(update.into());
+            }
+        });
+        Ok(())
     }
 
-    /// The old laptop's pick for `round`; the right one pairs, and its link is kept.
-    async fn pick(&self, round: u64, number: u8) -> Result<(), Problem> {
-        let link = {
-            let old = self.old.lock().await;
-            let journey = old.as_ref().ok_or(Problem::Failed)?;
-            journey.pick(round, number).await?
+    /// The old laptop's journey, while it is serving.
+    async fn old(&self) -> Result<Arc<OldJourney<S>>, Problem> {
+        match &self.inner.lock().await.side {
+            Side::Old(journey, _) => Ok(Arc::clone(journey)),
+            _ => Err(Problem::Failed),
+        }
+    }
+
+    /// The old laptop's pick for `round`; the right one pairs, and its link is kept. Leaving
+    /// pairing is never held up by a pick, and a pick that ends after it is let go.
+    async fn pick(self: &Arc<Self>, round: u64, number: u8) -> Result<(), Problem> {
+        let (journey, tell, epoch) = {
+            let inner = self.inner.lock().await;
+            match &inner.side {
+                Side::Old(journey, tell) => (Arc::clone(journey), tell.clone(), inner.epoch),
+                _ => return Err(Problem::Failed),
+            }
         };
-        if self.keep(link).await {
-            Ok(())
-        } else {
-            Err(Problem::Failed)
-        }
+        let link = journey.pick(round, number).await?;
+        self.keep(epoch, link, move || tell(OldView::Lost)).await
     }
 
-    /// Leaves pairing: the old laptop stops listening and announcing; the new laptop stops
-    /// waiting for an approval.
-    async fn stop(&self) {
-        *self.old.lock().await = None;
-        if let Some(waiting) = self.approval.lock().await.take() {
-            waiting.abort();
+    /// Keeps `link` as paired for work of `epoch`, watched until the move takes it: if it dies
+    /// first, it is let go and `lost` is told. If pairing was left meanwhile, the link is let go.
+    async fn keep(
+        self: &Arc<Self>,
+        epoch: u64,
+        link: Link,
+        lost: impl FnOnce() + Send + 'static,
+    ) -> Result<(), Problem> {
+        let mut inner = self.inner.lock().await;
+        let ours = inner.epoch == epoch && matches!(inner.side, Side::Old(..) | Side::New(_));
+        if !ours {
+            return Err(Problem::Failed);
         }
+        let Ok(watching) = link.watch() else {
+            inner.side = Side::Idle;
+            return Err(Problem::ConnectionLost);
+        };
+        let pairing = Arc::clone(self);
+        let watch = tauri::async_runtime::spawn(async move {
+            watching.closed().await;
+            let mut inner = pairing.inner.lock().await;
+            if inner.epoch == epoch && matches!(inner.side, Side::Paired { .. }) {
+                inner.side = Side::Idle;
+                inner.epoch += 1;
+                drop(inner);
+                lost();
+            }
+        });
+        inner.side = Side::Paired {
+            link: Box::new(link),
+            watch,
+        };
+        Ok(())
+    }
+
+    /// Leaves pairing: the old laptop stops listening and announcing, the new laptop stops
+    /// waiting for an approval, and a paired link not yet taken by the move is let go.
+    async fn stop(&self) {
+        let mut inner = self.inner.lock().await;
+        inner.epoch += 1;
+        match std::mem::replace(&mut inner.side, Side::Idle) {
+            Side::New(waiting) => waiting.abort(),
+            Side::Paired { watch, .. } => watch.abort(),
+            Side::Idle | Side::Busy | Side::Old(..) => {}
+        }
+        drop(inner);
         self.found.lock().await.clear();
     }
 
-    /// Whether this laptop is waiting, as the new laptop, for an approval.
-    async fn new_running(&self) -> bool {
-        self.approval
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|a| !a.inner().is_finished())
+    /// Whether this laptop is paired (its link kept for the move).
+    #[cfg(test)]
+    async fn is_paired(&self) -> bool {
+        matches!(self.inner.lock().await.side, Side::Paired { .. })
     }
 
     /// The new laptop connects with `connect` and returns the number to show; the approval (or
-    /// the attempt's end) goes to `tell` later. Only one attempt at a time, none once paired, and
-    /// none while this laptop is pairing as the old laptop.
+    /// the attempt's end, or later the link dying before the move) goes to `tell`. Only when
+    /// this laptop is doing nothing in pairing.
     async fn begin_new(
         self: &Arc<Self>,
         connect: impl Future<Output = Result<Waiting, Problem>>,
-        tell: impl FnOnce(NewView) + Send + 'static,
+        tell: Tell<NewView>,
     ) -> Result<u8, Problem> {
-        let old_running = self.old.lock().await.is_some();
-        let mut approval = self.approval.lock().await;
-        if approval.as_ref().is_some_and(|a| !a.inner().is_finished())
-            || self.link.lock().await.is_some()
-            || old_running
-        {
+        let epoch = self.reserve().await?;
+        let waiting = match connect.await {
+            Ok(waiting) => waiting,
+            Err(p) => {
+                self.release(epoch).await;
+                return Err(p);
+            }
+        };
+        let mut inner = self.inner.lock().await;
+        if inner.epoch != epoch || !matches!(inner.side, Side::Busy) {
             return Err(Problem::Failed);
         }
-        let waiting = connect.await?;
         let number = waiting.number();
         let pairing = Arc::clone(self);
-        *approval = Some(tauri::async_runtime::spawn(async move {
+        let approval = tauri::async_runtime::spawn(async move {
             let view = match waiting.approval().await {
                 Ok(link) => {
-                    if pairing.keep(link).await {
-                        NewView::Paired
-                    } else {
-                        NewView::Problem {
-                            problem: Problem::Failed.into(),
-                        }
+                    let lost = tell.clone();
+                    match pairing.keep(epoch, link, move || lost(NewView::Lost)).await {
+                        Ok(()) => NewView::Paired,
+                        Err(p) => NewView::Problem { problem: p.into() },
                     }
                 }
-                Err(p) => NewView::Problem { problem: p.into() },
+                Err(p) => {
+                    let mut inner = pairing.inner.lock().await;
+                    if inner.epoch == epoch && matches!(inner.side, Side::New(_)) {
+                        inner.side = Side::Idle;
+                    }
+                    NewView::Problem { problem: p.into() }
+                }
             };
             tell(view);
-        }));
+        });
+        // Set before the wait can end: the wait takes this lock to finish.
+        inner.side = Side::New(approval);
         Ok(number)
     }
 }
@@ -207,6 +303,8 @@ pub enum OldView {
     Paired,
     TimedOut,
     Left,
+    /// The paired connection died before the move began: pairing is over, start again.
+    Lost,
 }
 
 impl From<OldUpdate> for OldView {
@@ -229,7 +327,11 @@ impl From<OldUpdate> for OldView {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum NewView {
     Paired,
-    Problem { problem: ProblemView },
+    Problem {
+        problem: ProblemView,
+    },
+    /// The paired connection died before the move began: pairing is over, start again.
+    Lost,
 }
 
 /// A problem as the screens show it: its translation key, and the networks to choose from when
@@ -267,36 +369,35 @@ fn config() -> LinkConfig {
 }
 
 /// Old laptop: starts pairing with a new random label, on `network` (the one the person chose)
-/// or on the likely Wi-Fi. When it cannot tell which network, the problem lists them. Pairing
-/// already under way is never replaced: leave it first (`pairing_stop`).
+/// or on the likely Wi-Fi. When it cannot tell which network, the problem lists them. Only when
+/// this laptop is doing nothing in pairing: leave first (`pairing_stop`).
 #[tauri::command]
 pub async fn pairing_old_start<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppPairing>,
     network: Option<String>,
 ) -> Result<(), ProblemView> {
-    let mut updates = state
-        .begin_old(async {
-            let label = Label::random().map_err(|_| Problem::Failed)?;
-            match network {
-                Some(name) => {
-                    let interfaces =
-                        pctwin_doctor::probe::interfaces().ok_or(Problem::NoNetwork)?;
-                    let chosen = pctwin_session::pairing_network(&interfaces, Some(&name))
-                        .ok_or(Problem::NoNetwork)?;
-                    OldJourney::start_on(label, config(), &chosen).await
-                }
-                None => OldJourney::start(label, config()).await,
-            }
-        })
-        .await?;
-    tauri::async_runtime::spawn(async move {
-        while let Some(update) = updates.recv().await {
-            if app.emit(OLD_EVENT, OldView::from(update)).is_err() {
-                return;
-            }
-        }
+    let tell: Tell<OldView> = Arc::new(move |view| {
+        let _ = app.emit(OLD_EVENT, view);
     });
+    state
+        .begin_old(
+            async {
+                let label = Label::random().map_err(|_| Problem::Failed)?;
+                match network {
+                    Some(name) => {
+                        let interfaces =
+                            pctwin_doctor::probe::interfaces().ok_or(Problem::NoNetwork)?;
+                        let chosen = pctwin_session::pairing_network(&interfaces, Some(&name))
+                            .ok_or(Problem::NoNetwork)?;
+                        OldJourney::start_on(label, config(), &chosen).await
+                    }
+                    None => OldJourney::start(label, config()).await,
+                }
+            },
+            tell,
+        )
+        .await?;
     Ok(())
 }
 
@@ -317,7 +418,7 @@ pub async fn pairing_old_decline(
     state: State<'_, AppPairing>,
     round: u64,
 ) -> Result<(), ProblemView> {
-    if let Some(journey) = state.old.lock().await.as_ref() {
+    if let Ok(journey) = state.old().await {
         journey.decline(round).await;
     }
     Ok(())
@@ -326,8 +427,7 @@ pub async fn pairing_old_decline(
 /// Old laptop: a new random colour and animal.
 #[tauri::command]
 pub async fn pairing_old_shuffle(state: State<'_, AppPairing>) -> Result<(), ProblemView> {
-    let old = state.old.lock().await;
-    old.as_ref().ok_or(Problem::Failed)?.shuffle()?;
+    state.old().await?.shuffle()?;
     Ok(())
 }
 
@@ -337,21 +437,19 @@ pub async fn pairing_old_rename(
     state: State<'_, AppPairing>,
     name: String,
 ) -> Result<(), ProblemView> {
-    let old = state.old.lock().await;
-    old.as_ref().ok_or(Problem::Failed)?.rename(&name)?;
+    state.old().await?.rename(&name)?;
     Ok(())
 }
 
 /// Old laptop: Start again after too many tries.
 #[tauri::command]
 pub async fn pairing_old_start_again(state: State<'_, AppPairing>) -> Result<(), ProblemView> {
-    let old = state.old.lock().await;
-    old.as_ref().ok_or(Problem::Failed)?.start_again()?;
+    state.old().await?.start_again()?;
     Ok(())
 }
 
 /// Either laptop: leaves pairing (the old laptop stops listening and announcing; the new laptop
-/// stops waiting for an approval).
+/// stops waiting for an approval; a paired link not yet used is let go).
 #[tauri::command]
 pub async fn pairing_stop(state: State<'_, AppPairing>) -> Result<(), ProblemView> {
     state.stop().await;
@@ -383,7 +481,7 @@ fn nearby_views(found: &[Found]) -> Vec<NearbyView> {
 
 /// New laptop: connects to old laptop `index` (from the last search) with the code the person
 /// typed, and returns the number to show. The approval (or the attempt's end) follows as an
-/// event. Only one attempt at a time, and none once paired.
+/// event. Only when this laptop is doing nothing in pairing.
 #[tauri::command]
 pub async fn pairing_new_connect<R: Runtime>(
     app: AppHandle<R>,
@@ -398,12 +496,13 @@ pub async fn pairing_new_connect<R: Runtime>(
         .get(index)
         .cloned()
         .ok_or(Problem::Failed)?;
+    let tell: Tell<NewView> = Arc::new(move |view| {
+        let _ = app.emit(NEW_EVENT, view);
+    });
     let number = state
         .begin_new(
             async { NewJourney::new(config()).connect(&old, &code).await },
-            move |view| {
-                let _ = app.emit(NEW_EVENT, view);
-            },
+            tell,
         )
         .await?;
     Ok(number)
@@ -434,6 +533,12 @@ mod tests {
         }
     }
 
+    type Laptop = Arc<Pairing<Loopback>>;
+
+    fn laptop() -> Laptop {
+        Arc::new(Pairing::default())
+    }
+
     fn quick() -> LinkConfig {
         LinkConfig {
             connect_timeout: Duration::from_millis(500),
@@ -441,10 +546,21 @@ mod tests {
         }
     }
 
-    /// Starts the old laptop's side of `pairing` on loopback: its updates, and how to reach it.
+    /// What a screen was told, in order.
+    fn screen<V: Send + 'static>() -> (Tell<V>, mpsc::UnboundedReceiver<V>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Arc::new(move |v| {
+                let _ = tx.send(v);
+            }),
+            rx,
+        )
+    }
+
+    /// Starts the old laptop's side on loopback: what its screen is told, and how to reach it.
     async fn start_old(
-        pairing: &Pairing<Loopback>,
-    ) -> Result<(mpsc::UnboundedReceiver<OldUpdate>, Found), Problem> {
+        pairing: &Laptop,
+    ) -> Result<(mpsc::UnboundedReceiver<OldView>, Found), Problem> {
         let host = Host::bind("127.0.0.1:0".parse().unwrap(), quick())
             .await
             .unwrap();
@@ -453,207 +569,284 @@ mod tests {
             addrs: vec![host.local_addr().unwrap()],
             same_label_nearby: false,
         };
-        let updates = pairing
-            .begin_old(async { OldJourney::begin(Loopback(host)) })
+        let (tell, views) = screen();
+        pairing
+            .begin_old(async { OldJourney::begin(Loopback(host)) }, tell)
             .await?;
-        Ok((updates, found))
+        Ok((views, found))
     }
 
-    /// The next update `want` picks out.
-    async fn next<T>(
-        updates: &mut mpsc::UnboundedReceiver<OldUpdate>,
-        want: impl Fn(&OldUpdate) -> Option<T>,
+    /// The next view `want` picks out, within five seconds.
+    async fn next<V, T>(
+        views: &mut mpsc::UnboundedReceiver<V>,
+        want: impl Fn(&V) -> Option<T>,
     ) -> T {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Some(t) = want(&updates.recv().await.expect("updates keep coming")) {
+                if let Some(t) = want(&views.recv().await.expect("views keep coming")) {
                     return t;
                 }
             }
         })
         .await
-        .expect("the update came")
+        .expect("the view came")
     }
 
-    fn code_of(u: &OldUpdate) -> Option<String> {
-        match u {
-            OldUpdate::Code { code, .. } => Some(code.clone()),
+    fn code_of(v: &OldView) -> Option<String> {
+        match v {
+            OldView::Code { code, .. } => Some(code.clone()),
             _ => None,
         }
     }
 
-    fn round_of(u: &OldUpdate) -> Option<u64> {
-        match u {
-            OldUpdate::Choose { round, .. } => Some(*round),
+    fn round_of(v: &OldView) -> Option<u64> {
+        match v {
+            OldView::Choose { round, .. } => Some(*round),
             _ => None,
         }
     }
 
-    /// Pairs a new laptop's `pairing` with the old laptop's, through the bridge's own methods.
-    /// Returns what the new laptop's screen was told.
-    async fn pair(
-        old: &Pairing<Loopback>,
-        new: &Arc<Pairing<Loopback>>,
-    ) -> (Result<(), Problem>, NewView) {
-        let (mut updates, found) = start_old(old).await.unwrap();
-        let code = next(&mut updates, code_of).await;
-        let (told, heard) = tokio::sync::oneshot::channel();
+    fn is<V: PartialEq>(want: V) -> impl Fn(&V) -> Option<()> {
+        move |v| (*v == want).then_some(())
+    }
+
+    /// The new laptop connects to the old one: its number, and what its screen is told.
+    async fn connect(
+        new: &Laptop,
+        old_views: &mut mpsc::UnboundedReceiver<OldView>,
+        found: &Found,
+    ) -> (u8, u64, mpsc::UnboundedReceiver<NewView>) {
+        let code = next(old_views, code_of).await;
+        let (tell, views) = screen();
         let number = new
             .begin_new(
-                async { NewJourney::new(quick()).connect(&found, &code).await },
-                move |view| {
-                    let _ = told.send(view);
-                },
+                async { NewJourney::new(quick()).connect(found, &code).await },
+                tell,
             )
             .await
             .unwrap();
-        let round = next(&mut updates, round_of).await;
-        let picked = old.pick(round, number).await;
-        (picked, heard.await.unwrap())
+        let round = next(old_views, round_of).await;
+        (number, round, views)
+    }
+
+    /// Pairs `new` with `old` through the bridge's own methods.
+    async fn pair(
+        old: &Laptop,
+        new: &Laptop,
+    ) -> (
+        mpsc::UnboundedReceiver<OldView>,
+        mpsc::UnboundedReceiver<NewView>,
+    ) {
+        let (mut old_views, found) = start_old(old).await.unwrap();
+        let (number, round, mut new_views) = connect(new, &mut old_views, &found).await;
+        assert_eq!(old.pick(round, number).await, Ok(()));
+        next(&mut new_views, is(NewView::Paired)).await;
+        (old_views, new_views)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn both_laptops_keep_the_link_once_paired() {
-        let (old, new) = (Pairing::default(), Arc::new(Pairing::default()));
-        let (picked, view) = pair(&old, &new).await;
-        assert_eq!(picked, Ok(()));
-        assert_eq!(view, NewView::Paired);
-        assert!(old.link.lock().await.is_some());
-        assert!(new.link.lock().await.is_some());
+        let (old, new) = (laptop(), laptop());
+        let _ = pair(&old, &new).await;
+        assert!(old.is_paired().await);
+        assert!(new.is_paired().await);
     }
 
-    /// A laptop pairs once: a second link is never kept over the first, and once paired no
-    /// further attempt starts on either side.
+    /// Once paired, neither laptop starts pairing again until it leaves pairing.
     #[tokio::test(flavor = "multi_thread")]
-    async fn once_paired_no_second_link_or_attempt() {
-        let (old, new) = (Pairing::default(), Arc::new(Pairing::default()));
-        let _ = pair(&old, &new).await;
-        // A second pairing between two other laptops gives a second link.
-        let (other_old, other_new) = (Pairing::default(), Arc::new(Pairing::default()));
-        let _ = pair(&other_old, &other_new).await;
-        let second = other_new.link.lock().await.take().unwrap();
-        assert!(!new.keep(second).await, "a second link replaced the first");
-
+    async fn once_paired_nothing_starts_until_pairing_is_left() {
+        let (old, new) = (laptop(), laptop());
+        let _views = pair(&old, &new).await;
+        assert_eq!(start_old(&old).await.err(), Some(Problem::Failed));
+        let (tell, _) = screen();
         assert_eq!(
-            start_old(&old).await.err(),
-            Some(Problem::Failed),
-            "the old laptop started again once paired"
+            new.begin_new(async { Err(Problem::Unreachable) }, tell)
+                .await
+                .err(),
+            Some(Problem::Failed)
         );
-        // Not even after leaving the pairing screen: the kept link is the one for the move.
+        // Leaving lets the link go, and pairing can start afresh.
         old.stop().await;
+        assert!(!old.is_paired().await);
+        assert!(start_old(&old).await.is_ok());
+    }
+
+    /// A paired link that dies before the move is let go on both laptops, each screen is told,
+    /// and both can pair again: Paired is never a trap.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_paired_link_that_dies_is_let_go_and_each_screen_told() {
+        // The new laptop leaves pairing: its link is let go, and the old laptop notices.
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, _new_views) = pair(&old, &new).await;
+        new.stop().await;
+        next(&mut old_views, is(OldView::Lost)).await;
+        assert!(!old.is_paired().await);
+        assert!(start_old(&old).await.is_ok());
+
+        // The other way round: the old laptop leaves, and the new laptop notices.
+        let (old, new) = (laptop(), laptop());
+        let (_old_views, mut new_views) = pair(&old, &new).await;
+        old.stop().await;
+        next(&mut new_views, is(NewView::Lost)).await;
+        assert!(!new.is_paired().await);
+        let (tell, _) = screen();
         assert_eq!(
-            start_old(&old).await.err(),
-            Some(Problem::Failed),
-            "the old laptop started again after stop, once paired"
-        );
-        let attempt = new
-            .begin_new(async { Err(Problem::Unreachable) }, |_| {})
-            .await;
-        assert_eq!(
-            attempt.err(),
-            Some(Problem::Failed),
-            "the new laptop tried again once paired"
+            new.begin_new(async { Err(Problem::Unreachable) }, tell)
+                .await
+                .err(),
+            Some(Problem::Unreachable),
+            "the new laptop stayed stuck after its link died"
         );
     }
 
     /// Pairing already under way is never replaced by a second start.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_second_start_is_refused_while_pairing() {
-        let old = Pairing::default();
+        let old = laptop();
         let (mut first, _) = start_old(&old).await.unwrap();
         assert_eq!(start_old(&old).await.err(), Some(Problem::Failed));
-        // The first is still the one running.
         next(&mut first, code_of).await;
     }
 
-    /// A new laptop that left during the pick never pairs: the old laptop keeps no link, says so,
-    /// and can start pairing again.
+    /// A new laptop that left during the pick never pairs: the old laptop keeps no link, is
+    /// told, and can start again.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_new_laptop_that_left_never_pairs_and_the_old_laptop_can_start_again() {
-        let old = Pairing::<Loopback>::default();
-        let new = Arc::new(Pairing::<Loopback>::default());
-        let (mut updates, found) = start_old(&old).await.unwrap();
-        let code = next(&mut updates, code_of).await;
-        let number = new
-            .begin_new(
-                async { NewJourney::new(quick()).connect(&found, &code).await },
-                |_| {},
-            )
-            .await
-            .unwrap();
-        let round = next(&mut updates, round_of).await;
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let (number, round, _) = connect(&new, &mut old_views, &found).await;
         new.stop().await;
-        next(&mut updates, |u| (*u == OldUpdate::Left).then_some(())).await;
+        next(&mut old_views, is(OldView::Left)).await;
         assert!(old.pick(round, number).await.is_err());
-        assert!(old.link.lock().await.is_none());
+        assert!(!old.is_paired().await);
         old.stop().await;
-        assert!(
-            start_old(&old).await.is_ok(),
-            "stuck after a new laptop left"
-        );
+        assert!(start_old(&old).await.is_ok());
     }
 
-    /// One new-laptop attempt at a time, and a laptop is never both laptops at once.
+    /// One thing at a time: a second new-laptop attempt, or the other side, never starts while
+    /// one runs; a failed attempt frees the laptop again.
     #[tokio::test(flavor = "multi_thread")]
     async fn one_attempt_at_a_time_and_never_both_sides() {
-        let old = Pairing::<Loopback>::default();
-        let new = Arc::new(Pairing::<Loopback>::default());
-        let (mut updates, found) = start_old(&old).await.unwrap();
-        let code = next(&mut updates, code_of).await;
-        new.begin_new(
-            async { NewJourney::new(quick()).connect(&found, &code).await },
-            |_| {},
-        )
-        .await
-        .unwrap();
-        let again = new
-            .begin_new(async { Err(Problem::Unreachable) }, |_| {})
-            .await;
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let (_, round, mut new_views) = connect(&new, &mut old_views, &found).await;
+        let (tell, _) = screen();
         assert_eq!(
-            again.err(),
+            new.begin_new(async { Err(Problem::Unreachable) }, tell.clone())
+                .await
+                .err(),
             Some(Problem::Failed),
             "a second attempt started"
         );
+        assert_eq!(start_old(&new).await.err(), Some(Problem::Failed));
         assert_eq!(
-            start_old(&new).await.err(),
-            Some(Problem::Failed),
-            "the new laptop also became an old laptop"
-        );
-        let other = Arc::new(Pairing::<Loopback>::default());
-        let _ = start_old(&other).await.unwrap();
-        assert_eq!(
-            other
-                .begin_new(async { Err(Problem::Unreachable) }, |_| {})
+            old.begin_new(async { Err(Problem::Unreachable) }, tell.clone())
                 .await
                 .err(),
             Some(Problem::Failed),
             "the old laptop also became a new laptop"
         );
-        // Leaving clears this laptop's side, so it can start afresh.
-        new.stop().await;
-        assert!(start_old(&new).await.is_ok());
+        // The numbers did not match: the attempt ends, and the new laptop is free again.
+        old.old().await.unwrap().decline(round).await;
+        next(&mut new_views, |v| {
+            matches!(v, NewView::Problem { .. }).then_some(())
+        })
+        .await;
+        assert_eq!(
+            new.begin_new(async { Err(Problem::Unreachable) }, tell)
+                .await
+                .err(),
+            Some(Problem::Unreachable),
+            "a finished attempt still blocked the next"
+        );
+    }
+
+    /// Starting both sides at the same moment never leaves a laptop as both.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn starting_both_sides_at_once_gives_one() {
+        for _ in 0..200 {
+            let me = laptop();
+            let host = Host::bind("127.0.0.1:0".parse().unwrap(), quick())
+                .await
+                .unwrap();
+            let (old_tell, _old_views) = screen();
+            let (new_tell, _new_views) = screen();
+            let (as_old, as_new) = tokio::join!(
+                me.begin_old(async { OldJourney::begin(Loopback(host)) }, old_tell),
+                me.begin_new(async { Err(Problem::Unreachable) }, new_tell),
+            );
+            assert!(
+                !(as_old.is_ok() && as_new.is_ok()),
+                "this laptop became both laptops"
+            );
+            me.stop().await;
+        }
     }
 
     /// Leaving pairing ends the new laptop's wait for an approval: nothing is told afterwards.
     #[tokio::test(flavor = "multi_thread")]
     async fn stop_ends_the_wait_for_an_approval() {
-        let old = Pairing::default();
-        let new = Arc::new(Pairing::<Loopback>::default());
-        let (mut updates, found) = start_old(&old).await.unwrap();
-        let code = next(&mut updates, code_of).await;
-        let (told, mut heard) = mpsc::unbounded_channel();
-        new.begin_new(
-            async { NewJourney::new(quick()).connect(&found, &code).await },
-            move |view| {
-                let _ = told.send(view);
-            },
-        )
-        .await
-        .unwrap();
+        let (old, new) = (laptop(), laptop());
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let (_, _, mut new_views) = connect(&new, &mut old_views, &found).await;
         new.stop().await;
-        // The wait was ended, so its way to tell the screen is gone without a word.
-        let after = tokio::time::timeout(Duration::from_secs(3), heard.recv()).await;
-        assert!(matches!(after, Ok(None)), "the wait went on after stop");
+        let after = tokio::time::timeout(Duration::from_secs(3), new_views.recv()).await;
+        assert!(
+            matches!(after, Ok(None)),
+            "the wait went on after stop: {after:?}"
+        );
+    }
+
+    /// A pick that ends after the old laptop left pairing is let go, never kept, even once
+    /// pairing has started again: the new laptop confirms only after the old laptop left.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_pick_that_ends_after_leaving_is_let_go() {
+        let old = laptop();
+        let (mut old_views, found) = start_old(&old).await.unwrap();
+        let code = next(&mut old_views, code_of).await;
+        // The new laptop, driven by hand so its confirmation can be held back.
+        let waiting = NewJourney::new(quick())
+            .connect(&found, &code)
+            .await
+            .unwrap();
+        let round = next(&mut old_views, round_of).await;
+        let number = waiting.number();
+        let picking = {
+            let old = Arc::clone(&old);
+            tokio::spawn(async move { old.pick(round, number).await })
+        };
+        // The pick is waiting for the confirmation; the person leaves and starts again.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        old.stop().await;
+        let _again = start_old(&old).await.unwrap();
+        let _new_link = waiting.approval().await.unwrap();
+        assert_eq!(picking.await.unwrap(), Err(Problem::Failed));
+        assert!(
+            !old.is_paired().await,
+            "a stale pick landed in the new start"
+        );
+    }
+
+    /// An attempt that fails to start frees the laptop for the next one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_start_frees_the_laptop() {
+        let me = laptop();
+        for _ in 0..2 {
+            let (tell, _) = screen();
+            assert_eq!(
+                me.begin_new(async { Err(Problem::Unreachable) }, tell)
+                    .await
+                    .err(),
+                Some(Problem::Unreachable)
+            );
+            let (tell, _) = screen();
+            assert_eq!(
+                me.begin_old(async { Err(Problem::NoNetwork) }, tell)
+                    .await
+                    .err(),
+                Some(Problem::NoNetwork)
+            );
+        }
     }
 
     #[test]
@@ -716,5 +909,17 @@ mod tests {
         let p = ProblemView::from(Problem::WrongCode);
         assert_eq!(p.key, "pairing-code-wrong");
         assert!(p.networks.is_empty());
+    }
+
+    #[test]
+    fn a_lost_link_reaches_the_screens_as_lost() {
+        assert_eq!(
+            serde_json::to_value(OldView::Lost).unwrap(),
+            serde_json::json!({ "kind": "lost" })
+        );
+        assert_eq!(
+            serde_json::to_value(NewView::Lost).unwrap(),
+            serde_json::json!({ "kind": "lost" })
+        );
     }
 }
