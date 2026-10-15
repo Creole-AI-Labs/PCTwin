@@ -45,6 +45,9 @@ pub struct Interface {
     pub name: String,
     pub ip: IpAddr,
     pub kind: InterfaceKind,
+    /// The system's number for the connection (needed to use an IPv6 link-local address), if
+    /// known.
+    pub index: Option<u32>,
 }
 
 impl Interface {
@@ -59,6 +62,7 @@ impl Interface {
             name: name.to_string(),
             ip,
             kind,
+            index: None,
         }
     }
 
@@ -335,7 +339,10 @@ pub mod probe {
     pub fn interfaces() -> Option<Vec<Interface>> {
         if_addrs::get_if_addrs().ok().map(|list| {
             list.iter()
-                .map(|i| Interface::new(&i.name, i.ip()))
+                .map(|i| Interface {
+                    index: i.index,
+                    ..Interface::new(&i.name, i.ip())
+                })
                 .collect()
         })
     }
