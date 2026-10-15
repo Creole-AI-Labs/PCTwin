@@ -419,6 +419,7 @@ pub struct SenderSession {
     scheduler: Scheduler,
     capacity: usize,
     blocks_sent: u64,
+    blocks_confirmed: u64,
     in_flight_limit: u64,
     /// Jobs found identical on the new laptop, to tell it to skip.
     skips: Vec<usize>,
@@ -469,6 +470,7 @@ impl SenderSession {
             scheduler,
             capacity,
             blocks_sent: 0,
+            blocks_confirmed: 0,
             in_flight_limit: IN_FLIGHT_BYTES,
             skips: Vec::new(),
             ends: Vec::new(),
@@ -511,6 +513,12 @@ impl SenderSession {
     /// Blocks sent so far, over every connection and lane.
     pub fn blocks_sent(&self) -> u64 {
         self.blocks_sent
+    }
+
+    /// Blocks the new laptop has confirmed so far (a receipt for each), over every connection and
+    /// lane. Those sent and not yet confirmed are the most a drop can make send again.
+    pub fn blocks_confirmed(&self) -> u64 {
+        self.blocks_confirmed
     }
 
     /// What this laptop sent, item to source path: the list [`serve_originals`] answers from.
@@ -1041,6 +1049,7 @@ impl SenderSession {
                     .pop_front()
                     .ok_or_else(|| protocol("a receipt for nothing sent"))?;
                 self.in_flight -= bytes;
+                self.blocks_confirmed += 1;
                 // Only the current attempt counts; a receipt for an earlier one frees room only.
                 if let Some(&job) = self.job_of.get(&stream)
                     && let SendState::Open { sections, .. } = &mut self.states[job]

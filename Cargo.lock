@@ -3338,6 +3338,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-journey"
+version = "0.1.0"
+dependencies = [
+ "pctwin-discovery",
+ "pctwin-link",
+ "pctwin-pairing",
+ "pctwin-session",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "pctwin-lab"
 version = "0.1.0"
 dependencies = [

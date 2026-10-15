@@ -472,8 +472,12 @@ async fn a_move_runs_over_a_real_paired_link() {
     let pending_host = host.next_peer(&rotating).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let number = pending_guest.match_number();
-    let mut old_link = pending_host.choose(number, Instant::now()).await.unwrap();
-    let mut new_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (old_link, new_link) = tokio::join!(
+        pending_host.choose(number, Instant::now()),
+        pending_guest.approval()
+    );
+    let (mut old_link, mut new_link) = (old_link.unwrap(), new_link.unwrap());
 
     let mut sender = SenderSession::new(jobs(&l), 2);
     let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");

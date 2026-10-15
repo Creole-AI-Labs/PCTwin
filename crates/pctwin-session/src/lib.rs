@@ -127,10 +127,11 @@ pub fn pairing_network(interfaces: &[Interface], chosen: Option<&str>) -> Option
 
 /// The old laptop while it is pairing: listening and announcing its label.
 pub struct OldLaptop {
-    announcement: Announcement,
+    /// What is announced, and the label it shows: changed together (Shuffle, Change name) while
+    /// the laptop keeps serving.
+    shown: Mutex<(Announcement, Label)>,
     discovery: Discovery,
     host: Host,
-    label: Label,
     /// The connection paired on, and its addresses being listened on.
     network: String,
     ips: Vec<IpAddr>,
@@ -175,30 +176,36 @@ impl OldLaptop {
         let discovery = Discovery::new()?;
         let announcement = discovery.announce_on(&label, port, &ips, &network.name)?;
         Ok(Self {
-            announcement,
+            shown: Mutex::new((announcement, label)),
             discovery,
             host,
-            label,
             network: network.name.clone(),
             ips,
         })
     }
 
     /// The label being announced, to show on screen.
-    pub fn label(&self) -> &Label {
-        &self.label
+    pub fn label(&self) -> Label {
+        self.shown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .1
+            .clone()
     }
 
-    /// Announces a different label (Shuffle or Change name) and withdraws the previous one. For about a
-    /// third of a second a search may still list both (multicast DNS's goodbye delay).
-    pub fn relabel(&mut self, label: Label) -> Result<(), SessionError> {
+    /// Announces a different label (Shuffle or Change name) and withdraws the previous one, while
+    /// the laptop keeps serving. For about a third of a second a search may still list both
+    /// (multicast DNS's goodbye delay).
+    pub fn relabel(&self, label: Label) -> Result<(), SessionError> {
         let port = self.host.local_addr().map_err(SessionError::Listen)?.port();
         let fresh = self
             .discovery
             .announce_on(&label, port, &self.ips, &self.network)?;
         // Replacing the announcement drops the old one, which says goodbye.
-        self.announcement = fresh;
-        self.label = label;
+        *self
+            .shown
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (fresh, label);
         Ok(())
     }
 

@@ -103,8 +103,12 @@ async fn two_laptops_pair_over_a_real_connection_and_exchange_sealed_data() {
     // The person reads the new laptop's number and picks it on the old laptop.
     let shown = pending_guest.match_number();
     assert!(pending_host.choices().contains(&shown));
-    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let mut guest_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (mut host_link, mut guest_link) = (host_link.unwrap(), guest_link.unwrap());
 
     host_link.send(b"hello from the old laptop").await.unwrap();
     assert_eq!(
@@ -757,8 +761,12 @@ async fn after_a_send_times_out_the_link_refuses_further_use() {
     let pending_host = host.next_peer(&sender).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let shown = pending_guest.match_number();
-    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let _guest_link = pending_guest.approval().await.unwrap(); // never reads
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, _guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    ); // never reads
+    let (mut host_link, _guest_link) = (host_link.unwrap(), _guest_link.unwrap());
 
     let big = vec![0u8; 60_000];
     let mut timed_out = false;
@@ -785,8 +793,12 @@ async fn paired_links() -> (pctwin_link::Link, pctwin_link::Link) {
     let pending_host = host.next_peer(&sender).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let shown = pending_guest.match_number();
-    let host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let guest_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (host_link, guest_link) = (host_link.unwrap(), guest_link.unwrap());
     (host_link, guest_link)
 }
 
@@ -1117,8 +1129,12 @@ async fn paired_with_host() -> (pctwin_link::Link, pctwin_link::Link, Host) {
     let pending_host = host.next_peer(&sender).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let shown = pending_guest.match_number();
-    let old = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let new = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (old, new) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (old, new) = (old.unwrap(), new.unwrap());
     (old, new, host)
 }
 
@@ -1450,9 +1466,10 @@ async fn the_host_listens_on_each_chosen_address_with_one_port_and_nowhere_else(
         let guest = tokio::spawn(async move { connect(addr, &code, fast()).await });
         let pending = host.next_peer(&sender).await.unwrap();
         let guest = guest.await.unwrap().unwrap();
-        let old = pending.choose(guest.match_number(), Instant::now()).await;
+        let number = guest.match_number();
+        let (old, new) = tokio::join!(pending.choose(number, Instant::now()), guest.approval());
         assert!(old.is_ok(), "{addr}");
-        assert!(guest.approval().await.is_ok());
+        assert!(new.is_ok());
     }
     // Another address of this laptop, not chosen, reaches nothing.
     let elsewhere: std::net::SocketAddr = format!("127.0.0.2:{port}").parse().unwrap();
@@ -1462,4 +1479,119 @@ async fn the_host_listens_on_each_chosen_address_with_one_port_and_nowhere_else(
 #[tokio::test]
 async fn a_host_needs_at_least_one_address() {
     assert!(Host::bind_all(&[], fast()).await.is_err());
+}
+
+/// The new laptop's side of one pairing that reached the number pick, and the old laptop's.
+async fn at_the_pick() -> (pctwin_link::HostPending, pctwin_link::GuestPending) {
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let guest = tokio::spawn(async move { connect(addr, &code, fast()).await.unwrap() });
+    let pending_host = host.next_peer(&sender).await.unwrap();
+    (pending_host, guest.await.unwrap())
+}
+
+/// Each way the pick can end without pairing reaches the new laptop as its own reason.
+#[tokio::test]
+async fn the_new_laptop_is_told_why_the_pick_did_not_pair() {
+    // Another number than the new laptop's: the numbers did not match.
+    let (host, guest) = at_the_pick().await;
+    let other = host
+        .choices()
+        .into_iter()
+        .find(|n| *n != guest.match_number())
+        .unwrap();
+    assert!(matches!(
+        host.choose(other, Instant::now()).await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+    assert!(matches!(
+        guest.approval().await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+
+    // None match: the same.
+    let (host, guest) = at_the_pick().await;
+    host.decline().await;
+    assert!(matches!(
+        guest.approval().await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+
+    // No pick in time: the time ran out.
+    let (host, guest) = at_the_pick().await;
+    host.time_out().await;
+    assert!(matches!(guest.approval().await, Err(LinkError::Timeout)));
+
+    // The right number, but after the pick's deadline: the time ran out, not a wrong number.
+    let (host, guest) = at_the_pick().await;
+    let late = host.deadline() + Duration::from_secs(1);
+    assert!(matches!(
+        host.choose(guest.match_number(), late).await,
+        Err(LinkError::Pairing(PairingError::Expired))
+    ));
+    assert!(matches!(guest.approval().await, Err(LinkError::Timeout)));
+}
+
+/// The old laptop counts as paired only once the new laptop confirms: a new laptop that left
+/// during the pick never pairs, even with the right number.
+#[tokio::test]
+async fn a_new_laptop_that_left_during_the_pick_never_pairs() {
+    let (host, guest) = at_the_pick().await;
+    let right = guest.match_number();
+    drop(guest);
+    // The old laptop notices it is gone, without the person doing anything.
+    tokio::time::timeout(Duration::from_secs(5), host.gone())
+        .await
+        .expect("the old laptop noticed the new laptop left");
+    assert!(host.choose(right, Instant::now()).await.is_err());
+}
+
+/// While the new laptop waits for the pick, the old laptop does not see it as gone.
+#[tokio::test]
+async fn a_waiting_new_laptop_is_not_gone() {
+    let (host, _guest) = at_the_pick().await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), host.gone())
+            .await
+            .is_err()
+    );
+}
+
+/// A watched link tells when the other laptop hangs up, and not before; the watch reads nothing,
+/// so every message still reaches the link.
+#[tokio::test]
+async fn a_watched_link_tells_when_the_other_laptop_leaves_and_reads_nothing() {
+    let (mut old, mut new) = paired_links().await;
+    let watch = old.watch().unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(700), watch.closed())
+            .await
+            .is_err(),
+        "a live link looked closed"
+    );
+    new.send(b"still here").await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(1200), watch.closed())
+            .await
+            .is_err(),
+        "an unread message looked like the link closing"
+    );
+    assert_eq!(old.recv().await.unwrap().as_slice(), b"still here");
+    drop(new);
+    tokio::time::timeout(Duration::from_secs(5), watch.closed())
+        .await
+        .expect("the watch saw the other laptop leave");
+}
+
+/// The old laptop never counts a new laptop as paired if it stays silent after the approval.
+#[tokio::test]
+async fn a_new_laptop_that_never_confirms_is_not_paired() {
+    let (host, guest) = at_the_pick().await;
+    let right = guest.match_number();
+    // The new laptop is still connected but never reads the approval or confirms.
+    let started = Instant::now();
+    assert!(host.choose(right, Instant::now()).await.is_err());
+    assert!(started.elapsed() < Duration::from_secs(5));
+    drop(guest);
 }

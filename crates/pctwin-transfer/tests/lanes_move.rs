@@ -516,8 +516,12 @@ async fn a_whole_move_over_real_lanes_that_the_driver_opens_and_closes() {
     let pending_host = host.next_peer(&rotating).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let number = pending_guest.match_number();
-    let mut old_link = pending_host.choose(number, Instant::now()).await.unwrap();
-    let mut new_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (old_link, new_link) = tokio::join!(
+        pending_host.choose(number, Instant::now()),
+        pending_guest.approval()
+    );
+    let (mut old_link, mut new_link) = (old_link.unwrap(), new_link.unwrap());
 
     // The old laptop serves lanes; the new laptop's driver opens them as the tuner asks.
     let old_keys = old_link.take_lane_keys().unwrap();
@@ -659,8 +663,12 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
     let pending_host = host.next_peer(&rotating).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let number = pending_guest.match_number();
-    let old_link = pending_host.choose(number, Instant::now()).await.unwrap();
-    let mut new_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (old_link, new_link) = tokio::join!(
+        pending_host.choose(number, Instant::now()),
+        pending_guest.approval()
+    );
+    let (old_link, mut new_link) = (old_link.unwrap(), new_link.unwrap());
 
     // The person approved the plan: both laptops make their resume keys for it.
     let mut old_link = old_link;
@@ -702,6 +710,8 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
     drop(new_link);
     let before = sender.blocks_sent();
     assert!(before > 0 && before < total_blocks(&l), "{before}");
+    // Only blocks sent and not yet confirmed when the connection dropped may be sent again.
+    let unconfirmed = before - sender.blocks_confirmed();
 
     // The new laptop reconnects with its resume keys; the old laptop takes it as the main one.
     let (arrived, opened) = tokio::join!(
@@ -727,11 +737,12 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
             "{n}"
         );
     }
-    // It carried on rather than starting over: only blocks in flight at the drop (unconfirmed,
-    // at most a few per stream) are sent twice; restarting even one big file would be dozens.
+    // It carried on rather than starting over: only blocks unconfirmed at the drop are sent
+    // twice (how many that is depends on timing; restarting a file would send its confirmed
+    // blocks again too).
     assert!(
-        sender.blocks_sent() <= total_blocks(&l) + 16,
-        "{} sent for {} blocks",
+        sender.blocks_sent() <= total_blocks(&l) + unconfirmed,
+        "{} sent for {} blocks, {unconfirmed} unconfirmed at the drop",
         sender.blocks_sent(),
         total_blocks(&l)
     );

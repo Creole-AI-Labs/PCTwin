@@ -84,6 +84,10 @@ const KIND_PAUSED: u8 = 5;
 const KIND_EXPIRED: u8 = 6;
 const KIND_LOCKED: u8 = 7;
 const KIND_WRONG_CODE: u8 = 8;
+/// The person on the old laptop said the numbers did not match (or picked another).
+const KIND_NO_MATCH: u8 = 12;
+/// The person on the old laptop did not pick a number in time.
+const KIND_PICK_TIMED_OUT: u8 = 13;
 const KIND_LANE: u8 = 9;
 const KIND_RESUME: u8 = 10;
 /// A quiet connection is probed after this long, every [`KEEPALIVE_INTERVAL`], up to
@@ -98,6 +102,12 @@ const MAX_DATA_LEN: usize = u16::MAX as usize;
 const SESSION_TAG: std::ops::Range<usize> = 2..10;
 /// How long a device gets to read a notice before it is closed.
 const NOTICE_LINGER: Duration = Duration::from_secs(1);
+/// The new laptop's first sealed message once approved: a liveness receipt (it is still there,
+/// and holds the session's keys), not key confirmation, which the pairing messages already do.
+/// The old laptop counts as paired only once this arrives. Fixed for every release.
+const PAIRED_CONFIRM: &[u8] = b"paired";
+/// How often a watched link with unread messages is looked at again.
+const WATCH_PAUSE: Duration = Duration::from_millis(500);
 /// Most devices being refused at once; beyond this, extra connections are closed without a notice.
 const MAX_REFUSALS: usize = 64;
 /// Most addresses remembered as penalised.
@@ -466,12 +476,51 @@ impl HostPending {
         self.peer
     }
 
-    /// Records the person's pick at time `now`. The right number unlocks the old laptop and sends
-    /// the approval; anything else ends the pairing.
+    /// Records the person's pick at time `now`. The right number sends the approval, and pairs
+    /// only once the new laptop confirms it over the sealed link (so a new laptop that has gone
+    /// never counts as paired); anything else ends the pairing, and the new laptop is told the
+    /// numbers did not match, or that the time ran out (never only that the connection closed).
     pub async fn choose(mut self, picked: u8, now: Instant) -> Result<Link, LinkError> {
-        let (paired, approval) = self.choosing.choose(picked, now)?;
+        let (paired, approval) = match self.choosing.choose(picked, now) {
+            Ok(done) => done,
+            Err(e) => {
+                // Too late is the time running out, never a wrong number.
+                let kind = if e == PairingError::Expired {
+                    KIND_PICK_TIMED_OUT
+                } else {
+                    KIND_NO_MATCH
+                };
+                notify(&mut self.stream, kind).await;
+                return Err(e.into());
+            }
+        };
         write_frame(&mut self.stream, KIND_PAIRING, &approval, self.send_timeout).await?;
-        Ok(Link::new(paired, self.stream, self.peer, self.send_timeout))
+        let mut link = Link::new(paired, self.stream, self.peer, self.send_timeout);
+        match tokio::time::timeout(self.send_timeout, link.recv()).await {
+            Ok(Ok(confirm)) if confirm.as_slice() == PAIRED_CONFIRM => Ok(link),
+            Ok(Ok(_)) => Err(LinkError::Unexpected),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(LinkError::Closed),
+        }
+    }
+
+    /// Resolves when the new laptop is gone while the person picks: it hung up, the connection
+    /// broke, or it sent anything (it has nothing to send until approved). Cancel-safe: it only
+    /// looks, never reads.
+    pub async fn gone(&self) {
+        let mut byte = [0u8; 1];
+        let _ = self.stream.peek(&mut byte).await;
+    }
+
+    /// The person said none of the three numbers matches the new laptop's: pairing ends, and the
+    /// new laptop is told the numbers did not match.
+    pub async fn decline(mut self) {
+        notify(&mut self.stream, KIND_NO_MATCH).await;
+    }
+
+    /// The person did not pick a number in time: pairing ends, and the new laptop is told so.
+    pub async fn time_out(mut self) {
+        notify(&mut self.stream, KIND_PICK_TIMED_OUT).await;
     }
 }
 
@@ -538,7 +587,30 @@ impl GuestPending {
             .waiting
             .receive_approval(&approval, Instant::now())
             .map_err(PairingError::from)?;
-        Ok(Link::new(paired, self.stream, self.host, self.send_timeout))
+        let mut link = Link::new(paired, self.stream, self.host, self.send_timeout);
+        link.send(PAIRED_CONFIRM).await?;
+        Ok(link)
+    }
+}
+
+/// A watch on a paired link: see [`Link::watch`].
+pub struct LinkWatch {
+    stream: TcpStream,
+}
+
+impl LinkWatch {
+    /// Resolves when the other laptop hung up or the connection broke (the operating system's
+    /// keep-alive probes notice a laptop that vanished). Only looks, never reads. While a message
+    /// waits unread it can only see a broken connection, not a clean close, so it keeps looking
+    /// now and then until the link is taken.
+    pub async fn closed(&self) {
+        let mut byte = [0u8; 1];
+        loop {
+            match self.stream.peek(&mut byte).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => tokio::time::sleep(WATCH_PAUSE).await,
+            }
+        }
     }
 }
 
@@ -581,6 +653,21 @@ impl Link {
         socket2::SockRef::from(&self.stream)
             .keepalive()
             .unwrap_or(false)
+    }
+
+    /// A watch on this link that tells when the other laptop has gone, without reading anything
+    /// (whoever later uses the link still gets every message). For the quiet time between pairing
+    /// and the move, so a link that died is let go instead of shown as paired. Whoever takes the
+    /// link for the move ends the watch first: the watch holds the connection open while it
+    /// lives, and once a message waits unread it can no longer see a clean close.
+    pub fn watch(&self) -> Result<LinkWatch, LinkError> {
+        let copy = socket2::SockRef::from(&self.stream)
+            .try_clone()
+            .map_err(|_| LinkError::Closed)?;
+        let copy: std::net::TcpStream = copy.into();
+        copy.set_nonblocking(true).map_err(|_| LinkError::Closed)?;
+        let stream = TcpStream::from_std(copy).map_err(|_| LinkError::Closed)?;
+        Ok(LinkWatch { stream })
     }
 
     /// The keys for extra lanes, handed out once (from the main link only), so the app can open
@@ -956,6 +1043,8 @@ async fn read_from_host(stream: &mut TcpStream, wait: Duration) -> Result<Vec<u8
         KIND_EXPIRED => Err(PairingError::Expired.into()),
         KIND_LOCKED => Err(PairingError::Locked.into()),
         KIND_WRONG_CODE => Err(PairingError::HandshakeFailed.into()),
+        KIND_NO_MATCH => Err(PairingError::WrongNumber.into()),
+        KIND_PICK_TIMED_OUT => Err(LinkError::Timeout),
         _ => Err(LinkError::Unexpected),
     }
 }

@@ -36,7 +36,10 @@ jobs:
       - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         if: runner.os == 'Linux'
         with:
-          egress-policy: block
+          # The guard's start-up step runs on every system whatever the `if` says, and on
+          # Windows a blocking policy also blocks the certificate revocation check, so the
+          # toolchain download fails. Block on Linux; elsewhere only watch.
+          egress-policy: ${{ runner.os == 'Linux' && 'block' || 'audit' }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -88,6 +91,19 @@ jobs:
         run: |
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      # On Windows the network guard's start-up step runs even though the guard itself is
+      # Linux-only, and for a few seconds it leaves the runner with no DNS: the toolchain
+      # download then failed. Wait (bounded) until names resolve.
+      - name: Wait for DNS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          for ($i = 1; $i -le 60; $i++) {
+            try { Resolve-DnsName static.rust-lang.org -ErrorAction Stop | Out-Null; Write-Host "DNS ready after $i tries"; exit 0 } catch { Start-Sleep -Seconds 2 }
+          }
+          Write-Error "DNS did not come back within two minutes"
+          exit 1
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
         with:
           toolchain: 1.99.0
@@ -181,6 +197,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # On Windows the network guard's start-up step runs even though the guard itself is
+      # Linux-only, and for a few seconds it leaves the runner with no DNS: the toolchain
+      # download then failed. Wait (bounded) until names resolve.
+      - name: Wait for DNS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          for ($i = 1; $i -le 60; $i++) {
+            try { Resolve-DnsName static.rust-lang.org -ErrorAction Stop | Out-Null; Write-Host "DNS ready after $i tries"; exit 0 } catch { Start-Sleep -Seconds 2 }
+          }
+          Write-Error "DNS did not come back within two minutes"
+          exit 1
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10
         with:
           toolchain: 1.99.0
