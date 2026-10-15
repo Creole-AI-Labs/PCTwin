@@ -42,6 +42,7 @@ mod drive;
 #[cfg(target_os = "macos")]
 mod macos_check;
 mod marks;
+mod naming;
 mod original;
 mod read_back;
 mod siblings;
@@ -50,6 +51,14 @@ mod unix_undo;
 
 pub use drive::{DriveKind, DriveProfile, FAT_LARGEST_FILE};
 pub use marks::download_mark_of;
+pub use naming::{DriveCheck, Naming};
+
+/// For tests: what the first and second probe files of a drive test hold, so a test can leave
+/// probe files as a crash would.
+#[doc(hidden)]
+pub fn probe_contents() -> (&'static [u8], &'static [u8]) {
+    (naming::PROBE_A, naming::PROBE_B)
+}
 pub use original::open_original;
 pub use read_back::{CheckedFrom, ReadBack, Verification, WhyMemory};
 pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
@@ -450,6 +459,9 @@ pub struct Destination {
     /// Whether files can be read back past the cache, tested once per drive (by its number):
     /// an approved folder can hold another drive mounted inside it.
     read_back: Mutex<HashMap<u64, CheckedFrom>>,
+    /// What testing each drive under it found, by the drive's number: tested once, before its
+    /// first file is named (a folder under it can be another drive).
+    checks: Mutex<HashMap<u64, DriveCheck>>,
     /// For tests: the faults this place fakes.
     #[cfg(feature = "fault-plan")]
     faults: Faults,
@@ -623,6 +635,12 @@ impl Destination {
                 plan: self.faults.plan,
                 flipped_once: Default::default(),
             },
+            checks: Mutex::new(
+                self.checks
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone(),
+            ),
         })
     }
 
@@ -643,7 +661,41 @@ impl Destination {
             read_back: Mutex::default(),
             #[cfg(feature = "fault-plan")]
             faults: Faults::default(),
+            checks: Mutex::default(),
         }
+    }
+
+    /// Tests the drive this place is on, once, for a way to name a finished file that never
+    /// replaces anything (see [`Naming`]): on PCTwin's own probe files, which are removed
+    /// afterwards. Asked again, it answers from that test.
+    pub fn check_drive(&self) -> Result<DriveCheck, GateError> {
+        self.check_for(&self.root, "")
+    }
+
+    /// The drive test for the folder `dir` (at the stored path `folder`), run there the first
+    /// time a file on that drive is named.
+    fn check_for(&self, dir: &Dir, folder: &str) -> Result<DriveCheck, GateError> {
+        if let Some(forced) = self.profile.forced_check() {
+            return Ok(forced);
+        }
+        let key = drive::volume_key(dir)?;
+        let checks = || self.checks.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(check) = checks().get(&key) {
+            return Ok(*check);
+        }
+        let folder_path = || self.folder_path(dir, folder);
+        let check = naming::probe(dir, &folder_path, move_no_replace)?;
+        checks().insert(key, check);
+        Ok(check)
+    }
+
+    /// Forgets every drive test (after a handle went stale: the drive was removed, or another
+    /// put in its place), so the next file named tests again.
+    fn forget_checks(&self) {
+        self.checks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// The file name a file sent as `sent` is stored under in the folder `dir` (on that folder's
@@ -1382,89 +1434,155 @@ enum Linked {
 type FolderPath<'a> = &'a dyn Fn() -> io::Result<std::path::PathBuf>;
 
 /// Gives the finished file `temp` the name `name` if nothing has it, never replacing anything.
-/// Returns `None` when the name is taken. Nothing is ever put under `name` but the whole file: a
-/// hard link where the drive has them, else a move the drive itself refuses if the name exists.
-/// No placeholder is ever made, so no empty file is ever left under a real name.
+/// Returns `None` when the name is taken. How is decided by the drive's test (`check`), never by
+/// an error number alone: a hard link where the drive has them, else a move the drive itself
+/// refuses if the name exists. Nothing is ever put under `name` but the whole file, and no
+/// placeholder is made. A drive without either way is not named here at all.
 fn claim(
     dir: &Dir,
     name: &str,
     temp: &str,
     folder_path: FolderPath<'_>,
+    check: &DriveCheck,
 ) -> Result<Option<Linked>, GateError> {
-    // A hard link makes the whole file appear under its name at once, or not at all. The
-    // temporary name stays until the journal has recorded the real one.
-    match dir.hard_link(temp, dir, name) {
-        Ok(()) => Ok(Some(Linked::Hard)),
-        Err(e) if is_taken(dir, name, &e) => Ok(None),
-        // Some drives (FAT, exFAT) have no hard links.
-        Err(_) => Ok(rename_no_replace(dir, temp, name, folder_path)?.then_some(Linked::Moved)),
+    if check.naming != Naming::Atomic {
+        return Err(GateError::NoSafeName);
+    }
+    if check.hard_links {
+        // The whole file appears under its name at once, or not at all. The temporary name
+        // stays until the journal has recorded the real one.
+        match dir.hard_link(temp, dir, name) {
+            Ok(()) => return Ok(Some(Linked::Hard)),
+            Err(e) if is_taken(dir, name, &e) => return Ok(None),
+            Err(e) if is_name_error(&e) => return Err(GateError::NameRejected),
+            Err(e) if !check.no_replace_move => return Err(GateError::Io(e)),
+            Err(_) => {}
+        }
+    }
+    match move_no_replace(dir, temp, name, folder_path) {
+        naming::Moved::Done => Ok(Some(Linked::Moved)),
+        naming::Moved::Taken => Ok(None),
+        // The drive's no-replace move passed its test, so an "invalid" now is the name.
+        naming::Moved::Invalid | naming::Moved::Name => Err(GateError::NameRejected),
+        // The drive no longer does what its test found (another drive in its place?).
+        naming::Moved::Unsupported => Err(GateError::NoSafeName),
+        // Windows answers a folder in the way with "access denied": the name is taken.
+        naming::Moved::Failed(_) if dir.symlink_metadata(name).is_ok() => Ok(None),
+        naming::Moved::Failed(e) => Err(GateError::Io(e)),
     }
 }
 
-/// Moves PCTwin's own finished temporary file `temp` onto `name` in `dir` only if nothing has
-/// `name`; the drive checks and moves in one step, so another file can never be replaced.
-/// `Ok(false)` when the name is taken. Refused where the system cannot do this (the file is then
-/// not named rather than named unsafely). Only ever used for PCTwin's own temporary files.
+/// An error that is about the name itself (too long, or characters the drive cannot hold).
+fn is_name_error(e: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        e.raw_os_error().is_some_and(|code| {
+            [Errno::NAMETOOLONG, Errno::ILSEQ]
+                .iter()
+                .any(|n| n.raw_os_error() == code)
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        // ERROR_INVALID_NAME, ERROR_FILENAME_EXCED_RANGE.
+        matches!(e.raw_os_error(), Some(123 | 206))
+    }
+}
+
+/// Whether an error says the drive's handle went stale (the drive was removed, or another put
+/// in its place): what was learnt about the drive no longer holds.
+fn is_stale(e: &GateError) -> bool {
+    let GateError::Io(e) = e else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        e.raw_os_error().is_some_and(|code| {
+            [Errno::STALE, Errno::NODEV, Errno::NXIO, Errno::IO]
+                .iter()
+                .any(|n| n.raw_os_error() == code)
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        // ERROR_NOT_READY, ERROR_DEV_NOT_EXIST, ERROR_DEVICE_NOT_CONNECTED.
+        matches!(e.raw_os_error(), Some(21 | 55 | 1167))
+    }
+}
+
+/// Moves PCTwin's own file `temp` onto `name` in `dir` only if nothing has `name`; the drive
+/// checks and moves in one step, so another file can never be replaced, on a drive that honours
+/// the request (which its test found). Only ever used for PCTwin's own files.
 #[cfg(unix)]
-fn rename_no_replace(
+fn move_no_replace(
     dir: &Dir,
     temp: &str,
     name: &str,
     _folder_path: FolderPath<'_>,
-) -> Result<bool, GateError> {
+) -> naming::Moved {
+    use naming::Moved;
     use rustix::fs::{RenameFlags, renameat_with};
     use rustix::io::Errno;
     // renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS.
     match renameat_with(dir, temp, dir, name, RenameFlags::NOREPLACE) {
-        Ok(()) => Ok(true),
-        Err(Errno::EXIST) => Ok(false),
-        // The drive's own name rules: the name, not the drive, is the problem. (A bare
-        // "invalid" can mean either until the drive's way of naming files has been tested.)
-        Err(Errno::NAMETOOLONG | Errno::ILSEQ) => Err(GateError::NameRejected),
-        Err(Errno::INVAL | Errno::NOSYS | Errno::NOTSUP) => Err(GateError::NoSafeName),
-        Err(e) => Err(GateError::Io(e.into())),
+        Ok(()) => Moved::Done,
+        Err(Errno::EXIST) => Moved::Taken,
+        Err(Errno::INVAL) => Moved::Invalid,
+        // Two numbers on macOS, one on Linux.
+        Err(e) if e == Errno::NOSYS || e == Errno::NOTSUP || e == Errno::OPNOTSUPP => {
+            Moved::Unsupported
+        }
+        Err(Errno::NAMETOOLONG | Errno::ILSEQ) => Moved::Name,
+        Err(e) => Moved::Failed(e.into()),
     }
 }
 
 /// Windows: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (through `tempfile`, which wraps it
 /// safely; it also clears the temporary file's attributes, which are PCTwin's own), on the
-/// folder's full path, proven to be the folder held.
+/// folder's full path, proven to be the folder held. Without such a path (a place opened through
+/// the admin helper) there is no such move.
 #[cfg(windows)]
-fn rename_no_replace(
+fn move_no_replace(
     _dir: &Dir,
     temp: &str,
     name: &str,
     folder_path: FolderPath<'_>,
-) -> Result<bool, GateError> {
-    let folder = folder_path().map_err(|_| GateError::NoSafeName)?;
-    let mut source = tempfile::TempPath::try_from_path(folder.join(temp))?;
+) -> naming::Moved {
+    use naming::Moved;
+    let Ok(folder) = folder_path() else {
+        return Moved::Unsupported;
+    };
+    let mut source = match tempfile::TempPath::try_from_path(folder.join(temp)) {
+        Ok(source) => source,
+        Err(e) => return Moved::Failed(e),
+    };
     // Never removed by `tempfile`, whatever happens.
     source.disable_cleanup(true);
     match source.persist_noclobber(folder.join(name)) {
-        Ok(()) => Ok(true),
-        Err(e) => {
-            let taken = e.error.kind() == io::ErrorKind::AlreadyExists
-                || matches!(e.error.raw_os_error(), Some(80 | 183));
-            if taken {
-                Ok(false)
-            } else if matches!(e.error.raw_os_error(), Some(123 | 206)) {
-                // ERROR_INVALID_NAME, ERROR_FILENAME_EXCED_RANGE: the drive refused the name.
-                Err(GateError::NameRejected)
-            } else {
-                Err(GateError::Io(e.error))
-            }
-        }
+        Ok(()) => Moved::Done,
+        Err(e) if e.error.kind() == io::ErrorKind::AlreadyExists => Moved::Taken,
+        Err(e) => match e.error.raw_os_error() {
+            // ERROR_FILE_EXISTS, ERROR_ALREADY_EXISTS.
+            Some(80 | 183) => Moved::Taken,
+            // ERROR_INVALID_NAME, ERROR_FILENAME_EXCED_RANGE.
+            Some(123 | 206) => Moved::Name,
+            // ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED.
+            Some(1 | 50) => Moved::Unsupported,
+            _ => Moved::Failed(e.error),
+        },
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn rename_no_replace(
+fn move_no_replace(
     _dir: &Dir,
     _temp: &str,
     _name: &str,
     _folder_path: FolderPath<'_>,
-) -> Result<bool, GateError> {
-    Err(GateError::NoSafeName)
+) -> naming::Moved {
+    naming::Moved::Unsupported
 }
 
 pub use pctwin_journal::{Born, DownloadMark, FileId};
@@ -1921,6 +2039,40 @@ impl Destinations {
         }
         self.check_new(id)?;
         let destination = Destination::open(path)?;
+        self.admit(id, place, destination)
+    }
+
+    /// For tests: as [`approve`](Self::approve), on a drive behaving as `profile` says.
+    #[doc(hidden)]
+    pub fn approve_with_profile(
+        &mut self,
+        id: &str,
+        place: Approved,
+        path: &Path,
+        profile: DriveProfile,
+    ) -> Result<(), GateError> {
+        self.check_new(id)?;
+        let destination = Destination::open(path)?.with_profile(profile);
+        self.admit(id, place, destination)
+    }
+
+    /// Tests the place's drive once, when it is chosen (security design notes): a drive with no
+    /// safe way to name files is refused here, with the reason, before anything is sent. A test
+    /// that could not be run (a folder PCTwin may not write to, say) refuses nothing here, as
+    /// before: the drive is tested again before its first file is named, and nothing is named
+    /// untested.
+    fn admit(
+        &mut self,
+        id: &str,
+        place: Approved,
+        destination: Destination,
+    ) -> Result<(), GateError> {
+        if destination
+            .check_drive()
+            .is_ok_and(|check| check.naming == Naming::NoSafeMethod)
+        {
+            return Err(GateError::NoSafeName);
+        }
         self.entries.insert(id.to_string(), (place, destination));
         Ok(())
     }
@@ -1943,9 +2095,7 @@ impl Destinations {
         let place = Approved::AnotherAccount {
             account_id: account_id.to_string(),
         };
-        self.entries
-            .insert(id.to_string(), (place, Destination::from_dir(root)));
-        Ok(())
+        self.admit(id, place, Destination::from_dir(root))
     }
 
     /// The approved place labelled `id`, or [`GateError::UnknownDestination`].
@@ -2404,11 +2554,26 @@ impl<'d> Sealed<'d> {
         let Some(temp) = self.temp.clone() else {
             return Claim::Failed(GateError::Conflict, self);
         };
+        let check = match self.destination.check_for(&self.dir, &self.folder) {
+            Ok(check) => check,
+            Err(e) => {
+                if is_stale(&e) {
+                    self.destination.forget_checks();
+                }
+                return Claim::Failed(e, self);
+            }
+        };
         let folder_path = || self.destination.folder_path(&self.dir, &self.folder);
-        let linked = match claim(&self.dir, &name, &temp, &folder_path) {
+        let linked = match claim(&self.dir, &name, &temp, &folder_path, &check) {
             Ok(Some(linked)) => linked,
             Ok(None) => return Claim::Taken(self),
-            Err(e) => return Claim::Failed(e, self),
+            Err(e) => {
+                if is_stale(&e) || matches!(e, GateError::NoSafeName) {
+                    // What was learnt about the drive may no longer hold: test it again next time.
+                    self.destination.forget_checks();
+                }
+                return Claim::Failed(e, self);
+            }
         };
         self.temp = None;
         flush_name(&self.dir, &name);
@@ -2670,7 +2835,10 @@ mod tests {
     fn without_hard_links_the_whole_file_is_moved_onto_its_name() {
         let (root, dir) = folder();
         std::fs::write(root.path().join("t.part"), b"abc").unwrap();
-        assert!(rename_no_replace(&dir, "t.part", "photo.jpg", &path_of(&root)).unwrap());
+        assert!(matches!(
+            move_no_replace(&dir, "t.part", "photo.jpg", &path_of(&root)),
+            naming::Moved::Done
+        ));
         assert_eq!(
             std::fs::read(root.path().join("photo.jpg")).unwrap(),
             b"abc"
@@ -2682,7 +2850,10 @@ mod tests {
     fn a_failed_move_leaves_nothing_under_the_real_name() {
         let (root, dir) = folder();
         // The temporary file vanished (another program deleted it).
-        assert!(rename_no_replace(&dir, "gone.part", "doc.pdf", &path_of(&root)).is_err());
+        assert!(matches!(
+            move_no_replace(&dir, "gone.part", "doc.pdf", &path_of(&root)),
+            naming::Moved::Failed(_)
+        ));
         assert!(!root.path().join("doc.pdf").exists());
     }
 
@@ -2696,7 +2867,10 @@ mod tests {
         std::fs::create_dir(root.path().join("Notes")).unwrap();
         for taken in ["notes.txt", "empty.txt", "Notes"] {
             assert!(
-                !rename_no_replace(&dir, "t.part", taken, &path_of(&root)).unwrap(),
+                matches!(
+                    move_no_replace(&dir, "t.part", taken, &path_of(&root)),
+                    naming::Moved::Taken
+                ),
                 "{taken}"
             );
         }
@@ -2716,8 +2890,8 @@ mod tests {
         std::fs::write(root.path().join("t.part"), b"abc").unwrap();
         let no_path = || -> io::Result<std::path::PathBuf> { Err(io::Error::other("none")) };
         assert!(matches!(
-            rename_no_replace(&dir, "t.part", "a.txt", &no_path),
-            Err(GateError::NoSafeName)
+            move_no_replace(&dir, "t.part", "a.txt", &no_path),
+            naming::Moved::Unsupported
         ));
         assert!(root.path().join("t.part").exists());
         assert!(!root.path().join("a.txt").exists());

@@ -19,7 +19,7 @@
 
 use cap_std::fs::Dir;
 
-use crate::{NameRules, Platform};
+use crate::{DriveCheck, NameRules, Naming, Platform};
 
 /// The largest file a FAT drive (FAT12, FAT16, FAT32) holds: 4 GiB less one byte.
 pub const FAT_LARGEST_FILE: u64 = (1 << 32) - 1;
@@ -212,6 +212,9 @@ pub struct DriveProfile {
     case_apart: bool,
     /// Whether to try keeping download markers (the drive's own answer still decides).
     markers: bool,
+    /// For tests: the way of naming files to use instead of testing the drive, and whether it
+    /// has hard links.
+    forced: Option<(Naming, bool)>,
 }
 
 impl DriveProfile {
@@ -233,6 +236,7 @@ impl DriveProfile {
             },
             case_apart: posix && kind.tells_case_apart(),
             markers: true,
+            forced: None,
         }
     }
 
@@ -260,6 +264,31 @@ impl DriveProfile {
     pub fn without_markers(mut self) -> Self {
         self.markers = false;
         self
+    }
+
+    /// For tests: name files the way `naming` says instead of testing the drive (to force the
+    /// fill-in way on a drive that has hard links, say), as a drive with hard links.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_naming(mut self, naming: Naming) -> Self {
+        self.forced = Some((naming, true));
+        self
+    }
+
+    /// For tests, with [`with_naming`](Self::with_naming): as a drive without hard links (FAT,
+    /// exFAT), so a finished file gets its name by a no-replace move.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn without_hard_links(mut self) -> Self {
+        let naming = self.forced.map_or(Naming::Atomic, |(n, _)| n);
+        self.forced = Some((naming, false));
+        self
+    }
+
+    /// The forced result of a drive test, if a test forced one.
+    pub(crate) fn forced_check(&self) -> Option<DriveCheck> {
+        self.forced
+            .map(|(naming, hard_links)| DriveCheck::forced(naming, hard_links))
     }
 
     pub(crate) fn tries_markers(&self) -> bool {
