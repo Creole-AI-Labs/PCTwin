@@ -1242,8 +1242,6 @@ history-note = This history stays on this laptop. Nothing is sent anywhere unles
 history-empty = Your first local journal and report will appear here.
 history-empty-title = No moves recorded yet
 history-start = Start a new move
-history-receipts-title = Quick Send receipts
-history-receipts-body = Find received locations and unfinished selected items.
 
 ## Quick Send: words the mockups do not have (added while building; same voice)
 
