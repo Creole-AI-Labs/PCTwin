@@ -139,6 +139,112 @@ pairing-no-network = This laptop is not on a Wi-Fi or wired network. Connect it,
 pairing-choose-network = This laptop is on more than one network. Choose the one your new laptop is on:
 pairing-failed = Pairing did not work this time. Nothing was shared. Try again.
 
+## M06 Match people to their profiles (Who’s moving?)
+
+people-eyebrow = Reviewed move
+people-title = Match people to their profiles.
+people-body = Every source profile needs the right owner and destination.
+people-col-old = Source
+people-col-new = Target account
+people-col-status = Authority
+people-you = You
+# $name is the person's name on the old laptop. $account is an account name on the new laptop.
+people-select =
+    .aria-label = Target account for { $name }
+people-option-existing = { $account } / new laptop
+people-option-new = Create a new account
+people-option-leave-out = Leave out
+people-option-choose = Choose…
+people-new-account-hint = The new laptop asks for permission before it creates an account.
+people-suggested = Suggested because the names match. Check it is the same person.
+# $account is an account name on the new laptop.
+people-suggested-use = Use { $account }
+people-status-ready = Confirmed
+people-status-waiting = Owner permission needed
+people-status-left-out = Not selected
+people-status-choose = Needs your choice
+people-status-changed = Changed by you
+people-waiting-body = { $name } must sign in on the old laptop and approve before their files can move. Until then, their files stay untouched.
+people-just-me = Only your own profile was found on the old laptop.
+people-changed-note = You changed a target account. Check it before you continue.
+people-shared-title = Shared items
+people-shared-body = Shared folders and public documents that belong to everyone on the old laptop.
+people-shared-select =
+    .aria-label = Where shared items go
+people-shared-option-shared = Shared folders on the new laptop
+people-shared-option-person = With the files of { $name }
+people-shared-option-leave-out = Leave out
+people-note = PCTwin does not change anyone’s sign-in or bypass another profile’s protection.
+people-list-label = People on the old laptop
+people-todo =
+    { $count ->
+        [0] Everyone who can move has a place to go.
+        [one] { $count } person still needs a choice.
+       *[other] { $count } people still need a choice.
+    }
+people-waiting-count =
+    { $count ->
+        [one] { $count } person is waiting for approval. You can continue; their files stay untouched until they approve.
+       *[other] { $count } people are waiting for approval. You can continue; their files stay untouched until they approve.
+    }
+people-continue = Continue
+
+## M26 Before you leave this laptop (things to do on the old laptop)
+
+before-eyebrow = Reviewed move
+before-title = Before you leave this laptop.
+before-body = Check the work and recovery methods you may still need.
+before-licences-title = App activations
+before-licences-body = Some apps need owner-managed licence handover.
+before-passwords-title = Recovery methods
+before-passwords-body = Confirm drive and account recovery are available.
+before-codes-title = Keep your sign-in codes to hand
+before-codes-body = If an account sends you a code or uses an app to confirm it is you, keep that phone or app nearby.
+before-online-title = Unsynced work
+before-online-body = Save drafts and check cloud originals.
+before-source-title = Source-only items
+before-source-body = Unresolved items stay on this laptop.
+before-status-needs-action = Needs action
+before-status-review = Review
+before-status-keep = Keep
+before-done =
+    .aria-label = I have done this: { $item }
+before-done-label = Done
+before-ticked-count = { $done } of { $total } ticked by you
+before-note = Do not enter recovery secrets here. This checklist does not authorize erasing the laptop.
+before-empty = Nothing needs doing on your old laptop before the move.
+before-continue = Return to the move plan
+
+## S11 Get help with this task (a short problem code)
+
+help-eyebrow = Help and privacy
+help-title = Get help with this task.
+help-body = Share a short problem code after checking what it reveals.
+help-making = Making a code…
+help-code-title = Problem code
+# $code is the code itself, for example "PCT-7F3K-21". Keep it unchanged.
+help-code =
+    .aria-label = Problem code { $code }
+help-contains-title = Shared detail
+help-contains-problem = Problem category and approved task status.
+help-contains-step = The step of the move where it happened.
+help-contains-versions = The PCTwin version, and which system each laptop runs, such as Windows or macOS.
+help-never-title = Private material
+help-chip-included = Included
+help-chip-excluded = Never included
+help-never-names = Your name or anyone else’s.
+help-never-files = No file contents, secrets or control grant.
+help-never-network = File or folder names, where your files are kept, or Wi-Fi names.
+help-note = The code does not give anyone access to your laptops.
+help-copy = Copy code
+help-copied = Code copied.
+help-share = Share
+help-share-hint = Send it by WhatsApp or any app.
+help-share-text = My PCTwin problem code is { $code }.
+help-failed = A problem code could not be made. Try again. If it still does not work, describe the problem in your own words instead.
+help-try-again = Try again
+help-copy-failed = The code could not be copied. Select it above and copy it yourself.
+
 ## Label words (the name each laptop shows while pairing)
 
 label-colour-red = Red

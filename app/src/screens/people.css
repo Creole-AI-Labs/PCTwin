@@ -1,0 +1,288 @@
+/* People and help screens (Who is moving, Before you start, Get help). Only the app's tokens; logical
+   properties so right-to-left just works; sizes in rem so large text grows things instead of clipping them. */
+
+.people-note {
+  margin: var(--space-2) 0 0;
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+/* Who is moving: the mockup's table (soft header band, rules between rows). In a narrow window, or at
+   large text, each row stacks into one column and the column names appear inside the cells. */
+.people-table-wrap {
+  container-type: inline-size;
+  margin-block-start: var(--space-6);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  overflow: hidden;
+}
+
+.people-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-small);
+  text-align: start;
+}
+
+.people-table th {
+  padding: 11px var(--space-3);
+  background: var(--colour-soft);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  font-weight: 600;
+  text-align: start;
+}
+
+.people-table td {
+  padding: var(--space-3);
+  border-block-start: 1px solid var(--colour-line-quiet);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.people-cell-label {
+  display: none;
+}
+
+@container (max-width: 34rem) {
+  .people-table thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .people-table,
+  .people-table tbody,
+  .people-table tr,
+  .people-table td {
+    display: block;
+  }
+
+  .people-table tr + tr {
+    border-block-start: 1px solid var(--colour-line);
+  }
+
+  .people-table td {
+    padding-block: var(--space-2);
+    border-block-start: 0;
+  }
+
+  .people-table tr td:first-child {
+    padding-block-start: var(--space-4);
+  }
+
+  .people-table tr td:last-child {
+    padding-block-end: var(--space-4);
+  }
+
+  .people-cell-label {
+    display: block;
+    margin-block-end: var(--space-1);
+    color: var(--colour-muted);
+    font-size: var(--type-tertiary);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* An empty cell (the shared row has no status) takes no room */
+  .people-table td:empty {
+    display: none;
+  }
+}
+
+.people-head {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.people-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.people-shared .kit-hint {
+  display: block;
+}
+
+.people-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.people-select {
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+
+.people-suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.people-suggestion .people-note {
+  flex: 1 1 10rem;
+  margin: 0;
+}
+
+.people-summary:not(:empty) {
+  margin-block-start: var(--space-4);
+}
+
+.people-summary p {
+  margin: 0;
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+.people-summary p + p {
+  margin-block-start: var(--space-1);
+}
+
+/* The mockup's warning note: the app's attention colours on the ordinary note */
+.note-warn {
+  background: var(--colour-attention-surface);
+  color: var(--colour-attention-text);
+}
+
+.note-warn svg {
+  color: inherit;
+}
+
+.people-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-4);
+}
+
+.people-notice {
+  margin-block-start: var(--space-4);
+}
+
+.people-notice .kit-banner p {
+  margin: 0;
+}
+
+/* Before you start: the owner's checks in one bordered card, each a checkbox with its title and detail */
+.before-list {
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  overflow: hidden;
+}
+
+.before-list .kit-check {
+  padding-block: var(--space-3);
+  font-size: var(--type-small);
+}
+
+.before-list .kit-check .kit-hint {
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.before-empty {
+  margin-block-start: var(--space-6);
+}
+
+/* Get help: the code in its own card, then two rows (what it holds, what it never holds) */
+.help-box {
+  margin-block-start: var(--space-6);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.help-box-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-row-title);
+  font-weight: 650;
+}
+
+.help-code {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  font-size: var(--type-heading);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.help-rows {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  overflow: hidden;
+}
+
+.help-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 11px;
+  padding: var(--space-3) 14px;
+  border-block-end: 1px solid var(--colour-line-quiet);
+}
+
+.help-row:last-child {
+  border-block-end: 0;
+}
+
+.help-row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: 28px;
+  block-size: 28px;
+  border-radius: 8px;
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.help-row-icon svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+.help-row-copy {
+  flex: 1 1 10rem;
+  min-inline-size: 0;
+}
+
+.help-row-copy h2 {
+  margin: 0;
+  font-size: var(--type-small);
+  font-weight: 600;
+}
+
+.help-list {
+  margin: var(--space-1) 0 0;
+  padding-inline-start: 1.2em;
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.people-table .people-note:first-of-type {
+  margin-block-start: 0;
+}
