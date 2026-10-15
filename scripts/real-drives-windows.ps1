@@ -27,7 +27,9 @@ function Invoke-Diskpart([string[]]$Lines) {
 function Show-Volume($d) {
     $vol = Get-Volume -FilePath $d.Mount
     Write-Host "$($d.Kind) at $($d.Mount): Get-Volume FileSystem=$($vol.FileSystem) Size=$($vol.Size)"
-    fsutil fsinfo volumeinfo $d.Mount
+    # fsutil wants the root of the volume: the mount folder with a closing backslash.
+    fsutil fsinfo volumeinfo "$($d.Mount)\"
+    $global:LASTEXITCODE = 0
     if ($vol.FileSystem -ne $d.Want) {
         throw "$($d.Kind) at $($d.Mount) reports '$($vol.FileSystem)', expected '$($d.Want)'"
     }
@@ -63,17 +65,27 @@ else {
     foreach ($d in $drives) {
         Set-Content -Path (Join-Path $d.Mount '.pctwin-remount-marker') -Value 'kept' -Encoding ascii
         Invoke-Diskpart @("select vdisk file=`"$($d.Vhd)`"", 'detach vdisk', 'exit')
-        # The folder is an ordinary empty folder again while the disk is detached.
-        $gone = Get-Volume -FilePath $d.Mount
-        if ($gone.FileSystem -ne 'NTFS' -or (Test-Path (Join-Path $d.Mount '.pctwin-remount-marker'))) {
+        # While the disk is detached its files must be gone from the folder.
+        $left = Test-Path (Join-Path $d.Mount '.pctwin-remount-marker')
+        $what = try { (Get-Volume -FilePath $d.Mount -ErrorAction Stop).FileSystem } catch { "unreadable ($($_.Exception.Message))" }
+        Write-Host "after detach, $($d.Mount): volume=$what, marker still visible=$left"
+        if ($left) {
             throw "$($d.Mount) still shows the drive after detaching it"
         }
         Invoke-Diskpart @("select vdisk file=`"$($d.Vhd)`"", 'attach vdisk', 'exit')
         # A mount folder normally comes back with the partition; assign it again if it did not.
-        $back = Get-Volume -FilePath $d.Mount
-        if ($back.FileSystem -ne $d.Want) {
-            Write-Host "mount folder did not come back by itself: assigning it again"
-            Invoke-Diskpart @("select vdisk file=`"$($d.Vhd)`"", 'select partition 1', "assign mount=`"$($d.Mount)`"", 'exit')
+        $back = try { (Get-Volume -FilePath $d.Mount -ErrorAction Stop).FileSystem } catch { 'unreadable' }
+        if ($back -ne $d.Want) {
+            Write-Host "mount folder did not come back by itself ($back): assigning it again"
+            try {
+                Invoke-Diskpart @("select vdisk file=`"$($d.Vhd)`"", 'select partition 1', "assign mount=`"$($d.Mount)`"", 'exit')
+            }
+            catch {
+                # A stale mount folder: make it a plain empty folder and try once more.
+                [System.IO.Directory]::Delete($d.Mount)
+                New-Item -ItemType Directory -Force -Path $d.Mount | Out-Null
+                Invoke-Diskpart @("select vdisk file=`"$($d.Vhd)`"", 'select partition 1', "assign mount=`"$($d.Mount)`"", 'exit')
+            }
         }
         Show-Volume $d
         if ((Get-Content (Join-Path $d.Mount '.pctwin-remount-marker') -Raw).Trim() -ne 'kept') {

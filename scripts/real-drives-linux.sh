@@ -28,8 +28,8 @@ mount_one() {
     vfat) sudo mount -t vfat -o "loop,uid=$(id -u),gid=$(id -g),shortname=mixed,utf8=1" "$img" "$mnt" ;;
     exfat) sudo mount -t exfat -o "loop,uid=$(id -u),gid=$(id -g),iocharset=utf8" "$img" "$mnt" ;;
     # The FUSE driver through its own helper, so it is the FUSE driver even with the kernel module
-    # loaded. Run as the runner user: the mount is then the user's, with no allow_other needed.
-    exfat-fuse) mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g)" "$img" "$mnt" ;;
+    # loaded. As root: the helper asks for allow_other, which a plain user may not (fuse.conf).
+    exfat-fuse) sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g)" "$img" "$mnt" ;;
   esac
 }
 
@@ -37,11 +37,7 @@ unmount_one() {
   local kind="$1" mnt="$2" i
   sync
   for i in 1 2 3 4 5; do
-    if [ "$kind" = exfat-fuse ]; then
-      fusermount -u "$mnt" && return 0
-    else
-      sudo umount "$mnt" && return 0
-    fi
+    sudo umount "$mnt" && return 0
     sleep 2
   done
   return 1
