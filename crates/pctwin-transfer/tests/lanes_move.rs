@@ -710,6 +710,8 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
     drop(new_link);
     let before = sender.blocks_sent();
     assert!(before > 0 && before < total_blocks(&l), "{before}");
+    // Only blocks sent and not yet confirmed when the connection dropped may be sent again.
+    let unconfirmed = before - sender.blocks_confirmed();
 
     // The new laptop reconnects with its resume keys; the old laptop takes it as the main one.
     let (arrived, opened) = tokio::join!(
@@ -735,11 +737,12 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
             "{n}"
         );
     }
-    // It carried on rather than starting over: only blocks in flight at the drop (unconfirmed,
-    // at most a few per stream) are sent twice; restarting even one big file would be dozens.
+    // It carried on rather than starting over: only blocks unconfirmed at the drop are sent
+    // twice (how many that is depends on timing; restarting a file would send its confirmed
+    // blocks again too).
     assert!(
-        sender.blocks_sent() <= total_blocks(&l) + 16,
-        "{} sent for {} blocks",
+        sender.blocks_sent() <= total_blocks(&l) + unconfirmed,
+        "{} sent for {} blocks, {unconfirmed} unconfirmed at the drop",
         sender.blocks_sent(),
         total_blocks(&l)
     );
