@@ -476,7 +476,13 @@ impl HostPending {
         let (paired, approval) = match self.choosing.choose(picked, now) {
             Ok(done) => done,
             Err(e) => {
-                notify(&mut self.stream, KIND_NO_MATCH).await;
+                // Too late is the time running out, never a wrong number.
+                let kind = if e == PairingError::Expired {
+                    KIND_PICK_TIMED_OUT
+                } else {
+                    KIND_NO_MATCH
+                };
+                notify(&mut self.stream, kind).await;
                 return Err(e.into());
             }
         };
