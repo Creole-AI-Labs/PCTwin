@@ -133,7 +133,7 @@ describe("C01 How will you connect?", () => {
 /* ---------------------------------------------------------------- C02 */
 
 describe("C02 Put both laptops together", () => {
-  const stepItems = () => screen.getAllByRole("listitem").filter((li) => li.matches(".connect-step"));
+  const stepItems = () => screen.getAllByRole("listitem").filter((li) => li.matches(".frame-step"));
 
   it("lists three steps in order, each with its state in words", () => {
     inApp(<PutTogether onBack={nothing} onContinue={nothing} />);
@@ -142,22 +142,22 @@ describe("C02 Put both laptops together", () => {
     expect(within(steps[0]).getByText(text("connect-prep-step-1-title"))).toBeTruthy();
     expect(within(steps[1]).getByText(text("connect-prep-step-2-title"))).toBeTruthy();
     expect(within(steps[2]).getByText(text("connect-prep-step-3-title"))).toBeTruthy();
-    expect(within(steps[0]).getByText(text("connect-step-current"))).toBeTruthy();
-    expect(within(steps[1]).getByText(text("connect-step-todo"))).toBeTruthy();
-    expect(within(steps[2]).getByText(text("connect-step-todo"))).toBeTruthy();
+    expect(within(steps[0]).getByText(text("frame-step-current"))).toBeTruthy();
+    expect(within(steps[1]).getByText(text("frame-step-todo"))).toBeTruthy();
+    expect(within(steps[2]).getByText(text("frame-step-todo"))).toBeTruthy();
     noStringsMissing();
   });
 
   it("shows done, current and to-do each with its own word, a step position for screen readers, and marks the current step", () => {
     inApp(<PutTogether steps={["done", "current", "todo"]} onBack={nothing} onContinue={nothing} />);
     const steps = stepItems();
-    expect(within(steps[0]).getByText(text("connect-step-done"))).toBeTruthy();
-    expect(within(steps[1]).getByText(text("connect-step-current"))).toBeTruthy();
-    expect(within(steps[2]).getByText(text("connect-step-todo"))).toBeTruthy();
+    expect(within(steps[0]).getByText(text("frame-step-done"))).toBeTruthy();
+    expect(within(steps[1]).getByText(text("frame-step-current"))).toBeTruthy();
+    expect(within(steps[2]).getByText(text("frame-step-todo"))).toBeTruthy();
     expect(steps[1].getAttribute("aria-current")).toBe("step");
     expect(steps[0].getAttribute("aria-current")).toBeNull();
     expect(steps[2].getAttribute("aria-current")).toBeNull();
-    expect(plain(steps[1].textContent)).toContain(plain(text("connect-step-position", { number: 2, total: 3 })));
+    expect(plain(steps[1].textContent)).toContain(plain(text("frame-step-position", { number: 2, total: 3 })));
   });
 
   it("names the Wi-Fi this laptop is on only when it is known", () => {

@@ -29,6 +29,17 @@ role-new-title = My new laptop
 role-new-body = Receive my setup from another laptop.
 role-note = Nothing moves until you review and approve the plan. Your old laptop stays unchanged during the move.
 
+## Frame parts (footer note, Back, steps)
+
+footer-note-move = Free personal moves
+footer-note-send = Free nearby sending
+frame-back = Back
+# Read out by screen readers only; the step shapes carry the meaning on screen.
+frame-step-done = Done
+frame-step-current = Now
+frame-step-todo = Next
+frame-step-position = Step { $number } of { $total }
+
 ## F01 Unfinished move
 
 resume-open = Resume your move
@@ -60,10 +71,6 @@ connect-prep-step-2-title = Allow local-network access
 connect-prep-step-2-body = Use the genuine OS prompt if it appears.
 connect-prep-step-3-title = Choose a role on each laptop
 connect-prep-step-3-body = One sends. The other receives.
-connect-step-done = Done
-connect-step-current = Now
-connect-step-todo = Next
-connect-step-position = Step { $number } of { $total }
 connect-prep-note = Guest Wi-Fi or client isolation can block the link.
 connect-prep-continue = Continue to pairing
 

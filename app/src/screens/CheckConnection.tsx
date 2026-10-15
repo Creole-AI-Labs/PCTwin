@@ -4,7 +4,9 @@ import { Badge, Banner, Button, RowList, Row } from "../components/kit";
 import type { ConnectionCheck } from "../connection";
 import { ArrowForward, Attention, Check, Info, Laptop, Wifi } from "../icons";
 import { useUnits } from "./ConnectionParts";
-import { Eyebrow, Heading, PairStrip } from "./PairParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./PairParts";
 import "./connection.css";
 
 type Tone = "good" | "warn" | "neutral";
@@ -28,8 +30,7 @@ export default function CheckConnection({
 }) {
   return (
     <>
-      <PairStrip step={2} onBack={onBack} />
-      <Eyebrow id="check-eyebrow" />
+      <TopStrip onBack={onBack} labelId="check-eyebrow" />
       <Heading id="check-title" />
       <Localized id="check-body">
         <p className="subhead" />
@@ -42,19 +43,21 @@ export default function CheckConnection({
         <Results check={check} />
       )}
       <div className="connect-actions">
-        {check !== null && (
-          <Button variant="primary" icon={<ArrowForward />} className="connect-block" onClick={onContinue}>
-            <Localized id="check-continue">
-              <span />
-            </Localized>
-          </Button>
-        )}
         <Button className="connect-block" onClick={onRecheck}>
           <Localized id="check-again">
             <span />
           </Localized>
         </Button>
       </div>
+      {check !== null && (
+        <FrameFooter>
+          <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
+            <Localized id="check-continue">
+              <span />
+            </Localized>
+          </Button>
+        </FrameFooter>
+      )}
     </>
   );
 }
