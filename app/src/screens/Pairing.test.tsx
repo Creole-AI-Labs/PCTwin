@@ -162,6 +162,8 @@ describe("old laptop", () => {
     expect(heading().textContent).toBe(text("pair-choose-title"));
 
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 317 })) }));
+
+    fireEvent.click(button("pair-choose-confirm"));
     expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 7, number: 317 });
     expect(await screen.findByText(text("pair-choose-checking"))).toBeTruthy();
     noMissingText();
@@ -219,6 +221,7 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
     await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
+    fireEvent.click(button("pair-choose-confirm"));
     await emit("pairing-old", { kind: "paired" });
     await act(async () => {
       reject(problem("pairing-failed"));
@@ -234,6 +237,7 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
     await emit("pairing-old", { kind: "choose", round: 8, numbers: [4, 5, 6] });
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 5 })) }));
+    fireEvent.click(button("pair-choose-confirm"));
     expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 8, number: 5 });
   });
 
@@ -286,6 +290,7 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
     await emit("pairing-old", { kind: "choose", round: 7, numbers: [1, 2, 3] });
     fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
+    fireEvent.click(button("pair-choose-confirm"));
     expect(await screen.findByText(text("pairing-wrong-number"))).toBeTruthy();
     noMissingText();
   });
@@ -580,5 +585,33 @@ describe("the new laptop after an attempt ends", () => {
     });
     expect(screen.queryByText(text("pair-new-number-title"))).toBeNull();
     expect(await screen.findByText(text("pair-new-code-title"))).toBeTruthy();
+  });
+});
+
+describe("choosing the matching number", () => {
+  it("sends nothing until the person confirms, and a different number can be chosen first", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 3, numbers: [11, 42, 87] });
+    const confirm = button("pair-choose-confirm") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    const tile = (n: number) => screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: n })) });
+    fireEvent.click(tile(11));
+    fireEvent.click(tile(42));
+    expect(tile(42).getAttribute("aria-pressed")).toBe("true");
+    expect(tile(11).getAttribute("aria-pressed")).toBe("false");
+    expect(tauri.invoke.mock.calls.some((c) => c[0] === "pairing_old_pick")).toBe(false);
+    fireEvent.click(confirm);
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 3, number: 42 });
+    noMissingText();
+  });
+
+  it("new numbers clear an earlier choice", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
+    await emit("pairing-old", { kind: "choose", round: 2, numbers: [4, 5, 6] });
+    expect((button("pair-choose-confirm") as HTMLButtonElement).disabled).toBe(true);
   });
 });

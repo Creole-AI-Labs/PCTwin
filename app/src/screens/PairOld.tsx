@@ -1,7 +1,7 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { Badge, Banner, Button, CodeDisplay, TextField } from "../components/kit";
-import { ArrowForward, Info, Laptop, Lock, Shield, Wifi } from "../icons";
+import { ArrowForward, Check, Info, Laptop, Lock, Shield, Wifi } from "../icons";
 import {
   LOST,
   labelText,
@@ -43,6 +43,8 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const [code, setCode] = useState<{ digits: string; secondsLeft: number } | null>(null);
   const [waitLeft, setWaitLeft] = useState(0);
   const [numbers, setNumbers] = useState<number[]>([]);
+  // The number chosen on this round, sent only once the person confirms it (a mis-tap can be changed).
+  const [selected, setSelected] = useState<number | null>(null);
   const [round, setRound] = useState(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -76,6 +78,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
         break;
       case "choose":
         setNumbers(event.numbers);
+        setSelected(null);
         setRound(event.round);
         setChecking(false);
         setNotice(null);
@@ -458,9 +461,10 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
                   type="button"
                   className="pair-tile pair-number"
                   dir="ltr"
+                  aria-pressed={selected === n}
                   disabled={checking}
                   onClick={() => {
-                    void pick(n);
+                    setSelected(n);
                   }}
                 >
                   {/* The name ("Number 47") comes from real text, not a label that differs from what is seen. */}
@@ -475,6 +479,19 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
               </li>
             ))}
           </ul>
+          <Button
+            variant="primary"
+            className="pair-block"
+            icon={<Check />}
+            disabled={selected === null || checking}
+            onClick={() => {
+              if (selected !== null) void pick(selected);
+            }}
+          >
+            <Localized id="pair-choose-confirm">
+              <span />
+            </Localized>
+          </Button>
           <div role="status" className="pair-checking">
             {checking && (
               <Localized id="pair-choose-checking">

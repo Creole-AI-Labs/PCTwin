@@ -157,6 +157,12 @@ button.pair-number {
   background: var(--colour-soft);
 }
 
+.pair-number[aria-pressed="true"] {
+  border-color: var(--colour-blue);
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
 .pair-number:disabled {
   cursor: default;
   opacity: 0.55;
