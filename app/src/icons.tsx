@@ -75,6 +75,14 @@ export function Shield({ className }: Props) {
   );
 }
 
+export function Wifi({ className }: Props) {
+  return (
+    <svg {...base} width={16} height={16} className={className}>
+      <path d="M3 8a15 15 0 0 1 18 0M6 12a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 4h.01" />
+    </svg>
+  );
+}
+
 export function Lock({ className }: Props) {
   return (
     <svg {...base} width={16} height={16} className={className}>

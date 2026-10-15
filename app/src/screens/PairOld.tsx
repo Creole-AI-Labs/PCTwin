@@ -1,7 +1,7 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from "react";
-import { Banner, Button, CodeDisplay, TextField } from "../components/kit";
-import { ArrowForward, Info, Laptop, Lock, Shield } from "../icons";
+import { Badge, Banner, Button, CodeDisplay, TextField } from "../components/kit";
+import { ArrowForward, Info, Laptop, Lock, Shield, Wifi } from "../icons";
 import {
   LOST,
   labelText,
@@ -325,6 +325,20 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
               }
             />
           )}
+
+          <div className="pair-network">
+            <span className="pair-network-text">
+              <Wifi />
+              <Localized id="pair-old-network">
+                <span />
+              </Localized>
+            </span>
+            <Badge>
+              <Localized id="pair-old-waiting">
+                <span />
+              </Localized>
+            </Badge>
+          </div>
 
           <div className="note pair-next">
             <Shield />

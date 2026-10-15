@@ -182,8 +182,35 @@ button.pair-number {
   justify-content: center;
 }
 
+/* Network status under the code: wraps for large text and narrow windows */
+.pair-network {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-3) 0;
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.pair-network-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pair-network-text svg {
+  flex: none;
+}
+
 .pair-next {
   margin-top: var(--space-4);
+}
+
+.pair-network + .pair-next {
+  margin-top: var(--space-1);
 }
 
 .pair-numbers ~ .note {
