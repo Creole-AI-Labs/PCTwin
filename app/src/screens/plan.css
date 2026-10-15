@@ -1,0 +1,579 @@
+/* Choosing what moves (M02 to M23). Only the app tokens; logical properties so right-to-left just works;
+   sizes in rem so large text grows things instead of clipping them. The wide screens (M03, M23) lay out by
+   the width of their own window (a container), so they also work in a narrow frame. */
+
+.plan-screen {
+  container-type: inline-size;
+  container-name: plan;
+}
+
+.plan-strip .back {
+  min-height: var(--control-height);
+}
+
+.plan-screen h1:focus {
+  outline: none;
+}
+
+.plan-quiet {
+  margin-block: var(--space-2);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+  line-height: 1.5;
+}
+
+.plan-lead {
+  margin-block-end: var(--space-2);
+  color: var(--colour-ink);
+  font-size: var(--type-small);
+  line-height: 1.5;
+}
+
+/* The announced strip: no space until something is in it */
+.plan-notice:not(:empty) {
+  margin-block-start: var(--space-4);
+}
+
+.plan-notice .kit-banner p {
+  margin: 0;
+}
+
+.plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-block-start: var(--space-6);
+}
+
+.plan-actions .kit-button,
+.plan-folder-side .kit-button,
+.plan-message .kit-button {
+  min-height: var(--control-height);
+}
+
+/* M02: measured progress and counts */
+.plan-progress {
+  margin-block-start: var(--space-4);
+}
+
+.plan-counts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  margin-block: var(--space-2) var(--space-4);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-block {
+  margin-block-start: var(--space-4);
+}
+
+.plan-block .kit-row-end {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.plan-path {
+  overflow-wrap: anywhere;
+}
+
+/* M03: the three measured totals */
+.plan-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-6) 0 var(--space-4);
+}
+
+.plan-metric {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.plan-metric dd {
+  margin: 0;
+  color: var(--colour-blue);
+  font-size: var(--type-subheading);
+  font-weight: 650;
+  letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.plan-metric dt {
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.plan-screen .kit-row-end {
+  gap: var(--space-2);
+}
+
+/* M04: the folder list */
+.plan-search {
+  margin-block-start: var(--space-4);
+}
+
+.plan-folders {
+  display: flex;
+  flex-direction: column;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.plan-folders:empty {
+  display: none;
+}
+
+.plan-folder {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-block-end: 1px solid var(--colour-line-quiet);
+}
+
+.plan-folder:last-child {
+  border-block-end: 0;
+}
+
+.plan-folder-main {
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+}
+
+.plan-check {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0.1rem 0 0;
+  accent-color: var(--colour-blue);
+}
+
+.plan-folder-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--type-small);
+}
+
+.plan-folder-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.plan-folder-text small,
+.plan-cell-name small,
+.plan-cell-place small {
+  line-height: 1.45;
+}
+
+.plan-path-line {
+  overflow-wrap: anywhere;
+}
+
+.plan-folder-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.plan-folder-side .kit-chip {
+  white-space: normal;
+}
+
+.plan-add {
+  margin-block-start: var(--space-3);
+}
+
+.plan-total {
+  margin-block-start: var(--space-4);
+  font-size: var(--type-small);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* M05: the table of what goes where. Cells stack on a narrow window; the roles keep it a table. */
+.plan-default {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-block-start: var(--space-5);
+  font-size: var(--type-small);
+}
+
+.plan-default .kit-select {
+  inline-size: 100%;
+}
+
+.plan-default label {
+  font-weight: 600;
+}
+
+.plan-table {
+  position: relative;
+  margin-block-start: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.plan-table-head,
+.plan-table-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 0.6fr) minmax(0, 0.8fr);
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.plan-table-head {
+  border-start-start-radius: var(--radius-choice);
+  border-start-end-radius: var(--radius-choice);
+  background: var(--colour-soft);
+  border-block-end: 1px solid var(--colour-line);
+  color: var(--colour-muted);
+  font-size: var(--type-tertiary);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.plan-table-row + .plan-table-row {
+  border-block-start: 1px solid var(--colour-line-quiet);
+}
+
+.plan-cell-name,
+.plan-cell-place {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--type-small);
+}
+
+.plan-cell-place .kit-select {
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.plan-cell-placement {
+  font-size: var(--type-small);
+}
+
+.plan-cell-status .kit-chip {
+  white-space: normal;
+}
+
+@container plan (max-width: 34rem) {
+  .plan-table-head {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    padding: 0;
+    border: 0;
+  }
+
+  .plan-table-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+  }
+}
+
+.plan-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.plan-message + .plan-message {
+  margin-block-start: var(--space-2);
+}
+
+/* M23: the plan */
+.plan-version {
+  margin-block-start: var(--space-1);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.plan-columns {
+  display: grid;
+  margin-block-start: var(--space-4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 var(--space-6);
+}
+
+@container plan (min-width: 40rem) {
+  .plan-columns {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.plan-block-line {
+  display: block;
+}
+
+.plan-size {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.plan-places,
+.plan-hand {
+  margin: 0;
+  padding-inline-start: 1.2em;
+  font-size: var(--type-small);
+  line-height: 1.5;
+}
+
+.plan-places li + li,
+.plan-hand li + li {
+  margin-block-start: var(--space-2);
+}
+
+.plan-approval {
+  margin-block-start: var(--space-4);
+}
+
+.plan-approval .kit-banner + .kit-banner,
+.plan-approval .kit-banner + .plan-approve,
+.plan-approve + .plan-quiet,
+.plan-approval .kit-banner + .plan-quiet {
+  margin-block-start: var(--space-3);
+}
+
+.plan-approve {
+  margin-block-start: var(--space-4);
+  background: var(--colour-paper);
+  overflow: hidden;
+}
+
+.plan-more {
+  margin-block-start: var(--space-4);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.plan-more summary {
+  min-height: var(--control-small);
+  cursor: pointer;
+}
+
+.plan-more p {
+  margin-block-start: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+@container plan (max-width: 24rem) {
+  .plan-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The strip at the top: Back on one side, the label of the step on the other (as in the mockups) */
+.plan-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.plan-strip .eyebrow {
+  margin: 0;
+  text-align: end;
+}
+
+/* Cards and boxes */
+.plan-card,
+.plan-box {
+  padding: var(--space-5);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-choice);
+  background: var(--colour-paper);
+}
+
+.plan-card {
+  margin-block-start: var(--space-4);
+}
+
+.plan-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.plan-card .kit-progress {
+  margin-block-start: var(--space-3);
+}
+
+.plan-box-title {
+  margin-block-end: var(--space-3);
+  font-size: var(--type-row-title);
+  font-weight: 650;
+}
+
+.plan-box-rows {
+  margin-block-start: var(--space-3);
+  padding-block: var(--space-1);
+}
+
+.plan-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.plan-box-rows .kit-row {
+  align-items: center;
+}
+
+/* Rows inside a box: a bold line, a quiet line, a thin rule between */
+.plan-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: var(--space-3);
+  border-block-start: 1px solid var(--colour-line-quiet);
+  font-size: var(--type-small);
+}
+
+.plan-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.plan-item-text {
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.plan-columns .plan-box {
+  min-width: 0;
+}
+
+/* The steps: a marker for each, joined by a line (a tick done, a filled dot now, an empty ring next) */
+.plan-stepper {
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-step {
+  position: relative;
+  display: flex;
+  gap: var(--space-3);
+  padding-block-end: var(--space-4);
+}
+
+.plan-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  inset-block: 2.2rem 0.2rem;
+  inset-inline-start: calc(1.1rem - 1px);
+  width: 2px;
+  background: var(--colour-line);
+}
+
+.plan-step-marker {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1.5px solid var(--colour-line);
+  border-radius: 50%;
+  background: var(--colour-paper);
+}
+
+.plan-step-done .plan-step-marker {
+  border-color: var(--colour-success-text);
+  color: var(--colour-success-text);
+}
+
+.plan-step-current .plan-step-marker {
+  border-color: var(--colour-blue);
+  background: var(--colour-blue);
+}
+
+.plan-step-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--colour-paper);
+}
+
+.plan-step-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--type-small);
+}
+
+.plan-step-word {
+  margin-inline-start: var(--space-2);
+  color: var(--colour-muted);
+  font-weight: 500;
+}
+
+@media (forced-colors: active) {
+  .plan-card,
+  .plan-box,
+  .plan-step-marker {
+    border: 1px solid CanvasText;
+  }
+}
+
+@media (forced-colors: active) {
+  .plan-metric,
+  .plan-folders,
+  .plan-table,
+  .plan-approve {
+    border: 1px solid CanvasText;
+  }
+}
