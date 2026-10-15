@@ -97,9 +97,18 @@ pub enum Message {
     /// Receiver, answering an end in place of `FileDone`: some blocks are missing or read back
     /// wrong; send again those `ticket` does not list (the file stays open).
     SendAgain { stream: u32, ticket: ResumeTicket },
-    /// Sender, in place of sending again: this attempt has been asked for again as often as it
-    /// may be, so it stops here (the file fails, and the new laptop says why).
-    GiveUp { stream: u32 },
+    /// Sender: it stops sending this file, for `why` (the file fails, and the new laptop says
+    /// why).
+    GiveUp { stream: u32, why: GiveUpWhy },
+}
+
+/// Why the old laptop stopped sending a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiveUpWhy {
+    /// Parts of it were asked for again as often as one attempt allows.
+    AskedAgainTooOften,
+    /// It was read as many times as any file may be in one move.
+    ReadTooOften,
 }
 
 const START: u8 = 1;
@@ -183,9 +192,13 @@ impl Message {
                 w.extend_from_slice(&stream.to_be_bytes());
                 put_ticket(&mut w, ticket);
             }
-            Message::GiveUp { stream } => {
+            Message::GiveUp { stream, why } => {
                 w.push(GIVE_UP);
                 w.extend_from_slice(&stream.to_be_bytes());
+                w.push(match why {
+                    GiveUpWhy::AskedAgainTooOften => 0,
+                    GiveUpWhy::ReadTooOften => 1,
+                });
             }
             Message::FileDone { stream, ok } => {
                 w.push(DONE);
@@ -297,7 +310,14 @@ impl Message {
                 stream,
                 ticket: r.ticket()?,
             },
-            GIVE_UP => Message::GiveUp { stream },
+            GIVE_UP => Message::GiveUp {
+                stream,
+                why: match r.u8()? {
+                    0 => GiveUpWhy::AskedAgainTooOften,
+                    1 => GiveUpWhy::ReadTooOften,
+                    _ => return Err(damaged("unknown reason for stopping")),
+                },
+            },
             DONE => Message::FileDone {
                 stream,
                 ok: r.flag()?,

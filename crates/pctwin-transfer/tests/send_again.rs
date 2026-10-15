@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use pctwin_gate::{Approved, Destinations, FaultPlan, Flip};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    BlockMap, Channel, ChannelError, FileSender, Message, ReceiveOutcome, ReceiverSession,
-    ResumeTicket, Scheduler, SendJob, SendOutcome, SenderSession, Stamp, Tier, block_size_for,
-    split_into_pieces,
+    BlockMap, Channel, ChannelError, FileSender, GiveUpWhy, Message, ReceiveOutcome,
+    ReceiverSession, ResumeTicket, Scheduler, SendJob, SendOutcome, SenderSession, Stamp, Tier,
+    block_size_for, split_into_pieces,
 };
 use tokio::sync::mpsc;
 
@@ -458,7 +458,10 @@ fn the_new_messages_read_back_as_written() {
             block: 7,
             written: true,
         },
-        Message::GiveUp { stream: 9 },
+        Message::GiveUp {
+            stream: 9,
+            why: GiveUpWhy::ReadTooOften,
+        },
         Message::SendAgain {
             stream: 4,
             ticket: ResumeTicket {
@@ -562,7 +565,13 @@ async fn a_new_laptop_that_keeps_asking_again_is_answered_twice_then_the_file_fa
         // A third time in this attempt: nothing more is read or sent, and the old laptop says it
         // stops (never that the file changed).
         say(&mut new, &ask).await;
-        assert_eq!(hear(&mut new).await, Message::GiveUp { stream: 0 });
+        assert_eq!(
+            hear(&mut new).await,
+            Message::GiveUp {
+                stream: 0,
+                why: GiveUpWhy::AskedAgainTooOften
+            }
+        );
         say(
             &mut new,
             &Message::FileDone {
@@ -1028,7 +1037,13 @@ async fn a_ticket_that_does_not_describe_the_file_sent_stops_it_and_never_starts
             },
         )
         .await;
-        assert_eq!(hear(&mut new).await, Message::GiveUp { stream: 0 });
+        assert_eq!(
+            hear(&mut new).await,
+            Message::GiveUp {
+                stream: 0,
+                why: GiveUpWhy::AskedAgainTooOften
+            }
+        );
         say(
             &mut new,
             &Message::FileDone {
@@ -1050,38 +1065,279 @@ async fn a_ticket_that_does_not_describe_the_file_sent_stops_it_and_never_starts
 }
 
 #[tokio::test]
-async fn reconnecting_over_and_over_cannot_make_the_old_laptop_read_a_file_without_end() {
+async fn reconnecting_with_a_resume_ticket_over_and_over_cannot_make_the_old_laptop_read_without_end()
+ {
     let l = laptops(&[300_000]);
+    let header = FileSender::open(&l.files[0].0, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let count = header.block_count;
     let mut sender = SenderSession::new(jobs(&l), 1);
-    let mut starts = 0;
-    let mut finished = false;
-    for _ in 0..12 {
+    let mut stopped = false;
+    for _ in 0..60 {
         let (mut old, mut new) = mem_pair();
-        // Each connection: the new laptop says it has nothing, then goes away at the first start.
-        let script = async {
+        let header = header.clone();
+        // Each connection: "I have none of it, carry on", take every block, then go away (the
+        // connection ends with this script).
+        let script = async move {
+            say(
+                &mut new,
+                &Message::ResumeFrom {
+                    stream: 0,
+                    item: id(0),
+                    ticket: ResumeTicket {
+                        done: BlockMap::new(count),
+                        block_size: header.block_size,
+                        stamp: header.stamp,
+                    },
+                },
+            )
+            .await;
             say(&mut new, &Message::Ready).await;
-            let m = hear(&mut new).await;
-            drop(new);
-            m
+            loop {
+                match hear(&mut new).await {
+                    Message::StartFile { .. } => {
+                        say(
+                            &mut new,
+                            &Message::Have {
+                                stream: 0,
+                                same_size: None,
+                            },
+                        )
+                        .await;
+                    }
+                    Message::Piece {
+                        stream, last: true, ..
+                    } => {
+                        say(
+                            &mut new,
+                            &Message::Receipt {
+                                stream,
+                                block: 0,
+                                written: true,
+                            },
+                        )
+                        .await;
+                    }
+                    Message::Piece { .. } => {}
+                    Message::GiveUp { why, .. } => return Some(why),
+                    // The file's end, never answered: the connection goes.
+                    _ => return None,
+                }
+            }
         };
-        let (m, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let (got, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
             tokio::join!(script, sender.run(&mut old))
         })
         .await
         .expect("hung");
-        match m {
-            Message::StartFile { .. } => starts += 1,
-            Message::AllSent => {
-                finished = true;
-                break;
-            }
-            other => panic!("unexpected {other:?}"),
+        if got == Some(GiveUpWhy::ReadTooOften) {
+            stopped = true;
+            break;
         }
     }
-    assert!(finished, "the move never ended");
-    assert_eq!(starts, pctwin_transfer::MAX_ATTEMPTS);
+    assert!(stopped, "the old laptop never stopped reading the file");
+    // Never more than the budget: 16 times the file (as if 1 MiB), plus a block.
+    let budget_blocks = (16 * (1u64 << 20).max(header.size)).div_ceil(header.block_size);
+    assert!(
+        sender.blocks_sent() <= budget_blocks,
+        "{} blocks read, budget {budget_blocks}",
+        sender.blocks_sent()
+    );
     match sender.outcome(id(0)) {
-        Some(SendOutcome::Failed(why)) => assert!(why.contains("too many times"), "{why}"),
+        Some(SendOutcome::Failed(why)) => assert!(why.contains("many more times"), "{why}"),
+        None => {}
         other => panic!("{other:?}"),
     }
+}
+
+#[tokio::test]
+async fn an_answer_to_a_start_is_taken_once() {
+    let l = laptops(&[300_000]);
+    let fingerprint = *blake3::hash(&l.files[0].1).as_bytes();
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        say(&mut new, &Message::Ready).await;
+        assert!(matches!(
+            hear(&mut new).await,
+            Message::StartFile { stream: 0, .. }
+        ));
+        say(
+            &mut new,
+            &Message::Have {
+                stream: 0,
+                same_size: None,
+            },
+        )
+        .await;
+        // Once sending, later answers (here, "an identical file is here") are not owed: ignored,
+        // so the file is neither skipped nor read again to compare.
+        for _ in 0..40 {
+            say(
+                &mut new,
+                &Message::Have {
+                    stream: 0,
+                    same_size: Some(fingerprint),
+                },
+            )
+            .await;
+        }
+        let (_, end) = take_blocks_until_end(&mut new).await;
+        assert!(
+            matches!(end, Message::EndFile { changed: false, .. }),
+            "{end:?}"
+        );
+        say(
+            &mut new,
+            &Message::FileDone {
+                stream: 0,
+                ok: true,
+            },
+        )
+        .await;
+        assert_eq!(hear(&mut new).await, Message::AllSent);
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, sender.run(&mut old))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
+}
+
+/// A connection that goes away just as the old laptop starts a file, while `lose` is set.
+struct LoseStart {
+    inner: Option<Mem>,
+    lose: bool,
+}
+
+impl Channel for LoseStart {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        let Some(inner) = self.inner.as_mut() else {
+            return Err(ChannelError);
+        };
+        if self.lose && matches!(Message::decode(data), Ok(Message::StartFile { .. })) {
+            self.inner = None;
+            return Err(ChannelError);
+        }
+        inner.send(data).await
+    }
+
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        let Some(inner) = self.inner.as_mut() else {
+            return Err(ChannelError);
+        };
+        inner.recv().await
+    }
+}
+
+#[tokio::test]
+async fn files_whose_start_is_lost_to_drops_again_and_again_still_arrive() {
+    let l = laptops(&[300_000usize; 6]);
+    let jdir = tempfile::tempdir().unwrap();
+    let journal = pctwin_journal::Journal::open(&jdir.path().join("j.redb")).unwrap();
+    let table = table(&l, None);
+    let mut sender = SenderSession::new(jobs(&l), 4);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+    for c in 0..=6 {
+        let (a, mut b) = mem_pair();
+        let mut a = LoseStart {
+            inner: Some(a),
+            lose: c < 6,
+        };
+        let (s, _) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+        })
+        .await
+        .expect("hung");
+        if c == 6 {
+            s.unwrap();
+        }
+    }
+    for n in 0..6 {
+        assert_eq!(
+            sender.outcome(id(n as u8)),
+            Some(&SendOutcome::Arrived),
+            "file {n}"
+        );
+        assert_eq!(std::fs::read(landed(&l, n)).unwrap(), l.files[n].1);
+    }
+}
+
+/// Opens files whose stamp moves on every time a read of them ends, as a file being written to
+/// all the time does.
+#[derive(Default)]
+struct AlwaysChanging {
+    version: std::sync::Arc<std::sync::atomic::AtomicI64>,
+}
+
+struct AlwaysChangingSource {
+    inner: Box<dyn pctwin_transfer::Source>,
+    version: std::sync::Arc<std::sync::atomic::AtomicI64>,
+    seen: bool,
+}
+
+impl std::io::Read for AlwaysChangingSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl std::io::Seek for AlwaysChangingSource {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+impl pctwin_transfer::Source for AlwaysChangingSource {
+    fn stamp(&mut self) -> std::io::Result<Stamp> {
+        use std::sync::atomic::Ordering;
+        let mut s = self.inner.stamp()?;
+        let v = if self.seen {
+            self.version.fetch_add(1, Ordering::SeqCst) + 1
+        } else {
+            self.seen = true;
+            self.version.load(Ordering::SeqCst)
+        };
+        s.modified_ns = Some(1_000_000_000 + v);
+        Ok(s)
+    }
+}
+
+impl pctwin_transfer::Opener for AlwaysChanging {
+    fn open(&self, path: &std::path::Path) -> std::io::Result<Box<dyn pctwin_transfer::Source>> {
+        Ok(Box::new(AlwaysChangingSource {
+            inner: pctwin_transfer::FsOpener.open(path)?,
+            version: self.version.clone(),
+            seen: false,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn a_file_that_never_stops_changing_ends_with_the_true_reason() {
+    let l = laptops(&[300_000]);
+    let table = table(&l, None);
+    let mut sender =
+        SenderSession::new(jobs(&l), 1).with_opener(std::sync::Arc::new(AlwaysChanging::default()));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (mut a, mut b) = mem_pair();
+    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await
+    .expect("hung");
+    s.unwrap();
+    r.unwrap();
+    match receiver.outcome(id(0)) {
+        Some(ReceiveOutcome::Failed(why)) => assert!(why.contains("kept changing"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+    assert!(!landed(&l, 0).exists());
+    // Sent whole at most as often as the new laptop allows attempts.
+    let count = (300_000u64).div_ceil(block_size_for(300_000));
+    assert!(sender.blocks_sent() <= u64::from(pctwin_transfer::MAX_ATTEMPTS) * count);
 }
