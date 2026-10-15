@@ -1,9 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window's screens: they may open our own site in the browser and nothing else. The app's own commands (window size by name, tray labels) take typed arguments only.",
+  "description": "The main window's screens: they may open our own site in the browser and nothing else, and listen to the app's own events (pairing updates). The app's own commands (window size by name, tray labels, pairing) take typed arguments only.",
   "windows": ["main"],
   "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://getpctwin.com/*" }]
