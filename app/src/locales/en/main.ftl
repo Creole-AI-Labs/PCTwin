@@ -525,6 +525,18 @@ progress-count-failed =
        *[other] { $count } items could not be copied
     }
 progress-queue-empty = Nothing has started yet.
+progress-route-old = Old laptop
+progress-route-new = New laptop
+progress-role-home = Home folder
+progress-role-desktop = Desktop
+progress-role-documents = Documents
+progress-role-downloads = Downloads
+progress-role-pictures = Pictures
+progress-role-music = Music
+progress-role-videos = Videos
+progress-role-public = Public folder
+progress-role-app-data = App data
+progress-role-other = Other folder
 progress-panel-pausing = Pausing
 outcome-metric-size = copied and checked
 outcome-metric-done = items in place

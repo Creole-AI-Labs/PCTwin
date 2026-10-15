@@ -1,9 +1,9 @@
 import { useLocalization } from "@fluent/react";
-import { Badge, Button } from "../components/kit";
-import { ArrowForward, Lock } from "../icons";
+import { Button } from "../components/kit";
+import { ArrowForward } from "../icons";
 import { measuredPercent, type MoveProgress } from "../move";
 import Paused from "./Paused";
-import { CountRows, Eyebrow, Heading, MeasuredBar, Notices, NowLine, PercentValue } from "./ProgressParts";
+import { Eyebrow, Heading, MeasuredBar, Notices, NowLine, PercentValue, GroupRows, RouteStrip } from "./ProgressParts";
 
 export type ProgressHandlers = {
   onPause: () => void;
@@ -31,20 +31,16 @@ export default function ProgressCompact({
   if (progress.state !== "running") return <Paused progress={progress} onResume={onResume} onStop={onStop} />;
   return (
     <>
+      <RouteStrip laptops={progress.laptops} />
       <div className="mv-head">
         <div>
           <Eyebrow id="progress-eyebrow" />
           <Heading id="progress-title" />
         </div>
-        <div className="mv-head-end">
-          <Badge tone="good" icon={<Lock className="mv-icon" />}>
-            {l10n.getString("progress-paired")}
-          </Badge>
-          <PercentValue pct={measuredPercent(progress)} />
-        </div>
+        <PercentValue pct={measuredPercent(progress)} />
       </div>
       <MeasuredBar progress={progress} />
-      <CountRows counts={progress.counts} />
+      <GroupRows groups={progress.groups} />
       <NowLine current={progress.current} />
       <Notices progress={progress} onSeeNeedsAction={onSeeNeedsAction} />
       <p className="mv-safe">{l10n.getString("progress-old-safe")}</p>

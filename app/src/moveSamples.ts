@@ -3,6 +3,7 @@
  * number is invented. The shapes are the real ones (move.ts), so a sample that does not fit the
  * engine's rules does not type-check.
  */
+import type { Label } from "./pairing";
 import { noStatuses, type Counts, type MoveOutcome, type MoveProgress, type QueueItem, type ReportItem } from "./move";
 
 const GB = 1_000_000_000;
@@ -13,41 +14,67 @@ export function counts(partial: Partial<Counts>): Counts {
   return { ...c, total: partial.total ?? c.waiting + c.copying + c.checking + c.done + c.needsAction + c.failed + c.skippedByUser };
 }
 
+const old: Label = { kind: "named", name: "Ada’s old laptop" };
+const next: Label = { kind: "picked", colour: "blue", animal: "fox" };
+const laptops = { old, new: next };
+
 /** Copying, mid-move: some done, some being checked, some waiting. */
 export const running: MoveProgress = {
   state: "running",
+  laptops,
+  groups: [
+    { id: "g1", name: { kind: "role", role: "documents" }, counts: counts({ done: 1800 }) },
+    { id: "g2", name: { kind: "role", role: "pictures" }, counts: counts({ done: 2410, copying: 1, checking: 3, waiting: 1286 }) },
+    { id: "g3", name: { kind: "folder", name: "Tax 2023" }, counts: counts({ waiting: 500 }) },
+  ],
   counts: counts({ done: 4210, copying: 1, checking: 3, waiting: 1786 }),
   bytes: { checked: 81.6 * GB, total: 120 * GB },
   current: { name: "Holiday 2024 / IMG_2043.jpg", step: "copying" },
   speed: { low: 58 * MB, high: 66 * MB },
   minutesLeft: { low: 15, high: 20 },
-  laptop: "Blue Fox",
 };
 
 /** Just started: nothing measured yet, so no speed and no time. */
 export const starting: MoveProgress = {
   state: "running",
+  laptops,
+  groups: [
+    { id: "g1", name: { kind: "role", role: "documents" }, counts: counts({ waiting: 2000 }) },
+    { id: "g2", name: { kind: "role", role: "pictures" }, counts: counts({ waiting: 4000 }) },
+  ],
   counts: counts({ waiting: 6000 }),
   bytes: { checked: 0, total: 120 * GB },
-  laptop: "Blue Fox",
 };
 
 /** Every byte is checked but the last files are still being read back: never 100. */
 export const almost: MoveProgress = {
   state: "running",
+  laptops,
+  groups: [
+    { id: "g1", name: { kind: "role", role: "documents" }, counts: counts({ done: 2000 }) },
+    { id: "g2", name: { kind: "role", role: "pictures" }, counts: counts({ done: 3997, checking: 3 }) },
+  ],
   counts: counts({ done: 5997, checking: 3 }),
   bytes: { checked: 119.97 * GB, total: 120 * GB },
   current: { name: "Tax / 2023 return.pdf", step: "checking" },
-  laptop: "Blue Fox",
 };
 
 export const withNeedsAction: MoveProgress = {
   ...running,
+  groups: [
+    { id: "g1", name: { kind: "role", role: "documents" }, counts: counts({ done: 1797, needsAction: 3 }) },
+    ...running.groups.slice(1),
+  ],
   counts: counts({ done: 4210, copying: 1, checking: 3, waiting: 1783, needsAction: 3 }),
 };
 
 export const withFailures: MoveProgress = {
   ...running,
+  groups: [
+    { id: "g1", name: { kind: "role", role: "documents" }, counts: counts({ done: 1797, needsAction: 3 }) },
+    { id: "g2", name: { kind: "role", role: "pictures" }, counts: counts({ done: 2410, copying: 1, checking: 3, waiting: 1285, failed: 1 }) },
+    running.groups[2],
+  ],
   counts: counts({ done: 4210, copying: 1, checking: 3, waiting: 1782, needsAction: 3, failed: 1 }),
 };
 

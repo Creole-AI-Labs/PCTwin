@@ -2,8 +2,9 @@
 import { Localized, useLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
 import { Banner, Badge, ProgressBar, ProgressValue, ResultChip, Row, RowList } from "../components/kit";
-import { ArrowBack, ArrowForward, Info } from "../icons";
-import { formatBytes, formatSpeed, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type MoveProgress, type Reason } from "../move";
+import { ArrowBack, ArrowForward, Check, Info, Laptop, Lock } from "../icons";
+import { labelText } from "../pairing";
+import { formatBytes, formatSpeed, groupState, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Reason } from "../move";
 import "./progress.css";
 
 export { Eyebrow, Heading } from "./PairParts";
@@ -108,17 +109,64 @@ export function ProgressPanel({ title, progress, note }: { title: string; progre
   );
 }
 
-/** Each count on its own row, with its state in an icon and a word. All measured. Needs-action and failed appear only when there are some. */
-export function CountRows({ counts }: { counts: MoveProgress["counts"] }) {
+/** A group's name: its role in words, or the folder's own name in its own direction. */
+function GroupLabel({ name }: { name: GroupName }) {
+  const { l10n } = useLocalization();
+  return name.kind === "role" ? <>{l10n.getString(`progress-role-${name.role}`)}</> : <bdi dir="auto">{name.name}</bdi>;
+}
+
+/** A group's state as an icon and a word. "Verified" only for a group whose every item is copied and checked. */
+function GroupBadge({ state }: { state: GroupState }) {
+  const { l10n } = useLocalization();
+  if (state === "copied") return <Badge tone="good" icon={<Check className="mv-icon" />}>{l10n.getString("progress-state-verified")}</Badge>;
+  if (state === "needs-action" || state === "failed") return <ResultChip result={state} />;
+  return <PhaseBadge phase={state} paused={false} />;
+}
+
+/**
+ * One row for each group, with its state. The state comes from the group's measured counts
+ * (`groupState`), so a group with anything still being checked is never shown as verified; items
+ * that need the person or failed are counted under the group's name whatever its state.
+ */
+export function GroupRows({ groups }: { groups: MoveGroup[] }) {
   const { l10n } = useLocalization();
   return (
     <RowList>
-      <Row title={l10n.getString("progress-count-copied", { count: counts.done })} end={<ResultChip result="copied" />} />
-      <Row title={l10n.getString("progress-count-checking", { count: counts.checking })} end={<PhaseBadge phase="checking" paused={false} />} />
-      <Row title={l10n.getString("progress-count-waiting", { count: counts.waiting + counts.copying })} end={<PhaseBadge phase="waiting" paused={false} />} />
-      {counts.needsAction > 0 && <Row title={l10n.getString("progress-count-needs-action", { count: counts.needsAction })} end={<ResultChip result="needs-action" />} />}
-      {counts.failed > 0 && <Row title={l10n.getString("progress-count-failed", { count: counts.failed })} end={<ResultChip result="failed" />} />}
+      {groups.map((g) => {
+        const notes = [
+          g.counts.needsAction > 0 ? l10n.getString("progress-count-needs-action", { count: g.counts.needsAction }) : "",
+          g.counts.failed > 0 ? l10n.getString("progress-count-failed", { count: g.counts.failed }) : "",
+        ].filter(Boolean);
+        return <Row key={g.id} title={<GroupLabel name={g.name} />} detail={notes.length > 0 ? notes.join(" ") : undefined} end={<GroupBadge state={groupState(g.counts)} />} />;
+      })}
     </RowList>
+  );
+}
+
+/** "Old laptop → New laptop": the two names pairing gave them, each in its own direction. */
+export function RouteStrip({ laptops }: { laptops: MoveProgress["laptops"] }) {
+  const { l10n } = useLocalization();
+  return (
+    <div className="mv-route">
+      <span className="mv-laptop">
+        <Laptop className="mv-icon" />
+        <span>
+          <bdi dir="auto">{labelText(l10n, laptops.old)}</bdi>
+          <small>{l10n.getString("progress-route-old")}</small>
+        </span>
+      </span>
+      <ArrowForward className="mv-icon mv-arrow" />
+      <span className="mv-laptop">
+        <Laptop className="mv-icon" />
+        <span>
+          <bdi dir="auto">{labelText(l10n, laptops.new)}</bdi>
+          <small>{l10n.getString("progress-route-new")}</small>
+        </span>
+      </span>
+      <Badge tone="good" icon={<Lock className="mv-icon" />}>
+        {l10n.getString("progress-paired")}
+      </Badge>
+    </div>
   );
 }
 

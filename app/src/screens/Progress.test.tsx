@@ -11,9 +11,11 @@ import {
   ITEM_STATUSES,
   NEEDS_ACTION_REASONS,
   formatBytes,
+  groupState,
   measuredPercent,
   parseResult,
   statusOfReason,
+  type Counts,
   type ItemResult,
   type MoveProgress,
   type ReportItem,
@@ -188,8 +190,27 @@ describe("measured numbers", () => {
   });
 });
 
+describe("a group's state", () => {
+  const c = (p: Partial<Counts>) => counts(p);
+  it("is copied only when nothing in it is waiting, copying or checking", () => {
+    expect(groupState(c({ done: 10 }))).toBe("copied");
+    expect(groupState(c({ done: 10, checking: 1 }))).toBe("checking");
+    expect(groupState(c({ done: 10, copying: 1 }))).toBe("copying");
+    expect(groupState(c({ done: 10, waiting: 1 }))).toBe("copying");
+    expect(groupState(c({ waiting: 10 }))).toBe("waiting");
+    expect(groupState(c({ done: 9, checking: 1, failed: 1 }))).toBe("checking");
+  });
+
+  it("puts failed before needs-action before copied once nothing is unfinished", () => {
+    expect(groupState(c({ done: 5, needsAction: 1 }))).toBe("needs-action");
+    expect(groupState(c({ done: 5, needsAction: 1, failed: 1 }))).toBe("failed");
+  });
+});
+
 describe("X01 Move progress, compact", () => {
-  it("shows what is measured: the bar, sizes, and each count on its own line", async () => {
+  const groupRow = (name: string) => screen.getAllByRole("listitem").find((li) => li.textContent.includes(name)) as HTMLElement;
+
+  it("shows what is measured: the bar, sizes, the two laptops and each group", async () => {
     inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(text("progress-title"));
@@ -197,9 +218,14 @@ describe("X01 Move progress, compact", () => {
     const bar = screen.getByRole("progressbar", { name: attribute("progress-percent", "aria-label") });
     expect(bar.getAttribute("aria-valuenow")).toBe("68"); // 81.6 of 120 GB
     expect(screen.getByText(hasText("81.6 GB of 120 GB"))).toBeTruthy();
-    expect(screen.getByText(withText(text("progress-count-copied", { count: 4210 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("progress-count-checking", { count: 3 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("progress-count-waiting", { count: 1787 })))).toBeTruthy();
+    // The route: both laptops by the names pairing gave them, then each group with its own state.
+    expect(screen.getByText("Ada’s old laptop")).toBeTruthy();
+    expect(screen.getByText(withText(text("label-picked", { colour: text("label-colour-blue"), animal: text("label-animal-fox") })))).toBeTruthy();
+    expect(screen.getByText(text("progress-route-old"))).toBeTruthy();
+    expect(screen.getByText(text("progress-paired"))).toBeTruthy();
+    expect(within(groupRow("Documents")).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(within(groupRow("Pictures")).getByText(text("progress-state-checking"))).toBeTruthy();
+    expect(within(groupRow("Tax 2023")).getByText(text("progress-state-waiting"))).toBeTruthy();
     expect(screen.getByText(withText(text("progress-current-copying", { name: "Holiday 2024 / IMG_2043.jpg" })))).toBeTruthy();
     expect(screen.getByText(text("progress-old-safe"))).toBeTruthy();
     expectClean();
@@ -231,7 +257,10 @@ describe("X01 Move progress, compact", () => {
     expect(bar.getAttribute("aria-valuenow")).toBe("99");
     expect(document.body.textContent).not.toMatch(/100\s*%/);
     expect(document.body.textContent).not.toMatch(/\b(done|complete|completed|finished|all set)\b/i);
-    expect(screen.getByText(withText(text("progress-count-checking", { count: 3 })))).toBeTruthy();
+    // The group with files still being checked is never called verified.
+    expect(within(groupRow("Pictures")).queryByText(text("progress-state-verified"))).toBeNull();
+    expect(within(groupRow("Pictures")).getByText(text("progress-state-checking"))).toBeTruthy();
+    expect(within(groupRow("Documents")).getByText(text("progress-state-verified"))).toBeTruthy();
   });
 
   it("with nothing measured the bar is empty and says no number", () => {
@@ -245,17 +274,24 @@ describe("X01 Move progress, compact", () => {
   it("items that need the person are counted apart and do not stop the rest", () => {
     const onSee = vi.fn();
     inApp(<ProgressCompact progress={sample.withNeedsAction} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={onSee} />);
-    expect(screen.getByText(withText(text("progress-count-needs-action", { count: 3 })))).toBeTruthy();
+    const docs = groupRow("Documents");
+    expect(within(docs).getByText(withText(text("progress-count-needs-action", { count: 3 })))).toBeTruthy();
+    // Nothing unfinished in it, so it is shown as needing the person, not as verified.
+    expect(within(docs).getByText(text("status-needs-action"))).toBeTruthy();
+    expect(within(docs).queryByText(text("progress-state-verified"))).toBeNull();
     expect(screen.getByText(withText(text("progress-needs-action", { count: 3 })))).toBeTruthy();
-    // The other counts are still there.
-    expect(screen.getByText(withText(text("progress-count-copied", { count: 4210 })))).toBeTruthy();
+    // The other groups are still there.
+    expect(within(groupRow("Pictures")).getByText(text("progress-state-checking"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: text("progress-see-needs-action") }));
     expect(onSee).toHaveBeenCalledOnce();
   });
 
   it("items that could not be copied stay visible", () => {
     inApp(<ProgressCompact progress={sample.withFailures} onPause={noop} onResume={noop} onExpand={noop} onMinimise={noop} onStop={noop} onSeeNeedsAction={noop} />);
-    expect(screen.getByText(withText(text("progress-count-failed", { count: 1 })))).toBeTruthy();
+    const pictures = groupRow("Pictures");
+    expect(within(pictures).getByText(withText(text("progress-count-failed", { count: 1 })))).toBeTruthy();
+    // Still being worked on, so its state is a working one; the failure is counted under its name.
+    expect(within(pictures).getByText(text("progress-state-checking"))).toBeTruthy();
   });
 
   it("no line for needs-action or failed when there are none", () => {

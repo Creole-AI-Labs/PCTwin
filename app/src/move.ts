@@ -13,7 +13,7 @@
  * - `set_window_mode("mini" | "everyday" | "expanded")`: exists already (native.ts).
  *
  * Events (Tauri `listen`):
- * - `move-progress`: a `MoveProgress`, whenever a measured number changes (a few times a second at most).
+ * - `move-progress`: a `MoveProgress` (the pairing labels, each group's measured counts, the totals), whenever a measured number changes (a few times a second at most).
  * - `move-state`: `{ state: RunState }` when the run state changes.
  * - `move-queue`: `QueueItem[]` (X02), the items in flight and recently ended.
  * - `move-finished`: `MoveOutcome` once nothing is waiting, copying or checking.
@@ -23,6 +23,8 @@
  * (crates/pctwin-gate, read_back.rs). Names are the engine's kebab-case names, which are also the
  * keys of their translated text.
  */
+
+import type { Label } from "./pairing";
 
 /* ---------- Results: the engine's ItemStatus and Reason ---------- */
 
@@ -136,8 +138,38 @@ export type Counts = {
 
 export type Range = { low: number; high: number };
 
+/** What a folder is for (`FolderRole` in the engine, as lane C's plan.ts also names it). */
+export type FolderRole = "home" | "desktop" | "documents" | "downloads" | "pictures" | "music" | "videos" | "public" | "app-data" | "other";
+
+/** A group of the move: a folder by its role, or a folder the person added, by its name. */
+export type GroupName = { kind: "role"; role: FolderRole } | { kind: "folder"; name: string };
+
+/** Where a group stands. "copied" means every item in it is copied and checked, and nothing else. */
+export type GroupState = "waiting" | "copying" | "checking" | "copied" | "needs-action" | "failed";
+
+/** One group's measured counts (the same separate counts as the whole move). */
+export type MoveGroup = { id: string; name: GroupName; counts: Counts };
+
+/**
+ * A group's state, derived from its measured counts so it cannot be told otherwise: while anything
+ * in it is waiting, copying or checking it is not "copied"; when nothing is unfinished, failed
+ * comes before needs-action, which comes before copied.
+ */
+export function groupState(c: Counts): GroupState {
+  if (c.checking > 0) return "checking";
+  if (c.copying > 0) return "copying";
+  if (c.waiting > 0) return c.done + c.needsAction + c.failed > 0 ? "copying" : "waiting";
+  if (c.failed > 0) return "failed";
+  if (c.needsAction > 0) return "needs-action";
+  return "copied";
+}
+
 export type MoveProgress = {
   state: RunState;
+  /** The two laptops, as pairing labelled them. */
+  laptops: { old: Label; new: Label };
+  /** The groups of the plan, each with its own measured counts. */
+  groups: MoveGroup[];
   counts: Counts;
   /** Bytes written and read back so far, and bytes in the approved plan. Never estimated. */
   bytes: { checked: number; total: number };
@@ -149,8 +181,6 @@ export type MoveProgress = {
   minutesLeft?: Range;
   /** Something the person may need to act on. `label` is the laptop that is low on battery. */
   notice?: { kind: "low-battery"; label: string } | { kind: "link-lost" };
-  /** The other laptop's name, for the title. */
-  laptop?: string;
 };
 
 /** A count of zero for every status, to fill in. */
