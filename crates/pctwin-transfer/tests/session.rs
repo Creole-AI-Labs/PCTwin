@@ -1571,6 +1571,14 @@ async fn a_file_found_already_there_is_spent_too() {
             }
         ));
         say(&mut old, &Message::Skip { stream: 0 }).await;
+        // The skip is answered: it is already there.
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
         // Started again on another stream: refused, it is already there.
         let (again, _) = small_start(&l, 5);
         say(&mut old, &again).await;

@@ -1,7 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -392,6 +393,9 @@ enum SendState {
         /// It could not be read; try it once more after everything else.
         later: bool,
     },
+    /// Found identical on the new laptop and told to skip it; it is already there only once the
+    /// new laptop answers so.
+    Skipping,
     Done(SendOutcome),
 }
 
@@ -455,10 +459,30 @@ pub struct SenderSession {
     /// Per job: the file as this laptop read it for the current attempt. Whether it changed is
     /// judged against this, never against what the new laptop says it is.
     attempt_stamp: Vec<Option<crate::Stamp>>,
-    /// Per job: bytes of it read so far in this move, by any path (blocks sent, sent again, or
-    /// its fingerprint compared), whatever message asked for them: a new laptop, honest or not,
-    /// can never make this laptop read one file without end (see [`read_budget`]).
-    read: Vec<u64>,
+    /// The most that may be in flight now, in raw block bytes: the whole limit until a loss, then
+    /// the floor, growing by each block receipted written (TCP's slow start with byte counting,
+    /// RFC 5681 and RFC 3465). Every block a loss makes this laptop read again was earned by
+    /// progress it recorded itself, so a poor connection slows the move but never fails a file.
+    window: u64,
+    /// The drive is read carefully: the floor is one block.
+    careful: bool,
+    /// Whether a run started already, and whether the last one ended well (one that did not was
+    /// a loss).
+    ran: bool,
+    ended_well: bool,
+    /// Per job: raw bytes of its blocks the new laptop receipted (written or not) for the version
+    /// in `attempt_stamp`, over every attempt, connection and round at that version; past
+    /// [`answered_cap`] it stops. Drops never count: a lost block is never receipted.
+    answered: Vec<u64>,
+    /// Per job: versions of it (stamps unlike the one before) this laptop opened. Only the first
+    /// [`MAX_ATTEMPTS`](crate::MAX_ATTEMPTS) are ever read.
+    versions: Vec<u32>,
+    /// Per job: its fingerprint, worked out once for the version it was worked out at (`None`
+    /// when it could not be: then it is "not identical").
+    fingerprint: Vec<Option<(crate::Stamp, Option<[u8; 32]>)>>,
+    /// Per job: the end (or stop) last said for it, said again on each new connection while it
+    /// is unanswered.
+    last_end: Vec<Option<Message>>,
 }
 
 impl SenderSession {
@@ -505,14 +529,22 @@ impl SenderSession {
             asked_again: vec![0; jobs_len],
             ended_tier: tiers,
             attempt_stamp: vec![None; jobs_len],
-            read: vec![0; jobs_len],
+            window: IN_FLIGHT_BYTES,
+            careful: false,
+            ran: false,
+            ended_well: false,
+            answered: vec![0; jobs_len],
+            versions: vec![0; jobs_len],
+            fingerprint: vec![None; jobs_len],
+            last_end: vec![None; jobs_len],
         }
     }
 
-    /// Sends at most `bytes` (over every lane together) before the new laptop confirms them
-    /// (32 MiB unless set).
+    /// Sends at most `bytes` of blocks (over every lane together) before the new laptop confirms
+    /// them (32 MiB unless set).
     pub fn with_in_flight_limit(mut self, bytes: u64) -> Self {
         self.in_flight_limit = bytes.max(1);
+        self.window = self.in_flight_limit;
         self
     }
 
@@ -525,6 +557,7 @@ impl SenderSession {
     /// How carefully to read the old drive (from its health check).
     pub fn with_read_plan(mut self, plan: ReadPlan) -> Self {
         self.budget = ReadBudget::for_plan(plan);
+        self.careful = matches!(plan, ReadPlan::Careful { .. });
         self
     }
 
@@ -591,7 +624,26 @@ impl SenderSession {
         main: &mut C,
         joining: &mut UnboundedReceiver<L>,
     ) -> Result<(), TransferError> {
+        // A run that did not end well lost what it had in flight: the next starts again from the
+        // floor. (Judged at the start of each run, so a run given up by its caller counts too.)
+        let after_loss = self.ran && !self.ended_well;
+        self.ran = true;
+        self.ended_well = false;
+        let ran = self.run_once(main, joining, after_loss).await;
+        self.ended_well = ran.is_ok();
+        ran
+    }
+
+    async fn run_once<C: Channel, L: Channel>(
+        &mut self,
+        main: &mut C,
+        joining: &mut UnboundedReceiver<L>,
+        after_loss: bool,
+    ) -> Result<(), TransferError> {
         self.resume(main).await?;
+        if after_loss {
+            self.window = self.floor();
+        }
         self.lanes = vec![VecDeque::new()];
         self.in_flight = 0;
         let state = RefCell::new(self);
@@ -712,23 +764,52 @@ impl SenderSession {
                 // Done, or still waiting for its second try at the end.
                 continue;
             }
+            match &self.states[job] {
+                SendState::Ended {
+                    failure: Some(why), ..
+                } => {
+                    // An end stays an end: a file that failed here, or was given up on, is never
+                    // opened again; what was said is said again until the new laptop answers.
+                    match self.last_end[job].clone() {
+                        Some(end) => self.ends.push(end),
+                        None => {
+                            self.states[job] = SendState::Done(SendOutcome::Failed(why.clone()))
+                        }
+                    }
+                    continue;
+                }
+                SendState::Skipping => {
+                    // Its skip was never answered: started again, whatever the ticket says (the
+                    // fingerprint is kept, so comparing again reads nothing).
+                    self.states[job] = SendState::Waiting;
+                    self.scheduler
+                        .push(self.jobs[job].item, self.jobs[job].tier);
+                    continue;
+                }
+                _ => {}
+            }
             let picked_up = tickets.get(&job).and_then(|ticket| {
                 let j = &self.jobs[job];
                 let reader =
                     FileSender::open_with(&*self.opener, &j.source, Some(ticket), j.compressible)
                         .ok()?;
-                self.attempt_stamp[job] = Some(reader.header().stamp);
                 let sections = sections_for(reader.header(), &ticket.done.to_bools())?;
-                Some(SendState::Open {
-                    reader,
-                    sections,
-                    announced: false,
-                    resumed_done: ticket.done.done_count(),
-                    cleared: false,
-                })
+                Some((reader, sections, ticket.done.done_count()))
             });
             // Without a ticket, or if the file changed since, it starts again from the beginning.
-            self.states[job] = picked_up.unwrap_or(SendState::Waiting);
+            self.states[job] = match picked_up {
+                Some((reader, sections, resumed_done)) => {
+                    self.read_version(job, reader.header().stamp);
+                    SendState::Open {
+                        reader,
+                        sections,
+                        announced: false,
+                        resumed_done,
+                        cleared: false,
+                    }
+                }
+                None => SendState::Waiting,
+            };
             self.scheduler
                 .push(self.jobs[job].item, self.jobs[job].tier);
         }
@@ -743,7 +824,8 @@ impl SenderSession {
                 stream: self.streams[job],
             });
             self.scheduler.finished(self.jobs[job].item);
-            self.states[job] = SendState::Done(SendOutcome::AlreadyThere);
+            // Already there only once the new laptop says so (see `done`).
+            self.states[job] = SendState::Skipping;
         }
         out.append(&mut self.ends);
         // A file ends once every block is confirmed, so the new laptop has them all first.
@@ -756,15 +838,18 @@ impl SenderSession {
                 && let SendState::Open { reader, .. } =
                     std::mem::replace(&mut self.states[job], SendState::Waiting)
             {
-                out.push(self.end(job, reader));
+                let end = self.end(job, reader);
+                self.last_end[job] = Some(end.clone());
+                out.push(end);
             }
         }
         // Everything readable is done: one more try for what could not be read.
-        let idle = !self
-            .states
-            .iter()
-            .any(|s| matches!(s, SendState::Open { .. } | SendState::Ended { .. }))
-            && self.in_flight == 0;
+        let idle = !self.states.iter().any(|s| {
+            matches!(
+                s,
+                SendState::Open { .. } | SendState::Ended { .. } | SendState::Skipping
+            )
+        }) && self.in_flight == 0;
         if idle && !self.later.is_empty() && !self.budget.stopped() {
             for job in std::mem::take(&mut self.later) {
                 self.retried.insert(job);
@@ -826,7 +911,9 @@ impl SenderSession {
         match opened {
             Ok((reader, sections)) => {
                 self.new_stream(job);
-                self.attempt_stamp[job] = Some(reader.header().stamp);
+                // Past the versions any file is read in, it is still started (so the new laptop
+                // can say it kept changing) but never read again: see `answer`.
+                self.read_version(job, reader.header().stamp);
                 // A new attempt: the new laptop counts its rounds from 0 again, and so does this.
                 self.asked_again[job] = 0;
                 self.states[job] = SendState::Open {
@@ -861,6 +948,47 @@ impl SenderSession {
             self.streams[job] = stream;
             self.job_of.insert(stream, job);
         }
+    }
+
+    /// `job` is now read at `stamp`. A stamp unlike the one before is a new version: what the new
+    /// laptop was answered starts again from 0, and the version is counted.
+    fn read_version(&mut self, job: usize, stamp: crate::Stamp) {
+        if self.attempt_stamp[job] != Some(stamp) {
+            self.attempt_stamp[job] = Some(stamp);
+            self.answered[job] = 0;
+            self.versions[job] = self.versions[job].saturating_add(1);
+        }
+    }
+
+    /// Whether `job` is at a version past those any file is read in.
+    fn too_many_versions(&self, job: usize) -> bool {
+        self.versions[job] > crate::MAX_ATTEMPTS
+    }
+
+    /// The window after a loss: 1 MiB, or the block of the largest file open if that is bigger;
+    /// one block when the drive is read carefully. (One block always goes: see `work`.)
+    fn floor(&self) -> u64 {
+        let block = self
+            .states
+            .iter()
+            .filter_map(|s| match s {
+                SendState::Open { reader, .. } => Some(reader.header().block_size),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(crate::MIN_BLOCK);
+        if self.careful {
+            block
+        } else {
+            block.max(FLOOR_BYTES)
+        }
+    }
+
+    /// Queues `end` (an end or a stop of `job`) for the main connection, and keeps it to say again
+    /// on a new connection until it is answered.
+    fn push_end(&mut self, job: usize, end: Message) {
+        self.last_end[job] = Some(end.clone());
+        self.ends.push(end);
     }
 
     /// Every block of `job` is confirmed: its end, after checking it did not change while read.
@@ -903,12 +1031,13 @@ impl SenderSession {
 
     /// The next block for `lane`: from the most important file in flight that has one for it
     /// (a section this lane holds, a part no lane holds, or the back half of a big section).
+    /// While less than the window is in flight (raw block bytes, so compression cannot hide what
+    /// is read), one more block goes.
     fn work(&mut self, lane: usize) -> Work {
-        if self.budget.stopped() || self.in_flight >= self.in_flight_limit {
+        if self.budget.stopped() || self.in_flight >= self.in_flight_limit.min(self.window) {
             return Work::Wait;
         }
         let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
-        let mut over = None;
         for item in self.scheduler.in_flight() {
             let job = self.by_item[&item];
             let stream = self.streams[job];
@@ -921,11 +1050,6 @@ impl SenderSession {
             else {
                 continue;
             };
-            let cost = reader.header().block_size;
-            if self.read[job].saturating_add(cost) > read_budget(reader.header().size) {
-                over = Some(job);
-                break;
-            }
             let next = sections.next_block(lane_no).or_else(|| {
                 sections.claim(lane_no)?;
                 sections.next_block(lane_no)
@@ -933,49 +1057,79 @@ impl SenderSession {
             let Some(b) = next else {
                 continue;
             };
-            self.read[job] = self.read[job].saturating_add(cost);
             match reader.block_at(u64::from(b)) {
                 Ok(block) => {
                     self.budget.read_ok();
+                    let raw = block.data.len() as u64;
                     let wire = block.encode();
-                    let bytes = wire.len() as u64;
-                    self.lanes[lane].push_back((stream, b, bytes));
-                    self.in_flight += bytes;
+                    self.lanes[lane].push_back((stream, b, raw));
+                    self.in_flight += raw;
                     self.blocks_sent += 1;
                     return Work::Send { stream, wire };
                 }
                 Err(e) => self.read_error(job, e),
             }
         }
-        if let Some(job) = over {
-            self.read_too_often(job);
-        }
         Work::Wait
     }
 
-    /// `job` was read as many times as any file may be: it stops here, and the new laptop is
-    /// told why.
-    fn read_too_often(&mut self, job: usize) {
+    /// `job` stops here, for `why` (`text` is what this laptop says): the new laptop is told if
+    /// it holds the file, and nothing more of it is read.
+    fn give_up(&mut self, job: usize, why: GiveUpWhy, text: &str) {
         self.dirty = true;
         self.scheduler.finished(self.jobs[job].item);
         self.checks.retain(|(j, _)| *j != job);
         self.skips.retain(|j| *j != job);
-        self.states[job] = match self.states[job] {
+        let told = matches!(
+            self.states[job],
             SendState::Open {
-                announced: true, ..
-            } => {
-                self.ends.push(Message::GiveUp {
+                announced: true,
+                ..
+            } | SendState::Ended { .. }
+        );
+        if told {
+            self.push_end(
+                job,
+                Message::GiveUp {
                     stream: self.streams[job],
-                    why: GiveUpWhy::ReadTooOften,
-                });
-                SendState::Ended {
-                    retry: false,
-                    failure: Some(READ_TOO_OFTEN.into()),
-                    later: false,
-                }
-            }
-            _ => SendState::Done(SendOutcome::Failed(READ_TOO_OFTEN.into())),
+                    why,
+                },
+            );
+            self.states[job] = SendState::Ended {
+                retry: false,
+                failure: Some(text.into()),
+                later: false,
+            };
+        } else {
+            self.states[job] = SendState::Done(SendOutcome::Failed(text.into()));
+        }
+    }
+
+    /// The new laptop was answered for `job` more than any move needs: it stops here, and the new
+    /// laptop is told why.
+    fn read_too_often(&mut self, job: usize) {
+        self.give_up(job, GiveUpWhy::ReadTooOften, READ_TOO_OFTEN);
+    }
+
+    /// A receipt for `raw` bytes of a block of `stream`, `written` or not. Always in this order:
+    /// what the new laptop was answered is counted for the file's version, then checked against
+    /// the cap, then (if written) the window grows by it. A receipt for an earlier attempt frees
+    /// room only.
+    fn receipted(&mut self, stream: u32, raw: u64, written: bool) {
+        let Some(&job) = self.job_of.get(&stream) else {
+            return;
         };
+        self.answered[job] = self.answered[job].saturating_add(raw);
+        let size = self.attempt_stamp[job].map_or(0, |s| s.size);
+        if matches!(self.states[job], SendState::Open { .. })
+            && self.answered[job] > answered_cap(size)
+        {
+            self.read_too_often(job);
+            return;
+        }
+        if written {
+            self.window = self.window.saturating_add(raw).min(self.in_flight_limit);
+        }
     }
 
     /// A block of `job` could not be read: tell the new laptop to drop what it has of it.
@@ -987,11 +1141,14 @@ impl SenderSession {
         let stamp = reader.header().stamp;
         let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
         let retry = matches!(e, TransferError::ChangedWhileRead) && self.budget.try_again_later();
-        self.ends.push(Message::EndFile {
-            stream: self.streams[job],
-            stamp_after: stamp,
-            changed: true,
-        });
+        self.push_end(
+            job,
+            Message::EndFile {
+                stream: self.streams[job],
+                stamp_after: stamp,
+                changed: true,
+            },
+        );
         self.scheduler.finished(self.jobs[job].item);
         // Ended first, so stopping reading (if this was one error too many) leaves it be.
         self.states[job] = SendState::Ended {
@@ -1026,20 +1183,36 @@ impl SenderSession {
         !self.ends.is_empty() || !self.skips.is_empty()
     }
 
-    /// Fingerprint comparisons waiting to run: (job, the new laptop's fingerprint). Each reads
-    /// the whole file, so each is charged to its read budget; a file over it stops instead.
-    fn take_checks(&mut self) -> Vec<(usize, std::path::PathBuf, [u8; 32])> {
+    /// Fingerprint comparisons still to work out: (job, the version, its file, the new laptop's
+    /// fingerprint). One already worked out for that version is answered at once, reading
+    /// nothing.
+    fn take_checks(&mut self) -> Vec<(usize, crate::Stamp, PathBuf, [u8; 32])> {
         let mut out = Vec::new();
         for (job, theirs) in std::mem::take(&mut self.checks) {
-            let size = self.attempt_stamp[job].map_or(0, |s| s.size);
-            if self.read[job].saturating_add(size) > read_budget(size) {
-                self.read_too_often(job);
+            let Some(stamp) = self.attempt_stamp[job] else {
+                self.checked(job, false);
                 continue;
+            };
+            match self.fingerprint[job] {
+                Some((at, mine)) if at == stamp => self.checked(job, mine == Some(theirs)),
+                _ => out.push((job, stamp, self.jobs[job].source.clone(), theirs)),
             }
-            self.read[job] = self.read[job].saturating_add(size);
-            out.push((job, self.jobs[job].source.clone(), theirs));
         }
         out
+    }
+
+    /// `job`'s fingerprint at `stamp` was worked out (`None`: it could not be): kept for that
+    /// version, then compared.
+    fn printed(
+        &mut self,
+        job: usize,
+        stamp: crate::Stamp,
+        mine: Option<[u8; 32]>,
+        theirs: [u8; 32],
+    ) {
+        self.fingerprint[job] = Some((stamp, mine));
+        let same = self.attempt_stamp[job] == Some(stamp) && mine == Some(theirs);
+        self.checked(job, same);
     }
 
     /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
@@ -1075,6 +1248,7 @@ impl SenderSession {
                         cleared: false,
                         ..
                     } | SendState::Ended { .. }
+                        | SendState::Skipping
                 )
             })
     }
@@ -1101,11 +1275,15 @@ impl SenderSession {
                 if let Some(&job) = self.job_of.get(&stream)
                     && let SendState::Open { reader, .. } = &self.states[job]
                 {
-                    self.ends.push(Message::EndFile {
-                        stream,
-                        stamp_after: reader.header().stamp,
-                        changed: true,
-                    });
+                    let stamp_after = reader.header().stamp;
+                    self.push_end(
+                        job,
+                        Message::EndFile {
+                            stream,
+                            stamp_after,
+                            changed: true,
+                        },
+                    );
                     self.scheduler.finished(self.jobs[job].item);
                     self.states[job] = SendState::Ended {
                         retry: false,
@@ -1116,11 +1294,12 @@ impl SenderSession {
                 }
                 Ok(())
             }
-            Message::Receipt { .. } => {
-                let (stream, block, bytes) = self.lanes[lane]
+            Message::Receipt { written, .. } => {
+                // Which block it answers, and its size, are this laptop's own record.
+                let (stream, block, raw) = self.lanes[lane]
                     .pop_front()
                     .ok_or_else(|| protocol("a receipt for nothing sent"))?;
-                self.in_flight -= bytes;
+                self.in_flight -= raw;
                 self.blocks_confirmed += 1;
                 // Only the current attempt counts; a receipt for an earlier one frees room only.
                 if let Some(&job) = self.job_of.get(&stream)
@@ -1131,6 +1310,7 @@ impl SenderSession {
                     // failed the file, which it reports when the file ends.
                     let _ = sections.confirmed(lane_no, block);
                 }
+                self.receipted(stream, raw, written);
                 Ok(())
             }
             Message::FileDone { stream, ok } if lane == 0 => {
@@ -1163,6 +1343,11 @@ impl SenderSession {
                 if !owed {
                     return Ok(());
                 }
+                if self.too_many_versions(job) {
+                    // Started only so the new laptop can say it kept changing: never read.
+                    self.give_up(job, GiveUpWhy::ReadTooOften, KEPT_CHANGING);
+                    return Ok(());
+                }
                 match same_size {
                     // A same-size file is there: compare fingerprints, off the main loop (see
                     // `take_checks`).
@@ -1191,22 +1376,23 @@ impl SenderSession {
             return;
         }
         self.dirty = true;
-        // An honest new laptop's ticket carries exactly the file this laptop described; one that
-        // does not is a new laptop that misbehaves, and the file stops here like one asked for
-        // too often (so it can never force a new attempt).
-        let ours = self.attempt_stamp[job].is_some_and(|s| s == ticket.stamp);
-        if !ours || self.asked_again[job] >= SEND_AGAIN_ROUNDS {
+        // An honest new laptop's ticket carries exactly the file this laptop described (its
+        // stamp, block size and count); one that does not is a new laptop that misbehaves, and the
+        // file stops here (so it can never force a new attempt).
+        let fits = self.attempt_stamp[job].is_some_and(|s| {
+            let block_size = crate::block_size_for(s.size);
+            s == ticket.stamp
+                && ticket.block_size == block_size
+                && ticket.done.count() == s.size.div_ceil(block_size)
+        });
+        if !fits {
+            self.give_up(job, GiveUpWhy::AskedAgainTooOften, TICKET_WRONG);
+            return;
+        }
+        if self.asked_again[job] >= SEND_AGAIN_ROUNDS {
             // Asked more often in this attempt than an honest new laptop asks: this attempt stops
             // here and the file fails, said as it is (never as a file that changed).
-            self.ends.push(Message::GiveUp {
-                stream: self.streams[job],
-                why: GiveUpWhy::AskedAgainTooOften,
-            });
-            self.states[job] = SendState::Ended {
-                retry: false,
-                failure: Some(GAVE_UP.into()),
-                later: false,
-            };
+            self.give_up(job, GiveUpWhy::AskedAgainTooOften, GAVE_UP);
             return;
         }
         self.asked_again[job] += 1;
@@ -1236,11 +1422,14 @@ impl SenderSession {
             Err(e) => {
                 let retry =
                     matches!(e, TransferError::ChangedSince) && self.budget.try_again_later();
-                self.ends.push(Message::EndFile {
-                    stream: self.streams[job],
-                    stamp_after: ticket.stamp,
-                    changed: true,
-                });
+                self.push_end(
+                    job,
+                    Message::EndFile {
+                        stream: self.streams[job],
+                        stamp_after: ticket.stamp,
+                        changed: true,
+                    },
+                );
                 self.states[job] = SendState::Ended {
                     retry,
                     failure: (!retry).then(|| e.to_string()),
@@ -1250,12 +1439,14 @@ impl SenderSession {
         }
     }
 
-    /// `lane` dropped: what it sent and was not confirmed goes back to be sent on the others.
+    /// `lane` dropped: what it sent and was not confirmed goes back to be sent on the others, and
+    /// the window starts again from the floor (a loss, as a dropped main connection is).
     fn lane_lost(&mut self, lane: usize) {
         let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
-        for (_, _, bytes) in self.lanes[lane].drain(..) {
-            self.in_flight -= bytes;
+        for (_, _, raw) in self.lanes[lane].drain(..) {
+            self.in_flight -= raw;
         }
+        self.window = self.floor();
         for state in &mut self.states {
             if let SendState::Open { sections, .. } = state {
                 sections.lane_lost(lane_no);
@@ -1287,11 +1478,13 @@ impl SenderSession {
                     reader,
                     ..
                 } => {
-                    self.ends.push(Message::EndFile {
+                    let end = Message::EndFile {
                         stream: self.streams[job],
                         stamp_after: reader.header().stamp,
                         changed: true,
-                    });
+                    };
+                    self.last_end[job] = Some(end.clone());
+                    self.ends.push(end);
                     *state = SendState::Ended {
                         retry: false,
                         failure: Some(STOPPED.into()),
@@ -1315,6 +1508,16 @@ impl SenderSession {
                 // It could not be read: one more try after everything else.
                 self.later.push(job);
                 SendState::Waiting
+            }
+            // Already there only on the new laptop's word.
+            (SendState::Skipping, true) => SendState::Done(SendOutcome::AlreadyThere),
+            (SendState::Skipping, false) => SendState::Done(SendOutcome::Failed(
+                "the new laptop did not accept it".into(),
+            )),
+            // Started past the versions any file is read in, and refused: it kept changing.
+            (SendState::Open { .. }, false) if self.versions[job] > crate::MAX_ATTEMPTS => {
+                self.scheduler.finished(item);
+                SendState::Done(SendOutcome::Failed(KEPT_CHANGING.into()))
             }
             (SendState::Ended { failure: None, .. }, true) => SendState::Done(SendOutcome::Arrived),
             (SendState::Ended { retry: true, .. }, false) => {
@@ -1443,9 +1646,13 @@ fn sections_for(header: &crate::Header, done: &[bool]) -> Option<FileSections> {
 /// never stalls the lanes; each answer is settled before the main loop goes on.
 async fn compare_fingerprints(state: &RefCell<&mut SenderSession>) {
     let checks = state.borrow_mut().take_checks();
-    for (job, source, theirs) in checks {
-        let mine = off_the_loop(move || hash_file(&source)).await;
-        state.borrow_mut().checked(job, mine == Some(theirs));
+    for (job, stamp, source, theirs) in checks {
+        let opener = Arc::clone(&state.borrow().opener);
+        let mine = tokio::task::spawn_blocking(move || fingerprint_at(&*opener, &source, stamp))
+            .await
+            .ok()
+            .flatten();
+        state.borrow_mut().printed(job, stamp, mine, theirs);
     }
 }
 
@@ -1456,10 +1663,25 @@ async fn off_the_loop(
     tokio::task::spawn_blocking(work).await.ok()?.ok()
 }
 
-/// The BLAKE3 fingerprint of a whole file.
-fn hash_file(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
-    let mut file = std::fs::File::open(path)?;
-    hash_reader(&mut file)
+/// The BLAKE3 fingerprint of the file at `path` as it was when read at `stamp`, read through
+/// `opener` (the same reader its blocks come through): exactly `stamp.size` bytes, then a look
+/// for one more, its stamp checked before and after. `None` (so "not identical") if it is longer
+/// or shorter, its stamp moved, or it could not be read: never more than `stamp.size + 1` bytes
+/// are read.
+fn fingerprint_at(opener: &dyn Opener, path: &Path, stamp: crate::Stamp) -> Option<[u8; 32]> {
+    let mut source = opener.open(path).ok()?;
+    if source.stamp().ok()? != stamp {
+        return None;
+    }
+    let mut hasher = blake3::Hasher::new();
+    let read = std::io::copy(&mut Read::take(&mut source, stamp.size), &mut hasher).ok()?;
+    if read != stamp.size || source.read(&mut [0u8; 1]).ok()? != 0 {
+        return None;
+    }
+    if source.stamp().ok()? != stamp {
+        return None;
+    }
+    Some(*hasher.finalize().as_bytes())
 }
 
 fn hash_reader(reader: &mut impl std::io::Read) -> std::io::Result<[u8; 32]> {
@@ -2034,7 +2256,10 @@ impl<'d> ReceiverSession<'d> {
                 replies.push(Message::FileDone { stream, ok });
             }
             Message::Skip { stream } => {
-                // Identical to what is here: drop the partial copy and keep the original.
+                // Identical to what is here: drop the partial copy and keep the original. Always
+                // answered, so the old laptop records "already there" only on this laptop's word
+                // (a stream not open here is answered no).
+                let mut there = false;
                 if let Some(s) = self.streams.remove(&stream) {
                     // Its partial copy is removed first, then recorded.
                     drop(s.assembly);
@@ -2050,10 +2275,11 @@ impl<'d> ReceiverSession<'d> {
                         }
                     };
                     // Already there: spent, like a file that landed.
-                    self.allowance
-                        .ended(s.item, matches!(outcome, ReceiveOutcome::AlreadyThere(_)));
+                    there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
+                    self.allowance.ended(s.item, there);
                     self.end(s.item, stream, outcome, None);
                 }
+                replies.push(Message::FileDone { stream, ok: there });
             }
             Message::GiveUp { stream, why } => {
                 // The old laptop stopped sending this file: it fails, with the true reason.
@@ -2371,17 +2597,31 @@ impl Drop for ReceiverSession<'_> {
     }
 }
 
-/// Said of a file read as many times as any file may be in one move.
-const READ_TOO_OFTEN: &str = "it had to be read again many more times than a move needs, so PCTwin stopped copying it. Your original is untouched";
+/// Said of a file the new laptop was answered for more than any move needs.
+const READ_TOO_OFTEN: &str = "the new laptop asked for it again many more times than a move needs, so PCTwin stopped copying it. Your original is untouched";
 
-/// How many times its size one file may be read in one move (at least as if it were 1 MiB): room
-/// for every honest case (a file that keeps changing is sent whole up to the new laptop's limit
-/// of attempts, its fingerprint is compared once per attempt, damaged parts are sent again,
-/// blocks are sent again after dropped connections), never without end.
-const READ_BUDGET_TIMES: u64 = 16;
+/// Said of a file whose versions outnumbered the attempts any file gets.
+const KEPT_CHANGING: &str = "it kept changing while it was being read; close the program using it and move it again. Your original is untouched";
 
-fn read_budget(size: u64) -> u64 {
-    size.max(1 << 20).saturating_mul(READ_BUDGET_TIMES)
+/// Said of a file asked for again by a description that is not of the file sent.
+const TICKET_WRONG: &str = "the new laptop asked for parts of it that do not match the file, so it was not finished. Your original is untouched";
+
+/// The window after a loss (at least: see [`SenderSession::floor`]).
+const FLOOR_BYTES: u64 = 1024 * 1024;
+
+/// How many more times than once the new laptop may be answered for one file, per version. The
+/// design's derivation is the whole file sent again in each of the two rounds
+/// ([`SEND_AGAIN_ROUNDS`]) plus two restarts of the new laptop that each lose all of it: 4. It was
+/// measured before it was set (15 October 2026): on a drive that stores every block wrong, with two
+/// restarts during one file, the new laptop was answered 4.992 times the file, one block under a
+/// cap of 4; so it is one more, a whole file of room for that very case. (Every other honest probe
+/// measured at most 3: drops never count, since a lost block is never receipted.)
+const REREAD_TIMES: u64 = SEND_AGAIN_ROUNDS as u64 + 3;
+
+/// The most the new laptop may be answered for a file of `size` bytes, per version (as if at
+/// least 1 MiB).
+fn answered_cap(size: u64) -> u64 {
+    size.max(1 << 20).saturating_mul(1 + REREAD_TIMES)
 }
 
 /// Said of a file whose blocks were asked for again more often than one attempt allows.

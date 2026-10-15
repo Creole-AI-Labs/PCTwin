@@ -67,7 +67,8 @@ pub enum Message {
         item: ItemId,
         ticket: ResumeTicket,
     },
-    /// Receiver: the file is finished under its real name (`ok`), or was not.
+    /// Receiver: the file is finished under its real name (`ok`), or was not. Also the answer to
+    /// `Skip`: `ok` when an identical file is already there.
     FileDone { stream: u32, ok: bool },
     /// Receiver, at the start of each connection: everything it already has has been listed
     /// (`ResumeFrom` and `FileDone`), so sending can begin.
@@ -80,7 +81,8 @@ pub enum Message {
         stream: u32,
         same_size: Option<[u8; 32]>,
     },
-    /// Sender: the file already there is identical, so it is not sent.
+    /// Sender: the file already there is identical, so it is not sent (answered with
+    /// `FileDone`).
     Skip { stream: u32 },
     /// Receiver, in place of a receipt: that block was not written (the file failed, is not open,
     /// or belongs to an earlier attempt), so its file will not finish.
