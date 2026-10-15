@@ -7,13 +7,16 @@ import { Lock } from "./icons";
 import { setTrayLabels } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
+import ConnectionRoute from "./screens/ConnectionRoute";
 import PairNew from "./screens/PairNew";
 import PairOld from "./screens/PairOld";
+import PutTogether from "./screens/PutTogether";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
 
-type Screen = { id: "welcome" } | { id: "role" } | { id: "pair"; role: Role } | { id: "soon"; which: Soon };
+/** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), then pairing (C03 to C05). */
+type Screen = { id: "welcome" } | { id: "role" } | { id: "connect"; role: Role } | { id: "together"; role: Role } | { id: "pair"; role: Role } | { id: "soon"; which: Soon };
 
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
@@ -79,9 +82,11 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
         <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
           {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} onSoon={(which) => { setScreen({ id: "soon", which }); }} />}
           {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
-          {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "pair", role }); }} />}
-          {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "role" }); }} />}
-          {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "role" }); }} />}
+          {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
+          {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}
+          {screen.id === "together" && <PutTogether onBack={() => { setScreen({ id: "connect", role: screen.role }); }} onContinue={() => { setScreen({ id: "pair", role: screen.role }); }} />}
+          {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} />}
+          {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} />}
         </main>
         <footer className="app-footer">
           <span className="free">
