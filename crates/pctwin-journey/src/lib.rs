@@ -62,24 +62,24 @@ pub enum Problem {
 }
 
 impl Problem {
-    /// The translation key the screens show for this problem.
+    /// The translation key (a Fluent message id) the screens show for this problem.
     pub fn key(&self) -> &'static str {
         match self {
-            Self::InvalidCode => "pairing.code_invalid",
-            Self::WrongCode => "pairing.code_wrong",
-            Self::CodeExpired => "pairing.code_expired",
-            Self::Busy => "pairing.busy",
-            Self::Wait => "pairing.wait",
-            Self::Locked => "pairing.locked",
-            Self::Unreachable => "pairing.unreachable",
-            Self::WrongNumber => "pairing.wrong_number",
-            Self::TimedOut => "pairing.timed_out",
-            Self::ConnectionLost => "pairing.connection_lost",
-            Self::DifferentVersion => "pairing.different_version",
-            Self::InvalidName => "pairing.name_invalid",
-            Self::NoNetwork => "pairing.no_network",
-            Self::ChooseNetwork(_) => "pairing.choose_network",
-            Self::Failed => "pairing.failed",
+            Self::InvalidCode => "pairing-code-invalid",
+            Self::WrongCode => "pairing-code-wrong",
+            Self::CodeExpired => "pairing-code-expired",
+            Self::Busy => "pairing-busy",
+            Self::Wait => "pairing-wait",
+            Self::Locked => "pairing-locked",
+            Self::Unreachable => "pairing-unreachable",
+            Self::WrongNumber => "pairing-wrong-number",
+            Self::TimedOut => "pairing-timed-out",
+            Self::ConnectionLost => "pairing-connection-lost",
+            Self::DifferentVersion => "pairing-different-version",
+            Self::InvalidName => "pairing-name-invalid",
+            Self::NoNetwork => "pairing-no-network",
+            Self::ChooseNetwork(_) => "pairing-choose-network",
+            Self::Failed => "pairing-failed",
         }
     }
 

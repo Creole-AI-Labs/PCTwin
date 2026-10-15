@@ -221,6 +221,8 @@ fn every_problem_has_its_own_translation_key() {
     let keys: BTreeSet<&str> = all.iter().map(Problem::key).collect();
     assert_eq!(keys.len(), all.len());
     for k in keys {
-        assert!(k.starts_with("pairing."), "{k}");
+        assert!(k.starts_with("pairing-"), "{k}");
+        // A Fluent message id: letters, digits and dashes only.
+        assert!(k.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "{k}");
     }
 }
