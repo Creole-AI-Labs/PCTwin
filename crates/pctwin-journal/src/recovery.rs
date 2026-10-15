@@ -18,12 +18,20 @@
 //!   file at that name, however alike (an empty one, or a copy of the same contents), is someone
 //!   else's and is passed over for a new name; a lost name is given again from the temporary
 //!   file. A file at the name that cannot be proven its own is never taken and never replaced.
+//! - **Filling** and **Filled** (a drive with no safe rename: the real name was made only if
+//!   free, tagged, and filled from the checked temporary file): the file at the real name is
+//!   finished only when it is proven PCTwin's (its recorded identity where the drive keeps one,
+//!   else the creation time PCTwin gave it) and is exactly the whole file; a partial copy proven
+//!   PCTwin's, whose bytes are exactly the start of the checked temporary file, is removed and
+//!   the file named again. Anything else at the real name is left as it is, and the person is
+//!   told; the checked file is then named elsewhere. Where identities change, the checked
+//!   temporary file is proven by its journal-given name with its whole fingerprint.
 //! - Anything whose place cannot be looked at now (a drive not plugged in, a folder that is not
 //!   the approved one) is left exactly as it is for next time.
 
 use std::collections::HashSet;
 
-use crate::{Entry, FileId, State};
+use crate::{Born, Entry, FileId, Fill, Proof, State};
 
 /// What recovery found at a stored path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +57,12 @@ pub trait Look {
     /// The stored path of `entry`'s temporary file in `folder`, or (no folder given) in the folder
     /// its path lands in. `None` if that cannot be worked out.
     fn temp_path(&self, entry: &Entry, folder: Option<&str>) -> Option<String>;
+    /// The creation time of the file at `stored`, as its drive keeps it, if it keeps one.
+    fn born(&self, entry: &Entry, stored: &str) -> Result<Option<Born>, String>;
+    /// Whether the file at `stored` is exactly `len` bytes, and they are exactly the first `len`
+    /// bytes of the file at `temp`.
+    fn same_start(&self, entry: &Entry, stored: &str, temp: &str, len: u64)
+    -> Result<bool, String>;
 }
 
 /// What to do with one unfinished write.
@@ -65,6 +79,16 @@ pub enum Action {
     Name,
     /// It has its real name and the file there is proven to be it: committed.
     Commit,
+    /// The file filled in at its real name is proven PCTwin's and whole: made durable and
+    /// checked again, given its modified time and shown, then committed.
+    FinishFill,
+    /// The file at its real name is PCTwin's own partial copy, proven: removed, then the checked
+    /// temporary file is named again.
+    RemoveFillThenName,
+    /// The checked temporary file is named again (elsewhere: the file at the real name is not
+    /// proven PCTwin's and is left as it is), and the person is told, in plain words, what was
+    /// left there.
+    NameNoting(String),
 }
 
 /// The decision for one entry.
@@ -82,6 +106,14 @@ const CHANGED: &str =
     "the copy was interrupted, and the file changed afterwards, so it could not be confirmed";
 const CHANGED_KEPT: &str = "the copy was interrupted as it finished, and the file changed afterwards, so it could not be confirmed; it was kept as it is";
 const LOST: &str = "the copy was interrupted as it finished, and the file was not found afterwards";
+const FILL_LEFT: &str = "the copy was interrupted while it was being written under its name, and PCTwin could not confirm that the file now there is its own unfinished copy, so it left it as it is";
+const FILL_LEFT_SAFE: &str = "the copy was interrupted while it was being written under its name, and the original's copy here could not be checked again, so PCTwin left its unfinished copy as it is; that hidden, partly copied file is safe to delete";
+const FILL_CHANGED: &str = "the copy was interrupted while it was being written under its name, and the unfinished copy there changed afterwards, so PCTwin left it as it is";
+
+/// What was left at the real name, for the person: where, and whether it may be deleted.
+fn left_at(stored: &str, why: &str) -> String {
+    format!("{why}: {stored}")
+}
 
 fn leave(why: &str) -> Action {
     Action::Leave(format!(
@@ -193,10 +225,133 @@ pub fn decide(entry: &Entry, look: &impl Look) -> Action {
                 },
             }
         }
+        State::Filling {
+            temp,
+            fingerprint,
+            file,
+            fill,
+        } => decide_fill(entry, look, temp, fingerprint, *file, fill, false),
+        State::Filled {
+            temp,
+            fingerprint,
+            file,
+            fill,
+        } => decide_fill(entry, look, temp, fingerprint, *file, fill, true),
         State::Committed { .. } | State::Existing { .. } | State::Failed { .. } => {
             Action::Fail("already finished".into())
         }
     }
+}
+
+/// A file filled in under its real name (see the module notes). `filled`: it was recorded
+/// complete, durable and read back.
+fn decide_fill(
+    entry: &Entry,
+    look: &impl Look,
+    temp: &str,
+    fingerprint: &[u8; 32],
+    file: Option<FileId>,
+    fill: &Fill,
+    filled: bool,
+) -> Action {
+    let size = entry.write.size;
+    let at_name = match look.look(entry, &fill.final_path) {
+        Seen::CannotLook(why) => return leave(&why),
+        Seen::Missing => None,
+        Seen::File { len } => Some(len),
+    };
+    // The checked temporary file, still exactly as checked: its identity where the drive keeps
+    // identities, else its journal-given name; then its whole fingerprint.
+    let source = || -> Result<bool, Action> {
+        match look.look(entry, temp) {
+            Seen::CannotLook(why) => Err(leave(&why)),
+            Seen::Missing => Ok(false),
+            Seen::File { len } => {
+                if len != size {
+                    return Ok(false);
+                }
+                let mine = fill.proof == Proof::Token
+                    || match file {
+                        Some(file) => look
+                            .identity(entry, temp)
+                            .map_err(|why| leave(&why))?
+                            .is_some_and(|found| found == file),
+                        None => false,
+                    };
+                if !mine {
+                    return Ok(false);
+                }
+                look.matches(entry, temp, fingerprint)
+                    .map_err(|why| leave(&why))
+            }
+        }
+    };
+    let Some(len) = at_name else {
+        // Nothing at the real name (never made, or lost since): named again from the checked file.
+        return match source() {
+            Ok(true) => Action::Name,
+            Ok(false) => Action::Fail(LOST.into()),
+            Err(left) => left,
+        };
+    };
+    let ours = match fill_is_ours(entry, look, fill) {
+        Ok(ours) => ours,
+        Err(left) => return left,
+    };
+    if !ours {
+        // Someone else's file, or one nothing proves is PCTwin's: never touched.
+        return match source() {
+            Ok(true) => Action::NameNoting(left_at(&fill.final_path, FILL_LEFT)),
+            Ok(false) => Action::Fail(left_at(&fill.final_path, FILL_LEFT)),
+            Err(left) => left,
+        };
+    }
+    if len == size {
+        match look.matches(entry, &fill.final_path, fingerprint) {
+            Ok(true) => return Action::FinishFill,
+            Ok(false) => {}
+            Err(why) => return leave(&why),
+        }
+    }
+    if filled {
+        // Complete and checked when it was recorded filled, different now: changed by someone.
+        return Action::Fail(CHANGED_KEPT.into());
+    }
+    match source() {
+        Ok(true) => {}
+        Ok(false) => return Action::Fail(left_at(&fill.final_path, FILL_LEFT_SAFE)),
+        Err(left) => return left,
+    }
+    match look.same_start(entry, &fill.final_path, temp, len) {
+        Ok(true) if len <= size => Action::RemoveFillThenName,
+        Ok(_) => Action::NameNoting(left_at(&fill.final_path, FILL_CHANGED)),
+        Err(why) => leave(&why),
+    }
+}
+
+/// Whether the file at the real name is the one PCTwin made: its recorded identity, on a drive
+/// that keeps identities; or the creation time PCTwin gave it at once, where it gave one (on any
+/// drive, since the identity is recorded only just after the file is made).
+fn fill_is_ours(entry: &Entry, look: &impl Look, fill: &Fill) -> Result<bool, Action> {
+    if fill.proof == Proof::StableId
+        && let Some(made) = fill.made
+        && look
+            .identity(entry, &fill.final_path)
+            .map_err(|why| leave(&why))?
+            == Some(made)
+    {
+        return Ok(true);
+    }
+    if !matches!(fill.proof, Proof::StableId | Proof::Token) {
+        return Ok(false);
+    }
+    let Some(tag) = fill.tag.born else {
+        return Ok(false);
+    };
+    Ok(look
+        .born(entry, &fill.final_path)
+        .map_err(|why| leave(&why))?
+        == Some(tag))
 }
 
 /// A temporary file to remove in clean-up.
@@ -213,9 +368,11 @@ pub fn temp_of(entry: &Entry, look: &impl Look) -> Option<String> {
     fn at(entry: &Entry, state: &State, look: &impl Look) -> Option<String> {
         let folder_of = |stored: &str| stored.rsplit_once('/').map_or("", |(f, _)| f).to_string();
         match state {
-            State::Staged { temp } | State::Verified { temp, .. } | State::Applied { temp, .. } => {
-                Some(temp.clone())
-            }
+            State::Staged { temp }
+            | State::Verified { temp, .. }
+            | State::Applied { temp, .. }
+            | State::Filling { temp, .. }
+            | State::Filled { temp, .. } => Some(temp.clone()),
             State::Committed { final_path, .. } => {
                 look.temp_path(entry, Some(&folder_of(final_path)))
             }

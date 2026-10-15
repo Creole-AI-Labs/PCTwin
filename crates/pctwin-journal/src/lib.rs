@@ -48,7 +48,9 @@ use serde::{Deserialize, Serialize};
 ///   `Undo::Done`, with `UndoOutcome::Deleted` and `UndoOutcome::KeptAt`; and every PCTwin that
 ///   reads it honours the undo gate in the `gate` table. (The undo stages changed shape on 9
 ///   October 2026 without a new number: format 2 had never shipped, so no journal on any laptop
-///   holds the older shape. Once it ships, any change of shape needs a new number.) Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
+///   holds the older shape. Once it ships, any change of shape needs a new number.) The write
+///   steps `State::Filling` and `State::Filled` (a file filled in under its real name on a drive
+///   with no safe rename) joined it on 15 October 2026, still before it shipped. Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
 ///   and could allow undo after the wipe, so it must refuse this journal instead.
 /// - **1**: undo set copies aside or sent them to the Recycle Bin (`Undo::Aside`,
 ///   `UndoOutcome::Trashed`). Opening a format-1 journal that holds no undo record (of a file or
@@ -321,6 +323,48 @@ pub struct Landed {
     pub file: Option<FileId>,
 }
 
+/// How a file PCTwin made under its real name before it was complete is proven PCTwin's after a
+/// crash (security design notes, "Proving a file is PCTwin's, per drive", decided 15 October
+/// 2026). Nothing that cannot be proven PCTwin's is removed or adopted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Proof {
+    /// The drive keeps each file's identity for good (NTFS, APFS, ext4): the identity recorded
+    /// once the file was made.
+    StableId,
+    /// Identities change (FAT and exFAT after a remount): the creation time PCTwin gave the file
+    /// at once ([`FillTag::born`]); its checked temporary file is proven by the name the journal
+    /// gave it with the whole file's fingerprint.
+    Token,
+    /// The identity holds only while the drive stays mounted as it was: proof while PCTwin still
+    /// holds the file, none after a restart.
+    SameMountId,
+    /// Nothing proves it after a restart: left as it is and reported.
+    None,
+}
+
+/// The tag given at once to a file being filled in under its real name, chosen and recorded
+/// before the file exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FillTag {
+    /// The creation time given to it: a value no ordinary file has, on a drive that keeps it
+    /// exactly. `None` where the drive cannot keep one.
+    pub born: Option<Born>,
+    /// Whether it was to be marked hidden until it is complete (where the drive holds that mark).
+    pub hidden: bool,
+}
+
+/// A file being filled in under its real name: where, how it is proven PCTwin's, and which file
+/// it is once it exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fill {
+    pub final_path: String,
+    /// The file made under the real name, recorded once it exists (`None` until then).
+    pub made: Option<FileId>,
+    pub tag: FillTag,
+    pub proof: Proof,
+}
+
 /// How far a write got.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "step")]
@@ -346,6 +390,24 @@ pub enum State {
         fingerprint: [u8; 32],
         file: Option<FileId>,
     },
+    /// A drive with no safe rename: the real name `fill.final_path` is created only if nothing has
+    /// it, tagged at once, then filled from the checked temporary file `temp` (security design
+    /// notes, "Drives with no safe rename"). Recorded before the file is made.
+    Filling {
+        temp: String,
+        fingerprint: [u8; 32],
+        /// The checked temporary file's identity.
+        file: Option<FileId>,
+        fill: Fill,
+    },
+    /// The file at the real name is complete, durable and read back against the fingerprint; its
+    /// modified time, showing it and committing remain.
+    Filled {
+        temp: String,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        fill: Fill,
+    },
     Committed {
         final_path: String,
         fingerprint: [u8; 32],
@@ -370,6 +432,8 @@ impl State {
             State::Staged { .. } => "staged",
             State::Verified { .. } => "verified",
             State::Applied { .. } => "applied",
+            State::Filling { .. } => "filling",
+            State::Filled { .. } => "filled",
             State::Committed { .. } => "committed",
             State::Existing { .. } => "existing",
             State::Failed { .. } => "failed",
@@ -1183,6 +1247,12 @@ impl Journal {
                     fingerprint,
                     file,
                     ..
+                }
+                | State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill: Fill { made: None, .. },
                 } => Some(State::Applied {
                     temp: temp.clone(),
                     final_path: final_path.into(),
@@ -1195,7 +1265,133 @@ impl Journal {
         )
     }
 
-    /// Finished, under the name it was applied with, as `landed`.
+    /// A drive with no safe rename: the real name `final_path` is about to be made only if free,
+    /// tagged with `tag` at once, and filled from the checked temporary file. Recorded before the
+    /// file is made; again with another name if something took this one first.
+    pub fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: FillTag,
+        proof: Proof,
+    ) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "filling",
+            |s| match s {
+                State::Verified {
+                    temp,
+                    fingerprint,
+                    file,
+                }
+                | State::Applied {
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
+                }
+                | State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill: Fill { made: None, .. },
+                } => Some(State::Filling {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                    fill: Fill {
+                        final_path: final_path.into(),
+                        made: None,
+                        tag,
+                        proof,
+                    },
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// The file being filled in now exists, as `made`.
+    pub fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "fill-made",
+            |s| match s {
+                State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill,
+                } if fill.made.is_none() => Some(State::Filling {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                    fill: Fill {
+                        made: Some(made),
+                        ..fill.clone()
+                    },
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// The file that was being filled in is gone from its real name (PCTwin removed its own
+    /// partial copy, or found nothing there): back to the checked temporary file alone, to be
+    /// named again.
+    pub fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "fill-cleared",
+            |s| match s {
+                State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
+                }
+                | State::Filled {
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
+                } => Some(State::Verified {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// The file being filled in is complete, durable and read back against the fingerprint.
+    pub fn filled(&self, id: u64) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "filled",
+            |s| match s {
+                State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill,
+                } => Some(State::Filled {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                    fill: fill.clone(),
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Finished, under the name it was applied with (or filled in under), as `landed`.
     pub fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.step(
             id,
@@ -1203,6 +1399,11 @@ impl Journal {
             |s| match s {
                 State::Applied {
                     final_path,
+                    fingerprint,
+                    ..
+                }
+                | State::Filled {
+                    fill: Fill { final_path, .. },
                     fingerprint,
                     ..
                 } => Some(State::Committed {
