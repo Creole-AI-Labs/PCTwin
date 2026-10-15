@@ -21,7 +21,7 @@ use pctwin_discovery::{Found, Label};
 use pctwin_link::{GuestPending, HostPending, Link, LinkConfig, LinkError};
 use pctwin_pairing::{PairingCode, PairingError, RotatingSender, SenderStatus};
 use pctwin_session::{Network, OldLaptop, SessionError};
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{mpsc, oneshot};
 
 /// How often the old laptop's screen is brought up to date (the countdown moves each second).
 const TICK: Duration = Duration::from_millis(200);
@@ -45,6 +45,8 @@ pub enum Problem {
     Unreachable,
     #[error("that number was not the one on the new laptop")]
     WrongNumber,
+    #[error("the numbers did not match on the old laptop")]
+    NoMatch,
     #[error("the other laptop did not answer in time")]
     TimedOut,
     #[error("the connection to the other laptop was lost")]
@@ -73,6 +75,7 @@ impl Problem {
             Self::Locked => "pairing-locked",
             Self::Unreachable => "pairing-unreachable",
             Self::WrongNumber => "pairing-wrong-number",
+            Self::NoMatch => "pairing-no-match",
             Self::TimedOut => "pairing-timed-out",
             Self::ConnectionLost => "pairing-connection-lost",
             Self::DifferentVersion => "pairing-different-version",
@@ -94,6 +97,7 @@ impl Problem {
             Self::Locked,
             Self::Unreachable,
             Self::WrongNumber,
+            Self::NoMatch,
             Self::TimedOut,
             Self::ConnectionLost,
             Self::DifferentVersion,
@@ -154,8 +158,9 @@ pub enum OldUpdate {
     Wait { seconds_left: u64 },
     /// Pairing stopped after too many failed attempts until the person chooses Start again.
     Locked,
-    /// A new laptop has the code: the three numbers to offer, in display order.
-    Choose([u8; 3]),
+    /// A new laptop has the code: the three numbers to offer, in display order. A pick or a
+    /// decline names its `round`, so one meant for these numbers never applies to later ones.
+    Choose { round: u64, numbers: [u8; 3] },
     /// The right number was picked: paired.
     Paired,
     /// The person did not pick in time; a fresh code follows.
@@ -191,14 +196,23 @@ impl Serving for OldLaptop {
     }
 }
 
-/// The old laptop's side of the journey. Dropping it ends pairing and stops listening.
+/// The new laptop waiting for the person's pick: its numbers' round, and the one-shot signal
+/// that tells serving this pick is settled (sent, or dropped with it). Each laptop has its own,
+/// so a pick, a decline or a time-out can never be stored ahead for another laptop.
+struct WaitingPeer {
+    peer: HostPending,
+    round: u64,
+    settled: oneshot::Sender<()>,
+}
+
+/// The old laptop's side of the journey. Dropping it ends pairing and stops listening; pairing
+/// also stops listening and announcing on its own, once paired.
 pub struct OldJourney<S: Serving> {
-    serving: Arc<S>,
+    /// Taken (and so dropped, closing the port) once paired.
+    serving: Arc<Mutex<Option<Arc<S>>>>,
     sender: Arc<Mutex<RotatingSender>>,
     /// The new laptop waiting for the person's pick, if any.
-    pending: Arc<tokio::sync::Mutex<Option<HostPending>>>,
-    /// Told when the pick (or a decline) is made, so serving carries on.
-    decided: Arc<Notify>,
+    pending: Arc<tokio::sync::Mutex<Option<WaitingPeer>>>,
     /// Set once paired: no more codes are shown or served.
     finished: Arc<AtomicBool>,
     updates: mpsc::UnboundedSender<OldUpdate>,
@@ -233,57 +247,73 @@ impl<S: Serving> OldJourney<S> {
     pub fn begin(serving: S) -> Result<(Self, mpsc::UnboundedReceiver<OldUpdate>), Problem> {
         let sender = RotatingSender::new(Instant::now()).map_err(|_| Problem::Failed)?;
         let (updates, receiver) = mpsc::unbounded_channel();
+        let serving = Arc::new(serving);
+        let _ = updates.send(OldUpdate::Label(serving.label()));
         let mut journey = Self {
-            serving: Arc::new(serving),
+            serving: Arc::new(Mutex::new(Some(serving.clone()))),
             sender: Arc::new(Mutex::new(sender)),
             pending: Arc::new(tokio::sync::Mutex::new(None)),
-            decided: Arc::new(Notify::new()),
             finished: Arc::new(AtomicBool::new(false)),
             updates,
             tasks: Vec::new(),
         };
-        let _ = journey
-            .updates
-            .send(OldUpdate::Label(journey.serving.label()));
         journey.tasks.push(tokio::spawn(show_codes(
             journey.sender.clone(),
             journey.finished.clone(),
             journey.updates.clone(),
         )));
         journey.tasks.push(tokio::spawn(serve(
-            journey.serving.clone(),
+            serving,
             journey.sender.clone(),
             journey.pending.clone(),
-            journey.decided.clone(),
             journey.finished.clone(),
             journey.updates.clone(),
         )));
         Ok((journey, receiver))
     }
 
-    /// The person picked `number` among the three. The right one pairs (the new laptop is told);
-    /// any other ends this attempt, and a fresh code follows.
-    pub async fn pick(&self, number: u8) -> Result<Link, Problem> {
-        let pending = self.pending.lock().await.take().ok_or(Problem::TimedOut)?;
-        let picked = pending.choose(number, Instant::now()).await;
+    /// The person picked `number` among the three shown for `round`. The right one pairs (the new
+    /// laptop is told), and the old laptop stops listening; any other ends this attempt, the new
+    /// laptop is told the numbers did not match, and a fresh code follows. A pick for numbers no
+    /// longer shown (another round, or the time ran out) does nothing.
+    pub async fn pick(&self, round: u64, number: u8) -> Result<Link, Problem> {
+        let waiting = self.take_round(round).await.ok_or(Problem::TimedOut)?;
+        let picked = waiting.peer.choose(number, Instant::now()).await;
         if picked.is_ok() {
             self.finished.store(true, Ordering::SeqCst);
+            // Dropping our share of the serving side closes the port and the announcement once
+            // the serving task (which is now waiting on this pick) ends too.
+            drop(lock_serving(&self.serving).take());
             let _ = self.updates.send(OldUpdate::Paired);
         }
-        self.decided.notify_one();
+        let _ = waiting.settled.send(());
         picked.map_err(Problem::from)
     }
 
-    /// None of the three numbers matches the new laptop's (or it shows none): this attempt ends
-    /// without pairing, and a fresh code follows.
-    pub async fn decline(&self) {
-        drop(self.pending.lock().await.take());
-        self.decided.notify_one();
+    /// None of the three numbers shown for `round` matches the new laptop's (or it shows none):
+    /// this attempt ends without pairing, the new laptop is told, and a fresh code follows. For
+    /// numbers no longer shown, it does nothing.
+    pub async fn decline(&self, round: u64) {
+        if let Some(waiting) = self.take_round(round).await {
+            waiting.peer.decline().await;
+            let _ = waiting.settled.send(());
+        }
+    }
+
+    /// The waiting laptop, only if its numbers are those of `round`.
+    async fn take_round(&self, round: u64) -> Option<WaitingPeer> {
+        let mut pending = self.pending.lock().await;
+        if pending.as_ref().is_some_and(|w| w.round == round) {
+            pending.take()
+        } else {
+            None
+        }
     }
 
     /// Shows a new random colour and animal (Shuffle).
     pub fn shuffle(&self) -> Result<(), Problem> {
-        let label = Label::shuffle(&[self.serving.label()]).map_err(|_| Problem::Failed)?;
+        let current = self.serving_now()?.label();
+        let label = Label::shuffle(&[current]).map_err(|_| Problem::Failed)?;
         self.show_label(label)
     }
 
@@ -293,15 +323,22 @@ impl<S: Serving> OldJourney<S> {
         self.show_label(label)
     }
 
-    /// After too many failed attempts, the person chose Start again.
+    /// After too many failed attempts, the person chose Start again. Only when pairing is
+    /// locked: otherwise the count of failed attempts stands.
     pub fn start_again(&self) -> Result<(), Problem> {
-        lock(&self.sender)
-            .unlock(Instant::now())
-            .map_err(Problem::from)
+        let mut sender = lock(&self.sender);
+        if sender.status() != SenderStatus::Locked {
+            return Ok(());
+        }
+        sender.unlock(Instant::now()).map_err(Problem::from)
+    }
+
+    fn serving_now(&self) -> Result<Arc<S>, Problem> {
+        lock_serving(&self.serving).clone().ok_or(Problem::Failed)
     }
 
     fn show_label(&self, label: Label) -> Result<(), Problem> {
-        self.serving.relabel(label.clone())?;
+        self.serving_now()?.relabel(label.clone())?;
         let _ = self.updates.send(OldUpdate::Label(label));
         Ok(())
     }
@@ -317,6 +354,10 @@ impl<S: Serving> Drop for OldJourney<S> {
 
 fn lock(sender: &Mutex<RotatingSender>) -> std::sync::MutexGuard<'_, RotatingSender> {
     sender.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn lock_serving<S>(serving: &Mutex<Option<Arc<S>>>) -> std::sync::MutexGuard<'_, Option<Arc<S>>> {
+    serving.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Whole seconds from `now` until `then`, rounded up (a countdown never shows 0 too early).
@@ -363,24 +404,34 @@ async fn show_codes(
 async fn serve<S: Serving>(
     serving: Arc<S>,
     sender: Arc<Mutex<RotatingSender>>,
-    pending: Arc<tokio::sync::Mutex<Option<HostPending>>>,
-    decided: Arc<Notify>,
+    pending: Arc<tokio::sync::Mutex<Option<WaitingPeer>>>,
     finished: Arc<AtomicBool>,
     updates: mpsc::UnboundedSender<OldUpdate>,
 ) {
+    let mut round = 0u64;
     while !finished.load(Ordering::SeqCst) {
         match serving.next_peer(&sender).await {
             Ok(peer) => {
-                let choices = peer.choices();
+                round += 1;
+                let numbers = peer.choices();
                 let deadline = tokio::time::Instant::from_std(peer.deadline());
-                *pending.lock().await = Some(peer);
-                if updates.send(OldUpdate::Choose(choices)).is_err() {
+                let (settled, is_settled) = oneshot::channel();
+                *pending.lock().await = Some(WaitingPeer {
+                    peer,
+                    round,
+                    settled,
+                });
+                if updates.send(OldUpdate::Choose { round, numbers }).is_err() {
                     return;
                 }
                 tokio::select! {
-                    () = decided.notified() => {}
+                    _ = is_settled => {}
                     () = tokio::time::sleep_until(deadline) => {
-                        if pending.lock().await.take().is_some() {
+                        let mut waiting = pending.lock().await;
+                        if waiting.as_ref().is_some_and(|w| w.round == round) {
+                            if let Some(w) = waiting.take() {
+                                w.peer.decline().await;
+                            }
                             let _ = updates.send(OldUpdate::TimedOut);
                         }
                     }
@@ -427,8 +478,15 @@ impl Waiting {
         self.pending.match_number()
     }
 
-    /// Waits for the old laptop's approval: paired, or the attempt ended.
+    /// Waits for the old laptop's approval: paired, or the attempt ended (the numbers did not
+    /// match on the old laptop, or it stopped answering).
     pub async fn approval(self) -> Result<Link, Problem> {
-        self.pending.approval().await.map_err(Problem::from)
+        self.pending
+            .approval()
+            .await
+            .map_err(|e| match Problem::from(e) {
+                Problem::WrongNumber => Problem::NoMatch,
+                other => other,
+            })
     }
 }
