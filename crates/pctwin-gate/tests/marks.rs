@@ -164,3 +164,52 @@ mod macos {
         assert_eq!(download_mark_of(&file), Some(DownloadMark::Internet));
     }
 }
+
+/// On a drive that cannot hold download markers (FAT and exFAT, some network drives), the file
+/// still lands, as Windows' own copying does, but never silently: the finished file says which
+/// marker could not be kept, so the report can tell the person plainly.
+#[test]
+fn a_drive_that_cannot_keep_markers_still_gets_the_file_and_says_so() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap().as_if_no_markers();
+    let mut file = dest
+        .create_file(&IncomingPath::parse("setup.exe").unwrap(), 3)
+        .unwrap();
+    file.write_all(b"abc").unwrap();
+    file.keep_download_mark(DownloadMark::Restricted);
+    let done = file.finish().unwrap();
+    assert_eq!(done.mark_not_kept, Some(DownloadMark::Restricted));
+    assert_eq!(
+        std::fs::read(root.path().join("setup.exe")).unwrap(),
+        b"abc"
+    );
+    assert_eq!(download_mark_of(&root.path().join("setup.exe")), None);
+
+    // An unmarked file loses nothing.
+    let mut file = dest
+        .create_file(&IncomingPath::parse("notes.txt").unwrap(), 1)
+        .unwrap();
+    file.write_all(b"x").unwrap();
+    assert_eq!(file.finish().unwrap().mark_not_kept, None);
+}
+
+/// Where the marker is kept, nothing is reported lost.
+#[test]
+fn a_kept_marker_is_not_reported_lost() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let mut file = dest
+        .create_file(&IncomingPath::parse("a.exe").unwrap(), 1)
+        .unwrap();
+    file.write_all(b"x").unwrap();
+    file.keep_download_mark(DownloadMark::Internet);
+    assert_eq!(file.finish().unwrap().mark_not_kept, None);
+}
+
+/// Restricted is stricter than internet, and any marker stricter than none: when two answers
+/// differ (after a restart), the stricter is kept.
+#[test]
+fn markers_are_ordered_from_least_to_most_cautious() {
+    assert!(Some(DownloadMark::Restricted) > Some(DownloadMark::Internet));
+    assert!(Some(DownloadMark::Internet) > None);
+}

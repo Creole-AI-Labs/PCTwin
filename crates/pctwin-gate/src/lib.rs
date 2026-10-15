@@ -401,6 +401,9 @@ pub struct Destination {
     clash_hints: Mutex<ClashHints>,
     /// How many names were checked while choosing free names (see [`name_checks`](Self::name_checks)).
     name_checks: std::sync::atomic::AtomicU64,
+    /// Behave as on a drive that cannot keep download markers (see
+    /// [`as_if_no_markers`](Self::as_if_no_markers)).
+    no_markers: bool,
 }
 
 /// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
@@ -448,6 +451,15 @@ impl Destination {
         self.name_checks.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// For tests: behave as on a drive that cannot keep download markers (FAT, exFAT, some network
+    /// drives), which no test machine has. Files still land; [`Finished::mark_not_kept`] says
+    /// which marker was lost.
+    #[doc(hidden)]
+    pub fn as_if_no_markers(mut self) -> Self {
+        self.no_markers = true;
+        self
+    }
+
     /// Another handle on the very same approved folder (for a worker that finishes part of an
     /// undo with a deadline, which must own what it works on).
     pub fn try_clone(&self) -> io::Result<Self> {
@@ -456,6 +468,7 @@ impl Destination {
             root_path: self.root_path.clone(),
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
+            no_markers: self.no_markers,
         })
     }
 
@@ -465,6 +478,7 @@ impl Destination {
             root_path: None,
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
+            no_markers: false,
         }
     }
 
@@ -849,6 +863,7 @@ impl Destination {
             // whichever way naming it ends (the journal's clean-up decides).
             kept_if_dropped: true,
             held: Some(held),
+            mark_not_kept: None,
         })
     }
 
@@ -1684,6 +1699,11 @@ pub struct Finished {
     /// The path as the old laptop sent it.
     pub sent_path: String,
     pub changes: Vec<NameChange>,
+    /// The download marker the file should have had but could not keep, because the drive cannot
+    /// hold one (FAT and exFAT drives, some network drives): the copy is there, and the report
+    /// must say plainly that the system no longer knows it came from the internet. `None` when
+    /// every marker was kept (or there was none).
+    pub mark_not_kept: Option<DownloadMark>,
 }
 
 /// A file being received. Writing more than announced fails; [`finish`](Self::finish) checks the
@@ -1862,9 +1882,14 @@ impl<'d> IncomingFile<'d> {
         let file = self.file.take().ok_or(GateError::Conflict)?.into_std();
         file.sync_all()?;
         let temp_name = self.temp_name.as_deref().ok_or(GateError::Conflict)?;
+        let mut mark_not_kept = None;
         if let Some(mark) = self.mark {
             // Before the time: writing Windows' marker can change the file's modified time.
-            marks::put(&self.dir, temp_name, &file, mark)?;
+            let kept =
+                !self.destination.no_markers && marks::put(&self.dir, temp_name, &file, mark)?;
+            if !kept {
+                mark_not_kept = Some(mark);
+            }
         }
         if let Some(time) = self.modified {
             file.set_modified(time)?;
@@ -1882,6 +1907,7 @@ impl<'d> IncomingFile<'d> {
             changes: std::mem::take(&mut self.changes),
             kept_if_dropped: false,
             held: Some(file),
+            mark_not_kept,
         })
     }
 }
@@ -1909,6 +1935,8 @@ pub struct Sealed<'d> {
     /// The file itself, held open until it is kept under its real name: while it is held, the
     /// drive cannot give its number to another file.
     held: Option<std::fs::File>,
+    /// The marker that could not be kept on this drive, if any.
+    mark_not_kept: Option<DownloadMark>,
 }
 
 impl<'d> Sealed<'d> {
@@ -2005,6 +2033,7 @@ impl<'d> Sealed<'d> {
                 final_path: stored_path(&self.folder, &name),
                 sent_path: std::mem::take(&mut self.sent_path),
                 changes,
+                mark_not_kept: self.mark_not_kept,
             },
             _destination: std::marker::PhantomData,
         }

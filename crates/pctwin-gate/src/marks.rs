@@ -26,7 +26,7 @@ fn read(path: &Path) -> Option<DownloadMark> {
     stream.push(":Zone.Identifier");
     let file = match std::fs::File::open(&stream) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound || no_streams_here(&e) => return None,
         Err(_) => return Some(DownloadMark::Internet),
     };
     // A real marker is a few lines; only the start is read, however large the stream is.
@@ -60,17 +60,26 @@ fn read(_path: &Path) -> Option<DownloadMark> {
     None
 }
 
+/// Whether `e` says this drive has no streams at all (FAT and exFAT, some network drives): then
+/// no file on it carries a marker. ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED,
+/// ERROR_INVALID_PARAMETER, ERROR_INVALID_NAME.
+#[cfg(windows)]
+fn no_streams_here(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(1 | 50 | 87 | 123))
+}
+
 #[cfg(target_os = "macos")]
 const QUARANTINE: &str = "com.apple.quarantine";
 
 /// Puts `mark` on the received file `file`, still under its temporary name `temp` in `dir`.
+/// Returns `false` if this drive cannot hold markers at all; any other failure is an error.
 #[cfg(windows)]
 pub(crate) fn put(
     dir: &Dir,
     temp: &str,
     _file: &std::fs::File,
     mark: DownloadMark,
-) -> Result<(), GateError> {
+) -> Result<bool, GateError> {
     use std::io::Write;
     let zone = match mark {
         DownloadMark::Internet => 3,
@@ -78,10 +87,14 @@ pub(crate) fn put(
     };
     let mut options = cap_std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
-    let mut stream = dir.open_with(format!("{temp}:Zone.Identifier"), &options)?;
+    let mut stream = match dir.open_with(format!("{temp}:Zone.Identifier"), &options) {
+        Ok(s) => s,
+        Err(e) if no_streams_here(&e) => return Ok(false),
+        Err(e) => return Err(e.into()),
+    };
     stream.write_all(format!("[ZoneTransfer]\r\nZoneId={zone}\r\n").as_bytes())?;
     stream.sync_all()?;
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(target_os = "macos")]
@@ -90,21 +103,24 @@ pub(crate) fn put(
     _temp: &str,
     file: &std::fs::File,
     _mark: DownloadMark,
-) -> Result<(), GateError> {
+) -> Result<bool, GateError> {
     // The flag AirDrop gives files from another device, with when and by whom.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let value = format!("0081;{now:08x};PCTwin;");
-    rustix::fs::fsetxattr(
+    match rustix::fs::fsetxattr(
         file,
         QUARANTINE,
         value.as_bytes(),
         rustix::fs::XattrFlags::empty(),
-    )
-    .map_err(|e| GateError::Io(e.into()))?;
-    Ok(())
+    ) {
+        Ok(()) => Ok(true),
+        // A drive without extended attributes (some exFAT and network drives).
+        Err(rustix::io::Errno::NOTSUP) => Ok(false),
+        Err(e) => Err(GateError::Io(e.into())),
+    }
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -113,6 +129,7 @@ pub(crate) fn put(
     _temp: &str,
     _file: &std::fs::File,
     _mark: DownloadMark,
-) -> Result<(), GateError> {
-    Ok(())
+) -> Result<bool, GateError> {
+    // Linux has no standard marker: nothing to keep, nothing lost.
+    Ok(true)
 }
