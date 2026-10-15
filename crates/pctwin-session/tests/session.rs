@@ -78,7 +78,7 @@ fn closed_port() -> SocketAddr {
 async fn the_new_laptop_finds_the_old_laptop_by_its_label_and_pairs() {
     let label = unique("journey");
     let old = start_old(label.clone()).await;
-    assert_eq!(old.label(), &label);
+    assert_eq!(old.label(), label);
     let sender = sender();
     let code = shown_code(&sender);
 
@@ -92,8 +92,12 @@ async fn the_new_laptop_finds_the_old_laptop_by_its_label_and_pairs() {
     let pending_host = within(old.next_peer(&sender)).await.unwrap();
     let pending_guest = guest.await.unwrap().unwrap();
     let shown = pending_guest.match_number();
-    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let mut guest_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (mut host_link, mut guest_link) = (host_link.unwrap(), guest_link.unwrap());
     host_link.send(b"found you").await.unwrap();
     assert_eq!(guest_link.recv().await.unwrap().as_slice(), b"found you");
 }
@@ -101,10 +105,10 @@ async fn the_new_laptop_finds_the_old_laptop_by_its_label_and_pairs() {
 #[tokio::test]
 async fn shuffle_or_a_new_name_changes_what_the_new_laptop_sees() {
     let first = unique("before");
-    let mut old = start_old(first.clone()).await;
+    let old = start_old(first.clone()).await;
     let second = unique("after");
     old.relabel(second.clone()).unwrap();
-    assert_eq!(old.label(), &second);
+    assert_eq!(old.label(), second);
     let found = search(WAIT).await.unwrap();
     assert!(mine(&found, &first).is_empty(), "the old label is gone");
     assert_eq!(mine(&found, &second).len(), 1, "{found:?}");
@@ -152,8 +156,8 @@ async fn a_wrong_code_is_never_tried_at_a_second_address() {
     let first_sender = sender();
     let second_sender = sender();
     let found = search(WAIT).await.unwrap();
-    let mut chosen = mine(&found, first.label())[0].clone();
-    let other = mine(&found, second.label())[0].addrs[0];
+    let mut chosen = mine(&found, &first.label())[0].clone();
+    let other = mine(&found, &second.label())[0].addrs[0];
     chosen.addrs.truncate(1);
     chosen.addrs.push(other);
 
@@ -254,7 +258,7 @@ async fn once_an_address_answers_no_other_address_is_ever_tried() {
 
 #[tokio::test]
 async fn pairing_works_after_a_shuffle() {
-    let mut old = start_old(unique("before shuffle")).await;
+    let old = start_old(unique("before shuffle")).await;
     let after = unique("after shuffle");
     old.relabel(after.clone()).unwrap();
     let sender = sender();
