@@ -160,6 +160,136 @@ jobs:
             cargo +nightly fuzz run "$t" -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
           done
 
+  real-drives:
+    # The gate on real FAT-family drives, the ones with no hard links where names that differ only
+    # in letter case are one name. Every system makes its own drives and the test runs twice, with
+    # every drive unmounted and mounted again at the same path in between (PCTWIN_FAT_PHASE
+    # before, then after). Drive kinds: Linux vfat, kernel exFAT and exfat-fuse; Mac FAT32 and
+    # exFAT; Windows FAT32 and exFAT. Only the gate crate is built: no screens, no app.
+    name: Gate on real drives (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - macos-15-intel
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        if: runner.os == 'Linux'
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            uploads.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            static.rust-lang.org:443
+            index.crates.io:443
+            static.crates.io:443
+            crates.io:443
+            registry.npmjs.org:443
+            nodejs.org:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            azure.archive.ubuntu.com:80
+            azure.archive.ubuntu.com:443
+            archive.ubuntu.com:80
+            security.ubuntu.com:80
+            ports.ubuntu.com:80
+            esm.ubuntu.com:443
+            motd.ubuntu.com:443
+            packages.microsoft.com:443
+            ppa.launchpadcontent.net:443
+            api.osv.dev:443
+            osv-vulnerabilities.storage.googleapis.com:443
+            api.deps.dev:443
+            api.securityscorecards.dev:443
+            api.scorecard.dev:443
+            www.bestpractices.dev:443
+            oss-fuzz-build-logs.storage.googleapis.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # See the rust job: on Windows the network guard's start-up step leaves the runner without
+      # DNS for a few seconds.
+      - name: Wait for DNS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          for ($i = 1; $i -le 60; $i++) {
+            try { Resolve-DnsName static.rust-lang.org -ErrorAction Stop | Out-Null; Write-Host "DNS ready after $i tries"; exit 0 } catch { Start-Sleep -Seconds 2 }
+          }
+          Write-Error "DNS did not come back within two minutes"
+          exit 1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Make the drives (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
+        run: bash scripts/real-drives-linux.sh setup
+      - name: Make the drives (Mac)
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        shell: bash
+        run: bash scripts/real-drives-mac.sh setup
+      - name: Make the drives (Windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: pwsh
+        run: ./scripts/real-drives-windows.ps1 setup
+      - name: Gate on real drives (before the remount)
+        timeout-minutes: 10
+        shell: bash
+        env:
+          PCTWIN_REQUIRE_FAT: "1"
+          PCTWIN_FAT_PHASE: before
+        run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast
+      # Run even when the first run failed: the remount and the second run are still worth seeing.
+      - name: Unmount and mount every drive again (Linux)
+        if: runner.os == 'Linux' && !cancelled()
+        timeout-minutes: 5
+        shell: bash
+        run: bash scripts/real-drives-linux.sh remount
+      - name: Unmount and mount every drive again (Mac)
+        if: runner.os == 'macOS' && !cancelled()
+        timeout-minutes: 5
+        shell: bash
+        run: bash scripts/real-drives-mac.sh remount
+      - name: Unmount and mount every drive again (Windows)
+        if: runner.os == 'Windows' && !cancelled()
+        timeout-minutes: 5
+        shell: pwsh
+        run: ./scripts/real-drives-windows.ps1 remount
+      - name: Gate on real drives (after the remount)
+        if: "!cancelled()"
+        timeout-minutes: 10
+        shell: bash
+        env:
+          PCTWIN_REQUIRE_FAT: "1"
+          PCTWIN_FAT_PHASE: after
+        run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast
+
   rust:
     name: Rust (${{ matrix.os }})
     strategy:
