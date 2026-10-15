@@ -66,7 +66,6 @@ describe("screens", () => {
   it.each([
     ["Restore setup", "Restore setup"],
     ["Rescue a laptop", "Rescue a laptop"],
-    ["Sign in", "Cloud Twin"],
     ["Quick Send", "Quick Send"],
   ])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
     render(<App initialLanguage="en" />);
@@ -78,6 +77,17 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
+  it("Welcome shows only free choices: no sign-in, account, plan, price or upgrade", () => {
+    render(<App initialLanguage="en" />);
+    const paid = /sign[ -]?in|log[ -]?in|account|cloud twin|plan|price|upgrade|\bpro\b|premium|trial|subscri|[$€£₦]/i;
+    // The main area has no paid wording at all; the footer may only promise "No account needed".
+    expect(screen.getByRole("main").textContent).not.toMatch(paid);
+    for (const control of [...screen.getAllByRole("button"), ...screen.queryAllByRole("link")]) {
+      expect(control.textContent).not.toMatch(paid);
+    }
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
   });
 
   it("a new screen takes keyboard focus", () => {
