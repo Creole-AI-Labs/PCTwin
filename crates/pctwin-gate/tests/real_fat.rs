@@ -127,3 +127,82 @@ fn names_fat_cannot_hold_are_changed_and_still_land() {
         assert_eq!(std::fs::read(dir.join(&landed)).unwrap(), b"x");
     }
 }
+
+/// Reports, never asserts: what a Mac drive does with creation times, renames and file identity,
+/// through std and rustix (CI job `macos-drive-probe`; fixtures/macos/drive_caps.c covers the
+/// rest, such as the hidden flag, which needs chflags and so unsafe code). PCTWIN_FAT_PHASE is
+/// `before` (make files and set times) or `after` (the drive was ejected and attached again).
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "a probe for CI's macos-drive-probe job; it prints facts and checks nothing"]
+fn macos_drive_probe() {
+    use std::fs::{File, FileTimes};
+    use std::os::macos::fs::FileTimesExt;
+    use std::os::unix::fs::MetadataExt;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use rustix::fs::{CWD, RenameFlags, fstatvfs, renameat_with};
+
+    let before = std::env::var("PCTWIN_FAT_PHASE").as_deref() == Ok("before");
+    // 2001-02-03 04:05:06.00 and .07 UTC, then 2026-10-15 12:34:57.123456789 UTC.
+    let times = [
+        (981_173_106, 0),
+        (981_173_106, 70_000_000),
+        (1_792_067_697, 123_456_789),
+    ];
+    for drive in drives() {
+        let dir = drive.join("pctwin-rust-probe");
+        if before {
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+        }
+        println!(
+            "rust: ==== {} ({})",
+            drive.display(),
+            if before { "before" } else { "after" }
+        );
+        for (i, &(s, ns)) in times.iter().enumerate() {
+            let path = dir.join(format!("crt_{i}"));
+            let want = UNIX_EPOCH + Duration::new(s, ns);
+            if before {
+                let file = File::create(&path).unwrap();
+                let set = file.set_times(FileTimes::new().set_created(want));
+                println!("rust: set_created crt_{i}: {set:?}");
+            }
+            let meta = std::fs::metadata(&path).unwrap();
+            let got = meta
+                .created()
+                .map(|t| t.duration_since(UNIX_EPOCH).unwrap());
+            let fsid = fstatvfs(File::open(&path).unwrap()).map(|v| v.f_fsid);
+            println!(
+                "rust: crt_{i} set={s}.{ns:09} got={got:?} exact={} ino={} dev={} fsid={fsid:x?}",
+                got.as_ref().is_ok_and(|g| *g == Duration::new(s, ns)),
+                meta.ino(),
+                meta.dev()
+            );
+        }
+        if before {
+            for (flag, name) in [
+                (RenameFlags::NOREPLACE, "NOREPLACE"),
+                (RenameFlags::EXCHANGE, "EXCHANGE"),
+            ] {
+                std::fs::write(dir.join("r_a"), b"A").unwrap();
+                std::fs::write(dir.join("r_b"), b"B").unwrap();
+                let rc = renameat_with(CWD, dir.join("r_a"), CWD, dir.join("r_b"), flag);
+                let b = std::fs::read(dir.join("r_b")).unwrap_or_default();
+                println!(
+                    "rust: renameat_with({name}) onto an existing name: {rc:?}; r_b now {:?}",
+                    String::from_utf8_lossy(&b)
+                );
+            }
+            let free = renameat_with(
+                CWD,
+                dir.join("r_a"),
+                CWD,
+                dir.join("r_free"),
+                RenameFlags::NOREPLACE,
+            );
+            println!("rust: renameat_with(NOREPLACE) onto a free name: {free:?}");
+        }
+    }
+}
