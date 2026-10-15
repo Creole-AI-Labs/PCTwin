@@ -79,3 +79,32 @@ fn a_typed_number_reads_the_same_way() {
     assert!(read_digits("4x2").is_none());
     assert!(read_digits("²").is_none());
 }
+
+/// The digit table is exactly Unicode 15.1's: every one of its 680 decimal digits reads as its
+/// value, and no other character of the whole Unicode range reads as a digit (separators aside).
+#[test]
+fn every_unicode_digit_and_nothing_else_reads_as_a_digit() {
+    let listed: std::collections::BTreeMap<u32, u8> = include_str!("data/unicode-digits.txt")
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.is_empty())
+        .map(|l| {
+            let (cp, value) = l.split_once(' ').unwrap();
+            (u32::from_str_radix(cp, 16).unwrap(), value.parse().unwrap())
+        })
+        .collect();
+    assert_eq!(listed.len(), 680);
+    for cp in 0..=0x10FFFFu32 {
+        let Some(c) = char::from_u32(cp) else {
+            continue;
+        };
+        let read = read_digits(&c.to_string()).map(|d| d.to_string());
+        match listed.get(&cp) {
+            Some(value) => assert_eq!(read, Some(value.to_string()), "U+{cp:04X}"),
+            // Not a digit: refused, or only a separator (read as nothing).
+            None => assert!(
+                matches!(read.as_deref(), None | Some("")),
+                "U+{cp:04X} read as {read:?}"
+            ),
+        }
+    }
+}

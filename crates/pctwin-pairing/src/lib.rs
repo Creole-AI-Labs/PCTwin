@@ -146,8 +146,8 @@ fn digit_value(c: char) -> Option<u8> {
 }
 
 /// Where each run of ten decimal digits (0 to 9) starts, for every script in Unicode 15.1: the
-/// whole of general category Nd (680 digits), generated from Python's unicodedata and checked by
-/// the tests.
+/// whole of general category Nd (680 digits), generated from Python's unicodedata and checked
+/// against every Unicode character by `tests/digits.rs`.
 const DIGIT_ZEROS: [u32; 68] = [
     0x0030, 0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6,
     0x0D66, 0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80,
@@ -306,7 +306,8 @@ impl PairingCode {
         }
     }
 
-    /// Reads a code typed by a person. ASCII spaces are ignored; anything else must be six ASCII digits.
+    /// Reads a code typed by a person: six digits in any script, with spaces and dashes of any
+    /// kind ignored (see [`read_digits`]).
     pub fn parse(typed: &str) -> Result<Self, PairingError> {
         let read = read_digits(typed).ok_or(PairingError::InvalidCode)?;
         let digits: [u8; 6] = read
