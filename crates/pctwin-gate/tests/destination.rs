@@ -1,6 +1,8 @@
 //! Writing on the new laptop: only inside the approved folder, through a handle (cap-std), never
 //! overwriting, and never more or fewer bytes than the old laptop announced.
 
+mod common;
+
 use std::io::{Read, Write};
 
 use pctwin_gate::{Destination, GateError, IncomingPath, NameChange};
@@ -12,7 +14,7 @@ fn path(s: &str) -> IncomingPath {
 fn write(dest: &Destination, p: &str, bytes: &[u8]) -> Result<String, GateError> {
     let mut file = dest.create_file(&path(p), bytes.len() as u64)?;
     file.write_all(bytes).map_err(GateError::Io)?;
-    let done = file.finish()?;
+    let done = common::finish(file)?;
     Ok(done.final_path)
 }
 
@@ -35,7 +37,7 @@ fn an_existing_file_is_never_overwritten() {
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("notes.txt"), 6).unwrap();
     file.write_all(b"theirs").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.final_path, "notes (2).txt");
     assert!(done.changes.contains(&NameChange::NameClash));
     assert_eq!(
@@ -74,7 +76,7 @@ fn names_this_system_cannot_store_are_changed_and_reported() {
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("CON.txt"), 1).unwrap();
     file.write_all(b"x").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     if cfg!(windows) {
         assert_eq!(done.final_path, "CON_.txt");
         assert!(done.changes.contains(&NameChange::ReservedName));
@@ -113,7 +115,7 @@ fn fewer_bytes_than_announced_is_not_a_finished_file() {
     let mut file = dest.create_file(&path("a.bin"), 4).unwrap();
     file.write_all(b"12").unwrap();
     assert!(matches!(
-        file.finish(),
+        common::finish(file),
         Err(GateError::SizeMismatch {
             announced: 4,
             received: 2
@@ -197,7 +199,7 @@ fn an_unfinished_or_short_file_leaves_nothing_behind() {
     }
     let mut file = dest.create_file(&path("big.bin"), 100).unwrap();
     file.write_all(&[0u8; 40]).unwrap();
-    assert!(file.finish().is_err());
+    assert!(common::finish(file).is_err());
     let left: Vec<_> = std::fs::read_dir(root.path()).unwrap().collect();
     assert!(left.is_empty(), "{left:?}");
 }
@@ -212,7 +214,7 @@ fn a_file_only_appears_under_its_name_once_complete() {
         !root.path().join("photo.jpg").exists(),
         "not before it is finished"
     );
-    file.finish().unwrap();
+    common::finish(file).unwrap();
     assert_eq!(
         std::fs::read(root.path().join("photo.jpg")).unwrap(),
         b"abc"
@@ -225,7 +227,7 @@ fn the_report_keeps_the_name_as_sent() {
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("Notes/May?.txt"), 1).unwrap();
     file.write_all(b"x").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.sent_path, "Notes/May?.txt");
 }
 
@@ -248,7 +250,7 @@ fn a_short_name_alias_never_lands_inside_an_existing_folder() {
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("LONGFO~1/their.txt"), 1).unwrap();
     file.write_all(b"x").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert!(done.changes.contains(&NameChange::ShortNameAlias));
     assert!(!root.path().join("Long Folder Name/their.txt").exists());
     assert!(
@@ -315,8 +317,8 @@ fn two_files_can_be_in_transfer_in_one_folder() {
     let mut two = dest.create_file(&path("two.txt"), 3).unwrap();
     one.write_all(b"111").unwrap();
     two.write_all(b"222").unwrap();
-    two.finish().unwrap();
-    one.finish().unwrap();
+    common::finish(two).unwrap();
+    common::finish(one).unwrap();
     assert_eq!(std::fs::read(root.path().join("one.txt")).unwrap(), b"111");
     assert_eq!(std::fs::read(root.path().join("two.txt")).unwrap(), b"222");
 }
@@ -328,7 +330,7 @@ fn a_file_named_like_an_existing_folder_gets_a_number() {
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("Notes"), 1).unwrap();
     file.write_all(b"x").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.final_path, "Notes (2)");
     assert!(done.changes.contains(&NameChange::NameClash));
     assert!(root.path().join("Notes").is_dir());
@@ -342,7 +344,7 @@ fn names_differing_only_in_case_are_not_clashes_where_the_disk_keeps_case() {
     write(&dest, "Readme.md", b"1").unwrap();
     let mut file = dest.create_file(&path("README.md"), 1).unwrap();
     file.write_all(b"2").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.final_path, "README.md");
     assert!(!done.changes.contains(&NameChange::NameClash));
 }
@@ -369,7 +371,7 @@ fn a_file_held_open_by_another_program_never_leaves_an_empty_file_behind() {
         .share_mode(READ_AND_WRITE_NOT_DELETE)
         .open(&part)
         .unwrap();
-    match file.finish() {
+    match common::finish(file) {
         Ok(done) => assert_eq!(
             std::fs::read(root.path().join(&done.final_path)).unwrap(),
             b"abc"
@@ -414,7 +416,7 @@ fn a_finished_file_keeps_the_modified_time_it_is_given() {
     let mut file = dest.create_file(&path("Docs/old.txt"), 3).unwrap();
     file.write_all(b"abc").unwrap();
     file.keep_modified_time(when);
-    file.finish().unwrap();
+    common::finish(file).unwrap();
     let meta = std::fs::metadata(root.path().join("Docs/old.txt")).unwrap();
     assert_eq!(meta.modified().unwrap(), when);
 }
