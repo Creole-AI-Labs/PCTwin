@@ -118,6 +118,7 @@ fn lab_folders(root: &Path) -> Vec<FolderLookup> {
                 path: root.join(name),
                 storage: Storage::SystemDrive,
                 moved: false,
+                managed_by: pctwin_record::ManagedBy::Personal,
             })
         })
         .collect()
