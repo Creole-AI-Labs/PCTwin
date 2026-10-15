@@ -16,14 +16,15 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use pctwin_gate::{Approved, Destinations};
-use pctwin_journal::Ledger;
+use pctwin_journal::{DownloadMark, Ledger};
 use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
     ManagedBy, Owner, Place, Portability, Record, RecordError, Storage,
 };
 use pctwin_transfer::{
-    Allowance, Channel, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
-    SenderSession, Tier, TransferError, agree_version, receive_inventory, send_inventory,
+    Allowance, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession, SendJob,
+    SendOutcome, SenderSession, SizeRoom, Tier, TransferError, agree_version, receive_inventory,
+    send_inventory, shown_path,
 };
 
 /// The destination label everything of a Quick Send lands under: the folder the receiver chose.
@@ -79,12 +80,11 @@ fn place() -> Place {
     }
 }
 
-fn shown(path: &ItemPath) -> String {
-    path.parts()
-        .iter()
-        .map(ItemName::display)
-        .collect::<Vec<_>>()
-        .join("/")
+/// Where an offered file lands: inside the folder the receiver chose, at its path in the send.
+/// Both sides use this one function (the sender to say where it sends each file, the receiver to
+/// check it), so the sender never chooses a place.
+fn landing(item: &Item) -> LandingPlace {
+    LandingPlace::new(DESTINATION, shown_path(&item.path))
 }
 
 /// `name`, or `stem (n).ext` for the first n from 2 not in `taken` (compared ignoring case).
@@ -206,13 +206,13 @@ impl Offer {
 }
 
 fn job(item: &Item, source: PathBuf) -> SendJob {
-    let path = shown(&item.path);
+    let place = landing(item);
     SendJob {
         item: item.id,
         source,
-        destination: DESTINATION.to_string(),
-        compressible: compressible(&path),
-        path,
+        compressible: compressible(&place.path),
+        destination: place.destination,
+        path: place.path,
         tier: Tier::Rest,
     }
 }
@@ -224,7 +224,7 @@ fn files_of(record: &Record) -> Vec<OfferedFile> {
         .filter(|i| i.kind == ItemKind::File && i.inclusion == Inclusion::Included)
         .map(|i| OfferedFile {
             id: i.id,
-            path: shown(&i.path),
+            path: shown_path(&i.path),
             size: i.size_bytes,
         })
         .collect();
@@ -363,7 +363,12 @@ impl Incoming {
             }
         }
         let approval = record.approve()?;
-        let allowance = Allowance::from_record(&record, &approval)?;
+        // Where each file lands comes from the offer, never from the sender's start; the files
+        // were chosen a moment ago, so none may grow; and they come from someone else's laptop,
+        // so each is marked as from the internet at least.
+        let allowance = Allowance::from_record(&record, &approval, |i| Some(landing(i)))?
+            .with_size_room(SizeRoom::NoGrowth)
+            .with_mark_floor(DownloadMark::Internet);
         let mut table = Destinations::new();
         table
             .approve(DESTINATION, Approved::MyFolders, dest)

@@ -373,3 +373,118 @@ async fn nothing_declined_is_even_started() {
         Outcome::Arrived { .. }
     ));
 }
+
+/// A sender that names another place for a file it offered (a startup folder) gets it refused:
+/// where a file lands comes from the offer the receiver accepted, never from the sender's start.
+#[tokio::test]
+async fn a_sender_cannot_choose_where_a_file_lands() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let offer = Offer::of(&chosen(old.path())).unwrap();
+    let (record, mut jobs) = offer.into_parts();
+    for job in &mut jobs {
+        if job.path == "letter.txt" {
+            job.path =
+                "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/run.cmd".into();
+        }
+    }
+    let (mut a, mut b) = pair();
+    let hostile = async {
+        pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+            .await
+            .unwrap();
+        pctwin_transfer::send_inventory(&mut a, &record)
+            .await
+            .unwrap();
+        let _answer = a.recv().await.unwrap();
+        let mut sender = pctwin_transfer::SenderSession::new(jobs, 2);
+        let _ = sender.run(&mut a).await;
+    };
+    let receiving = async {
+        let incoming = receive_offer(&mut b).await.unwrap();
+        incoming
+            .accept(&mut b, dest.path(), None, &journal(jdir.path()), "1001")
+            .await
+            .unwrap()
+    };
+    let (_, receipt) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(hostile, receiving)
+    })
+    .await
+    .expect("the send finished");
+    assert!(!dest.path().join("AppData").exists());
+    assert!(!dest.path().join("letter.txt").exists());
+    assert!(matches!(
+        outcome(&receipt, "letter.txt"),
+        Outcome::Failed { .. }
+    ));
+    // The files sent where the offer said still arrive.
+    assert!(matches!(
+        outcome(&receipt, "Holiday/beach.jpg"),
+        Outcome::Arrived { .. }
+    ));
+}
+
+/// A file that grew after it was offered is not copied, not even by one byte: the receiver
+/// accepted what it was shown.
+#[tokio::test]
+async fn a_file_that_grew_after_it_was_offered_is_not_copied() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let offer = Offer::of(&chosen(old.path())).unwrap();
+    std::fs::write(old.path().join("letter.txt"), b"Dear Ada!").unwrap();
+    let (sent, received) = run(offer, async |incoming: Incoming, ch: &mut Mem| {
+        Some(
+            incoming
+                .accept(ch, dest.path(), None, &journal(jdir.path()), "1001")
+                .await
+                .unwrap(),
+        )
+    })
+    .await;
+    let received = received.unwrap();
+    assert!(!dest.path().join("letter.txt").exists());
+    assert!(
+        matches!(outcome(&received, "letter.txt"), Outcome::Failed { why } if why.contains("changed since it was chosen")),
+        "{:?}",
+        outcome(&received, "letter.txt")
+    );
+    assert!(matches!(
+        outcome(&sent, "letter.txt"),
+        Outcome::Failed { .. }
+    ));
+    assert!(matches!(
+        outcome(&received, "Holiday/beach.jpg"),
+        Outcome::Arrived { .. }
+    ));
+}
+
+/// Everything received comes from someone else's laptop, so the system treats each file as from
+/// the internet, whatever the sender said (Security Design B). Linux has no standard marker.
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn every_received_file_is_marked_as_from_the_internet() {
+    use pctwin_gate::{DownloadMark, download_mark_of};
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let offer = Offer::of(&chosen(old.path())).unwrap();
+    let _ = run(offer, async |incoming: Incoming, ch: &mut Mem| {
+        Some(
+            incoming
+                .accept(ch, dest.path(), None, &journal(jdir.path()), "1001")
+                .await
+                .unwrap(),
+        )
+    })
+    .await;
+    for path in ["Holiday/beach.jpg", "Holiday/day 2/boat.jpg", "letter.txt"] {
+        assert_eq!(
+            download_mark_of(&dest.path().join(path)),
+            Some(DownloadMark::Internet),
+            "{path}"
+        );
+    }
+}
