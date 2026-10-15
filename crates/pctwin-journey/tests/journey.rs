@@ -5,6 +5,8 @@
 //! engine text. Run over a real connection on this laptop, without network discovery.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use pctwin_discovery::{Found, Label};
@@ -24,6 +26,8 @@ fn config() -> LinkConfig {
 struct Loopback {
     host: Host,
     label: std::sync::Mutex<Label>,
+    /// How many times serving asked for the next new laptop.
+    asked: Arc<AtomicUsize>,
 }
 
 impl Serving for Loopback {
@@ -31,6 +35,7 @@ impl Serving for Loopback {
         &self,
         sender: &std::sync::Mutex<RotatingSender>,
     ) -> Result<HostPending, LinkError> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
         self.host.next_peer(sender).await
     }
     fn label(&self) -> Label {
@@ -43,6 +48,17 @@ impl Serving for Loopback {
 }
 
 async fn old_laptop() -> (OldJourney<Loopback>, UnboundedReceiver<OldUpdate>, Found) {
+    let (old, updates, found, _) = counted_old_laptop().await;
+    (old, updates, found)
+}
+
+/// An old laptop as [`old_laptop`], with the count of times serving asked for a new laptop.
+async fn counted_old_laptop() -> (
+    OldJourney<Loopback>,
+    UnboundedReceiver<OldUpdate>,
+    Found,
+    Arc<AtomicUsize>,
+) {
     let host = Host::bind("127.0.0.1:0".parse().unwrap(), config())
         .await
         .unwrap();
@@ -51,12 +67,14 @@ async fn old_laptop() -> (OldJourney<Loopback>, UnboundedReceiver<OldUpdate>, Fo
         addrs: vec![host.local_addr().unwrap()],
         same_label_nearby: false,
     };
+    let asked = Arc::new(AtomicUsize::new(0));
     let serving = Loopback {
         host,
         label: std::sync::Mutex::new(Label::named("Blue Fox").unwrap()),
+        asked: asked.clone(),
     };
     let (old, updates) = OldJourney::begin(serving).unwrap();
-    (old, updates, found)
+    (old, updates, found, asked)
 }
 
 /// The next update matching `want`, within five seconds.
@@ -339,13 +357,84 @@ async fn no_pick_in_time_tells_the_new_laptop_the_time_ran_out() {
     next(&mut updates, round_of).await;
     // Nothing else happens until the pick's deadline: let the clock run ahead to it.
     tokio::time::pause();
-    let (approved, ()) = tokio::join!(waiting.approval(), async {
-        while let Some(u) = updates.recv().await {
-            if u == OldUpdate::TimedOut {
-                return;
+    let both = async {
+        tokio::join!(waiting.approval(), async {
+            while let Some(u) = updates.recv().await {
+                if u == OldUpdate::TimedOut {
+                    return;
+                }
+            }
+            panic!("the old laptop said the time ran out");
+        })
+    };
+    // On the paused clock: well past the pick's deadline, so a missing time-out fails, never hangs.
+    let (approved, ()) = tokio::time::timeout(Duration::from_secs(600), both)
+        .await
+        .expect("the time-out came");
+    assert_eq!(approved.err(), Some(Problem::TimedOut));
+}
+
+/// Once paired, the old laptop never asks for another new laptop, and no numbers follow Paired.
+#[tokio::test]
+async fn once_paired_serving_ends_for_good() {
+    let (old, mut updates, found, asked) = counted_old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let waiting = NewJourney::new(config())
+        .connect(&found, &code)
+        .await
+        .unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    let (picked, approved) = tokio::join!(old.pick(round, waiting.number()), waiting.approval());
+    let _links = (picked.unwrap(), approved.unwrap());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(asked.load(Ordering::SeqCst), 1);
+    while let Ok(u) = updates.try_recv() {
+        assert!(
+            !matches!(u, OldUpdate::Choose { .. }),
+            "numbers after Paired"
+        );
+    }
+}
+
+/// A pick made just as the pick's time runs out has exactly one outcome on the old laptop: it
+/// pairs and serving ends, or the time ran out and the pick says so. Never both.
+#[tokio::test]
+async fn a_pick_as_the_time_runs_out_has_one_outcome() {
+    for late in [false, true] {
+        let (old, mut updates, found, asked) = counted_old_laptop().await;
+        let (code, _) = next(&mut updates, code_of).await;
+        let waiting = NewJourney::new(config())
+            .connect(&found, &code)
+            .await
+            .unwrap();
+        let (round, _) = next(&mut updates, round_of).await;
+        tokio::time::pause();
+        let number = waiting.number();
+        let pick = async {
+            if late {
+                tokio::time::sleep(pctwin_pairing::CONFIRMATION_TIMEOUT).await;
+            }
+            old.pick(round, number).await
+        };
+        let run_out = tokio::time::sleep(pctwin_pairing::CONFIRMATION_TIMEOUT);
+        let (picked, ()) = tokio::join!(pick, run_out);
+        tokio::time::resume();
+        let mut seen = Vec::new();
+        while let Ok(u) = updates.try_recv() {
+            seen.push(u);
+        }
+        let paired = seen.contains(&OldUpdate::Paired);
+        let timed_out = seen.contains(&OldUpdate::TimedOut);
+        match picked {
+            Ok(_) => assert!(paired && !timed_out, "late={late}: {seen:?}"),
+            Err(p) => {
+                assert_eq!(p, Problem::TimedOut, "late={late}");
+                assert!(!paired, "late={late}: {seen:?}");
             }
         }
-        panic!("the old laptop said the time ran out");
-    });
-    assert_eq!(approved.err(), Some(Problem::TimedOut));
+        if paired {
+            assert_eq!(asked.load(Ordering::SeqCst), 1, "late={late}");
+        }
+        drop(waiting);
+    }
 }

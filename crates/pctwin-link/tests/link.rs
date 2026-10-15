@@ -1309,3 +1309,55 @@ async fn the_host_listens_on_each_chosen_address_with_one_port_and_nowhere_else(
 async fn a_host_needs_at_least_one_address() {
     assert!(Host::bind_all(&[], fast()).await.is_err());
 }
+
+/// The new laptop's side of one pairing that reached the number pick, and the old laptop's.
+async fn at_the_pick() -> (pctwin_link::HostPending, pctwin_link::GuestPending) {
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let guest = tokio::spawn(async move { connect(addr, &code, fast()).await.unwrap() });
+    let pending_host = host.next_peer(&sender).await.unwrap();
+    (pending_host, guest.await.unwrap())
+}
+
+/// Each way the pick can end without pairing reaches the new laptop as its own reason.
+#[tokio::test]
+async fn the_new_laptop_is_told_why_the_pick_did_not_pair() {
+    // Another number than the new laptop's: the numbers did not match.
+    let (host, guest) = at_the_pick().await;
+    let other = host
+        .choices()
+        .into_iter()
+        .find(|n| *n != guest.match_number())
+        .unwrap();
+    assert!(matches!(
+        host.choose(other, Instant::now()).await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+    assert!(matches!(
+        guest.approval().await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+
+    // None match: the same.
+    let (host, guest) = at_the_pick().await;
+    host.decline().await;
+    assert!(matches!(
+        guest.approval().await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+
+    // No pick in time: the time ran out.
+    let (host, guest) = at_the_pick().await;
+    host.time_out().await;
+    assert!(matches!(guest.approval().await, Err(LinkError::Timeout)));
+
+    // The right number, but after the pick's deadline: the time ran out, not a wrong number.
+    let (host, guest) = at_the_pick().await;
+    let late = host.deadline() + Duration::from_secs(1);
+    assert!(matches!(
+        host.choose(guest.match_number(), late).await,
+        Err(LinkError::Pairing(PairingError::Expired))
+    ));
+    assert!(matches!(guest.approval().await, Err(LinkError::Timeout)));
+}
