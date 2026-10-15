@@ -462,7 +462,8 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
             )}
           </div>
           <Button
-            className="pair-block"
+            variant="quiet"
+            className="pair-block pair-text-btn"
             disabled={checking}
             onClick={() => {
               void decline();
@@ -472,18 +473,18 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
               <span />
             </Localized>
           </Button>
-          <div className="note">
-            <Info />
-            <Localized id="pair-choose-note">
-              <p className="note-text" />
-            </Localized>
-          </div>
           <p className="pair-safe">
             <Shield />
             <Localized id="pair-choose-safe">
               <span />
             </Localized>
           </p>
+          <div className="note">
+            <Info />
+            <Localized id="pair-choose-note">
+              <p className="note-text" />
+            </Localized>
+          </div>
         </>
       )}
     </>

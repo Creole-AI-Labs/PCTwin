@@ -169,7 +169,13 @@ button.pair-number {
 }
 
 .pair-checking + .kit-button {
-  margin-top: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+/* "None of these match": a quiet, full-width text action */
+.pair-text-btn {
+  text-align: center;
+  justify-content: center;
 }
 
 .pair-numbers ~ .note {
@@ -179,8 +185,9 @@ button.pair-number {
 .pair-safe {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  margin-top: var(--space-3);
+  margin-top: var(--space-4);
   color: var(--colour-success-text);
   font-size: var(--type-supporting);
 }
