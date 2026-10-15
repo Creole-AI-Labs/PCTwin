@@ -30,6 +30,7 @@ fn found(role: FolderRole, path: &Path) -> FolderLookup {
         path: path.to_path_buf(),
         storage: Storage::SystemDrive,
         moved: false,
+        managed_by: pctwin_record::ManagedBy::Personal,
     })
 }
 

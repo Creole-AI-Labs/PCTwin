@@ -72,6 +72,7 @@ impl World {
         let id = self
             .journal
             .plan(&PlannedWrite {
+                download_mark: None,
                 item: item(n),
                 source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
                 destination: "me".into(),
@@ -424,6 +425,7 @@ fn a_copy_whose_original_was_never_noted_is_kept_and_said_so() {
     let id = w
         .journal
         .plan(&PlannedWrite {
+            download_mark: None,
             item: item(6),
             source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
             destination: "me".into(),
@@ -616,6 +618,7 @@ fn identical_files_that_were_already_there_are_never_touched() {
     let id = w
         .journal
         .plan(&PlannedWrite {
+            download_mark: None,
             item: item(9),
             source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
             destination: "me".into(),
@@ -1134,6 +1137,7 @@ fn a_folder_whose_identity_was_never_known_is_never_removed() {
     let e = w
         .journal
         .plan(&PlannedWrite {
+            download_mark: None,
             item: item(14),
             source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
             destination: "me".into(),
@@ -1172,6 +1176,7 @@ fn a_file_whose_identity_was_never_known_is_kept_and_said_so() {
     let id = w
         .journal
         .plan(&PlannedWrite {
+            download_mark: None,
             item: item(5),
             source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
             destination: "me".into(),

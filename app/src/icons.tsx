@@ -49,6 +49,40 @@ export function Info({ className }: Props) {
   );
 }
 
+export function Check({ className }: Props) {
+  return (
+    <svg {...base} width={16} height={16} className={className}>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </svg>
+  );
+}
+
+export function Attention({ className }: Props) {
+  return (
+    <svg {...base} width={16} height={16} className={className}>
+      <path d="M12 3l9.5 17h-19z" />
+      <path d="M12 10v4M12 17.5h.01" />
+    </svg>
+  );
+}
+
+export function Shield({ className }: Props) {
+  return (
+    <svg {...base} width={16} height={16} className={className}>
+      <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+}
+
+export function Wifi({ className }: Props) {
+  return (
+    <svg {...base} width={16} height={16} className={className}>
+      <path d="M3 8a15 15 0 0 1 18 0M6 12a10 10 0 0 1 12 0m-9 4a5 5 0 0 1 6 0m-3 4h.01" />
+    </svg>
+  );
+}
+
 export function Lock({ className }: Props) {
   return (
     <svg {...base} width={16} height={16} className={className}>

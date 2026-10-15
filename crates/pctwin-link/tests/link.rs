@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pctwin_link::{Host, LinkConfig, LinkError, connect, is_local_peer};
+use pctwin_link::{Arrival, Host, LinkConfig, LinkError, connect, is_local_peer};
 use pctwin_pairing::{
     CODE_LIFETIME, PairingCode, PairingError, ROTATION_GRACE, ReceiverSession, RotatingSender,
 };
@@ -103,8 +103,12 @@ async fn two_laptops_pair_over_a_real_connection_and_exchange_sealed_data() {
     // The person reads the new laptop's number and picks it on the old laptop.
     let shown = pending_guest.match_number();
     assert!(pending_host.choices().contains(&shown));
-    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let mut guest_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (mut host_link, mut guest_link) = (host_link.unwrap(), guest_link.unwrap());
 
     host_link.send(b"hello from the old laptop").await.unwrap();
     assert_eq!(
@@ -757,8 +761,12 @@ async fn after_a_send_times_out_the_link_refuses_further_use() {
     let pending_host = host.next_peer(&sender).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let shown = pending_guest.match_number();
-    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let _guest_link = pending_guest.approval().await.unwrap(); // never reads
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, _guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    ); // never reads
+    let (mut host_link, _guest_link) = (host_link.unwrap(), _guest_link.unwrap());
 
     let big = vec![0u8; 60_000];
     let mut timed_out = false;
@@ -785,8 +793,12 @@ async fn paired_links() -> (pctwin_link::Link, pctwin_link::Link) {
     let pending_host = host.next_peer(&sender).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let shown = pending_guest.match_number();
-    let host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let guest_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (host_link, guest_link) = (host_link.unwrap(), guest_link.unwrap());
     (host_link, guest_link)
 }
 
@@ -1117,8 +1129,12 @@ async fn paired_with_host() -> (pctwin_link::Link, pctwin_link::Link, Host) {
     let pending_host = host.next_peer(&sender).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let shown = pending_guest.match_number();
-    let old = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let new = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (old, new) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (old, new) = (old.unwrap(), new.unwrap());
     (old, new, host)
 }
 
@@ -1241,11 +1257,167 @@ async fn every_connection_is_watched_so_a_dead_laptop_is_noticed() {
     assert!(opened.unwrap().keeps_alive());
 }
 
+const PLAN: [u8; 32] = [0x33; 32];
+
+/// After a drop, the new laptop reconnects with its resume keys, no new code: the old laptop's
+/// listener hands the connection over as a resume, a new main connection with fresh keys.
+#[tokio::test]
+async fn after_a_drop_the_new_laptop_resumes_without_a_code() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let addr = new.peer_addr();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let (arrived, opened) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_resume(addr, &mut new_resumes, fast())
+        )
+    })
+    .await
+    .expect("the resume hung");
+    let Arrival::Resumed(mut old_main) = arrived.unwrap() else {
+        panic!("a resume, not a lane");
+    };
+    let mut new_main = opened.unwrap();
+    assert!(old_main.keeps_alive() && new_main.keeps_alive());
+    new_main.send(b"where were we").await.unwrap();
+    assert_eq!(&old_main.recv().await.unwrap()[..], b"where were we");
+    old_main.send(b"block 7").await.unwrap();
+    assert_eq!(&new_main.recv().await.unwrap()[..], b"block 7");
+}
+
+/// Lanes still arrive as lanes on the same listener.
+#[tokio::test]
+async fn lanes_and_resumes_share_the_listener_and_are_told_apart() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let addr = new.peer_addr();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    let (arrived, opened) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_lane(addr, &mut new_keys, fast())
+        )
+    })
+    .await
+    .expect("the lane hung");
+    assert!(matches!(arrived.unwrap(), Arrival::Lane(_)));
+    opened.unwrap();
+}
+
+/// A listener that was given no resume keys refuses a resume; and a resume for another plan is
+/// refused too. Either way the next genuine connection is still served.
+#[tokio::test]
+async fn a_resume_is_refused_without_keys_or_for_another_plan() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut wrong_plan = new_keys.resume_keys(&[0x44; 32], now).unwrap();
+    let addr = new.peer_addr();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    let serving = tokio::spawn(async move {
+        // Not allowed yet: the first resume is dropped, then the keys arrive.
+        let first = tokio::time::timeout(Duration::from_secs(3), listener.accept_any()).await;
+        assert!(first.is_err(), "nothing genuine arrived");
+        listener.allow_resumes(old_resumes);
+        listener.accept_any().await
+    });
+    assert!(
+        pctwin_link::open_resume(addr, &mut wrong_plan, fast())
+            .await
+            .is_err()
+    );
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert!(
+        pctwin_link::open_resume(addr, &mut wrong_plan, fast())
+            .await
+            .is_err()
+    );
+    // A genuine lane is still served after both refusals.
+    let (arrived, opened) =
+        tokio::join!(serving, pctwin_link::open_lane(addr, &mut new_keys, fast()));
+    assert!(matches!(arrived.unwrap().unwrap(), Arrival::Lane(_)));
+    opened.unwrap();
+}
+
+/// Waiting for lanes only ([`accept`]) never takes a resume, even once resumes are allowed: a
+/// resume is only ever the move's new main connection, taken through `accept_any`.
+#[tokio::test]
+async fn waiting_for_lanes_only_never_takes_a_resume() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let addr = new.peer_addr();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    let serving = tokio::spawn(async move { listener.accept().await });
+    assert!(
+        pctwin_link::open_resume(addr, &mut new_resumes, fast())
+            .await
+            .is_err()
+    );
+    // The listener is still waiting for a lane, and serves the next one.
+    let (accepted, opened) =
+        tokio::join!(serving, pctwin_link::open_lane(addr, &mut new_keys, fast()));
+    accepted.unwrap().unwrap();
+    opened.unwrap();
+}
+
+/// An old laptop that answers a resume with a message of another kind is refused as unexpected,
+/// before anything in it is used.
+#[tokio::test]
+async fn a_reply_of_another_kind_is_refused_as_unexpected() {
+    let (mut old, mut new, _host) = paired_with_host().await;
+    let now = Instant::now();
+    let _ = old.take_lane_keys();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let mut resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let fake = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = fake.local_addr().unwrap();
+    let answering = tokio::spawn(async move {
+        let (mut raw, _) = fake.accept().await.unwrap();
+        let (kind, body) = read_frame(&mut raw).await;
+        // Answered as if it were a lane, with the very bytes it sent.
+        let other = if kind == KIND_LANE {
+            kind + 1
+        } else {
+            KIND_LANE
+        };
+        let mut reply = vec![other];
+        reply.extend_from_slice(&(body.len() as u16).to_be_bytes());
+        reply.extend_from_slice(&body);
+        raw.write_all(&reply).await.unwrap();
+        let mut rest = Vec::new();
+        let _ = raw.read_to_end(&mut rest).await;
+    });
+    let got = pctwin_link::open_resume(addr, &mut resumes, fast()).await;
+    assert!(matches!(got, Err(LinkError::Unexpected)), "{:?}", got.err());
+    answering.abort();
+}
+
 /// Whether nothing answers at `addr` any more.
 async fn nothing_listens_at(addr: std::net::SocketAddr) -> bool {
-    matches!(
+    // Refused, or no answer at all (a Mac has no 127.0.0.2, so connecting there just waits):
+    // either way nothing is listening. Only a connection that opens counts as listening.
+    !matches!(
         tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await,
-        Ok(Err(_))
+        Ok(Ok(_))
     )
 }
 
@@ -1270,4 +1442,156 @@ async fn the_port_stays_open_for_lanes_during_the_move_and_closes_after() {
     assert!(!nothing_listens_at(addr).await, "lanes can still be opened");
     drop(lanes);
     assert!(nothing_listens_at(addr).await);
+}
+
+/// While pairing, the old laptop listens only on the chosen connection's own addresses (IPv4 and
+/// IPv6, one port), never on every connection: a VPN or virtual-machine network cannot reach it.
+#[tokio::test]
+async fn the_host_listens_on_each_chosen_address_with_one_port_and_nowhere_else() {
+    let chosen: Vec<std::net::SocketAddr> =
+        vec!["127.0.0.1:0".parse().unwrap(), "[::1]:0".parse().unwrap()];
+    let host = match Host::bind_all(&chosen, fast()).await {
+        Ok(h) => h,
+        // A runner without IPv6 loopback: the IPv4 address alone is still served.
+        Err(_) => Host::bind_all(&chosen[..1], fast()).await.unwrap(),
+    };
+    let addrs = host.local_addrs();
+    assert!(!addrs.is_empty());
+    let port = addrs[0].port();
+    assert!(addrs.iter().all(|a| a.port() == port), "{addrs:?}");
+    let sender = Arc::new(Mutex::new(RotatingSender::new(Instant::now()).unwrap()));
+    // A device pairs through every chosen address.
+    for addr in addrs.clone() {
+        let code = shown_code(&sender);
+        let guest = tokio::spawn(async move { connect(addr, &code, fast()).await });
+        let pending = host.next_peer(&sender).await.unwrap();
+        let guest = guest.await.unwrap().unwrap();
+        let number = guest.match_number();
+        let (old, new) = tokio::join!(pending.choose(number, Instant::now()), guest.approval());
+        assert!(old.is_ok(), "{addr}");
+        assert!(new.is_ok());
+    }
+    // Another address of this laptop, not chosen, reaches nothing.
+    let elsewhere: std::net::SocketAddr = format!("127.0.0.2:{port}").parse().unwrap();
+    assert!(nothing_listens_at(elsewhere).await, "{elsewhere}");
+}
+
+#[tokio::test]
+async fn a_host_needs_at_least_one_address() {
+    assert!(Host::bind_all(&[], fast()).await.is_err());
+}
+
+/// The new laptop's side of one pairing that reached the number pick, and the old laptop's.
+async fn at_the_pick() -> (pctwin_link::HostPending, pctwin_link::GuestPending) {
+    let (host, sender) = host_and_sender().await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let guest = tokio::spawn(async move { connect(addr, &code, fast()).await.unwrap() });
+    let pending_host = host.next_peer(&sender).await.unwrap();
+    (pending_host, guest.await.unwrap())
+}
+
+/// Each way the pick can end without pairing reaches the new laptop as its own reason.
+#[tokio::test]
+async fn the_new_laptop_is_told_why_the_pick_did_not_pair() {
+    // Another number than the new laptop's: the numbers did not match.
+    let (host, guest) = at_the_pick().await;
+    let other = host
+        .choices()
+        .into_iter()
+        .find(|n| *n != guest.match_number())
+        .unwrap();
+    assert!(matches!(
+        host.choose(other, Instant::now()).await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+    assert!(matches!(
+        guest.approval().await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+
+    // None match: the same.
+    let (host, guest) = at_the_pick().await;
+    host.decline().await;
+    assert!(matches!(
+        guest.approval().await,
+        Err(LinkError::Pairing(PairingError::WrongNumber))
+    ));
+
+    // No pick in time: the time ran out.
+    let (host, guest) = at_the_pick().await;
+    host.time_out().await;
+    assert!(matches!(guest.approval().await, Err(LinkError::Timeout)));
+
+    // The right number, but after the pick's deadline: the time ran out, not a wrong number.
+    let (host, guest) = at_the_pick().await;
+    let late = host.deadline() + Duration::from_secs(1);
+    assert!(matches!(
+        host.choose(guest.match_number(), late).await,
+        Err(LinkError::Pairing(PairingError::Expired))
+    ));
+    assert!(matches!(guest.approval().await, Err(LinkError::Timeout)));
+}
+
+/// The old laptop counts as paired only once the new laptop confirms: a new laptop that left
+/// during the pick never pairs, even with the right number.
+#[tokio::test]
+async fn a_new_laptop_that_left_during_the_pick_never_pairs() {
+    let (host, guest) = at_the_pick().await;
+    let right = guest.match_number();
+    drop(guest);
+    // The old laptop notices it is gone, without the person doing anything.
+    tokio::time::timeout(Duration::from_secs(5), host.gone())
+        .await
+        .expect("the old laptop noticed the new laptop left");
+    assert!(host.choose(right, Instant::now()).await.is_err());
+}
+
+/// While the new laptop waits for the pick, the old laptop does not see it as gone.
+#[tokio::test]
+async fn a_waiting_new_laptop_is_not_gone() {
+    let (host, _guest) = at_the_pick().await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(500), host.gone())
+            .await
+            .is_err()
+    );
+}
+
+/// A watched link tells when the other laptop hangs up, and not before; the watch reads nothing,
+/// so every message still reaches the link.
+#[tokio::test]
+async fn a_watched_link_tells_when_the_other_laptop_leaves_and_reads_nothing() {
+    let (mut old, mut new) = paired_links().await;
+    let watch = old.watch().unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(700), watch.closed())
+            .await
+            .is_err(),
+        "a live link looked closed"
+    );
+    new.send(b"still here").await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(1200), watch.closed())
+            .await
+            .is_err(),
+        "an unread message looked like the link closing"
+    );
+    assert_eq!(old.recv().await.unwrap().as_slice(), b"still here");
+    drop(new);
+    tokio::time::timeout(Duration::from_secs(5), watch.closed())
+        .await
+        .expect("the watch saw the other laptop leave");
+}
+
+/// The old laptop never counts a new laptop as paired if it stays silent after the approval.
+#[tokio::test]
+async fn a_new_laptop_that_never_confirms_is_not_paired() {
+    let (host, guest) = at_the_pick().await;
+    let right = guest.match_number();
+    // The new laptop is still connected but never reads the approval or confirms.
+    let started = Instant::now();
+    assert!(host.choose(right, Instant::now()).await.is_err());
+    assert!(started.elapsed() < Duration::from_secs(5));
+    drop(guest);
 }

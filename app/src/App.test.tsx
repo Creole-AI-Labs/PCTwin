@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { LANGUAGES, directionOf, localization, pickLanguage } from "./i18n";
 
+// Pairing talks to the desktop shell; these tests only look at the screens, so it answers with nothing.
+const tauri = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
+
 let warnings: string[] = [];
 
 beforeEach(() => {
@@ -12,6 +17,10 @@ beforeEach(() => {
     warnings.push(args.map(String).join(" "));
   });
   localStorage.clear();
+  tauri.invoke.mockReset();
+  tauri.invoke.mockResolvedValue(undefined);
+  tauri.listen.mockReset();
+  tauri.listen.mockResolvedValue(() => undefined);
 });
 
 afterEach(() => {
@@ -34,23 +43,29 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
-  it("goes Welcome, then Which laptop is this?, then the next step, and back", () => {
+  it("goes Welcome, then Which laptop is this?, then pairing, and back", async () => {
+    const l10n = localization("en");
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Which laptop is this?");
     fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("This is the old laptop");
-    expect(screen.getByText(/nothing has been changed on this laptop/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    await act(async () => {});
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("pair-old-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_stop");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Which laptop is this?");
+    fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    await act(async () => {});
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("pair-new-searching-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
-    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+    expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
   });
 
   it.each([
     ["Restore setup", "Restore setup"],
     ["Rescue a laptop", "Rescue a laptop"],
-    ["Sign in", "Cloud Twin"],
     ["Quick Send", "Quick Send"],
   ])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
     render(<App initialLanguage="en" />);
@@ -64,16 +79,28 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
+  it("Welcome shows only free choices: no sign-in, account, plan, price or upgrade", () => {
+    render(<App initialLanguage="en" />);
+    const paid = /sign[ -]?in|log[ -]?in|account|cloud twin|plan|price|upgrade|\bpro\b|premium|trial|subscri|[$€£₦]/i;
+    // The main area has no paid wording at all; the footer may only promise "No account needed".
+    expect(screen.getByRole("main").textContent).not.toMatch(paid);
+    for (const control of [...screen.getAllByRole("button"), ...screen.queryAllByRole("link")]) {
+      expect(control.textContent).not.toMatch(paid);
+    }
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
+  });
+
   it("a new screen takes keyboard focus", () => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
     expect(document.activeElement?.tagName).toBe("MAIN");
   });
 
-  it.each(["welcome", "role", "next"])("the %s screen has no accessibility violations", async (which) => {
+  it.each(["welcome", "role", "pair"])("the %s screen has no accessibility violations", async (which) => {
     render(<App initialLanguage="en" />);
     if (which !== "welcome") fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
-    if (which === "next") fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    if (which === "pair") fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    await act(async () => {});
     expect(await violations()).toEqual([]);
   });
 });
