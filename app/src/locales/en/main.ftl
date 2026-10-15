@@ -83,12 +83,9 @@ peer-sending = Sending
 peer-receiving = Receiving
 peer-old = Old laptop
 peer-new = New laptop
-peer-name-label = Name
-peer-system-label = System
 peer-version-label = PCTwin
 # $version is the PCTwin version on that laptop, for example "1.0.3".
 peer-version = { $version }
-peer-status-ready = Ready
 peer-status-update = Blocked
 peer-status-unsupported = Waiting
 peer-ready-note = Authenticated pairing comes before inventory. Unsupported versions need a trusted update.
@@ -100,8 +97,6 @@ peer-update-body = Use the compatible signed release.
 # $from and $to are system names, for example "Windows 11" and "macOS". The mockup sentence does not use them.
 peer-direction-unsupported = This platform direction is not supported by the selected release.
 peer-continue = Assess the connection
-peer-pair-again = Pair again
-peer-home = Return home
 
 ## C07 Let’s check the route
 
@@ -112,8 +107,6 @@ check-measuring = Measuring the connection…
 # The value next to it is already formatted, for example "62 MB/s".
 check-speed-label = local link
 check-space-label = free target space
-check-link-title = Connection
-check-link-good = Strong. Files should move steadily.
 check-link-weak = Weak, so moving may be slow. Moving the laptops closer to the Wi-Fi router can help.
 check-power-title = Power
 check-power-both = Both laptops connected.
@@ -124,7 +117,6 @@ check-internet-title = Internet
 check-internet-on = Needed for fresh app downloads, not this LAN file copy.
 check-internet-off = Not connected. That is fine: copying files does not need the internet.
 check-status-ready = Ready
-check-status-slow = Slow
 check-status-plug-in = Plug in
 check-status-connected = Available
 check-status-not-needed = Not needed

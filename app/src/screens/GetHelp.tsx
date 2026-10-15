@@ -3,8 +3,10 @@ import { useState } from "react";
 import { Badge, Banner, Button } from "../components/kit";
 import { Check, Lock } from "../icons";
 import type { HelpCode } from "../people";
-import { Eyebrow, Heading } from "./PairParts";
-import { BackStrip } from "./PeopleParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./PairParts";
+import "./people.css";
 
 type Props = {
   help: HelpCode;
@@ -33,8 +35,7 @@ export default function GetHelp({ help, canShare = true, onBack, onShare, onRetr
   if (help.status === "making") {
     return (
       <div className="help">
-        <BackStrip id="pair-back" onBack={onBack} />
-        <Eyebrow id="help-eyebrow" />
+        <TopStrip onBack={onBack} labelId="help-eyebrow" />
         <Heading key="making" id="help-title" />
         <div role="status">
           <Localized id="help-making">
@@ -48,8 +49,7 @@ export default function GetHelp({ help, canShare = true, onBack, onShare, onRetr
   if (help.status === "failed") {
     return (
       <div className="help">
-        <BackStrip id="pair-back" onBack={onBack} />
-        <Eyebrow id="help-eyebrow" />
+        <TopStrip onBack={onBack} labelId="help-eyebrow" />
         <Heading key="failed" id="help-title" />
         <div className="people-notice">
           <Banner tone="attention">
@@ -58,11 +58,11 @@ export default function GetHelp({ help, canShare = true, onBack, onShare, onRetr
             </Localized>
           </Banner>
         </div>
-        <div className="people-actions">
+        <FrameFooter>
           <Button variant="primary" onClick={onRetry}>
             {l10n.getString("help-try-again")}
           </Button>
-        </div>
+        </FrameFooter>
       </div>
     );
   }
@@ -85,8 +85,7 @@ export default function GetHelp({ help, canShare = true, onBack, onShare, onRetr
 
   return (
     <div className="help">
-      <BackStrip id="pair-back" onBack={onBack} />
-      <Eyebrow id="help-eyebrow" />
+      <TopStrip onBack={onBack} labelId="help-eyebrow" />
       <Heading key="ready" id="help-title" />
       <Localized id="help-body">
         <p className="subhead" />
@@ -157,11 +156,13 @@ export default function GetHelp({ help, canShare = true, onBack, onShare, onRetr
         </Localized>
       </div>
 
-      <div className="people-actions">
+      <FrameFooter>
         <Button variant="primary" onClick={() => void doCopy()}>
           {l10n.getString("help-copy")}
         </Button>
-        {canShare && (
+      </FrameFooter>
+      {canShare && (
+        <div className="people-actions">
           <Button
             onClick={() => {
               onShare(code, l10n.getString("help-share-text", { code }));
@@ -169,8 +170,8 @@ export default function GetHelp({ help, canShare = true, onBack, onShare, onRetr
           >
             {l10n.getString("help-share")}
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       {canShare && (
         <Localized id="help-share-hint">
           <p className="people-note" />
