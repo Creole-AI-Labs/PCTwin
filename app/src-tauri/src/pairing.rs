@@ -10,6 +10,7 @@ use pctwin_journey::{NewJourney, OldJourney, OldUpdate, Problem, Waiting};
 use pctwin_link::{Link, LinkConfig};
 use pctwin_session::OldLaptop;
 use serde::Serialize;
+use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::Mutex;
 
@@ -26,8 +27,23 @@ const SEARCH_WAIT: Duration = Duration::from_secs(3);
 pub struct Pairing {
     old: Mutex<Option<OldJourney<OldLaptop>>>,
     found: Mutex<Vec<Found>>,
-    /// The paired connection, kept for the move.
+    /// The new laptop's wait for the old laptop's approval, ended if the person leaves pairing.
+    approval: Mutex<Option<JoinHandle<()>>>,
+    /// The paired connection, kept for the move. Only the first is kept.
     link: Mutex<Option<Link>>,
+}
+
+impl Pairing {
+    /// Keeps `link` as the paired connection, unless one is already kept (it is then dropped,
+    /// which closes it): a laptop pairs once.
+    async fn keep(&self, link: Link) -> bool {
+        let mut slot = self.link.lock().await;
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(link);
+        true
+    }
 }
 
 /// A label as the screens show it: a colour and an animal to translate, or the typed name.
@@ -74,6 +90,7 @@ pub enum OldView {
     },
     Locked,
     Choose {
+        round: u64,
         numbers: [u8; 3],
     },
     Paired,
@@ -87,7 +104,7 @@ impl From<OldUpdate> for OldView {
             OldUpdate::Code { code, seconds_left } => Self::Code { code, seconds_left },
             OldUpdate::Wait { seconds_left } => Self::Wait { seconds_left },
             OldUpdate::Locked => Self::Locked,
-            OldUpdate::Choose(numbers) => Self::Choose { numbers },
+            OldUpdate::Choose { round, numbers } => Self::Choose { round, numbers },
             OldUpdate::Paired => Self::Paired,
             OldUpdate::TimedOut => Self::TimedOut,
         }
@@ -137,13 +154,18 @@ fn config() -> LinkConfig {
 }
 
 /// Old laptop: starts pairing with a new random label, on `network` (the one the person chose)
-/// or on the likely Wi-Fi. When it cannot tell which network, the problem lists them.
+/// or on the likely Wi-Fi. When it cannot tell which network, the problem lists them. Pairing
+/// already under way is never replaced: leave it first (`pairing_stop`).
 #[tauri::command]
 pub async fn pairing_old_start<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, Pairing>,
     network: Option<String>,
 ) -> Result<(), ProblemView> {
+    let mut old = state.old.lock().await;
+    if old.is_some() || state.link.lock().await.is_some() {
+        return Err(Problem::Failed.into());
+    }
     let label = Label::random().map_err(|_| Problem::Failed)?;
     let (journey, mut updates) = match network {
         Some(name) => {
@@ -154,7 +176,7 @@ pub async fn pairing_old_start<R: Runtime>(
         }
         None => OldJourney::start(label, config()).await?,
     };
-    *state.old.lock().await = Some(journey);
+    *old = Some(journey);
     tauri::async_runtime::spawn(async move {
         while let Some(update) = updates.recv().await {
             if app.emit(OLD_EVENT, OldView::from(update)).is_err() {
@@ -165,23 +187,30 @@ pub async fn pairing_old_start<R: Runtime>(
     Ok(())
 }
 
-/// Old laptop: the person picked `number`. The right one pairs.
+/// Old laptop: the person picked `number` among the numbers shown for `round`. The right one
+/// pairs; a pick for numbers no longer shown does nothing (and says the time ran out).
 #[tauri::command]
-pub async fn pairing_old_pick(state: State<'_, Pairing>, number: u8) -> Result<(), ProblemView> {
+pub async fn pairing_old_pick(
+    state: State<'_, Pairing>,
+    round: u64,
+    number: u8,
+) -> Result<(), ProblemView> {
     let link = {
         let old = state.old.lock().await;
         let journey = old.as_ref().ok_or(Problem::Failed)?;
-        journey.pick(number).await?
+        journey.pick(round, number).await?
     };
-    *state.link.lock().await = Some(link);
+    if !state.keep(link).await {
+        return Err(Problem::Failed.into());
+    }
     Ok(())
 }
 
-/// Old laptop: none of the three numbers matches the new laptop's.
+/// Old laptop: none of the three numbers shown for `round` matches the new laptop's.
 #[tauri::command]
-pub async fn pairing_old_decline(state: State<'_, Pairing>) -> Result<(), ProblemView> {
+pub async fn pairing_old_decline(state: State<'_, Pairing>, round: u64) -> Result<(), ProblemView> {
     if let Some(journey) = state.old.lock().await.as_ref() {
-        journey.decline().await;
+        journey.decline(round).await;
     }
     Ok(())
 }
@@ -213,10 +242,14 @@ pub async fn pairing_old_start_again(state: State<'_, Pairing>) -> Result<(), Pr
     Ok(())
 }
 
-/// Either laptop: leaves pairing (the old laptop stops listening and announcing).
+/// Either laptop: leaves pairing (the old laptop stops listening and announcing; the new laptop
+/// stops waiting for an approval).
 #[tauri::command]
 pub async fn pairing_stop(state: State<'_, Pairing>) -> Result<(), ProblemView> {
     *state.old.lock().await = None;
+    if let Some(waiting) = state.approval.lock().await.take() {
+        waiting.abort();
+    }
     state.found.lock().await.clear();
     Ok(())
 }
@@ -244,7 +277,7 @@ fn nearby_views(found: &[Found]) -> Vec<NearbyView> {
 
 /// New laptop: connects to old laptop `index` (from the last search) with the code the person
 /// typed, and returns the number to show. The approval (or the attempt's end) follows as an
-/// event.
+/// event. Only one attempt at a time, and none once paired.
 #[tauri::command]
 pub async fn pairing_new_connect<R: Runtime>(
     app: AppHandle<R>,
@@ -252,6 +285,12 @@ pub async fn pairing_new_connect<R: Runtime>(
     index: usize,
     code: String,
 ) -> Result<u8, ProblemView> {
+    let mut approval = state.approval.lock().await;
+    if approval.as_ref().is_some_and(|a| !a.inner().is_finished())
+        || state.link.lock().await.is_some()
+    {
+        return Err(Problem::Failed.into());
+    }
     let old = state
         .found
         .lock()
@@ -262,18 +301,18 @@ pub async fn pairing_new_connect<R: Runtime>(
     let waiting: Waiting = NewJourney::new(config()).connect(&old, &code).await?;
     let number = waiting.number();
     let link_slot = app.clone();
-    tauri::async_runtime::spawn(async move {
+    *approval = Some(tauri::async_runtime::spawn(async move {
         let view = match waiting.approval().await {
-            Ok(link) => {
-                if let Some(pairing) = tauri::Manager::try_state::<Pairing>(&link_slot) {
-                    *pairing.link.lock().await = Some(link);
-                }
-                NewView::Paired
-            }
+            Ok(link) => match tauri::Manager::try_state::<Pairing>(&link_slot) {
+                Some(pairing) if pairing.keep(link).await => NewView::Paired,
+                _ => NewView::Problem {
+                    problem: Problem::Failed.into(),
+                },
+            },
             Err(p) => NewView::Problem { problem: p.into() },
         };
         let _ = app.emit(NEW_EVENT, view);
-    });
+    }));
     Ok(number)
 }
 
@@ -310,10 +349,13 @@ mod tests {
             serde_json::to_value(code).unwrap(),
             serde_json::json!({ "kind": "code", "code": "123456", "secondsLeft": 42 })
         );
-        let choose = OldView::from(OldUpdate::Choose([11, 42, 87]));
+        let choose = OldView::from(OldUpdate::Choose {
+            round: 3,
+            numbers: [11, 42, 87],
+        });
         assert_eq!(
             serde_json::to_value(choose).unwrap(),
-            serde_json::json!({ "kind": "choose", "numbers": [11, 42, 87] })
+            serde_json::json!({ "kind": "choose", "round": 3, "numbers": [11, 42, 87] })
         );
         assert_eq!(
             serde_json::to_value(OldView::from(OldUpdate::TimedOut)).unwrap(),
