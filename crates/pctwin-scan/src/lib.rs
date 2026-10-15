@@ -44,7 +44,7 @@ pub use drives::{
     CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
 };
 pub use folders::{
-    Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders,
+    Facts, FolderLookup, FoundFolder, classify, facts_from_system, find_special_folders, managed_by,
 };
 pub use health::{
     Health, ReadPlan, health_from_diskutil, health_from_get_physical_disk, health_from_udisks,
@@ -60,7 +60,7 @@ pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
-pub use scan::{Counts, Scan, Stamp, scan_folder};
+pub use scan::{Counts, Scan, Stamp, scan_folder, scan_managed_folder};
 pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
 pub use usage::{
     Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials,

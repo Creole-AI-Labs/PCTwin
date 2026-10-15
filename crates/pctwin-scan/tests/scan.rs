@@ -6,9 +6,10 @@
 use std::path::Path;
 
 use pctwin_record::{
-    FolderRole, Inclusion, Item, ItemKind, LaptopId, Owner, Place, Record, Storage,
+    FolderRole, Inclusion, Item, ItemKind, LaptopId, LeftOutReason, ManagedBy, Owner, Place,
+    Record, Storage,
 };
-use pctwin_scan::{Counts, scan_folder};
+use pctwin_scan::{Counts, scan_folder, scan_managed_folder};
 
 fn laptop() -> LaptopId {
     LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap()
@@ -258,4 +259,44 @@ fn a_missing_folder_gives_no_items_and_is_listed() {
     let scan = scan_folder(&laptop(), &ada(), &docs(), &gone);
     assert!(scan.items.is_empty());
     assert_eq!(scan.unreadable, [gone]);
+}
+
+/// A folder an employer or school manages (Documents moved into "OneDrive - Contoso"): every item
+/// is marked as theirs and left out by default with that plain reason; what was already left out
+/// (the system's clutter) keeps its own reason.
+#[test]
+fn a_work_or_school_folder_is_marked_and_left_out_by_default() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "Report.docx", 10);
+    write(root.path(), "Team/Plan.xlsx", 20);
+    write(root.path(), "desktop.ini", 5);
+    let scan = scan_managed_folder(
+        &laptop(),
+        &ada(),
+        &docs(),
+        root.path(),
+        ManagedBy::Organisation,
+    );
+    for path in [&["Report.docx"][..], &["Team"], &["Team", "Plan.xlsx"]] {
+        let item = find(&scan.items, path);
+        assert_eq!(item.managed_by, ManagedBy::Organisation, "{path:?}");
+        assert_eq!(
+            item.inclusion,
+            Inclusion::LeftOut {
+                reason: LeftOutReason::WorkManaged
+            },
+            "{path:?}"
+        );
+    }
+    assert_eq!(
+        find(&scan.items, &["desktop.ini"]).inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::System
+        }
+    );
+    // The same folder as the person's own is moved.
+    let own = scan_folder(&laptop(), &ada(), &docs(), root.path());
+    let report = find(&own.items, &["Report.docx"]);
+    assert_eq!(report.managed_by, ManagedBy::Personal);
+    assert_eq!(report.inclusion, Inclusion::Included);
 }
