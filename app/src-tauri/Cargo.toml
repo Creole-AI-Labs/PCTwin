@@ -30,5 +30,9 @@ pctwin-link = { path = "../../crates/pctwin-link" }
 pctwin-session = { path = "../../crates/pctwin-session" }
 tokio = { version = "1.53.2", features = ["sync"] }
 
+[dev-dependencies]
+pctwin-pairing = { path = "../../crates/pctwin-pairing" }
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+
 [lints]
 workspace = true
