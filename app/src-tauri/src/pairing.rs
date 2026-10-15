@@ -633,6 +633,17 @@ mod tests {
         .expect("the view came")
     }
 
+    /// Waits until `me` has reserved its place for work just started.
+    async fn until_busy(me: &Laptop) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !matches!(me.inner.lock().await.side, Side::Busy) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the work started");
+    }
+
     fn code_of(v: &OldView) -> Option<String> {
         match v {
             OldView::Code { code, .. } => Some(code.clone()),
@@ -936,7 +947,7 @@ mod tests {
                 .await
             })
         };
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        until_busy(&me).await;
         me.stop().await;
         let _ = go.send(());
         assert_eq!(starting.await.unwrap().err(), Some(Problem::Failed));
@@ -963,7 +974,7 @@ mod tests {
                 .await
             })
         };
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        until_busy(&me).await;
         me.stop().await;
         let (_hold, held) = tokio::sync::oneshot::channel::<()>();
         let second = {
@@ -980,7 +991,7 @@ mod tests {
                 .await
             })
         };
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        until_busy(&me).await;
         let _ = fail.send(());
         let _ = first.await.unwrap();
         let (tell, _) = screen();
@@ -1015,7 +1026,7 @@ mod tests {
                 .await
             })
         };
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        until_busy(&new).await;
         new.stop().await;
         let _ = go.send(());
         assert_eq!(connecting.await.unwrap().err(), Some(Problem::Failed));
@@ -1042,7 +1053,8 @@ mod tests {
             let new = Arc::clone(&new);
             tokio::spawn(async move { new.stop().await })
         };
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Long enough for stop to queue behind the held lock, even under load.
+        tokio::time::sleep(Duration::from_millis(500)).await;
         drop(held);
         stopping.await.unwrap();
         let mut heard = Vec::new();
@@ -1084,11 +1096,11 @@ mod tests {
         };
         let (go_a, gate_a) = tokio::sync::oneshot::channel::<()>();
         let a = gated(gate_a);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        until_busy(&me).await;
         me.stop().await;
         let (go_b, gate_b) = tokio::sync::oneshot::channel::<()>();
         let b = gated(gate_b);
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        until_busy(&me).await;
         let _ = go_a.send(());
         assert_eq!(
             a.await.unwrap().err(),
@@ -1143,7 +1155,8 @@ mod tests {
             let new = Arc::clone(&new);
             tokio::spawn(async move { new.stop().await })
         };
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Long enough for stop to queue behind the held lock, even under load.
+        tokio::time::sleep(Duration::from_millis(500)).await;
         drop(held);
         stopping.await.unwrap();
         let mut heard = Vec::new();
