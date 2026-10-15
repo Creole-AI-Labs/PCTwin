@@ -2759,6 +2759,12 @@ impl<'d> Sealed<'d> {
         let io = |e: io::Error| (GateError::Io(e), false);
         if let Some(born) = plan.tag.born {
             fill::set_born(target, born).map_err(io)?;
+            // Read back at once: a tag the drive did not keep exactly would prove nothing later.
+            if fill::born_of(target) != Some(born) {
+                return Err(early(GateError::Io(io::Error::other(
+                    "this drive did not keep the mark PCTwin gives a file while it is copied",
+                ))));
+            }
             progress.born = Some(born);
         }
         let kept = fill::put_mark(

@@ -67,28 +67,53 @@ pub(crate) struct FillHook {
     pub(crate) after_chunk: Arc<dyn Fn(u64) -> io::Result<()> + Send + Sync>,
 }
 
-/// The creation time PCTwin tests a drive with: 3 February 2001, 04:05:06.07 UTC, which FAT and
-/// exFAT (two-second steps plus hundredths) hold exactly.
+/// The creation time PCTwin tests a drive with: 3 July 2001, 04:05:06 UTC. Real drives in CI
+/// (15 October 2026) showed what a Mac keeps: FAT32 two-second steps (rounded down), exFAT whole
+/// seconds until the drive is mounted again (hundredths after), so only an even whole second is
+/// kept exactly on both, before and after a remount. FAT keeps local time, so tags stay out of the
+/// months when clocks change anywhere.
 pub(crate) const PROBE_BORN: Born = Born {
-    secs: 981_173_106,
-    nanos: 70_000_000,
+    secs: 994_133_106,
+    nanos: 0,
 };
 
-/// A fresh tag: a creation time between 2000 and 2020, in hundredths of a second (which FAT and
-/// exFAT hold exactly), chosen at random. No ordinary file made today has one.
+/// Days from 1970-01-01 to the given date (proleptic Gregorian calendar).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The months a tag may fall in: June, July, December and January, when no place changes its
+/// clocks (they change in March to May and September to November), so local time on a FAT drive
+/// converts back exactly.
+const TAG_MONTHS: [i64; 4] = [1, 6, 7, 12];
+
+/// A fresh tag: a creation time on an even whole second (which FAT and exFAT hold exactly,
+/// before and after a remount), on a day of 1981 to 2099 in [`TAG_MONTHS`], chosen at random
+/// (about 2^29 values). No ordinary file made today has one; it is also read back right after it
+/// is set, and a drive that did not keep it is never filled.
 pub(crate) fn fresh_born() -> Born {
     use std::hash::{BuildHasher, RandomState};
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
-    let state = RandomState::new();
-    let r = state.hash_one((std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-    const START: u64 = 946_684_800;
-    const SPAN: u64 = 20 * 365 * 86_400;
-    let secs = START + r % SPAN;
-    let hundredths = (r >> 40) % 100;
+    let r = RandomState::new().hash_one((std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    #[allow(
+        clippy::cast_possible_wrap,
+        reason = "each part is reduced far below i64's range first"
+    )]
+    let pick = |shift: u32, n: u64| ((r >> shift) % n) as i64;
+    let year = 1981 + pick(0, 119);
+    let month = TAG_MONTHS[usize::try_from(pick(8, 4)).unwrap_or(0)];
+    let day = 1 + pick(12, 28);
+    let second = 2 * pick(20, 43_200);
     Born {
-        secs: i64::try_from(secs).unwrap_or(i64::MAX),
-        nanos: u32::try_from(hundredths * 10_000_000).unwrap_or(0),
+        secs: days_from_civil(year, month, day) * 86_400 + second,
+        nanos: 0,
     }
 }
 
@@ -232,15 +257,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fresh_tags_are_in_hundredths_and_differ() {
-        let a = fresh_born();
-        let b = fresh_born();
-        assert_ne!(a, b);
-        for t in [a, b] {
-            assert_eq!(t.nanos % 10_000_000, 0, "{t:?}");
-            assert!((946_684_800..946_684_800 + 20 * 365 * 86_400).contains(&t.secs));
+    fn fresh_tags_are_even_seconds_in_months_without_clock_changes() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(
+            days_from_civil(2001, 7, 3) * 86_400 + 4 * 3600 + 5 * 60 + 6,
+            PROBE_BORN.secs
+        );
+        let tags: Vec<Born> = (0..2000).map(|_| fresh_born()).collect();
+        for t in &tags {
+            assert_eq!(t.nanos, 0, "{t:?}");
+            assert_eq!(t.secs % 2, 0, "{t:?}");
+            // 1981-01-01 to 2100-01-01.
+            assert!((347_155_200..4_102_444_800).contains(&t.secs), "{t:?}");
+            let days = t.secs.div_euclid(86_400);
+            let month = (1..=12)
+                .rev()
+                .find(|m| {
+                    (1981..2100).any(|y| {
+                        let start = days_from_civil(y, *m, 1);
+                        (start..start + 28).contains(&days)
+                    })
+                })
+                .unwrap_or(0);
+            assert!(TAG_MONTHS.contains(&month), "{t:?} in month {month}");
         }
-        assert_eq!(PROBE_BORN.nanos % 10_000_000, 0);
+        let distinct: std::collections::HashSet<_> = tags.iter().collect();
+        assert!(distinct.len() > 1990, "{}", distinct.len());
+        assert_eq!(PROBE_BORN.nanos, 0);
+        assert_eq!(PROBE_BORN.secs % 2, 0);
     }
 }
 
