@@ -17,7 +17,7 @@ thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt", "sync", "time", "macros"] }
 
 [dev-dependencies]
-tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 
 [lints]
 workspace = true

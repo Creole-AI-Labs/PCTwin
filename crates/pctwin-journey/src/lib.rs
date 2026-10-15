@@ -430,7 +430,7 @@ async fn serve<S: Serving>(
                         let mut waiting = pending.lock().await;
                         if waiting.as_ref().is_some_and(|w| w.round == round) {
                             if let Some(w) = waiting.take() {
-                                w.peer.decline().await;
+                                w.peer.time_out().await;
                             }
                             let _ = updates.send(OldUpdate::TimedOut);
                         }
