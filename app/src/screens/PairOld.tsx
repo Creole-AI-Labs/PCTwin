@@ -459,11 +459,12 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
                   className="pair-tile pair-number"
                   dir="ltr"
                   disabled={checking}
-                  aria-label={l10n.getString("pair-choose-number", { number: n })}
                   onClick={() => {
                     void pick(n);
                   }}
                 >
+                  {/* The name ("Number 47") comes from real text, not a label that differs from what is seen. */}
+                  <span className="visually-hidden">{l10n.getString("pair-choose-number", { number: n })}</span>
                   <span className="pair-tile-index" aria-hidden="true">
                     {String(i + 1).padStart(2, "0")}
                   </span>
