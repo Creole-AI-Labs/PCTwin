@@ -254,6 +254,44 @@ jobs:
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
         run: cargo test --workspace --locked --no-fail-fast
+      # The gate on real FAT and exFAT drives (no hard links, names that differ only in case are
+      # one name): Linux loop-mounts fresh images, the Mac makes disk images.
+      - name: Gate on real FAT and exFAT drives (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y dosfstools exfatprogs
+          dirs=""
+          for fs in vfat exfat; do
+            img="$RUNNER_TEMP/$fs.img"
+            mnt="$RUNNER_TEMP/$fs"
+            truncate -s 64M "$img"
+            sudo "mkfs.$fs" "$img"
+            mkdir -p "$mnt"
+            # The runner's kernel may lack an exFAT driver; the Mac job covers exFAT as well.
+            if sudo mount -t "$fs" -o "loop,uid=$(id -u),gid=$(id -g)" "$img" "$mnt"; then
+              dirs="$dirs|$mnt"
+            elif [ "$fs" = exfat ]; then
+              echo "::notice::this runner cannot mount exFAT; vfat only here"
+            else
+              exit 1
+            fi
+          done
+          PCTWIN_FAT_DIRS="$dirs" PCTWIN_REQUIRE_FAT=1 cargo test -p pctwin-gate --test real_fat --locked
+      - name: Gate on real FAT and exFAT drives (Mac)
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          dirs=""
+          for fs in "MS-DOS FAT32" ExFAT; do
+            name="PCT$(echo "$fs" | tr -dc 'A-Z' | head -c 5)"
+            hdiutil create -size 64m -fs "$fs" -volname "$name" "$RUNNER_TEMP/$name.dmg"
+            hdiutil attach "$RUNNER_TEMP/$name.dmg" -mountpoint "$RUNNER_TEMP/$name"
+            dirs="$dirs|$RUNNER_TEMP/$name"
+          done
+          PCTWIN_FAT_DIRS="$dirs" PCTWIN_REQUIRE_FAT=1 cargo test -p pctwin-gate --test real_fat --locked
       # The desktop app, built and packaged on every system and kept unsigned for two weeks.
       # One package type per system keeps the build free of extra downloads.
       - name: Build the app
@@ -560,3 +598,68 @@ jobs:
           path: evidence
           if-no-files-found: warn
           retention-days: 14
+
+  # REPORTS facts about Mac drives and never fails the workflow: on FAT32 and exFAT disk images
+  # (APFS beside them to compare), which no-replace renames, hard links, hidden flags and
+  # creation times the drive keeps, and whether they and the file identity survive ejecting and
+  # attaching the drive again. fixtures/macos/drive_caps.c asks in C; macos_drive_probe in Rust.
+  macos-drive-probe:
+    name: macOS drive probe (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # Facts only: nothing here may fail the workflow.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Make the FAT32 and exFAT drives
+        shell: bash
+        run: |
+          for fs in "MS-DOS FAT32" ExFAT; do
+            name="PCT$(echo "$fs" | tr -dc 'A-Z' | head -c 5)"
+            hdiutil create -size 64m -fs "$fs" -volname "$name" "$RUNNER_TEMP/$name.dmg"
+            hdiutil attach "$RUNNER_TEMP/$name.dmg" -mountpoint "$RUNNER_TEMP/$name"
+          done
+          mkdir -p "$RUNNER_TEMP/apfs"
+          echo "PCTWIN_FAT_DIRS=$RUNNER_TEMP/apfs|$RUNNER_TEMP/PCTMSDOS|$RUNNER_TEMP/PCTEFAT" >> "$GITHUB_ENV"
+          mount
+          cc -Wall -o "$RUNNER_TEMP/drive_caps" fixtures/macos/drive_caps.c
+          cargo test -p pctwin-gate --test real_fat --locked --no-run
+      - name: Probe before ejecting (C)
+        continue-on-error: true
+        shell: bash
+        run: |
+          IFS='|'; for d in $PCTWIN_FAT_DIRS; do "$RUNNER_TEMP/drive_caps" "$d" before || true; done
+      - name: Probe before ejecting (Rust)
+        continue-on-error: true
+        env:
+          PCTWIN_FAT_PHASE: before
+        run: cargo test -p pctwin-gate --test real_fat --locked -- --ignored --nocapture macos_drive_probe
+      - name: Eject and attach the drives again
+        continue-on-error: true
+        shell: bash
+        run: |
+          for name in PCTMSDOS PCTEFAT; do
+            hdiutil detach "$RUNNER_TEMP/$name"
+            hdiutil attach "$RUNNER_TEMP/$name.dmg" -mountpoint "$RUNNER_TEMP/$name"
+          done
+          mount
+      - name: Probe after attaching again (C)
+        continue-on-error: true
+        shell: bash
+        run: |
+          IFS='|'; for d in $PCTWIN_FAT_DIRS; do "$RUNNER_TEMP/drive_caps" "$d" after || true; done
+      - name: Probe after attaching again (Rust)
+        continue-on-error: true
+        env:
+          PCTWIN_FAT_PHASE: after
+        run: cargo test -p pctwin-gate --test real_fat --locked -- --ignored --nocapture macos_drive_probe
