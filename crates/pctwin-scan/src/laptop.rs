@@ -7,7 +7,7 @@ use crate::drives::{Drive, list_drives};
 use crate::folders::{FolderLookup, find_special_folders, is_within};
 use crate::measure::Size;
 use crate::people::{Person, list_people};
-use crate::scan::{Counts, scan_folder};
+use crate::scan::{Counts, scan_managed_folder};
 use crate::state::{DoneFolder, ScanState};
 
 /// One person and how much they have, as honestly as can be told.
@@ -122,7 +122,7 @@ pub fn build_scan_resumable(
             role: folder.role,
             storage: folder.storage.clone(),
         };
-        let scan = scan_folder(&laptop, &owner, &place, &folder.path);
+        let scan = scan_managed_folder(&laptop, &owner, &place, &folder.path, folder.managed_by);
         state.record.items.extend(scan.items);
         state.stamps.extend(scan.stamps);
         state.done.push(DoneFolder {

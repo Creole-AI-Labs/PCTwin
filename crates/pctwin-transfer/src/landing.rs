@@ -1,8 +1,20 @@
 use std::collections::BTreeMap;
 
 use pctwin_gate::{Approved, Destinations, GateError};
-use pctwin_record::{CloudProvider, FolderRole, Item, Owner, Storage};
+use pctwin_record::{CloudProvider, FolderRole, Item, ItemPath, Owner, Storage};
 use pctwin_scan::FolderLookup;
+
+use crate::LandingPlace;
+
+/// The path inside a destination for an item's path: its names as shown, joined with `/`. Both
+/// laptops use it, so the path the old laptop announces is the one the new laptop expects.
+pub fn shown_path(path: &ItemPath) -> String {
+    path.parts()
+        .iter()
+        .map(|n| n.display())
+        .collect::<Vec<_>>()
+        .join("/")
+}
 
 /// The destination label for a role's folder on the new laptop.
 pub fn role_label(role: FolderRole) -> &'static str {
@@ -72,6 +84,19 @@ pub enum Landing {
     NoPlace,
 }
 
+impl Landing {
+    /// Where it is copied to, if it is copied: what the old laptop announces and the new
+    /// laptop's [`Allowance`](crate::Allowance) checks.
+    pub fn place(&self) -> Option<LandingPlace> {
+        match self {
+            Landing::Copy { destination, path } => {
+                Some(LandingPlace::new(destination.clone(), path.clone()))
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Where `item` lands. `me` is the signed-in person's account ID on the old laptop; `fallback`
 /// gives the folder (in the person's language) for a role the new laptop doesn't have, such as
 /// "From your old laptop/Music".
@@ -91,13 +116,7 @@ pub fn landing_for(
     } else {
         item.place.role
     };
-    let path = item
-        .path
-        .parts()
-        .iter()
-        .map(|n| n.display())
-        .collect::<Vec<_>>()
-        .join("/");
+    let path = shown_path(&item.path);
     match places.roles.get(&role) {
         Some(storage) => {
             if let (Storage::Cloud { provider: old }, Storage::Cloud { provider: new }) =

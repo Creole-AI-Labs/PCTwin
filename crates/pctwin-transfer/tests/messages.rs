@@ -2,7 +2,7 @@
 //! limit, blocks travel as pieces and are rejoined with a size cap, and anything malformed is
 //! refused rather than guessed at.
 
-use pctwin_journal::FileId;
+use pctwin_journal::{DownloadMark, FileId};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
     BlockMap, Header, MAX_BLOCK, MAX_ORIGINALS_PER_REQUEST, Message, NONCE_LEN, Nonce, OriginalNow,
@@ -50,6 +50,7 @@ fn all_kinds() -> Vec<Message> {
                     index: std::num::NonZeroU64::new(0x0011_2233_4455_6677).unwrap(),
                     born: None,
                 }),
+                mark: Some(DownloadMark::Internet),
             },
             resumed_done: 0,
         },
@@ -170,6 +171,7 @@ fn a_header_with_and_without_the_originals_identity_survives_the_trip() {
                 block_count: 1,
                 stamp: stamp(),
                 source_file,
+                mark: None,
             },
             resumed_done: 0,
         };
@@ -394,6 +396,7 @@ fn paths_and_labels_must_be_text_within_limits() {
             block_count: 0,
             stamp: stamp(),
             source_file: None,
+            mark: None,
         },
         resumed_done: 0,
     };
@@ -476,5 +479,43 @@ fn a_damaged_or_missing_nonce_is_refused_or_changes_the_message() {
             let read = Message::decode(&bad).unwrap();
             assert_ne!(read, m, "byte {at}");
         }
+    }
+}
+
+/// The download marker travels as one byte: none, internet or restricted. Anything else is
+/// refused, never guessed at, and both levels survive the trip.
+#[test]
+fn a_download_marker_travels_and_nothing_else_is_accepted() {
+    let start = |mark| Message::StartFile {
+        stream: 1,
+        item: id(),
+        destination: "me".into(),
+        path: "a".into(),
+        header: Header {
+            size: 1,
+            block_size: 131_072,
+            block_count: 1,
+            stamp: stamp(),
+            source_file: None,
+            mark,
+        },
+        resumed_done: 0,
+    };
+    for mark in [
+        None,
+        Some(DownloadMark::Internet),
+        Some(DownloadMark::Restricted),
+    ] {
+        let m = start(mark);
+        assert_eq!(Message::decode(&m.encode()).unwrap(), m);
+    }
+    // The marker byte sits just before resumed_done (8), the label (2 + 2) and the path (2 + 1).
+    let wire = start(None).encode();
+    let at = wire.len() - 8 - 4 - 3 - 1;
+    assert_eq!(wire[at], 0);
+    for bad in [3u8, 7, 255] {
+        let mut w = wire.clone();
+        w[at] = bad;
+        assert!(Message::decode(&w).is_err(), "marker byte {bad}");
     }
 }

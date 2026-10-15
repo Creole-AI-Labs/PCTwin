@@ -126,8 +126,10 @@ $shell = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Fol
 New-Item -ItemType Directory -Force (Join-Path $oldProfile 'OneDrive\Documents') | Out-Null
 Invoke-As $oldUser $reg @('add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Personal', '/v', 'UserFolder', '/d', (Join-Path $oldProfile 'OneDrive'), '/f') 'old-onedrive-account'
 Invoke-As $oldUser $reg @('add', $shell, '/v', 'Personal', '/t', 'REG_EXPAND_SZ', '/d', (Join-Path $oldProfile 'OneDrive\Documents'), '/f') 'old-documents-in-onedrive'
-# A work laptop too: the Desktop lives in an employer's OneDrive ("OneDrive - Contoso"). Telling
-# work data apart is Task List 1.4; until then this records what the move does with it.
+# A work laptop too: the Desktop lives in an employer's OneDrive ("OneDrive - Contoso"). The
+# scanner marks a folder inside a work or school account's storage as the employer's and leaves it
+# out by default (pctwin-scan's tests prove that); the lab builds its own folder list, so here
+# this records what the move does with such a folder.
 New-Item -ItemType Directory -Force (Join-Path $oldProfile 'OneDrive - Contoso\Desktop') | Out-Null
 Invoke-As $oldUser $reg @('add', 'HKCU\Software\Microsoft\OneDrive\Accounts\Business1', '/v', 'UserFolder', '/d', (Join-Path $oldProfile 'OneDrive - Contoso'), '/f') 'old-work-onedrive-account'
 Invoke-As $oldUser $reg @('add', $shell, '/v', 'Desktop', '/t', 'REG_EXPAND_SZ', '/d', (Join-Path $oldProfile 'OneDrive - Contoso\Desktop'), '/f') 'old-desktop-in-work-onedrive'

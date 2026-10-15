@@ -61,6 +61,32 @@ pub struct Counts {
 /// listings and file details are read: no file is opened, nothing in the cloud is downloaded and
 /// links are never followed.
 pub fn scan_folder(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Path) -> Scan {
+    scan_managed_folder(laptop, owner, place, root, ManagedBy::Personal)
+}
+
+/// As [`scan_folder`], for a folder `managed` by its owner or by an employer or school. A work
+/// or school folder's items are marked as theirs and left out by default, with that plain
+/// reason; the person can still choose to include them when reviewing the plan.
+pub fn scan_managed_folder(
+    laptop: &LaptopId,
+    owner: &Owner,
+    place: &Place,
+    root: &Path,
+    managed: ManagedBy,
+) -> Scan {
+    let mut scan = scan_folder_items(laptop, owner, place, root);
+    if managed == ManagedBy::Organisation {
+        for item in &mut scan.items {
+            item.managed_by = ManagedBy::Organisation;
+            if item.inclusion == Inclusion::Included {
+                item.inclusion = left_out(LeftOutReason::WorkManaged);
+            }
+        }
+    }
+    scan
+}
+
+fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Path) -> Scan {
     let mut scan = Scan::default();
     // Each pending folder carries its path inside `root` and, below the top, its item's index.
     let mut pending: Vec<(PathBuf, Vec<ItemName>, Option<usize>)> =
