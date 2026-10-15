@@ -7,7 +7,14 @@ authors.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# For tests only: a plan of faults a destination fakes (a byte stored wrong, a drive that cannot be
+# read past the cache), so the read-back's guards can be proven. Never enabled in the app.
+fault-plan = []
+
 [dependencies]
+# The sender's block fingerprints are BLAKE3; the read-back hashes each block the same way.
+blake3 = "1.8"
 cap-std = "4.0.3"
 # Undo permits: nothing is removed once undo is closed for good.
 pctwin-journal = { path = "../pctwin-journal" }
@@ -38,6 +45,8 @@ pctwin-lease = { path = "../pctwin-lease" }
 libproc = "0.14"
 
 [dev-dependencies]
+# The gate's own tests turn the fault plan on.
+pctwin-gate = { path = ".", features = ["fault-plan"] }
 proptest = "1.11.0"
 tempfile = "3"
 
