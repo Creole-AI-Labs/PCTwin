@@ -188,8 +188,14 @@ jobs:
             truncate -s 64M "$img"
             sudo "mkfs.$fs" "$img"
             mkdir -p "$mnt"
-            sudo mount -o "loop,uid=$(id -u),gid=$(id -g)" "$img" "$mnt"
-            dirs="$dirs|$mnt"
+            # The runner's kernel may lack an exFAT driver; the Mac job covers exFAT as well.
+            if sudo mount -t "$fs" -o "loop,uid=$(id -u),gid=$(id -g)" "$img" "$mnt"; then
+              dirs="$dirs|$mnt"
+            elif [ "$fs" = exfat ]; then
+              echo "::notice::this runner cannot mount exFAT; vfat only here"
+            else
+              exit 1
+            fi
           done
           PCTWIN_FAT_DIRS="$dirs" PCTWIN_REQUIRE_FAT=1 cargo test -p pctwin-gate --test real_fat --locked
       - name: Gate on real FAT and exFAT drives (Mac)
