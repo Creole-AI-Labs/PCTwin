@@ -37,6 +37,8 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   const wasBusy = useRef(false);
   // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
   const paired = useRef(false);
+  // Counts attempts, so a reply that arrives after its attempt ended changes nothing.
+  const attempt = useRef(0);
 
 
   // `notice` is shown while looking again (after a lost connection).
@@ -69,19 +71,16 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
     if (event.kind === "paired") {
       paired.current = true;
       setPhase("paired");
-    } else if (event.kind === "lost") {
-      // The old laptop starts again elsewhere after a lost connection: look for it again.
-      paired.current = false;
-      setBusy(false);
-      setNumber(null);
-      setCode("");
-      void search(LOST_NEW);
     } else {
+      // The attempt is over. The old laptop shows a fresh code, and may have started again
+      // somewhere else (it left, or its app closed), so look for it again rather than retry an
+      // address it may have left. What happened stays on screen while looking.
+      paired.current = false;
+      attempt.current += 1;
       setBusy(false);
       setNumber(null);
       setCode("");
-      setProblem(event.problem);
-      setPhase("code");
+      void search(event.kind === "lost" ? LOST_NEW : event.problem);
     }
   }, [search]);
 
@@ -124,13 +123,19 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   const connect = async (e: SyntheticEvent) => {
     e.preventDefault();
     if (!chosen || busy || code.trim() === "") return;
+    const mine = ++attempt.current;
     setBusy(true);
     setProblem(null);
     try {
-      setNumber(await newConnect(chosen.index, code.trim()));
+      const shown = await newConnect(chosen.index, code.trim());
+      // The attempt may already have ended (its end can arrive before this reply): then the
+      // screen has moved on, and this number is not shown.
+      if (attempt.current !== mine) return;
+      setNumber(shown);
       setBusy(false);
       setPhase("number");
     } catch (error) {
+      if (attempt.current !== mine) return;
       setBusy(false);
       setProblem(toProblem(error));
     }

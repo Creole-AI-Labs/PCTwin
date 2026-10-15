@@ -542,3 +542,43 @@ describe("the old laptop once paired", () => {
     expect(screen.getByRole("group", { name: /1 2 3 4 5 6$/ })).toBeTruthy();
   });
 });
+
+describe("the new laptop after an attempt ends", () => {
+  it("looks for the old laptop again, keeping what happened on screen", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    const searches = () => tauri.invoke.mock.calls.filter((c) => c[0] === "pairing_new_search").length;
+    const before = searches();
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-connection-lost", networks: [] } });
+    await waitFor(() => {
+      expect(searches()).toBe(before + 1);
+    });
+    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    noMissingText();
+  });
+
+  it("ignores a number that arrives after its attempt ended", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    let answer: (n: number) => void = () => undefined;
+    replies.pairing_new_connect = () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      });
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    // The attempt's end arrives before the reply.
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-connection-lost", networks: [] } });
+    await act(async () => {
+      answer(57);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByText(text("pair-new-number-title"))).toBeNull();
+    expect(await screen.findByText(text("pair-new-code-title"))).toBeTruthy();
+  });
+});
