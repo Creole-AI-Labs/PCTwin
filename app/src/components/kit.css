@@ -411,6 +411,7 @@
   font-size: var(--type-tertiary);
   font-weight: 600;
   max-inline-size: 100%;
+  overflow-wrap: normal;
 }
 
 .kit-chip svg {
