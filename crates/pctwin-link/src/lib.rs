@@ -101,9 +101,12 @@ const MAX_DATA_LEN: usize = u16::MAX as usize;
 const SESSION_TAG: std::ops::Range<usize> = 2..10;
 /// How long a device gets to read a notice before it is closed.
 const NOTICE_LINGER: Duration = Duration::from_secs(1);
-/// The new laptop's first sealed message once approved: it has the keys and is still there. The
-/// old laptop counts as paired only once this arrives.
+/// The new laptop's first sealed message once approved: a liveness receipt (it is still there,
+/// and holds the session's keys), not key confirmation, which the pairing messages already do.
+/// The old laptop counts as paired only once this arrives. Fixed for every release.
 const PAIRED_CONFIRM: &[u8] = b"paired";
+/// How often a watched link with unread messages is looked at again.
+const WATCH_PAUSE: Duration = Duration::from_millis(500);
 /// Most devices being refused at once; beyond this, extra connections are closed without a notice.
 const MAX_REFUSALS: usize = 64;
 /// Most addresses remembered as penalised.
@@ -589,6 +592,26 @@ impl GuestPending {
     }
 }
 
+/// A watch on a paired link: see [`Link::watch`].
+pub struct LinkWatch {
+    stream: TcpStream,
+}
+
+impl LinkWatch {
+    /// Resolves when the other laptop hung up or the connection broke (the operating system's
+    /// keep-alive probes notice a laptop that vanished). Only looks, never reads: while messages
+    /// wait unread, it looks again now and then.
+    pub async fn closed(&self) {
+        let mut byte = [0u8; 1];
+        loop {
+            match self.stream.peek(&mut byte).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => tokio::time::sleep(WATCH_PAUSE).await,
+            }
+        }
+    }
+}
+
 /// A paired, encrypted link. Every message is sealed; anything altered, replayed or forged is
 /// rejected. A half-sent or half-read frame would leave the stream out of step, so the link is
 /// closed for good after any failure, and also if a [`send`](Self::send) or [`recv`](Self::recv)
@@ -628,6 +651,19 @@ impl Link {
         socket2::SockRef::from(&self.stream)
             .keepalive()
             .unwrap_or(false)
+    }
+
+    /// A watch on this link that tells when the other laptop has gone, without reading anything
+    /// (whoever later uses the link still gets every message). For the time between pairing and
+    /// the move, so a link that died is let go instead of shown as paired.
+    pub fn watch(&self) -> Result<LinkWatch, LinkError> {
+        let copy = socket2::SockRef::from(&self.stream)
+            .try_clone()
+            .map_err(|_| LinkError::Closed)?;
+        let copy: std::net::TcpStream = copy.into();
+        copy.set_nonblocking(true).map_err(|_| LinkError::Closed)?;
+        let stream = TcpStream::from_std(copy).map_err(|_| LinkError::Closed)?;
+        Ok(LinkWatch { stream })
     }
 
     /// The keys for extra lanes, handed out once (from the main link only), so the app can open

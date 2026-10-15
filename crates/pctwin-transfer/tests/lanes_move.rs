@@ -170,10 +170,13 @@ fn jobs(l: &Laptops) -> Vec<SendJob> {
 }
 
 fn plan(l: &Laptops) -> pctwin_transfer::Allowance {
-    let files: Vec<(ItemId, u64)> = (0..l.files.len())
-        .map(|n| (id(n as u8), l.files[n].1.len() as u64))
+    let jobs = jobs(l);
+    let files: Vec<(&SendJob, u64)> = jobs
+        .iter()
+        .enumerate()
+        .map(|(n, j)| (j, l.files[n].1.len() as u64))
         .collect();
-    common::approved(&files)
+    common::approved_jobs(&files)
 }
 
 fn total_blocks(l: &Laptops) -> u64 {

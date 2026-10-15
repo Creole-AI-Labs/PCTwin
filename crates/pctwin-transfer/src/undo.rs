@@ -995,6 +995,7 @@ mod tests {
     fn committed(j: &Journal) -> u64 {
         let id = j
             .plan(&PlannedWrite {
+                download_mark: None,
                 item: ItemId::from_hex(&"01".repeat(16)).unwrap(),
                 source_laptop: pctwin_record::LaptopId::from_hex(&"02".repeat(16)).unwrap(),
                 destination: "me".into(),

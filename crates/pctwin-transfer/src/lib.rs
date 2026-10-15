@@ -60,12 +60,12 @@ mod session;
 mod undo;
 mod version;
 
-pub use allowance::{Allowance, MAX_ATTEMPTS, Refusal};
+pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use inventory::{
     INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, receive_inventory, send_inventory,
 };
-pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label};
+pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label, shown_path};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces};
@@ -251,6 +251,23 @@ pub struct Header {
     /// (`None` if the old laptop could not tell), so undo can later ask whether that same file
     /// is still there unchanged.
     pub source_file: Option<pctwin_journal::FileId>,
+    /// The original's download marker, if its system marked it as from the internet; the copy
+    /// gets the same (Security Design B). Only the level travels.
+    pub mark: Option<pctwin_journal::DownloadMark>,
+}
+
+impl Header {
+    /// Whether `other` describes the same file: everything but the download marker, which says
+    /// how cautious to be with the file, not which file it is.
+    pub fn same_file(&self, other: &Header) -> bool {
+        Header {
+            mark: None,
+            ..self.clone()
+        } == Header {
+            mark: None,
+            ..other.clone()
+        }
+    }
 }
 
 /// Sent after a file's last block.
@@ -445,6 +462,8 @@ impl FileSender {
         let mut file = opener.open(path)?;
         let stamp = file.stamp()?;
         let source_file = file.identity().ok().flatten();
+        // Read only: the marker is looked at, never changed.
+        let mark = pctwin_gate::download_mark_of(path);
         // The block size is always this laptop's own choice, never taken from the ticket.
         let block_size = block_size_for(stamp.size);
         let block_count = stamp.size.div_ceil(block_size);
@@ -470,6 +489,7 @@ impl FileSender {
                 block_count,
                 stamp,
                 source_file,
+                mark,
             },
             next: 0,
             skip,
@@ -559,8 +579,12 @@ fn check_header(header: &Header) -> Result<(), TransferError> {
     Ok(())
 }
 
-/// The copy keeps the original's modified time, so a later check can tell it is unchanged.
+/// The copy keeps the original's modified time, so a later check can tell it is unchanged, and
+/// its download marker, so the system stays as cautious with it.
 fn keep_original_time(file: &mut IncomingFile<'_>, header: &Header) {
+    if let Some(mark) = header.mark {
+        file.keep_download_mark(mark);
+    }
     if let Some(ns) = header.stamp.modified_ns {
         let at = std::time::Duration::from_nanos(ns.unsigned_abs());
         let time = if ns >= 0 {
@@ -627,6 +651,16 @@ impl<'d> Assembly<'d> {
             done,
             hashes: std::collections::BTreeMap::new(),
         })
+    }
+
+    /// Keeps `mark` instead of the marker this file has if it is the stricter one.
+    pub(crate) fn keep_stricter_mark(&mut self, mark: Option<pctwin_journal::DownloadMark>) {
+        if mark > self.header.mark {
+            self.header.mark = mark;
+            if let Some(m) = mark {
+                self.file.keep_download_mark(m);
+            }
+        }
     }
 
     /// After the app restarts: picks a partly received file up again from its temporary file

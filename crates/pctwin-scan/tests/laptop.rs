@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use pctwin_record::{
-    CloudProvider, FolderRole, Inclusion, Item, LaptopId, LeftOutReason, Owner, Storage,
+    CloudProvider, FolderRole, Inclusion, Item, LaptopId, LeftOutReason, ManagedBy, Owner, Storage,
 };
 use pctwin_scan::{
     FolderLookup, FoundFolder, Person, ScanError, Size, build_scan, scan_this_laptop,
@@ -30,6 +30,7 @@ fn found(role: FolderRole, path: &Path, storage: Storage) -> FolderLookup {
         path: path.to_path_buf(),
         storage,
         moved: false,
+        managed_by: pctwin_record::ManagedBy::Personal,
     })
 }
 
@@ -224,4 +225,52 @@ fn this_laptop_scans_into_a_valid_record() {
     scan.record.validate().unwrap();
     assert_eq!(scan.people.iter().filter(|p| p.person.is_me).count(), 1);
     assert!(scan.drives.iter().any(|d| d.is_system));
+}
+
+/// A work laptop: the employer moved the Desktop into "OneDrive - Contoso". Its files are in the
+/// record, marked as the employer's and left out by default with that reason; the person's own
+/// Documents move as usual.
+#[test]
+fn a_desktop_in_an_employers_onedrive_is_recorded_and_left_out() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("ada");
+    let docs = home.join("Documents");
+    let work_desktop = home.join("OneDrive - Contoso/Desktop");
+    write(docs.join("cv.docx"), 10);
+    write(work_desktop.join("budget.xlsx"), 20);
+    let people = vec![person("S-1-5-21-1001", &home, true)];
+    let mut desktop = found(
+        FolderRole::Desktop,
+        &work_desktop,
+        Storage::Cloud {
+            provider: CloudProvider::OneDrive,
+        },
+    );
+    if let FolderLookup::Found(f) = &mut desktop {
+        f.managed_by = ManagedBy::Organisation;
+    }
+    let folders = vec![
+        found(FolderRole::Home, &home, Storage::SystemDrive),
+        found(FolderRole::Documents, &docs, Storage::SystemDrive),
+        desktop,
+    ];
+    let scan = build_scan(laptop(), people, folders, Vec::new()).unwrap();
+    let item = |name: &str| {
+        scan.record
+            .items
+            .iter()
+            .find(|i| names(i) == name)
+            .unwrap_or_else(|| panic!("{name} is in the record"))
+    };
+    let budget = item("budget.xlsx");
+    assert_eq!(budget.managed_by, ManagedBy::Organisation);
+    assert_eq!(
+        budget.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::WorkManaged
+        }
+    );
+    let cv = item("cv.docx");
+    assert_eq!(cv.managed_by, ManagedBy::Personal);
+    assert_eq!(cv.inclusion, Inclusion::Included);
 }
