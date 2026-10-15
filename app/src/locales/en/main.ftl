@@ -260,6 +260,240 @@ label-animal-beaver = Beaver
 label-picked = { $colour } { $animal }
 label-unnamed = Unnamed laptop
 
+## M02 Finding your familiar setup
+
+scan-eyebrow = Reviewed move
+scan-title = Finding your familiar setup.
+scan-body = The inventory is saved so the scan can resume.
+scan-progress =
+    .aria-label = Scanning selected locations
+# $size is passed but not shown in the mockup line.
+scan-found =
+    { NUMBER($count) ->
+        [one] Scan: { $count } file discovered.
+       *[other] Scan: { $count } files discovered.
+    }
+scan-step-usual-title = Files and folders
+scan-step-usual-body = Accessible selected paths scanned.
+scan-step-other-title = Other folders and drives
+scan-step-other-body = Folders and drives you use outside the usual places.
+scan-step-protected-title = Protected locations
+scan-step-protected-body =
+    { NUMBER($count) ->
+        [one] { $count } location still needs permission.
+       *[other] { $count } locations still need permission.
+    }
+scan-step-done = Done
+scan-step-current = Now
+scan-step-todo = Next
+scan-unreadable-note = Unreadable locations remain visible. They are not counted as fully scanned.
+scan-status-not-searched = Not scanned
+scan-paused = Scan paused. Everything found so far is saved.
+scan-resumed = The scan picked up where it stopped.
+scan-partial =
+    { NUMBER($count) ->
+        [one] Partial scan: { $count } protected location is still excluded.
+       *[other] Partial scan: { $count } protected locations are still excluded.
+    }
+scan-allow = Allow access
+scan-pause = Pause
+scan-resume = Continue scanning
+scan-continue = Preview inventory
+
+## M03 Everything you chose, in view
+
+overview-eyebrow = Reviewed move
+overview-title = Everything you chose, in view.
+overview-body = Review the inventory before creating the move plan.
+# The metric value next to each label is passed in already formatted.
+overview-size-label = selected files
+overview-items-label =
+    { NUMBER($count) ->
+        [one] file
+       *[other] files
+    }
+overview-attention-label =
+    { NUMBER($count) ->
+        [one] needs your attention
+       *[other] need your attention
+    }
+overview-files-title = Files and folders
+overview-files-body = Documents, photos and selected custom locations.
+overview-dest-title = Where they go
+overview-dest-body = The place on the new laptop for each folder.
+overview-people-title = Profiles
+overview-people-body = Choose the receiving account for each.
+overview-review = Review
+overview-partial =
+    { NUMBER($count) ->
+        [one] Partial scan: { $count } protected location is still excluded.
+       *[other] Partial scan: { $count } protected locations are still excluded.
+    }
+overview-allow = Allow access
+overview-continue = Continue
+
+## M04 Keep what matters to you
+
+files-eyebrow = Reviewed move
+files-title = Keep what matters to you.
+files-body = Choose folders, secondary drives and custom locations.
+files-search-label = Find a local folder
+files-search-placeholder = Search selected paths
+files-select =
+    .aria-label = Move { $name }
+files-folder-detail =
+    { NUMBER($count) ->
+        [one] { $size } · { $count } file
+       *[other] { $size } · { $count } files
+    }
+files-status-protected = Needs permission
+files-protected-body = PCTwin needs your permission to read this folder. Its files are not counted until you allow it.
+files-allow = Allow access
+files-status-added = Custom path
+files-add = Add another folder
+files-remove =
+    .aria-label = Remove { $name }
+files-no-limit = The free core has no arbitrary file-size or folder-count cap.
+files-total =
+    { NUMBER($count) ->
+        [one] { $count } folder chosen, { $size } in total
+       *[other] { $count } folders chosen, { $size } in total
+    }
+files-none = Choose at least one folder to continue.
+files-continue = Choose destinations
+
+## M05 Give every file a home
+
+dest-eyebrow = Reviewed move
+dest-title = Give every file a home.
+dest-body = Map selected categories to a target you control.
+dest-col-chosen = Selected data
+dest-col-place = Destination
+dest-col-placement = Placement
+dest-placement-local = Local
+dest-placement-external = External
+dest-col-status = Status
+dest-select =
+    .aria-label = Destination for { $name }
+# $folder is a folder name on the new laptop, for example "Documents".
+dest-option-folder = New laptop / { $folder }
+# $drive is the name of a drive connected to the new laptop.
+dest-option-drive = External disk / { $drive }
+dest-option-choose = Choose folder
+dest-default-label = Default destination
+dest-status-ready = Ready
+dest-status-missing = Drive missing
+dest-status-space = Not enough space
+dest-all-ready = Every folder has a place on the new laptop.
+dest-missing = { $drive } is not connected to the new laptop. Connect it, or choose another place for these files.
+dest-space = { $place } has { $free } free, but these files need { $needed }. Free up space there, choose another place, or move fewer files.
+dest-change = Change
+dest-continue = Review the plan
+
+## M23 Approve the move you want
+
+plan-eyebrow = Reviewed move
+plan-title = Approve the move you want.
+plan-body = This versioned plan is the only authority for execution.
+plan-what-title = Selected scope
+# $size is already formatted, for example "120 GB". $count is passed but not shown.
+plan-what-body = { $size } of files. Selected folders and mapped destinations.
+plan-where-title = Where it goes
+plan-where-body =
+    { NUMBER($count) ->
+        [one] To { $count } place on the new laptop.
+       *[other] To { $count } places on the new laptop.
+    }
+plan-hand-title = Before you start
+plan-hand-body =
+    { NUMBER($count) ->
+        [one] { $count } step. It is listed in your report at the end.
+       *[other] { $count } steps. They are listed in your report at the end.
+    }
+plan-hand-none = Nothing, as far as PCTwin can tell now.
+plan-old-safe = Your old laptop stays unchanged. Files are copied, never taken off it.
+plan-edit = Change the plan
+plan-edit-note = Editing the plan invalidates approval for new operations.
+plan-approve = I approve this reviewed plan and its disclosed manual steps.
+plan-not-approved = The draft plan has not been approved. New executable operations remain blocked.
+plan-changed = These edits invalidate the previous approval for new operations.
+plan-start = Start the move
+
+## Plan screens: shared words and the lines the copy deck did not cover
+
+plan-back = Back
+# $n is a count of files or folders.
+plan-number = { NUMBER($n) }
+# $n is a number already rounded for reading, for example 18.4.
+plan-size-b = { NUMBER($n) } bytes
+plan-size-kb = { NUMBER($n) } KB
+plan-size-mb = { NUMBER($n) } MB
+plan-size-gb = { NUMBER($n) } GB
+plan-size-tb = { NUMBER($n) } TB
+# $size is a size already written out, for example "18.4 GB". Used when part of a folder could not be read.
+plan-size-at-least = at least { $size }
+plan-size-unknown = size unknown
+plan-role-home = Home folder
+plan-role-desktop = Desktop
+plan-role-documents = Documents
+plan-role-downloads = Downloads
+plan-role-pictures = Pictures
+plan-role-music = Music
+plan-role-videos = Videos
+plan-role-public = Public folder
+plan-role-app-data = App data
+plan-role-other = Other folder
+# $done and $total are counts of places this search has looked at and has to look at.
+scan-places = { $done } of { $total } places searched
+scan-card-title = Scanning selected locations
+scan-pausing = Pausing after the folder it is on. Everything found so far is saved.
+overview-row-attention = Needs attention
+files-status-work = Work or school
+files-work-body = Your work or school manages this folder, so it is left out unless you tick it.
+# $count is how many files in the folder are only online.
+files-online-only =
+    { NUMBER($count) ->
+        [one] { $count } file is only online, so it is not copied.
+       *[other] { $count } files are only online, so they are not copied.
+    }
+files-no-match = No folder matches that name.
+dest-status-none = Choose a place
+dest-status-readonly = Cannot be written to
+dest-status-format = File too big
+# $name is the folder that needs a place.
+dest-none = Choose a place for { $name } on the new laptop.
+# $place is a drive on the new laptop that cannot be written to.
+dest-readonly = { $place } is read-only, so nothing can be copied to it. Choose another place.
+# $place is the drive. Some drive formats cannot hold a single very large file.
+dest-format = A file in these folders is too big for the way { $place } is set up. Choose another place.
+# $folder is a folder on the new laptop and $drive the drive it is on.
+plan-place = { $folder } on { $drive }
+plan-group-to = Goes to { $place }
+plan-version = Plan version { $revision }
+plan-details = More details
+# $reference is a short code that names exactly this version of the plan.
+plan-reference = Reference { $reference }
+# $count is how many files are affected in each line below.
+plan-hand-cloud-only =
+    { NUMBER($count) ->
+        [one] { $count } file is only online. PCTwin does not download it. Make it available on the old laptop first, or leave it.
+       *[other] { $count } files are only online. PCTwin does not download them. Make them available on the old laptop first, or leave them.
+    }
+plan-hand-unreadable =
+    { NUMBER($count) ->
+        [one] { $count } item could not be opened, so it is not moving. Allow access, or leave it.
+       *[other] { $count } items could not be opened, so they are not moving. Allow access, or leave them.
+    }
+plan-hand-work-managed =
+    { NUMBER($count) ->
+        [one] { $count } item is managed by your work or school and is left out. Tick its folder to include it.
+       *[other] { $count } items are managed by your work or school and are left out. Tick their folders to include them.
+    }
+plan-blocked-someone-unmapped = Someone on the old laptop has no account chosen on the new one yet. Choose where each person's files go, then come back.
+plan-blocked-account-used-twice = Two people would end up in one account on the new laptop. Give each person their own.
+plan-blocked-invalid = This plan cannot be approved as it is. Go back and check what you chose.
+plan-blocked-fix = Choose accounts
+
 ## Tray menu
 
 tray-show = Show PCTwin
