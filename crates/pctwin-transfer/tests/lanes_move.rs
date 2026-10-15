@@ -663,8 +663,12 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
     let pending_host = host.next_peer(&rotating).await.unwrap();
     let pending_guest = guest.await.unwrap();
     let number = pending_guest.match_number();
-    let old_link = pending_host.choose(number, Instant::now()).await.unwrap();
-    let mut new_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (old_link, new_link) = tokio::join!(
+        pending_host.choose(number, Instant::now()),
+        pending_guest.approval()
+    );
+    let (old_link, mut new_link) = (old_link.unwrap(), new_link.unwrap());
 
     // The person approved the plan: both laptops make their resume keys for it.
     let mut old_link = old_link;
