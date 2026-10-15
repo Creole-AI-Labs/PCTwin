@@ -3267,6 +3267,7 @@ dependencies = [
  "pctwin-doctor",
  "pctwin-journey",
  "pctwin-link",
+ "pctwin-pairing",
  "pctwin-session",
  "serde",
  "serde_json",

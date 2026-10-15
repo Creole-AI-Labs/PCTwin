@@ -196,13 +196,20 @@ impl Serving for OldLaptop {
     }
 }
 
-/// The new laptop waiting for the person's pick: its numbers' round, and the one-shot signal
-/// that tells serving this pick is settled (sent, or dropped with it). Each laptop has its own,
-/// so a pick, a decline or a time-out can never be stored ahead for another laptop.
-struct WaitingPeer {
-    peer: HostPending,
+/// What the person decided for one round of numbers. Only the serving task acts on it: it alone
+/// holds the waiting laptop, so a pick, a decline and the pick's deadline can never race.
+enum Decision {
+    /// The picked number, and where the outcome goes.
+    Pick(u8, oneshot::Sender<Result<Link, Problem>>),
+    /// None match; told when the new laptop has been told.
+    Decline(oneshot::Sender<()>),
+}
+
+/// The round of numbers on screen now, and the one way to answer it. Each laptop gets its own,
+/// used at most once, so an answer can never be stored ahead for another laptop.
+struct Turn {
     round: u64,
-    settled: oneshot::Sender<()>,
+    decide: oneshot::Sender<Decision>,
 }
 
 /// The old laptop's side of the journey. Dropping it ends pairing and stops listening; pairing
@@ -211,8 +218,8 @@ pub struct OldJourney<S: Serving> {
     /// Taken (and so dropped, closing the port) once paired.
     serving: Arc<Mutex<Option<Arc<S>>>>,
     sender: Arc<Mutex<RotatingSender>>,
-    /// The new laptop waiting for the person's pick, if any.
-    pending: Arc<tokio::sync::Mutex<Option<WaitingPeer>>>,
+    /// The round waiting for the person's answer, if any.
+    pending: Arc<Mutex<Option<Turn>>>,
     /// Set once paired: no more codes are shown or served.
     finished: Arc<AtomicBool>,
     updates: mpsc::UnboundedSender<OldUpdate>,
@@ -252,7 +259,7 @@ impl<S: Serving> OldJourney<S> {
         let mut journey = Self {
             serving: Arc::new(Mutex::new(Some(serving.clone()))),
             sender: Arc::new(Mutex::new(sender)),
-            pending: Arc::new(tokio::sync::Mutex::new(None)),
+            pending: Arc::new(Mutex::new(None)),
             finished: Arc::new(AtomicBool::new(false)),
             updates,
             tasks: Vec::new(),
@@ -277,36 +284,38 @@ impl<S: Serving> OldJourney<S> {
     /// laptop is told the numbers did not match, and a fresh code follows. A pick for numbers no
     /// longer shown (another round, or the time ran out) does nothing.
     pub async fn pick(&self, round: u64, number: u8) -> Result<Link, Problem> {
-        let waiting = self.take_round(round).await.ok_or(Problem::TimedOut)?;
-        let picked = waiting.peer.choose(number, Instant::now()).await;
-        if picked.is_ok() {
-            self.finished.store(true, Ordering::SeqCst);
-            // Dropping our share of the serving side closes the port and the announcement once
-            // the serving task (which is now waiting on this pick) ends too.
-            drop(lock_serving(&self.serving).take());
-            let _ = self.updates.send(OldUpdate::Paired);
-        }
-        let _ = waiting.settled.send(());
-        picked.map_err(Problem::from)
+        let (outcome, picked) = oneshot::channel();
+        self.answer(round, Decision::Pick(number, outcome))?;
+        // No outcome means the pick's deadline came first: serving has moved on.
+        let link = picked.await.map_err(|_| Problem::TimedOut)??;
+        // Our share of the serving side; the serving task has already let go of its own, so the
+        // port and the announcement close.
+        drop(lock_serving(&self.serving).take());
+        Ok(link)
     }
 
     /// None of the three numbers shown for `round` matches the new laptop's (or it shows none):
     /// this attempt ends without pairing, the new laptop is told, and a fresh code follows. For
     /// numbers no longer shown, it does nothing.
     pub async fn decline(&self, round: u64) {
-        if let Some(waiting) = self.take_round(round).await {
-            waiting.peer.decline().await;
-            let _ = waiting.settled.send(());
+        let (told, is_told) = oneshot::channel();
+        if self.answer(round, Decision::Decline(told)).is_ok() {
+            let _ = is_told.await;
         }
     }
 
-    /// The waiting laptop, only if its numbers are those of `round`.
-    async fn take_round(&self, round: u64) -> Option<WaitingPeer> {
-        let mut pending = self.pending.lock().await;
-        if pending.as_ref().is_some_and(|w| w.round == round) {
-            pending.take()
-        } else {
-            None
+    /// Hands `decision` to the serving task, only if the numbers of `round` are on screen and
+    /// unanswered. Taking the round and answering it are one step, so it is answered once.
+    fn answer(&self, round: u64, decision: Decision) -> Result<(), Problem> {
+        let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+        match pending.take() {
+            Some(turn) if turn.round == round => {
+                turn.decide.send(decision).map_err(|_| Problem::TimedOut)
+            }
+            other => {
+                *pending = other;
+                Err(Problem::TimedOut)
+            }
         }
     }
 
@@ -400,46 +409,76 @@ async fn show_codes(
 }
 
 /// Serves new laptops one at a time: each that reaches the number pick waits for the person's
-/// pick (or decline, or the pick's deadline), then the next is served, until paired.
+/// answer or the pick's deadline, whichever comes first, then the next is served. Once paired,
+/// serving ends, and with it this task's hold on the port and the announcement.
 async fn serve<S: Serving>(
     serving: Arc<S>,
     sender: Arc<Mutex<RotatingSender>>,
-    pending: Arc<tokio::sync::Mutex<Option<WaitingPeer>>>,
+    pending: Arc<Mutex<Option<Turn>>>,
     finished: Arc<AtomicBool>,
     updates: mpsc::UnboundedSender<OldUpdate>,
 ) {
     let mut round = 0u64;
-    while !finished.load(Ordering::SeqCst) {
-        match serving.next_peer(&sender).await {
-            Ok(peer) => {
-                round += 1;
-                let numbers = peer.choices();
-                let deadline = tokio::time::Instant::from_std(peer.deadline());
-                let (settled, is_settled) = oneshot::channel();
-                *pending.lock().await = Some(WaitingPeer {
-                    peer,
-                    round,
-                    settled,
-                });
-                if updates.send(OldUpdate::Choose { round, numbers }).is_err() {
-                    return;
-                }
-                tokio::select! {
-                    _ = is_settled => {}
-                    () = tokio::time::sleep_until(deadline) => {
-                        let mut waiting = pending.lock().await;
-                        if waiting.as_ref().is_some_and(|w| w.round == round) {
-                            if let Some(w) = waiting.take() {
-                                w.peer.time_out().await;
-                            }
-                            let _ = updates.send(OldUpdate::TimedOut);
-                        }
+    loop {
+        let peer = match serving.next_peer(&sender).await {
+            Ok(peer) => peer,
+            // Only a failed secure random source ends serving; wait and try again.
+            Err(_) => {
+                tokio::time::sleep(TICK).await;
+                continue;
+            }
+        };
+        round += 1;
+        let numbers = peer.choices();
+        let deadline = tokio::time::Instant::from_std(peer.deadline());
+        let (decide, decided) = oneshot::channel();
+        *pending.lock().unwrap_or_else(PoisonError::into_inner) = Some(Turn { round, decide });
+        if updates.send(OldUpdate::Choose { round, numbers }).is_err() {
+            return;
+        }
+        let decision = tokio::select! {
+            // An answer that came in just as the time ran out still counts.
+            biased;
+            d = decided => d.ok(),
+            () = tokio::time::sleep_until(deadline) => None,
+        };
+        // Whatever happened, this round can no longer be answered.
+        pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take_if(|t| t.round == round);
+        match decision {
+            Some(Decision::Pick(number, outcome)) => {
+                match peer.choose(number, Instant::now()).await {
+                    Ok(link) => {
+                        finished.store(true, Ordering::SeqCst);
+                        let _ = updates.send(OldUpdate::Paired);
+                        let _ = outcome.send(Ok(link));
+                        return;
+                    }
+                    Err(e) => {
+                        let _ = outcome.send(Err(picked_problem(e)));
                     }
                 }
             }
-            // Only a failed secure random source ends serving; wait and try again.
-            Err(_) => tokio::time::sleep(TICK).await,
+            Some(Decision::Decline(told)) => {
+                peer.decline().await;
+                let _ = told.send(());
+            }
+            None => {
+                peer.time_out().await;
+                let _ = updates.send(OldUpdate::TimedOut);
+            }
         }
+    }
+}
+
+/// A pick that did not pair, as the old laptop's screen says it: one that came too late is the
+/// time running out, not a wrong number.
+fn picked_problem(e: LinkError) -> Problem {
+    match e {
+        LinkError::Pairing(PairingError::Expired) => Problem::TimedOut,
+        other => other.into(),
     }
 }
 

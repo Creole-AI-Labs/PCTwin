@@ -150,7 +150,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .manage(pairing::Pairing::default())
+        .manage(pairing::new_state())
         .invoke_handler(tauri::generate_handler![
             set_window_mode,
             set_tray_labels,
