@@ -160,7 +160,7 @@ impl World {
         }
     }
     fn plan(&self) -> pctwin_transfer::Allowance {
-        common::approved(&[(id(1), SIZE as u64)])
+        common::approved(&[(id(1), SIZE as u64, "me", "Videos/big.bin")])
     }
     fn receiver(&self) -> ReceiverSession<'_> {
         ReceiverSession::new(&self.table, self.plan(), &self.journal, "1001")
@@ -320,7 +320,7 @@ async fn a_file_no_longer_in_the_approved_plan_is_not_picked_up_again() {
     let w = world();
     let claims: Vec<(u64, [u8; 32])> = (0..10).map(|b| (b, w.hash(b))).collect();
     let entry = w.left_behind(&(0..10).collect::<Vec<_>>(), &claims);
-    let other_plan = common::approved(&[(id(2), 10)]);
+    let other_plan = common::approved(&[(id(2), 10, "me", "Videos/big.bin")]);
     let mut receiver = ReceiverSession::new(&w.table, other_plan, &w.journal, "1001");
     assert_eq!(receiver.restore().unwrap(), 0);
     assert!(matches!(
@@ -333,6 +333,29 @@ async fn a_file_no_longer_in_the_approved_plan_is_not_picked_up_again() {
             .count(),
         0
     );
+}
+
+#[tokio::test]
+async fn a_partial_file_somewhere_the_plan_does_not_say_is_not_picked_up_again() {
+    // The journal says where the partial file is; only the approved plan says where it lands.
+    let w = world();
+    let claims: Vec<(u64, [u8; 32])> = (0..10).map(|b| (b, w.hash(b))).collect();
+    for elsewhere in [("me", "Documents/big.bin"), ("other", "Videos/big.bin")] {
+        let entry = w.left_behind(&(0..10).collect::<Vec<_>>(), &claims);
+        let plan = common::approved(&[(id(1), SIZE as u64, elsewhere.0, elsewhere.1)]);
+        let mut receiver = ReceiverSession::new(&w.table, plan, &w.journal, "1001");
+        assert_eq!(receiver.restore().unwrap(), 0, "{elsewhere:?}");
+        assert!(matches!(
+            w.journal.entry(entry).unwrap().unwrap().state,
+            State::Failed { .. }
+        ));
+        assert_eq!(
+            std::fs::read_dir(w.mine.path().join("Videos"))
+                .unwrap()
+                .count(),
+            0
+        );
+    }
 }
 
 #[tokio::test]
@@ -604,16 +627,14 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
         .unwrap()
         .unwrap();
     let n = pctwin_transfer::MAX_OPEN_FILES + 6;
-    let files: Vec<(ItemId, u64)> = (0..n)
+    let files: Vec<(ItemId, u64, String)> = (0..n)
         .map(|k| {
-            (
-                ItemId::from_hex(&format!("{:04x}{}", k + 16, "0".repeat(28))).unwrap(),
-                10,
-            )
+            let item = ItemId::from_hex(&format!("{:04x}{}", k + 16, "0".repeat(28))).unwrap();
+            (item, 10, format!("Many/{}.txt", item.to_hex()))
         })
         .collect();
     std::fs::create_dir_all(w.mine.path().join("Many")).unwrap();
-    for (item, size) in &files {
+    for (item, size, path) in &files {
         let entry = w
             .journal
             .plan(&PlannedWrite {
@@ -621,7 +642,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
                 item: *item,
                 source_laptop: LaptopId::from_hex(LAPTOP).unwrap(),
                 destination: "me".into(),
-                path: format!("Many/{}.txt", item.to_hex()),
+                path: path.clone(),
                 size: *size,
                 actor: Actor {
                     acting_account: "1001".into(),
@@ -639,7 +660,11 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
         std::fs::write(w.mine.path().join(&temp), b"").unwrap();
         w.journal.staged(entry, &temp, &[]).unwrap();
     }
-    let mut receiver = ReceiverSession::new(&w.table, common::approved(&files), &w.journal, "1001");
+    let plan: Vec<(ItemId, u64, &str, &str)> = files
+        .iter()
+        .map(|(item, size, path)| (*item, *size, "me", path.as_str()))
+        .collect();
+    let mut receiver = ReceiverSession::new(&w.table, common::approved(&plan), &w.journal, "1001");
     assert_eq!(
         receiver.restore().unwrap(),
         pctwin_transfer::MAX_OPEN_FILES as u64
@@ -814,6 +839,28 @@ async fn a_file_marked_by_the_time_it_is_continued_arrives_marked() {
     let mut sender = SenderSession::new(vec![w.job()], 1);
     send_all(&mut sender, &mut receiver).await;
     assert!(sender.blocks_sent() < 100, "continued, not started again");
+    let landed = w.mine.path().join("Videos/big.bin");
+    assert_eq!(std::fs::read(&landed).unwrap(), w.data);
+    assert_eq!(download_mark_of(&landed), Some(DownloadMark::Internet));
+}
+
+/// With a marker floor, a file left partway unmarked and continued after a restart arrives marked
+/// at least as the floor says: the old laptop describes it unmarked, and so does the journal.
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn with_a_marker_floor_a_file_continued_after_a_restart_still_lands_marked() {
+    use pctwin_gate::{DownloadMark, download_mark_of};
+    let w = world();
+    let landed: Vec<u64> = (0..40).collect();
+    let claims: Vec<(u64, [u8; 32])> = landed.iter().map(|b| (*b, w.hash(*b))).collect();
+    w.left_behind(&landed, &claims);
+    recover(&w.journal, &w.table).unwrap();
+    let plan = w.plan().with_mark_floor(DownloadMark::Internet);
+    let mut receiver = ReceiverSession::new(&w.table, plan, &w.journal, "1001");
+    assert_eq!(receiver.restore().unwrap(), 1);
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    send_all(&mut sender, &mut receiver).await;
+    assert_eq!(receiver.continued(), 1);
     let landed = w.mine.path().join("Videos/big.bin");
     assert_eq!(std::fs::read(&landed).unwrap(), w.data);
     assert_eq!(download_mark_of(&landed), Some(DownloadMark::Internet));

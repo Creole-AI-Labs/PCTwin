@@ -133,8 +133,8 @@ async fn move_all(
 }
 
 fn plan_for(jobs: &[(SendJob, Vec<u8>)]) -> pctwin_transfer::Allowance {
-    let files: Vec<(ItemId, u64)> = jobs.iter().map(|(j, d)| (j.item, d.len() as u64)).collect();
-    common::approved(&files)
+    let files: Vec<(&SendJob, u64)> = jobs.iter().map(|(j, d)| (j, d.len() as u64)).collect();
+    common::approved_jobs(&files)
 }
 
 fn only_entry(j: &Journal) -> pctwin_journal::Entry {
