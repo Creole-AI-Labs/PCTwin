@@ -3,6 +3,8 @@
 //! `..`, its IDs are never used as paths, and another person's account opens only through the admin
 //! helper.
 
+mod common;
+
 use std::io::Write;
 
 use pctwin_gate::{Approved, Destinations, Dir, GateError, IncomingPath};
@@ -11,7 +13,7 @@ fn write(table: &Destinations, id: &str, p: &str, bytes: &[u8]) -> Result<String
     let dest = table.get(id)?;
     let mut file = dest.create_file(&IncomingPath::parse(p).unwrap(), bytes.len() as u64)?;
     file.write_all(bytes).map_err(GateError::Io)?;
-    Ok(file.finish()?.final_path)
+    Ok(common::finish(file)?.final_path)
 }
 
 /// Every file and folder under `root`, as sorted relative paths.
