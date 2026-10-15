@@ -48,8 +48,9 @@ pub trait FillSteps {
     /// it.
     fn made(&mut self, made: FileId) -> io::Result<()>;
     /// Whether the file, now durable, reads back as exactly the whole checked file (its
-    /// fingerprint). Given the file at its start.
-    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool>;
+    /// fingerprint). Given a reader at its start, past this laptop's cache where the drive allows
+    /// it (as every received file is read back).
+    fn read_back(&mut self, file: &mut dyn Read) -> io::Result<bool>;
     /// It is complete, durable and read back: recorded before its time is set and it is shown.
     fn filled(&mut self) -> io::Result<()>;
     /// PCTwin's own partial copy was removed from the real name after a failure.
@@ -375,7 +376,7 @@ impl crate::Destination {
         stored: &str,
         fill: &Fill,
         modified: Option<std::time::SystemTime>,
-        read_back: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+        read_back: impl FnOnce(&mut dyn Read) -> io::Result<bool>,
         filled: impl FnOnce() -> io::Result<()>,
     ) -> Result<FillFinish, GateError> {
         let Some((dir, name)) = self.open_stored_folder(stored)? else {
@@ -389,15 +390,18 @@ impl crate::Destination {
         }
         let mut options = OpenOptions::new();
         options.read(true).write(true);
-        let mut file = dir.open_with(name, &options)?.into_std();
+        let file = dir.open_with(name, &options)?.into_std();
         if !proven_fill(&file, fill)? {
             return Ok(FillFinish::NotProven);
         }
         full_sync(&file)?;
-        file.seek(SeekFrom::Start(0))?;
-        if !read_back(&mut file)? {
+        // Past the cache where the drive allows it; after a restart the file's pages are not
+        // known to be kept out of memory, so the check says honestly where its bytes came from.
+        let mut reader = self.read_back_of(&dir, name, &file, false)?;
+        if !read_back(&mut reader)? {
             return Ok(FillFinish::NotProven);
         }
+        drop(reader);
         filled()?;
         if let Some(time) = modified {
             file.set_modified(time)?;
@@ -461,9 +465,19 @@ impl FillSteps for Unjournaled {
     fn made(&mut self, _: FileId) -> io::Result<()> {
         Ok(())
     }
-    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool> {
-        let len = self.source.metadata()?.len();
-        same_start_of(file, &mut self.source, len)
+    fn read_back(&mut self, file: &mut dyn Read) -> io::Result<bool> {
+        self.source.seek(SeekFrom::Start(0))?;
+        let (mut x, mut y) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+        loop {
+            let n = read_full(file, &mut x)?;
+            let m = read_full(&mut self.source, &mut y)?;
+            if n != m || x[..n] != y[..m] {
+                return Ok(false);
+            }
+            if n == 0 {
+                return Ok(true);
+            }
+        }
     }
     fn filled(&mut self) -> io::Result<()> {
         Ok(())
@@ -471,4 +485,18 @@ impl FillSteps for Unjournaled {
     fn cleared(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+/// Reads as much of `buf` as `r` has (less only at its end).
+fn read_full(r: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
+    let mut got = 0;
+    while got < buf.len() {
+        match r.read(&mut buf[got..]) {
+            Ok(0) => break,
+            Ok(n) => got += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(got)
 }

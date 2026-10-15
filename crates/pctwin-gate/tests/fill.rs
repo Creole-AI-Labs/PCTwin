@@ -52,7 +52,7 @@ impl FillSteps for Steps {
         self.log.push("made".into());
         Ok(())
     }
-    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool> {
+    fn read_back(&mut self, file: &mut dyn Read) -> io::Result<bool> {
         let mut got = Vec::new();
         file.read_to_end(&mut got)?;
         self.log.push("read back".into());
@@ -129,7 +129,7 @@ fn a_plain_finish_fills_in_on_such_a_drive() {
         .create_file(&IncomingPath::parse("b.txt").unwrap(), 3)
         .unwrap();
     file.write_all(b"abc").unwrap();
-    assert_eq!(file.finish().unwrap().final_path, "b.txt");
+    assert_eq!(common::finish(file).unwrap().final_path, "b.txt");
     assert_eq!(std::fs::read(root.path().join("b.txt")).unwrap(), b"abc");
     assert_eq!(names(root.path()), ["b.txt"]);
 }
@@ -384,7 +384,7 @@ fn a_fill_that_cannot_be_recorded_stops_and_leaves_nothing_under_the_name() {
         fn made(&mut self, _: FileId) -> io::Result<()> {
             Err(io::Error::other("the journal is full"))
         }
-        fn read_back(&mut self, _: &mut std::fs::File) -> io::Result<bool> {
+        fn read_back(&mut self, _: &mut dyn Read) -> io::Result<bool> {
             Ok(true)
         }
         fn filled(&mut self) -> io::Result<()> {

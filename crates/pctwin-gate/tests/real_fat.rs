@@ -307,6 +307,26 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
     });
 }
 
+/// What the race's fill checks its read-back against (a fill with no journal).
+struct Expect(Vec<u8>);
+
+impl pctwin_gate::FillSteps for Expect {
+    fn made(&mut self, _: pctwin_gate::FileId) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn read_back(&mut self, file: &mut dyn std::io::Read) -> std::io::Result<bool> {
+        let mut got = Vec::new();
+        file.read_to_end(&mut got)?;
+        Ok(got == self.0)
+    }
+    fn filled(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn cleared(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// FAT drives hold files of up to 4 GB less one byte, on every system: a bigger one is refused at
 /// its start, before anything is made. exFAT has no such limit. (Windows cannot read a drive's
 /// type through its handle; the gate asks the drive how it keeps time instead.)
@@ -403,14 +423,11 @@ fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
 /// some rounds, so it proves they really competed. The split is printed for the CI log.
 #[test]
 fn a_name_raced_for_is_never_shared() {
-    use pctwin_gate::Claim;
+    use pctwin_gate::{Claim, Naming};
     if phase() == Phase::After {
         return;
     }
     each_drive(|drive| {
-        if refuses(drive) {
-            return;
-        }
         let dir = fresh(&drive.path, "pctwin-fat-race");
         let dest = Destination::open(&dir).unwrap();
         let naming = dest.check_drive().unwrap().naming;
@@ -474,7 +491,12 @@ fn a_name_raced_for_is_never_shared() {
             if !they_wait {
                 wait(head);
             }
-            let claim = sealed.claim_as(&name);
+            let claim = if naming == Naming::FillIn {
+                let plan = sealed.fill_plan().unwrap();
+                sealed.fill_as(&name, &plan, &mut Expect(ours.clone()))
+            } else {
+                sealed.claim_as(&name)
+            };
             let they_won = other.join().unwrap();
             let got = std::fs::read(dir.join(&name)).unwrap();
             match claim {

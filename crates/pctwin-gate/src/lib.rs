@@ -2715,11 +2715,21 @@ impl<'d> Sealed<'d> {
             Err(e) if is_name_error(&e) => return Claim::Failed(GateError::NameRejected, self),
             Err(e) => return Claim::Failed(GateError::Io(e), self),
         };
+        // Its pages kept out of this laptop's memory as it is written (macOS), so reading it back
+        // past the cache reads the drive, as for every received file.
+        let pages_kept_out = read_back::keep_pages_out(&target);
         let mut progress = fill::Progress {
             born: None,
             written: 0,
         };
-        let filled = self.fill_into(&name, &mut target, plan, steps, &mut progress);
+        let filled = self.fill_into(
+            &name,
+            &mut target,
+            plan,
+            steps,
+            &mut progress,
+            pages_kept_out,
+        );
         match filled {
             Ok(()) => {}
             Err((e, true)) => {
@@ -2754,6 +2764,7 @@ impl<'d> Sealed<'d> {
         plan: &FillPlan,
         steps: &mut dyn FillSteps,
         progress: &mut fill::Progress,
+        pages_kept_out: bool,
     ) -> Result<(), (GateError, bool)> {
         let early = |e: GateError| (e, false);
         let io = |e: io::Error| (GateError::Io(e), false);
@@ -2789,12 +2800,27 @@ impl<'d> Sealed<'d> {
             ))));
         }
         fill::full_sync(target).map_err(io)?;
-        target.seek(SeekFrom::Start(0)).map_err(io)?;
-        if !steps.read_back(target).map_err(io)? {
+        // Read back through a second, read-only handle, past the cache where the drive allows it.
+        let mut reader =
+            match self
+                .destination
+                .read_back_of(&self.dir, name, target, pages_kept_out)
+            {
+                Ok(reader) => reader,
+                // It refuses to read back another file put under the name: say so plainly.
+                Err(_) if !fill::still_ours(&self.dir, name, target, progress).unwrap_or(false) => {
+                    return Err(early(GateError::ReplacedWhileFilling));
+                }
+                Err(e) => return Err(io(e)),
+            };
+        if !steps.read_back(&mut reader).map_err(io)? {
             return Err(early(GateError::Io(io::Error::other(
                 "the copy did not read back the same as the checked file",
             ))));
         }
+        let from = reader.judged_after(|f| self.destination.still_from_drive(f));
+        drop(reader);
+        self.checked_from = Some(from);
         if !fill::still_ours(&self.dir, name, target, progress).map_err(io)? {
             return Err(early(GateError::ReplacedWhileFilling));
         }

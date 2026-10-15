@@ -42,8 +42,8 @@ impl FillSteps for JournalFill<'_> {
         let r = self.journal.fill_made(self.id, made);
         self.keep(r)
     }
-    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool> {
-        let found = fingerprint_reader(file, self.whole.size, self.whole.block_size)?;
+    fn read_back(&mut self, mut file: &mut dyn io::Read) -> io::Result<bool> {
+        let found = fingerprint_reader(&mut file, self.whole.size, self.whole.block_size)?;
         Ok(found == Some(self.whole.fingerprint))
     }
     fn filled(&mut self) -> io::Result<()> {
@@ -57,8 +57,8 @@ impl FillSteps for JournalFill<'_> {
 }
 
 /// Whether a file read back now is exactly the whole file.
-pub(crate) fn reads_back_whole(file: &mut std::fs::File, whole: &Whole) -> io::Result<bool> {
-    Ok(fingerprint_reader(file, whole.size, whole.block_size)? == Some(whole.fingerprint))
+pub(crate) fn reads_back_whole(mut file: &mut dyn io::Read, whole: &Whole) -> io::Result<bool> {
+    Ok(fingerprint_reader(&mut file, whole.size, whole.block_size)? == Some(whole.fingerprint))
 }
 
 /// How giving one name ended, and whether the file was filled in under it (then the journal is

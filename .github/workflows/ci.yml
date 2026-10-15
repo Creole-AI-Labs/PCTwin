@@ -176,7 +176,7 @@ jobs:
           - macos-15-intel
           - windows-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
@@ -264,11 +264,17 @@ jobs:
         env:
           PCTWIN_REQUIRE_FAT: "1"
           PCTWIN_FAT_PHASE: before
-          # A Mac's exFAT has neither hard links nor a no-replace move, and its FAT32's is done by
-          # macOS, not the drive: until files can be filled in under their names there, the gate
-          # must refuse both safely.
-          PCTWIN_FAT_REFUSES: exfat-mac,msdos-fat32
         run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast -- --nocapture
+      # A copy killed part way through on each drive; after the remount, recovery: nothing partly
+      # copied under a real name, an honest record, nothing lost.
+      - name: Recovery on real drives (before the remount: a copy is killed mid-way)
+        if: "!cancelled()"
+        timeout-minutes: 15
+        shell: bash
+        env:
+          PCTWIN_REQUIRE_FAT: "1"
+          PCTWIN_FAT_PHASE: before
+        run: cargo test -p pctwin-transfer --test real_fat_kill --locked -- --nocapture
       # Run even when the first run failed: the remount and the second run are still worth seeing.
       - name: Unmount and mount every drive again (Linux)
         if: runner.os == 'Linux' && !cancelled()
@@ -292,11 +298,17 @@ jobs:
         env:
           PCTWIN_REQUIRE_FAT: "1"
           PCTWIN_FAT_PHASE: after
-          # A Mac's exFAT has neither hard links nor a no-replace move, and its FAT32's is done by
-          # macOS, not the drive: until files can be filled in under their names there, the gate
-          # must refuse both safely.
-          PCTWIN_FAT_REFUSES: exfat-mac,msdos-fat32
         run: cargo test -p pctwin-gate --test real_fat --locked --no-fail-fast -- --nocapture
+      # A copy killed part way through on each drive; after the remount, recovery: nothing partly
+      # copied under a real name, an honest record, nothing lost.
+      - name: Recovery on real drives (after the remount)
+        if: "!cancelled()"
+        timeout-minutes: 15
+        shell: bash
+        env:
+          PCTWIN_REQUIRE_FAT: "1"
+          PCTWIN_FAT_PHASE: after
+        run: cargo test -p pctwin-transfer --test real_fat_kill --locked -- --nocapture
 
   rust:
     name: Rust (${{ matrix.os }})
