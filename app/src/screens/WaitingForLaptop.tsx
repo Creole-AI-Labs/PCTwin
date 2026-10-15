@@ -1,0 +1,146 @@
+import { Localized } from "@fluent/react";
+import { Badge, Banner, Button, ProgressBar, ProgressValue, Row, RowList } from "../components/kit";
+import type { WaitingState } from "../connection";
+import { Attention, Info, Laptop, Shield } from "../icons";
+import { useAgo, useUnits } from "./ConnectionParts";
+import { Heading } from "./PairParts";
+import "./connection.css";
+
+/**
+ * C09 Waiting for your other laptop. Three states: reconnecting by itself, the pairing has expired
+ * (pair again), and the other laptop cannot be reached (try now). What is saved is measured, and
+ * nothing here says the move is finished. Laid out as in the mockup: the saved share, the other
+ * laptop, the resume check, a note, and one action.
+ */
+export default function WaitingForLaptop({ waiting, onRetry, onPairAgain }: { waiting: WaitingState; onRetry: () => void; onPairAgain: () => void }) {
+  const units = useUnits();
+  const ago = useAgo();
+  const { kind } = waiting;
+  const fraction = waiting.totalGb > 0 ? waiting.savedGb / waiting.totalGb : 0;
+  return (
+    <>
+      <Heading key={kind} id="reconnect-title" />
+      <Localized id="reconnect-body">
+        <p className="subhead" />
+      </Localized>
+      <div className="connect-saved connect-panel">
+        <div className="connect-saved-head">
+          <Localized id="reconnect-card-title">
+            <h2 />
+          </Localized>
+          <ProgressValue value={fraction} />
+        </div>
+        <Localized id="reconnect-progress" attrs={{ "aria-label": true }}>
+          <SavedBar value={fraction} saved={units.gb(waiting.savedGb)} total={units.gb(waiting.totalGb)} />
+        </Localized>
+      </div>
+      <div className="connect-panel">
+      <RowList>
+        <Row
+          icon={<Laptop />}
+          title={<bdi>{waiting.otherLaptop}</bdi>}
+          detail={
+            waiting.lastSeenSeconds === null ? undefined : (
+              <Localized id="reconnect-last-seen" vars={{ ago: ago(waiting.lastSeenSeconds) }}>
+                <span />
+              </Localized>
+            )
+          }
+          end={
+            kind === "reconnecting" ? (
+              <Badge tone="warn" icon={<Attention />}>
+                <Localized id="reconnect-status-trying">
+                  <span />
+                </Localized>
+              </Badge>
+            ) : (
+              <Badge tone="neutral" icon={<Info />}>
+                <Localized id="reconnect-status-offline">
+                  <span />
+                </Localized>
+              </Badge>
+            )
+          }
+        />
+        <Row
+          icon={<Shield />}
+          title={
+            <Localized id="reconnect-details">
+              <span />
+            </Localized>
+          }
+          detail={
+            <Localized id="reconnect-details-body">
+              <span />
+            </Localized>
+          }
+          end={
+            kind === "pairing-expired" ? undefined : (
+              <Badge tone="warn" icon={<Attention />}>
+                <Localized id="reconnect-status-pending">
+                  <span />
+                </Localized>
+              </Badge>
+            )
+          }
+        />
+      </RowList>
+      </div>
+      <div className="connect-notice">
+        {kind === "reconnecting" && (
+          <div role="status">
+            <Banner tone="info">
+              <Localized id="reconnect-trying">
+                <p />
+              </Localized>
+            </Banner>
+          </div>
+        )}
+        {kind === "pairing-expired" && (
+          <Banner tone="attention">
+            <Localized id="reconnect-expired">
+              <p />
+            </Localized>
+          </Banner>
+        )}
+        {kind === "unreachable" && (
+          <Banner tone="attention">
+            <Localized id="reconnect-unavailable" vars={{ label: waiting.otherLaptop }}>
+              <p />
+            </Localized>
+          </Banner>
+        )}
+      </div>
+      <div className="connect-actions">
+        {kind === "pairing-expired" ? (
+          <Button variant="primary" className="connect-block" onClick={onPairAgain}>
+            <Localized id="reconnect-pair-again">
+              <span />
+            </Localized>
+          </Button>
+        ) : (
+          <Button className="connect-block" onClick={onRetry}>
+            <Localized id="reconnect-try-now">
+              <span />
+            </Localized>
+          </Button>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** The saved share of the move (measured), named by the translated aria-label that the Localized wrapper hands in. */
+function SavedBar({ value, saved, total, "aria-label": label }: { value: number; saved: string; total: string; "aria-label"?: string }) {
+  return (
+    <ProgressBar
+      value={value}
+      label={label ?? ""}
+      left={
+        <Localized id="reconnect-saved" vars={{ done: saved, total }}>
+          <span />
+        </Localized>
+      }
+    />
+  );
+}

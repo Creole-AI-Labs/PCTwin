@@ -43,23 +43,38 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
-  it("goes Welcome, then Which laptop is this?, then pairing, and back", async () => {
+  it("goes Welcome, Which laptop is this?, How will you connect?, Put both laptops together, then pairing, and back one step at a time", async () => {
     const l10n = localization("en");
+    const title = () => screen.getByRole("heading", { level: 1 }).textContent;
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Which laptop is this?");
+    expect(title()).toBe("Which laptop is this?");
     fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
+    expect(title()).toBe(l10n.getString("connect-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
+    expect(title()).toBe(l10n.getString("connect-prep-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-prep-continue") }));
     await act(async () => {});
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("pair-old-title"));
+    expect(title()).toBe(l10n.getString("pair-old-title"));
+    // Back from pairing stops it and returns to the preparation step; Back again and again walks up the path.
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     expect(tauri.invoke).toHaveBeenCalledWith("pairing_stop");
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Which laptop is this?");
+    expect(title()).toBe(l10n.getString("connect-prep-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
+    expect(title()).toBe(l10n.getString("connect-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
+    expect(title()).toBe("Which laptop is this?");
+    // The role chosen is kept through the new steps: the new laptop reaches its own pairing screen.
     fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-prep-continue") }));
     await act(async () => {});
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("pair-new-searching-title"));
+    expect(title()).toBe(l10n.getString("pair-new-searching-title"));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(title()).toBe("Your setup.Your next laptop.");
     expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
   });
 
@@ -96,10 +111,14 @@ describe("screens", () => {
     expect(document.activeElement?.tagName).toBe("MAIN");
   });
 
-  it.each(["welcome", "role", "pair"])("the %s screen has no accessibility violations", async (which) => {
+  it.each(["welcome", "role", "connect", "together", "pair"])("the %s screen has no accessibility violations", async (which) => {
     render(<App initialLanguage="en" />);
-    if (which !== "welcome") fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
-    if (which === "pair") fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    const steps = ["welcome", "role", "connect", "together", "pair"];
+    const at = steps.indexOf(which);
+    if (at >= 1) fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    if (at >= 2) fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    if (at >= 3) fireEvent.click(screen.getByRole("button", { name: /Use Wi-Fi/ }));
+    if (at >= 4) fireEvent.click(screen.getByRole("button", { name: /Continue to pairing/ }));
     await act(async () => {});
     expect(await violations()).toEqual([]);
   });
