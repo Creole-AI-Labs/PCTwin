@@ -450,6 +450,12 @@ pub struct SenderSession {
     /// Per job: how important it was when it last ended (raised if the person asked for it
     /// first), so a file asked for again keeps its place.
     ended_tier: Vec<Tier>,
+    /// Per job: the file as this laptop read it for the current attempt. Whether it changed is
+    /// judged against this, never against what the new laptop says it is.
+    attempt_stamp: Vec<Option<crate::Stamp>>,
+    /// Per job: attempts opened so far, kept by this laptop whatever the new laptop says, so no
+    /// answer and no number of reconnects can make it read one file without end.
+    attempts: Vec<u32>,
 }
 
 impl SenderSession {
@@ -495,6 +501,8 @@ impl SenderSession {
             attempted: HashSet::new(),
             asked_again: vec![0; jobs_len],
             ended_tier: tiers,
+            attempt_stamp: vec![None; jobs_len],
+            attempts: vec![0; jobs_len],
         }
     }
 
@@ -706,6 +714,7 @@ impl SenderSession {
                 let reader =
                     FileSender::open_with(&*self.opener, &j.source, Some(ticket), j.compressible)
                         .ok()?;
+                self.attempt_stamp[job] = Some(reader.header().stamp);
                 let sections = sections_for(reader.header(), &ticket.done.to_bools())?;
                 Some(SendState::Open {
                     reader,
@@ -802,9 +811,15 @@ impl SenderSession {
         out
     }
 
-    /// Opens a waiting file for a new attempt, with a new stream.
+    /// Opens a waiting file for a new attempt, with a new stream; a file opened as often as any
+    /// file may be fails instead.
     fn open(&mut self, job: usize) {
         let j = &self.jobs[job];
+        if self.attempts[job] >= crate::MAX_ATTEMPTS {
+            self.scheduler.finished(j.item);
+            self.states[job] = SendState::Done(SendOutcome::Failed(TOO_MANY_ATTEMPTS.into()));
+            return;
+        }
         let opened = FileSender::open_with(&*self.opener, &j.source, None, j.compressible)
             .and_then(|reader| {
                 let sections = sections_for(reader.header(), &[])
@@ -814,6 +829,8 @@ impl SenderSession {
         match opened {
             Ok((reader, sections)) => {
                 self.new_stream(job);
+                self.attempts[job] += 1;
+                self.attempt_stamp[job] = Some(reader.header().stamp);
                 // A new attempt: the new laptop counts its rounds from 0 again, and so does this.
                 self.asked_again[job] = 0;
                 self.states[job] = SendState::Open {
@@ -1121,7 +1138,11 @@ impl SenderSession {
             return;
         }
         self.dirty = true;
-        if self.asked_again[job] >= SEND_AGAIN_ROUNDS {
+        // An honest new laptop's ticket carries exactly the file this laptop described; one that
+        // does not is a new laptop that misbehaves, and the file stops here like one asked for
+        // too often (so it can never force a new attempt).
+        let ours = self.attempt_stamp[job].is_some_and(|s| s == ticket.stamp);
+        if !ours || self.asked_again[job] >= SEND_AGAIN_ROUNDS {
             // Asked more often in this attempt than an honest new laptop asks: this attempt stops
             // here and the file fails, said as it is (never as a file that changed).
             self.ends.push(Message::GiveUp {
@@ -2291,6 +2312,10 @@ impl Drop for ReceiverSession<'_> {
         }
     }
 }
+
+/// Said of a file started over as often as any file may be.
+const TOO_MANY_ATTEMPTS: &str =
+    "it had to be started again too many times, so it was not copied. Your original is untouched";
 
 /// Said of a file whose blocks were asked for again more often than one attempt allows.
 const GAVE_UP: &str = "parts of it kept arriving damaged or being stored wrong, so it was not finished. Your original is untouched";

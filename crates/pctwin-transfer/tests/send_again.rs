@@ -580,10 +580,10 @@ async fn a_new_laptop_that_keeps_asking_again_is_answered_twice_then_the_file_fa
     .expect("hung");
     r.unwrap();
     assert_eq!(sender.blocks_sent(), 3 * count);
-    assert!(matches!(
-        sender.outcome(id(0)),
-        Some(SendOutcome::Failed(_))
-    ));
+    match sender.outcome(id(0)) {
+        Some(SendOutcome::Failed(why)) => assert!(why.contains("kept arriving damaged"), "{why}"),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -934,11 +934,21 @@ async fn after_the_new_laptop_restarts_a_file_out_of_rounds_fails_with_the_true_
         }
         other => panic!("expected the file to fail, got {other:?}"),
     }
-    assert!(matches!(
-        sender.outcome(id(0)),
-        Some(SendOutcome::Failed(_))
-    ));
+    match sender.outcome(id(0)) {
+        Some(SendOutcome::Failed(why)) => assert!(why.contains("kept arriving damaged"), "{why}"),
+        other => panic!("{other:?}"),
+    }
     assert!(!landed(&l, 0).exists());
+    // Nothing partly received is left on the drive or open in the journal.
+    let left: Vec<_> = std::fs::read_dir(l.new.path().join("Documents"))
+        .map(|d| d.map(|e| e.unwrap().file_name()).collect())
+        .unwrap_or_default();
+    assert!(left.is_empty(), "{left:?}");
+    assert!(
+        pctwin_journal::Ledger::unfinished(&journal)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn order(s: &mut Scheduler) -> Vec<ItemId> {
@@ -975,4 +985,103 @@ fn a_file_asked_again_goes_ahead_of_its_own_importance_only() {
     s.push(z, Tier::Rest);
     s.ask_first(&[z]);
     assert!(matches!(s.tier_of(z), Some(Tier::AskedFirst { .. })));
+}
+
+#[tokio::test]
+async fn a_ticket_that_does_not_describe_the_file_sent_stops_it_and_never_starts_it_again() {
+    let l = laptops(&[300_000]);
+    let header = FileSender::open(&l.files[0].0, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let count = header.block_count;
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        say(&mut new, &Message::Ready).await;
+        assert!(matches!(
+            hear(&mut new).await,
+            Message::StartFile { stream: 0, .. }
+        ));
+        say(
+            &mut new,
+            &Message::Have {
+                stream: 0,
+                same_size: None,
+            },
+        )
+        .await;
+        let (got, _) = take_blocks_until_end(&mut new).await;
+        assert_eq!(got, count);
+        // A ticket claiming the file is other than the one described: as if it changed.
+        let mut forged = header.stamp;
+        forged.size += 1;
+        say(
+            &mut new,
+            &Message::SendAgain {
+                stream: 0,
+                ticket: ResumeTicket {
+                    done: BlockMap::new(count),
+                    block_size: header.block_size,
+                    stamp: forged,
+                },
+            },
+        )
+        .await;
+        assert_eq!(hear(&mut new).await, Message::GiveUp { stream: 0 });
+        say(
+            &mut new,
+            &Message::FileDone {
+                stream: 0,
+                ok: false,
+            },
+        )
+        .await;
+        // Never started again.
+        assert_eq!(hear(&mut new).await, Message::AllSent);
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, sender.run(&mut old))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert_eq!(sender.blocks_sent(), count);
+}
+
+#[tokio::test]
+async fn reconnecting_over_and_over_cannot_make_the_old_laptop_read_a_file_without_end() {
+    let l = laptops(&[300_000]);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let mut starts = 0;
+    let mut finished = false;
+    for _ in 0..12 {
+        let (mut old, mut new) = mem_pair();
+        // Each connection: the new laptop says it has nothing, then goes away at the first start.
+        let script = async {
+            say(&mut new, &Message::Ready).await;
+            let m = hear(&mut new).await;
+            drop(new);
+            m
+        };
+        let (m, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            tokio::join!(script, sender.run(&mut old))
+        })
+        .await
+        .expect("hung");
+        match m {
+            Message::StartFile { .. } => starts += 1,
+            Message::AllSent => {
+                finished = true;
+                break;
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(finished, "the move never ended");
+    assert_eq!(starts, pctwin_transfer::MAX_ATTEMPTS);
+    match sender.outcome(id(0)) {
+        Some(SendOutcome::Failed(why)) => assert!(why.contains("too many times"), "{why}"),
+        other => panic!("{other:?}"),
+    }
 }
