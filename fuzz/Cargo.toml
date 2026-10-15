@@ -1,0 +1,64 @@
+# Fuzz targets for everything that arrives from the other laptop or the person (Task List 1.3
+# and 1.8). Run with cargo-fuzz on a nightly compiler, as CI does; kept out of the workspace so
+# the shipped build never depends on it.
+[package]
+name = "pctwin-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pctwin-gate = { path = "../crates/pctwin-gate" }
+pctwin-pairing = { path = "../crates/pctwin-pairing" }
+pctwin-record = { path = "../crates/pctwin-record" }
+pctwin-transfer = { path = "../crates/pctwin-transfer" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "messages"
+path = "fuzz_targets/messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inventory_frames"
+path = "fuzz_targets/inventory_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "record"
+path = "fuzz_targets/record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "paths"
+path = "fuzz_targets/paths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pairing_messages"
+path = "fuzz_targets/pairing_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "typed_digits"
+path = "fuzz_targets/typed_digits.rs"
+test = false
+doc = false
+bench = false

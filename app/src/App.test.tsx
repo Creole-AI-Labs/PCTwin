@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -76,6 +76,28 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
     expect(title()).toBe("Your setup.Your next laptop.");
     expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
+  });
+
+  it("the footer shows the short note and the screen action on the connection steps, and the usual footer elsewhere", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    const footer = () => within(screen.getByRole("contentinfo"));
+    expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
+    expect(footer().getByRole("button", { name: l10n.getString("footer-help") })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
+    expect(footer().getByText(l10n.getString("footer-note-move"))).toBeTruthy();
+    expect(footer().getByRole("button", { name: l10n.getString("connect-use-wifi") })).toBeTruthy();
+    expect(within(screen.getByRole("main")).queryByRole("button", { name: l10n.getString("connect-use-wifi") })).toBeNull();
+    expect(footer().queryByText(l10n.getString("footer-free"))).toBeNull();
+    fireEvent.click(footer().getByRole("button", { name: l10n.getString("connect-use-wifi") }));
+    expect(footer().getByRole("button", { name: l10n.getString("connect-prep-continue") })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
+    expect(footer().getByRole("button", { name: l10n.getString("footer-help") })).toBeTruthy();
   });
 
   it.each([

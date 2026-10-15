@@ -3,6 +3,8 @@ import { Badge, Banner, Button, ProgressBar, ProgressValue, Row, RowList } from 
 import type { WaitingState } from "../connection";
 import { Attention, Info, Laptop, Shield } from "../icons";
 import { useAgo, useUnits } from "./ConnectionParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import "./connection.css";
 
@@ -12,13 +14,14 @@ import "./connection.css";
  * nothing here says the move is finished. Laid out as in the mockup: the saved share, the other
  * laptop, the resume check, a note, and one action.
  */
-export default function WaitingForLaptop({ waiting, onRetry, onPairAgain }: { waiting: WaitingState; onRetry: () => void; onPairAgain: () => void }) {
+export default function WaitingForLaptop({ waiting, onRetry, onPairAgain, onBack }: { waiting: WaitingState; onRetry: () => void; onPairAgain: () => void; onBack?: () => void }) {
   const units = useUnits();
   const ago = useAgo();
   const { kind } = waiting;
   const fraction = waiting.totalGb > 0 ? waiting.savedGb / waiting.totalGb : 0;
   return (
     <>
+      <TopStrip onBack={onBack} labelId="connect-eyebrow" />
       <Heading key={kind} id="reconnect-title" />
       <Localized id="reconnect-body">
         <p className="subhead" />
@@ -111,21 +114,21 @@ export default function WaitingForLaptop({ waiting, onRetry, onPairAgain }: { wa
           </Banner>
         )}
       </div>
-      <div className="connect-actions">
+      <FrameFooter>
         {kind === "pairing-expired" ? (
-          <Button variant="primary" className="connect-block" onClick={onPairAgain}>
+          <Button variant="primary" onClick={onPairAgain}>
             <Localized id="reconnect-pair-again">
               <span />
             </Localized>
           </Button>
         ) : (
-          <Button className="connect-block" onClick={onRetry}>
+          <Button variant="primary" onClick={onRetry}>
             <Localized id="reconnect-try-now">
               <span />
             </Localized>
           </Button>
         )}
-      </div>
+      </FrameFooter>
     </>
   );
 }
