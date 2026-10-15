@@ -3314,11 +3314,13 @@ dependencies = [
 name = "pctwin-gate"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "cap-std",
  "fs4",
  "fs_at",
  "getrandom 0.3.4",
  "libproc",
+ "pctwin-gate",
  "pctwin-journal",
  "pctwin-lease",
  "proptest",

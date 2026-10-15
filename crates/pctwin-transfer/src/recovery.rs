@@ -182,8 +182,9 @@ fn prove(
     if !same || stat.len != entry.write.size {
         return Proof::Changed;
     }
+    // Read back from the drive past this laptop's cache where it allows, as on arrival.
     match dest
-        .open_read(stored)
+        .open_read_back(stored)
         .and_then(|mut f| fingerprint_reader(&mut f, entry.write.size, entry.write.block_size))
     {
         Ok(Some(found)) if &found == fingerprint => Proof::Proven(stat),
@@ -347,7 +348,8 @@ impl Look for DiskLook<'_> {
 
     fn matches(&self, entry: &Entry, stored: &str, fingerprint: &[u8; 32]) -> Result<bool, String> {
         let dest = self.destination(entry)?;
-        let mut file = dest.open_read(stored).map_err(|e| e.to_string())?;
+        // The same reader as on arrival: from the drive, past the cache where it allows.
+        let mut file = dest.open_read_back(stored).map_err(|e| e.to_string())?;
         let found = fingerprint_reader(&mut file, entry.write.size, entry.write.block_size)
             .map_err(|e| e.to_string())?;
         Ok(found.as_ref() == Some(fingerprint))
