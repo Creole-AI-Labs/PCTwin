@@ -101,6 +101,9 @@ const MAX_DATA_LEN: usize = u16::MAX as usize;
 const SESSION_TAG: std::ops::Range<usize> = 2..10;
 /// How long a device gets to read a notice before it is closed.
 const NOTICE_LINGER: Duration = Duration::from_secs(1);
+/// The new laptop's first sealed message once approved: it has the keys and is still there. The
+/// old laptop counts as paired only once this arrives.
+const PAIRED_CONFIRM: &[u8] = b"paired";
 /// Most devices being refused at once; beyond this, extra connections are closed without a notice.
 const MAX_REFUSALS: usize = 64;
 /// Most addresses remembered as penalised.
@@ -469,9 +472,10 @@ impl HostPending {
         self.peer
     }
 
-    /// Records the person's pick at time `now`. The right number unlocks the old laptop and sends
-    /// the approval; anything else ends the pairing, and the new laptop is told the numbers did
-    /// not match (never only that the connection closed).
+    /// Records the person's pick at time `now`. The right number sends the approval, and pairs
+    /// only once the new laptop confirms it over the sealed link (so a new laptop that has gone
+    /// never counts as paired); anything else ends the pairing, and the new laptop is told the
+    /// numbers did not match, or that the time ran out (never only that the connection closed).
     pub async fn choose(mut self, picked: u8, now: Instant) -> Result<Link, LinkError> {
         let (paired, approval) = match self.choosing.choose(picked, now) {
             Ok(done) => done,
@@ -487,7 +491,21 @@ impl HostPending {
             }
         };
         write_frame(&mut self.stream, KIND_PAIRING, &approval, self.send_timeout).await?;
-        Ok(Link::new(paired, self.stream, self.peer, self.send_timeout))
+        let mut link = Link::new(paired, self.stream, self.peer, self.send_timeout);
+        match tokio::time::timeout(self.send_timeout, link.recv()).await {
+            Ok(Ok(confirm)) if confirm.as_slice() == PAIRED_CONFIRM => Ok(link),
+            Ok(Ok(_)) => Err(LinkError::Unexpected),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(LinkError::Closed),
+        }
+    }
+
+    /// Resolves when the new laptop is gone while the person picks: it hung up, the connection
+    /// broke, or it sent anything (it has nothing to send until approved). Cancel-safe: it only
+    /// looks, never reads.
+    pub async fn gone(&self) {
+        let mut byte = [0u8; 1];
+        let _ = self.stream.peek(&mut byte).await;
     }
 
     /// The person said none of the three numbers matches the new laptop's: pairing ends, and the
@@ -565,7 +583,9 @@ impl GuestPending {
             .waiting
             .receive_approval(&approval, Instant::now())
             .map_err(PairingError::from)?;
-        Ok(Link::new(paired, self.stream, self.host, self.send_timeout))
+        let mut link = Link::new(paired, self.stream, self.host, self.send_timeout);
+        link.send(PAIRED_CONFIRM).await?;
+        Ok(link)
     }
 }
 
