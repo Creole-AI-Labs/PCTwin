@@ -507,8 +507,24 @@ describe("the new laptop once paired", () => {
     await waitFor(() => {
       expect(searches()).toBe(before + 1);
     });
-    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    expect(await screen.findByText(text("pairing-connection-lost-new"))).toBeTruthy();
     expect(await screen.findByText(text("pair-new-code-title"))).toBeTruthy();
+    noMissingText();
+  });
+
+  it("after a lost connection, says so while it looks for the old laptop again", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    await emit("pairing-new", { kind: "paired" });
+    // The search does not answer yet: the person sees the searching screen with the notice.
+    replies.pairing_new_search = () => new Promise(() => undefined);
+    await emit("pairing-new", { kind: "lost" });
+    expect(await screen.findByText(text("pair-new-searching-title"))).toBeTruthy();
+    expect(await screen.findByText(text("pairing-connection-lost-new"))).toBeTruthy();
     noMissingText();
   });
 });

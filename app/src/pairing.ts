@@ -28,6 +28,9 @@ export type NewEvent = { kind: "paired" } | { kind: "problem"; problem: Problem 
 /** What a lost connection shows: the connection dropped, nothing was shared, try again. */
 export const LOST: Problem = { key: "pairing-connection-lost", networks: [] };
 
+/** The same on the new laptop, which looks for the old laptop again by itself (no Try again there). */
+export const LOST_NEW: Problem = { key: "pairing-connection-lost-new", networks: [] };
+
 export type Nearby = { index: number; label: Label; sameLabelNearby: boolean };
 
 /** What anything unexpected becomes: the generic "something went wrong, try again" text. */

@@ -130,6 +130,7 @@ pairing-wrong-number = That number did not match the new laptop’s. Nothing was
 pairing-no-match = The numbers did not match on the old laptop. Nothing was shared. Type the new code from the old laptop’s screen.
 pairing-timed-out = No number was picked in time. Try again with the new code on the old laptop.
 pairing-connection-lost = The connection between the laptops dropped. Nothing was shared. Try again.
+pairing-connection-lost-new = The connection to the old laptop dropped. Nothing was shared.
 pairing-different-version = The two laptops have different versions of PCTwin. Update PCTwin on both, then try again.
 pairing-name-invalid = That name cannot be used. Try a shorter name with letters and numbers.
 pairing-no-network = This laptop is not on a Wi-Fi or wired network. Connect it, then try again.

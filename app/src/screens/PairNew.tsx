@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
-import { LOST, labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
+import { LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
 import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
@@ -75,7 +75,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       setBusy(false);
       setNumber(null);
       setCode("");
-      void search(LOST);
+      void search(LOST_NEW);
     } else {
       setBusy(false);
       setNumber(null);
@@ -149,6 +149,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
           <Localized id="pair-new-searching-body">
             <p className="subhead" />
           </Localized>
+          {problem && <ProblemNotice problem={problem} />}
         </>
       )}
 
@@ -180,6 +181,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
           <Localized id="pair-new-none-body">
             <p className="subhead" />
           </Localized>
+          {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button
               variant="primary"
@@ -203,6 +205,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
           <Localized id="pair-new-list-body">
             <p className="subhead" />
           </Localized>
+          {problem && <ProblemNotice problem={problem} />}
           <ul className="pair-list">
             {nearby.map((n) => (
               <NearbyRow
