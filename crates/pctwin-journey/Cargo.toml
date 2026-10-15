@@ -1,0 +1,23 @@
+[package]
+name = "pctwin-journey"
+description = "The pairing journey as the screens see it: what to show and what the person can do"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-discovery = { path = "../pctwin-discovery" }
+pctwin-link = { path = "../pctwin-link" }
+pctwin-pairing = { path = "../pctwin-pairing" }
+pctwin-session = { path = "../pctwin-session" }
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true
