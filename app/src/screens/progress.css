@@ -42,23 +42,8 @@
   gap: var(--space-4);
 }
 
-.mv-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  min-height: var(--control-small);
-  margin-bottom: var(--space-3);
-}
 
-.mv-topline .back {
-  min-height: var(--control-height);
-}
 
-.mv-eyebrow {
-  margin: 0;
-  text-align: end;
-}
 
 /* A bordered panel: title and percent, the bar, a line under it */
 .mv-panel {
@@ -160,20 +145,8 @@
 }
 
 
-.mv-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-5);
-}
 
-.mv-actions-quiet {
-  margin-top: var(--space-2);
-}
 
-.mv-actions .kit-button {
-  min-height: var(--control-height);
-}
 
 /* The serious choices keep their words but read as such: the error colours, never colour alone */
 .mv-danger {

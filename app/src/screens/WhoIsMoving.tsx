@@ -3,8 +3,10 @@ import type { ReactNode } from "react";
 import { Badge, Button } from "../components/kit";
 import { ArrowForward, Attention, Check, Info } from "../icons";
 import type { Account, Destination, Person, SharedHome } from "../people";
-import { Eyebrow, Heading } from "./PairParts";
-import { BackStrip } from "./PeopleParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./PairParts";
+import "./people.css";
 
 /** What a select shows for a person: a choice, or "not chosen" (also when the account chosen no longer exists). */
 function valueOf(destination: Destination, accounts: readonly Account[]): string {
@@ -57,8 +59,7 @@ export default function WhoIsMoving({ people, accounts, shared, onBack, onChoose
 
   return (
     <div className="people">
-      <BackStrip id="pair-back" onBack={onBack} />
-      <Eyebrow id="people-eyebrow" />
+      <TopStrip onBack={onBack} labelId="people-eyebrow" />
       <Heading id="people-title" />
       <Localized id="people-body">
         <p className="subhead" />
@@ -143,11 +144,11 @@ export default function WhoIsMoving({ people, accounts, shared, onBack, onChoose
         </Localized>
       </div>
 
-      <div className="people-actions">
+      <FrameFooter>
         <Button variant="primary" disabled={todo > 0} icon={<ArrowForward className="flip" />} onClick={onContinue}>
           {l10n.getString("people-continue")}
         </Button>
-      </div>
+      </FrameFooter>
     </div>
   );
 }

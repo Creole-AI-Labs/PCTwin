@@ -2,7 +2,7 @@
 import { Localized, useLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
 import { Banner, Badge, ProgressBar, ProgressValue, ResultChip, Row, RowList } from "../components/kit";
-import { ArrowBack, ArrowForward, Check, Info, Laptop, Lock } from "../icons";
+import { ArrowForward, Check, Info, Laptop, Lock } from "../icons";
 import { labelText } from "../pairing";
 import { formatBytes, formatSpeed, groupState, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Reason } from "../move";
 import "./progress.css";
@@ -68,27 +68,6 @@ export function MeasuredBar({ progress }: { progress: MoveProgress }) {
         right={timeLeft ?? l10n.getString("progress-time-measuring")}
       />
       {speed && <p className="mv-speed">{speed}</p>}
-    </div>
-  );
-}
-
-/** Back on the left, the screen's eyebrow on the right (the mockups' top line). */
-export function Topline({ onBack, eyebrow }: { onBack?: () => void; eyebrow: string }) {
-  return (
-    <div className="mv-topline">
-      {onBack ? (
-        <button type="button" className="back" onClick={onBack}>
-          <ArrowBack />
-          <Localized id="report-back">
-            <span />
-          </Localized>
-        </button>
-      ) : (
-        <span />
-      )}
-      <Localized id={eyebrow}>
-        <p className="eyebrow mv-eyebrow" />
-      </Localized>
     </div>
   );
 }

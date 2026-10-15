@@ -2,7 +2,9 @@ import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Metrics, Row, RowList } from "../components/kit";
 import { Attention, Check } from "../icons";
 import { formatBytes, pageLocale, type MoveOutcome } from "../move";
-import { Eyebrow, Heading } from "./ProgressParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./ProgressParts";
 
 const DONE = ["copied", "reinstalled", "converted"] as const;
 
@@ -12,7 +14,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * every approved item is copied and checked; anything else, including a stopped move, says
  * "Partial". Item-by-item detail is in the report (R02).
  */
-export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOutcome; onReport: () => void; onHome: () => void }) {
+export default function Outcome({ outcome, onReport }: { outcome: MoveOutcome; onReport: () => void }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
   const needsAction = byStatus["needs-action"];
@@ -28,7 +30,7 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
     .join(" ");
   return (
     <>
-      <Eyebrow id="outcome-eyebrow" />
+      <TopStrip labelId="outcome-eyebrow" />
       <Heading id={stopped ? "outcome-stopped-title" : "outcome-title"} />
       <p className="subhead">{l10n.getString(stopped ? "outcome-stopped-body" : "outcome-body")}</p>
       <Metrics
@@ -59,14 +61,11 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           <Banner tone="attention">{l10n.getString("outcome-old-safe")}</Banner>
         </div>
       )}
-      <div className="mv-actions">
+      <FrameFooter>
         <Button variant="primary" onClick={onReport}>
           {l10n.getString("outcome-report")}
         </Button>
-        <Button variant="quiet" onClick={onHome}>
-          {l10n.getString("outcome-home")}
-        </Button>
-      </div>
+      </FrameFooter>
     </>
   );
 }

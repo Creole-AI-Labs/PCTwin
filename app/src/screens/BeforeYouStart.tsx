@@ -2,8 +2,10 @@ import { Localized, useLocalization } from "@fluent/react";
 import { Button } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
 import type { BeforeItem } from "../people";
-import { Eyebrow, Heading } from "./PairParts";
-import { BackStrip } from "./PeopleParts";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
+import { Heading } from "./PairParts";
+import "./people.css";
 
 type Props = {
   items: readonly BeforeItem[];
@@ -24,8 +26,7 @@ export default function BeforeYouStart({ items, onBack, onToggle, onContinue }: 
 
   return (
     <div className="before">
-      <BackStrip id="pair-back" onBack={onBack} />
-      <Eyebrow id="before-eyebrow" />
+      <TopStrip onBack={onBack} labelId="before-eyebrow" />
       <Heading id="before-title" />
       <Localized id="before-body">
         <p className="subhead" />
@@ -70,11 +71,11 @@ export default function BeforeYouStart({ items, onBack, onToggle, onContinue }: 
         </Localized>
       </div>
 
-      <div className="people-actions">
+      <FrameFooter>
         <Button variant="primary" icon={<ArrowForward className="flip" />} onClick={onContinue}>
           {l10n.getString("before-continue")}
         </Button>
-      </div>
+      </FrameFooter>
     </div>
   );
 }

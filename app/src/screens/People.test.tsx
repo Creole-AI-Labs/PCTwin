@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import type { Account, BeforeItem, HelpCode, Person } from "../people";
 import BeforeYouStart from "./BeforeYouStart";
+import { FooterProvider } from "./FrameFooter";
 import GetHelp from "./GetHelp";
 import WhoIsMoving from "./WhoIsMoving";
 
@@ -434,5 +435,42 @@ describe("Get help", () => {
     const { props } = renderHelp();
     fireEvent.click(pairBack());
     expect(props.onBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the primary action sits in the window footer", () => {
+  function inFooter(ui: ReactNode) {
+    return render(
+      <LocalizationProvider l10n={l10n}>
+        <FooterProvider>
+          <main>{ui}</main>
+        </FooterProvider>
+      </LocalizationProvider>,
+    );
+  }
+  const noop = () => undefined;
+
+  it("Who is moving: Continue", () => {
+    inFooter(<WhoIsMoving people={[{ ...ada, destination: { kind: "new" } }]} accounts={accounts} shared="shared" onBack={noop} onChoose={noop} onChooseShared={noop} onContinue={noop} />);
+    const footer = document.querySelector("footer") as HTMLElement;
+    expect(within(footer).getByRole("button", { name: nameIs(text("people-continue")) })).toBeTruthy();
+    expect(within(screen.getByRole("main")).queryByRole("button", { name: nameIs(text("people-continue")) })).toBeNull();
+  });
+
+  it("Before you start: Continue", () => {
+    inFooter(<BeforeYouStart items={items} onBack={noop} onToggle={noop} onContinue={noop} />);
+    const footer = document.querySelector("footer") as HTMLElement;
+    expect(within(footer).getByRole("button", { name: nameIs(text("before-continue")) })).toBeTruthy();
+    expect(within(screen.getByRole("main")).queryByRole("button", { name: nameIs(text("before-continue")) })).toBeNull();
+  });
+
+  it("Get help: Copy code (and Try again when no code could be made); Share stays in the content", () => {
+    const view = inFooter(<GetHelp help={ready} onBack={noop} onShare={noop} onRetry={noop} />);
+    const footer = document.querySelector("footer") as HTMLElement;
+    expect(within(footer).getByRole("button", { name: nameIs(text("help-copy")) })).toBeTruthy();
+    expect(within(screen.getByRole("main")).getByRole("button", { name: nameIs(text("help-share")) })).toBeTruthy();
+    view.unmount();
+    inFooter(<GetHelp help={{ status: "failed" }} onBack={noop} onShare={noop} onRetry={noop} />);
+    expect(within(document.querySelector("footer") as HTMLElement).getByRole("button", { name: nameIs(text("help-try-again")) })).toBeTruthy();
   });
 });

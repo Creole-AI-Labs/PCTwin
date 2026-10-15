@@ -3,8 +3,10 @@ import { useId, type ReactNode } from "react";
 import { Badge, Banner, Button, Row, RowList } from "../components/kit";
 import { ArrowForward } from "../icons";
 import { attentionCount, type OverviewRow, type OverviewView } from "../plan";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
-import { AttentionMark, DriveIcon, FolderIcon, PeopleIcon, PlanBack, useFormat } from "./PlanParts";
+import { AttentionMark, DriveIcon, FolderIcon, PeopleIcon, useFormat } from "./PlanParts";
 
 export interface OverviewProps {
   view: OverviewView;
@@ -40,7 +42,7 @@ export default function Overview({ view, onOpen, onContinue, onAllowAccess, onBa
 
   return (
     <div className="plan-screen plan-wide">
-      <PlanBack onBack={onBack} eyebrow="overview-eyebrow" />
+      <TopStrip onBack={onBack} labelId="overview-eyebrow" />
       <Heading id="overview-title" />
       <Localized id="overview-body">
         <p className="subhead" />
@@ -73,11 +75,11 @@ export default function Overview({ view, onOpen, onContinue, onAllowAccess, onBa
         </div>
       )}
 
-      <div className="plan-actions">
-        <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
-          {l10n.getString("overview-continue")}
-        </Button>
-      </div>
+      <FrameFooter>
+          <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
+            {l10n.getString("overview-continue")}
+          </Button>
+      </FrameFooter>
     </div>
   );
 }

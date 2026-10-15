@@ -401,7 +401,8 @@ export function MiniProgress({
   left?: ReactNode;
   right?: ReactNode;
   pause: ReactNode;
-  open: ReactNode;
+  /** An extra action at the end of the row; the app puts it in the footer instead. */
+  open?: ReactNode;
 }) {
   const headingId = useId();
   return (
