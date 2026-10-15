@@ -1,0 +1,430 @@
+//! Filling in a file under its real name, for a drive with no safe rename (exFAT on a Mac;
+//! security design notes, "Drives with no safe rename", the user's decision of 15 October 2026).
+//!
+//! The drive offers neither a hard link nor a move it refuses when the name exists, so the file
+//! is never placed with a rename at all:
+//! 1. The journal records the step first (`Filling`, with the tag below and how the file is proven
+//!    PCTwin's).
+//! 2. The real name is created only if nothing has it (an exclusive create, which never follows a
+//!    link). Something already there: the name is taken, and nothing of it is touched.
+//! 3. At once: the tag (a creation time no ordinary file has, where the drive keeps one exactly),
+//!    the hidden mark (where the drive holds one), the download marker; then its identity is
+//!    recorded.
+//! 4. It is filled from the checked temporary file, through the handle held on it, without ever
+//!    setting its size first (so it never holds bytes that were not copied).
+//! 5. Made durable (`F_FULLFSYNC` where the system has it, else a flush), then read back and
+//!    checked against the whole file's fingerprint. The read-back is what the system returns, which
+//!    may come from its memory rather than the drive; that is all any program can check.
+//! 6. Before it is recorded `Filled`, PCTwin checks the name still holds its own file (the same
+//!    file, with its tag and exactly the bytes copied). Another program that put its own file there
+//!    meanwhile is never touched: its file stays, and PCTwin's checked temporary file is kept.
+//! 7. Recorded `Filled`; then its modified time, shown (the hidden mark cleared), the folder
+//!    flushed; committed, and the temporary file removed, as for a hard-linked file.
+//!
+//! On a failure before step 7, PCTwin's own partial copy is removed only while the name still
+//! holds it (checked as in step 6), and that is recorded; anything else is left. After a crash the
+//! journal's recovery table decides (finish, remove, or leave and report).
+
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::sync::Arc;
+
+use cap_std::fs::{Dir, OpenOptions};
+
+use crate::{Born, DownloadMark, FileId, GateError, identity, marks};
+
+pub use pctwin_journal::{Fill, FillTag, Proof};
+
+/// What is recorded before a file is filled in: the tag it gets at once, and how it is proven
+/// PCTwin's after a crash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FillPlan {
+    pub tag: FillTag,
+    pub proof: Proof,
+}
+
+/// The journal's steps of a fill, recorded as they happen (see the module notes).
+pub trait FillSteps {
+    /// The file under its real name exists, as `made`: recorded before anything is copied into
+    /// it.
+    fn made(&mut self, made: FileId) -> io::Result<()>;
+    /// Whether the file, now durable, reads back as exactly the whole checked file (its
+    /// fingerprint). Given the file at its start.
+    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool>;
+    /// It is complete, durable and read back: recorded before its time is set and it is shown.
+    fn filled(&mut self) -> io::Result<()>;
+    /// PCTwin's own partial copy was removed from the real name after a failure.
+    fn cleared(&mut self) -> io::Result<()>;
+}
+
+/// Bytes copied at a time.
+const CHUNK: usize = 1 << 20;
+
+/// For tests: what is copied at a time, and what runs after each piece (with the bytes copied so
+/// far); an error from it stops the copy as a failing drive would.
+#[derive(Clone)]
+pub(crate) struct FillHook {
+    pub(crate) chunk: usize,
+    pub(crate) after_chunk: Arc<dyn Fn(u64) -> io::Result<()> + Send + Sync>,
+}
+
+/// The creation time PCTwin tests a drive with: 3 February 2001, 04:05:06.07 UTC, which FAT and
+/// exFAT (two-second steps plus hundredths) hold exactly.
+pub(crate) const PROBE_BORN: Born = Born {
+    secs: 981_173_106,
+    nanos: 70_000_000,
+};
+
+/// A fresh tag: a creation time between 2000 and 2020, in hundredths of a second (which FAT and
+/// exFAT hold exactly), chosen at random. No ordinary file made today has one.
+pub(crate) fn fresh_born() -> Born {
+    use std::hash::{BuildHasher, RandomState};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let state = RandomState::new();
+    let r = state.hash_one((std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    const START: u64 = 946_684_800;
+    const SPAN: u64 = 20 * 365 * 86_400;
+    let secs = START + r % SPAN;
+    let hundredths = (r >> 40) % 100;
+    Born {
+        secs: i64::try_from(secs).unwrap_or(i64::MAX),
+        nanos: u32::try_from(hundredths * 10_000_000).unwrap_or(0),
+    }
+}
+
+fn as_time(born: Born) -> io::Result<std::time::SystemTime> {
+    let secs = u64::try_from(born.secs).map_err(|_| io::Error::other("a time before 1970"))?;
+    Ok(std::time::UNIX_EPOCH + std::time::Duration::new(secs, born.nanos))
+}
+
+/// Gives the open file `file` the creation time `born`, through its handle.
+pub(crate) fn set_born(file: &std::fs::File, born: Born) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::FileTimesExt;
+        file.set_times(std::fs::FileTimes::new().set_created(as_time(born)?))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTimesExt;
+        file.set_times(std::fs::FileTimes::new().set_created(as_time(born)?))
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = (file, as_time(born)?);
+        Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+/// The creation time of the open file `file`, as its drive keeps it.
+pub(crate) fn born_of(file: &std::fs::File) -> Option<Born> {
+    file.metadata().ok()?.created().ok().map(Born::of)
+}
+
+/// Whether this system can set a file's creation time at all (the drive's test says whether the
+/// drive keeps it exactly).
+pub(crate) const CAN_SET_BORN: bool = cfg!(any(target_os = "macos", windows));
+
+/// Whether the drive under `dir` keeps a creation time exactly as set: tried on the probe file
+/// `name` (PCTwin's own), read back through a fresh handle.
+pub(crate) fn keeps_born(dir: &Dir, name: &str) -> bool {
+    if !CAN_SET_BORN {
+        return false;
+    }
+    let mut options = OpenOptions::new();
+    options.write(true);
+    let set = dir
+        .open_with(name, &options)
+        .map(cap_std::fs::File::into_std)
+        .and_then(|f| set_born(&f, PROBE_BORN));
+    set.is_ok() && dir.open(name).ok().and_then(|f| born_of(&f.into_std())) == Some(PROBE_BORN)
+}
+
+/// Makes the file's writes durable on the drive itself: `F_FULLFSYNC` on a Mac (a plain flush
+/// there may stop at the drive's own cache), else a flush.
+pub(crate) fn full_sync(file: &std::fs::File) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        if rustix::fs::fcntl_fullfsync(file).is_ok() {
+            return Ok(());
+        }
+    }
+    file.sync_all()
+}
+
+/// Where a fill had got to, for what a failure may undo.
+pub(crate) struct Progress {
+    /// The tag was given (so the name must still carry it to be PCTwin's).
+    pub(crate) born: Option<Born>,
+    /// Bytes copied into it.
+    pub(crate) written: u64,
+}
+
+/// Whether the name `name` in `dir` still holds PCTwin's own file `target`: a regular file, the
+/// very same file, carrying the tag it was given, with exactly the bytes copied.
+pub(crate) fn still_ours(
+    dir: &Dir,
+    name: &str,
+    target: &std::fs::File,
+    progress: &Progress,
+) -> io::Result<bool> {
+    match dir.symlink_metadata(name) {
+        Ok(meta) if meta.is_file() => {}
+        Ok(_) => return Ok(false),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    }
+    let there = dir.open(name)?.into_std();
+    let meta = there.metadata()?;
+    if !meta.is_file() || meta.len() != progress.written {
+        return Ok(false);
+    }
+    if identity(&there)?.0 != identity(target)?.0 {
+        return Ok(false);
+    }
+    Ok(progress.born.is_none() || born_of(&there) == progress.born)
+}
+
+/// Copies the whole held file `from` into `to` (both at their start), never setting `to`'s size
+/// first; `progress.written` counts what was copied, and `hook` runs after each piece.
+pub(crate) fn copy_held(
+    from: &mut std::fs::File,
+    to: &mut std::fs::File,
+    progress: &mut Progress,
+    hook: Option<&FillHook>,
+) -> io::Result<()> {
+    from.seek(SeekFrom::Start(0))?;
+    to.seek(SeekFrom::Start(0))?;
+    let mut buf = vec![0u8; hook.map_or(CHUNK, |h| h.chunk.max(1))];
+    loop {
+        let n = match from.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        to.write_all(&buf[..n])?;
+        progress.written += n as u64;
+        if let Some(hook) = hook {
+            (hook.after_chunk)(progress.written)?;
+        }
+    }
+    to.flush()
+}
+
+/// Puts the download marker on the file filled in, as on every received file.
+pub(crate) fn put_mark(
+    dir: &Dir,
+    name: &str,
+    file: &std::fs::File,
+    mark: Option<DownloadMark>,
+    tries: bool,
+) -> Result<bool, GateError> {
+    match mark {
+        Some(mark) if tries => marks::put(dir, name, file, mark),
+        Some(_) => Ok(false),
+        None => Ok(true),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_tags_are_in_hundredths_and_differ() {
+        let a = fresh_born();
+        let b = fresh_born();
+        assert_ne!(a, b);
+        for t in [a, b] {
+            assert_eq!(t.nanos % 10_000_000, 0, "{t:?}");
+            assert!((946_684_800..946_684_800 + 20 * 365 * 86_400).contains(&t.secs));
+        }
+        assert_eq!(PROBE_BORN.nanos % 10_000_000, 0);
+    }
+}
+
+/// How finishing a filled-in file after a restart ended.
+#[derive(Debug)]
+pub enum FillFinish {
+    /// Durable, read back whole, given its time and shown: here is what it landed as.
+    Finished(crate::Stat),
+    /// Nothing is at the name now.
+    Gone,
+    /// The file at the name is not proven PCTwin's now, or no longer reads back whole: left.
+    NotProven,
+}
+
+/// How removing PCTwin's own partial copy after a restart ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillRemoval {
+    /// Removed: it was proven PCTwin's, and its bytes exactly the start of the checked file.
+    Removed,
+    /// Nothing is at the name now.
+    Gone,
+    /// Not proven PCTwin's partial copy now: left as it is.
+    NotProven,
+}
+
+/// Whether the open file `file` is the one PCTwin made for `fill`: its recorded identity where
+/// the drive keeps identities, or the creation time it was given (the same rule as the journal's
+/// recovery table).
+fn proven_fill(file: &std::fs::File, fill: &Fill) -> io::Result<bool> {
+    if fill.proof == Proof::StableId && fill.made == Some(identity(file)?.0) {
+        return Ok(true);
+    }
+    Ok(matches!(fill.proof, Proof::StableId | Proof::Token)
+        && fill.tag.born.is_some()
+        && born_of(file) == fill.tag.born)
+}
+
+/// The two open files' first `len` bytes are the same, and `a` is exactly `len` long.
+fn same_start_of(a: &mut std::fs::File, b: &mut std::fs::File, len: u64) -> io::Result<bool> {
+    if a.metadata()?.len() != len || b.metadata()?.len() < len {
+        return Ok(false);
+    }
+    a.seek(SeekFrom::Start(0))?;
+    b.seek(SeekFrom::Start(0))?;
+    let (mut x, mut y) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    let mut left = len;
+    while left > 0 {
+        let n = usize::try_from(left.min(x.len() as u64)).unwrap_or(x.len());
+        a.read_exact(&mut x[..n])?;
+        b.read_exact(&mut y[..n])?;
+        if x[..n] != y[..n] {
+            return Ok(false);
+        }
+        left -= n as u64;
+    }
+    Ok(true)
+}
+
+impl crate::Destination {
+    /// The creation time of the regular file at the stored path `stored`, as its drive keeps it;
+    /// `None` if there is none (or no file). Never follows a link.
+    pub fn born(&self, stored: &str) -> io::Result<Option<Born>> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(None);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => Ok(born_of(&dir.open(name)?.into_std())),
+            Ok(_) => Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Whether the file at the stored path `stored` is exactly `len` bytes, and they are exactly
+    /// the first `len` bytes of the file at the stored path `temp`. Never follows a link.
+    pub fn same_start(&self, stored: &str, temp: &str, len: u64) -> io::Result<bool> {
+        let mut a = self.open_read(stored)?;
+        let mut b = self.open_read(temp)?;
+        same_start_of(&mut a, &mut b, len)
+    }
+
+    /// After a restart: finishes the file filled in at the stored path `stored` for `fill`, if it
+    /// is proven PCTwin's right now: made durable, read back whole (`read_back`, given the file at
+    /// its start), `filled` (record it, if not yet recorded), given `modified`, shown, and the
+    /// folder flushed. Anything not proven is left exactly as it is.
+    pub fn finish_fill(
+        &self,
+        stored: &str,
+        fill: &Fill,
+        modified: Option<std::time::SystemTime>,
+        read_back: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+        filled: impl FnOnce() -> io::Result<()>,
+    ) -> Result<FillFinish, GateError> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(FillFinish::Gone);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Ok(FillFinish::NotProven),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(FillFinish::Gone),
+            Err(e) => return Err(e.into()),
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        let mut file = dir.open_with(name, &options)?.into_std();
+        if !proven_fill(&file, fill)? {
+            return Ok(FillFinish::NotProven);
+        }
+        full_sync(&file)?;
+        file.seek(SeekFrom::Start(0))?;
+        if !read_back(&mut file)? {
+            return Ok(FillFinish::NotProven);
+        }
+        filled()?;
+        if let Some(time) = modified {
+            file.set_modified(time)?;
+        }
+        full_sync(&file)?;
+        crate::flush_name(&dir, name);
+        let meta = file.metadata()?;
+        Ok(FillFinish::Finished(crate::Stat {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            id: identity(&file)?.0,
+        }))
+    }
+
+    /// After a restart: removes PCTwin's own partial copy at the stored path `stored` for `fill`,
+    /// only if, right now, it is proven PCTwin's, exactly `len` bytes, and they are exactly the
+    /// start of the checked temporary file at `temp`; the name is checked once more to hold that
+    /// very file just before it is removed. Anything else is left.
+    pub fn remove_fill(
+        &self,
+        stored: &str,
+        fill: &Fill,
+        temp: &str,
+        len: u64,
+    ) -> Result<FillRemoval, GateError> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(FillRemoval::Gone);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Ok(FillRemoval::NotProven),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(FillRemoval::Gone),
+            Err(e) => return Err(e.into()),
+        }
+        let mut held = dir.open(name)?.into_std();
+        let mut source = self.open_read(temp)?;
+        if !proven_fill(&held, fill)? || !same_start_of(&mut held, &mut source, len)? {
+            return Ok(FillRemoval::NotProven);
+        }
+        let progress = Progress {
+            born: fill.tag.born.filter(|_| born_of(&held) == fill.tag.born),
+            written: len,
+        };
+        if !still_ours(&dir, name, &held, &progress)? {
+            return Ok(FillRemoval::NotProven);
+        }
+        drop(held);
+        dir.remove_file(name)?;
+        crate::sync_folder(&dir)?;
+        Ok(FillRemoval::Removed)
+    }
+}
+
+/// A fill with no journal ([`crate::Sealed::claim`]): nothing to record, and the read-back is
+/// checked byte for byte against the checked file itself.
+pub(crate) struct Unjournaled {
+    pub(crate) source: std::fs::File,
+}
+
+impl FillSteps for Unjournaled {
+    fn made(&mut self, _: FileId) -> io::Result<()> {
+        Ok(())
+    }
+    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool> {
+        let len = self.source.metadata()?.len();
+        same_start_of(file, &mut self.source, len)
+    }
+    fn filled(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    fn cleared(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}

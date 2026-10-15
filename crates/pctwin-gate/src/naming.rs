@@ -59,6 +59,9 @@ pub struct DriveCheck {
     pub replaced_silently: bool,
     /// Making a file only if nothing has its name is honoured.
     pub exclusive_create: bool,
+    /// A creation time set on a file is kept exactly (the tag that proves a file filled in under
+    /// its real name is PCTwin's, where identities change).
+    pub exact_birth_time: bool,
 }
 
 impl DriveCheck {
@@ -71,6 +74,7 @@ impl DriveCheck {
             no_replace_move: atomic && !hard_links,
             replaced_silently: false,
             exclusive_create: naming != Naming::NoSafeMethod,
+            exact_birth_time: crate::fill::CAN_SET_BORN,
         }
     }
 }
@@ -123,6 +127,7 @@ pub(crate) fn classify(
         no_replace_move,
         replaced_silently,
         exclusive_create,
+        exact_birth_time: false,
     }
 }
 
@@ -262,6 +267,7 @@ fn run(
     move_no_replace: fn(&Dir, &str, &str, FolderPath<'_>) -> Moved,
 ) -> io::Result<DriveCheck> {
     make(dir, a, PROBE_A)?;
+    let exact_birth_time = crate::fill::keeps_born(dir, a);
     make(dir, b, PROBE_B)?;
     let exclusive_create = match make(dir, a, PROBE_B) {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => true,
@@ -296,14 +302,17 @@ fn run(
         },
         _ => false,
     };
-    Ok(classify(
-        link_new,
-        link_onto_existing_refused,
-        &moved,
-        now == PROBE_B,
-        moved_to_free_name,
-        exclusive_create,
-    ))
+    Ok(DriveCheck {
+        exact_birth_time,
+        ..classify(
+            link_new,
+            link_onto_existing_refused,
+            &moved,
+            now == PROBE_B,
+            moved_to_free_name,
+            exclusive_create,
+        )
+    })
 }
 
 #[cfg(test)]

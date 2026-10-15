@@ -1,0 +1,407 @@
+//! Filling a file in under its real name, for drives with no safe rename (security design
+//! notes, "Drives with no safe rename", decided 15 October 2026): forced here on the test
+//! machine's own drive through a drive profile, so every system runs it. The real drives that
+//! need it (exFAT on a Mac) run it in the real-drive tests.
+// Tests make and read files to test on; the no-file-changes fence is for the shipped code.
+#![allow(clippy::disallowed_methods)]
+
+use std::io::{self, Read, Write};
+use std::path::Path;
+use std::sync::Arc;
+
+mod common;
+
+use pctwin_gate::{
+    Claim, Destination, DriveKind, DriveProfile, FileId, FillPlan, FillSteps, GateError,
+    IncomingPath, Naming, Proof, Sealed,
+};
+
+fn fill_in(root: &Path) -> Destination {
+    Destination::open(root)
+        .unwrap()
+        .with_profile(DriveProfile::of(DriveKind::ExFat).with_naming(Naming::FillIn))
+}
+
+fn sealed<'d>(dest: &'d Destination, path: &str, bytes: &[u8]) -> Sealed<'d> {
+    let mut file = dest
+        .create_file(&IncomingPath::parse(path).unwrap(), bytes.len() as u64)
+        .unwrap();
+    file.write_all(bytes).unwrap();
+    common::seal(file).unwrap()
+}
+
+fn names(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+/// What the journal was told, in order.
+#[derive(Default)]
+struct Steps {
+    log: Vec<String>,
+    /// The bytes expected on read-back.
+    expect: Vec<u8>,
+}
+
+impl FillSteps for Steps {
+    fn made(&mut self, _: FileId) -> io::Result<()> {
+        self.log.push("made".into());
+        Ok(())
+    }
+    fn read_back(&mut self, file: &mut std::fs::File) -> io::Result<bool> {
+        let mut got = Vec::new();
+        file.read_to_end(&mut got)?;
+        self.log.push("read back".into());
+        Ok(got == self.expect)
+    }
+    fn filled(&mut self) -> io::Result<()> {
+        self.log.push("filled".into());
+        Ok(())
+    }
+    fn cleared(&mut self) -> io::Result<()> {
+        self.log.push("cleared".into());
+        Ok(())
+    }
+}
+
+fn steps(expect: &[u8]) -> Steps {
+    Steps {
+        log: Vec::new(),
+        expect: expect.to_vec(),
+    }
+}
+
+#[test]
+fn a_file_filled_in_lands_whole_and_the_steps_are_recorded_in_order() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let bytes = vec![7u8; 3000];
+    let s = sealed(&dest, "Docs/a.bin", &bytes);
+    assert_eq!(s.naming().unwrap(), Naming::FillIn);
+    let plan = s.fill_plan().unwrap();
+    // exFAT's identities change: the creation-time tag proves the file, where the system can
+    // set one (Linux cannot: there nothing lasts past a restart).
+    let expected = if cfg!(any(windows, target_os = "macos")) {
+        Proof::Token
+    } else {
+        Proof::SameMountId
+    };
+    assert_eq!(plan.proof, expected);
+    let name = s.next_name().unwrap();
+    assert_eq!(name, "Docs/a.bin");
+    let mut st = steps(&bytes);
+    let Claim::Named(claimed) = s.fill_as(&name, &plan, &mut st) else {
+        panic!("not named");
+    };
+    assert_eq!(st.log, ["made", "read back", "filled"]);
+    // The temporary file stays until the journal has committed, then goes.
+    assert_eq!(names(&root.path().join("Docs")).len(), 2);
+    let done = claimed.keep();
+    assert_eq!(done.final_path, "Docs/a.bin");
+    assert_eq!(
+        std::fs::read(root.path().join("Docs/a.bin")).unwrap(),
+        bytes
+    );
+    assert_eq!(names(&root.path().join("Docs")), ["a.bin"]);
+}
+
+/// On a drive that keeps identities, the identity recorded once the file is made proves it.
+#[test]
+fn a_drive_that_keeps_identities_proves_the_file_by_it() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path())
+        .unwrap()
+        .with_profile(DriveProfile::of(DriveKind::Ntfs).with_naming(Naming::FillIn));
+    let s = sealed(&dest, "k.txt", b"k");
+    assert_eq!(s.fill_plan().unwrap().proof, Proof::StableId);
+}
+
+/// Without a journal (a plain finish), a drive that fills in still lands files whole.
+#[test]
+fn a_plain_finish_fills_in_on_such_a_drive() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let mut file = dest
+        .create_file(&IncomingPath::parse("b.txt").unwrap(), 3)
+        .unwrap();
+    file.write_all(b"abc").unwrap();
+    assert_eq!(file.finish().unwrap().final_path, "b.txt");
+    assert_eq!(std::fs::read(root.path().join("b.txt")).unwrap(), b"abc");
+    assert_eq!(names(root.path()), ["b.txt"]);
+}
+
+/// The creation time PCTwin tags the file with is on it while it is filled, where the system
+/// can set one; it proves the file PCTwin's where identities change.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn the_file_is_tagged_with_its_creation_time() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let s = sealed(&dest, "c.txt", b"xyz");
+    let plan = s.fill_plan().unwrap();
+    let tag = plan.tag.born.expect("this system sets creation times");
+    let mut st = steps(b"xyz");
+    let Claim::Named(c) = s.fill_as("c.txt", &plan, &mut st) else {
+        panic!("not named");
+    };
+    c.keep();
+    assert_eq!(dest.born("c.txt").unwrap(), Some(tag));
+}
+
+/// A name already taken (even by an empty file) is never touched: the file gets a numbered name.
+#[test]
+fn a_file_already_at_the_name_is_never_touched_and_a_clash_is_numbered() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("d.txt"), b"").unwrap();
+    std::fs::write(root.path().join("d (2).txt"), b"theirs").unwrap();
+    let dest = fill_in(root.path());
+    let s = sealed(&dest, "d.txt", b"ours");
+    let plan = s.fill_plan().unwrap();
+    // Taken between finding it free and filling it, as another program would: left alone.
+    let Claim::Taken(s) = s.fill_as("d.txt", &plan, &mut steps(b"ours")) else {
+        panic!("a taken name was filled");
+    };
+    let Claim::Taken(s) = s.fill_as("d (2).txt", &plan, &mut steps(b"ours")) else {
+        panic!("a taken name was filled");
+    };
+    let claimed = s.claim().unwrap();
+    assert_eq!(claimed.finished().final_path, "d (3).txt");
+    claimed.keep();
+    assert_eq!(std::fs::read(root.path().join("d.txt")).unwrap(), b"");
+    assert_eq!(
+        std::fs::read(root.path().join("d (2).txt")).unwrap(),
+        b"theirs"
+    );
+    assert_eq!(
+        std::fs::read(root.path().join("d (3).txt")).unwrap(),
+        b"ours"
+    );
+    assert_eq!(names(root.path()), ["d (2).txt", "d (3).txt", "d.txt"]);
+}
+
+/// Another program puts its own file at the name part way through the copy: PCTwin notices
+/// before calling it filled, never touches that file, and keeps its own checked copy.
+#[test]
+fn another_program_replacing_the_file_mid_copy_is_noticed_and_its_file_kept() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().to_path_buf();
+    let dest = fill_in(root.path()).with_fill_hook(1000, move |written| {
+        if written == 1000 {
+            std::fs::write(path.join("other.tmp"), b"their file").unwrap();
+            replace(&path.join("other.tmp"), &path.join("e.bin"))?;
+        }
+        Ok(())
+    });
+    let bytes = vec![1u8; 3000];
+    let s = sealed(&dest, "e.bin", &bytes);
+    let temp = s.temp_path();
+    let plan = s.fill_plan().unwrap();
+    let mut st = steps(&bytes);
+    let Claim::Failed(e, back) = s.fill_as("e.bin", &plan, &mut st) else {
+        panic!("a replaced file was called filled");
+    };
+    assert!(matches!(e, GateError::ReplacedWhileFilling), "{e:?}");
+    assert!(!st.log.contains(&"filled".to_string()), "{:?}", st.log);
+    assert!(!st.log.contains(&"cleared".to_string()), "{:?}", st.log);
+    assert_eq!(
+        std::fs::read(root.path().join("e.bin")).unwrap(),
+        b"their file"
+    );
+    assert_eq!(back.temp_path(), temp);
+    back.persist();
+    assert_eq!(std::fs::read(root.path().join(&temp)).unwrap(), bytes);
+}
+
+/// Moves `from` onto `to`, replacing it, as another program may.
+fn replace(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+/// A copy that fails part way removes PCTwin's own partial copy (proven: the very file, with
+/// the bytes copied) and records that; the checked file comes back.
+#[test]
+fn a_copy_error_removes_only_pctwin_s_own_partial_copy() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path()).with_fill_hook(1000, |written| {
+        if written >= 2000 {
+            Err(io::Error::other("the drive was pulled out"))
+        } else {
+            Ok(())
+        }
+    });
+    let bytes = vec![2u8; 3000];
+    let s = sealed(&dest, "f.bin", &bytes);
+    let temp = s.temp_path();
+    let plan = s.fill_plan().unwrap();
+    let mut st = steps(&bytes);
+    let Claim::Failed(e, back) = s.fill_as("f.bin", &plan, &mut st) else {
+        panic!("a failed copy was named");
+    };
+    assert!(matches!(e, GateError::Io(_)), "{e:?}");
+    assert_eq!(st.log, ["made", "cleared"]);
+    assert!(!root.path().join("f.bin").exists());
+    back.persist();
+    assert_eq!(names(root.path()), [temp]);
+}
+
+/// The same failure after another program put its file at the name: that file stays.
+#[test]
+fn a_copy_error_never_removes_another_program_s_file() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().to_path_buf();
+    let dest = fill_in(root.path()).with_fill_hook(1000, move |written| {
+        if written == 2000 {
+            std::fs::write(path.join("other.tmp"), b"their file").unwrap();
+            replace(&path.join("other.tmp"), &path.join("g.bin"))?;
+            return Err(io::Error::other("the drive was pulled out"));
+        }
+        Ok(())
+    });
+    let bytes = vec![3u8; 3000];
+    let s = sealed(&dest, "g.bin", &bytes);
+    let plan = s.fill_plan().unwrap();
+    let mut st = steps(&bytes);
+    let Claim::Failed(_, back) = s.fill_as("g.bin", &plan, &mut st) else {
+        panic!("a failed copy was named");
+    };
+    assert_eq!(st.log, ["made"]);
+    assert_eq!(
+        std::fs::read(root.path().join("g.bin")).unwrap(),
+        b"their file"
+    );
+    back.persist();
+}
+
+/// A copy that does not read back the same is never called filled, and is removed.
+#[test]
+fn a_copy_that_reads_back_differently_is_never_called_filled() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let s = sealed(&dest, "h.bin", b"abc");
+    let plan = s.fill_plan().unwrap();
+    let mut st = steps(b"not what was written");
+    let Claim::Failed(_, back) = s.fill_as("h.bin", &plan, &mut st) else {
+        panic!("named");
+    };
+    assert_eq!(st.log, ["made", "read back", "cleared"]);
+    assert!(!root.path().join("h.bin").exists());
+    back.persist();
+}
+
+/// A drive that names files at once is never filled in, even if asked.
+#[test]
+fn only_a_drive_that_needs_it_is_filled_in() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let s = sealed(&dest, "i.txt", b"x");
+    let plan = FillPlan {
+        tag: pctwin_gate::FillTag {
+            born: None,
+            hidden: false,
+        },
+        proof: Proof::StableId,
+    };
+    let Claim::Failed(e, back) = s.fill_as("i.txt", &plan, &mut steps(b"x")) else {
+        panic!("filled in on an ordinary drive");
+    };
+    assert!(matches!(e, GateError::NoSafeName), "{e:?}");
+    assert!(!root.path().join("i.txt").exists());
+    drop(back);
+}
+
+/// Many times over, PCTwin and another program make the same name at the same moment: exactly
+/// one of them gets it, every time, and the other's file is never touched or mixed in.
+#[test]
+fn ten_thousand_races_for_a_name_never_mix_or_replace_a_file() {
+    let rounds: u32 = std::env::var("PCTWIN_RACE_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000);
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let ours = b"ours".to_vec();
+    let mut pending: Option<Sealed<'_>> = None;
+    let (mut won, mut lost) = (0u32, 0u32);
+    for round in 0..rounds {
+        let name = format!("r{round}.bin");
+        let s = match pending.take() {
+            Some(s) => s,
+            None => sealed(&dest, "x.bin", &ours),
+        };
+        let plan = s.fill_plan().unwrap();
+        let theirs = root.path().join(&name);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let b = Arc::clone(&barrier);
+        let other = std::thread::spawn(move || {
+            b.wait();
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&theirs)
+            {
+                Ok(mut f) => {
+                    f.write_all(b"theirs").unwrap();
+                    true
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
+                Err(e) => panic!("{e}"),
+            }
+        });
+        barrier.wait();
+        let claim = s.fill_as(&name, &plan, &mut steps(&ours));
+        let they_won = other.join().unwrap();
+        let got = std::fs::read(root.path().join(&name)).unwrap();
+        match claim {
+            Claim::Named(c) => {
+                assert!(!they_won, "round {round}: both got the name");
+                c.keep();
+                assert_eq!(got, ours, "round {round}");
+                won += 1;
+            }
+            Claim::Taken(back) => {
+                assert!(they_won, "round {round}: nobody got the name");
+                assert_eq!(got, b"theirs", "round {round}");
+                pending = Some(back);
+                lost += 1;
+            }
+            Claim::Failed(e, _) => panic!("round {round}: {e}"),
+        }
+    }
+    assert_eq!(won + lost, rounds);
+    eprintln!("PCTwin got the name {won} times, the other program {lost} times");
+}
+
+/// The journal's steps can fail too: one that cannot record the file made stops the fill, and
+/// the file just made (proven PCTwin's: nothing copied yet) is removed.
+#[test]
+fn a_fill_that_cannot_be_recorded_stops_and_leaves_nothing_under_the_name() {
+    struct NoJournal;
+    impl FillSteps for NoJournal {
+        fn made(&mut self, _: FileId) -> io::Result<()> {
+            Err(io::Error::other("the journal is full"))
+        }
+        fn read_back(&mut self, _: &mut std::fs::File) -> io::Result<bool> {
+            Ok(true)
+        }
+        fn filled(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+        fn cleared(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let s = sealed(&dest, "j.txt", b"abc");
+    let plan = s.fill_plan().unwrap();
+    let Claim::Failed(_, back) = s.fill_as("j.txt", &plan, &mut NoJournal) else {
+        panic!("named without a journal");
+    };
+    assert!(!root.path().join("j.txt").exists());
+    drop(back);
+    assert!(names(root.path()).is_empty(), "{:?}", names(root.path()));
+}
