@@ -1,5 +1,5 @@
 /**
- * View models for the connection screens (lane A): the resume banner on Welcome (F01), and
+ * View models for the connection screens (lane A): the Resume button on Welcome (F01), and
  * C06 Meet your other laptop, C07 Let's check the connection, C09 Waiting for your other laptop and
  * C10 The connection has ended. Screens take these as props and report choices as callbacks; the
  * bridge to the engine fills them later. C01 and C02 need no engine data and have no model here.
@@ -7,9 +7,12 @@
  * Engine commands and events these screens need (none exist yet; pairing's commands are in pairing.ts).
  * Names are proposals for the bridge; payloads are the shapes below.
  *
- *  F01  command `unfinished_move() -> UnfinishedMove | null`      asked once when Welcome opens.
- *       command `resume_move()`                                    when "Open this move" is chosen; the engine
- *                                                                  reconnects (C09) or goes to the move.
+ *  F01  command `unfinished_move() -> boolean`                    asked once when Welcome opens; true when a
+ *                                                                  saved move is waiting. (Details, such as the
+ *                                                                  other laptop and when it stopped, are not
+ *                                                                  shown, so none are needed.)
+ *       command `resume_move()`                                    when "Resume your move" is chosen; the engine
+ *                                                                  goes to the saved move (X09), or reconnects (C09).
  *  C06  event   `peer-readiness` { PeerReadiness }                 once, right after pairing succeeds and the
  *                                                                  two laptops have exchanged their details.
  *  C07  command `connection_check() -> ConnectionCheck`           when C07 opens (the screen shows "measuring"
@@ -39,16 +42,6 @@ export interface Laptop {
   system: string;
   /** The PCTwin version, for example "1.4.2". */
   version: string;
-}
-
-/** F01: a move that was paused or stopped before it finished, still saved on this laptop. */
-export interface UnfinishedMove {
-  /** The other laptop's label. */
-  otherLaptop: string;
-  /** `paused`: the person paused it. `interrupted`: it stopped by itself (power, crash, connection). */
-  state: "paused" | "interrupted";
-  /** When it stopped. */
-  stoppedAt: Date;
 }
 
 /** C06: which of the three things the two laptops' details add up to. */

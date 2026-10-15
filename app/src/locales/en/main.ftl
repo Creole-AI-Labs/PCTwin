@@ -29,19 +29,9 @@ role-new-title = My new laptop
 role-new-body = Receive my setup from another laptop.
 role-note = Nothing moves until you review and approve the plan. Your old laptop stays unchanged during the move.
 
-## F01 Resume banner (an unfinished move on this laptop)
+## F01 Unfinished move
 
-# $label is the other laptop's name, for example "Blue Fox".
-# $when is already formatted as a time phrase, for example "today at 14:05" or "on 12 October".
-resume-title-paused = You have a paused move.
-resume-title-interrupted = A move did not finish.
-resume-body-paused = Your move with { $label } was paused { $when }. Everything copied and checked so far is kept.
-resume-body-interrupted = Your move with { $label } stopped { $when } before it finished. Everything copied and checked so far is kept.
 resume-open = Resume your move
-# Added: how the time is said, chosen in the screen (today, this year, or an earlier year).
-resume-when-today = today at { DATETIME($when, hour: "numeric", minute: "2-digit") }
-resume-when-date = on { DATETIME($when, day: "numeric", month: "long") }
-resume-when-date-year = on { DATETIME($when, day: "numeric", month: "long", year: "numeric") }
 
 ## C01 How will you connect?
 

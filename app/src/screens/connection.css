@@ -27,30 +27,6 @@
   line-height: 1.55;
 }
 
-/* F01: the banner takes the place of the picture, so the free move stays in view */
-.resume {
-  margin-block: var(--space-4);
-}
-
-.resume .kit-banner {
-  background: var(--colour-soft);
-  color: var(--colour-ink);
-  font-size: var(--type-small);
-}
-
-.resume .kit-banner p {
-  margin: var(--space-1) 0 var(--space-3);
-  color: var(--colour-muted);
-}
-
-.resume .kit-banner-title {
-  font-size: var(--type-row-title);
-}
-
-.resume .kit-button {
-  inline-size: 100%;
-}
-
 /* C01: the one way to connect */
 .connect-card {
   display: flex;
