@@ -7,9 +7,8 @@
 
 .frame-actions-host {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   justify-content: flex-end;
-  min-inline-size: 0;
 }
 
 .frame-actions {
@@ -29,7 +28,9 @@
   justify-content: space-between;
 }
 
+/* The note and the action wrap onto two lines when they do not fit side by side (narrow window, large text) */
 .app-footer {
+  flex-wrap: wrap;
   padding-block: var(--space-2);
 }
 
