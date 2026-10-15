@@ -1403,3 +1403,41 @@ async fn a_waiting_new_laptop_is_not_gone() {
             .is_err()
     );
 }
+
+/// A watched link tells when the other laptop hangs up, and not before; the watch reads nothing,
+/// so every message still reaches the link.
+#[tokio::test]
+async fn a_watched_link_tells_when_the_other_laptop_leaves_and_reads_nothing() {
+    let (mut old, mut new) = paired_links().await;
+    let watch = old.watch().unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(700), watch.closed())
+            .await
+            .is_err(),
+        "a live link looked closed"
+    );
+    new.send(b"still here").await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(1200), watch.closed())
+            .await
+            .is_err(),
+        "an unread message looked like the link closing"
+    );
+    assert_eq!(old.recv().await.unwrap().as_slice(), b"still here");
+    drop(new);
+    tokio::time::timeout(Duration::from_secs(5), watch.closed())
+        .await
+        .expect("the watch saw the other laptop leave");
+}
+
+/// The old laptop never counts a new laptop as paired if it stays silent after the approval.
+#[tokio::test]
+async fn a_new_laptop_that_never_confirms_is_not_paired() {
+    let (host, guest) = at_the_pick().await;
+    let right = guest.match_number();
+    // The new laptop is still connected but never reads the approval or confirms.
+    let started = Instant::now();
+    assert!(host.choose(right, Instant::now()).await.is_err());
+    assert!(started.elapsed() < Duration::from_secs(5));
+    drop(guest);
+}
