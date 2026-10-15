@@ -1,0 +1,308 @@
+﻿/* Pairing screens (C03 to C05). Only the app's tokens; logical properties so right-to-left just works;
+   sizes in rem so large text grows things instead of clipping them. */
+
+.pair-heading:focus {
+  outline: none;
+}
+
+.pair-strip .back {
+  min-height: var(--control-height);
+}
+
+.pair-section {
+  margin-top: var(--space-6);
+}
+
+.pair-block {
+  width: 100%;
+}
+
+/* Quiet text actions keep a full-size target */
+.pair-text-btn,
+.pair-actions .kit-button-quiet {
+  min-height: var(--control-height);
+}
+
+/* The announced strip for notices: no space until something is in it */
+.pair-notice:not(:empty) {
+  margin-top: var(--space-4);
+}
+
+.pair-notice .kit-banner p {
+  margin: 0;
+}
+
+/* The old laptop's name for now */
+.pair-card {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.pair-card-title {
+  margin-bottom: var(--space-2);
+  color: var(--colour-muted);
+  font-size: var(--type-tertiary);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pair-label-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-subheading);
+  font-weight: 650;
+  letter-spacing: -0.4px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.pair-label-name svg {
+  flex: none;
+  color: var(--colour-blue);
+}
+
+.pair-card-hint {
+  margin-top: var(--space-2);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.pair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.pair-rename {
+  margin-top: var(--space-3);
+}
+
+/* The steps for the new laptop */
+.pair-steps {
+  margin: 0;
+  padding-inline-start: 1.6em;
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+  line-height: 1.55;
+}
+
+.pair-steps li + li {
+  margin-top: var(--space-2);
+}
+
+.pair-steps li::marker {
+  color: var(--colour-blue);
+  font-weight: 600;
+}
+
+/* The three numbers to choose from */
+.pair-numbers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pair-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 5.5rem;
+  padding: var(--space-3);
+  border: 1px solid #ccd8fb;
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  font-size: var(--type-progress);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition:
+    border-color var(--motion-feedback),
+    background var(--motion-feedback);
+}
+
+.pair-number:hover:not(:disabled) {
+  border-color: var(--colour-blue);
+  background: var(--colour-soft);
+}
+
+.pair-number:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pair-checking:not(:empty) {
+  margin-top: var(--space-3);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+.pair-numbers + .pair-checking:empty {
+  display: none;
+}
+
+.pair-checking + .kit-button {
+  margin-top: var(--space-4);
+}
+
+.pair-numbers ~ .note {
+  margin-top: var(--space-4);
+}
+
+.pair-safe {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--space-3);
+  color: var(--colour-success-text);
+  font-size: var(--type-supporting);
+}
+
+.pair-safe svg {
+  flex: none;
+}
+
+/* A list of laptops, or of networks: big buttons that carry the verbatim name */
+.pair-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pair-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 4.5rem;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-choice);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  text-align: start;
+  transition:
+    border-color var(--motion-feedback),
+    background var(--motion-feedback);
+}
+
+.pair-pick:hover {
+  border-color: var(--colour-blue);
+  background: var(--colour-soft);
+}
+
+.pair-pick-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: var(--radius-content);
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.pair-pick-icon svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.pair-pick-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pair-pick-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--type-row-title);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.pair-pick > svg:last-child {
+  flex: none;
+  margin-inline-start: auto;
+}
+
+/* The flag has to wrap: it is a whole sentence */
+.pair-flag .kit-chip {
+  align-items: flex-start;
+  border-radius: var(--radius-content);
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.pair-flag .kit-chip svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+/* The code field on the new laptop: one field, digits stay left to right */
+.pair-code-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kit-field input.pair-code-input {
+  height: 4.5rem;
+  border-color: #aabcfa;
+  font-size: var(--type-pairing);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The number the new laptop shows */
+.pair-bignumber {
+  padding: var(--space-4) 0;
+  font-size: var(--type-progress);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.kit-code-box:has(.pair-bignumber) {
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+}
+
+.pair-waiting {
+  margin-top: var(--space-4);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+.pair-paired-badge {
+  margin-bottom: var(--space-3);
+}
+
+@media (forced-colors: active) {
+  .pair-card,
+  .pair-number,
+  .pair-pick {
+    border: 1px solid CanvasText;
+  }
+}

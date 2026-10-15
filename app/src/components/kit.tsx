@@ -53,14 +53,22 @@ export function TextField({ label, hint, error, id, ...rest }: FieldProps) {
 /* ---------- Six-digit code ---------- */
 
 /** The code on the sending laptop: six large tiles in a box, read out as one label, with a line under it (the expiry). */
-export function CodeDisplay({ digits, meta }: { digits: string; meta?: ReactNode }) {
+export function CodeDisplay({ digits, meta, group }: { digits: string; meta?: ReactNode; group?: number }) {
   const { l10n } = useLocalization();
+  // With a grouping (3 gives "123 456") the tiles sit in runs with a gap; it still reads as one code.
+  const size = group && group > 0 ? group : Math.max(digits.length, 1);
+  const runs: string[] = [];
+  for (let i = 0; i < digits.length; i += size) runs.push(digits.slice(i, i + size));
   return (
     <div className="kit-code-box">
-      <div className="kit-code-display" role="group" aria-label={`${l10n.getString("code-label")}: ${digits.split("").join(" ")}`}>
-        {digits.split("").map((d, i) => (
-          <span key={i} className="kit-code-tile" aria-hidden="true">
-            {d}
+      <div className="kit-code-display" dir="ltr" role="group" aria-label={`${l10n.getString("code-label")}: ${digits.split("").join(" ")}`}>
+        {runs.map((run, r) => (
+          <span key={r} className="kit-code-run" aria-hidden="true">
+            {run.split("").map((d, i) => (
+              <span key={i} className="kit-code-tile">
+                {d}
+              </span>
+            ))}
           </span>
         ))}
       </div>

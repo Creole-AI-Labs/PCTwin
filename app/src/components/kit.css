@@ -121,16 +121,23 @@
 
 .kit-code-display {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  gap: var(--space-2) var(--space-6);
+}
+
+.kit-code-run {
+  display: flex;
   gap: var(--space-2);
 }
 
+/* Tiles are in rem (48 x 64 at the normal size) so large text makes them larger, not clipped. */
 .kit-code-tile {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 64px;
+  width: 3.429rem;
+  height: 4.571rem;
   border-radius: 10px;
   background: var(--colour-soft);
   color: var(--colour-ink);
