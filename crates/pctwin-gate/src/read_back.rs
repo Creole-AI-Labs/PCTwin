@@ -15,8 +15,11 @@
 //! - Then each file is judged on its own ([`this_file_from_drive`]): a system can quietly read a
 //!   file through its memory even on a drive that passed, because of how that file is stored
 //!   (Windows: compressed, encrypted, or so small it lives in the drive's own records; Linux:
-//!   kept inline, journalled, compressed, encrypted or verity-protected). Such a file is still
-//!   checked, and its result says it came from memory. "Drive" is said only when it is known.
+//!   kept inline, journalled, compressed, encrypted or verity-protected; ZFS, whose direct reads
+//!   may still come from its own cache). Such a file is read through an ordinary handle, still
+//!   checked, and its result says it came from memory. The file is judged again after the last
+//!   read, so one changed while it was read (another program compressing it) says memory too.
+//!   "Drive" is said only when it is known for the whole read.
 //! - An input or output error while reading back fails the check with that error (the file is
 //!   removed, never named), rather than as blocks that did not match.
 
@@ -141,6 +144,21 @@ impl ReadBack {
             done: false,
             flip_at,
         })
+    }
+
+    /// After the last read: judges the file again with `judge`, so a file that changed how it is
+    /// stored while it was read (compressed by another program, say) no longer counts as read
+    /// from the drive. Returns where its bytes came from, for the whole read.
+    pub(crate) fn judged_after(
+        &mut self,
+        judge: impl FnOnce(&std::fs::File) -> Result<(), WhyMemory>,
+    ) -> CheckedFrom {
+        if self.from == CheckedFrom::Drive
+            && let Err(why) = judge(&self.file)
+        {
+            self.from = CheckedFrom::Memory(why);
+        }
+        self.from
     }
 
     /// Where its bytes come from.
@@ -357,6 +375,14 @@ pub(crate) fn this_file_from_drive(file: &std::fs::File) -> Result<(), WhyMemory
 #[cfg(target_os = "linux")]
 pub(crate) fn this_file_from_drive(file: &std::fs::File) -> Result<(), WhyMemory> {
     use rustix::io::Errno;
+    /// ZFS answers a direct read from its own cache when the block is there, so it never counts.
+    const ZFS_SUPER_MAGIC: i64 = 0x2fc1_2fc1;
+    #[allow(clippy::useless_conversion, clippy::cast_lossless)]
+    match rustix::fs::fstatfs(file) {
+        Ok(st) if i64::from(st.f_type) == ZFS_SUPER_MAGIC => return Err(WhyMemory::NotShown),
+        Ok(_) => {}
+        Err(_) => return Err(WhyMemory::NotShown),
+    }
     /// `FS_COMPR_FL`, `FS_ENCRYPT_FL`, `FS_JOURNAL_DATA_FL`, `FS_VERITY_FL`, `FS_INLINE_DATA_FL`.
     const READ_THROUGH_MEMORY: u32 =
         0x0000_0004 | 0x0000_0800 | 0x0000_4000 | 0x0010_0000 | 0x1000_0000;
@@ -440,10 +466,24 @@ fn shown_uncached(dir: &Dir, name: &str) -> bool {
 /// length alone, so there it shows only that the handle asks to bypass the cache, not that the
 /// file is read that way: [`this_file_from_drive`] decides each file.
 #[cfg(any(windows, target_os = "linux"))]
-fn odd_read_refused(mut file: &std::fs::File) -> bool {
+fn odd_read_refused(file: &std::fs::File) -> bool {
     let mut store = vec![0u8; 2 * ALIGN];
     let odd = store.as_ptr().align_offset(ALIGN) + 1;
-    matches!(file.read(&mut store[odd..=odd]), Err(e) if e.kind() == io::ErrorKind::InvalidInput)
+    matches!(read_once_at_start(file, &mut store[odd..=odd]), Err(e) if e.kind() == io::ErrorKind::InvalidInput)
+}
+
+/// One read at the very start of `file`, leaving its position where it was (the same handle is
+/// read back from next).
+#[cfg(target_os = "linux")]
+fn read_once_at_start(file: &std::fs::File, buf: &mut [u8]) -> io::Result<usize> {
+    std::os::unix::fs::FileExt::read_at(file, buf, 0)
+}
+
+/// One read at the start of `file` (Windows tests only the probe file this way, which is not
+/// read again).
+#[cfg(windows)]
+fn read_once_at_start(mut file: &std::fs::File, buf: &mut [u8]) -> io::Result<usize> {
+    file.read(buf)
 }
 
 /// Whether Linux reports this file can be read directly, with alignments the reader meets.
