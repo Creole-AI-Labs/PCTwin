@@ -1,8 +1,68 @@
 
 # cargo-vet audits file
 
+[[audits.chacha20]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-run"
+version = "0.10.2"
+notes = "Reviewed 15 Oct 2026. Dev-dependency only, pulled in by proptest 1.12 as its RNG (rng feature). RustCrypto project crate. About 2800 lines. Review depth is limited: I inspected where the 73 lines of unsafe sit (sse2, avx2, avx512 and neon backends: SIMD intrinsics on the 64-byte state, pointer offsets inside the state and output arrays, transmutes between vector arrays) and the build and I/O surface, not each intrinsic call. Backend choice uses cpufeatures. No build script, no network, file or process access (grep)."
+
 [[audits.fs_at]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 version = "0.2.1"
 notes = "Reviewed 8 Oct 2026 for PCTwin's one use: FileExt::delete_by_handle on a std File opened by PCTwin with DELETE access. Read every unsafe block in src/win.rs and src/win/sugar.rs (22 + 4): SetFileInformationByHandle with FileDispositionInfoEx (DELETE|POSIX_SEMANTICS|IGNORE_READONLY), FileDispositionInfo and FileBasicInfo, each with a correctly sized, initialised struct and a live owned handle; NtCreateFile with zeroed OBJECT_ATTRIBUTES and a NUL-terminated UNICODE_STRING bounded by UNICODE_STRING_MAX_CHARS; the symlink-creation reparse buffer (an align_to_mut with a checked head; its own TODO notes alignment) and the read_dir entry parsing (trusts the kernel's offsets) are not used by PCTwin and were read, not exercised. No build script, no network, no file access beyond the caller's handles and paths. Unix code (nix/libc) not used by PCTwin."
+
+[[audits.proptest]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-run"
+delta = "1.11.0 -> 1.12.0"
+notes = "Reviewed 15 Oct 2026. Dev-dependency only (tests of pctwin-gate, pctwin-scan, pctwin-transfer); never in a shipped build. Read the Cargo.toml diff and grepped the src diff: moves from rand 0.9 and rand_chacha to rand 0.10 and chacha20 (RustCrypto), adds core_detect, raises MSRV to 1.88, and removes two unsafe blocks in test_runner/scoped_panic_hook.rs. No build script, no network, no process spawning."
+
+[[audits.rand]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-run"
+version = "0.10.3"
+notes = "Reviewed 15 Oct 2026. Dev-dependency only, pulled in by proptest 1.12. Read all 23 lines of unsafe: transmute of a filled byte array into __m128i and similar (all bit patterns valid), char::from_u32_unchecked after a range fix-up, String::as_mut_vec extended with ASCII-only bytes (Alphanumeric, Alphabetic), slice::from_raw_parts_mut for fill_slice on plain integer types, and the UnsafeCell access in ThreadRng (single thread, no outstanding reference). No build script, no network or process use; the only file mention is a doc example."
+
+[[audits.rand_core]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.10.1"
+notes = "Reviewed 15 Oct 2026. Pulled in by getrandom's optional sys_rng feature, which proptest's rand 0.10 turns on. Read src/utils.rs and src/word.rs in full; searched all of src/ (about 1070 lines in six files) for unsafe, extern, std::fs, std::net, std::process and env access and found none. No build script, no dependencies. Only integer and byte-slice helpers (chunks_exact, copy_from_slice, to/from_le_bytes) and the RNG traits."
+
+[[audits.rand_xorshift]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-run"
+version = "0.5.0"
+notes = "Reviewed 15 Oct 2026. Dev-dependency only. 155 lines, #![forbid(unsafe_code)], no build script, no dependencies other than rand_core 0.10. A xorshift generator."
+
+[[audits.serde_json]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "1.0.151 -> 1.0.154"
+notes = "Reviewed 15 Oct 2026. Read the whole src/ diff. Behaviour changes: the text '-0' is no longer parsed as the integer 0 but falls through to the float path (so an integer field given '-0' may now be refused); Number::as_f32 now returns None for a value that overflows f32 instead of infinity; with the preserve_order feature (not used by PCTwin) the map uses a RandomState hasher (foldhash with no-std) and the indexmap dependency is built without default features; error positions for invalid UTF-8 inside raw values and strings are now computed (memchr, already a dependency, no new unsafe). The lexical/math.rs hunks are formatting or renames. No new unsafe in the diff, build script unchanged, no network or file access."
+
+[[audits.tauri]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.12.1 -> 2.12.2"
+notes = "Reviewed 15 Oct 2026. Read the full src/ diff and compared the injected scripts/bundle.global.js (minified: the menu helper was refactored, no new fetch, eval, WebSocket or URL; the only URL string, the mock-IPC localhost form, is unchanged). Changes: Listeners::once no longer panics if a replayed queued emit calls the handler twice; the Menu and Submenu wrappers now keep their own item list instead of re-asking muda; the macOS restart path (process.rs) first runs /usr/bin/open -n on the app bundle with the current arguments, then falls back to spawning the bundle's own executable with null stdio in a new process group. No new dependencies, no new unsafe, build script unchanged, no network access."
+
+[[audits.tauri-build]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.1 -> 2.7.2"
+notes = "Reviewed 15 Oct 2026. The only change is Cargo.toml: version number and the tauri-codegen requirement raised to ~2.7.2. No source change."
+
+[[audits.tauri-plugin-opener]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.0 -> 2.7.1"
+notes = "Reviewed 15 Oct 2026. Only changes: Cargo.toml (version, tauri-plugin build dependency raised to 2.7.1) and the iOS Swift entry point made public (initPlugin). No Rust source change, so the open-path/open-url permission checks are untouched."
+
+[[audits.zeroize]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "1.9.0 -> 1.9.1"
+notes = "Reviewed 15 Oct 2026. Read the whole src/ diff. Changes: the extra optimization_barrier call after each volatile zeroing write was removed from the scalar, SIMD, Option, MaybeUninit, slice and raw-pointer impls (the volatile writes that do the zeroing remain); Vec<Z>::zeroize now clears the spare capacity before the elements instead of after, which avoids zeroing the initialised elements twice; Zeroizing's Debug no longer prints the secret (opaque 'Zeroizing { .. }'); the fallback black-box read uses MaybeUninit<u8> to avoid reading uninitialised memory. No new dependencies, no build script. Residual: the removal of the barrier cannot be proven safe from a diff alone; it matches the upstream changelog (RustCrypto/utils #1535)."
