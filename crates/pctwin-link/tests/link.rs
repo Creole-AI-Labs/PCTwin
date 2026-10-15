@@ -1243,9 +1243,11 @@ async fn every_connection_is_watched_so_a_dead_laptop_is_noticed() {
 
 /// Whether nothing answers at `addr` any more.
 async fn nothing_listens_at(addr: std::net::SocketAddr) -> bool {
-    matches!(
+    // Refused, or no answer at all (a Mac has no 127.0.0.2, so connecting there just waits):
+    // either way nothing is listening. Only a connection that opens counts as listening.
+    !matches!(
         tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await,
-        Ok(Err(_))
+        Ok(Ok(_))
     )
 }
 

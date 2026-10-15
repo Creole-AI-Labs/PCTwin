@@ -84,8 +84,12 @@ fn code_of(u: &OldUpdate) -> Option<(String, u64)> {
 }
 
 fn choices_of(u: &OldUpdate) -> Option<[u8; 3]> {
+    round_of(u).map(|(_, numbers)| numbers)
+}
+
+fn round_of(u: &OldUpdate) -> Option<(u64, [u8; 3])> {
     match u {
-        OldUpdate::Choose(c) => Some(*c),
+        OldUpdate::Choose { round, numbers } => Some((*round, *numbers)),
         _ => None,
     }
 }
@@ -122,10 +126,10 @@ async fn the_right_pick_on_the_old_laptop_pairs_both() {
     let new = NewJourney::new(config());
     let waiting = new.connect(&found, &full_width(&code)).await.unwrap();
     let shown = waiting.number();
-    let choices = next(&mut updates, choices_of).await;
+    let (round, choices) = next(&mut updates, round_of).await;
     assert!(choices.contains(&shown), "{choices:?} {shown}");
     assert_eq!(choices.iter().collect::<BTreeSet<_>>().len(), 3);
-    let (picked, approved) = tokio::join!(old.pick(shown), waiting.approval());
+    let (picked, approved) = tokio::join!(old.pick(round, shown), waiting.approval());
     let mut old_link = picked.unwrap();
     let mut new_link = approved.unwrap();
     next(&mut updates, |u| {
@@ -148,11 +152,12 @@ async fn a_wrong_pick_ends_the_attempt_and_a_fresh_code_follows() {
     let new = NewJourney::new(config());
     let waiting = new.connect(&found, &code).await.unwrap();
     let shown = waiting.number();
-    let choices = next(&mut updates, choices_of).await;
+    let (round, choices) = next(&mut updates, round_of).await;
     let wrong = *choices.iter().find(|&&n| n != shown).unwrap();
-    let (picked, approved) = tokio::join!(old.pick(wrong), waiting.approval());
+    let (picked, approved) = tokio::join!(old.pick(round, wrong), waiting.approval());
     assert_eq!(picked.err(), Some(Problem::WrongNumber));
-    assert!(approved.is_err());
+    // The new laptop is told the numbers did not match, not that the connection was lost.
+    assert_eq!(approved.err(), Some(Problem::NoMatch));
     next(&mut updates, |u| code_of(u).filter(|(c, _)| *c != code)).await;
 }
 
@@ -162,9 +167,9 @@ async fn numbers_that_do_not_match_can_be_declined_on_the_old_laptop() {
     let (code, _) = next(&mut updates, code_of).await;
     let new = NewJourney::new(config());
     let waiting = new.connect(&found, &code).await.unwrap();
-    next(&mut updates, choices_of).await;
-    old.decline().await;
-    assert!(waiting.approval().await.is_err());
+    let (round, _) = next(&mut updates, round_of).await;
+    old.decline(round).await;
+    assert_eq!(waiting.approval().await.err(), Some(Problem::NoMatch));
     // Serving carries on: another new laptop with the fresh code reaches the pick.
     let (fresh, _) = next(&mut updates, |u| code_of(u).filter(|(c, _)| *c != code)).await;
     let again = new.connect(&found, &fresh).await.unwrap();
@@ -225,4 +230,81 @@ fn every_problem_has_its_own_translation_key() {
         // A Fluent message id: letters, digits and dashes only.
         assert!(k.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "{k}");
     }
+}
+
+/// From the fresh-context review: a "none of these match" with nobody waiting (a double tap, a
+/// tap after the time ran out) must never let a second laptop in while the person is picking.
+#[tokio::test]
+async fn a_stray_decline_never_lets_another_laptop_in_during_the_pick() {
+    let (old, mut updates, found) = old_laptop().await;
+    old.decline(0).await;
+    old.decline(7).await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let new = NewJourney::new(config());
+    let first = new.connect(&found, &code).await.unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    // A second laptop trying the code still on screen is not served while the first waits.
+    let second = tokio::time::timeout(Duration::from_secs(2), new.connect(&found, &code)).await;
+    assert!(
+        !matches!(second, Ok(Ok(_))),
+        "a second laptop reached the pick"
+    );
+    let (picked, approved) = tokio::join!(old.pick(round, first.number()), first.approval());
+    assert!(picked.is_ok() && approved.is_ok());
+}
+
+/// A pick answers the numbers it was shown for: one meant for an earlier laptop never applies to
+/// the next one.
+#[tokio::test]
+async fn a_pick_for_earlier_numbers_never_applies_to_the_next_laptop() {
+    let (old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let new = NewJourney::new(config());
+    let first = new.connect(&found, &code).await.unwrap();
+    let (earlier, _) = next(&mut updates, round_of).await;
+    old.decline(earlier).await;
+    assert!(first.approval().await.is_err());
+    let (fresh, _) = next(&mut updates, |u| code_of(u).filter(|(c, _)| *c != code)).await;
+    let second = new.connect(&found, &fresh).await.unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    assert_ne!(round, earlier);
+    assert_eq!(
+        old.pick(earlier, second.number()).await.err(),
+        Some(Problem::TimedOut)
+    );
+    let (picked, approved) = tokio::join!(old.pick(round, second.number()), second.approval());
+    assert!(picked.is_ok() && approved.is_ok());
+}
+
+/// Once paired, the old laptop stops serving and stops listening: no other laptop can reach it.
+#[tokio::test]
+async fn once_paired_no_other_laptop_can_reach_the_old_laptop() {
+    let (old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let new = NewJourney::new(config());
+    let waiting = new.connect(&found, &code).await.unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    let (picked, approved) = tokio::join!(old.pick(round, waiting.number()), waiting.approval());
+    let _links = (picked.unwrap(), approved.unwrap());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let later = tokio::time::timeout(Duration::from_secs(3), new.connect(&found, "123456")).await;
+    assert!(
+        matches!(later, Ok(Err(Problem::Unreachable))),
+        "after pairing: {:?}",
+        later.as_ref().map(|r| r.as_ref().err())
+    );
+}
+
+/// Two picks at once (a double tap): exactly one pairs.
+#[tokio::test]
+async fn two_picks_at_once_pair_exactly_once() {
+    let (old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let new = NewJourney::new(config());
+    let waiting = new.connect(&found, &code).await.unwrap();
+    let n = waiting.number();
+    let (round, _) = next(&mut updates, round_of).await;
+    let (a, b, approved) = tokio::join!(old.pick(round, n), old.pick(round, n), waiting.approval());
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    assert!(approved.is_ok());
 }
