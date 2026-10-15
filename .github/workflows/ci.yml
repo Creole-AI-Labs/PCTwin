@@ -173,6 +173,38 @@ jobs:
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
         run: cargo test --workspace --locked --no-fail-fast
+      # The gate on real FAT and exFAT drives (no hard links, names that differ only in case are
+      # one name): Linux loop-mounts fresh images, the Mac makes disk images.
+      - name: Gate on real FAT and exFAT drives (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y dosfstools exfatprogs
+          dirs=""
+          for fs in vfat exfat; do
+            img="$RUNNER_TEMP/$fs.img"
+            mnt="$RUNNER_TEMP/$fs"
+            truncate -s 64M "$img"
+            sudo "mkfs.$fs" "$img"
+            mkdir -p "$mnt"
+            sudo mount -o "loop,uid=$(id -u),gid=$(id -g)" "$img" "$mnt"
+            dirs="$dirs|$mnt"
+          done
+          PCTWIN_FAT_DIRS="$dirs" PCTWIN_REQUIRE_FAT=1 cargo test -p pctwin-gate --test real_fat --locked
+      - name: Gate on real FAT and exFAT drives (Mac)
+        if: matrix.os == 'macos-latest'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          dirs=""
+          for fs in "MS-DOS FAT32" ExFAT; do
+            name="PCT$(echo "$fs" | tr -dc 'A-Z' | head -c 5)"
+            hdiutil create -size 64m -fs "$fs" -volname "$name" "$RUNNER_TEMP/$name.dmg"
+            hdiutil attach "$RUNNER_TEMP/$name.dmg" -mountpoint "$RUNNER_TEMP/$name"
+            dirs="$dirs|$RUNNER_TEMP/$name"
+          done
+          PCTWIN_FAT_DIRS="$dirs" PCTWIN_REQUIRE_FAT=1 cargo test -p pctwin-gate --test real_fat --locked
       # The desktop app, built and packaged on every system and kept unsigned for two weeks.
       # One package type per system keeps the build free of extra downloads.
       - name: Build the app
