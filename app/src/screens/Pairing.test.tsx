@@ -757,3 +757,30 @@ describe("late replies never move a screen off what it shows", () => {
     expect(heading().textContent).toBe(text("pair-done-title"));
   });
 });
+
+describe("new numbers and the checking state", () => {
+  const tile = (n: number) => screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: n })) });
+
+  it("the first numbers, or numbers after a code screen, are not announced as new", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    expect(screen.queryByText(text("pair-choose-renewed"))).toBeNull();
+    await emit("pairing-old", { kind: "timed-out" });
+    await emit("pairing-old", { kind: "choose", round: 2, numbers: [4, 5, 6] });
+    expect(screen.queryByText(text("pair-choose-renewed"))).toBeNull();
+  });
+
+  it("while checking, the numbers cannot be changed and only Checking is said", async () => {
+    replies.pairing_old_pick = () => new Promise(() => undefined);
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 1, numbers: [1, 2, 3] });
+    await emit("pairing-old", { kind: "choose", round: 2, numbers: [4, 5, 6] });
+    fireEvent.click(tile(5));
+    fireEvent.click(button("pair-choose-confirm"));
+    expect(await screen.findByText(text("pair-choose-checking"))).toBeTruthy();
+    expect(screen.queryByText(text("pair-choose-renewed"))).toBeNull();
+    expect((tile(4) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
