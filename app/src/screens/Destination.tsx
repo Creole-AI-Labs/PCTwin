@@ -3,8 +3,10 @@ import { useId, useRef } from "react";
 import { Badge, Banner, Button } from "../components/kit";
 import { ArrowForward, Check } from "../icons";
 import { checkDestinations, type DestDrive, type DestGroup, type DestinationCheck, type GroupIssue } from "../plan";
+import FrameFooter from "./FrameFooter";
+import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
-import { AttentionMark, FolderTitle, PathText, PlanBack, useFolderName, useFormat } from "./PlanParts";
+import { AttentionMark, FolderTitle, PathText, useFolderName, useFormat } from "./PlanParts";
 
 export interface DestinationProps {
   groups: DestGroup[];
@@ -82,7 +84,7 @@ export default function Destination({ groups, drives, onSetDestination, onSetAll
 
   return (
     <div className="plan-screen">
-      <PlanBack onBack={onBack} eyebrow="dest-eyebrow" />
+      <TopStrip onBack={onBack} labelId="dest-eyebrow" />
       <Heading id="dest-title" />
       <Localized id="dest-body">
         <p className="subhead" />
@@ -209,11 +211,11 @@ export default function Destination({ groups, drives, onSetDestination, onSetAll
         )}
       </div>
 
-      <div className="plan-actions">
-        <Button variant="primary" icon={<ArrowForward />} disabled={!check.ok} onClick={onContinue}>
-          {l10n.getString("dest-continue")}
-        </Button>
-      </div>
+      <FrameFooter>
+          <Button variant="primary" icon={<ArrowForward />} disabled={!check.ok} onClick={onContinue}>
+            {l10n.getString("dest-continue")}
+          </Button>
+      </FrameFooter>
     </div>
   );
 }

@@ -1,9 +1,11 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, ProgressValue, Row, RowList } from "../components/kit";
-import { ArrowForward, Check } from "../icons";
+import { ArrowForward } from "../icons";
 import { isPartial, type ScanStep, type ScanView } from "../plan";
+import FrameFooter from "./FrameFooter";
+import { Steps, TopStrip, type StepItem } from "./FrameParts";
 import { Heading } from "./PairParts";
-import { AttentionMark, PathText, PlanBack, useFormat } from "./PlanParts";
+import { AttentionMark, PathText, useFormat } from "./PlanParts";
 
 export interface ScanProgressProps {
   scan: ScanView;
@@ -34,7 +36,7 @@ export default function ScanProgress({ scan, onPause, onResume, onContinue, onAl
 
   return (
     <div className="plan-screen">
-      <PlanBack onBack={onBack} eyebrow="scan-eyebrow" />
+      <TopStrip onBack={onBack} labelId="scan-eyebrow" />
       {/* A new state is a new heading, and the heading takes focus; steady progress inside one state does not. */}
       <Heading key={`${scan.status}-${String(scan.resumed)}`} id="scan-title" />
       <Localized id="scan-body">
@@ -74,11 +76,7 @@ export default function ScanProgress({ scan, onPause, onResume, onContinue, onAl
         </p>
       </div>
 
-      <ol className="plan-stepper">
-        {scan.steps.map((step) => (
-          <StepItem key={step.key} step={step} unreadable={scan.unreadable.length} />
-        ))}
-      </ol>
+      <Steps steps={scan.steps.map((step) => stepItem(step, scan.unreadable.length, (id, vars) => l10n.getString(id, vars)))} />
 
       {scan.unreadable.length > 0 && (
         <div className="plan-block">
@@ -117,40 +115,30 @@ export default function ScanProgress({ scan, onPause, onResume, onContinue, onAl
         </div>
       )}
 
-      <div className="plan-actions">
-        {scan.status === "scanning" && <Button onClick={onPause}>{l10n.getString("scan-pause")}</Button>}
-        {scan.status === "paused" && (
-          <Button variant="primary" onClick={onResume}>
-            {l10n.getString("scan-resume")}
-          </Button>
-        )}
-        {finished && (
-          <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
-            {l10n.getString("scan-continue")}
-          </Button>
-        )}
-      </div>
+      {(scan.status === "scanning" || scan.status === "paused" || finished) && (
+        <FrameFooter>
+          {scan.status === "scanning" && <Button onClick={onPause}>{l10n.getString("scan-pause")}</Button>}
+          {scan.status === "paused" && (
+            <Button variant="primary" onClick={onResume}>
+              {l10n.getString("scan-resume")}
+            </Button>
+          )}
+          {finished && (
+            <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
+              {l10n.getString("scan-continue")}
+            </Button>
+          )}
+        </FrameFooter>
+      )}
     </div>
   );
 }
 
-/** One step with its marker (a tick, a filled dot, an empty ring), joined to the next by a line, and its state in words. */
-function StepItem({ step, unreadable }: { step: ScanStep; unreadable: number }) {
-  const { l10n } = useLocalization();
-  const body =
-    step.key === "protected" ? l10n.getString("scan-step-protected-body", { count: unreadable }) : l10n.getString(`scan-step-${step.key}-body`);
-  const word = l10n.getString(`scan-step-${step.state === "done" ? "done" : step.state === "current" ? "current" : "todo"}`);
-  return (
-    <li className={`plan-step plan-step-${step.state}`}>
-      <span className="plan-step-marker" aria-hidden="true">
-        {step.state === "done" ? <Check /> : step.state === "current" ? <span className="plan-step-dot" /> : null}
-      </span>
-      <span className="plan-step-text">
-        <strong>
-          {l10n.getString(`scan-step-${step.key}-title`)} <small className="plan-step-word">{word}</small>
-        </strong>
-        <small className="kit-hint">{body}</small>
-      </span>
-    </li>
-  );
+/** A step for the shared list: its title and what it covers (the state comes from the marker, with hidden words for screen readers). */
+function stepItem(step: ScanStep, unreadable: number, t: (id: string, vars?: Record<string, number>) => string): StepItem {
+  return {
+    state: step.state,
+    title: t(`scan-step-${step.key}-title`),
+    body: step.key === "protected" ? t("scan-step-protected-body", { count: unreadable }) : t(`scan-step-${step.key}-body`),
+  };
 }
