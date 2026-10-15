@@ -396,45 +396,84 @@ async fn once_paired_serving_ends_for_good() {
     }
 }
 
-/// A pick made just as the pick's time runs out has exactly one outcome on the old laptop: it
-/// pairs and serving ends, or the time ran out and the pick says so. Never both.
+/// A pick made once the pick's time has run out never pairs: the time ran out, the pick says
+/// so, and serving moves on. (A pick in time pairs only with the new laptop confirming, which the
+/// other tests run over the real clock; a paused clock would jump past the confirmation's wait.)
 #[tokio::test]
-async fn a_pick_as_the_time_runs_out_has_one_outcome() {
-    for late in [false, true] {
-        let (old, mut updates, found, asked) = counted_old_laptop().await;
-        let (code, _) = next(&mut updates, code_of).await;
-        let waiting = NewJourney::new(config())
-            .connect(&found, &code)
-            .await
-            .unwrap();
-        let (round, _) = next(&mut updates, round_of).await;
-        tokio::time::pause();
-        let number = waiting.number();
-        let pick = async {
-            if late {
-                tokio::time::sleep(pctwin_pairing::CONFIRMATION_TIMEOUT).await;
-            }
-            old.pick(round, number).await
-        };
-        let run_out = tokio::time::sleep(pctwin_pairing::CONFIRMATION_TIMEOUT);
-        let (picked, ()) = tokio::join!(pick, run_out);
-        tokio::time::resume();
-        let mut seen = Vec::new();
-        while let Ok(u) = updates.try_recv() {
-            seen.push(u);
-        }
-        let paired = seen.contains(&OldUpdate::Paired);
-        let timed_out = seen.contains(&OldUpdate::TimedOut);
-        match picked {
-            Ok(_) => assert!(paired && !timed_out, "late={late}: {seen:?}"),
-            Err(p) => {
-                assert_eq!(p, Problem::TimedOut, "late={late}");
-                assert!(!paired, "late={late}: {seen:?}");
-            }
-        }
-        if paired {
-            assert_eq!(asked.load(Ordering::SeqCst), 1, "late={late}");
-        }
-        drop(waiting);
+async fn a_pick_after_the_time_ran_out_never_pairs() {
+    let (old, mut updates, found, asked) = counted_old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let waiting = NewJourney::new(config())
+        .connect(&found, &code)
+        .await
+        .unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    tokio::time::pause();
+    let number = waiting.number();
+    let picked = async {
+        tokio::time::sleep(pctwin_pairing::CONFIRMATION_TIMEOUT).await;
+        old.pick(round, number).await
+    };
+    let picked = tokio::time::timeout(Duration::from_secs(600), picked)
+        .await
+        .expect("the pick ended");
+    tokio::time::resume();
+    assert_eq!(picked.err(), Some(Problem::TimedOut));
+    let mut seen = Vec::new();
+    while let Ok(u) = updates.try_recv() {
+        seen.push(u);
     }
+    assert!(seen.contains(&OldUpdate::TimedOut), "{seen:?}");
+    assert!(!seen.contains(&OldUpdate::Paired), "{seen:?}");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        asked.load(Ordering::SeqCst),
+        2,
+        "serving moved on to the next laptop"
+    );
+    drop(waiting);
+}
+
+/// A new laptop that leaves while the numbers are shown ends the round on the old laptop at once,
+/// and the right number picked afterwards never pairs: the old laptop never shows Paired for a
+/// laptop that has gone.
+#[tokio::test]
+async fn a_new_laptop_that_leaves_during_the_pick_never_pairs() {
+    let (old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let waiting = NewJourney::new(config())
+        .connect(&found, &code)
+        .await
+        .unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    let right = waiting.number();
+    drop(waiting);
+    next(&mut updates, |u| (*u == OldUpdate::Left).then_some(())).await;
+    assert!(old.pick(round, right).await.is_err());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while let Ok(u) = updates.try_recv() {
+        assert_ne!(u, OldUpdate::Paired);
+    }
+}
+
+/// Paired is on the old laptop's screen by the time its pick returns, and the port is closed by
+/// serving itself (not by whoever called the pick).
+#[tokio::test]
+async fn paired_is_shown_when_the_pick_returns_and_serving_closes_the_port() {
+    let (old, mut updates, found) = old_laptop().await;
+    let (code, _) = next(&mut updates, code_of).await;
+    let new = NewJourney::new(config());
+    let waiting = new.connect(&found, &code).await.unwrap();
+    let (round, _) = next(&mut updates, round_of).await;
+    let number = waiting.number();
+    let (picked, approved) = tokio::join!(old.pick(round, number), waiting.approval());
+    let _links = (picked.unwrap(), approved.unwrap());
+    let mut seen = Vec::new();
+    while let Ok(u) = updates.try_recv() {
+        seen.push(u);
+    }
+    assert!(seen.contains(&OldUpdate::Paired), "{seen:?}");
+    // The serving side was let go by serving: shuffling the label has nothing to show it on.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(old.shuffle().err(), Some(Problem::Failed));
 }

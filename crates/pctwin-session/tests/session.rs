@@ -92,8 +92,12 @@ async fn the_new_laptop_finds_the_old_laptop_by_its_label_and_pairs() {
     let pending_host = within(old.next_peer(&sender)).await.unwrap();
     let pending_guest = guest.await.unwrap().unwrap();
     let shown = pending_guest.match_number();
-    let mut host_link = pending_host.choose(shown, Instant::now()).await.unwrap();
-    let mut guest_link = pending_guest.approval().await.unwrap();
+    // The old laptop pairs once the new laptop confirms, so both run together.
+    let (host_link, guest_link) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    let (mut host_link, mut guest_link) = (host_link.unwrap(), guest_link.unwrap());
     host_link.send(b"found you").await.unwrap();
     assert_eq!(guest_link.recv().await.unwrap().as_slice(), b"found you");
 }
