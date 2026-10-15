@@ -270,9 +270,6 @@ tray-quit = Quit PCTwin
 welcome-restore = Restore setup
 welcome-rescue = Rescue a laptop
 welcome-quick-send = Quick Send
-welcome-cloud-question = Have Cloud Twin?
-welcome-cloud-body = Sign in to see your saved setup.
-welcome-sign-in = Sign in
 
 soon-eyebrow = Coming soon
 soon-restore-title = Restore setup
@@ -281,8 +278,6 @@ soon-rescue-title = Rescue a laptop
 soon-rescue-body = Bring files back from a laptop that will not start, by connecting its drive to a working one. This is coming in a later version.
 soon-quick-send-title = Quick Send
 soon-quick-send-body = Send chosen files or folders to a laptop nearby, at any time, not only during a move. It is free, with no account, and it is coming in the first release.
-soon-sign-in-title = Cloud Twin
-soon-sign-in-body = Signing in to see your saved setup comes with Cloud Twin, in a later version. Moving your own laptops will always be free, with no account.
 
 ## Item results (every item ends with one of these)
 
