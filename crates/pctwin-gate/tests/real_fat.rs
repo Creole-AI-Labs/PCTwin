@@ -72,6 +72,29 @@ fn drives() -> Vec<Drive> {
     }
 }
 
+/// Runs `check` on every drive and fails once, at the end, naming each drive that failed and why:
+/// one bad drive must not hide the result for the others.
+fn each_drive(check: impl Fn(&Drive)) {
+    let mut failures = Vec::new();
+    for drive in drives() {
+        let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(&drive)));
+        if let Err(cause) = run {
+            let why = cause
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| cause.downcast_ref::<&str>().map(|s| (*s).to_string()))
+                .unwrap_or_else(|| "failed".to_string());
+            failures.push(format!("[{}] {}", drive.kind, why.replace('\n', " | ")));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "failed on {} drive(s):\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 fn write(dest: &Destination, p: &str, bytes: &[u8]) -> String {
     let mut file = dest
         .create_file(&IncomingPath::parse(p).unwrap(), bytes.len() as u64)
@@ -116,7 +139,7 @@ fn files_land_whole_with_numbered_clashes_and_nothing_left_behind() {
     if phase() == Phase::After {
         return;
     }
-    for drive in drives() {
+    each_drive(|drive| {
         let dir = fresh(&drive.path, "pctwin-fat-landing");
         // This really is a drive without hard links, so the move fallback is what runs.
         std::fs::write(dir.join("probe"), b"x").unwrap();
@@ -144,7 +167,7 @@ fn files_land_whole_with_numbered_clashes_and_nothing_left_behind() {
             "no temporary file left on {}",
             drive.show()
         );
-    }
+    });
 }
 
 #[test]
@@ -152,7 +175,7 @@ fn an_unfinished_file_leaves_nothing_behind() {
     if phase() == Phase::After {
         return;
     }
-    for drive in drives() {
+    each_drive(|drive| {
         let dir = fresh(&drive.path, "pctwin-fat-unfinished");
         let dest = Destination::open(&dir).unwrap();
         {
@@ -168,7 +191,7 @@ fn an_unfinished_file_leaves_nothing_behind() {
             drive.show(),
             names_under(&dir)
         );
-    }
+    });
 }
 
 #[test]
@@ -176,7 +199,7 @@ fn names_fat_cannot_hold_are_changed_and_still_land() {
     if phase() == Phase::After {
         return;
     }
-    for drive in drives() {
+    each_drive(|drive| {
         let dir = fresh(&drive.path, "pctwin-fat-names");
         let dest = Destination::open(&dir).unwrap();
         let landed = write(&dest, "Notes/May?.txt", b"x");
@@ -187,7 +210,7 @@ fn names_fat_cannot_hold_are_changed_and_still_land() {
             "{}",
             drive.show()
         );
-    }
+    });
 }
 
 /// The bytes the remount test writes: more than one cluster, and different at every position.
@@ -204,7 +227,7 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
     let phase = phase();
     let state = std::env::var_os("PCTWIN_FAT_STATE").map(PathBuf::from);
     let bytes = remount_bytes();
-    for drive in drives() {
+    each_drive(|drive| {
         let note = state
             .as_ref()
             .map(|s| s.join(format!("remount-{}.txt", drive.kind)));
@@ -229,5 +252,5 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
             });
             assert_eq!(back, bytes, "{}: {landed} came back changed", drive.show());
         }
-    }
+    });
 }
