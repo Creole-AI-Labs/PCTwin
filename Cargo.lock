@@ -3263,12 +3263,19 @@ dependencies = [
 name = "pctwin-app"
 version = "0.1.0"
 dependencies = [
+ "pctwin-discovery",
+ "pctwin-doctor",
+ "pctwin-journey",
+ "pctwin-link",
+ "pctwin-pairing",
+ "pctwin-session",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
+ "tokio",
 ]
 
 [[package]]
