@@ -8,6 +8,7 @@
 use curve25519_dalek::constants::EIGHT_TORSION;
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
+use hmac::{Hmac, KeyInit, Mac};
 use pctwin_pairing::{
     CONFIRMATION_TIMEOUT, MATCH_NUMBER_RANGE, MAX_FAILED_ATTEMPTS, PairingCode, PairingError,
     REPLY_TIMEOUT, ReceiverAwaitingApproval, ReceiverSession, RotatingSender, SenderAwaitingReveal,
@@ -21,6 +22,7 @@ use std::time::{Duration, Instant};
 
 const PSK_SALT: &[u8] = b"pctwin/v1/pairing-psk";
 const PROLOGUE_LABEL: &[u8] = b"pctwin/v1/pairing-prologue";
+const ROLES: &[u8] = b"pctwin/v1/roles: old laptop responds, new laptop initiates";
 const NOISE: &str = "Noise_NNpsk0_25519_ChaChaPoly_BLAKE2s";
 
 fn psk_from(key: &[u8]) -> [u8; 32] {
@@ -34,6 +36,7 @@ fn psk_from(key: &[u8]) -> [u8; 32] {
 fn prologue(id: &[u8], spake_a: &[u8], spake_b: &[u8]) -> Vec<u8> {
     let mut p = PROLOGUE_LABEL.to_vec();
     p.push(1);
+    p.extend(ROLES);
     p.extend(id);
     p.extend(spake_a);
     p.extend(spake_b);
@@ -57,12 +60,32 @@ fn commit_to(nonce: &[u8]) -> Vec<u8> {
     h.finalize().to_vec()
 }
 
-fn sealed(tr: &mut snow::TransportState, kind: u8, plain: &[u8]) -> Vec<u8> {
-    let mut out = [0u8; 128];
-    let k = tr.write_message(plain, &mut out).unwrap();
+/// A confirmation key, as the public protocol derives it: `who` is "new" or "old".
+fn confirm_key(psk: &[u8; 32], hash: &[u8], who: &str) -> [u8; 32] {
+    let mut info = format!("confirm from the {who} laptop").into_bytes();
+    info.extend(hash);
+    let mut key = [0u8; 32];
+    Hkdf::<Sha256>::new(Some(b"pctwin/v1/confirm"), psk)
+        .expand(&info, &mut key)
+        .unwrap();
+    key
+}
+
+/// A confirmation message of `kind`: `body` and its code under `key`.
+fn sealed(key: &[u8; 32], kind: u8, body: &[u8]) -> Vec<u8> {
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(key).unwrap();
+    mac.update(body);
     let mut m = vec![1u8, kind];
-    m.extend(&out[..k]);
+    m.extend(body);
+    m.extend(mac.finalize().into_bytes());
     m
+}
+
+/// The body of a reveal of `nonce`.
+fn reveal_of(nonce: &[u8]) -> Vec<u8> {
+    let mut b = b"pctwin/v1/reveal".to_vec();
+    b.extend(nonce);
+    b
 }
 
 /// An attacker who knows the code reimplements the RECEIVER from the public protocol and also
@@ -70,8 +93,8 @@ fn sealed(tr: &mut snow::TransportState, kind: u8, plain: &[u8]) -> Vec<u8> {
 /// Returns the sender's choosing state and the number the attacker computed.
 fn raw_receiver(sender: &mut RotatingSender, now: Instant) -> (SenderChoosing, u8) {
     let nonce = [5u8; 32];
-    let (waiting, mut tr, hash) = raw_receiver_committed(sender, &nonce, now);
-    let reveal = sealed(&mut tr, 4, &nonce);
+    let (waiting, key, hash) = raw_receiver_committed(sender, &nonce, now);
+    let reveal = sealed(&key, 4, &reveal_of(&nonce));
     let choosing = waiting.receive_reveal(&reveal, now).unwrap();
     (choosing, match_number_of(&hash, &nonce))
 }
@@ -81,7 +104,7 @@ fn raw_receiver_committed(
     sender: &mut RotatingSender,
     nonce: &[u8],
     now: Instant,
-) -> (SenderAwaitingReveal, snow::TransportState, Vec<u8>) {
+) -> (SenderAwaitingReveal, [u8; 32], Vec<u8>) {
     let code = sender.code().unwrap();
     let m1 = sender.message_1().unwrap().to_vec();
     let id = m1[2..10].to_vec();
@@ -109,12 +132,12 @@ fn raw_receiver_committed(
     let (waiting, m3) = sender.receive(&m2, now).unwrap();
     hs.read_message(&m3[2..], &mut buf).unwrap();
     let hash = hs.get_handshake_hash().to_vec();
-    (waiting, hs.into_transport_mode().unwrap(), hash)
+    (waiting, confirm_key(&psk, &hash, "new"), hash)
 }
 
 /// An attacker who knows the code reimplements the SENDER, so it can seal any approval it likes.
-/// Returns the real receiver's waiting state and the attacker's transport.
-fn raw_sender(code: &str, now: Instant) -> (ReceiverAwaitingApproval, snow::TransportState) {
+/// Returns the real receiver's waiting state and the attacker's confirmation key.
+fn raw_sender(code: &str, now: Instant) -> (ReceiverAwaitingApproval, [u8; 32]) {
     let id = [7u8; 8];
     let (st, spake_a) = Spake2::<Ed25519Group>::start_a(
         &Password::new(code.as_bytes()),
@@ -143,15 +166,15 @@ fn raw_sender(code: &str, now: Instant) -> (ReceiverAwaitingApproval, snow::Tran
     let mut m3 = vec![1u8, 3];
     m3.extend(&buf[..n]);
     let (waiting, _reveal) = receiver.receive(&m3, now).unwrap();
-    (waiting, hs.into_transport_mode().unwrap())
+    (waiting, confirm_key(&psk, hs.get_handshake_hash(), "old"))
 }
 
 fn receiver_number_after(receiver: ReceiverSession, m3: &[u8], now: Instant) -> u8 {
     receiver.receive(m3, now).unwrap().0.match_number()
 }
 
-fn sealed_approval(tr: &mut snow::TransportState, plain: &[u8]) -> Vec<u8> {
-    sealed(tr, 5, plain)
+fn sealed_approval(key: &[u8; 32], plain: &[u8]) -> Vec<u8> {
+    sealed(key, 5, plain)
 }
 
 /// A code-holder sitting between the laptops plays the sender to the real new laptop and tries
@@ -230,9 +253,26 @@ fn a_reveal_that_does_not_match_the_commitment_ends_pairing() {
     // A fake new laptop cannot pick its random value after seeing the old laptop's key.
     let now = Instant::now();
     let mut sender = RotatingSender::new(now).unwrap();
-    let (waiting, mut tr, _hash) = raw_receiver_committed(&mut sender, &[5u8; 32], now);
-    let reveal = sealed(&mut tr, 4, &[6u8; 32]);
+    let (waiting, key, _hash) = raw_receiver_committed(&mut sender, &[5u8; 32], now);
+    let reveal = sealed(&key, 4, &reveal_of(&[6u8; 32]));
     let rejected = waiting.receive_reveal(&reveal, now).unwrap_err();
+    assert_eq!(rejected.error(), PairingError::HandshakeFailed);
+    assert!(rejected.into_retry().is_none());
+}
+
+/// A code holder's reveal carries a genuine code but another label: it ends pairing, so a
+/// confirmation made for one step can never stand in for another.
+#[test]
+fn a_genuine_reveal_with_another_label_ends_pairing() {
+    let now = Instant::now();
+    let mut sender = RotatingSender::new(now).unwrap();
+    let nonce = [5u8; 32];
+    let (waiting, key, _hash) = raw_receiver_committed(&mut sender, &nonce, now);
+    let mut body = b"pctwin/v1/REVEAL".to_vec();
+    body.extend(nonce);
+    let rejected = waiting
+        .receive_reveal(&sealed(&key, 4, &body), now)
+        .unwrap_err();
     assert_eq!(rejected.error(), PairingError::HandshakeFailed);
     assert!(rejected.into_retry().is_none());
 }
@@ -242,8 +282,8 @@ fn a_reveal_of_the_wrong_length_ends_pairing() {
     for len in [0usize, 31, 33, 64] {
         let now = Instant::now();
         let mut sender = RotatingSender::new(now).unwrap();
-        let (waiting, mut tr, _hash) = raw_receiver_committed(&mut sender, &[5u8; 32], now);
-        let reveal = sealed(&mut tr, 4, &vec![5u8; len]);
+        let (waiting, key, _hash) = raw_receiver_committed(&mut sender, &[5u8; 32], now);
+        let reveal = sealed(&key, 4, &reveal_of(&vec![5u8; len]));
         let rejected = waiting.receive_reveal(&reveal, now).unwrap_err();
         assert!(
             rejected.into_retry().is_none(),
@@ -257,8 +297,8 @@ fn junk_reveals_do_not_cancel_the_sender_and_late_reveals_are_refused() {
     let now = Instant::now();
     let mut sender = RotatingSender::new(now).unwrap();
     let nonce = [5u8; 32];
-    let (mut waiting, mut tr, _hash) = raw_receiver_committed(&mut sender, &nonce, now);
-    let reveal = sealed(&mut tr, 4, &nonce);
+    let (mut waiting, key, _hash) = raw_receiver_committed(&mut sender, &nonce, now);
+    let reveal = sealed(&key, 4, &reveal_of(&nonce));
     for junk in [vec![], vec![1u8], vec![1, 5, 0], vec![1, 4, 0, 0], {
         let mut f = reveal.clone();
         let last = f.len() - 1;
@@ -325,10 +365,10 @@ fn a_wrong_pick_on_the_sender_cancels_pairing() {
 fn control_the_hand_built_sender_is_approved_with_the_right_label_and_number() {
     let now = Instant::now();
     let code = PairingCode::generate().unwrap().digits();
-    let (waiting, mut tr) = raw_sender(&code, now);
+    let (waiting, key) = raw_sender(&code, now);
     let mut plain = b"pctwin/v1/approved".to_vec();
     plain.push(waiting.match_number());
-    let m4 = sealed_approval(&mut tr, &plain);
+    let m4 = sealed_approval(&key, &plain);
     assert!(waiting.receive_approval(&m4, now).is_ok());
 }
 
@@ -336,14 +376,14 @@ fn control_the_hand_built_sender_is_approved_with_the_right_label_and_number() {
 fn an_approval_with_the_wrong_number_is_rejected() {
     let now = Instant::now();
     let code = PairingCode::generate().unwrap().digits();
-    let (waiting, mut tr) = raw_sender(&code, now);
+    let (waiting, key) = raw_sender(&code, now);
     let wrong = MATCH_NUMBER_RANGE
         .clone()
         .find(|&n| n != waiting.match_number())
         .unwrap();
     let mut plain = b"pctwin/v1/approved".to_vec();
     plain.push(wrong);
-    let m4 = sealed_approval(&mut tr, &plain);
+    let m4 = sealed_approval(&key, &plain);
     let rejected = waiting.receive_approval(&m4, now).unwrap_err();
     assert_eq!(rejected.error(), PairingError::WrongNumber);
     assert!(rejected.into_retry().is_none());
@@ -360,10 +400,10 @@ fn an_approval_with_a_wrong_label_or_no_number_is_rejected() {
     ] {
         let now = Instant::now();
         let code = PairingCode::generate().unwrap().digits();
-        let (waiting, mut tr) = raw_sender(&code, now);
+        let (waiting, key) = raw_sender(&code, now);
         let mut plain = bad_label.to_vec();
         plain.push(waiting.match_number());
-        let m4 = sealed_approval(&mut tr, &plain);
+        let m4 = sealed_approval(&key, &plain);
         let rejected = waiting.receive_approval(&m4, now).unwrap_err();
         assert!(
             rejected.into_retry().is_none(),
@@ -372,8 +412,8 @@ fn an_approval_with_a_wrong_label_or_no_number_is_rejected() {
     }
     let now = Instant::now();
     let code = PairingCode::generate().unwrap().digits();
-    let (waiting, mut tr) = raw_sender(&code, now);
-    let m4 = sealed_approval(&mut tr, b"pctwin/v1/approved");
+    let (waiting, key) = raw_sender(&code, now);
+    let m4 = sealed_approval(&key, b"pctwin/v1/approved");
     assert!(waiting.receive_approval(&m4, now).is_err());
 }
 

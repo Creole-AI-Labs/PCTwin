@@ -439,7 +439,8 @@ async fn serve<S: Serving>(
             return;
         }
         let decision = tokio::select! {
-            // An answer that came in just as the time ran out still counts.
+            // An answer already given is acted on first; if the time had run out by then, the
+            // pick below says so (and the screen is told the time ran out, as below).
             biased;
             d = decided => d.ok().map(Ended::Answered),
             () = tokio::time::sleep_until(deadline) => Some(Ended::TimeRanOut),
@@ -461,7 +462,13 @@ async fn serve<S: Serving>(
                         return;
                     }
                     Err(e) => {
-                        let _ = outcome.send(Err(picked_problem(e)));
+                        let problem = picked_problem(e);
+                        // Every round that ends by time tells the screen so, whichever side of
+                        // the deadline saw it.
+                        if problem == Problem::TimedOut {
+                            let _ = updates.send(OldUpdate::TimedOut);
+                        }
+                        let _ = outcome.send(Err(problem));
                     }
                 }
             }
