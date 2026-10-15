@@ -98,7 +98,7 @@ function noMissingText() {
 }
 
 describe("old laptop", () => {
-  it("listens before it starts, shows the label and the code in two groups with its countdown", async () => {
+  it("listens before it starts, shows the label and the code as six even tiles with its countdown", async () => {
     inApp(<PairOld onBack={vi.fn()} />);
     await waitFor(() => {
       expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
@@ -112,7 +112,8 @@ describe("old laptop", () => {
     expect(screen.getByText(withText(foxText()))).toBeTruthy();
     const group = screen.getByRole("group", { name: /1 2 3 4 5 6$/ });
     const runs = [...group.querySelectorAll(".kit-code-run")].map((r) => r.textContent);
-    expect(runs).toEqual(["123", "456"]);
+    expect(runs).toEqual(["123456"]);
+    expect(group.querySelectorAll(".kit-code-tile")).toHaveLength(6);
     expect(screen.getByText(withText(text("pair-old-code-meta", { seconds: 42 })))).toBeTruthy();
     expect(document.querySelectorAll(".pair-steps li")).toHaveLength(3);
     // The heading takes focus on the new state, and the countdown is not a live region.

@@ -315,7 +315,6 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
           {code && (
             <CodeDisplay
               digits={code.digits}
-              group={3}
               meta={
                 <>
                   <Lock />
