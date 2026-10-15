@@ -1007,35 +1007,25 @@ progress-queue-empty = Nothing has started yet.
 progress-route-old = Old laptop
 progress-route-new = New laptop
 progress-panel-pausing = Pausing
-outcome-metric-size = copied and checked
-outcome-metric-done = items in place
+outcome-metric-size = verified copies
 outcome-metric-action = need your action
 progress-percent-unknown = PCTwin is still working out the size of this move.
 mini-title-send-paused = Send paused.
 cancel-ack-hint = Tick the box above to turn on the stop button.
-outcome-not-copied-chip = Not copied
 progress-state-placing = Putting in place
 progress-state-existing = Already there
 outcome-stopped-title = Your move was stopped.
 outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
-outcome-not-copied =
+# $done and $total are counts of items: what was copied and checked, and everything the person approved.
+outcome-files-summary = { $done } of { $total } items copied and checked.
+outcome-files-memory =
     { NUMBER($count) ->
-        [one] { $count } item was not copied
-       *[other] { $count } items were not copied
-    }
-outcome-checked-memory =
-    { NUMBER($count) ->
-        [one] { $count } file was checked from this laptop’s memory, not the drive. It was still compared with the original, and the report marks it.
-       *[other] { $count } files were checked from this laptop’s memory, not the drive. They were still compared with the originals, and the report marks each one.
+        [one] { $count } checked from this laptop’s memory, not the drive.
+       *[other] { $count } checked from this laptop’s memory, not the drive.
     }
 report-show-more = Show more
 # $shown and $total are counts of items.
 report-showing = Showing { $shown } of { $total }
-report-memory-summary =
-    { NUMBER($count) ->
-        [one] { $count } file was checked from this laptop’s memory, not the drive. It is marked below.
-       *[other] { $count } files were checked from this laptop’s memory, not the drive. Each one is marked below.
-    }
 
 ## Component kit
 

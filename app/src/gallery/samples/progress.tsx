@@ -14,7 +14,7 @@ const nothing = () => undefined;
 const handlers = { onPause: nothing, onResume: nothing, onStop: nothing, onSeeNeedsAction: nothing };
 
 const compact = (progress: MoveProgress) => <ProgressCompact progress={progress} onExpand={nothing} onMinimise={nothing} {...handlers} />;
-const detail = (progress: MoveProgress) => <ProgressDetail progress={progress} queue={data.queue} onCollapse={nothing} {...handlers} />;
+const detail = (progress: MoveProgress) => <ProgressDetail progress={progress} onCollapse={nothing} {...handlers} />;
 const mini = (progress: MoveProgress, kind: "move" | "send" = "move") => <MiniPanel kind={kind} progress={progress} onPause={nothing} onResume={nothing} onOpen={nothing} />;
 
 export const samples: Sample[] = [

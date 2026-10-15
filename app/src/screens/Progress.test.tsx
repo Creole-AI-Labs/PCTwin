@@ -337,50 +337,53 @@ describe("X01 Move progress, compact", () => {
 });
 
 describe("X02 Move progress, expanded", () => {
-  const props = { progress: sample.running, queue: sample.queue, onPause: noop, onResume: noop, onCollapse: noop, onStop: noop, onSeeNeedsAction: noop };
+  const props = { progress: sample.running, onPause: noop, onResume: noop, onCollapse: noop, onStop: noop, onSeeNeedsAction: noop };
+  const rowOf = (name: string) => screen.getAllByRole("row").find((r) => r.textContent.includes(name)) as HTMLElement;
 
-  it("lists every item with its own state, source and status in words", async () => {
+  it("shows one table row for each group, with its source and its state in words", async () => {
     inApp(<ProgressDetail {...props} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(text("progress-all-title"));
     expect(document.activeElement).toBe(heading);
-    const table = screen.getByRole("table");
-    const rows = within(table).getAllByRole("row");
-    expect(rows).toHaveLength(sample.queue.length + 1); // plus the header row
-    const row = (name: string) => rows.find((r) => r.textContent.includes(name)) as HTMLElement;
-    expect(within(row("IMG_2043.jpg")).getByText(text("progress-state-copying"))).toBeTruthy();
-    expect(within(row("IMG_2042.jpg")).getByText(text("progress-state-checking"))).toBeTruthy();
-    expect(within(row("Budget.xlsx")).getByText(text("progress-state-placing"))).toBeTruthy();
-    expect(within(row("Notes.txt")).getByText(text("progress-state-existing"))).toBeTruthy();
-    expect(within(row("Wedding video.mp4")).getByText(text("progress-state-waiting"))).toBeTruthy();
-    expect(within(row("Invoice March.pdf")).getByText(text("status-copied"))).toBeTruthy();
-    expect(within(row("Archive.zip")).getByText(text("status-failed"))).toBeTruthy();
-    expect(within(row("Mail export.pst")).getByText(text("status-needs-action"))).toBeTruthy();
+    expect(screen.getAllByRole("row")).toHaveLength(sample.running.groups.length + 1); // plus the header row
+    expect(screen.getByRole("columnheader", { name: text("progress-col-item") })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: text("progress-col-from") })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: text("progress-col-status") })).toBeTruthy();
+    const docs = rowOf(text("plan-role-documents"));
+    expect(within(docs).getByText("Ada’s old laptop")).toBeTruthy();
+    expect(within(docs).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(within(rowOf(text("plan-role-pictures"))).getByText(text("progress-state-checking"))).toBeTruthy();
+    expect(within(rowOf("Tax 2023")).getByText(text("progress-state-waiting"))).toBeTruthy();
     expect(screen.getByText(text("progress-checked-note"))).toBeTruthy();
     expectClean();
     expect(await violations()).toEqual([]);
   });
 
-  it("an item that did not finish says why and what to do", () => {
-    inApp(<ProgressDetail {...props} />);
-    expect(screen.getByText(text("reason-not-enough-space"))).toBeTruthy();
-    expect(screen.getByText(text("reason-online-only"))).toBeTruthy();
+  it("a group still being checked is never shown as verified", () => {
+    inApp(<ProgressDetail {...props} progress={sample.almost} />);
+    const pictures = rowOf(text("plan-role-pictures"));
+    expect(within(pictures).queryByText(text("progress-state-verified"))).toBeNull();
+    expect(within(pictures).getByText(text("progress-state-checking"))).toBeTruthy();
+    expect(within(rowOf(text("plan-role-documents"))).getByText(text("progress-state-verified"))).toBeTruthy();
   });
 
-  it("an item is called copied only once it has ended as copied", () => {
-    inApp(<ProgressDetail {...props} />);
-    expect(screen.getAllByText(text("status-copied"))).toHaveLength(1);
+  it("items that need the person or failed are counted under their group", () => {
+    inApp(<ProgressDetail {...props} progress={sample.withFailures} />);
+    const docs = rowOf(text("plan-role-documents"));
+    expect(within(docs).getByText(withText(text("progress-count-needs-action", { count: 3 })))).toBeTruthy();
+    expect(within(docs).getByText(text("status-needs-action"))).toBeTruthy();
+    expect(within(rowOf(text("plan-role-pictures"))).getByText(withText(text("progress-count-failed", { count: 1 })))).toBeTruthy();
   });
 
-  it("waiting items read Paused while the move is paused", () => {
-    inApp(<ProgressDetail {...props} progress={sample.paused} />);
-    const row = screen.getAllByRole("row").find((r) => r.textContent.includes("Wedding video.mp4")) as HTMLElement;
+  it("waiting groups read Paused while the move is paused", () => {
+    inApp(<ProgressDetail {...props} progress={{ ...sample.paused, groups: sample.running.groups }} />);
+    const row = rowOf("Tax 2023");
     expect(within(row).getByText(text("progress-state-paused"))).toBeTruthy();
     expect(within(row).queryByText(text("progress-state-waiting"))).toBeNull();
   });
 
-  it("says so when nothing has started", () => {
-    inApp(<ProgressDetail {...props} queue={[]} />);
+  it("says so when there are no groups", () => {
+    inApp(<ProgressDetail {...props} progress={{ ...sample.running, groups: [] }} />);
     expect(screen.getByText(text("progress-queue-empty"))).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -612,67 +615,65 @@ describe("X10 Stop the rest of the move?", () => {
 
 describe("R01 Welcome to your next laptop", () => {
   const props = { onReport: noop, onHome: noop };
+  const chip = () => screen.getByRole("listitem");
 
-  it("a clean move says every item was copied and checked, with the size", async () => {
+  it("a clean move shows two numbers and one Selected files row marked verified", async () => {
     inApp(<Outcome outcome={sample.finishedClean} {...props} />);
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(text("outcome-title"));
     expect(document.activeElement).toBe(heading);
-    expect(screen.getByText(text("outcome-all-done"))).toBeTruthy();
     expect(screen.getByText("120 GB")).toBeTruthy();
     expect(screen.getByText(text("outcome-metric-size"))).toBeTruthy();
-    expect(screen.getByText("6,000")).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-copied", { count: 6000 })))).toBeTruthy();
-    expect(screen.getByText(text("outcome-old-safe"))).toBeTruthy();
-    expect(screen.queryByText(hasText("did not finish"))).toBeNull();
+    expect(screen.getByText("0")).toBeTruthy();
+    expect(screen.getByText(text("outcome-metric-action"))).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(within(chip()).getByText(text("outcome-files-title"))).toBeTruthy();
+    expect(within(chip()).getByText(withText(text("outcome-files-summary", { done: 6000, total: 6000 })))).toBeTruthy();
+    expect(within(chip()).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(screen.queryByText(text("outcome-status-partial"))).toBeNull();
+    expect(screen.queryByText(text("outcome-old-safe"))).toBeNull();
     expectClean();
     expect(await violations()).toEqual([]);
   });
 
-  it("a mixed move shows each status with its own count and never says everything worked", () => {
+  it("anything that failed or needs the person is Partial, never verified, and the warning shows", () => {
     inApp(<Outcome outcome={sample.finishedMixed} {...props} />);
-    expect(screen.queryByText(text("outcome-all-done"))).toBeNull();
-    expect(screen.getByText(withText(text("outcome-copied", { count: 5900 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-converted", { count: 90 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-needs-action", { count: 3 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-failed", { count: 2 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-skipped-by-user", { count: 5 })))).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-unfinished", { count: 5 })))).toBeTruthy();
-    expect(screen.getByText(text("outcome-next-needs-action"))).toBeTruthy();
-    expect(screen.getByText(text("outcome-next-failed"))).toBeTruthy();
-    // Each count sits beside its status word.
-    expect(screen.getByText(text("status-failed"))).toBeTruthy();
-    expect(screen.getByText(text("status-needs-action"))).toBeTruthy();
+    expect(within(chip()).getByText(text("outcome-status-partial"))).toBeTruthy();
+    expect(within(chip()).queryByText(text("progress-state-verified"))).toBeNull();
+    expect(screen.getByText(text("outcome-old-safe"))).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy(); // need your action
+    expect(within(chip()).getByText(withText(text("outcome-files-summary", { done: 5990, total: 5995 })))).toBeTruthy();
   });
 
-  it("leaves out the statuses nothing ended as", () => {
-    inApp(<Outcome outcome={sample.finishedClean} {...props} />);
-    expect(screen.queryByText(text("status-failed"))).toBeNull();
-    expect(screen.queryByText(text("status-needs-action"))).toBeNull();
-    expect(screen.queryByText(text("outcome-next-needs-action"))).toBeNull();
-    expect(screen.queryByText(text("outcome-next-failed"))).toBeNull();
-  });
-
-  it("a single failure is not hidden by a long list of successes", () => {
+  it("a single failure among many successes still makes it Partial", () => {
     const one = { ...sample.finishedClean, byStatus: { ...sample.finishedClean.byStatus, copied: 99999, failed: 1 } };
     inApp(<Outcome outcome={one} {...props} />);
-    expect(screen.queryByText(text("outcome-all-done"))).toBeNull();
-    expect(screen.getByText(withText(text("outcome-failed", { count: 1 })))).toBeTruthy();
+    expect(within(chip()).getByText(text("outcome-status-partial"))).toBeTruthy();
+    expect(within(chip()).queryByText(text("progress-state-verified"))).toBeNull();
   });
 
-  it("a move stopped by the person says so and counts what was not copied", () => {
+  it("has no per-status rows and no list of next steps", () => {
+    inApp(<Outcome outcome={sample.finishedMixed} {...props} />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.queryByText(text("outcome-next-title"))).toBeNull();
+    expect(screen.queryByText(text("status-failed"))).toBeNull();
+  });
+
+  it("a stopped move has the same layout with its own heading and is Partial", () => {
     inApp(<Outcome outcome={sample.finishedStopped} {...props} />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-stopped-title"));
     expect(screen.getByText(text("outcome-stopped-body"))).toBeTruthy();
-    expect(screen.getByText(withText(text("outcome-not-copied", { count: 2900 })))).toBeTruthy();
-    expect(screen.queryByText(text("outcome-all-done"))).toBeNull();
+    expect(within(chip()).getByText(withText(text("outcome-files-summary", { done: 3100, total: 6000 })))).toBeTruthy();
+    expect(within(chip()).getByText(text("outcome-status-partial"))).toBeTruthy();
     expect(screen.queryByText(text("outcome-title"))).toBeNull();
   });
 
-  it("files checked from this laptop's memory are called out in their own line", () => {
+  it("files checked from this laptop's memory are named in the row's own text", () => {
     inApp(<Outcome outcome={sample.finishedMemory} {...props} />);
-    expect(screen.getByText(withText(text("outcome-checked-memory", { count: 6000 })))).toBeTruthy();
-    expect(screen.getByText(hasText("not the drive"))).toBeTruthy();
+    expect(within(chip()).getByText(hasText(text("outcome-files-memory", { count: 6000 })))).toBeTruthy();
+    expect(within(chip()).getByText(hasText("not the drive"))).toBeTruthy();
+    // Still complete: it was checked, and the line says how.
+    expect(within(chip()).getByText(text("progress-state-verified"))).toBeTruthy();
   });
 
   it("no memory line when every file was read back from the drive", () => {
@@ -764,48 +765,11 @@ describe("R02 Your move, item by item", () => {
     expect(within(rowOf("Games")).queryByText(text("evidence-read-back"))).toBeNull();
   });
 
-  it("summarises how many files were checked from memory", () => {
+  it("has no filter buttons and no count line", () => {
     inApp(<Report items={sample.report} onBack={noop} />);
-    expect(screen.getByText(withText(text("report-memory-summary", { count: 1 })))).toBeTruthy();
-  });
-
-  it("no memory summary when every check read the drive", () => {
-    inApp(<Report items={sample.report.filter((r) => r.id !== "r2")} onBack={noop} />);
-    expect(screen.queryByText(hasText("not the drive."))).toBeNull();
-    expect(screen.queryByText(text("evidence-memory"))).toBeNull();
-  });
-
-  it("filters by status with buttons that say which is on", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
-    const group = screen.getByRole("group", { name: text("report-filter-label") });
-    const all = within(group).getByRole("button", { name: hasText(text("report-filter-all")) });
-    expect(all.getAttribute("aria-pressed")).toBe("true");
-    const failed = within(group).getByRole("button", { name: hasText(text("status-failed")) });
-    fireEvent.click(failed);
-    expect(failed.getAttribute("aria-pressed")).toBe("true");
-    expect(all.getAttribute("aria-pressed")).toBe("false");
-    expect(screen.getAllByRole("row")).toHaveLength(2);
-    expect(screen.getByText("Archive.zip")).toBeTruthy();
-    expect(screen.queryByText("Invoice March.pdf")).toBeNull();
-    fireEvent.click(all);
-    expect(screen.getAllByRole("row")).toHaveLength(sample.report.length + 1);
-  });
-
-  it("each filter button shows how many items it has", () => {
-    inApp(<Report items={sample.report} onBack={noop} />);
-    const group = screen.getByRole("group", { name: text("report-filter-label") });
-    const copied = within(group).getByRole("button", { name: hasText(text("status-copied")) });
-    expect(copied.textContent).toContain("2");
-    const all = within(group).getByRole("button", { name: hasText(text("report-filter-all")) });
-    expect(all.textContent).toContain("7");
-  });
-
-  it("a filter with no items says so, and the count is announced", () => {
-    inApp(<Report items={sample.report.filter((r) => r.status !== "failed")} onBack={noop} />);
-    fireEvent.click(screen.getByRole("button", { name: hasText(text("status-failed")) }));
-    expect(screen.getByText(text("report-none"))).toBeTruthy();
-    expect(screen.queryByRole("table")).toBeNull();
-    expect(plain(screen.getByRole("status").textContent)).toContain(plain(text("report-count", { count: 0 })));
+    expect(screen.queryByRole("group", { name: text("report-filter-label") })).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(hasText("not the drive."), { selector: "p.eyebrow, .kit-banner p" })).toBeNull();
   });
 
   it("a report with no items says so", () => {
@@ -824,17 +788,6 @@ describe("R02 Your move, item by item", () => {
     fireEvent.click(screen.getByText(text("report-show-more")));
     expect(rows()).toBe(250);
     expect(screen.queryByText(text("report-show-more"))).toBeNull();
-  });
-
-  it("changing the filter starts again at the first page", () => {
-    const items = [...sample.longReport(150), ...sample.report.filter((r) => r.status === "failed")];
-    inApp(<Report items={items} onBack={noop} />);
-    const rows = () => document.querySelectorAll("tbody tr").length;
-    fireEvent.click(screen.getByText(text("report-show-more")));
-    expect(rows()).toBe(151);
-    fireEvent.click(screen.getByRole("button", { name: hasText(text("status-failed")) }));
-    fireEvent.click(screen.getByRole("button", { name: hasText(text("report-filter-all")) }));
-    expect(rows()).toBe(100);
   });
 
   it("goes back", () => {

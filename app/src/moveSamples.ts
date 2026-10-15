@@ -4,7 +4,7 @@
  * engine's rules does not type-check.
  */
 import type { Label } from "./pairing";
-import { noStatuses, type Counts, type MoveOutcome, type MoveProgress, type QueueItem, type ReportItem } from "./move";
+import { noStatuses, type Counts, type MoveOutcome, type MoveProgress, type ReportItem } from "./move";
 
 const GB = 1_000_000_000;
 const MB = 1_000_000;
@@ -83,18 +83,6 @@ export const lowBattery: MoveProgress = { ...running, notice: { kind: "low-batte
 
 export const pausing: MoveProgress = { ...running, state: "pausing", counts: counts({ done: 4210, copying: 1, waiting: 1789 }) };
 export const paused: MoveProgress = { ...running, state: "paused", counts: counts({ done: 4211, waiting: 1789 }), current: undefined, speed: undefined, minutesLeft: undefined };
-
-/** The expanded view's items: in flight, ended and waiting. */
-export const queue: QueueItem[] = [
-  { id: "q1", name: "IMG_2043.jpg", source: "C:\\Users\\Ada\\Pictures\\Holiday 2024", phase: "copying" },
-  { id: "q2", name: "IMG_2042.jpg", source: "C:\\Users\\Ada\\Pictures\\Holiday 2024", phase: "checking" },
-  { id: "q3", name: "Budget.xlsx", source: "C:\\Users\\Ada\\Documents", phase: "putting-in-place" },
-  { id: "q4", name: "Notes.txt", source: "C:\\Users\\Ada\\Documents", phase: "already-there" },
-  { id: "q5", name: "Invoice March.pdf", source: "C:\\Users\\Ada\\Documents", phase: "ended", outcome: { status: "copied", evidence: { from: "drive" } } },
-  { id: "q6", name: "Archive.zip", source: "D:\\Archive", phase: "ended", outcome: { status: "failed", reason: "not-enough-space" } },
-  { id: "q7", name: "Mail export.pst", source: "C:\\Users\\Ada\\Documents", phase: "ended", outcome: { status: "needs-action", reason: "online-only" } },
-  { id: "q8", name: "Wedding video.mp4", source: "C:\\Users\\Ada\\Videos", phase: "waiting" },
-];
 
 /** A move that ended with a mix. */
 export const finishedMixed: MoveOutcome = {
