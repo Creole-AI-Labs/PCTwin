@@ -71,7 +71,7 @@ pair-old-locked-body = There were too many wrong tries, so pairing stopped to ke
 pair-old-start-again = Start again
 pair-old-timed-out = No number was chosen in time, so here is a new code.
 pair-old-declined = The numbers did not match, so nothing was shared. Here is a new code.
-pair-old-left = The new laptop stopped pairing before a number was picked, so nothing was shared. Here is a new code.
+pair-old-left = The new laptop stopped pairing before a number was chosen, so nothing was shared. Here is a new code.
 pair-network-title = Choose your Wi-Fi.
 pair-network-hint = Choose the network your new laptop is on.
 
@@ -128,7 +128,7 @@ pairing-locked = Pairing stopped after too many wrong tries. On the old laptop, 
 pairing-unreachable = This laptop could not reach the old laptop. Check that both are on the same Wi-Fi, then try again.
 pairing-wrong-number = That number did not match the new laptop’s. Nothing was shared. Type the new code on the new laptop to try again.
 pairing-no-match = The numbers did not match on the old laptop. Nothing was shared. Type the new code from the old laptop’s screen.
-pairing-timed-out = No number was picked in time. Try again with the new code on the old laptop.
+pairing-timed-out = No number was chosen in time. Try again with the new code on the old laptop.
 pairing-connection-lost = The connection between the laptops dropped. Nothing was shared. Try again.
 pairing-connection-lost-new = The connection to the old laptop dropped. Nothing was shared.
 pairing-different-version = The two laptops have different versions of PCTwin. Update PCTwin on both, then try again.
