@@ -9,7 +9,7 @@
 //! pairing message and bound into its handshake; this one covers everything sent after pairing.
 //!
 //! This message's form is fixed for every release, since it is what a laptop on another version
-//! reads first: a kind byte, then the oldest and the newest version as big-endian 16-bit numbers.
+//! reads first after pairing: a kind byte, then the oldest and the newest version as big-endian 16-bit numbers.
 
 use std::time::Duration;
 

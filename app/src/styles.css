@@ -273,7 +273,7 @@ h1.welcome span {
   background: var(--colour-soft);
 }
 
-/* Welcome: picture, secondary choices and the Cloud Twin row */
+/* Welcome: picture and secondary choices */
 .illustration {
   display: block;
   width: min(100%, 250px);
@@ -307,22 +307,6 @@ h1.welcome span {
 .secondary-actions svg {
   width: 16px;
   height: 16px;
-}
-
-.account-invite {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: var(--space-6);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--colour-line);
-}
-
-.account-invite p {
-  max-width: 248px;
-  color: var(--colour-muted);
-  font-size: var(--type-supporting);
 }
 
 /* Back link and the connection-stage dots */

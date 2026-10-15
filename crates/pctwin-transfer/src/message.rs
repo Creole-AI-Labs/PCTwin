@@ -1,4 +1,4 @@
-use pctwin_journal::FileId;
+use pctwin_journal::{DownloadMark, FileId};
 use pctwin_record::ItemId;
 
 use crate::{
@@ -378,6 +378,11 @@ fn put_header(w: &mut Vec<u8>, h: &Header) {
     w.extend_from_slice(&h.block_count.to_be_bytes());
     put_stamp(w, &h.stamp);
     put_file_id(w, h.source_file.as_ref());
+    w.push(match h.mark {
+        None => 0,
+        Some(DownloadMark::Internet) => 1,
+        Some(DownloadMark::Restricted) => 2,
+    });
 }
 
 fn put_file_id(w: &mut Vec<u8>, id: Option<&FileId>) {
@@ -507,6 +512,12 @@ impl<'a> Reader<'a> {
             block_count: self.u64()?,
             stamp: self.stamp()?,
             source_file: self.file_id()?,
+            mark: match self.u8()? {
+                0 => None,
+                1 => Some(DownloadMark::Internet),
+                2 => Some(DownloadMark::Restricted),
+                _ => return Err(damaged("unknown download marker")),
+            },
         })
     }
 

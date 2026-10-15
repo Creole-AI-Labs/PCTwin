@@ -3263,12 +3263,19 @@ dependencies = [
 name = "pctwin-app"
 version = "0.1.0"
 dependencies = [
+ "pctwin-discovery",
+ "pctwin-doctor",
+ "pctwin-journey",
+ "pctwin-link",
+ "pctwin-pairing",
+ "pctwin-session",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
+ "tokio",
 ]
 
 [[package]]
@@ -3336,6 +3343,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-journey"
+version = "0.1.0"
+dependencies = [
+ "pctwin-discovery",
+ "pctwin-link",
+ "pctwin-pairing",
+ "pctwin-session",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "pctwin-lab"
 version = "0.1.0"
 dependencies = [
@@ -3390,6 +3409,7 @@ dependencies = [
  "curve25519-dalek",
  "getrandom 0.4.3",
  "hkdf 0.13.0",
+ "hmac 0.13.0",
  "sha2 0.11.0",
  "snow",
  "spake2",
@@ -3404,6 +3424,20 @@ dependencies = [
  "keepawake",
  "serde",
  "starship-battery",
+]
+
+[[package]]
+name = "pctwin-quicksend"
+version = "0.1.0"
+dependencies = [
+ "pctwin-gate",
+ "pctwin-journal",
+ "pctwin-record",
+ "pctwin-scan",
+ "pctwin-transfer",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -3454,6 +3488,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
  "pctwin-discovery",
+ "pctwin-doctor",
  "pctwin-link",
  "pctwin-pairing",
  "thiserror 2.0.21",

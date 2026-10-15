@@ -5,13 +5,15 @@ import { HELP_URL, openExternal } from "./external";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { Lock } from "./icons";
 import { setTrayLabels } from "./native";
+import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
-import NextStep from "./screens/NextStep";
+import PairNew from "./screens/PairNew";
+import PairOld from "./screens/PairOld";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
 
-type Screen = { id: "welcome" } | { id: "role" } | { id: "next"; role: Role } | { id: "soon"; which: Soon };
+type Screen = { id: "welcome" } | { id: "role" } | { id: "pair"; role: Role } | { id: "soon"; which: Soon };
 
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
@@ -30,7 +32,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   useEffect(() => {
     if (!main.current) return;
     main.current.scrollTop = 0;
-    main.current.focus();
+    // A screen that already moved focus to its own heading keeps it.
+    if (!main.current.contains(document.activeElement)) main.current.focus();
   }, [screen]);
 
   const choose = (code: LanguageCode) => {
@@ -48,6 +51,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               className="brand"
               aria-label="PCTwin home"
               onClick={() => {
+                if (screen.id === "pair") void stopPairing().catch(() => undefined);
                 setScreen({ id: "welcome" });
               }}
             >
@@ -75,8 +79,9 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
         <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
           {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} onSoon={(which) => { setScreen({ id: "soon", which }); }} />}
           {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
-          {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "next", role }); }} />}
-          {screen.id === "next" && <NextStep role={screen.role} onBack={() => { setScreen({ id: "role" }); }} />}
+          {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "pair", role }); }} />}
+          {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "role" }); }} />}
+          {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "role" }); }} />}
         </main>
         <footer className="app-footer">
           <span className="free">

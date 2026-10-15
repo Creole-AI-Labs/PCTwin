@@ -1,6 +1,6 @@
 use std::path::{Component, Path, PathBuf, Prefix};
 
-use pctwin_record::{CloudProvider, FolderRole, Storage};
+use pctwin_record::{CloudProvider, FolderRole, ManagedBy, Storage};
 use serde::Serialize;
 
 /// The special folders looked for, in the order they are reported.
@@ -25,6 +25,9 @@ pub struct Facts {
     pub cloud_roots: Vec<(CloudProvider, PathBuf)>,
     /// macOS: iCloud keeps Desktop and Documents (their path does not change).
     pub icloud_desktop_and_documents: bool,
+    /// Cloud storage folders an employer or school owns (OneDrive work or school accounts,
+    /// Dropbox business): what is inside is work-managed.
+    pub work_roots: Vec<PathBuf>,
 }
 
 /// A special folder the system reported, where it really is.
@@ -36,6 +39,9 @@ pub struct FoundFolder {
     pub storage: Storage,
     /// True when the folder is not where its plain name would put it (`home/Documents`).
     pub moved: bool,
+    /// Who manages it: an employer or school when it is inside their cloud storage (an
+    /// employer that moved Documents into "OneDrive - Company", say).
+    pub managed_by: ManagedBy,
 }
 
 /// The answer for one special folder.
@@ -55,6 +61,16 @@ impl FolderLookup {
             Self::Found(f) => f.role,
             Self::Missing { role } => *role,
         }
+    }
+}
+
+/// Who manages what is at `path`: an employer or school when it is inside one of their cloud
+/// storage folders.
+pub fn managed_by(path: &Path, facts: &Facts) -> ManagedBy {
+    if facts.work_roots.iter().any(|root| is_within(path, root)) {
+        ManagedBy::Organisation
+    } else {
+        ManagedBy::Personal
     }
 }
 
@@ -133,57 +149,66 @@ pub(crate) fn same_place(a: &Path, b: &Path) -> bool {
 pub fn facts_from_system() -> Facts {
     let home = dirs::home_dir().unwrap_or_default();
     let mut cloud_roots = Vec::new();
-    let mut add = |provider, path: PathBuf| {
+    let mut work_roots = Vec::new();
+    let mut add = |provider, path: PathBuf, work: bool| {
         if path.is_dir() {
-            cloud_roots.push((provider, real(&path)));
+            let path = real(&path);
+            if work {
+                work_roots.push(path.clone());
+            }
+            cloud_roots.push((provider, path));
         }
     };
     if cfg!(windows) {
-        for var in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
+        for (var, work) in [
+            ("OneDrive", false),
+            ("OneDriveConsumer", false),
+            ("OneDriveCommercial", true),
+        ] {
             if let Some(path) = std::env::var_os(var) {
-                add(CloudProvider::OneDrive, PathBuf::from(path));
+                add(CloudProvider::OneDrive, PathBuf::from(path), work);
             }
         }
         // Each signed-in OneDrive account (Personal, Business1, ...) records its folder here;
-        // the environment variables above are only set when the person signs in.
-        for path in registry_values(r"HKCU\Software\Microsoft\OneDrive\Accounts", "UserFolder") {
-            add(CloudProvider::OneDrive, path);
+        // the environment variables above are only set when the person signs in. A Business
+        // account is a work or school account.
+        for (account, path) in
+            registry_values(r"HKCU\Software\Microsoft\OneDrive\Accounts", "UserFolder")
+        {
+            add(
+                CloudProvider::OneDrive,
+                path,
+                is_work_onedrive_account(&account),
+            );
         }
-        add(CloudProvider::ICloud, home.join("iCloudDrive"));
+        add(CloudProvider::ICloud, home.join("iCloudDrive"), false);
         for base in [dirs::data_local_dir(), dirs::data_dir()]
             .into_iter()
             .flatten()
         {
-            for path in dropbox_folders(&base.join("Dropbox").join("info.json")) {
-                add(CloudProvider::Dropbox, path);
+            for (account, path) in dropbox_folders(&base.join("Dropbox").join("info.json")) {
+                add(CloudProvider::Dropbox, path, account == "business");
             }
         }
     } else if cfg!(target_os = "macos") {
         add(
             CloudProvider::ICloud,
             home.join("Library/Mobile Documents/com~apple~CloudDocs"),
+            false,
         );
         if let Ok(entries) = std::fs::read_dir(home.join("Library/CloudStorage")) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().into_owned();
-                let provider = if name.starts_with("OneDrive") {
-                    CloudProvider::OneDrive
-                } else if name.starts_with("Dropbox") {
-                    CloudProvider::Dropbox
-                } else if name.starts_with("GoogleDrive") {
-                    CloudProvider::GoogleDrive
-                } else {
-                    CloudProvider::Other
-                };
-                add(provider, entry.path());
+                let (provider, work) = cloud_storage_folder(&name);
+                add(provider, entry.path(), work);
             }
         }
     }
     if !cfg!(windows) {
-        for path in dropbox_folders(&home.join(".dropbox").join("info.json")) {
-            add(CloudProvider::Dropbox, path);
+        for (account, path) in dropbox_folders(&home.join(".dropbox").join("info.json")) {
+            add(CloudProvider::Dropbox, path, account == "business");
         }
-        add(CloudProvider::Dropbox, home.join("Dropbox"));
+        add(CloudProvider::Dropbox, home.join("Dropbox"), false);
     }
     Facts {
         icloud_desktop_and_documents: icloud_desktop_and_documents(&home),
@@ -194,11 +219,40 @@ pub fn facts_from_system() -> Facts {
         },
         home,
         cloud_roots,
+        work_roots,
     }
 }
 
-/// Every `name` value under `key` and its subkeys, read with the system's own `reg` tool.
-fn registry_values(key: &str, name: &str) -> Vec<PathBuf> {
+/// Whether a OneDrive account's registry key (`Personal`, `Business1`, ...) is a work or school
+/// account.
+fn is_work_onedrive_account(key: &str) -> bool {
+    key.starts_with("Business")
+}
+
+/// A folder in macOS's `~/Library/CloudStorage` by its name: which service, and whether it is a
+/// work or school account (`OneDrive-Personal` is personal; `OneDrive-Contoso` is Contoso's;
+/// `Dropbox-Business` and `Dropbox (Contoso)` are an employer's Dropbox).
+fn cloud_storage_folder(name: &str) -> (CloudProvider, bool) {
+    if let Some(rest) = name.strip_prefix("OneDrive") {
+        (
+            CloudProvider::OneDrive,
+            !rest.is_empty() && rest != "-Personal",
+        )
+    } else if let Some(rest) = name.strip_prefix("Dropbox") {
+        (
+            CloudProvider::Dropbox,
+            !rest.is_empty() && rest != "-Personal",
+        )
+    } else if name.starts_with("GoogleDrive") {
+        (CloudProvider::GoogleDrive, false)
+    } else {
+        (CloudProvider::Other, false)
+    }
+}
+
+/// Every `name` value under `key` and its subkeys, with the subkey it is in, read with the
+/// system's own `reg` tool.
+fn registry_values(key: &str, name: &str) -> Vec<(String, PathBuf)> {
     let Ok(out) = std::process::Command::new("reg")
         .args(["query", key, "/s", "/v", name])
         .output()
@@ -208,18 +262,29 @@ fn registry_values(key: &str, name: &str) -> Vec<PathBuf> {
     parse_reg_values(&String::from_utf8_lossy(&out.stdout), name)
 }
 
-/// Reads `    UserFolder    REG_SZ    C:\Users\Ada\OneDrive` lines from `reg query` output.
-fn parse_reg_values(output: &str, name: &str) -> Vec<PathBuf> {
+/// Reads `    UserFolder    REG_SZ    C:\Users\Ada\OneDrive` lines from `reg query` output, each
+/// with the last part of the key it is under (`Personal`, `Business1`).
+fn parse_reg_values(output: &str, name: &str) -> Vec<(String, PathBuf)> {
+    let mut key = String::new();
     output
         .lines()
         .filter_map(|line| {
+            if line.starts_with("HKEY_") {
+                key = line
+                    .trim()
+                    .rsplit('\\')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                return None;
+            }
             let rest = line.trim_start().strip_prefix(name)?;
             let rest = rest.trim_start();
             let value = rest
                 .strip_prefix("REG_EXPAND_SZ")
                 .or_else(|| rest.strip_prefix("REG_SZ"))?;
             let value = value.trim();
-            (!value.is_empty()).then(|| PathBuf::from(value))
+            (!value.is_empty()).then(|| (key.clone(), PathBuf::from(value)))
         })
         .collect()
 }
@@ -245,8 +310,9 @@ fn icloud_desktop_and_documents(home: &Path) -> bool {
         && same_place(&real(&link), &real(&home.join("Documents")))
 }
 
-/// The folders Dropbox's own settings file lists (`{"personal": {"path": ...}, "business": ...}`).
-fn dropbox_folders(info: &Path) -> Vec<PathBuf> {
+/// The folders Dropbox's own settings file lists (`{"personal": {"path": ...}, "business": ...}`),
+/// each with its account kind.
+fn dropbox_folders(info: &Path) -> Vec<(String, PathBuf)> {
     let Ok(text) = std::fs::read(info) else {
         return Vec::new();
     };
@@ -256,8 +322,11 @@ fn dropbox_folders(info: &Path) -> Vec<PathBuf> {
     value
         .as_object()
         .into_iter()
-        .flat_map(|accounts| accounts.values())
-        .filter_map(|account| account.get("path")?.as_str().map(PathBuf::from))
+        .flat_map(|accounts| accounts.iter())
+        .filter_map(|(kind, account)| {
+            let path = account.get("path")?.as_str()?;
+            Some((kind.clone(), PathBuf::from(path)))
+        })
         .collect()
 }
 
@@ -395,6 +464,7 @@ fn look_up(role: FolderRole, answer: Answer, facts: &Facts) -> FolderLookup {
                 role,
                 moved: !same_place(&path, &plain),
                 storage,
+                managed_by: managed_by(&path, facts),
                 path,
             })
         }
@@ -452,6 +522,7 @@ mod tests {
             system_drive: None,
             cloud_roots: Vec::new(),
             icloud_desktop_and_documents: false,
+            work_roots: Vec::new(),
         }
     }
 
@@ -504,16 +575,108 @@ mod tests {
         ));
     }
 
+    /// Work and school cloud storage is told apart from personal storage by the service's own
+    /// naming: OneDrive Business accounts, a Mac's OneDrive-<Company> folders, Dropbox business.
+    #[test]
+    fn work_and_school_cloud_folders_are_told_from_personal_ones() {
+        assert_eq!(
+            cloud_storage_folder("OneDrive-Personal"),
+            (CloudProvider::OneDrive, false)
+        );
+        assert_eq!(
+            cloud_storage_folder("OneDrive-Contoso"),
+            (CloudProvider::OneDrive, true)
+        );
+        assert_eq!(
+            cloud_storage_folder("OneDrive-SharedLibraries-Contoso"),
+            (CloudProvider::OneDrive, true)
+        );
+        assert_eq!(
+            cloud_storage_folder("Dropbox"),
+            (CloudProvider::Dropbox, false)
+        );
+        assert_eq!(
+            cloud_storage_folder("Dropbox-Personal"),
+            (CloudProvider::Dropbox, false)
+        );
+        assert_eq!(
+            cloud_storage_folder("Dropbox-Business"),
+            (CloudProvider::Dropbox, true)
+        );
+        assert_eq!(
+            cloud_storage_folder("GoogleDrive-ada@example.com"),
+            (CloudProvider::GoogleDrive, false)
+        );
+        assert!(is_work_onedrive_account("Business1"));
+        assert!(is_work_onedrive_account("Business2"));
+        assert!(!is_work_onedrive_account("Personal"));
+    }
+
+    #[test]
+    fn dropbox_says_which_folder_is_the_business_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let info = dir.path().join("info.json");
+        std::fs::write(
+            &info,
+            r#"{"personal": {"path": "/Users/ada/Dropbox"}, "business": {"path": "/Users/ada/Dropbox (Contoso)"}}"#,
+        )
+        .unwrap();
+        let mut found = dropbox_folders(&info);
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                (
+                    "business".to_string(),
+                    PathBuf::from("/Users/ada/Dropbox (Contoso)")
+                ),
+                ("personal".to_string(), PathBuf::from("/Users/ada/Dropbox")),
+            ]
+        );
+    }
+
+    /// A special folder inside an employer's cloud storage (Documents moved into "OneDrive -
+    /// Contoso") is theirs; one outside it is the person's own.
+    #[test]
+    fn a_folder_inside_work_storage_is_managed_by_the_organisation() {
+        let home = tempfile::tempdir().unwrap();
+        let work = home.path().join("OneDrive - Contoso");
+        let mut f = facts(home.path());
+        f.work_roots = vec![work.clone()];
+        assert_eq!(
+            managed_by(&work.join("Documents"), &f),
+            ManagedBy::Organisation
+        );
+        assert_eq!(managed_by(&work, &f), ManagedBy::Organisation);
+        assert_eq!(
+            managed_by(&home.path().join("Documents"), &f),
+            ManagedBy::Personal
+        );
+        assert_eq!(
+            managed_by(&home.path().join("OneDrive - Contoso2"), &f),
+            ManagedBy::Personal
+        );
+    }
+
     #[test]
     fn onedrive_folders_are_read_from_reg_output() {
         let output = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\OneDrive\\Accounts\\Personal\r\n    UserFolder    REG_SZ    C:\\Users\\Ada\\OneDrive\r\n\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\OneDrive\\Accounts\\Business1\r\n    UserFolder    REG_EXPAND_SZ    C:\\Users\\Ada\\OneDrive - Contoso\r\n    UserFolderOld    REG_SZ    C:\\Old\r\n    UserFolder    REG_SZ    \r\nEnd of search: 3 match(es) found.\r\n";
+        let found = parse_reg_values(output, "UserFolder");
         assert_eq!(
-            parse_reg_values(output, "UserFolder"),
+            found,
             [
-                PathBuf::from(r"C:\Users\Ada\OneDrive"),
-                PathBuf::from(r"C:\Users\Ada\OneDrive - Contoso"),
+                (
+                    "Personal".to_string(),
+                    PathBuf::from(r"C:\Users\Ada\OneDrive")
+                ),
+                (
+                    "Business1".to_string(),
+                    PathBuf::from(r"C:\Users\Ada\OneDrive - Contoso")
+                ),
             ]
         );
+        assert!(!is_work_onedrive_account(&found[0].0));
+        assert!(is_work_onedrive_account(&found[1].0));
         assert!(
             parse_reg_values(
                 "ERROR: The system was unable to find the specified registry key or value.",

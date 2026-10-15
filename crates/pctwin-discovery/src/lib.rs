@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::time::{Duration, Instant};
 
-use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{IfKind, ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use pctwin_link::is_local_peer;
 use unicode_normalization::char::is_combining_mark;
 use unicode_normalization::{UnicodeNormalization, is_nfc};
@@ -467,6 +467,33 @@ impl Discovery {
         let props: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &props[..])?
             .enable_addr_auto();
+        let fullname = info.get_fullname().to_string();
+        self.daemon.register(info)?;
+        Ok(Announcement {
+            daemon: self.daemon.clone(),
+            fullname,
+        })
+    }
+
+    /// As [`announce`](Self::announce), but only on the connection named `interface` and with
+    /// only its addresses `ips`: nothing is announced on, or points to, any other connection of
+    /// this laptop (a VPN, a virtual machine's network).
+    pub fn announce_on(
+        &self,
+        label: &Label,
+        port: u16,
+        ips: &[IpAddr],
+        interface: &str,
+    ) -> Result<Announcement, DiscoveryError> {
+        self.daemon.disable_interface(IfKind::All)?;
+        self.daemon
+            .enable_interface(IfKind::Name(interface.to_string()))?;
+        let tag = random_tag()?;
+        let instance = format!("pctwin-{tag}");
+        let host = format!("pctwin-{tag}.local.");
+        let txt = label.to_txt();
+        let props: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, ips, port, &props[..])?;
         let fullname = info.get_fullname().to_string();
         self.daemon.register(info)?;
         Ok(Announcement {

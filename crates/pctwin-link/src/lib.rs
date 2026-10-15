@@ -54,16 +54,18 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 /// The keys for extra lanes (see [`Link::take_lane_keys`]).
-pub use pctwin_pairing::LaneKeys;
+pub use pctwin_pairing::{LaneKeys, ResumeKeys};
 use pctwin_pairing::{
-    MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval, ReceiverSession,
-    RotatingSender, SenderChoosing, SenderStatus, Transport,
+    LaneOpening, MAX_MESSAGE_LEN, Paired, PairingCode, PairingError, ReceiverAwaitingApproval,
+    ReceiverSession, RotatingSender, SenderChoosing, SenderStatus, Transport,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use zeroize::Zeroizing;
 
+/// Most addresses the old laptop listens on while pairing: the chosen connection's IPv4 and IPv6.
+pub const MAX_LISTEN_ADDRS: usize = 2;
 /// Default longest wait for each step the new laptop waits on, and for each send.
 pub const STEP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default longest time one device may hold the old laptop's single pairing slot.
@@ -82,7 +84,12 @@ const KIND_PAUSED: u8 = 5;
 const KIND_EXPIRED: u8 = 6;
 const KIND_LOCKED: u8 = 7;
 const KIND_WRONG_CODE: u8 = 8;
+/// The person on the old laptop said the numbers did not match (or picked another).
+const KIND_NO_MATCH: u8 = 12;
+/// The person on the old laptop did not pick a number in time.
+const KIND_PICK_TIMED_OUT: u8 = 13;
 const KIND_LANE: u8 = 9;
+const KIND_RESUME: u8 = 10;
 /// A quiet connection is probed after this long, every [`KEEPALIVE_INTERVAL`], up to
 /// [`KEEPALIVE_PROBES`] times: a laptop that went away (lid closed, out of Wi-Fi range) is noticed
 /// in about half a minute rather than the systems' default of up to two hours. The operating
@@ -95,6 +102,12 @@ const MAX_DATA_LEN: usize = u16::MAX as usize;
 const SESSION_TAG: std::ops::Range<usize> = 2..10;
 /// How long a device gets to read a notice before it is closed.
 const NOTICE_LINGER: Duration = Duration::from_secs(1);
+/// The new laptop's first sealed message once approved: a liveness receipt (it is still there,
+/// and holds the session's keys), not key confirmation, which the pairing messages already do.
+/// The old laptop counts as paired only once this arrives. Fixed for every release.
+const PAIRED_CONFIRM: &[u8] = b"paired";
+/// How often a watched link with unread messages is looked at again.
+const WATCH_PAUSE: Duration = Duration::from_millis(500);
 /// Most devices being refused at once; beyond this, extra connections are closed without a notice.
 const MAX_REFUSALS: usize = 64;
 /// Most addresses remembered as penalised.
@@ -205,7 +218,8 @@ fn honest(error: impl Into<LinkError>) -> Failure {
 
 /// The old laptop's listener. Serves one device at a time.
 pub struct Host {
-    listener: TcpListener,
+    /// One listener per chosen address (the connection's IPv4 and IPv6 addresses), one port.
+    listeners: Vec<TcpListener>,
     config: LinkConfig,
     refusals: Arc<Semaphore>,
     penalised: Mutex<HashMap<IpAddr, Instant>>,
@@ -220,8 +234,32 @@ impl Host {
     /// Starts listening on `addr` (use port 0 for any free port). Bind the local network
     /// interface's own address, not every interface.
     pub async fn bind(addr: SocketAddr, config: LinkConfig) -> io::Result<Self> {
+        Self::bind_all(&[addr], config).await
+    }
+
+    /// Starts listening on each of `addrs`, the chosen connection's own addresses (an IPv4 and an
+    /// IPv6 address, say), all on one port: the first address's (port 0 picks a free one), so one
+    /// port is announced. Nothing listens on any other address of this laptop.
+    pub async fn bind_all(addrs: &[SocketAddr], config: LinkConfig) -> io::Result<Self> {
+        // One IPv4 and one IPv6 address at most: every listener is served (see `accept_local`).
+        if addrs.len() > MAX_LISTEN_ADDRS {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "at most one IPv4 and one IPv6 address",
+            ));
+        }
+        let (first, rest) = addrs.split_first().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "no address to listen on")
+        })?;
+        let mut listeners = vec![TcpListener::bind(first).await?];
+        let port = listeners[0].local_addr()?.port();
+        for addr in rest {
+            let mut at = *addr;
+            at.set_port(port);
+            listeners.push(TcpListener::bind(at).await?);
+        }
         Ok(Self {
-            listener: TcpListener::bind(addr).await?,
+            listeners,
             config,
             refusals: Arc::new(Semaphore::new(MAX_REFUSALS)),
             penalised: Mutex::new(HashMap::new()),
@@ -230,9 +268,17 @@ impl Host {
         })
     }
 
-    /// The address and port to announce.
+    /// The address and port to announce (the first chosen address).
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
+        self.listeners[0].local_addr()
+    }
+
+    /// Every address being listened on, all with the same port.
+    pub fn local_addrs(&self) -> Vec<SocketAddr> {
+        self.listeners
+            .iter()
+            .filter_map(|l| l.local_addr().ok())
+            .collect()
     }
 
     /// Serves devices one at a time until one completes the handshake and the person can pick
@@ -334,7 +380,18 @@ impl Host {
     /// Accepts one connection from the local network. Connections from elsewhere are closed at
     /// once; an accept error (for example, out of handles) pauses briefly and is not fatal.
     async fn accept_local(&self) -> Option<(TcpStream, SocketAddr)> {
-        match self.listener.accept().await {
+        // Whichever chosen address a device arrives on (each accept can be dropped unfinished).
+        let next = async {
+            match self.listeners.as_slice() {
+                [only] => only.accept().await,
+                [first, second, ..] => tokio::select! {
+                    a = first.accept() => a,
+                    b = second.accept() => b,
+                },
+                [] => std::future::pending().await,
+            }
+        };
+        match next.await {
             Ok((stream, peer)) if (self.allowed)(peer.ip()) => {
                 keep_alive(&stream);
                 Some((stream, peer))
@@ -419,12 +476,51 @@ impl HostPending {
         self.peer
     }
 
-    /// Records the person's pick at time `now`. The right number unlocks the old laptop and sends
-    /// the approval; anything else ends the pairing.
+    /// Records the person's pick at time `now`. The right number sends the approval, and pairs
+    /// only once the new laptop confirms it over the sealed link (so a new laptop that has gone
+    /// never counts as paired); anything else ends the pairing, and the new laptop is told the
+    /// numbers did not match, or that the time ran out (never only that the connection closed).
     pub async fn choose(mut self, picked: u8, now: Instant) -> Result<Link, LinkError> {
-        let (paired, approval) = self.choosing.choose(picked, now)?;
+        let (paired, approval) = match self.choosing.choose(picked, now) {
+            Ok(done) => done,
+            Err(e) => {
+                // Too late is the time running out, never a wrong number.
+                let kind = if e == PairingError::Expired {
+                    KIND_PICK_TIMED_OUT
+                } else {
+                    KIND_NO_MATCH
+                };
+                notify(&mut self.stream, kind).await;
+                return Err(e.into());
+            }
+        };
         write_frame(&mut self.stream, KIND_PAIRING, &approval, self.send_timeout).await?;
-        Ok(Link::new(paired, self.stream, self.peer, self.send_timeout))
+        let mut link = Link::new(paired, self.stream, self.peer, self.send_timeout);
+        match tokio::time::timeout(self.send_timeout, link.recv()).await {
+            Ok(Ok(confirm)) if confirm.as_slice() == PAIRED_CONFIRM => Ok(link),
+            Ok(Ok(_)) => Err(LinkError::Unexpected),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(LinkError::Closed),
+        }
+    }
+
+    /// Resolves when the new laptop is gone while the person picks: it hung up, the connection
+    /// broke, or it sent anything (it has nothing to send until approved). Cancel-safe: it only
+    /// looks, never reads.
+    pub async fn gone(&self) {
+        let mut byte = [0u8; 1];
+        let _ = self.stream.peek(&mut byte).await;
+    }
+
+    /// The person said none of the three numbers matches the new laptop's: pairing ends, and the
+    /// new laptop is told the numbers did not match.
+    pub async fn decline(mut self) {
+        notify(&mut self.stream, KIND_NO_MATCH).await;
+    }
+
+    /// The person did not pick a number in time: pairing ends, and the new laptop is told so.
+    pub async fn time_out(mut self) {
+        notify(&mut self.stream, KIND_PICK_TIMED_OUT).await;
     }
 }
 
@@ -491,7 +587,30 @@ impl GuestPending {
             .waiting
             .receive_approval(&approval, Instant::now())
             .map_err(PairingError::from)?;
-        Ok(Link::new(paired, self.stream, self.host, self.send_timeout))
+        let mut link = Link::new(paired, self.stream, self.host, self.send_timeout);
+        link.send(PAIRED_CONFIRM).await?;
+        Ok(link)
+    }
+}
+
+/// A watch on a paired link: see [`Link::watch`].
+pub struct LinkWatch {
+    stream: TcpStream,
+}
+
+impl LinkWatch {
+    /// Resolves when the other laptop hung up or the connection broke (the operating system's
+    /// keep-alive probes notice a laptop that vanished). Only looks, never reads. While a message
+    /// waits unread it can only see a broken connection, not a clean close, so it keeps looking
+    /// now and then until the link is taken.
+    pub async fn closed(&self) {
+        let mut byte = [0u8; 1];
+        loop {
+            match self.stream.peek(&mut byte).await {
+                Ok(0) | Err(_) => return,
+                Ok(_) => tokio::time::sleep(WATCH_PAUSE).await,
+            }
+        }
     }
 }
 
@@ -534,6 +653,21 @@ impl Link {
         socket2::SockRef::from(&self.stream)
             .keepalive()
             .unwrap_or(false)
+    }
+
+    /// A watch on this link that tells when the other laptop has gone, without reading anything
+    /// (whoever later uses the link still gets every message). For the quiet time between pairing
+    /// and the move, so a link that died is let go instead of shown as paired. Whoever takes the
+    /// link for the move ends the watch first: the watch holds the connection open while it
+    /// lives, and once a message waits unread it can no longer see a clean close.
+    pub fn watch(&self) -> Result<LinkWatch, LinkError> {
+        let copy = socket2::SockRef::from(&self.stream)
+            .try_clone()
+            .map_err(|_| LinkError::Closed)?;
+        let copy: std::net::TcpStream = copy.into();
+        copy.set_nonblocking(true).map_err(|_| LinkError::Closed)?;
+        let stream = TcpStream::from_std(copy).map_err(|_| LinkError::Closed)?;
+        Ok(LinkWatch { stream })
     }
 
     /// The keys for extra lanes, handed out once (from the main link only), so the app can open
@@ -586,7 +720,7 @@ macro_rules! redacted_debug {
         }
     )*};
 }
-redacted_debug!(Host, HostPending, GuestPending, Link, LaneListener);
+redacted_debug!(Host, HostPending, GuestPending, Link, LaneListener, Arrival);
 
 /// New laptop: opens an extra lane to the old laptop at `addr` (the main link's
 /// [`Link::peer_addr`]), with no new code: the lane's own short handshake proves both laptops hold
@@ -597,21 +731,42 @@ pub async fn open_lane(
     keys: &mut LaneKeys,
     config: LinkConfig,
 ) -> Result<Link, LinkError> {
+    open_numbered(addr, KIND_LANE, |now| keys.open_lane(now), config).await
+}
+
+/// New laptop, after the main connection dropped: reconnects to the old laptop at `addr` with the
+/// move's resume keys, no new code. The returned link has fresh keys and becomes the move's main
+/// connection. Each try uses the next attempt number, even if it fails.
+pub async fn open_resume(
+    addr: SocketAddr,
+    keys: &mut ResumeKeys,
+    config: LinkConfig,
+) -> Result<Link, LinkError> {
+    open_numbered(addr, KIND_RESUME, |now| keys.open(now), config).await
+}
+
+/// Opens a lane or a resume: the three-message handshake on a new connection.
+async fn open_numbered(
+    addr: SocketAddr,
+    kind: u8,
+    start: impl FnOnce(Instant) -> Result<(LaneOpening, Vec<u8>), PairingError>,
+    config: LinkConfig,
+) -> Result<Link, LinkError> {
     let wait = config.step_timeout;
     let mut stream = tokio::time::timeout(config.connect_timeout, TcpStream::connect(addr))
         .await
         .map_err(|_| LinkError::Unreachable)?
         .map_err(|_| LinkError::Unreachable)?;
     keep_alive(&stream);
-    let (opening, msg1) = keys.open_lane(Instant::now())?;
-    write_frame(&mut stream, KIND_LANE, &msg1, wait).await?;
+    let (opening, msg1) = start(Instant::now())?;
+    write_frame(&mut stream, kind, &msg1, wait).await?;
     let msg2 = match read_timed(&mut stream, wait).await? {
-        (KIND_LANE, body) => body,
+        (k, body) if k == kind => body,
         (KIND_BUSY, _) => return Err(LinkError::Busy),
         _ => return Err(LinkError::Unexpected),
     };
     let (transport, msg3) = opening.receive(&msg2, Instant::now())?;
-    write_frame(&mut stream, KIND_LANE, &msg3, wait).await?;
+    write_frame(&mut stream, kind, &msg3, wait).await?;
     Ok(Link {
         transport,
         lanes: None,
@@ -629,7 +784,17 @@ pub async fn open_lane(
 pub struct LaneListener {
     host: Host,
     keys: LaneKeys,
+    /// Once the plan is approved: the keys to accept the new laptop's reconnection after a drop.
+    resumes: Option<ResumeKeys>,
     peer: IpAddr,
+}
+
+/// What arrived at the old laptop's listener during the move.
+pub enum Arrival {
+    /// An extra lane beside the main connection.
+    Lane(Link),
+    /// The new laptop reconnecting after the main connection dropped: the new main connection.
+    Resumed(Link),
 }
 
 impl Host {
@@ -638,14 +803,39 @@ impl Host {
         LaneListener {
             host: self,
             keys,
+            resumes: None,
             peer: penalty_key(peer.ip()),
         }
     }
 }
 
 impl LaneListener {
-    /// Waits for the next genuine lane and returns it.
+    /// Once the person approved the plan: also accept the new laptop's reconnection after a drop,
+    /// with these resume keys (see [`accept_any`](Self::accept_any)).
+    pub fn allow_resumes(&mut self, keys: ResumeKeys) {
+        self.resumes = Some(keys);
+    }
+
+    /// Waits for the next genuine lane and returns it. A resume is not accepted here; the move
+    /// uses [`accept_any`](Self::accept_any).
     pub async fn accept(&mut self) -> Result<Link, LinkError> {
+        loop {
+            if let Arrival::Lane(link) = self.serve(false).await? {
+                return Ok(link);
+            }
+        }
+    }
+
+    /// Waits for the next genuine lane, or (once [`allow_resumes`](Self::allow_resumes) was
+    /// called) the new laptop's reconnection after a drop. A resume can arrive while the old main
+    /// connection still looks alive (the new laptop gave up on it first): the app then drops the
+    /// old one and carries the move on over the resumed one, so there is only ever one main
+    /// connection.
+    pub async fn accept_any(&mut self) -> Result<Arrival, LinkError> {
+        self.serve(true).await
+    }
+
+    async fn serve(&mut self, resumes: bool) -> Result<Arrival, LinkError> {
         loop {
             let Some((mut stream, from)) = self.host.accept_local().await else {
                 continue;
@@ -655,32 +845,41 @@ impl LaneListener {
                 continue;
             }
             let wait = self.host.config.step_timeout;
-            let keys = &mut self.keys;
+            let lanes = &mut self.keys;
+            let resume_keys = if resumes { self.resumes.as_mut() } else { None };
             let attempt = async {
-                let msg1 = match read_timed(&mut stream, wait).await? {
-                    (KIND_LANE, body) => body,
+                let (kind, msg1) = match read_timed(&mut stream, wait).await? {
                     (KIND_HELLO, _) => {
                         notify(&mut stream, KIND_BUSY).await;
                         return Err(LinkError::Busy);
                     }
+                    other => other,
+                };
+                let (accepting, msg2) = match (kind, resume_keys) {
+                    (KIND_LANE, _) => lanes.accept_lane(&msg1, Instant::now())?,
+                    (KIND_RESUME, Some(keys)) => keys.accept(&msg1, Instant::now())?,
                     _ => return Err(LinkError::Unexpected),
                 };
-                let (accepting, msg2) = keys.accept_lane(&msg1, Instant::now())?;
-                write_frame(&mut stream, KIND_LANE, &msg2, wait).await?;
+                write_frame(&mut stream, kind, &msg2, wait).await?;
                 let msg3 = match read_timed(&mut stream, wait).await? {
-                    (KIND_LANE, body) => body,
+                    (k, body) if k == kind => body,
                     _ => return Err(LinkError::Unexpected),
                 };
-                Ok(accepting.confirm(&msg3, Instant::now())?)
+                Ok((kind, accepting.confirm(&msg3, Instant::now())?))
             };
-            if let Ok(transport) = attempt.await {
-                return Ok(Link {
+            if let Ok((kind, transport)) = attempt.await {
+                let link = Link {
                     transport,
                     lanes: None,
                     stream,
                     peer: from,
                     send_timeout: wait,
                     broken: false,
+                };
+                return Ok(if kind == KIND_RESUME {
+                    Arrival::Resumed(link)
+                } else {
+                    Arrival::Lane(link)
                 });
             }
         }
@@ -844,6 +1043,8 @@ async fn read_from_host(stream: &mut TcpStream, wait: Duration) -> Result<Vec<u8
         KIND_EXPIRED => Err(PairingError::Expired.into()),
         KIND_LOCKED => Err(PairingError::Locked.into()),
         KIND_WRONG_CODE => Err(PairingError::HandshakeFailed.into()),
+        KIND_NO_MATCH => Err(PairingError::WrongNumber.into()),
+        KIND_PICK_TIMED_OUT => Err(LinkError::Timeout),
         _ => Err(LinkError::Unexpected),
     }
 }
