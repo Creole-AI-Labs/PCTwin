@@ -36,6 +36,7 @@
 /* The top of the compact view: title on one side, the measured percent on the other */
 .mv-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
