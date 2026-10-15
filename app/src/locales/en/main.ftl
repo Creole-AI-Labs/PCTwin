@@ -39,6 +39,7 @@ pair-try-again = Try again
 pair-old-eyebrow = Old laptop
 pair-old-title = Let’s connect your laptops.
 pair-old-body = On your new laptop, enter the code below.
+pair-old-next = Next, you’ll match a number shown on both laptops.
 pair-old-starting = Getting a code ready…
 pair-old-label-title = This laptop’s name for now
 pair-old-label-hint = Your new laptop will find this one by this name.

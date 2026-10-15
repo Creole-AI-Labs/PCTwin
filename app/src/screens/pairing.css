@@ -182,6 +182,10 @@ button.pair-number {
   justify-content: center;
 }
 
+.pair-next {
+  margin-top: var(--space-4);
+}
+
 .pair-numbers ~ .note {
   margin-top: var(--space-4);
 }

@@ -327,6 +327,13 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
             />
           )}
 
+          <div className="note pair-next">
+            <Shield />
+            <Localized id="pair-old-next">
+              <p className="note-text" />
+            </Localized>
+          </div>
+
           {label && (
             <section className="pair-card" aria-labelledby="pair-label-title">
               <Localized id="pair-old-label-title">
