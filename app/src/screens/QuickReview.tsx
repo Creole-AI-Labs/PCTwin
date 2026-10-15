@@ -3,7 +3,8 @@ import { useState } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { Info } from "../icons";
 import { totalBytes, useBytes, type OfferedFile, type SourceIssue } from "../quicksend";
-import { FileRows, Heading, ISSUE_TEXT, QsActions, QsFooter, QsStrip, TallyBar } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { FileRows, Heading, ISSUE_TEXT, QsActions, QsStrip, TallyBar } from "./QsParts";
 
 /** Rows drawn before "Show all": a long folder stays a short screen. Every file is still sent; the count above is of all of them. */
 const SHOWN = 100;
@@ -102,13 +103,13 @@ export default function QuickReview({
         </Localized>
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" disabled={blocked} onClick={onContinue}>
           <Localized id="qs-check-continue">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

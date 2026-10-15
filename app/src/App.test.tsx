@@ -128,7 +128,13 @@ describe("screens", () => {
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     }
     expect(tauri.invoke).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: l10n.getString("qs-back") }));
+    // The window footer carries the free-sending note and the main action, also while the notice is showing.
+    const footer = within(screen.getByRole("contentinfo"));
+    expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();
+    expect(footer.getByRole("button", { name: l10n.getString("qs-home-action") })).toBeTruthy();
+    expect(footer.queryByText(l10n.getString("footer-free"))).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(within(screen.getByRole("contentinfo")).getByText(l10n.getString("footer-free"))).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });

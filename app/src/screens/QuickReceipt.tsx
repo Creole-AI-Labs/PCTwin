@@ -3,7 +3,8 @@ import { Badge, Banner, Button, ResultChip, Row } from "../components/kit";
 import { ArrowForward, Attention, Check, Info } from "../icons";
 import { labelText, type Label } from "../pairing";
 import { fileName, formatWhen, missingLines, receiptState, tally, useBytes, type OfferedFile, type Outcome, type Receipt, type ReceiptLine } from "../quicksend";
-import { Folder, Heading, Name, QsActions, QsFooter, QsRowList, QsStrip, Tile } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Folder, Heading, Name, QsActions, QsRowList, QsStrip, Tile } from "./QsParts";
 
 type Side = "send" | "receive";
 
@@ -265,13 +266,13 @@ export default function QuickReceipt({
         </div>
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" onClick={onDone}>
           <Localized id="qs-receipt-done">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

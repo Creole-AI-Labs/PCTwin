@@ -3,7 +3,8 @@ import { Banner, Button } from "../components/kit";
 import { ArrowForward, Info, Laptop } from "../icons";
 import { labelText } from "../pairing";
 import { useBytes, type NearbyLaptop } from "../quicksend";
-import { Heading, QsFooter, QsStrip, TallyBar } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Heading, QsStrip, TallyBar } from "./QsParts";
 
 /**
  * Q04 Who should receive it? (sender) Laptops nearby that can receive, and "use a code" as the other
@@ -103,13 +104,13 @@ export default function QuickWho({
         </Localized>
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" onClick={onUseCode}>
           <Localized id="qs-who-action">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

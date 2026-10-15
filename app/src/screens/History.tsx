@@ -2,7 +2,8 @@ import { Localized, useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Row } from "../components/kit";
 import { Attention, Check, Info } from "../icons";
 import { formatWhen, type HistoryEntry } from "../quicksend";
-import { Folder, Heading, Name, QsActions, QsFooter, QsRowList, QsStrip, Tile } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Folder, Heading, Name, QsActions, QsRowList, QsStrip, Tile } from "./QsParts";
 
 export type ExportResult = { kind: "saved"; path: string } | { kind: "failed" };
 
@@ -142,13 +143,13 @@ export default function History({
         </Localized>
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" onClick={onStart}>
           <Localized id="history-start">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

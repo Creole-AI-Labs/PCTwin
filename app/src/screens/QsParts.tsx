@@ -1,14 +1,15 @@
 /**
  * Pieces shared by the Quick Send screens, in the arrangement the 14 October mockups use: the Back
  * strip with "Quick Send" at the far side, the route between two laptops, the tally bar, rows in a
- * card with an icon tile, and the bar at the foot of the window with the one primary action.
+ * card with an icon tile, and the shared top strip and footer (FrameParts, FrameFooter).
  */
 import { Localized, useLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
 import { Badge, Row, RowList } from "../components/kit";
-import { ArrowBack, Check, Laptop } from "../icons";
+import { Check, Laptop } from "../icons";
 import { labelText, type Label } from "../pairing";
 import { fileName, useBytes } from "../quicksend";
+import { TopStrip } from "./FrameParts";
 import "./quicksend.css";
 
 export { Heading } from "./PairParts";
@@ -37,37 +38,9 @@ export function Tile({ children }: { children: ReactNode }) {
   return <span className="qs-tile">{children}</span>;
 }
 
-/** Back on one side and "Quick Send" (or "Receiving on this laptop") on the other, as every Quick Send frame has it. */
+/** Back on one side and "Quick Send" (or "Receiving on this device") on the other: the shared top strip. */
 export function QsStrip({ onBack, receiving = false }: { onBack?: () => void; receiving?: boolean }) {
-  return (
-    <div className="pair-strip qs-strip">
-      {onBack ? (
-        <button type="button" className="back" onClick={onBack}>
-          <ArrowBack />
-          <Localized id="qs-back">
-            <span />
-          </Localized>
-        </button>
-      ) : (
-        <span />
-      )}
-      <Localized id={receiving ? "qs-eyebrow-receiving" : "qs-eyebrow"}>
-        <span className="qs-eyebrow" />
-      </Localized>
-    </div>
-  );
-}
-
-/** The bar at the foot of the window: "Free nearby sending" on one side, the one main action on the other. */
-export function QsFooter({ children }: { children?: ReactNode }) {
-  return (
-    <div className="qs-footer">
-      <Localized id="qs-footer-free">
-        <span className="qs-footer-note" />
-      </Localized>
-      <div className="qs-footer-actions">{children}</div>
-    </div>
-  );
+  return <TopStrip onBack={onBack} labelId={receiving ? "qs-eyebrow-receiving" : "qs-eyebrow"} />;
 }
 
 /** Who sends to whom: the two laptops, one under the other, each with its role. */
@@ -184,30 +157,5 @@ export function FileRows({ files, limit, included = false }: { files: readonly {
         );
       })}
     </QsRowList>
-  );
-}
-
-export type StepState = "done" | "current" | "todo";
-
-/** A short list of steps where each one says in words whether it is done, going on, or next. */
-export function Steps({ steps }: { steps: readonly { id: string; state: StepState; vars?: Record<string, string | number> }[] }) {
-  return (
-    <ol className="qs-steps">
-      {steps.map(({ id, state, vars }) => (
-        <li key={id} className={`qs-step qs-step-${state}`} aria-current={state === "current" ? "step" : undefined}>
-          <Localized id={`qs-step-${state}`}>
-            <span className="qs-step-state" />
-          </Localized>
-          <span>
-            <Localized id={id}>
-              <strong />
-            </Localized>
-            <Localized id={`${id}-body`} vars={vars}>
-              <small className="kit-hint" />
-            </Localized>
-          </span>
-        </li>
-      ))}
-    </ol>
   );
 }

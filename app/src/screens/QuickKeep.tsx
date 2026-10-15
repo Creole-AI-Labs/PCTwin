@@ -3,7 +3,8 @@ import { useId } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { Attention, Info } from "../icons";
 import { fileName, formatWhen, type Conflict, type OfferedFile } from "../quicksend";
-import { Heading, Name, QsFooter, QsStrip } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Heading, Name, QsStrip } from "./QsParts";
 
 type Choice = NonNullable<Conflict["choice"]>;
 const CHOICE_KEY: Record<Choice, string> = { "keep-both": "qs-keep-both", skip: "qs-skip", replace: "qs-replace" };
@@ -130,13 +131,13 @@ export default function QuickKeep({
         </div>
       )}
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" disabled={blocked} aria-describedby="qs-conflict-why" onClick={onContinue}>
           <Localized id="qs-conflict-continue">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
       <p id="qs-conflict-why" className="qs-small">
         {blocked ? l10n.getString("qs-conflict-why") : ""}
       </p>

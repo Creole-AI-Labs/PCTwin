@@ -1,7 +1,8 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { totalBytes, useBytes, type PickedItem } from "../quicksend";
-import { Heading, Name, QsFooter, QsStrip, TallyBar, useAttribute } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Heading, Name, QsStrip, TallyBar, useAttribute } from "./QsParts";
 
 const PROBLEM_TEXT = { "online-only": "qs-online-only", unreadable: "qs-protected", missing: "qs-gone" } as const;
 
@@ -134,13 +135,13 @@ export default function QuickPick({
         </div>
       </section>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" disabled={blocked} onClick={onContinue}>
           <Localized id="qs-choose-continue">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

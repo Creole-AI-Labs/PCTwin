@@ -2,11 +2,13 @@ import { Localized, useLocalization } from "@fluent/react";
 import { Banner, Button } from "../components/kit";
 import { ArrowForward } from "../icons";
 import { labelText, type Label } from "../pairing";
-import { Folder, Heading, QsFooter, QsStrip } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Folder, Heading, QsStrip, Tile } from "./QsParts";
 
 /**
- * Q01 Quick Send home: Send files and Receive files as the original choice cards, then past sends and
- * receipts, with Choose files as the main action. While this laptop is ready to receive, `receiving`
+ * Q01 Quick Send home: Send files and Receive files as the two big choice cards, then the local
+ * handover receipts in one smaller row card (the mockup's Request and Pending rows are out of scope),
+ * with Choose files as the main action in the window footer. While this laptop is ready to receive, `receiving`
  * carries the name nearby laptops see for it, and `noNearby` says no other laptop was found. `notice`
  * says the engine is not connected yet (the screens exist, nothing is sent or received).
  * Events: onSend, onReceive, onStopReceiving, onHistory, onBack.
@@ -34,7 +36,6 @@ export default function QuickHome({
   const cards = [
     { id: "send", go: onSend },
     { id: "receive", go: onReceive },
-    { id: "history", go: onHistory },
   ];
   return (
     <>
@@ -98,13 +99,30 @@ export default function QuickHome({
         ))}
       </ul>
 
-      <QsFooter>
+      <div className="qs-rows">
+        <button type="button" className="qs-rowlink" onClick={onHistory}>
+          <Tile>
+            <Folder size={18} />
+          </Tile>
+          <span>
+            <Localized id="qs-history-title">
+              <strong />
+            </Localized>
+            <Localized id="qs-history-body">
+              <small />
+            </Localized>
+          </span>
+          <ArrowForward />
+        </button>
+      </div>
+
+      <FrameFooter note="send">
         <Button variant="primary" onClick={onSend}>
           <Localized id="qs-home-action">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

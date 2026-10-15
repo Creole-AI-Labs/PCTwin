@@ -1053,7 +1053,6 @@ qs-tally =
        *[other] { $count } selected items · { $size }
     }
 qs-tally-badge = Local send
-qs-back = Back
 
 ## Q01 Quick Send home
 
@@ -1344,7 +1343,6 @@ qs-check-show-all =
        *[other] Show all { $count } files
     }
 qs-check-change = Change what I am sending
-qs-footer-free = Free nearby sending
 qs-land-none = No folder chosen yet.
 qs-land-space-unknown = PCTwin could not measure the free space here. These files need { $needed }.
 qs-conflict-existing-unknown = Already there
@@ -1352,9 +1350,6 @@ qs-conflict-choice-open = Not chosen yet
 qs-conflict-why = Choose what happens to every file, then tick the box, to continue.
 qs-approve-folder-title = Receiving folder
 qs-status-recipient-choice = Recipient choice
-qs-step-done = Done
-qs-step-current = Now
-qs-step-todo = Next
 qs-sending-card = Sending selected files
 qs-progress-of = of { $total }
 qs-receipt-partial-title = Not everything arrived

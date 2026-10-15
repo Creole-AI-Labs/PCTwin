@@ -2,7 +2,8 @@ import { Localized, useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Checkbox, Row } from "../components/kit";
 import { Attention, Check, Info } from "../icons";
 import { useBytes } from "../quicksend";
-import { Folder, Heading, Name, QsActions, QsFooter, QsRowList, QsStrip, Tile } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Folder, Heading, Name, QsActions, QsRowList, QsStrip, Tile } from "./QsParts";
 
 export type WhereProblem = "unavailable" | "no-permission";
 
@@ -146,13 +147,13 @@ export default function QuickWhere({
         </Localized>
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" disabled={blocked} onClick={onContinue}>
           <Localized id="qs-land-use">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

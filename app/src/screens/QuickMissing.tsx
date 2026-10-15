@@ -2,7 +2,8 @@ import { Localized, useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Checkbox, Row } from "../components/kit";
 import { Attention, Check, Info } from "../icons";
 import { fileName, missingLines, type Receipt, type SourceIssue } from "../quicksend";
-import { Folder, Heading, ISSUE_TEXT, Name, QsFooter, QsRowList, QsStrip, Tile } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Folder, Heading, ISSUE_TEXT, Name, QsRowList, QsStrip, Tile } from "./QsParts";
 
 /**
  * Q19 Send the missing pieces (sender): uses the last receipt to send only what is missing. Files that
@@ -126,24 +127,24 @@ export default function QuickMissing({
               <p className="note-text" />
             </Localized>
           </div>
-          <QsFooter>
+          <FrameFooter note="send">
             <Button variant="primary" disabled={!approved} onClick={onContinue}>
               <Localized id="qs-missing-continue">
                 <span />
               </Localized>
             </Button>
-          </QsFooter>
+          </FrameFooter>
         </>
       )}
 
       {receipt === null && (
-        <QsFooter>
+        <FrameFooter note="send">
           <Button variant="primary" onClick={onNewSend}>
             <Localized id="qs-missing-new-send">
               <span />
             </Localized>
           </Button>
-        </QsFooter>
+        </FrameFooter>
       )}
     </>
   );

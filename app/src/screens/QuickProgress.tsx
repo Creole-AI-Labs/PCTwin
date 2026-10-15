@@ -2,11 +2,13 @@ import { Localized, useLocalization } from "@fluent/react";
 import { Banner, Button, ProgressBar, ProgressValue } from "../components/kit";
 import type { Label } from "../pairing";
 import { fileName, formatRate, fraction, useBytes, type SendProgress } from "../quicksend";
-import { Heading, QsActions, QsFooter, QsStrip, Route, Steps, useAttribute, type StepState } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Steps, type StepItem, type StepState } from "./FrameParts";
+import { Heading, QsActions, QsStrip, Route, useAttribute } from "./QsParts";
 import { labelText } from "../pairing";
 
 /** The three stages and which one a phase is in. "needs-action" and "lost" stop short: the checking has not finished. */
-function stages(p: SendProgress): { id: string; state: StepState; vars?: Record<string, number> }[] {
+function stages(p: SendProgress, say: (id: string, vars?: Record<string, number>) => string): StepItem[] {
   const at: Record<SendProgress["phase"], [StepState, StepState, StepState]> = {
     copying: ["current", "todo", "todo"],
     paused: ["current", "todo", "todo"],
@@ -17,9 +19,9 @@ function stages(p: SendProgress): { id: string; state: StepState; vars?: Record<
   };
   const [copying, checking, receipt] = at[p.phase];
   return [
-    { id: "qs-step-copying", state: copying, vars: { done: p.filesDone, total: p.filesTotal } },
-    { id: "qs-step-checking", state: checking },
-    { id: "qs-step-receipt", state: receipt },
+    { state: copying, title: say("qs-step-copying"), body: say("qs-step-copying-body", { done: p.filesDone, total: p.filesTotal }) },
+    { state: checking, title: say("qs-step-checking"), body: say("qs-step-checking-body") },
+    { state: receipt, title: say("qs-step-receipt"), body: say("qs-step-receipt-body") },
   ];
 }
 
@@ -123,7 +125,7 @@ export default function QuickProgress({
         {detail.length > 0 && <p className="qs-small">{detail.join(" · ")}</p>}
       </section>
 
-      <Steps steps={stages(p)} />
+      <Steps steps={stages(p, (id, vars) => l10n.getString(id, vars))} />
 
       <QsActions>
         {p.phase === "complete" ? null : paused ? (
@@ -158,13 +160,13 @@ export default function QuickProgress({
         )}
       </QsActions>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" onClick={onReceipt}>
           <Localized id="qs-sending-receipt">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

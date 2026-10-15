@@ -3,7 +3,8 @@ import { Badge, Banner, Button, Checkbox, Row } from "../components/kit";
 import { Attention, Check, Info, Laptop } from "../icons";
 import { labelText, type Label } from "../pairing";
 import { useBytes, type SourceIssue } from "../quicksend";
-import { Folder, Heading, ISSUE_TEXT, QsFooter, QsRowList, QsStrip, Route, TallyBar, Tile } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { Folder, Heading, ISSUE_TEXT, QsRowList, QsStrip, Route, TallyBar, Tile } from "./QsParts";
 
 /** Where the other laptop's approval stands: waiting, given, taken back, or cleared by a change to the files. */
 export type ReceiverApproval = "waiting" | "accepted" | "withdrawn" | "cleared";
@@ -187,13 +188,13 @@ export default function QuickApprove({
         />
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" disabled={blocked} onClick={onStart}>
           <Localized id="qs-approve-start">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

@@ -7,6 +7,7 @@ import { SAMPLES } from "../gallery/samples";
 import { localization } from "../i18n";
 import { fraction, formatBytes, historyStateOf, missingLines, receiptState, tally, type Conflict, type HistoryEntry, type PickedItem, type Receipt } from "../quicksend";
 import { BLUE_FOX, CONFLICTS, GREEN_OWL, HISTORY, NEARBY, OFFER, PICKED, PROGRESS, RECEIPT_PARTIAL, RECEIPT_WHOLE } from "../quicksend.fixtures";
+import { FooterProvider } from "./FrameFooter";
 import History from "./History";
 import QuickApprove from "./QuickApprove";
 import QuickHome from "./QuickHome";
@@ -126,7 +127,7 @@ describe("Q01 Quick Send home", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-receive-title")) }));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-history-title")) }));
     fireEvent.click(button("qs-home-action"));
-    fireEvent.click(button("qs-back"));
+    fireEvent.click(button("frame-back"));
     expect(e.onSend).toHaveBeenCalledTimes(2);
     expect(e.onReceive).toHaveBeenCalledTimes(1);
     expect(e.onHistory).toHaveBeenCalledTimes(1);
@@ -554,12 +555,13 @@ describe("Q12 Your files are on their way", () => {
     expect(plain(document.body.textContent)).not.toMatch(/MB\/s/);
   });
 
-  it("every stage says in words whether it is done, now or next", () => {
+  it("every stage carries its state for a screen reader, and the current one is marked", () => {
     progress({ phase: "checking" });
-    const steps = screen.getAllByRole("listitem").filter((li) => li.className.includes("qs-step"));
-    expect(steps[0].textContent).toContain(text("qs-step-done"));
-    expect(steps[1].textContent).toContain(text("qs-step-current"));
-    expect(steps[2].textContent).toContain(text("qs-step-todo"));
+    const steps = screen.getAllByRole("listitem").filter((li) => li.className.includes("frame-step"));
+    expect(steps.length).toBe(3);
+    expect(steps[0].textContent).toContain(text("frame-step-done"));
+    expect(steps[1].textContent).toContain(text("frame-step-current"));
+    expect(steps[2].textContent).toContain(text("frame-step-todo"));
     expect(steps[1].getAttribute("aria-current")).toBe("step");
   });
 
@@ -590,7 +592,7 @@ describe("Q12 Your files are on their way", () => {
     expect(screen.getByText(text("qs-sending-complete-title"))).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("100");
     for (const id of ["qs-pause", "qs-compact", "qs-stop", "qs-resume"]) expect(maybeButton(id)).toBeNull();
-    expect(screen.getAllByText(text("qs-step-done")).length).toBe(3);
+    expect(screen.getAllByText(text("frame-step-done")).length).toBe(3);
   });
 
   it("needs action counts what did not arrive; a dropped connection says what is kept and offers no compact view", () => {
@@ -891,9 +893,22 @@ describe("every Quick Send screen", () => {
     expect(document.body.textContent).not.toMatch(paid);
   });
 
-  it("the whole Q01 to Q20 set is free: the foot bar says so", () => {
-    inApp(ours.find((s) => s.id === "Q02-chosen")?.render());
-    expect(screen.getByText(text("qs-footer-free"))).toBeTruthy();
+  it("inside the window's footer provider, the main action of Q01, Q11 and Q14 sits in the footer with the free-sending note", () => {
+    for (const [id, action] of [["Q01-default", "qs-home-action"], ["Q11-ready", "qs-approve-start"], ["Q14-whole-sender", "qs-receipt-done"]] as const) {
+      const sample = ours.find((s) => s.id === id);
+      render(
+        <LocalizationProvider l10n={l10n}>
+          <FooterProvider>
+            <main>{sample?.render()}</main>
+          </FooterProvider>
+        </LocalizationProvider>,
+      );
+      const footer = within(screen.getByRole("contentinfo"));
+      expect(footer.getByText(text("footer-note-send"))).toBeTruthy();
+      expect(footer.getByRole("button", { name: nameIs(text(action)) })).toBeTruthy();
+      expect(within(screen.getByRole("main")).queryByRole("button", { name: nameIs(text(action)) })).toBeNull();
+      cleanup();
+    }
   });
 
   it("a screen's heading takes keyboard focus when it appears", () => {

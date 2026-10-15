@@ -3,7 +3,8 @@ import { Banner, Button } from "../components/kit";
 import { Info } from "../icons";
 import { labelText, type Label } from "../pairing";
 import { totalBytes, useBytes, type OfferedFile } from "../quicksend";
-import { FileRows, Heading, QsActions, QsFooter, QsStrip, Route, TallyBar } from "./QsParts";
+import FrameFooter from "./FrameFooter";
+import { FileRows, Heading, QsActions, QsStrip, Route, TallyBar } from "./QsParts";
 
 /**
  * Q08 Someone wants to send you files (receiver): who is sending to whom, the tally, and names and
@@ -49,13 +50,13 @@ export default function QuickIncoming({
             </Localized>
           </Banner>
         </div>
-        <QsFooter>
+        <FrameFooter note="send">
           <Button variant="primary" onClick={onDone}>
             <Localized id="qs-receipt-done">
               <span />
             </Localized>
           </Button>
-        </QsFooter>
+        </FrameFooter>
       </>
     );
   }
@@ -97,13 +98,13 @@ export default function QuickIncoming({
         </Localized>
       </div>
 
-      <QsFooter>
+      <FrameFooter note="send">
         <Button variant="primary" disabled={files.length === 0} onClick={onAccept}>
           <Localized id="qs-offer-accept">
             <span />
           </Localized>
         </Button>
-      </QsFooter>
+      </FrameFooter>
     </>
   );
 }

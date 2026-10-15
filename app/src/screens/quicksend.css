@@ -149,53 +149,6 @@
   overflow-wrap: anywhere;
 }
 
-/* Q12: steps say Done, Now or Next in words */
-.qs-steps {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  margin: var(--space-6) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.qs-step {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  font-size: var(--type-small);
-}
-
-.qs-step-state {
-  flex: none;
-  min-width: 3.2rem;
-  padding: 2px var(--space-2);
-  border-radius: 20px;
-  background: var(--colour-soft);
-  color: var(--colour-muted);
-  font-size: var(--type-tertiary);
-  font-weight: 600;
-  text-align: center;
-}
-
-.qs-step-done .qs-step-state {
-  background: var(--colour-success-surface);
-  color: var(--colour-success-text);
-}
-
-.qs-step-current .qs-step-state {
-  background: var(--colour-blue);
-  color: var(--colour-paper);
-}
-
-.qs-step strong {
-  display: block;
-  font-weight: 600;
-}
-
-.qs-step small {
-  display: block;
-}
 
 /* Q14: the counts */
 .qs-tally {
@@ -234,58 +187,9 @@
   .qs-metric {
     border: 1px solid CanvasText;
   }
-  .qs-step-state {
-    border: 1px solid CanvasText;
-  }
 }
 
-/* The arrangement the mockups use: Back and "Quick Send" on one line, cards, and the foot bar */
-.qs-strip .qs-eyebrow {
-  color: var(--colour-muted);
-  font-size: var(--type-tertiary);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.qs-footer {
-  position: sticky;
-  bottom: calc(-1 * var(--content-padding));
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin: var(--space-6) calc(-1 * var(--content-padding)) calc(-1 * var(--content-padding));
-  padding: var(--space-3) var(--content-padding);
-  border-top: 1px solid var(--colour-line-quiet);
-  background: var(--colour-paper);
-}
-
-/* Narrow windows use the tighter margins (styles.css), so the footer's bleed must match them. */
-@media (max-width: 400px) {
-  .qs-footer {
-    --content-padding: var(--content-padding-narrow);
-  }
-}
-
-.qs-footer-note {
-  color: var(--colour-muted);
-  font-size: var(--type-supporting);
-}
-
-.qs-footer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-inline-start: auto;
-}
-
-.qs-footer-actions .kit-button {
-  min-height: var(--control-height);
-}
-
+/* The arrangement the mockups use: cards, rows and tiles */
 .qs-tile {
   display: inline-flex;
   align-items: center;
@@ -522,6 +426,31 @@
 }
 
 .qs-metric span {
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+/* Q01: the one smaller row under the two big cards */
+.qs-rowlink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-height);
+  padding: var(--space-3) 0;
+  background: transparent;
+  color: var(--colour-ink);
+  text-align: start;
+}
+
+.qs-rowlink > span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.qs-rowlink small {
   color: var(--colour-muted);
   font-size: var(--type-supporting);
 }
