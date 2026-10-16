@@ -514,8 +514,9 @@ export function checkMessage(
       else if (stack.pop() !== m[2].toLowerCase()) fail("markup", slot, `tag </${m[2]}> closes nothing or the wrong tag`);
     }
     if (stack.length > 0) fail("markup", slot, `tag <${stack.join(">, <")}> is never closed`);
-    const stripped = t.text.replace(tagRe, "");
-    if (/[<>]/.test(stripped) && !/[<>]/.test(e.text.replace(tagRe, ""))) fail("markup", slot, "stray < or > in translation (broken tag?)");
+    // Angle brackets that are not inside a recognised tag.
+    const brackets = (text: string, tags: string[]) => (text.match(/[<>]/g) ?? []).length - tags.join("").split("").filter((c) => c === "<" || c === ">").length;
+    if (brackets(t.text, tTagsAll) > 0 && brackets(e.text, e.text.match(tagRe) ?? []) <= 0) fail("markup", slot, "stray < or > in translation (broken tag?)");
   }
 
   // Never-translate terms (per message, over all of its text).
