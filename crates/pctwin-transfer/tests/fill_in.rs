@@ -500,7 +500,9 @@ async fn stops_dead_finishing() {
 /// The laptop is killed (by its process number, as a power cut or a crash would stop it) at a
 /// random moment of a move onto a drive with no safe rename, again and again
 /// (PCTWIN_KILL_RUNS, 100 unless set). After each, recovery never leaves a second copy, nor a
-/// partial or hidden file under a real name, nor anything still to show.
+/// partial or hidden file under a real name, nor anything still to show. The one thing it may
+/// leave, where a file cannot be made hidden as it is made, is PCTwin's own empty file, and it
+/// says so.
 #[test]
 fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
     use std::hash::{BuildHasher, RandomState};
@@ -530,7 +532,7 @@ fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
         started.elapsed()
     };
     let random = RandomState::new();
-    let (mut committed, mut earlier) = (0, 0);
+    let (mut committed, mut earlier, mut left_empty) = (0, 0, 0);
     for run in 0..runs {
         let work = tempfile::tempdir().unwrap();
         let (_, usb, jdir) = dirs(work.path());
@@ -547,24 +549,40 @@ fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
             .into_iter()
             .filter(|n| !n.starts_with(".pctwin-"))
             .collect();
-        assert!(real.len() <= 1, "run {run} ({at:?}): {real:?}, {r:?}");
-        for name in &real {
-            assert_eq!(
-                std::fs::read(usb.join(name)).unwrap(),
-                data(BIG),
-                "run {run} ({at:?}): a partial copy under {name}"
-            );
+        let (whole, other): (Vec<&String>, Vec<&String>) = real
+            .iter()
+            .partition(|n| std::fs::read(usb.join(n)).unwrap() == data(BIG));
+        assert!(whole.len() <= 1, "run {run} ({at:?}): {real:?}, {r:?}");
+        for name in &whole {
             assert!(!dest.hidden(name).unwrap(), "run {run}: {name} left hidden");
         }
+        // Where a file cannot be made hidden as it is made (a Mac sets the mark just after; Linux
+        // never can, and its drives that would need this are refused), a stop in that instant
+        // leaves PCTwin's empty file, visible and unproven. It is left, and said, and the copy
+        // lands beside it: nothing is lost, and no copy is made twice.
+        for name in &other {
+            assert!(
+                !cfg!(windows) && std::fs::metadata(usb.join(name)).unwrap().len() == 0,
+                "run {run} ({at:?}): a partial copy under {name}: {r:?}"
+            );
+            assert!(
+                r.notes.iter().any(|(_, n)| n.ends_with(name.as_str())),
+                "run {run}: {name} left without a word: {r:?}"
+            );
+        }
+        if other.is_empty() {
+            assert!(r.notes.is_empty(), "run {run}: {r:?}");
+        } else {
+            left_empty += 1;
+        }
         assert!(journal.unshown().unwrap().is_empty(), "run {run}: {r:?}");
-        assert!(r.notes.is_empty(), "run {run}: {r:?}");
         match journal.entries().unwrap().first().map(|e| &e.state) {
             Some(State::Committed { .. }) => committed += 1,
             _ => earlier += 1,
         }
     }
     eprintln!(
-        "{runs} kills: {committed} ended committed, {earlier} stopped earlier (kept or failed)"
+        "{runs} kills: {committed} ended committed, {earlier} stopped earlier (kept or failed), {left_empty} left an empty file and said so"
     );
 }
 
