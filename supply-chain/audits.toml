@@ -19,30 +19,6 @@ criteria = "safe-to-deploy"
 version = "0.2.1"
 notes = "Reviewed 8 Oct 2026 for PCTwin's one use: FileExt::delete_by_handle on a std File opened by PCTwin with DELETE access. Read every unsafe block in src/win.rs and src/win/sugar.rs (22 + 4): SetFileInformationByHandle with FileDispositionInfoEx (DELETE|POSIX_SEMANTICS|IGNORE_READONLY), FileDispositionInfo and FileBasicInfo, each with a correctly sized, initialised struct and a live owned handle; NtCreateFile with zeroed OBJECT_ATTRIBUTES and a NUL-terminated UNICODE_STRING bounded by UNICODE_STRING_MAX_CHARS; the symlink-creation reparse buffer (an align_to_mut with a checked head; its own TODO notes alignment) and the read_dir entry parsing (trusts the kernel's offsets) are not used by PCTwin and were read, not exercised. No build script, no network, no file access beyond the caller's handles and paths. Unix code (nix/libc) not used by PCTwin."
 
-[[audits.signal-hook]]
-who = "PCTwin maintainers; to be confirmed in the security review"
-criteria = "safe-to-deploy"
-delta = "0.3.18 -> 0.4.5"
-notes = "Reviewed 15 Oct 2026 for PCTwin's one use: signal_hook::flag::register for SIGIO in pctwin-lease (Linux). Read the full non-test diff. flag.rs is unchanged apart from a test import, so the flag handler (an atomic store in the signal handler) is the same. low_level/pipe.rs now takes OwnedFd instead of raw fds (not used by PCTwin), sets FD_CLOEXEC, and fixes a double close; low_level/signal_details.rs drops the 32-bit Android sigset fallback; build.rs only compiles extract.c when the optional extended-siginfo-raw feature is on and the target is not Windows. Dev dependency serial_test removed. No network or file access. Same dependency (signal-hook-registry)."
-
-[[audits.zstd]]
-who = "PCTwin maintainers; to be confirmed in the security review"
-criteria = "safe-to-deploy"
-delta = "0.13.3 -> 0.14.2"
-notes = "Reviewed 15 Oct 2026 for PCTwin's use: zstd::bulk::compress/decompress and zstd::stream::read::Decoder in pctwin-transfer (default features off). Read the whole src/ diff. Safe Rust wrapper only, no unsafe added, no build script, no network or file access beyond the new compress_file helper (not used by PCTwin). Behaviour changes that touch the decompression-bomb limits: bulk::Decompressor::decompress now sums the frame sizes recorded in the headers and refuses up front if they exceed the caller's capacity, otherwise allocates at most that capacity (the cap PCTwin passes still bounds memory); stream::decode_all pre-reserves at most 32 MiB from a header-claimed size via try_reserve; the new Reader::read_to_end override only fills the Vec in 32 byte / one block steps, and PCTwin's capped read goes through io::Take, which does not call it. New try_* constructors replace panics on null contexts. Licence changed from MIT to BSD-3-Clause (allowed in deny.toml). Optional rust-allocator, cmake and vendored features are not enabled."
-
-[[audits.zstd-safe]]
-who = "PCTwin maintainers; to be confirmed in the security review"
-criteria = "safe-to-deploy"
-delta = "7.3.0 -> 8.1.0"
-notes = "Reviewed 15 Oct 2026. Read the diff of src/lib.rs and the new src/rust_allocator.rs. The new with-rust-allocator feature (customAlloc/customFree backed by Rust's global allocator with a 16 byte size header, overflow-checked) is compiled only when the feature is on, and PCTwin does not enable it. Otherwise: a Poison field on CCtx/DCtx remembers a failed call until reset, try_create variants return None instead of panicking, and the unsafe FFI calls keep the same buffer and length arguments. No build script in this crate; no network or file access."
-
-[[audits.zstd-sys]]
-who = "PCTwin maintainers; to be confirmed in the security review"
-criteria = "safe-to-deploy"
-delta = "2.1.0+zstd.1.5.7 -> 2.1.1+zstd.1.5.7"
-notes = "Reviewed 15 Oct 2026. The bundled zstd C tree (zstd/ directory, version 1.5.7) is byte-identical to the previous release (diff -r reports no differences), so no C code changed. Changes: build.rs gains an opt-in ZSTD_SYS_NO_HIDE_SYMBOLS environment switch (default unchanged: symbols stay hidden) and a bindgen callback adding Copy/Clone to opaque handle types, used only when the optional bindgen feature is on; the bundled bindings_*.rs files differ only in the generator version comment (0.71.1 to 0.73.2) and added doc comments. build.rs still only runs the cc compiler on the bundled sources: no network, no downloads, no file writes outside OUT_DIR."
-
 [[audits.proptest]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-run"
@@ -73,6 +49,12 @@ criteria = "safe-to-deploy"
 delta = "1.0.151 -> 1.0.154"
 notes = "Reviewed 15 Oct 2026. Read the whole src/ diff. Behaviour changes: the text '-0' is no longer parsed as the integer 0 but falls through to the float path (so an integer field given '-0' may now be refused); Number::as_f32 now returns None for a value that overflows f32 instead of infinity; with the preserve_order feature (not used by PCTwin) the map uses a RandomState hasher (foldhash with no-std) and the indexmap dependency is built without default features; error positions for invalid UTF-8 inside raw values and strings are now computed (memchr, already a dependency, no new unsafe). The lexical/math.rs hunks are formatting or renames. No new unsafe in the diff, build script unchanged, no network or file access."
 
+[[audits.signal-hook]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.3.18 -> 0.4.5"
+notes = "Reviewed 15 Oct 2026 for PCTwin's one use: signal_hook::flag::register for SIGIO in pctwin-lease (Linux). Read the full non-test diff. flag.rs is unchanged apart from a test import, so the flag handler (an atomic store in the signal handler) is the same. low_level/pipe.rs now takes OwnedFd instead of raw fds (not used by PCTwin), sets FD_CLOEXEC, and fixes a double close; low_level/signal_details.rs drops the 32-bit Android sigset fallback; build.rs only compiles extract.c when the optional extended-siginfo-raw feature is on and the target is not Windows. Dev dependency serial_test removed. No network or file access. Same dependency (signal-hook-registry)."
+
 [[audits.tauri]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
@@ -96,3 +78,21 @@ who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "1.9.0 -> 1.9.1"
 notes = "Reviewed 15 Oct 2026. Read the whole src/ diff. Changes: the extra optimization_barrier call after each volatile zeroing write was removed from the scalar, SIMD, Option, MaybeUninit, slice and raw-pointer impls (the volatile writes that do the zeroing remain); Vec<Z>::zeroize now clears the spare capacity before the elements instead of after, which avoids zeroing the initialised elements twice; Zeroizing's Debug no longer prints the secret (opaque 'Zeroizing { .. }'); the fallback black-box read uses MaybeUninit<u8> to avoid reading uninitialised memory. No new dependencies, no build script. Residual: the removal of the barrier cannot be proven safe from a diff alone; it matches the upstream changelog (RustCrypto/utils #1535)."
+
+[[audits.zstd]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.13.3 -> 0.14.2"
+notes = "Reviewed 15 Oct 2026 for PCTwin's use: zstd::bulk::compress/decompress and zstd::stream::read::Decoder in pctwin-transfer (default features off). Read the whole src/ diff. Safe Rust wrapper only, no unsafe added, no build script, no network or file access beyond the new compress_file helper (not used by PCTwin). Behaviour changes that touch the decompression-bomb limits: bulk::Decompressor::decompress now sums the frame sizes recorded in the headers and refuses up front if they exceed the caller's capacity, otherwise allocates at most that capacity (the cap PCTwin passes still bounds memory); stream::decode_all pre-reserves at most 32 MiB from a header-claimed size via try_reserve; the new Reader::read_to_end override only fills the Vec in 32 byte / one block steps, and PCTwin's capped read goes through io::Take, which does not call it. New try_* constructors replace panics on null contexts. Licence changed from MIT to BSD-3-Clause (allowed in deny.toml). Optional rust-allocator, cmake and vendored features are not enabled."
+
+[[audits.zstd-safe]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "7.3.0 -> 8.1.0"
+notes = "Reviewed 15 Oct 2026. Read the diff of src/lib.rs and the new src/rust_allocator.rs. The new with-rust-allocator feature (customAlloc/customFree backed by Rust's global allocator with a 16 byte size header, overflow-checked) is compiled only when the feature is on, and PCTwin does not enable it. Otherwise: a Poison field on CCtx/DCtx remembers a failed call until reset, try_create variants return None instead of panicking, and the unsafe FFI calls keep the same buffer and length arguments. No build script in this crate; no network or file access."
+
+[[audits.zstd-sys]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.1.0+zstd.1.5.7 -> 2.1.1+zstd.1.5.7"
+notes = "Reviewed 15 Oct 2026. The bundled zstd C tree (zstd/ directory, version 1.5.7) is byte-identical to the previous release (diff -r reports no differences), so no C code changed. Changes: build.rs gains an opt-in ZSTD_SYS_NO_HIDE_SYMBOLS environment switch (default unchanged: symbols stay hidden) and a bindgen callback adding Copy/Clone to opaque handle types, used only when the optional bindgen feature is on; the bundled bindings_*.rs files differ only in the generator version comment (0.71.1 to 0.73.2) and added doc comments. build.rs still only runs the cc compiler on the bundled sources: no network, no downloads, no file writes outside OUT_DIR."
