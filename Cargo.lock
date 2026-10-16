@@ -3384,7 +3384,7 @@ dependencies = [
  "cap-std",
  "fs4",
  "fs_at",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "libproc",
  "pctwin-gate",
  "pctwin-journal",
