@@ -243,3 +243,21 @@ fn the_spec_is_the_same_for_the_same_seed_and_names_are_unique() {
     assert!(spec.people.iter().any(|p| p.role == Role::Leftover));
     assert!(spec.people.iter().any(|p| p.role == Role::Locked));
 }
+
+#[test]
+fn the_spec_and_roots_read_back_exactly_as_written() {
+    // The CI runners pass the spec between programs as JSON.
+    for people in 1..=6 {
+        let spec = plan(41, people);
+        let json = serde_json::to_vec(&spec).unwrap();
+        let back: LaptopSpec = serde_json::from_slice(&json).unwrap();
+        assert_eq!(back, spec);
+    }
+    let roots = Roots {
+        system_root: PathBuf::from("C:/"),
+        other_drive: PathBuf::from("E:/"),
+        homes: BTreeMap::from([("ada".to_string(), PathBuf::from("C:/Users/ada"))]),
+    };
+    let back: Roots = serde_json::from_slice(&serde_json::to_vec(&roots).unwrap()).unwrap();
+    assert_eq!(back, roots);
+}

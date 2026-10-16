@@ -76,7 +76,7 @@ pub enum Expect {
     /// In the move record, shared.
     Shared,
     /// In the record as part of one counted item (`node_modules`): the item is the folder named.
-    InItem { folder: String },
+    InItem { item_folder: String },
     /// Never named anywhere in the sweep's output, and either counted as another person's or
     /// listed as a blind spot with one of these reasons.
     NotNamed { reasons: Vec<String> },
@@ -263,7 +263,7 @@ pub fn plan(seed: u64, people: usize) -> LaptopSpec {
         "code-{t}/site/node_modules/pkg",
         Opens::OwnerOnly,
         &|f: &str| Expect::InItem {
-            folder: f.trim_end_matches("/pkg").to_string(),
+            item_folder: f.trim_end_matches("/pkg").to_string(),
         },
     );
     add(
@@ -760,14 +760,14 @@ pub fn check(
                     }
                 }
             }
-            Expect::InItem { folder } => {
+            Expect::InItem { item_folder } => {
                 let base = match &p.spot {
                     Spot::Home { person } => roots.homes.get(person).cloned(),
                     Spot::SystemRoot => Some(roots.system_root.clone()),
                     Spot::OtherDrive => Some(roots.other_drive.clone()),
                 };
                 let mut want = base.unwrap_or_default();
-                for part in folder.split('/') {
+                for part in item_folder.split('/') {
                     want.push(part);
                 }
                 let want = norm(&want.to_string_lossy());
