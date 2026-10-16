@@ -15,7 +15,7 @@ use pctwin_journal::recovery::{self, Action, Look, Seen};
 use pctwin_journal::{Born, Entry, FileId, Fill, Journal, JournalError, Landed, Proof, State};
 
 use crate::fingerprint_reader;
-use crate::naming::{Whole, commit_and_show, name_as, reads_back_whole, show_committed};
+use crate::naming::{ShowEnd, Whole, commit_and_show, name_as, reads_back_whole, show_committed};
 
 /// What recovery did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -69,11 +69,10 @@ pub fn recover_with(
         let mut bytes = |f: &mut dyn std::io::Read| reads_back_whole(f, &whole);
         let check = pctwin_gate::ShowCheck::Bytes(&mut bytes);
         match show_committed(journal, dest, entry.id, &show, check)? {
-            Some(note) => done.notes.push((entry.id, note)),
-            None if journal.show_pending(entry.id)?.is_none() => done.shown.push(entry.id),
-            None => done
-                .left
-                .push((entry.id, "the drive could not be reached to show it".into())),
+            ShowEnd::Shown => done.shown.push(entry.id),
+            ShowEnd::Gone => done.notes.push((entry.id, GONE_BEFORE_SHOWN.into())),
+            ShowEnd::Left(note) => done.notes.push((entry.id, note)),
+            ShowEnd::Later(why) => done.left.push((entry.id, why)),
         }
     }
     let unfinished = journal.unfinished()?;
@@ -122,8 +121,22 @@ pub fn recover_with(
 
 enum Finish {
     Committed,
+    /// Committed, and then its show ended other than shown (filled in under its name).
+    CommittedShowing(ShowEnd),
     Failed(String),
     Left(String),
+}
+
+/// Said of a committed copy found gone from its name before it was shown.
+const GONE_BEFORE_SHOWN: &str =
+    "it was copied, but removed from its name before PCTwin could make it visible";
+
+/// How finishing a write that was filled in under its name ended, by how its show ended.
+fn committed(end: ShowEnd) -> Finish {
+    match end {
+        ShowEnd::Shown => Finish::Committed,
+        other => Finish::CommittedShowing(other),
+    }
 }
 
 /// Records how finishing one write ended.
@@ -135,6 +148,15 @@ fn record_finish(
 ) -> Result<(), JournalError> {
     match finished {
         Finish::Committed => done.committed.push(id),
+        Finish::CommittedShowing(end) => {
+            done.committed.push(id);
+            match end {
+                ShowEnd::Shown => {}
+                ShowEnd::Gone => done.notes.push((id, GONE_BEFORE_SHOWN.into())),
+                ShowEnd::Left(note) => done.notes.push((id, note)),
+                ShowEnd::Later(why) => done.left.push((id, why)),
+            }
+        }
         Finish::Failed(why) => {
             journal.failed(id, &why)?;
             done.failed.push((id, why));
@@ -272,9 +294,9 @@ fn finish_fill(
                 modified_ns: show.modified_ns,
                 file: Some(stat.id),
             };
-            commit_and_show(journal, dest, entry.id, landed, &show)?;
+            let end = commit_and_show(journal, dest, entry.id, landed, &show)?;
             let _ = dest.remove_temp(temp);
-            Ok(Finish::Committed)
+            Ok(committed(end))
         }
         Ok(FillFinish::Gone | FillFinish::NotProven) => Ok(Finish::Left(FILL_CHANGED_NOW.into())),
         Err(e) => Ok(Finish::Left(e.to_string())),
@@ -360,18 +382,22 @@ fn finish(
                             modified_ns: show.modified_ns,
                             file: Some(stat.id),
                         };
-                        commit_and_show(journal, dest, entry.id, landed, show)?;
+                        Ok(committed(commit_and_show(
+                            journal, dest, entry.id, landed, show,
+                        )?))
                     }
-                    None => journal.committed(
-                        entry.id,
-                        Landed {
-                            size: stat.len,
-                            modified_ns: stat.modified.map(crate::nanos),
-                            file: Some(stat.id),
-                        },
-                    )?,
+                    None => {
+                        journal.committed(
+                            entry.id,
+                            Landed {
+                                size: stat.len,
+                                modified_ns: stat.modified.map(crate::nanos),
+                                file: Some(stat.id),
+                            },
+                        )?;
+                        Ok(Finish::Committed)
+                    }
                 }
-                Ok(Finish::Committed)
             }
             Proved::Gone => Ok(Finish::Failed(
                 "it was removed as soon as it was given its name, often by security software"
@@ -616,11 +642,6 @@ impl Look for DiskLook<'_> {
     fn identity(&self, entry: &Entry, stored: &str) -> Result<Option<FileId>, String> {
         let dest = self.destination(entry)?;
         Ok(dest.stat(stored).map_err(|e| e.to_string())?.map(|s| s.id))
-    }
-
-    fn hidden(&self, entry: &Entry, stored: &str) -> Result<bool, String> {
-        let dest = self.destination(entry)?;
-        dest.hidden(stored).map_err(|e| e.to_string())
     }
 
     fn born(&self, entry: &Entry, stored: &str) -> Result<Option<Born>, String> {

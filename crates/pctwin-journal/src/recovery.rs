@@ -59,8 +59,6 @@ pub trait Look {
     fn temp_path(&self, entry: &Entry, folder: Option<&str>) -> Option<String>;
     /// The creation time of the file at `stored`, as its drive keeps it, if it keeps one.
     fn born(&self, entry: &Entry, stored: &str) -> Result<Option<Born>, String>;
-    /// Whether the file at `stored` is marked hidden.
-    fn hidden(&self, entry: &Entry, stored: &str) -> Result<bool, String>;
     /// Whether the file at `stored` is exactly `len` bytes, and they are exactly the first `len`
     /// bytes of the file at `temp`.
     fn same_start(&self, entry: &Entry, stored: &str, temp: &str, len: u64)
@@ -109,6 +107,7 @@ const CHANGED: &str =
 const CHANGED_KEPT: &str = "the copy was interrupted as it finished, and the file changed afterwards, so it could not be confirmed; it was kept as it is";
 const LOST: &str = "the copy was interrupted as it finished, and the file was not found afterwards";
 const FILL_LEFT: &str = "the copy was interrupted while it was being written under its name, and PCTwin could not confirm that the file now there is its own unfinished copy, so it left it as it is";
+const FILL_LEFT_EMPTY: &str = "the copy was interrupted just as it began under its name, and the empty file now there holds nothing of it; PCTwin cannot be sure that file is its own, so it left it as it is and put the copy beside it";
 const FILL_LEFT_SAFE: &str = "the copy was interrupted while it was being written under its name, and the original's copy here could not be checked again, so PCTwin left its own unfinished copy as it is; that partly copied file (hidden, on drives that can hide files) is safe to delete";
 const FILL_CHANGED: &str = "the copy was interrupted while it was being written under its name, and the unfinished copy there changed afterwards, so PCTwin left it as it is";
 
@@ -297,17 +296,7 @@ fn decide_fill(
         };
     };
     let ours = match fill_is_ours(entry, look, fill) {
-        Ok(true) => true,
-        // Stopped between making the name and tagging it: made hidden, nothing in it yet, and
-        // nothing recorded as made (the tag comes before that). Only PCTwin's own exclusively made
-        // file can be at the name then, and an empty file holds nothing to lose.
-        Ok(false) if !filled && len == 0 && fill.made.is_none() && fill.tag.hidden => {
-            match look.hidden(entry, &fill.final_path) {
-                Ok(hidden) => hidden,
-                Err(why) => return leave(&why),
-            }
-        }
-        Ok(false) => false,
+        Ok(ours) => ours,
         Err(left) => return left,
     };
     if !ours {
@@ -334,6 +323,10 @@ fn decide_fill(
         Ok(false) => return Action::Fail(left_at(&fill.final_path, FILL_LEFT_SAFE)),
         Err(left) => return left,
     }
+    if len == 0 {
+        // Nothing of PCTwin's is in it, and an empty lookalike could be another program's: left.
+        return Action::NameNoting(left_at(&fill.final_path, FILL_LEFT_EMPTY));
+    }
     match look.same_start(entry, &fill.final_path, temp, len) {
         Ok(true) if len <= size => Action::RemoveFillThenName,
         Ok(_) => Action::NameNoting(left_at(&fill.final_path, FILL_CHANGED)),
@@ -345,25 +338,30 @@ fn decide_fill(
 /// that keeps identities; or the creation time PCTwin gave it at once, where it gave one (on any
 /// drive, since the identity is recorded only just after the file is made).
 fn fill_is_ours(entry: &Entry, look: &impl Look, fill: &Fill) -> Result<bool, Action> {
-    if fill.proof == Proof::StableId
-        && let Some(made) = fill.made
-        && look
-            .identity(entry, &fill.final_path)
-            .map_err(|why| leave(&why))?
-            == Some(made)
-    {
-        return Ok(true);
-    }
-    if !matches!(fill.proof, Proof::StableId | Proof::Token) {
-        return Ok(false);
-    }
-    let Some(tag) = fill.tag.born else {
+    // Nothing is PCTwin's until the journal has recorded the file it made: what it meant to do
+    // (the name, the tag it chose) proves nothing, since another program can make a file there
+    // after the name was recorded, or had one there already.
+    let Some(made) = fill.made else {
         return Ok(false);
     };
-    Ok(look
-        .born(entry, &fill.final_path)
-        .map_err(|why| leave(&why))?
-        == Some(tag))
+    match fill.proof {
+        // A drive that keeps identities: the very file made.
+        Proof::StableId => Ok(look
+            .identity(entry, &fill.final_path)
+            .map_err(|why| leave(&why))?
+            == Some(made)),
+        // Identities change across a remount: the creation time PCTwin gave the file made.
+        Proof::Token => {
+            let Some(tag) = fill.tag.born else {
+                return Ok(false);
+            };
+            Ok(look
+                .born(entry, &fill.final_path)
+                .map_err(|why| leave(&why))?
+                == Some(tag))
+        }
+        Proof::SameMountId | Proof::None => Ok(false),
+    }
 }
 
 /// A temporary file to remove in clean-up.

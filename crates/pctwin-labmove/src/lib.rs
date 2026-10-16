@@ -394,6 +394,9 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         let folder = role_name(item.place.role);
         let outcome = match receiver.outcome(item.id) {
             Some(ReceiveOutcome::Finished(f)) => format!("landed: {folder}/{}", f.final_path),
+            Some(ReceiveOutcome::NeedsAction { finished, why }) => {
+                format!("needs-action: {folder}/{}: {why}", finished.final_path)
+            }
             Some(ReceiveOutcome::AlreadyThere(p)) => format!("already-there: {p}"),
             Some(ReceiveOutcome::Failed(why)) => format!("failed: {why}"),
             None => "no outcome".to_string(),

@@ -50,8 +50,6 @@ struct Stored {
 #[derive(Default)]
 struct Disk {
     files: HashMap<String, Stored>,
-    /// Stored paths marked hidden.
-    hidden: HashSet<String>,
     cannot: HashSet<String>,
     unreadable: HashSet<String>,
 }
@@ -110,10 +108,6 @@ impl Disk {
         f.start_of_temp = false;
         self
     }
-    fn hidden(mut self, path: &str) -> Self {
-        self.hidden.insert(path.into());
-        self
-    }
     fn cannot(mut self, path: &str) -> Self {
         self.cannot.insert(path.into());
         self
@@ -144,9 +138,6 @@ impl Look for Disk {
     }
     fn temp_path(&self, _: &Entry, _: Option<&str>) -> Option<String> {
         Some(TEMP.into())
-    }
-    fn hidden(&self, _: &Entry, stored: &str) -> Result<bool, String> {
-        Ok(self.hidden.contains(stored))
     }
     fn born(&self, _: &Entry, stored: &str) -> Result<Option<Born>, String> {
         if self.unreadable.contains(stored) {
@@ -243,13 +234,25 @@ fn a_crash_at_every_step_of_a_fill_ends_honestly() {
         filling(token(None)),
         &t().at_name(0, MADE, None)
     )));
-    // 3. Tagged, its identity not yet recorded: the tag proves it; empty, so removed.
-    assert_eq!(
-        decide(filling(token(None)), &t().at_name(0, MADE, Some(TOKEN))),
-        Action::RemoveFillThenName
-    );
-    // 4. Its identity recorded; 5. part copied: still PCTwin's partial, removed.
-    for len in [0, 1, 40, SIZE - 1] {
+    // 3. Tagged, its identity not yet recorded: what PCTwin meant to do proves nothing, and a
+    // tag can be copied (Windows gives a file made at a freed name the old one's creation time).
+    // Left, and said.
+    assert!(noting(&decide(
+        filling(token(None)),
+        &t().at_name(0, MADE, Some(TOKEN))
+    )));
+    assert!(noting(&decide(
+        filling(token(None)),
+        &t().at_name(40, MADE, Some(TOKEN))
+    )));
+    // 4. Its identity recorded, nothing in it yet: an empty file holds nothing of PCTwin's, and
+    // removing it could remove another program's. Left, and said.
+    assert!(noting(&decide(
+        filling(token(Some(MADE))),
+        &t().at_name(0, MADE, Some(TOKEN))
+    )));
+    // 5. Part copied: PCTwin's partial (recorded made, its tag, its bytes), removed.
+    for len in [1, 40, SIZE - 1] {
         assert_eq!(
             decide(
                 filling(token(Some(MADE))),
@@ -462,41 +465,45 @@ fn a_fill_s_temporary_file_is_known_for_clean_up() {
     }
 }
 
-/// Stopped between making the name and tagging it: an empty file, hidden from the moment it was
-/// made, and nothing recorded as made yet. Nothing but PCTwin's own exclusively made file can be
-/// at the name then, and an empty file holds nothing to lose: it is removed and the file named
-/// again. Anything else without the tag stays someone else's.
+/// Ownership is proven, never inferred from what PCTwin meant to do: until the journal has
+/// recorded the file PCTwin made, nothing at the name is PCTwin's, however it looks (empty,
+/// hidden, even carrying the tag). Another program can make a file there after PCTwin recorded
+/// the name and stopped, or when it found the name taken; that file is left, and said.
 #[test]
-fn an_empty_hidden_file_made_just_before_its_tag_is_pctwin_s() {
+fn nothing_at_the_name_is_pctwin_s_until_the_file_made_is_recorded() {
     let t = || Disk::default().temp();
-    let empty_hidden = t().at_name(0, id(70), None).hidden(NAME);
-    assert_eq!(
-        decide(filling(token(None)), &empty_hidden),
-        Action::RemoveFillThenName
-    );
-    // Not hidden: a file anyone could have made there.
-    assert!(noting(&decide(
+    for (len, born) in [(0, None), (0, Some(TOKEN)), (40, None), (40, Some(TOKEN))] {
+        for f in [token(None), fill(Proof::StableId, None, Some(TOKEN))] {
+            let a = decide(filling(f), &t().at_name(len, id(70), born));
+            assert!(noting(&a), "{len} {born:?}: {a:?}");
+        }
+    }
+    // The whole file, carrying the tag, but nothing recorded as made: still not taken over.
+    let a = decide(
         filling(token(None)),
-        &t().at_name(0, id(70), None)
-    )));
-    // Bytes in it, yet no tag: never PCTwin's (the tag comes before any byte).
-    assert!(noting(&decide(
-        filling(token(None)),
-        &t().at_name(40, id(70), None).hidden(NAME)
-    )));
-    // Its identity was recorded, so its tag came first: a missing tag means another file.
-    assert!(noting(&decide(
-        filling(token(Some(MADE))),
-        &t().at_name(0, id(70), None).hidden(NAME)
-    )));
-    // A fill not made hidden: the rule does not apply.
-    let mut plain = token(None);
-    plain.tag.hidden = false;
-    assert!(noting(&decide(filling(plain), &empty_hidden)));
-    // Once filled, it has its tag: an untagged empty file is not it.
-    let a = decide(filled(token(Some(MADE))), &empty_hidden);
-    assert!(
-        !matches!(a, Action::FinishFill | Action::RemoveFillThenName),
-        "{a:?}"
+        &t().at_name(SIZE, id(70), Some(TOKEN)),
     );
+    assert!(noting(&a), "{a:?}");
+    // On a drive that keeps identities, the identity made must be the one there: the tag alone
+    // never stands in for it.
+    let stable = fill(Proof::StableId, Some(MADE), Some(TOKEN));
+    let a = decide(filling(stable), &t().at_name(40, id(70), Some(TOKEN)));
+    assert!(noting(&a), "{a:?}");
+}
+
+/// A file PCTwin proved its own but with nothing in it is never removed after a restart: it
+/// holds nothing of PCTwin's, and a lookalike (a tag copied by the system) could be another
+/// program's. It is left, said in plain words, and the copy lands beside it.
+#[test]
+fn an_empty_file_at_the_name_is_never_removed_after_a_restart() {
+    let t = || Disk::default().temp();
+    for f in [token(Some(MADE)), fill(Proof::StableId, Some(MADE), None)] {
+        let born = (f.proof == Proof::Token).then_some(TOKEN);
+        let a = decide(filling(f), &t().at_name(0, MADE, born));
+        assert!(noting(&a), "{a:?}");
+        let Action::NameNoting(why) = a else {
+            unreachable!()
+        };
+        assert!(why.contains("empty"), "{why}");
+    }
 }

@@ -189,26 +189,34 @@ fn flags_of(file: &std::fs::File) -> io::Result<u32> {
 }
 
 /// macOS: whether the name `name` in `dir` holds the very file `file` PCTwin holds open (a plain
-/// file, not a link, with the same identity).
+/// file, not a link, with the same identity), and PCTwin's file is still linked: on FAT and
+/// exFAT a file's number is the place of its entry, which a file made where a removed one was
+/// can take.
 #[cfg(target_os = "macos")]
 fn name_holds(dir: &Dir, name: &str, file: &std::fs::File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
     match dir.symlink_metadata(name) {
         Ok(meta) if meta.is_file() => {}
         Ok(_) => return Ok(false),
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(e) => return Err(e),
     }
+    if file.metadata()?.nlink() == 0 {
+        return Ok(false);
+    }
     let there = dir.open(name)?.into_std();
     Ok(identity(&there)?.0 == identity(file)?.0)
 }
 
 /// macOS: marks the file PCTwin holds open as `file`, at `name` in `dir`, hidden, or clears the
-/// mark, keeping every other flag. No safe call sets a file's flags through its handle, so it is
-/// set by name (nix's `chflags`, by the folder's path now, read from the folder's own handle),
-/// and only after checking the name still holds this very file and no link; then the mark is
-/// read back through the handle, and must be as asked. Another file at the name refuses it
-/// ([`NameReplaced`]). `hook` (tests) runs before the check (`<op>:named`) and between the check
-/// and the call (`<op>:checked`), where `op` is `hide` or `show`.
+/// mark, changing no other flag. No safe call sets a file's flags through its handle or without
+/// following a link (nix has only `chflags`), so it is set by name, as close to the checks as can
+/// be: the name must hold this very file (not a link, still linked); then the folder's path is
+/// read from the folder's own handle, and the file at that exact path is looked at without
+/// following a link and must be PCTwin's file; its own flags, with only the hidden mark changed,
+/// are set; then the mark is read back through the handle, and must be as asked. Another file at
+/// the name refuses it ([`NameReplaced`]). `hook` (tests) runs before the checks
+/// (`<op>:named`) and just before the call (`<op>:checked`), where `op` is `hide` or `show`.
 #[cfg(target_os = "macos")]
 fn set_hidden_named(
     dir: &Dir,
@@ -226,17 +234,30 @@ fn set_hidden_named(
     if name.contains('/') || name.is_empty() || name == "." || name == ".." {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    let folder = rustix::fs::getpath(dir)?;
-    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(folder.as_bytes())).join(name);
     step("named")?;
     if !name_holds(dir, name, file)? {
         return Err(io::Error::other(NameReplaced));
     }
-    let now = flags_of(file)?;
-    let flags = if hidden {
-        now | UF_HIDDEN
-    } else {
-        now & !UF_HIDDEN
+    // The folder's path now, from its own handle, and the file at that exact path, not followed
+    // if it is a link: it must be PCTwin's very file, and only its own hidden mark changes.
+    let folder = rustix::fs::getpath(dir)?;
+    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(folder.as_bytes())).join(name);
+    let flags = {
+        use std::os::macos::fs::MetadataExt;
+        let there = std::fs::symlink_metadata(&path)?;
+        let held = file.metadata()?;
+        if !there.file_type().is_file()
+            || there.st_dev() != held.st_dev()
+            || there.st_ino() != held.st_ino()
+            || held.st_nlink() == 0
+        {
+            return Err(io::Error::other(NameReplaced));
+        }
+        if hidden {
+            there.st_flags() | UF_HIDDEN
+        } else {
+            there.st_flags() & !UF_HIDDEN
+        }
     };
     step("checked")?;
     nix::unistd::chflags(&path, nix::sys::stat::FileFlag::from_bits_retain(flags))
@@ -526,12 +547,16 @@ pub enum FillRemoval {
 /// the drive keeps identities, or the creation time it was given (the same rule as the journal's
 /// recovery table).
 fn proven_fill(file: &std::fs::File, fill: &Fill) -> io::Result<bool> {
-    if fill.proof == Proof::StableId && fill.made == Some(identity(file)?.0) {
-        return Ok(true);
-    }
-    Ok(matches!(fill.proof, Proof::StableId | Proof::Token)
-        && fill.tag.born.is_some()
-        && born_of(file) == fill.tag.born)
+    // Nothing is PCTwin's until the journal has recorded the file it made: what it meant to do
+    // (the name, the tag it chose) proves nothing (the journal's rule exactly).
+    let Some(made) = fill.made else {
+        return Ok(false);
+    };
+    Ok(match fill.proof {
+        Proof::StableId => made == identity(file)?.0,
+        Proof::Token => fill.tag.born.is_some() && born_of(file) == fill.tag.born,
+        Proof::SameMountId | Proof::None => false,
+    })
 }
 
 /// The two open files' first `len` bytes are the same, and `a` is exactly `len` long.
@@ -652,13 +677,10 @@ impl crate::Destination {
         }
         let mut held = dir.open(name)?.into_std();
         let mut source = self.open_read(temp)?;
-        // PCTwin's by its identity or tag; or made just before its tag: empty, hidden from the
-        // moment it was made, nothing recorded as made yet (the journal's rule exactly).
-        let made_before_tag =
-            len == 0 && fill.made.is_none() && fill.tag.hidden && is_hidden(&held)?;
-        if !(proven_fill(&held, fill)? || made_before_tag)
-            || !same_start_of(&mut held, &mut source, len)?
-        {
+        // PCTwin's by the file the journal recorded it made (its identity, or its tag), with at
+        // least one byte, all of them the start of the checked file. An empty file holds nothing
+        // of PCTwin's, and a lookalike could be another program's: never removed.
+        if len == 0 || !proven_fill(&held, fill)? || !same_start_of(&mut held, &mut source, len)? {
             return Ok(FillRemoval::NotProven);
         }
         let progress = Progress {
@@ -776,15 +798,15 @@ pub enum Shown {
     /// Proven PCTwin's, then shown, with its real dates: record it shown, with its identity as
     /// it is now (on a Mac the identity carries the creation date, just given back).
     Shown(FileId),
-    /// Already shown (no longer hidden, and the tag that goes last is gone): record it shown.
-    /// With its identity now when it is still the very file PCTwin made (the same file number
-    /// on the same drive, and, after a restart, its bytes the whole file's); otherwise the
-    /// identity recorded at the commit stays.
+    /// Already shown (no longer hidden, the tag that goes last gone, and PCTwin's copy: the very
+    /// file made, or after a restart the whole file's bytes): record it shown. With its identity
+    /// now when it is still the very file PCTwin made (the same file number on the same drive);
+    /// otherwise the identity recorded at the commit stays.
     AlreadyShown(Option<FileId>),
     /// Nothing is at its name now: nothing left to do; record it shown.
     Gone,
-    /// Hidden still, but nothing proves it PCTwin's now (another program's, or changed): left as
-    /// it is; record it shown, with a note.
+    /// Nothing proves it PCTwin's copy now (another program's, or changed), hidden or not: left
+    /// as it is; record it shown, with a note.
     NotProven,
 }
 
@@ -824,16 +846,19 @@ impl crate::Destination {
         let proven =
             proven_fill(&file, &show.fill)? && whole.unwrap_or(show.fill.made == Some(now));
         if !proven {
-            if is_hidden(&file)? {
-                return Ok(Shown::NotProven);
-            }
+            // Its tag gone: already shown, but only if it is PCTwin's copy, not hidden, and the
+            // very file made (in the same run), or the whole file's bytes (after a restart, when
+            // its identity may have changed). Anything else is left exactly as it is.
             let same = show
                 .fill
                 .made
                 .is_some_and(|m| m.volume == now.volume && m.index == now.index);
-            return Ok(Shown::AlreadyShown(
-                (same && whole.unwrap_or(true)).then_some(now),
-            ));
+            let ours = !is_hidden(&file)? && whole.unwrap_or(same);
+            return Ok(if ours {
+                Shown::AlreadyShown(same.then_some(now))
+            } else {
+                Shown::NotProven
+            });
         }
         let step = |what: &str| match &self.show_hook {
             Some(hook) => hook(what),

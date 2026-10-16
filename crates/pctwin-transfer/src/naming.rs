@@ -131,23 +131,45 @@ pub(crate) fn name_as<'d>(
     Ok(Named { claim, filled_in })
 }
 
-/// Said of a hidden file PCTwin made that it could not prove its own when it came to show it.
-fn left_hidden(stored: &str) -> String {
+/// Said of a file at the name that PCTwin could not prove its finished copy when it came to show
+/// it.
+fn left_unproven(stored: &str) -> String {
     format!(
-        "PCTwin could not confirm that the hidden file at {stored} is its finished copy, so it left it as it is"
+        "PCTwin could not confirm that the file at {stored} is its finished copy, so it left it as it is"
+    )
+}
+
+/// How showing a committed file filled in under its name ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ShowEnd {
+    /// Shown (now or before), with its real dates, and recorded so.
+    Shown,
+    /// Nothing is at its name now; recorded, nothing to show.
+    Gone,
+    /// Not proven PCTwin's copy: left as it is, and recorded with these plain words.
+    Left(String),
+    /// Could not be shown now (the drive refused or went away): still hidden, recorded as
+    /// waiting, and finished when PCTwin starts again. Why, in plain words.
+    Later(String),
+}
+
+/// Said of a copy committed but not yet shown.
+pub(crate) fn shows_later(why: &dyn std::fmt::Display) -> String {
+    format!(
+        "PCTwin copied and checked it, but could not yet make it visible ({why}); it does that when PCTwin starts again"
     )
 }
 
 /// A file filled in under its real name, checked and recorded filled: committed while still
-/// hidden and tagged (with what showing it needs), then shown, then recorded shown. Returns, in
-/// plain words, what was left if PCTwin could not prove the file its own when it came to show it.
+/// hidden and tagged (with what showing it needs), then shown, then recorded shown. Returns how
+/// the show ended, which the person must be told unless it was shown.
 pub(crate) fn commit_and_show(
     journal: &dyn Ledger,
     dest: &Destination,
     id: u64,
     landed: Landed,
     show: &Show,
-) -> Result<Option<String>, JournalError> {
+) -> Result<ShowEnd, JournalError> {
     journal.committed_showing(id, landed, show)?;
     // Just filled in by this very program: its recorded identity is the second check.
     show_committed(journal, dest, id, show, ShowCheck::Made)
@@ -161,25 +183,26 @@ pub(crate) fn show_committed(
     id: u64,
     show: &Show,
     check: ShowCheck<'_>,
-) -> Result<Option<String>, JournalError> {
+) -> Result<ShowEnd, JournalError> {
     match dest.finish_show(&show.fill.final_path, show, check) {
         Ok(Shown::Shown(now)) => {
             journal.shown(id, None, Some(now))?;
-            Ok(None)
+            Ok(ShowEnd::Shown)
         }
         Ok(Shown::AlreadyShown(now)) => {
             journal.shown(id, None, now)?;
-            Ok(None)
+            Ok(ShowEnd::Shown)
         }
         Ok(Shown::Gone) => {
             journal.shown(id, None, None)?;
-            Ok(None)
+            Ok(ShowEnd::Gone)
         }
         Ok(Shown::NotProven) => {
-            let note = left_hidden(&show.fill.final_path);
+            let note = left_unproven(&show.fill.final_path);
             journal.shown(id, Some(&note), None)?;
-            Ok(Some(note))
+            Ok(ShowEnd::Left(note))
         }
-        Err(_) => Ok(None),
+        // Still waiting in the journal: shown when PCTwin starts again.
+        Err(e) => Ok(ShowEnd::Later(shows_later(&e))),
     }
 }

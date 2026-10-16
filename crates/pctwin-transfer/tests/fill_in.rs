@@ -72,6 +72,20 @@ async fn send(
     table: &Destinations,
     journal: &dyn Ledger,
 ) -> Result<(), TransferError> {
+    send_outcome(old, bytes, path, table, journal).await.0
+}
+
+/// As [`send`], with what the new laptop reports for the file.
+async fn send_outcome(
+    old: &Path,
+    bytes: &[u8],
+    path: &str,
+    table: &Destinations,
+    journal: &dyn Ledger,
+) -> (
+    Result<(), TransferError>,
+    Option<pctwin_transfer::ReceiveOutcome>,
+) {
     let source = old.join("source.bin");
     std::fs::write(&source, bytes).unwrap();
     let job = SendJob {
@@ -100,7 +114,8 @@ async fn send(
     })
     .await
     .expect("the move hung");
-    received
+    let outcome = receiver.outcome(item(1));
+    (received, outcome)
 }
 
 fn names(dir: &Path) -> Vec<String> {
@@ -222,7 +237,19 @@ impl Ledger for Breaks<'_> {
         proof: pctwin_journal::Proof,
     ) -> Result<(), JournalError> {
         self.check("filling")?;
-        self.inner.filling(id, final_path, tag, proof)
+        // Another program takes the name just after it is recorded, so the next one is about to
+        // be recorded: stop dead before it is.
+        let race = std::env::var_os("PCTWIN_TAKE_THEN_DIE").map(PathBuf::from);
+        if race.is_some() && FILLINGS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            std::process::abort();
+        }
+        let r = self.then("filling", self.inner.filling(id, final_path, tag, proof));
+        if let Some(usb) = race
+            && r.is_ok()
+        {
+            their_empty_hidden(&usb.join(final_path));
+        }
+        r
     }
     fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
         self.check("fill-made")?;
@@ -243,7 +270,17 @@ impl Ledger for Breaks<'_> {
         show: &pctwin_journal::Show,
     ) -> Result<(), JournalError> {
         self.check("committed")?;
-        self.then("committed", self.inner.committed_showing(id, landed, show))
+        let r = self.then("committed", self.inner.committed_showing(id, landed, show));
+        // Another program puts its own file in place of PCTwin's just after the commit (set
+        // only in a separate copy of this program, so no other test sees it).
+        if let Some(usb) = std::env::var_os("PCTWIN_REPLACE_AFTER_COMMIT").map(PathBuf::from)
+            && r.is_ok()
+        {
+            let at = usb.join(&show.fill.final_path);
+            std::fs::remove_file(&at).unwrap();
+            their_empty_hidden(&at);
+        }
+        r
     }
     fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
         self.check("shown")?;
@@ -507,12 +544,188 @@ async fn stops_dead_finishing() {
     unreachable!("the laptop was meant to stop dead at {at}");
 }
 
+/// How many fills a test run has recorded (for a stop just before the second).
+static FILLINGS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Makes `path` as another program's empty file, marked hidden where the system has a mark.
+fn their_empty_hidden(path: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .attributes(0x2)
+            .open(path)
+            .unwrap();
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::write(path, b"").unwrap();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let done = std::process::Command::new("chflags")
+            .arg("hidden")
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(done.success());
+    }
+}
+
+/// Runs a move of c.bin in a separate copy of this program, stopped dead as `env` says.
+fn stopped_naming(work: &Path, env: (&str, &str)) {
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "stops_dead_naming", "--nocapture"])
+        .env("PCTWIN_KILL_WORK", work)
+        .env(env.0, env.1)
+        .status()
+        .unwrap();
+    assert!(!status.success(), "the laptop was meant to stop dead");
+}
+
+/// After recovery: another program's empty file is still at c.bin, untouched; PCTwin's copy is
+/// whole under another name, committed; and the person is told about c.bin in plain words.
+fn assert_theirs_kept(journal: &Journal, usb: &Path, r: &pctwin_transfer::Recovered) {
+    assert_eq!(
+        std::fs::read(usb.join("c.bin")).unwrap(),
+        b"",
+        "their file at c.bin was removed or taken over: {r:?}"
+    );
+    let e = &journal.entries().unwrap()[0];
+    let State::Committed { final_path, .. } = &e.state else {
+        panic!("{:?} {r:?}", e.state);
+    };
+    assert_ne!(final_path, "c.bin");
+    assert_eq!(std::fs::read(usb.join(final_path)).unwrap(), data(BIG));
+    assert!(
+        r.notes.iter().any(|(_, n)| n.ends_with("c.bin")),
+        "c.bin left without a word: {r:?}"
+    );
+}
+
+/// The review's probe: the laptop stops dead right after the journal records the name it is
+/// about to fill in, before the file is made; then another program makes an empty hidden file at
+/// that name. What PCTwin meant to do proves nothing: recovery leaves that file exactly as it
+/// is, says so, and puts the copy beside it.
+#[test]
+fn an_empty_hidden_file_made_after_pctwin_stopped_is_never_removed_or_taken() {
+    let work = tempfile::tempdir().unwrap();
+    let (_, usb, jdir) = dirs(work.path());
+    stopped_naming(work.path(), ("PCTWIN_DIE_AT", "journal:filling"));
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let e = journal.entries().unwrap()[0].clone();
+    assert!(
+        matches!(&e.state, State::Filling { fill, .. } if fill.made.is_none()),
+        "{:?}",
+        e.state
+    );
+    assert!(
+        !usb.join("c.bin").exists(),
+        "PCTwin made nothing at the name"
+    );
+    their_empty_hidden(&usb.join("c.bin"));
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    assert_theirs_kept(&journal, &usb, &r);
+}
+
+/// The other way in: another program makes an empty hidden file at the name just after PCTwin
+/// recorded it, so the name is taken, and the laptop stops dead before it records the next name. Recovery still
+/// leaves that file, says so, and puts the copy beside it.
+#[test]
+fn a_taken_name_s_file_is_never_removed_after_a_stop_before_the_next_name() {
+    let work = tempfile::tempdir().unwrap();
+    let (_, usb, jdir) = dirs(work.path());
+    stopped_naming(work.path(), ("PCTWIN_TAKE_THEN_DIE", usb.to_str().unwrap()));
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let e = journal.entries().unwrap()[0].clone();
+    assert!(
+        matches!(&e.state, State::Filling { fill, .. } if fill.final_path == "c.bin" && fill.made.is_none()),
+        "{:?}",
+        e.state
+    );
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    assert_theirs_kept(&journal, &usb, &r);
+}
+
+/// Another program puts its own file in place of PCTwin's just after the copy is committed and
+/// before it is shown (on Windows its file even takes PCTwin's tag: a file made at a freed name
+/// gets the old one's creation time). That file is never shown or touched, and the person is
+/// told in the same move, never that the file was copied.
+#[test]
+fn a_file_replaced_before_it_is_shown_is_reported_in_the_same_move() {
+    let work = tempfile::tempdir().unwrap();
+    let (_, usb, jdir) = dirs(work.path());
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "moves_and_reports", "--nocapture"])
+        .env("PCTWIN_KILL_WORK", work.path())
+        .env("PCTWIN_REPLACE_AFTER_COMMIT", &usb)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let said = std::fs::read_to_string(work.path().join("outcome.txt")).unwrap();
+    assert!(said.starts_with("Some(NeedsAction"), "{said}");
+    assert!(said.contains("could not confirm"), "{said}");
+    assert_eq!(
+        std::fs::read(usb.join("c.bin")).unwrap(),
+        b"",
+        "their file was touched"
+    );
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let id = journal.entries().unwrap()[0].id;
+    assert_eq!(journal.notes(id).unwrap().len(), 1, "kept for good");
+}
+
+/// The part run as a separate program by the test above: a whole move, its outcome written to
+/// outcome.txt.
+#[tokio::test]
+#[ignore = "run by a_file_replaced_before_it_is_shown_is_reported_in_the_same_move"]
+async fn moves_and_reports() {
+    let work = PathBuf::from(std::env::var_os("PCTWIN_KILL_WORK").expect("run by its parent"));
+    let (old, usb, jdir) = dirs(&work);
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let breaks = Breaks {
+        inner: &journal,
+        at: "",
+        dies_after: "",
+    };
+    let (sent, outcome) = send_outcome(&old, &data(BIG), "c.bin", &table, &breaks).await;
+    sent.unwrap();
+    std::fs::write(work.join("outcome.txt"), format!("{outcome:?}")).unwrap();
+}
+
+/// The part run as a separate program by the two tests above.
+#[tokio::test]
+#[ignore = "run by the tests of a stop while naming"]
+async fn stops_dead_naming() {
+    let work = PathBuf::from(std::env::var_os("PCTWIN_KILL_WORK").expect("run by its parent"));
+    let (old, usb, jdir) = dirs(&work);
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let dies_after = if std::env::var("PCTWIN_DIE_AT").as_deref() == Ok("journal:filling") {
+        "filling"
+    } else {
+        ""
+    };
+    let breaks = Breaks {
+        inner: &journal,
+        at: "",
+        dies_after,
+    };
+    let _ = send(&old, &data(BIG), "c.bin", &table, &breaks).await;
+    unreachable!("the laptop was meant to stop dead");
+}
+
 /// The laptop is killed (by its process number, as a power cut or a crash would stop it) at a
 /// random moment of a move onto a drive with no safe rename, again and again
 /// (PCTWIN_KILL_RUNS, 100 unless set). After each, recovery never leaves a second copy, nor a
 /// partial or hidden file under a real name, nor anything still to show. The one thing it may
-/// leave, where a file cannot be made hidden as it is made, is PCTwin's own empty file, and it
-/// says so.
+/// leave is an empty file nothing proves is PCTwin's (a stop just after it was made), and it says
+/// so.
 #[test]
 fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
     use std::hash::{BuildHasher, RandomState};
@@ -566,13 +779,12 @@ fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
         for name in &whole {
             assert!(!dest.hidden(name).unwrap(), "run {run}: {name} left hidden");
         }
-        // Where a file cannot be made hidden as it is made (a Mac sets the mark just after; Linux
-        // never can, and its drives that would need this are refused), a stop in that instant
-        // leaves PCTwin's empty file, visible and unproven. It is left, and said, and the copy
-        // lands beside it: nothing is lost, and no copy is made twice.
+        // A stop between making the file and recording it made (or before its first byte) leaves
+        // an empty file nothing proves is PCTwin's. It is left, and said, and the copy lands
+        // beside it: nothing is lost, and no copy is made twice.
         for name in &other {
             assert!(
-                !cfg!(windows) && std::fs::metadata(usb.join(name)).unwrap().len() == 0,
+                std::fs::metadata(usb.join(name)).unwrap().len() == 0,
                 "run {run} ({at:?}): a partial copy under {name}: {r:?}"
             );
             assert!(
@@ -646,9 +858,16 @@ async fn a_show_that_fails_part_way_is_finished_at_the_next_start() {
             }
             Ok(())
         });
-    send(&old, &data(BIG), "c.bin", &table_for(failing), &journal)
-        .await
-        .unwrap();
+    let (sent, outcome) =
+        send_outcome(&old, &data(BIG), "c.bin", &table_for(failing), &journal).await;
+    sent.unwrap();
+    // Told in the same move: never reported copied while it is still hidden.
+    match outcome {
+        Some(pctwin_transfer::ReceiveOutcome::NeedsAction { why, .. }) => {
+            assert!(why.contains("starts again"), "{why}");
+        }
+        other => panic!("reported {other:?}"),
+    }
     let id = journal.entries().unwrap()[0].id;
     assert!(
         journal.show_pending(id).unwrap().is_some(),

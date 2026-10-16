@@ -599,3 +599,59 @@ fn a_drive_put_in_another_s_place_at_the_same_folder_is_judged_again() {
         "the new drive was tested again"
     );
 }
+
+/// On FAT and exFAT a file's number is where its entry sits, which a file made in place of a
+/// removed or moved one can take. PCTwin tells its own open file from such a file before it sets
+/// or clears a hidden mark by name (the same file, by number and creation time, and still
+/// linked), so this checks, on each real drive, that the check tells them apart when the other
+/// file is made at once (the worst case). Prints what each drive gave, for the CI log.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_file_made_in_place_of_pctwin_s_is_told_apart_from_it() {
+    use std::os::unix::fs::MetadataExt;
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        let dir = fresh(&drive.path, "pctwin-fat-slot");
+        let same = |held: &std::fs::File, at: &Path| {
+            let there = std::fs::File::open(at).unwrap();
+            let id_same = pctwin_gate::file_identity(held).unwrap()
+                == pctwin_gate::file_identity(&there).unwrap();
+            let linked = held.metadata().unwrap().nlink() > 0;
+            (id_same, linked)
+        };
+        // Removed, and another file made at once at its name.
+        let at = dir.join("s.bin");
+        std::fs::write(&at, b"ours").unwrap();
+        let held = std::fs::File::open(&at).unwrap();
+        std::fs::remove_file(&at).unwrap();
+        std::fs::write(&at, b"theirs").unwrap();
+        let (id_same, linked) = same(&held, &at);
+        println!(
+            "{}: removed then made: same number and time {id_same}, ours still linked {linked}",
+            drive.show()
+        );
+        assert!(
+            !(id_same && linked),
+            "{}: a file made in place of a removed one passes as PCTwin's",
+            drive.show()
+        );
+        // Moved away, and another file made at once at its name.
+        let at = dir.join("m.bin");
+        std::fs::write(&at, b"ours").unwrap();
+        let held = std::fs::File::open(&at).unwrap();
+        std::fs::rename(&at, dir.join("moved.bin")).unwrap();
+        std::fs::write(&at, b"theirs").unwrap();
+        let (id_same, linked) = same(&held, &at);
+        println!(
+            "{}: moved then made: same number and time {id_same}, ours still linked {linked}",
+            drive.show()
+        );
+        assert!(
+            !(id_same && linked),
+            "{}: a file made in place of a moved one passes as PCTwin's",
+            drive.show()
+        );
+    });
+}

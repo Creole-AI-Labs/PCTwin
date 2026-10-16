@@ -1716,6 +1716,14 @@ fn hash_reader(reader: &mut impl std::io::Read) -> std::io::Result<[u8; 32]> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReceiveOutcome {
     Finished(Finished),
+    /// Copied and checked, and kept, but not finished as a visible, proven copy: filled in under
+    /// its name and not yet shown (shown when PCTwin starts again), or a file PCTwin could not
+    /// prove its own was found at its name and left as it is. Never reported as copied; `why`
+    /// says, in plain words, what happened and what comes next.
+    NeedsAction {
+        finished: Finished,
+        why: String,
+    },
     /// An identical file was already there (its stored path); nothing was copied.
     AlreadyThere(String),
     Failed(String),
@@ -1782,7 +1790,9 @@ impl Ended {
     fn spent(&self) -> bool {
         matches!(
             self.outcome,
-            ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_)
+            ReceiveOutcome::Finished(_)
+                | ReceiveOutcome::NeedsAction { .. }
+                | ReceiveOutcome::AlreadyThere(_)
         )
     }
 }
@@ -2264,7 +2274,11 @@ impl<'d> ReceiverSession<'d> {
                         ReceiveOutcome::Failed(why)
                     }
                 };
-                let ok = matches!(outcome, ReceiveOutcome::Finished(_));
+                // Landed (kept on this laptop, never sent again), even when it still needs action.
+                let ok = matches!(
+                    outcome,
+                    ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
+                );
                 self.allowance.ended(s.item, ok);
                 let landed = ok.then(|| (s.destination.clone(), s.size));
                 self.end(s.item, stream, outcome, landed);
@@ -2766,8 +2780,18 @@ fn land(
                     modified_ns: show.modified_ns,
                     file: Some(file_id(stat.id)),
                 };
-                crate::naming::commit_and_show(journal, dest, entry, landed, &show)
+                let end = crate::naming::commit_and_show(journal, dest, entry, landed, &show)
                     .map_err(record)?;
+                // Kept whatever the show came to: the journal has it, and recovery or the person
+                // finishes it. Reported copied only once shown.
+                let finished = claimed.keep();
+                return Ok(match end {
+                    crate::naming::ShowEnd::Shown => ReceiveOutcome::Finished(finished),
+                    crate::naming::ShowEnd::Gone => ReceiveOutcome::Failed(REMOVED_AT_ONCE.into()),
+                    crate::naming::ShowEnd::Left(why) | crate::naming::ShowEnd::Later(why) => {
+                        ReceiveOutcome::NeedsAction { finished, why }
+                    }
+                });
             } else {
                 journal
                     .committed(
