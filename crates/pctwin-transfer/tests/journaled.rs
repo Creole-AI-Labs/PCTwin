@@ -388,7 +388,10 @@ async fn a_file_that_changed_while_read_is_recorded_failed_never_verified() {
         SenderSession::new(vec![job.clone()], 1).with_opener(Arc::new(Growing(job.source.clone())));
     let (mut a, mut b) = mem_pair();
     let meter = receiver.meter();
-    let _ = common::unless_stuck(&meter, 1000, async {
+    // The file changes on every read, so it is honestly sent once per attempt, a byte longer each time.
+    let to_move = u64::from(pctwin_transfer::MAX_ATTEMPTS)
+        * (1000 + u64::from(pctwin_transfer::MAX_ATTEMPTS));
+    let _ = common::unless_stuck(&meter, to_move, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
     .await;
