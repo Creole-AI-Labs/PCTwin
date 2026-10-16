@@ -207,8 +207,26 @@ fn things_in_odd_places_on_every_drive_are_found_and_the_systems_are_only_counte
     write(&lab.c.join("Projects/app/main.rs"), 100);
     write(&lab.d.join("Photos/2019/beach.jpg"), 200);
     write(&lab.d.join("notes.txt"), 10);
-    write(&lab.c.join("Windows/System32/kernel.dll"), 5000);
-    write(&lab.c.join("Program Files/App/app.exe"), 3000);
+    // Each system's own shapes: its system folder, its programs, a program's data in the home.
+    let (system_dir, apps_dir, app_data, junk) = if cfg!(windows) {
+        (
+            "Windows",
+            "Program Files",
+            "AppData/Local/Google",
+            "AppData/Local/Temp",
+        )
+    } else if cfg!(target_os = "macos") {
+        (
+            "System",
+            "Applications",
+            "Library/Application Support/Google",
+            "Library/Caches",
+        )
+    } else {
+        ("usr", "opt", ".config/Google", ".cache")
+    };
+    write(&lab.c.join(system_dir).join("System32/kernel.dll"), 5000);
+    write(&lab.c.join(apps_dir).join("App/app.exe"), 3000);
     write(&lab.ada.join("Documents/cv.docx"), 40);
     write(&lab.ada.join("code/site/index.html"), 50);
     write(
@@ -219,8 +237,8 @@ fn things_in_odd_places_on_every_drive_are_found_and_the_systems_are_only_counte
         &lab.ada.join("code/site/node_modules/left-pad/package.json"),
         30,
     );
-    write(&lab.ada.join("AppData/Local/Google/Chrome/prefs"), 60);
-    write(&lab.ada.join("AppData/Local/Temp/junk.tmp"), 15);
+    write(&lab.ada.join(app_data).join("Chrome/prefs"), 60);
+    write(&lab.ada.join(junk).join("junk.tmp"), 15);
     let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
 
     assert!(s.finished);
@@ -261,10 +279,10 @@ fn things_in_odd_places_on_every_drive_are_found_and_the_systems_are_only_counte
     let windows = s
         .places
         .iter()
-        .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with("Windows")))
+        .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with(system_dir)))
         .unwrap();
     assert_eq!(windows.placement.whose, Whose::System);
-    assert!(matches!(&windows.placement.rule, Rule::RulesFile { row } if row.contains("Windows")));
+    assert!(matches!(&windows.placement.rule, Rule::RulesFile { row } if row.contains(system_dir)));
     assert_eq!(windows.bytes, 5000);
     // Every item says what placed it.
     for item in &s.record.items {
