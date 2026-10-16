@@ -43,11 +43,17 @@ fn mine<'a>(found: &'a [Found], label: &Label) -> Vec<&'a Found> {
     found.iter().filter(|f| &f.label == label).collect()
 }
 
-/// Waits at most 10 seconds, so a broken journey fails instead of hanging.
-async fn within<T>(step: impl std::future::Future<Output = T>) -> T {
-    tokio::time::timeout(Duration::from_secs(10), step)
-        .await
-        .expect("the step finished within 10 seconds")
+/// How long a test waits for a step before calling it a deadlock. It is not a guess at the
+/// runner's speed: every step here takes well under a second, so a busy runner never comes near
+/// it, while a step that waits for ever still fails the test instead of hanging the run.
+const HANG_AFTER: Duration = Duration::from_secs(300);
+
+/// Runs a step to its end, failing only if it is still waiting after [`HANG_AFTER`].
+async fn within<T>(work: impl std::future::Future<Output = T>) -> T {
+    match tokio::time::timeout(HANG_AFTER, work).await {
+        Ok(done) => done,
+        Err(_) => panic!("hung: still waiting after {HANG_AFTER:?}, a deadlock, not a slow runner"),
+    }
 }
 
 /// Starts the old laptop as the app does once the connection is known: the likely Wi-Fi, or

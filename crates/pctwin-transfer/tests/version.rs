@@ -39,11 +39,14 @@ fn v(oldest: u16, newest: u16) -> Versions {
     Versions::new(oldest, newest).unwrap()
 }
 
-/// Waits for `f`, failing the test instead of hanging if it never finishes.
+/// Waits for `f`, which must finish without waiting on the clock at all. The tests run on
+/// tokio's paused clock, which moves only when nothing else can run: a slow runner never moves
+/// it, while a handshake that hangs, or waits for an answer that is already there, moves it at
+/// once and fails here. So this is judged by what happens, not by the clock on the wall.
 async fn within<F: Future>(f: F) -> F::Output {
-    tokio::time::timeout(Duration::from_secs(5), f)
+    tokio::time::timeout(VERSION_WAIT / 2, f)
         .await
-        .expect("the handshake hung")
+        .expect("the handshake hung or waited on the clock")
 }
 
 /// Runs the handshake between two laptops speaking `a` and `b`.
@@ -91,14 +94,14 @@ fn a_range_must_start_at_one_or_later_and_not_run_backwards() {
     assert!(Versions::new(1, u16::MAX).is_some());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn two_laptops_on_this_release_agree_on_version_two() {
     let (a, b) = agree(MOVE_PROTOCOL, MOVE_PROTOCOL).await;
     assert_eq!(a.unwrap(), 2);
     assert_eq!(b.unwrap(), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn both_use_the_highest_version_they_share() {
     // A newer laptop that still speaks one version back, and an older one.
     let (a, b) = agree(v(1, 2), v(1, 1)).await;
@@ -109,7 +112,7 @@ async fn both_use_the_highest_version_they_share() {
     assert_eq!(b.unwrap(), 3);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn each_laptop_says_which_one_is_older_when_they_share_no_version() {
     let (newer, older) = agree(v(3, 4), v(1, 2)).await;
     assert!(
@@ -128,7 +131,7 @@ async fn each_laptop_says_which_one_is_older_when_they_share_no_version() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_version_message_is_short_and_sent_once() {
     let (mut x, mut y) = pair();
     let (a, _) = within(async {
@@ -145,7 +148,7 @@ async fn the_version_message_is_short_and_sent_once() {
     assert!(y.recv().await.is_err());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_message_of_the_wrong_kind_or_size_is_refused() {
     let good = sent_by(MOVE_PROTOCOL).await;
     assert!(receive(&good).await.is_ok());
@@ -165,7 +168,7 @@ async fn a_message_of_the_wrong_kind_or_size_is_refused() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_range_that_starts_at_zero_or_runs_backwards_is_refused() {
     let good = sent_by(v(1, 1)).await;
     let kind = good[0];
@@ -183,7 +186,7 @@ async fn a_range_that_starts_at_zero_or_runs_backwards_is_refused() {
 
 /// Every release reads this message the same way: a kind byte, then the oldest and the newest
 /// version as big-endian 16-bit numbers.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_message_form_is_fixed_for_every_release() {
     let kind = sent_by(v(1, 1)).await[0];
     // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33).
@@ -193,7 +196,7 @@ async fn the_message_form_is_fixed_for_every_release() {
     assert_eq!(receive(&[kind, 0, 1, 0, 3]).await.unwrap(), 2);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_dropped_connection_is_reported_as_one() {
     let (mut x, y) = pair();
     drop(y);
@@ -204,7 +207,7 @@ async fn a_dropped_connection_is_reported_as_one() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_connection_that_drops_before_the_reply_is_reported_as_one() {
     let (mut x, y) = pair();
     // The other laptop takes the message, then hangs up without answering.
@@ -255,6 +258,7 @@ proptest! {
     fn any_bytes_end_in_an_answer_never_a_crash(bytes in proptest::collection::vec(any::<u8>(), 0..12)) {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
+            .start_paused(true)
             .build().unwrap();
         if let Ok(n) = rt.block_on(receive(&bytes)) {
             prop_assert!(n >= MOVE_PROTOCOL.oldest() && n <= MOVE_PROTOCOL.newest());

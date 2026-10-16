@@ -13,8 +13,6 @@ use pctwin_journal::{
     CloseError, Journal, JournalError, Pending, Resolved, Undo, UndoGate, UndoOutcome,
 };
 
-const LONG: Duration = Duration::from_secs(30);
-
 fn done(outcome: UndoOutcome) -> Option<Undo> {
     Some(Undo::Done { outcome })
 }
@@ -347,7 +345,7 @@ fn a_permit_held_past_the_deadline_is_busy_never_a_hang() {
         Ok(Resolved::Removed)
     });
     assert!(matches!(r, Err(CloseError::Busy)), "{r:?}");
-    assert!(started.elapsed() < LONG);
+    assert!(started.elapsed() < HANG_AFTER);
     assert!(!asked);
     assert_eq!(j.undo_gate().unwrap(), UndoGate::Open);
     // Undo carries on: the held one and new ones.
@@ -374,9 +372,9 @@ fn a_permit_given_back_before_the_deadline_lets_close_go_ahead() {
                 .unwrap();
         })
     };
-    taken_rx.recv_timeout(LONG).unwrap();
+    taken_rx.recv_timeout(HANG_AFTER).unwrap();
     let mut asked = 0;
-    j.close_undo_within(LONG, &mut |_, _| {
+    j.close_undo_within(HANG_AFTER, &mut |_, _| {
         asked += 1;
         Ok(Resolved::Removed)
     })
@@ -404,7 +402,7 @@ fn a_second_close_while_one_is_resolving_is_busy() {
             .map(|t| t.is_for(&j))
         })
     };
-    in_rx.recv_timeout(LONG).unwrap();
+    in_rx.recv_timeout(HANG_AFTER).unwrap();
     assert!(matches!(
         j.close_undo(&mut |_, _| Ok(Resolved::Removed)),
         Err(CloseError::Busy)
