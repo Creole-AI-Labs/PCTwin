@@ -6,6 +6,11 @@ use std::num::NonZeroU64;
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo};
 use pctwin_record::{ItemId, LaptopId};
 
+/// How long a test waits on another thread (or process) before calling it a deadlock. It is
+/// not a guess at the runner's speed: what is waited for takes well under a second, so a busy
+/// runner never comes near it, while a wait that never ends still fails the test.
+pub const HANG_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
+
 pub fn planned(n: u8) -> PlannedWrite {
     PlannedWrite {
         download_mark: None,

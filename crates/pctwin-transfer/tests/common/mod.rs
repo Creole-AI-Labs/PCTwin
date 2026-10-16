@@ -75,6 +75,24 @@ pub fn journal() -> &'static pctwin_journal::Journal {
     ))
 }
 
+/// How long a test lets an exchange that lands no file bytes (a scripted old or new laptop, a
+/// handshake, a check of the originals) run before it calls it a deadlock. It is not a guess at
+/// the runner's speed: these exchanges take a few seconds here and once took just over 30 s on a
+/// busy Windows runner, so this is ten times the slowest seen. A move that lands bytes is judged
+/// by [`unless_stuck`] instead, which never runs out while bytes keep landing.
+#[allow(dead_code)]
+pub const HANG_AFTER: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Runs `work` to its end, failing only if it is still waiting after [`HANG_AFTER`]: a deadlock
+/// fails the test instead of hanging the run, and a slow runner does not.
+#[allow(dead_code)]
+pub async fn no_hang<T>(work: impl std::future::Future<Output = T>) -> T {
+    match tokio::time::timeout(HANG_AFTER, work).await {
+        Ok(done) => done,
+        Err(_) => panic!("hung: still waiting after {HANG_AFTER:?}, a deadlock, not a slow runner"),
+    }
+}
+
 /// How long a move may go without a single new byte landing on the new laptop before a test
 /// calls it stuck.
 #[allow(dead_code)]

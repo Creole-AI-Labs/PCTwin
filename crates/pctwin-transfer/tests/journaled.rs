@@ -113,6 +113,11 @@ async fn move_all(
     Result<(), TransferError>,
     SenderSession,
 ) {
+    let to_move = jobs
+        .iter()
+        .map(|j| std::fs::metadata(&j.source).map_or(0, |m| m.len()))
+        .sum();
+    let meter = receiver.meter();
     let mut sender = SenderSession::new(jobs, 2);
     let (a, b) = mem_pair();
     // Each side's end closes when it stops, as a real link does when an app stops.
@@ -124,11 +129,10 @@ async fn move_all(
         let mut b = b;
         receiver.run(&mut b).await
     };
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let (sent, received) = common::unless_stuck(&meter, to_move, async {
         tokio::join!(send_side, receive_side)
     })
-    .await
-    .expect("the move hung");
+    .await;
     (sent, received, sender)
 }
 
@@ -383,11 +387,11 @@ async fn a_file_that_changed_while_read_is_recorded_failed_never_verified() {
     let mut sender =
         SenderSession::new(vec![job.clone()], 1).with_opener(Arc::new(Growing(job.source.clone())));
     let (mut a, mut b) = mem_pair();
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, 1000, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let all = w.journal.entries().unwrap();
     assert!(!all.is_empty());
     for e in all {
@@ -646,11 +650,7 @@ async fn a_file_that_fails_is_recorded_with_its_reason_even_if_its_end_never_com
         let mut b = b;
         receiver.run(&mut b).await
     };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(send_side, receive_side)
-    })
-    .await
-    .expect("hung");
+    let _ = common::no_hang(async { tokio::join!(send_side, receive_side) }).await;
     let e = only_entry(&w.journal);
     let State::Failed { why, .. } = &e.state else {
         panic!("{:?}", e.state)
@@ -786,11 +786,7 @@ async fn a_block_sent_over_and_over_is_recorded_once() {
         let mut new = new;
         receiver.run(&mut new).await
     };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receive)
-    })
-    .await
-    .expect("hung");
+    let _ = common::no_hang(async { tokio::join!(script, receive) }).await;
     // One block landed: nothing to checkpoint in a batch yet.
     assert_eq!(counting.checkpoints.get(), 0);
     drop(receiver);
