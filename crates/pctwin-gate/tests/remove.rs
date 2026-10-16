@@ -760,3 +760,32 @@ fn a_lent_right_that_has_ended_removes_nothing() {
     );
     assert_eq!(names(&root.path().join("Docs")), ["a.txt"]);
 }
+
+/// Windows: on a drive without hard links (FAT and exFAT), a file's number is where its entry
+/// sits in its folder, so a different file made later at that place can carry the number PCTwin
+/// recorded. Undo never removes there: the copy is kept, as on Linux and macOS (decided 15
+/// October 2026).
+#[cfg(windows)]
+#[test]
+fn undo_keeps_every_copy_on_a_drive_whose_file_numbers_cannot_be_trusted() {
+    use pctwin_gate::{DriveKind, DriveProfile, Naming};
+    let (root, dest) = setup();
+    std::fs::write(root.path().join("Docs/a.txt"), b"abc").unwrap();
+    let expect = id(&dest, "Docs/a.txt");
+    let fat = dest.with_profile(
+        DriveProfile::of(DriveKind::Fat)
+            .with_naming(Naming::Atomic)
+            .without_hard_links(),
+    );
+    let checked = AtomicBool::new(false);
+    let r = fat.rm("Docs/a.txt", expect, |_| {
+        checked.store(true, Ordering::SeqCst);
+        Ok(true)
+    });
+    assert_eq!(r.unwrap(), Removed::Unsupported);
+    assert!(!checked.load(Ordering::SeqCst), "nothing was read");
+    assert_eq!(
+        std::fs::read(root.path().join("Docs/a.txt")).unwrap(),
+        b"abc"
+    );
+}

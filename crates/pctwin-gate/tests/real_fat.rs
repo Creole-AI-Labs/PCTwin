@@ -404,6 +404,128 @@ fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
     });
 }
 
+/// PCTwin and another program make the same name at the same moment, many times, the way this
+/// drive names files: exactly one of them gets it every time, and the other's file is never
+/// touched or mixed in. Each round gives one side or the other a different head start (up to a
+/// few times what making a file takes on this drive, or a few microseconds). Both sides winning
+/// proves little (the big head starts decide those rounds), so the test fails unless some rounds
+/// went against the head start: the side that started later still got the name, which happens
+/// only when the two really overlap. The split is printed for the CI log.
+#[test]
+fn a_name_raced_for_is_never_shared() {
+    use pctwin_gate::Claim;
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        if refuses(drive) {
+            return;
+        }
+        let dir = fresh(&drive.path, "pctwin-fat-race");
+        let dest = Destination::open(&dir).unwrap();
+        let naming = dest.check_drive().unwrap().naming;
+        let ours = b"ours".to_vec();
+        // How long making a file takes on this drive, the measure of each head start.
+        let step = {
+            let started = std::time::Instant::now();
+            for i in 0..8 {
+                std::fs::write(dir.join(format!("w{i}.tmp")), b"w").unwrap();
+            }
+            (started.elapsed() / 8).max(std::time::Duration::from_micros(20))
+        };
+        let wait = |d: std::time::Duration| {
+            let until = std::time::Instant::now() + d;
+            while std::time::Instant::now() < until {
+                std::hint::spin_loop();
+            }
+        };
+        let mut pending = None;
+        let (mut won, mut lost, mut upsets) = (0, 0, 0);
+        for round in 0..300u32 {
+            let name = format!("r{round}.bin");
+            let sealed = match pending.take() {
+                Some(s) => s,
+                None => {
+                    let mut f = dest
+                        .create_file(&IncomingPath::parse("x.bin").unwrap(), 4)
+                        .unwrap();
+                    f.write_all(&ours).unwrap();
+                    common::seal(f).unwrap()
+                }
+            };
+            let theirs = dir.join(&name);
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let b = std::sync::Arc::clone(&barrier);
+            // A different head start each round, to one side or the other: in half the rounds up
+            // to a few times what making a file takes, in the other half a few microseconds, less
+            // than the threads' own start-up jitter (a drive that handles one request at a time
+            // lets the first to arrive win, so only such rounds can show a real overlap there).
+            let head = if (round / 2) % 2 == 0 {
+                step * ((round * 7919) % 400) / 100
+            } else {
+                std::time::Duration::from_nanos(u64::from((round * 7919) % 5000))
+            };
+            let they_wait = round % 2 == 0;
+            let other = std::thread::spawn(move || {
+                b.wait();
+                if they_wait {
+                    let until = std::time::Instant::now() + head;
+                    while std::time::Instant::now() < until {
+                        std::hint::spin_loop();
+                    }
+                }
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&theirs)
+                {
+                    Ok(mut f) => {
+                        f.write_all(b"theirs").unwrap();
+                        true
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => false,
+                    Err(e) => panic!("{e}"),
+                }
+            });
+            barrier.wait();
+            if !they_wait {
+                wait(head);
+            }
+            let claim = sealed.claim_as(&name);
+            let they_won = other.join().unwrap();
+            // The side that started later got the name.
+            if !head.is_zero() && they_won == they_wait {
+                upsets += 1;
+            }
+            let got = std::fs::read(dir.join(&name)).unwrap();
+            match claim {
+                Claim::Named(c) => {
+                    assert!(!they_won, "{} round {round}: both got it", drive.show());
+                    c.keep();
+                    assert_eq!(got, ours, "{} round {round}", drive.show());
+                    won += 1;
+                }
+                Claim::Taken(back) => {
+                    assert!(they_won, "{} round {round}: nobody got it", drive.show());
+                    assert_eq!(got, b"theirs", "{} round {round}", drive.show());
+                    pending = Some(back);
+                    lost += 1;
+                }
+                Claim::Failed(e, _) => panic!("{} round {round}: {e}", drive.show()),
+            }
+        }
+        println!(
+            "race on {}: names by {naming:?}; PCTwin got the name {won} times, the other program {lost}; {upsets} went against the head start",
+            drive.show()
+        );
+        assert!(
+            upsets > 0,
+            "{}: the head start decided every round ({won} to {lost}): the two never really overlapped",
+            drive.show()
+        );
+    });
+}
+
 /// A drive put in another's place at the same folder, with the very number the first had (Linux
 /// gives a freed loop device to the next image): it is judged again, so it gets its own name
 /// rules and limits, never the old drive's. CI mounts a vfat drive inside an approved folder,
@@ -432,6 +554,7 @@ fn a_drive_put_in_another_s_place_at_the_same_folder_is_judged_again() {
         write(&dest, "drive/before/May?.txt", b"vfat"),
         "drive/before/May\u{FF1F}.txt"
     );
+    let tested = dest.drives_tested();
     let done = std::process::Command::new("sh")
         .args(["-c", &swap])
         .status()
@@ -446,5 +569,11 @@ fn a_drive_put_in_another_s_place_at_the_same_folder_is_judged_again() {
     assert_eq!(
         write(&dest, "drive/after/May?.txt", b"ext4"),
         "drive/after/May?.txt"
+    );
+    // And it was tested again before its first file was named, not given the old drive's test.
+    assert_eq!(
+        dest.drives_tested(),
+        tested + 1,
+        "the new drive was tested again"
     );
 }
