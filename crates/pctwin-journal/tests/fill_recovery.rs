@@ -50,6 +50,8 @@ struct Stored {
 #[derive(Default)]
 struct Disk {
     files: HashMap<String, Stored>,
+    /// Stored paths marked hidden.
+    hidden: HashSet<String>,
     cannot: HashSet<String>,
     unreadable: HashSet<String>,
 }
@@ -108,6 +110,10 @@ impl Disk {
         f.start_of_temp = false;
         self
     }
+    fn hidden(mut self, path: &str) -> Self {
+        self.hidden.insert(path.into());
+        self
+    }
     fn cannot(mut self, path: &str) -> Self {
         self.cannot.insert(path.into());
         self
@@ -138,6 +144,9 @@ impl Look for Disk {
     }
     fn temp_path(&self, _: &Entry, _: Option<&str>) -> Option<String> {
         Some(TEMP.into())
+    }
+    fn hidden(&self, _: &Entry, stored: &str) -> Result<bool, String> {
+        Ok(self.hidden.contains(stored))
     }
     fn born(&self, _: &Entry, stored: &str) -> Result<Option<Born>, String> {
         if self.unreadable.contains(stored) {
@@ -451,4 +460,43 @@ fn a_fill_s_temporary_file_is_known_for_clean_up() {
             Some(TEMP.into())
         );
     }
+}
+
+/// Stopped between making the name and tagging it: an empty file, hidden from the moment it was
+/// made, and nothing recorded as made yet. Nothing but PCTwin's own exclusively made file can be
+/// at the name then, and an empty file holds nothing to lose: it is removed and the file named
+/// again. Anything else without the tag stays someone else's.
+#[test]
+fn an_empty_hidden_file_made_just_before_its_tag_is_pctwin_s() {
+    let t = || Disk::default().temp();
+    let empty_hidden = t().at_name(0, id(70), None).hidden(NAME);
+    assert_eq!(
+        decide(filling(token(None)), &empty_hidden),
+        Action::RemoveFillThenName
+    );
+    // Not hidden: a file anyone could have made there.
+    assert!(noting(&decide(
+        filling(token(None)),
+        &t().at_name(0, id(70), None)
+    )));
+    // Bytes in it, yet no tag: never PCTwin's (the tag comes before any byte).
+    assert!(noting(&decide(
+        filling(token(None)),
+        &t().at_name(40, id(70), None).hidden(NAME)
+    )));
+    // Its identity was recorded, so its tag came first: a missing tag means another file.
+    assert!(noting(&decide(
+        filling(token(Some(MADE))),
+        &t().at_name(0, id(70), None).hidden(NAME)
+    )));
+    // A fill not made hidden: the rule does not apply.
+    let mut plain = token(None);
+    plain.tag.hidden = false;
+    assert!(noting(&decide(filling(plain), &empty_hidden)));
+    // Once filled, it has its tag: an untagged empty file is not it.
+    let a = decide(filled(token(Some(MADE))), &empty_hidden);
+    assert!(
+        !matches!(a, Action::FinishFill | Action::RemoveFillThenName),
+        "{a:?}"
+    );
 }

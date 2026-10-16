@@ -15,7 +15,7 @@ use pctwin_journal::recovery::{self, Action, Look, Seen};
 use pctwin_journal::{Born, Entry, FileId, Fill, Journal, JournalError, Landed, Proof, State};
 
 use crate::fingerprint_reader;
-use crate::naming::{Whole, name_as, reads_back_whole};
+use crate::naming::{Whole, commit_and_show, name_as, reads_back_whole, show_committed};
 
 /// What recovery did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -31,6 +31,8 @@ pub struct Recovered {
     /// What the person should know about a write, in plain words, whatever became of it (a
     /// file PCTwin left at a name because it could not prove it its own, say).
     pub notes: Vec<(u64, String)>,
+    /// Files filled in under their names, committed before a stop but not yet shown: now shown.
+    pub shown: Vec<u64>,
     /// Temporary files removed.
     pub removed: u64,
 }
@@ -49,6 +51,31 @@ pub fn recover_with(
 ) -> Result<Recovered, JournalError> {
     let look = DiskLook { journal, table };
     let mut done = Recovered::default();
+    // Copies committed while still hidden and tagged, then stopped before they were shown: shown
+    // now (proven PCTwin's by their tag first), so none stays hidden.
+    for (entry, show) in journal.unshown()? {
+        let dest = match look.destination(&entry) {
+            Ok(dest) => dest,
+            Err(why) => {
+                done.left.push((entry.id, why));
+                continue;
+            }
+        };
+        // After a restart: its bytes, read now, against the whole file's fingerprint.
+        let State::Committed { fingerprint, .. } = &entry.state else {
+            continue;
+        };
+        let whole = whole(&entry, fingerprint);
+        let mut bytes = |f: &mut dyn std::io::Read| reads_back_whole(f, &whole);
+        let check = pctwin_gate::ShowCheck::Bytes(&mut bytes);
+        match show_committed(journal, dest, entry.id, &show, check)? {
+            Some(note) => done.notes.push((entry.id, note)),
+            None if journal.show_pending(entry.id)?.is_none() => done.shown.push(entry.id),
+            None => done
+                .left
+                .push((entry.id, "the drive could not be reached to show it".into())),
+        }
+    }
     let unfinished = journal.unfinished()?;
     let decisions = recovery::plan(&unfinished, &look);
     after_planning();
@@ -221,8 +248,6 @@ fn finish_fill(
     let finished = dest.finish_fill(
         &fill.final_path,
         fill,
-        created,
-        modified,
         |f| reads_back_whole(f, &whole),
         || {
             if filled {
@@ -236,14 +261,18 @@ fn finish_fill(
     );
     match finished {
         Ok(FillFinish::Finished(stat)) => {
-            journal.committed(
-                entry.id,
-                Landed {
-                    size: stat.len,
-                    modified_ns: stat.modified.map(crate::nanos),
-                    file: Some(stat.id),
-                },
-            )?;
+            // Committed while still hidden and tagged, then shown with its real dates.
+            let show = pctwin_gate::Show {
+                fill: fill.clone(),
+                created: created.map(Born::of),
+                modified_ns: modified.map(crate::nanos),
+            };
+            let landed = Landed {
+                size: stat.len,
+                modified_ns: show.modified_ns,
+                file: Some(stat.id),
+            };
+            commit_and_show(journal, dest, entry.id, landed, &show)?;
             let _ = dest.remove_temp(temp);
             Ok(Finish::Committed)
         }
@@ -308,7 +337,10 @@ fn finish(
     // Proven again immediately before it is committed (not only when it was decided): the very
     // file it sealed, exactly its size and fingerprint, read now. A file filled in under its
     // name is a new file: the gate read it back whole just now, so its identity is what landed.
-    let commit_if_proven = |stored: &str, filled_in: bool| -> Result<Finish, JournalError> {
+    let commit_if_proven = |stored: &str,
+                            filled_in: bool,
+                            show: Option<&pctwin_gate::Show>|
+     -> Result<Finish, JournalError> {
         let sealed = if filled_in {
             match dest.stat(stored) {
                 Ok(Some(stat)) => Some(stat.id),
@@ -320,14 +352,25 @@ fn finish(
         };
         match prove(dest, entry, stored, sealed, source.fingerprint, false) {
             Proved::Proven(stat) => {
-                journal.committed(
-                    entry.id,
-                    Landed {
-                        size: stat.len,
-                        modified_ns: stat.modified.map(crate::nanos),
-                        file: Some(stat.id),
-                    },
-                )?;
+                match show {
+                    // Filled in under its name: committed still hidden and tagged, then shown.
+                    Some(show) => {
+                        let landed = Landed {
+                            size: stat.len,
+                            modified_ns: show.modified_ns,
+                            file: Some(stat.id),
+                        };
+                        commit_and_show(journal, dest, entry.id, landed, show)?;
+                    }
+                    None => journal.committed(
+                        entry.id,
+                        Landed {
+                            size: stat.len,
+                            modified_ns: stat.modified.map(crate::nanos),
+                            file: Some(stat.id),
+                        },
+                    )?,
+                }
                 Ok(Finish::Committed)
             }
             Proved::Gone => Ok(Finish::Failed(
@@ -340,7 +383,7 @@ fn finish(
     };
     let (claimed, filled_in) = match (&entry.state, action) {
         (State::Applied { final_path, .. }, Action::Commit) => {
-            return commit_if_proven(final_path, false);
+            return commit_if_proven(final_path, false, None);
         }
         (_, Action::Commit) => return Ok(Finish::Failed(NOT_NAMED.into())),
         (_, _) => {
@@ -357,7 +400,7 @@ fn finish(
         }
     };
     // Committed while the temporary name still holds the file, then the temporary name goes.
-    let finish = commit_if_proven(&claimed.finished().final_path, filled_in)?;
+    let finish = commit_if_proven(&claimed.finished().final_path, filled_in, claimed.show())?;
     if matches!(finish, Finish::Committed) {
         claimed.keep();
     }
@@ -412,7 +455,7 @@ fn prove(
 /// How naming a recovered file ended.
 enum Naming<'d> {
     /// Named; and whether it was filled in under the name (a new file there).
-    Named(Claimed<'d>, bool),
+    Named(Box<Claimed<'d>>, bool),
     /// Not now (the drive, say): kept, sealed, for the next start.
     NotNow(String),
     /// It cannot be: its temporary file is not one that can be named.
@@ -460,7 +503,9 @@ fn name<'d>(
             Err(broke) => return Err(broke.0),
         };
         match named.claim {
-            Claim::Named(claimed) => return Ok(Naming::Named(claimed, named.filled_in)),
+            Claim::Named(claimed) => {
+                return Ok(Naming::Named(Box::new(claimed), named.filled_in));
+            }
             Claim::Taken(back) => sealed = back,
             Claim::Failed(e, _) => return Ok(Naming::NotNow(reason(&e))),
         }
@@ -571,6 +616,11 @@ impl Look for DiskLook<'_> {
     fn identity(&self, entry: &Entry, stored: &str) -> Result<Option<FileId>, String> {
         let dest = self.destination(entry)?;
         Ok(dest.stat(stored).map_err(|e| e.to_string())?.map(|s| s.id))
+    }
+
+    fn hidden(&self, entry: &Entry, stored: &str) -> Result<bool, String> {
+        let dest = self.destination(entry)?;
+        dest.hidden(stored).map_err(|e| e.to_string())
     }
 
     fn born(&self, entry: &Entry, stored: &str) -> Result<Option<Born>, String> {

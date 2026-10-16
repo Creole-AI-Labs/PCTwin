@@ -91,6 +91,8 @@ pub const CANNOT_CHECK: &str = "PCTwin can't be sure no other program is changin
 pub const ONLINE_ONLY: &str = "it is stored online only, so it was kept";
 /// The plain reason for a file with a second name on the drive.
 pub const SECOND_NAME: &str = "it has a second name on this drive, so it was kept";
+const STILL_SHOWING: &str =
+    "PCTwin is still finishing this copy; it is undone once PCTwin has started again";
 const NO_SAFE_REMOVAL: &str =
     "this drive cannot remove it without risk to other files, so it was kept";
 const NOT_REACHABLE: &str = "the place it is in could not be reached";
@@ -199,7 +201,15 @@ fn undo_all(
         let State::Committed { final_path, .. } = &entry.state else {
             continue;
         };
-        let outcome = undo_file(journal, table, originals, options, &entry)?;
+        // A copy filled in under its name and not yet shown is still being finished: never
+        // undone while hidden; tried again once it is shown.
+        let outcome = if journal.show_pending(entry.id)?.is_some() {
+            UndoOutcome::NotDone {
+                why: STILL_SHOWING.into(),
+            }
+        } else {
+            undo_file(journal, table, originals, options, &entry)?
+        };
         if outcome == (UndoOutcome::NotDone { why: IN_USE.into() }) {
             in_use.push(report.files.len());
         }

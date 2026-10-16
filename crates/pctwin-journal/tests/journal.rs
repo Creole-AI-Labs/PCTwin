@@ -675,3 +675,79 @@ fn a_fill_s_steps_and_a_file_left_at_its_name_are_recorded_for_good() {
     j.fill_cleared(other, None).unwrap();
     assert!(j.notes(other).unwrap().is_empty());
 }
+
+/// A file filled in under its name is committed while still hidden and tagged, with what showing
+/// it needs (its tag, how it is proven PCTwin's, its real dates); the show stays pending, for good,
+/// until it is recorded shown. Only a fill that was recorded filled can be committed this way.
+#[test]
+fn a_filled_file_is_committed_with_its_show_pending_until_it_is_shown() {
+    use pctwin_journal::{Born, Fill, FillTag, Proof, Show};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    let tag = FillTag {
+        born: Some(Born {
+            secs: 1_000_000_000,
+            nanos: 0,
+        }),
+        hidden: true,
+    };
+    let show = Show {
+        fill: Fill {
+            final_path: "Documents/f1.txt".into(),
+            made: landed().file,
+            tag,
+            proof: Proof::Token,
+        },
+        created: Some(Born {
+            secs: 1_790_000_000,
+            nanos: 5,
+        }),
+        modified_ns: Some(1_780_000_000_000_000_000),
+    };
+    let id = {
+        let j = Journal::open(&path).unwrap();
+        let id = j.plan(&planned(1)).unwrap();
+        j.staged(id, ".pctwin-77-1.part", &[]).unwrap();
+        j.verified(id, [7; 32], None).unwrap();
+        j.filling(id, "Documents/f1.txt", tag, Proof::Token)
+            .unwrap();
+        // Not filled yet: never committed as shown or to be shown.
+        assert!(matches!(
+            j.committed_showing(id, landed(), &show),
+            Err(JournalError::OutOfOrder { .. })
+        ));
+        j.fill_made(id, landed().file.unwrap()).unwrap();
+        j.filled(id).unwrap();
+        // Nothing is pending to be shown before the commit.
+        assert!(matches!(
+            j.shown(id, None),
+            Err(JournalError::OutOfOrder { .. })
+        ));
+        j.committed_showing(id, landed(), &show).unwrap();
+        id
+    };
+    let j = Journal::open(&path).unwrap();
+    assert!(matches!(
+        j.entry(id).unwrap().unwrap().state,
+        State::Committed { .. }
+    ));
+    assert!(
+        j.unfinished().unwrap().is_empty(),
+        "the copy itself is finished"
+    );
+    let pending = j.unshown().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].0.id, id);
+    assert_eq!(pending[0].1, show);
+    assert_eq!(j.show_pending(id).unwrap(), Some(show.clone()));
+    j.shown(id, Some("left hidden at Documents/f1.txt"))
+        .unwrap();
+    assert!(j.unshown().unwrap().is_empty());
+    assert_eq!(j.show_pending(id).unwrap(), None);
+    assert_eq!(j.notes(id).unwrap(), ["left hidden at Documents/f1.txt"]);
+    // Shown once: not again.
+    assert!(matches!(
+        j.shown(id, None),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+}

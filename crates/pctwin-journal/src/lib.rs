@@ -88,6 +88,9 @@ const GATE: TableDefinition<&str, u8> = TableDefinition::new("gate");
 /// What the person should know about a write, kept for good (a file PCTwin left at a name because
 /// it could not prove it its own): entry, then its notes in order, as plain words.
 const NOTES: TableDefinition<(u64, u32), &str> = TableDefinition::new("notes");
+/// Files filled in under their real names, committed but not yet shown: entry, then what showing
+/// it needs ([`Show`], as JSON). Kept until it is recorded shown.
+const SHOWING: TableDefinition<u64, &[u8]> = TableDefinition::new("showing");
 const UNDO_GATE: &str = "undo";
 const CLOSED: u8 = 1;
 
@@ -366,6 +369,18 @@ pub struct Fill {
     pub made: Option<FileId>,
     pub tag: FillTag,
     pub proof: Proof,
+}
+
+/// What showing a file filled in under its real name needs once it is committed (still hidden
+/// and tagged then): the fill (where, its tag, how it is proven PCTwin's), and the real dates it
+/// gets back, the modified time last.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Show {
+    pub fill: Fill,
+    /// The creation date of PCTwin's copy (the checked temporary file's).
+    pub created: Option<Born>,
+    /// The original's modified time, nanoseconds since 1970.
+    pub modified_ns: Option<i64>,
 }
 
 /// How far a write got.
@@ -1062,6 +1077,7 @@ impl Journal {
             tx.open_table(UNDO_FOLDERS).map_err(storage)?;
             tx.open_table(GATE).map_err(storage)?;
             tx.open_table(NOTES).map_err(storage)?;
+            tx.open_table(SHOWING).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -1375,6 +1391,91 @@ impl Journal {
                 None => Ok(()),
             },
         )
+    }
+
+    /// A file filled in under its real name is committed while still hidden and tagged, as
+    /// `landed` (its modified time the original's, as it will be once shown), with what showing
+    /// it needs kept for good until [`shown`](Self::shown). Only from `Filled`. The copy is then
+    /// finished; showing it can no longer cost it its proof, since the tag goes only after this.
+    pub fn committed_showing(
+        &self,
+        id: u64,
+        landed: Landed,
+        show: &Show,
+    ) -> Result<(), JournalError> {
+        let bytes = serde_json::to_vec(show).map_err(storage)?;
+        self.step(
+            id,
+            "committed",
+            |s| match s {
+                State::Filled {
+                    fill: Fill { final_path, .. },
+                    fingerprint,
+                    ..
+                } => Some(State::Committed {
+                    final_path: final_path.clone(),
+                    fingerprint: *fingerprint,
+                    landed,
+                }),
+                _ => None,
+            },
+            |tx, entry| {
+                let mut table = tx.open_table(SHOWING).map_err(storage)?;
+                table.insert(entry.id, bytes.as_slice()).map_err(storage)?;
+                Ok(())
+            },
+        )
+    }
+
+    /// The committed file filled in under its name is shown (or there is nothing left PCTwin
+    /// may do to it: `left` then says, in plain words, what was left, kept for good).
+    pub fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        let tx = self.db.begin_write().map_err(storage)?;
+        {
+            let entries = tx.open_table(ENTRIES).map_err(storage)?;
+            let entry = read_entry(&entries, id)?;
+            let mut table = tx.open_table(SHOWING).map_err(storage)?;
+            let pending = table.remove(id).map_err(storage)?.is_some();
+            if !pending || !matches!(entry.state, State::Committed { .. }) {
+                return Err(JournalError::OutOfOrder {
+                    from: entry.state.name(),
+                    to: "shown",
+                });
+            }
+            drop(table);
+            if let Some(words) = left {
+                add_note(&tx, id, words)?;
+            }
+        }
+        tx.commit().map_err(storage)
+    }
+
+    /// Every committed file filled in under its name and not yet shown, with what showing it
+    /// needs, oldest first (recovery finishes them).
+    pub fn unshown(&self) -> Result<Vec<(Entry, Show)>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(SHOWING).map_err(storage)?;
+        let entries = tx.open_table(ENTRIES).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in table.iter().map_err(storage)? {
+            let (k, v) = row.map_err(storage)?;
+            let show: Show = serde_json::from_slice(v.value())
+                .map_err(|e| damaged(format!("a pending show: {e}")))?;
+            out.push((read_entry(&entries, k.value())?, show));
+        }
+        Ok(out)
+    }
+
+    /// What showing write `id`'s file still needs, if it is committed and not yet shown.
+    pub fn show_pending(&self, id: u64) -> Result<Option<Show>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(SHOWING).map_err(storage)?;
+        match table.get(id).map_err(storage)? {
+            Some(v) => serde_json::from_slice(v.value())
+                .map(Some)
+                .map_err(|e| damaged(format!("a pending show: {e}"))),
+            None => Ok(None),
+        }
     }
 
     /// What the person should know about write `id`, in the order it was noted.
@@ -1992,6 +2093,10 @@ pub trait Ledger {
     fn filled(&self, id: u64) -> Result<(), JournalError>;
     /// See [`Journal::fill_cleared`].
     fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError>;
+    /// See [`Journal::committed_showing`].
+    fn committed_showing(&self, id: u64, landed: Landed, show: &Show) -> Result<(), JournalError>;
+    /// See [`Journal::shown`].
+    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError>;
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
@@ -2048,6 +2153,12 @@ impl Ledger for Journal {
     }
     fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
         Journal::fill_cleared(self, id, left)
+    }
+    fn committed_showing(&self, id: u64, landed: Landed, show: &Show) -> Result<(), JournalError> {
+        Journal::committed_showing(self, id, landed, show)
+    }
+    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        Journal::shown(self, id, left)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         Journal::committed(self, id, landed)

@@ -20,13 +20,12 @@
 //! 6. Before it is recorded `Filled`, PCTwin checks the name still holds its own file (the same
 //!    file, with its tag and exactly the bytes copied). Another program that put its own file there
 //!    meanwhile is never touched: its file stays, and PCTwin's checked temporary file is kept.
-//! 7. Recorded `Filled`; then shown (the hidden mark cleared), its real creation date given back
-//!    (when PCTwin's copy was made: the tag is never left on the person's file), and its modified
-//!    time set last (setting it can move a creation time, as APFS does, so it never comes while
-//!    the tag is still the proof); the folder flushed; committed, and the temporary file removed,
-//!    as for a hard-linked file. A crash between giving back the date and committing leaves a
-//!    whole, shown file that nothing proves PCTwin's: recovery leaves it, says so, and names the
-//!    file again beside it (never removes or adopts it).
+//! 7. Recorded `Filled`, and committed while still hidden and tagged, with what showing it
+//!    needs kept in the journal. Only then is it shown ([`Destination::finish_show`]): the hidden
+//!    mark cleared, its modified time set, its real creation date given back (when PCTwin's copy
+//!    was made: the tag is never left on the person's file); and it is recorded shown. Every step
+//!    before the commit still has the tag as its proof, and every step after it is finished by
+//!    recovery from the journal, so no crash leaves a whole file that nothing proves PCTwin's.
 //!
 //! On a failure before step 7, PCTwin's own partial copy is removed only while the name still
 //! holds it (checked as in step 6) and its bytes are exactly the bytes PCTwin copied (another
@@ -41,7 +40,7 @@ use cap_std::fs::{Dir, OpenOptions};
 
 use crate::{Born, DownloadMark, FileId, GateError, identity, marks};
 
-pub use pctwin_journal::{Fill, FillTag, Proof};
+pub use pctwin_journal::{Fill, FillTag, Proof, Show};
 
 /// What is recorded before a file is filled in: the tag it gets at once, and how it is proven
 /// PCTwin's after a crash.
@@ -202,7 +201,7 @@ pub(crate) fn hide(file: &std::fs::File) -> io::Result<()> {
 /// Clears the hidden mark on the open file `file`, through its handle: on Windows by giving it
 /// the attributes of `like` (one of PCTwin's own plain files, never hidden); and fails unless it
 /// reads back shown.
-pub(crate) fn show(file: &std::fs::File, like: &std::fs::File) -> io::Result<()> {
+pub(crate) fn show_file(file: &std::fs::File, like: &std::fs::File) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let _ = like;
@@ -479,12 +478,11 @@ impl crate::Destination {
     /// folder flushed. Anything not proven is left exactly as it is.
     /// The order is the fill's own: shown, the real creation date `created` given back (when
     /// PCTwin's copy was made), the modified time `modified` set last.
+    /// It stays hidden and tagged: commit it, then [`finish_show`](Self::finish_show).
     pub fn finish_fill(
         &self,
         stored: &str,
         fill: &Fill,
-        created: Option<std::time::SystemTime>,
-        modified: Option<std::time::SystemTime>,
         read_back: impl FnOnce(&mut dyn Read) -> io::Result<bool>,
         filled: impl FnOnce() -> io::Result<()>,
     ) -> Result<FillFinish, GateError> {
@@ -512,16 +510,6 @@ impl crate::Destination {
         }
         drop(reader);
         filled()?;
-        if is_hidden(&file)? {
-            let like = plain_file(&dir)?;
-            show(&file, &like)?;
-        }
-        if fill.tag.born.is_some() {
-            set_created(&file, created.unwrap_or_else(std::time::SystemTime::now))?;
-        }
-        if let Some(time) = modified {
-            file.set_modified(time)?;
-        }
         full_sync(&file)?;
         crate::flush_name(&dir, name);
         let meta = file.metadata()?;
@@ -554,7 +542,13 @@ impl crate::Destination {
         }
         let mut held = dir.open(name)?.into_std();
         let mut source = self.open_read(temp)?;
-        if !proven_fill(&held, fill)? || !same_start_of(&mut held, &mut source, len)? {
+        // PCTwin's by its identity or tag; or made just before its tag: empty, hidden from the
+        // moment it was made, nothing recorded as made yet (the journal's rule exactly).
+        let made_before_tag =
+            len == 0 && fill.made.is_none() && fill.tag.hidden && is_hidden(&held)?;
+        if !(proven_fill(&held, fill)? || made_before_tag)
+            || !same_start_of(&mut held, &mut source, len)?
+        {
             return Ok(FillRemoval::NotProven);
         }
         let progress = Progress {
@@ -645,5 +639,103 @@ impl crate::Destination {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e),
         }
+    }
+}
+
+/// Nanoseconds since 1970 (0 before it).
+pub(crate) fn nanos_of(t: std::time::SystemTime) -> i64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+}
+
+/// The second check, beside its tag or recorded identity, that the file about to be shown is the
+/// very one PCTwin filled in. Windows gives a file made at a name just freed the creation time of
+/// the file that had it (file-system tunnelling, on NTFS and FAT), so a tag alone could pass
+/// another program's file.
+pub enum ShowCheck<'a> {
+    /// In the program that filled it in, the drive not mounted again since: its identity, as
+    /// recorded when it was made (tunnelling never carries a file's number).
+    Made,
+    /// After a restart: its bytes, read now, against the whole file's fingerprint.
+    Bytes(&'a mut dyn FnMut(&mut dyn Read) -> io::Result<bool>),
+}
+
+/// How showing a committed, filled-in file ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shown {
+    /// Proven PCTwin's, then shown, with its real dates: record it shown.
+    Shown,
+    /// Already shown (no longer hidden, and the tag that goes last is gone): record it shown.
+    AlreadyShown,
+    /// Nothing is at its name now: nothing left to do; record it shown.
+    Gone,
+    /// Hidden still, but nothing proves it PCTwin's now (another program's, or changed): left as
+    /// it is; record it shown, with a note.
+    NotProven,
+}
+
+impl crate::Destination {
+    /// Shows a committed file filled in under its real name at the stored path `stored`, as
+    /// `show` records (after a restart too): proven PCTwin's first (its identity where the drive
+    /// keeps identities, else its tag), then the hidden mark cleared, its modified time set, its
+    /// real creation date given back (the tag goes last, so a file seen without it was already
+    /// shown), flushed. Each step can be done again. A file not proven PCTwin's is never touched.
+    pub fn finish_show(
+        &self,
+        stored: &str,
+        show: &Show,
+        check: ShowCheck<'_>,
+    ) -> Result<Shown, GateError> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(Shown::Gone);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Ok(Shown::NotProven),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Shown::Gone),
+            Err(e) => return Err(e.into()),
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        let mut file = dir.open_with(name, &options)?.into_std();
+        let proven = proven_fill(&file, &show.fill)?
+            && match check {
+                ShowCheck::Made => show.fill.made == Some(identity(&file)?.0),
+                ShowCheck::Bytes(whole) => {
+                    file.seek(SeekFrom::Start(0))?;
+                    whole(&mut file)?
+                }
+            };
+        if !proven {
+            return Ok(if is_hidden(&file)? {
+                Shown::NotProven
+            } else {
+                Shown::AlreadyShown
+            });
+        }
+        let step = |what: &str| match &self.show_hook {
+            Some(hook) => hook(what),
+            None => Ok(()),
+        };
+        if is_hidden(&file)? {
+            let like = plain_file(&dir)?;
+            show_file(&file, &like)?;
+        }
+        step("shown")?;
+        if let Some(ns) = show.modified_ns.and_then(|ns| u64::try_from(ns).ok()) {
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(ns))?;
+        }
+        step("modified")?;
+        if show.fill.tag.born.is_some() {
+            let created = match show.created {
+                Some(b) => as_time(b)?,
+                None => std::time::SystemTime::now(),
+            };
+            set_created(&file, created)?;
+        }
+        step("created")?;
+        full_sync(&file)?;
+        crate::flush_name(&dir, name);
+        Ok(Shown::Shown)
     }
 }

@@ -51,7 +51,9 @@ mod siblings;
 mod unix_undo;
 
 pub use drive::{DriveKind, DriveProfile, FAT_LARGEST_FILE};
-pub use fill::{Fill, FillFinish, FillPlan, FillRemoval, FillSteps, FillTag, Proof};
+pub use fill::{
+    Fill, FillFinish, FillPlan, FillRemoval, FillSteps, FillTag, Proof, Show, ShowCheck, Shown,
+};
 pub use marks::download_mark_of;
 pub use naming::{DriveCheck, Naming};
 
@@ -472,6 +474,8 @@ pub struct Destination {
     checks: Mutex<HashMap<u64, DriveCheck>>,
     /// For tests: how a fill copies (see [`with_fill_hook`](Self::with_fill_hook)).
     fill_hook: Option<fill::FillHook>,
+    /// For tests: what runs after each step of showing a filled-in file.
+    show_hook: Option<ShowHook>,
     /// For tests: the faults this place fakes.
     #[cfg(feature = "fault-plan")]
     faults: Faults,
@@ -511,6 +515,9 @@ struct Faults {
     plan: FaultPlan,
     flipped_once: std::sync::atomic::AtomicBool,
 }
+
+/// For tests: what runs after each step of showing a filled-in file, with the step's name.
+type ShowHook = std::sync::Arc<dyn Fn(&str) -> io::Result<()> + Send + Sync>;
 
 /// Clash hints keyed by a hash of the folder and name, folded so every spelling a disk might treat
 /// as the same lands on one key. Entries exist only for names that clashed, and are capped.
@@ -652,6 +659,7 @@ impl Destination {
                     .clone(),
             ),
             fill_hook: self.fill_hook.clone(),
+            show_hook: self.show_hook.clone(),
         })
     }
 
@@ -674,7 +682,20 @@ impl Destination {
             faults: Faults::default(),
             checks: Mutex::default(),
             fill_hook: None,
+            show_hook: None,
         }
+    }
+
+    /// For tests: `after` runs after each step of showing a filled-in file ("shown", "modified",
+    /// "created"), with the step's name (to stop the program dead there, say).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_show_hook(
+        mut self,
+        after: impl Fn(&str) -> io::Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.show_hook = Some(std::sync::Arc::new(after));
+        self
     }
 
     /// For tests: a file filled in under its real name is copied `chunk` bytes at a time, and
@@ -1313,6 +1334,7 @@ impl Destination {
             mark_not_kept: None,
             checked_from: None,
             mark: None,
+            show: None,
         })
     }
 
@@ -2556,6 +2578,7 @@ impl<'d> IncomingFile<'d> {
             mark_not_kept,
             checked_from: Some(checked_from),
             mark: self.mark,
+            show: None,
         })
     }
 }
@@ -2589,6 +2612,8 @@ pub struct Sealed<'d> {
     checked_from: Option<CheckedFrom>,
     /// The download marker the file carries, for a copy filled in under its real name.
     mark: Option<DownloadMark>,
+    /// For a copy filled in under its real name: what showing it needs once it is committed.
+    show: Option<Show>,
 }
 
 impl<'d> Sealed<'d> {
@@ -2803,7 +2828,8 @@ impl<'d> Sealed<'d> {
         if !kept && self.mark.is_some() {
             self.mark_not_kept = self.mark;
         }
-        if let Ok((made, _)) = identity(target) {
+        let made = identity(target).ok().map(|(made, _)| made);
+        if let Some(made) = made {
             steps.made(made).map_err(io)?;
         }
         let held = self.held.as_mut().ok_or((GateError::Conflict, false))?;
@@ -2839,23 +2865,26 @@ impl<'d> Sealed<'d> {
             return Err(early(GateError::ReplacedWhileFilling));
         }
         steps.filled().map_err(io)?;
-        let late = |e: io::Error| (GateError::Io(e), true);
-        // Shown only now, complete and checked.
-        if plan.tag.hidden {
-            fill::show(target, held).map_err(late)?;
-        }
-        // The tag goes: the file gets the creation date of PCTwin's copy (the checked file's),
-        // as a file named by a move keeps; then its modified time, last, since setting it can
-        // move a creation time (APFS).
-        if progress.born.is_some()
-            && let Ok(created) = held.metadata().and_then(|m| m.created())
-        {
-            fill::set_created(target, created).map_err(late)?;
-        }
-        if let Ok(time) = held.metadata().and_then(|m| m.modified()) {
-            target.set_modified(time).map_err(late)?;
-        }
-        fill::full_sync(target).map_err(late)?;
+        // Still hidden and tagged: it is shown, and gets its real dates back, only once it is
+        // committed ([`Destination::finish_show`]), so nothing can cost it its proof before then.
+        let meta = held.metadata().ok();
+        self.show = Some(Show {
+            fill: Fill {
+                final_path: stored_path(&self.folder, name),
+                made,
+                tag: FillTag {
+                    born: progress.born,
+                    hidden: plan.tag.hidden,
+                },
+                proof: plan.proof,
+            },
+            created: meta.as_ref().and_then(|m| m.created().ok()).map(Born::of),
+            modified_ns: meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .map(fill::nanos_of),
+        });
+        fill::full_sync(target).map_err(|e| (GateError::Io(e), true))?;
         flush_name(&self.dir, name);
         Ok(())
     }
@@ -2879,6 +2908,7 @@ impl<'d> Sealed<'d> {
     /// Gives the file a real name that nothing else uses, never replacing another file (without
     /// a journal: the name is not recorded first).
     pub fn claim(self) -> Result<Claimed<'d>, GateError> {
+        let destination = self.destination;
         let mut sealed = self;
         // Each try fails only if another program took the free name in between.
         for _ in 0..MAX_CLAIM_RACES {
@@ -2895,7 +2925,17 @@ impl<'d> Sealed<'d> {
                 sealed.claim_as(&name)
             };
             match claim {
-                Claim::Named(claimed) => return Ok(claimed),
+                // No journal: nothing to record first, so it is shown at once.
+                Claim::Named(mut claimed) => {
+                    if let Some(show) = claimed.show.take() {
+                        destination.finish_show(
+                            &claimed.finished.final_path,
+                            &show,
+                            fill::ShowCheck::Made,
+                        )?;
+                    }
+                    return Ok(claimed);
+                }
                 Claim::Taken(back) => sealed = back,
                 Claim::Failed(e, _) => return Err(e),
             }
@@ -2921,6 +2961,7 @@ impl<'d> Sealed<'d> {
         Claimed {
             dir: self.dir.try_clone().ok(),
             _held: self.held.take(),
+            show: self.show.take(),
             temp,
             finished: Finished {
                 final_path: stored_path(&self.folder, &name),
@@ -2981,6 +3022,8 @@ impl Drop for Sealed<'_> {
 /// clean-up).
 pub struct Claimed<'d> {
     dir: Option<Dir>,
+    /// For a file filled in under its real name: what showing it needs, once it is committed.
+    show: Option<Show>,
     /// The file, still held open until it is kept (so its number stays its own until then).
     _held: Option<std::fs::File>,
     /// The temporary name, while the file still has it (drives with hard links).
@@ -2993,6 +3036,13 @@ impl Claimed<'_> {
     /// Where it landed and what was changed on the way.
     pub fn finished(&self) -> &Finished {
         &self.finished
+    }
+
+    /// For a file filled in under its real name: it is still hidden and tagged. Commit it with
+    /// this recorded (the journal's `committed_showing`), then show it
+    /// ([`Destination::finish_show`]), then record it shown.
+    pub fn show(&self) -> Option<&Show> {
+        self.show.as_ref()
     }
 
     /// Removes the temporary name; the file stays under its real name. If another program holds

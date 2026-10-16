@@ -81,6 +81,9 @@ impl Look for Disk {
         Some(format!("{folder}/.pctwin-j-{}.part", entry.id))
     }
     // Only a file filled in under its real name asks these (tests/fill_recovery.rs).
+    fn hidden(&self, _: &Entry, _: &str) -> Result<bool, String> {
+        Ok(false)
+    }
     fn born(&self, _: &Entry, _: &str) -> Result<Option<pctwin_journal::Born>, String> {
         Ok(None)
     }

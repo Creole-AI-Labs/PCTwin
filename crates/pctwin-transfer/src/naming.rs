@@ -5,8 +5,8 @@
 
 use std::io;
 
-use pctwin_gate::{Claim, FillSteps, Naming, Sealed};
-use pctwin_journal::{FileId, JournalError, Ledger};
+use pctwin_gate::{Claim, Destination, FillSteps, Naming, Sealed, Show, ShowCheck, Shown};
+use pctwin_journal::{FileId, JournalError, Landed, Ledger};
 
 use crate::fingerprint_reader;
 
@@ -129,4 +129,49 @@ pub(crate) fn name_as<'d>(
     }
     let filled_in = matches!(claim, Claim::Named(_));
     Ok(Named { claim, filled_in })
+}
+
+/// Said of a hidden file PCTwin made that it could not prove its own when it came to show it.
+fn left_hidden(stored: &str) -> String {
+    format!(
+        "PCTwin could not confirm that the hidden file at {stored} is its finished copy, so it left it as it is"
+    )
+}
+
+/// A file filled in under its real name, checked and recorded filled: committed while still
+/// hidden and tagged (with what showing it needs), then shown, then recorded shown. Returns, in
+/// plain words, what was left if PCTwin could not prove the file its own when it came to show it.
+pub(crate) fn commit_and_show(
+    journal: &dyn Ledger,
+    dest: &Destination,
+    id: u64,
+    landed: Landed,
+    show: &Show,
+) -> Result<Option<String>, JournalError> {
+    journal.committed_showing(id, landed, show)?;
+    // Just filled in by this very program: its recorded identity is the second check.
+    show_committed(journal, dest, id, show, ShowCheck::Made)
+}
+
+/// Shows a committed file filled in under its real name, and records it shown. A drive that
+/// cannot be reached now leaves it pending: recovery finishes it at the next start.
+pub(crate) fn show_committed(
+    journal: &dyn Ledger,
+    dest: &Destination,
+    id: u64,
+    show: &Show,
+    check: ShowCheck<'_>,
+) -> Result<Option<String>, JournalError> {
+    match dest.finish_show(&show.fill.final_path, show, check) {
+        Ok(Shown::Shown | Shown::AlreadyShown | Shown::Gone) => {
+            journal.shown(id, None)?;
+            Ok(None)
+        }
+        Ok(Shown::NotProven) => {
+            let note = left_hidden(&show.fill.final_path);
+            journal.shown(id, Some(&note))?;
+            Ok(Some(note))
+        }
+        Err(_) => Ok(None),
+    }
 }

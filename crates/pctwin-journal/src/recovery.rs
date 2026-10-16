@@ -59,6 +59,8 @@ pub trait Look {
     fn temp_path(&self, entry: &Entry, folder: Option<&str>) -> Option<String>;
     /// The creation time of the file at `stored`, as its drive keeps it, if it keeps one.
     fn born(&self, entry: &Entry, stored: &str) -> Result<Option<Born>, String>;
+    /// Whether the file at `stored` is marked hidden.
+    fn hidden(&self, entry: &Entry, stored: &str) -> Result<bool, String>;
     /// Whether the file at `stored` is exactly `len` bytes, and they are exactly the first `len`
     /// bytes of the file at `temp`.
     fn same_start(&self, entry: &Entry, stored: &str, temp: &str, len: u64)
@@ -295,7 +297,17 @@ fn decide_fill(
         };
     };
     let ours = match fill_is_ours(entry, look, fill) {
-        Ok(ours) => ours,
+        Ok(true) => true,
+        // Stopped between making the name and tagging it: made hidden, nothing in it yet, and
+        // nothing recorded as made (the tag comes before that). Only PCTwin's own exclusively made
+        // file can be at the name then, and an empty file holds nothing to lose.
+        Ok(false) if !filled && len == 0 && fill.made.is_none() && fill.tag.hidden => {
+            match look.hidden(entry, &fill.final_path) {
+                Ok(hidden) => hidden,
+                Err(why) => return leave(&why),
+            }
+        }
+        Ok(false) => false,
         Err(left) => return left,
     };
     if !ours {

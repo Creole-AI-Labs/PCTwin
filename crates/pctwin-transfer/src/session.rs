@@ -2261,16 +2261,27 @@ fn land(
     // Committed while the temporary name still holds the file, then the temporary name goes.
     match dest.stat(&claimed.finished().final_path) {
         Ok(Some(stat)) => {
-            journal
-                .committed(
-                    entry,
-                    Landed {
-                        size: stat.len,
-                        modified_ns: stat.modified.map(crate::nanos),
-                        file: Some(file_id(stat.id)),
-                    },
-                )
-                .map_err(record)?;
+            if let Some(show) = claimed.show().cloned() {
+                // Filled in under its name: committed while still hidden and tagged, then shown.
+                let landed = Landed {
+                    size: stat.len,
+                    modified_ns: show.modified_ns,
+                    file: Some(file_id(stat.id)),
+                };
+                crate::naming::commit_and_show(journal, dest, entry, landed, &show)
+                    .map_err(record)?;
+            } else {
+                journal
+                    .committed(
+                        entry,
+                        Landed {
+                            size: stat.len,
+                            modified_ns: stat.modified.map(crate::nanos),
+                            file: Some(file_id(stat.id)),
+                        },
+                    )
+                    .map_err(record)?;
+            }
             Ok(ReceiveOutcome::Finished(claimed.keep()))
         }
         // Gone the moment it got its name: never reported copied.

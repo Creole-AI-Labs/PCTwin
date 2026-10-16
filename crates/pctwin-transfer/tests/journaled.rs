@@ -469,6 +469,19 @@ impl Ledger for Breaks<'_> {
         self.check("fill-cleared")?;
         self.inner.fill_cleared(id, left)
     }
+    fn committed_showing(
+        &self,
+        id: u64,
+        landed: Landed,
+        show: &pctwin_journal::Show,
+    ) -> Result<(), JournalError> {
+        self.check("committed")?;
+        self.inner.committed_showing(id, landed, show)
+    }
+    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        self.check("shown")?;
+        self.inner.shown(id, left)
+    }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.check("committed")?;
         self.inner.committed(id, landed)
@@ -764,6 +777,17 @@ impl Ledger for Counting<'_> {
     }
     fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
         self.inner.fill_cleared(id, left)
+    }
+    fn committed_showing(
+        &self,
+        id: u64,
+        landed: Landed,
+        show: &pctwin_journal::Show,
+    ) -> Result<(), JournalError> {
+        self.inner.committed_showing(id, landed, show)
+    }
+    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        self.inner.shown(id, left)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.inner.committed(id, landed)

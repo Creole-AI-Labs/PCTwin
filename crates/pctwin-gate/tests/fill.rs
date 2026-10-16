@@ -15,6 +15,8 @@ use pctwin_gate::{
     Claim, Destination, DriveKind, DriveProfile, FileId, FillPlan, FillSteps, GateError,
     IncomingPath, Naming, Proof, Sealed,
 };
+#[cfg(any(windows, target_os = "macos"))]
+use pctwin_gate::{ShowCheck, Shown};
 
 /// A drive that fills files in: exFAT where the system can tag and hide a file (Windows, macOS);
 /// on Linux, which can do neither, a drive that keeps identities (an exFAT drive would be refused
@@ -180,13 +182,32 @@ fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
     let Claim::Named(c) = s.fill_as("c.txt", &plan, &mut st) else {
         panic!("not named");
     };
-    c.keep();
     assert_eq!(
         *seen.lock().unwrap(),
         Some((true, Some(tag))),
         "while filled"
     );
+    // Named, but still hidden and tagged until it is committed and then shown.
+    assert!(
+        dest.hidden("c.txt").unwrap(),
+        "not shown before it is committed"
+    );
+    assert_eq!(dest.born("c.txt").unwrap(), Some(tag));
+    let show = c
+        .show()
+        .expect("a filled-in file has a show to finish")
+        .clone();
+    c.keep();
+    assert_eq!(
+        dest.finish_show("c.txt", &show, ShowCheck::Made).unwrap(),
+        Shown::Shown
+    );
     assert!(!dest.hidden("c.txt").unwrap(), "shown once complete");
+    // Asked again: already shown, nothing touched.
+    assert_eq!(
+        dest.finish_show("c.txt", &show, ShowCheck::Made).unwrap(),
+        Shown::AlreadyShown
+    );
     assert_eq!(
         dest.born("c.txt").unwrap(),
         Some(pctwin_gate::Born::of(real))
@@ -220,7 +241,12 @@ fn an_old_original_never_costs_the_tag_and_never_leaves_it_behind() {
     let Claim::Named(c) = s.fill_as("old.txt", &plan, &mut st) else {
         panic!("not named");
     };
+    let show = c.show().unwrap().clone();
     c.keep();
+    assert_eq!(
+        dest.finish_show("old.txt", &show, ShowCheck::Made).unwrap(),
+        Shown::Shown
+    );
     assert_eq!(
         *seen.lock().unwrap(),
         Some(tag),
@@ -692,7 +718,7 @@ fn after_a_restart_only_a_file_proven_pctwin_s_is_finished_or_removed() {
             FillRemoval::NotProven,
             "{proof:?}"
         );
-        let r = dest.finish_fill("n.bin", &f, None, None, |_| Ok(true), || Ok(()));
+        let r = dest.finish_fill("n.bin", &f, |_| Ok(true), || Ok(()));
         assert!(matches!(r, Ok(FillFinish::NotProven)), "{proof:?}: {r:?}");
         assert!(root.path().join("n.bin").exists());
     }
@@ -721,4 +747,178 @@ fn after_a_restart_only_a_file_proven_pctwin_s_is_finished_or_removed() {
         FillRemoval::Removed
     );
     assert!(!root.path().join("ok.bin").exists());
+}
+
+/// Showing a committed, filled-in file never touches one PCTwin cannot prove its own: a hidden
+/// file whose tag is not the recorded one is left exactly as it is; a name with nothing at it is
+/// gone; and each step of a show can be done again after a stop part way.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
+    let root = tempfile::tempdir().unwrap();
+    let steps_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = Arc::clone(&steps_seen);
+    let dest = fill_in(root.path()).with_show_hook(move |step| {
+        seen.lock().unwrap().push(step.to_string());
+        Ok(())
+    });
+    let s = sealed(&dest, "s.txt", b"show");
+    let plan = s.fill_plan().unwrap();
+    let Claim::Named(c) = s.fill_as("s.txt", &plan, &mut steps(b"show")) else {
+        panic!("not named");
+    };
+    let show = c.show().unwrap().clone();
+    c.keep();
+    // Not proven: the recorded tag is not this file's.
+    let mut other = show.clone();
+    other.fill.tag.born = Some(pctwin_gate::Born {
+        secs: 1_000_000_000,
+        nanos: 0,
+    });
+    other.fill.proof = Proof::Token;
+    assert_eq!(
+        dest.finish_show("s.txt", &other, ShowCheck::Made).unwrap(),
+        Shown::NotProven
+    );
+    assert!(dest.hidden("s.txt").unwrap(), "left exactly as it is");
+    assert!(steps_seen.lock().unwrap().is_empty());
+    // Proven: shown in order, the creation date given back last.
+    assert_eq!(
+        dest.finish_show("s.txt", &show, ShowCheck::Made).unwrap(),
+        Shown::Shown
+    );
+    assert_eq!(
+        *steps_seen.lock().unwrap(),
+        ["shown", "modified", "created"]
+    );
+    // Nothing at a name: gone.
+    let mut gone = show.clone();
+    gone.fill.final_path = "nothing.txt".into();
+    assert_eq!(
+        dest.finish_show("nothing.txt", &gone, ShowCheck::Made)
+            .unwrap(),
+        Shown::Gone
+    );
+}
+
+/// After a restart, an empty file made hidden just before its tag (nothing recorded as made) is
+/// PCTwin's own and removed; an empty file that is not hidden is not.
+#[cfg(windows)]
+#[test]
+fn after_a_restart_an_empty_hidden_file_made_before_its_tag_is_removed() {
+    use pctwin_gate::{Fill, FillRemoval, FillTag};
+    use std::os::windows::fs::OpenOptionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    std::fs::write(root.path().join(".pctwin-t.part"), b"abc").unwrap();
+    let fill = |name: &str| Fill {
+        final_path: name.into(),
+        made: None,
+        tag: FillTag {
+            born: Some(pctwin_gate::Born {
+                secs: 1_000_000_000,
+                nanos: 0,
+            }),
+            hidden: true,
+        },
+        proof: Proof::Token,
+    };
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .attributes(0x2)
+        .open(root.path().join("h.bin"))
+        .unwrap();
+    assert_eq!(
+        dest.remove_fill("h.bin", &fill("h.bin"), ".pctwin-t.part", 0)
+            .unwrap(),
+        FillRemoval::Removed
+    );
+    std::fs::write(root.path().join("v.bin"), b"").unwrap();
+    assert_eq!(
+        dest.remove_fill("v.bin", &fill("v.bin"), ".pctwin-t.part", 0)
+            .unwrap(),
+        FillRemoval::NotProven
+    );
+    assert!(root.path().join("v.bin").exists());
+    let hidden = |name: &str, bytes: &[u8]| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .attributes(0x2)
+            .open(root.path().join(name))
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+    };
+    // Not empty: something was written into it, so it is not the file made just before its tag,
+    // even when its bytes are the start of PCTwin's.
+    hidden("p.bin", b"abc");
+    assert_eq!(
+        dest.remove_fill("p.bin", &fill("p.bin"), ".pctwin-t.part", 3)
+            .unwrap(),
+        FillRemoval::NotProven
+    );
+    assert!(root.path().join("p.bin").exists());
+    // Something was recorded as made, and this is not it: the tag came before that, so an
+    // untagged file here is not PCTwin's.
+    hidden("m.bin", b"");
+    let mut made = fill("m.bin");
+    made.made = Some(FileId {
+        volume: 7,
+        index: std::num::NonZeroU64::new(7).unwrap(),
+        born: None,
+    });
+    assert_eq!(
+        dest.remove_fill("m.bin", &made, ".pctwin-t.part", 0)
+            .unwrap(),
+        FillRemoval::NotProven
+    );
+    assert!(root.path().join("m.bin").exists());
+}
+
+/// Windows gives a file made at a name just freed the creation time of the file that had it
+/// (file-system tunnelling), so another program's file put in place of PCTwin's hidden one
+/// carries PCTwin's tag. It is still never shown: its identity is not the one made, and its bytes
+/// are not the file's.
+#[cfg(windows)]
+#[test]
+fn a_file_put_in_place_of_pctwin_s_hidden_one_is_never_shown_though_it_carries_the_tag() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let s = sealed(&dest, "u.txt", b"ours, whole");
+    let plan = s.fill_plan().unwrap();
+    let Claim::Named(c) = s.fill_as("u.txt", &plan, &mut steps(b"ours, whole")) else {
+        panic!("not named");
+    };
+    let show = c.show().unwrap().clone();
+    c.keep();
+    std::fs::remove_file(root.path().join("u.txt")).unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .attributes(0x2)
+        .open(root.path().join("u.txt"))
+        .unwrap()
+        .write_all(b"theirs")
+        .unwrap();
+    // Tunnelling: their file has PCTwin's tag.
+    assert_eq!(dest.born("u.txt").unwrap(), show.fill.tag.born);
+    assert_eq!(
+        dest.finish_show("u.txt", &show, ShowCheck::Made).unwrap(),
+        Shown::NotProven
+    );
+    let mut whole = |f: &mut dyn Read| {
+        let mut got = Vec::new();
+        f.read_to_end(&mut got)?;
+        Ok(got == b"ours, whole")
+    };
+    assert_eq!(
+        dest.finish_show("u.txt", &show, ShowCheck::Bytes(&mut whole))
+            .unwrap(),
+        Shown::NotProven
+    );
+    assert!(dest.hidden("u.txt").unwrap(), "their file is left as it is");
+    assert_eq!(std::fs::read(root.path().join("u.txt")).unwrap(), b"theirs");
 }
