@@ -685,7 +685,7 @@ impl Destination {
             return Ok(*check);
         }
         let folder_path = || self.folder_path(dir, folder);
-        let check = naming::trusted(
+        let check = naming::for_system(
             naming::probe(dir, &folder_path, move_no_replace)?,
             self.profile_of(dir).kind(),
             Platform::host(),

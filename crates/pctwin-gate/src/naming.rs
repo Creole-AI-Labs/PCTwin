@@ -131,7 +131,7 @@ pub(crate) fn classify(
 /// (`VOL_CAP_INT_RENAME_EXCL` is 0, found in CI on 15 October 2026), so macOS checks the name
 /// itself before it moves, and that check and the move are two steps another program could come
 /// between. Those drives fill files in instead, where the drive itself refuses a taken name.
-pub(crate) fn trusted(
+pub(crate) fn for_system(
     check: DriveCheck,
     kind: crate::DriveKind,
     system: crate::Platform,
@@ -529,27 +529,27 @@ mod trust_tests {
             DriveKind::Unknown,
             DriveKind::Network,
         ] {
-            let c = trusted(moving(), kind, Platform::MacOs);
+            let c = for_system(moving(), kind, Platform::MacOs);
             assert_eq!(c.naming, Naming::FillIn, "{kind:?}");
             assert!(!c.no_replace_move, "{kind:?}");
         }
         for kind in [DriveKind::Apfs, DriveKind::HfsPlus] {
             assert_eq!(
-                trusted(moving(), kind, Platform::MacOs),
+                for_system(moving(), kind, Platform::MacOs),
                 moving(),
                 "{kind:?}"
             );
         }
         // Linux and Windows do the no-replace move in the drive driver itself.
         for system in [Platform::Linux, Platform::Windows] {
-            assert_eq!(trusted(moving(), DriveKind::Fat, system), moving());
+            assert_eq!(for_system(moving(), DriveKind::Fat, system), moving());
         }
         // A drive with hard links is unchanged; one with no safe way stays refused.
         let linked = classify(true, true, &Moved::Taken, true, true, true);
-        assert_eq!(trusted(linked, DriveKind::Fat, Platform::MacOs), linked);
+        assert_eq!(for_system(linked, DriveKind::Fat, Platform::MacOs), linked);
         let none = classify(false, false, &Moved::Taken, true, true, false);
         assert_eq!(
-            trusted(none, DriveKind::Fat, Platform::MacOs).naming,
+            for_system(none, DriveKind::Fat, Platform::MacOs).naming,
             Naming::NoSafeMethod
         );
     }
