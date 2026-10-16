@@ -9,7 +9,9 @@ mod common;
 use std::io::Write;
 use std::path::Path;
 
-use pctwin_gate::{Destination, DownloadMark, IncomingPath, download_mark_of};
+use pctwin_gate::{
+    Destination, DownloadMark, DriveKind, DriveProfile, IncomingPath, download_mark_of,
+};
 
 fn receive(dest: &Destination, name: &str, mark: Option<DownloadMark>) -> String {
     let mut file = dest
@@ -173,7 +175,9 @@ mod macos {
 #[test]
 fn a_drive_that_cannot_keep_markers_still_gets_the_file_and_says_so() {
     let root = tempfile::tempdir().unwrap();
-    let dest = Destination::open(root.path()).unwrap().as_if_no_markers();
+    let dest = Destination::open(root.path())
+        .unwrap()
+        .with_profile(DriveProfile::of(DriveKind::Fat).without_markers());
     let mut file = dest
         .create_file(&IncomingPath::parse("setup.exe").unwrap(), 3)
         .unwrap();

@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Real FAT-family drives for the gate's real-drive tests, on a Linux runner.
+#
+# Usage: scripts/real-drives-linux.sh setup | remount | swap
+#   setup    makes three drives (vfat, the kernel's exFAT, exfat-fuse), mounts them under
+#            $RUNNER_TEMP and exports PCTWIN_FAT_DIRS (kind=path, separated by |) to later steps.
+#            Also makes one more vfat drive on a loop device, mounted at swap/drive, for the test
+#            of a drive put in another's place (PCTWIN_SWAP_DIR, PCTWIN_SWAP_CMD).
+#   remount  unmounts every drive and mounts it again at the same path with the same driver.
+#   swap     (run by that test) unmounts the swap drive and puts an ext4 image on the very same
+#            loop device, mounted at the same folder: a different drive with the same number.
+set -euo pipefail
+
+root="${RUNNER_TEMP:?RUNNER_TEMP is not set}"
+list="$root/fat-drives.txt" # one line per drive: kind|image|mountpoint
+apt=(sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+
+# What the OS says each kind is mounted as (findmnt's FSTYPE; stat's name for it is printed too).
+expected_type() {
+  case "$1" in
+    vfat) echo '^vfat$' ;;
+    exfat) echo '^exfat$' ;;
+    exfat-fuse) echo '^fuse' ;;
+  esac
+}
+
+mount_one() {
+  local kind="$1" img="$2" mnt="$3"
+  mkdir -p "$mnt"
+  case "$kind" in
+    # Explicit UTF-8 and mixed-case short names, as desktop automounters (udisks2) mount it.
+    vfat) sudo mount -t vfat -o "loop,uid=$(id -u),gid=$(id -g),shortname=mixed,utf8=1" "$img" "$mnt" ;;
+    exfat) sudo mount -t exfat -o "loop,uid=$(id -u),gid=$(id -g),iocharset=utf8" "$img" "$mnt" ;;
+    # The FUSE driver through its own helper, so it is the FUSE driver even with the kernel module
+    # loaded. As root: the helper asks for allow_other, which a plain user may not (fuse.conf).
+    # It needs a block device (a plain file gives "Block device required"), so a loop device.
+    exfat-fuse)
+      local dev
+      dev="$(sudo losetup --find --show "$img")"
+      sudo mount.exfat-fuse -o "uid=$(id -u),gid=$(id -g)" "$dev" "$mnt"
+      ;;
+  esac
+}
+
+unmount_one() {
+  local kind="$1" img="$2" mnt="$3" i
+  sync
+  for i in 1 2 3 4 5; do
+    if sudo umount "$mnt"; then
+      # Free the loop device the FUSE drive used; the next mount makes a new one.
+      if [ "$kind" = exfat-fuse ]; then sudo losetup -j "$img" -O NAME -n | xargs -r -n1 sudo losetup -d; fi
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+# Prints and checks what the OS reports for the mount point.
+verify() {
+  local kind="$1" mnt="$2" fstype
+  fstype="$(findmnt -no FSTYPE "$mnt" || true)"
+  echo "$kind at $mnt: findmnt FSTYPE=$fstype, stat -f type=$(stat -f -c %T "$mnt")"
+  echo "  options: $(findmnt -no OPTIONS "$mnt")"
+  if ! echo "$fstype" | grep -Eq "$(expected_type "$kind")"; then
+    echo "::error::$kind at $mnt is mounted as '$fstype', not the driver this drive is for"
+    return 1
+  fi
+}
+
+case "${1:-}" in
+setup)
+  "${apt[@]}" update
+  "${apt[@]}" install -y dosfstools exfatprogs exfat-fuse
+  # The runner's Azure kernel does not ship the exFAT module in its base package.
+  if ! sudo modprobe exfat 2>/dev/null; then
+    if "${apt[@]}" install -y "linux-modules-extra-$(uname -r)"; then
+      sudo modprobe exfat || true
+    else
+      echo "::warning::no linux-modules-extra package for kernel $(uname -r), so no kernel exFAT driver here"
+    fi
+  fi
+  if grep -qw exfat /proc/filesystems; then
+    echo "kernel exFAT driver present: $(grep -w exfat /proc/filesystems)"
+  fi
+  : >"$list"
+  dirs=""
+  for kind in vfat exfat exfat-fuse; do
+    img="$root/$kind.img"
+    mnt="$root/$kind"
+    if [ "$kind" = exfat ] && ! grep -qw exfat /proc/filesystems; then
+      echo "::warning::kernel exFAT driver unavailable on $(uname -r): skipping the kernel exFAT drive (exfat-fuse still covers exFAT)"
+      continue
+    fi
+    truncate -s 64M "$img"
+    if [ "$kind" = vfat ]; then mkfs.vfat "$img"; else mkfs.exfat "$img"; fi
+    mount_one "$kind" "$img" "$mnt"
+    verify "$kind" "$mnt"
+    echo "$kind|$img|$mnt" >>"$list"
+    dirs="$dirs|$kind=$mnt"
+  done
+  mkdir -p "$root/fat-state"
+  # The drive for the swap test: vfat now, ext4 once the test asks.
+  truncate -s 32M "$root/swap-a.img" "$root/swap-b.img"
+  mkfs.vfat "$root/swap-a.img"
+  mkfs.ext4 -q -F "$root/swap-b.img"
+  swapdev="$(sudo losetup --find --show "$root/swap-a.img")"
+  echo "$swapdev" >"$root/swap-dev.txt"
+  mkdir -p "$root/swap/drive"
+  sudo mount -t vfat -o "uid=$(id -u),gid=$(id -g)" "$swapdev" "$root/swap/drive"
+  verify vfat "$root/swap/drive"
+  {
+    echo "PCTWIN_FAT_DIRS=$dirs"
+    echo "PCTWIN_FAT_STATE=$root/fat-state"
+    echo "PCTWIN_SWAP_DIR=$root/swap"
+    echo "PCTWIN_SWAP_CMD=bash $(cd "$(dirname "$0")" && pwd)/real-drives-linux.sh swap"
+  } >>"$GITHUB_ENV"
+  echo "== mounts"
+  findmnt -t vfat,exfat,fuseblk,fuse.exfat || true
+  ;;
+remount)
+  echo "== mount table before"
+  findmnt -t vfat,exfat,fuseblk,fuse.exfat || true
+  while IFS='|' read -r kind img mnt; do
+    # A marker written from the shell must survive the round trip.
+    echo "kept" >"$mnt/.pctwin-remount-marker"
+    unmount_one "$kind" "$img" "$mnt"
+    if mountpoint -q "$mnt"; then
+      echo "::error::$mnt is still mounted after unmounting"
+      exit 1
+    fi
+    if [ -e "$mnt/.pctwin-remount-marker" ]; then
+      echo "::error::$mnt still shows the drive's files after it was unmounted"
+      exit 1
+    fi
+    mount_one "$kind" "$img" "$mnt"
+    verify "$kind" "$mnt"
+    if [ "$(cat "$mnt/.pctwin-remount-marker")" != kept ]; then
+      echo "::error::the marker did not survive the remount of $mnt"
+      exit 1
+    fi
+    echo "remounted $kind at $mnt: it was really unmounted and mounted again"
+  done <"$list"
+  echo "== mount table after"
+  findmnt -t vfat,exfat,fuseblk,fuse.exfat || true
+  ;;
+swap)
+  dev="$(cat "$root/swap-dev.txt")"
+  mnt="$root/swap/drive"
+  sync
+  sudo umount "$mnt"
+  sudo losetup --detach "$dev"
+  sudo losetup "$dev" "$root/swap-b.img"
+  sudo mount -t ext4 "$dev" "$mnt"
+  sudo chown "$(id -u):$(id -g)" "$mnt"
+  fstype="$(findmnt -no FSTYPE "$mnt")"
+  if [ "$fstype" != ext4 ]; then
+    echo "::error::the swap drive is mounted as '$fstype', not ext4"
+    exit 1
+  fi
+  echo "swapped: $dev now holds ext4 at $mnt ($(stat -c %D "$mnt"))"
+  ;;
+*)
+  echo "usage: $0 setup|remount|swap" >&2
+  exit 2
+  ;;
+esac
