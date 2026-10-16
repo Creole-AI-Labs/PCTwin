@@ -126,6 +126,31 @@ pub(crate) fn classify(
     }
 }
 
+/// What a drive's test may trust on `system`, for a drive of `kind`. On a Mac a no-replace move
+/// counts only on APFS and HFS+, which do it themselves: FAT32 and exFAT say they cannot
+/// (`VOL_CAP_INT_RENAME_EXCL` is 0, found in CI on 15 October 2026), so macOS checks the name
+/// itself before it moves, and that check and the move are two steps another program could come
+/// between. Those drives fill files in instead, where the drive itself refuses a taken name.
+pub(crate) fn trusted(
+    check: DriveCheck,
+    kind: crate::DriveKind,
+    system: crate::Platform,
+) -> DriveCheck {
+    use crate::DriveKind::{Apfs, HfsPlus};
+    if system != crate::Platform::MacOs || check.hard_links || matches!(kind, Apfs | HfsPlus) {
+        return check;
+    }
+    let naming = match check.naming {
+        Naming::Atomic if check.no_replace_move => Naming::FillIn,
+        n => n,
+    };
+    DriveCheck {
+        naming,
+        no_replace_move: false,
+        ..check
+    }
+}
+
 /// What the first and second probe files hold.
 pub(crate) const PROBE_A: &[u8] = b"PCTwin drive test: file a. Safe to delete.\n";
 pub(crate) const PROBE_B: &[u8] = b"PCTwin drive test: file b. Safe to delete.\n";
@@ -142,6 +167,8 @@ fn is_probe_name(name: &str) -> bool {
             rest.strip_suffix("-a")
                 .or_else(|| rest.strip_suffix("-b"))
                 .or_else(|| rest.strip_suffix("-c"))
+                // The time-step test's file (the drive module).
+                .or_else(|| rest.strip_suffix("-t"))
         })
         .is_some_and(|tag| {
             !tag.is_empty()
@@ -171,13 +198,16 @@ fn remove_if_probe(dir: &Dir, name: &str, leftover: bool) -> io::Result<()> {
             return Ok(());
         }
     }
-    let longest = PROBE_A.len().max(PROBE_B.len()) as u64;
+    let longest = PROBE_A
+        .len()
+        .max(PROBE_B.len())
+        .max(crate::drive::TIME_PROBE.len()) as u64;
     if !meta.is_file() || meta.len() > longest {
         return Ok(());
     }
     let mut bytes = Vec::new();
     dir.open(name)?.take(longest + 1).read_to_end(&mut bytes)?;
-    if bytes != PROBE_A && bytes != PROBE_B {
+    if bytes != PROBE_A && bytes != PROBE_B && bytes != crate::drive::TIME_PROBE {
         return Ok(());
     }
     match dir.remove_file(name) {
@@ -479,5 +509,48 @@ mod tests {
         ] {
             assert!(!is_probe_name(no), "{no}");
         }
+    }
+}
+
+#[cfg(test)]
+mod trust_tests {
+    use super::*;
+    use crate::{DriveKind, Platform};
+
+    fn moving() -> DriveCheck {
+        classify(false, false, &Moved::Taken, true, true, true)
+    }
+
+    #[test]
+    fn a_mac_trusts_a_no_replace_move_only_where_the_drive_does_it_itself() {
+        for kind in [
+            DriveKind::Fat,
+            DriveKind::ExFat,
+            DriveKind::Unknown,
+            DriveKind::Network,
+        ] {
+            let c = trusted(moving(), kind, Platform::MacOs);
+            assert_eq!(c.naming, Naming::FillIn, "{kind:?}");
+            assert!(!c.no_replace_move, "{kind:?}");
+        }
+        for kind in [DriveKind::Apfs, DriveKind::HfsPlus] {
+            assert_eq!(
+                trusted(moving(), kind, Platform::MacOs),
+                moving(),
+                "{kind:?}"
+            );
+        }
+        // Linux and Windows do the no-replace move in the drive driver itself.
+        for system in [Platform::Linux, Platform::Windows] {
+            assert_eq!(trusted(moving(), DriveKind::Fat, system), moving());
+        }
+        // A drive with hard links is unchanged; one with no safe way stays refused.
+        let linked = classify(true, true, &Moved::Taken, true, true, true);
+        assert_eq!(trusted(linked, DriveKind::Fat, Platform::MacOs), linked);
+        let none = classify(false, false, &Moved::Taken, true, true, false);
+        assert_eq!(
+            trusted(none, DriveKind::Fat, Platform::MacOs).naming,
+            Naming::NoSafeMethod
+        );
     }
 }

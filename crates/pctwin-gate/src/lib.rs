@@ -685,7 +685,11 @@ impl Destination {
             return Ok(*check);
         }
         let folder_path = || self.folder_path(dir, folder);
-        let check = naming::probe(dir, &folder_path, move_no_replace)?;
+        let check = naming::trusted(
+            naming::probe(dir, &folder_path, move_no_replace)?,
+            self.profile_of(dir).kind(),
+            Platform::host(),
+        );
         checks.insert(key, check);
         Ok(check)
     }
@@ -2891,6 +2895,24 @@ mod tests {
         assert_eq!(std::fs::read(root.path().join("empty.txt")).unwrap(), b"");
         assert!(root.path().join("Notes").is_dir());
         assert_eq!(std::fs::read(root.path().join("t.part")).unwrap(), b"new");
+    }
+
+    /// A drive whose test found a no-replace move that is not there now (here: Windows without
+    /// the folder's full path) is an unsafe drive for this file, never a taken name: a taken name
+    /// would send the file on to other names it can never get either.
+    #[cfg(windows)]
+    #[test]
+    fn a_move_that_is_no_longer_there_is_never_taken_for_a_taken_name() {
+        let (root, dir) = folder();
+        std::fs::write(root.path().join("t.part"), b"abc").unwrap();
+        let check = DriveCheck::forced(Naming::Atomic, false);
+        let no_path = || -> io::Result<std::path::PathBuf> { Err(io::Error::other("none")) };
+        assert!(matches!(
+            claim(&dir, "a.txt", "t.part", &no_path, &check),
+            Err(GateError::NoSafeName)
+        ));
+        assert!(root.path().join("t.part").exists());
+        assert!(!root.path().join("a.txt").exists());
     }
 
     #[cfg(windows)]
