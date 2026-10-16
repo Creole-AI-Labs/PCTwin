@@ -724,6 +724,24 @@ impl Sweeper<'_> {
                     zone: Zone::Explore { inside: None },
                     item: None,
                 });
+                // macOS: the data volume behind `/`. Most of it is seen through `/` (Users,
+                // Applications, Library); what an administrator made at its root is not, so its
+                // root is listed too.
+                for also in &v.also {
+                    let Ok(inner) = also.strip_prefix(&v.mount) else {
+                        continue;
+                    };
+                    if !also.is_dir() {
+                        continue;
+                    }
+                    self.state.shallow[i].push_back(Job {
+                        volume: i,
+                        rel: inner.iter().map(item_name).collect(),
+                        depth: 0,
+                        zone: Zone::Explore { inside: None },
+                        item: None,
+                    });
+                }
             } else if v.kind == VolumeKind::OtherSystem {
                 self.state.blind.insert(BlindSpot {
                     volume: Some(v.label()),
@@ -1202,11 +1220,19 @@ impl Sweeper<'_> {
         let is_system = self.facts.volumes[job.volume].is_system;
         let keeps_owners = self.facts.volumes[job.volume].keeps_owners();
         let mut loose: BTreeMap<Placement, usize> = BTreeMap::new();
+        // The root of a macOS data volume: what `/` already shows is seen there.
+        let also_root = job.depth == 0 && !job.rel.is_empty();
         for entry in entries {
             let name = item_name(&entry.name);
             let text = name.display().to_string();
             let path = self.abs(job.volume, &job.rel).join(&entry.name);
             if self.skipped(job, &entry, &path) {
+                continue;
+            }
+            if also_root
+                && std::fs::symlink_metadata(self.facts.volumes[job.volume].mount.join(&entry.name))
+                    .is_ok()
+            {
                 continue;
             }
             self.note_owner(&entry);

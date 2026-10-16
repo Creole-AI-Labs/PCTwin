@@ -771,3 +771,31 @@ fn a_refusal_keeps_its_reason() {
         Some(BlindReason::Refused { code: Some(9999) })
     );
 }
+
+#[test]
+fn a_second_root_behind_the_system_root_is_walked_without_counting_twice() {
+    // As macOS's data volume sits behind `/`: what `/` shows (Users) is seen there; what only the
+    // data volume holds (a folder an administrator made at its root) is found through `also`.
+    let lab = lab();
+    let data = lab.c.join("System").join("Volumes").join("Data");
+    write(&data.join("Projects/only-here.txt"), 30);
+    write(&data.join("Users/also-at-root.txt"), 7);
+    write(&lab.c.join("Users/also-at-root.txt"), 7);
+    let mut f = sized(facts(&lab, false), 0);
+    f.volumes[0].skip.push(lab.c.join("System").join("Volumes"));
+    f.volumes[0].also.push(data.clone());
+    f.volumes[0].free_bytes += 7;
+    let s = run(f, &mut Answers::default());
+    find(
+        &s,
+        FolderRole::Other,
+        "System/Volumes/Data/Projects/only-here.txt",
+    );
+    assert!(
+        !s.record
+            .items
+            .iter()
+            .any(|i| shown(i).starts_with("System/Volumes/Data/Users"))
+    );
+    assert_eq!(s.volumes[0].unexplained_bytes, 0);
+}
