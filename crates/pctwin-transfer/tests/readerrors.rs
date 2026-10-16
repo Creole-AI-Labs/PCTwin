@@ -173,16 +173,17 @@ async fn run(
         let files: Vec<(&SendJob, u64)> = jobs.iter().map(|j| (j, 200_000)).collect();
         common::approved_jobs(&files)
     };
+    let to_move = 200_000 * jobs.len() as u64;
     let mut sender = SenderSession::new(jobs, 2)
         .with_opener(faulty)
         .with_read_plan(plan);
     let mut receiver = ReceiverSession::new(&table, approved, common::journal(), "1001");
     let (mut a, mut b) = mem_pair();
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let meter = receiver.meter();
+    let (sent, received) = common::unless_stuck(&meter, to_move, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("the move hung");
+    .await;
     sent.unwrap();
     received.unwrap();
     sender

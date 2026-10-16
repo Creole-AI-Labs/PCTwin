@@ -7,9 +7,10 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
 
 use pctwin_journal::{Journal, JournalError};
+
+mod common;
 
 const HOLD: &str = "PCTWIN_TEST_JOURNAL_HOLD";
 const HELD: &str = "PCTWIN-JOURNAL-HELD-3f9c";
@@ -50,7 +51,7 @@ fn a_second_process_cannot_open_a_journal_in_use() {
             }
         }
     });
-    if rx.recv_timeout(Duration::from_secs(60)).is_err() {
+    if rx.recv_timeout(common::HANG_AFTER).is_err() {
         let _ = child.kill();
         panic!("the child never opened the journal");
     }

@@ -13,6 +13,8 @@ use pctwin_journal::{
 };
 use pctwin_record::{ItemId, LaptopId};
 
+mod common;
+
 fn planned(n: u8) -> PlannedWrite {
     PlannedWrite {
         download_mark: None,
@@ -165,10 +167,7 @@ fn there_is_no_way_back_a_cancelled_wipe_leaves_undo_closed() {
     }
 }
 
-/// Long enough for any working close; a broken one fails the test instead of hanging it.
-const LONG: Duration = Duration::from_secs(30);
-
-/// Closes `j` on its own thread; `Some(token is for j)` if it finished within [`LONG`].
+/// Closes `j` on its own thread; `Some(token is for j)` if it finished within [`common::HANG_AFTER`].
 fn close_soon(j: &Arc<Journal>) -> Option<bool> {
     let (tx, rx) = mpsc::channel();
     let jj = Arc::clone(j);
@@ -180,7 +179,7 @@ fn close_soon(j: &Arc<Journal>) -> Option<bool> {
             .is_for(&jj);
         let _ = tx.send(ok);
     });
-    rx.recv_timeout(LONG).ok()
+    rx.recv_timeout(common::HANG_AFTER).ok()
 }
 
 #[test]
@@ -210,7 +209,7 @@ fn a_held_permit_makes_closing_wait_until_it_is_dropped() {
             .unwrap();
         })
     };
-    taken_rx.recv_timeout(LONG).unwrap();
+    taken_rx.recv_timeout(common::HANG_AFTER).unwrap();
     {
         let j = Arc::clone(&j);
         std::thread::spawn(move || {
@@ -219,7 +218,7 @@ fn a_held_permit_makes_closing_wait_until_it_is_dropped() {
             let _ = closed_tx.send(ok);
         });
     }
-    closing_rx.recv_timeout(LONG).unwrap();
+    closing_rx.recv_timeout(common::HANG_AFTER).unwrap();
     // Closing has been asked for and cannot finish while the permit is held.
     assert!(
         closed_rx.recv_timeout(Duration::from_millis(300)).is_err(),
@@ -230,7 +229,7 @@ fn a_held_permit_makes_closing_wait_until_it_is_dropped() {
     // Once it is given back, closing finishes, and the file's last record came first.
     assert!(
         closed_rx
-            .recv_timeout(LONG)
+            .recv_timeout(common::HANG_AFTER)
             .expect("closing never finished")
     );
     undoer.join().unwrap();
@@ -260,7 +259,7 @@ fn once_closing_is_waiting_no_new_permit_is_handed_out() {
             let _ = release_rx.recv();
         });
     }
-    taken_rx.recv_timeout(LONG).unwrap();
+    taken_rx.recv_timeout(common::HANG_AFTER).unwrap();
     {
         let j = Arc::clone(&j);
         std::thread::spawn(move || {
@@ -290,7 +289,7 @@ fn once_closing_is_waiting_no_new_permit_is_handed_out() {
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
     release_tx.send(()).unwrap();
     closed_rx
-        .recv_timeout(LONG)
+        .recv_timeout(common::HANG_AFTER)
         .expect("closing never finished");
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
 }
