@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Checks that `unsafe` stays forbidden everywhere except in one place: fn fcntl_int in
+# Checks that `unsafe` stays forbidden everywhere except in one place: fn sys_int in
 # pctwin-lease.
 #
 # Every crate must say `[lints] workspace = true`, which brings in the workspace's
 # `unsafe_code = "forbid"`. A crate that sets its own unsafe_code, or whose sources contain an
 # allow/expect/warn of unsafe code, fails this check. The one exception, pctwin-lease (approved by
 # the user, October 2026), may set unsafe_code = "deny" and has exactly one `expect(unsafe_code)`
-# and exactly one `unsafe`, both inside the body of `fn fcntl_int`.
+# and exactly one `unsafe`, both inside the body of `fn sys_int`.
 #
 # The sources are read as Rust, not line by line: comments, strings and character literals are
 # set aside first, and an attribute counts however it is spread over lines, so
@@ -29,7 +29,7 @@ grep -Eq '^unsafe_code *= *"forbid"' Cargo.toml || bad "Cargo.toml no longer set
 # Reads Rust sources as code and reports, one per line:
 #   loosen <file>:<line> <allow|expect|warn>   an attribute loosening unsafe_code
 #   unsafe <file>:<line>                       the keyword `unsafe`
-#   body <file> <start> <end>                  where `fn fcntl_int`'s body is (byte offsets)
+#   body <file> <start> <end>                  where `fn sys_int`'s body is (byte offsets)
 #   at <file>:<offset> <kind>                  the byte offset of each loosen/unsafe found
 # Exits 3 if a file cannot be read as Rust (an unclosed comment or string): fail closed.
 scan() {
@@ -85,7 +85,7 @@ scan() {
         printf "unsafe %s:%d\n", $file, $line->($-[0]);
         printf "at %s:%d unsafe\n", $file, $-[0];
       }
-      while ($o =~ /\bfn\s+fcntl_int\b/g) {
+      while ($o =~ /\bfn\s+sys_int\b/g) {
         my $open = index($o, "{", pos($o));
         next if $open < 0;
         my ($j, $d) = ($open + 1, 1);
@@ -126,14 +126,14 @@ for toml in crates/*/Cargo.toml app/src-tauri/Cargo.toml; do
     n_body=$(echo "$report" | grep -cE '^body ' || true)
     [ "$n_expect" -eq 1 ] || bad "$dir: $n_expect expect(unsafe_code) found, exactly 1 is permitted: $(echo "$report" | grep -E '^loosen ' | tr '\n' ' ')"
     [ "$n_unsafe" -eq 1 ] || bad "$dir: $n_unsafe uses of unsafe found, exactly 1 is permitted: $(echo "$report" | grep -E '^unsafe ' | tr '\n' ' ')"
-    [ "$n_body" -eq 1 ] || bad "$dir: $n_body definitions of fn fcntl_int found, exactly 1 is expected"
+    [ "$n_body" -eq 1 ] || bad "$dir: $n_body definitions of fn sys_int found, exactly 1 is expected"
     if [ "$n_body" -eq 1 ]; then
       read -r _ bfile bstart bend <<<"$(echo "$report" | grep -E '^body ')"
       while read -r _ where kind; do
         [ -n "$where" ] || continue
         f="${where%:*}"; off="${where##*:}"
         if [ "$f" != "$bfile" ] || [ "$off" -le "$bstart" ] || [ "$off" -ge "$bend" ]; then
-          bad "$dir: $kind at $where is outside the body of fn fcntl_int"
+          bad "$dir: $kind at $where is outside the body of fn sys_int"
         fi
       done < <(echo "$report" | grep -E '^at ')
     fi
@@ -148,5 +148,5 @@ for toml in crates/*/Cargo.toml app/src-tauri/Cargo.toml; do
   [ -z "$loosen" ] || bad "$dir: sources loosen unsafe_code: $(echo "$loosen" | tr '\n' ' ')"
 done
 
-[ "$fail" -eq 0 ] && echo "unsafe fence OK: unsafe is forbidden everywhere except fn fcntl_int in pctwin-lease."
+[ "$fail" -eq 0 ] && echo "unsafe fence OK: unsafe is forbidden everywhere except fn sys_int in pctwin-lease."
 exit $fail

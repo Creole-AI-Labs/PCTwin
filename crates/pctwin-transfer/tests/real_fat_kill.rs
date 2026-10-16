@@ -140,11 +140,26 @@ fn before(kind: &str, drive: &Path) {
     let journal = Journal::open(&st.join("j.redb")).unwrap();
     let e = &journal.entries().unwrap()[0];
     println!("{kind}: stopped at {:?}", step(&e.state));
+    let dest = Destination::open(&dir).unwrap();
     for (name, bytes) in files_under(&dir) {
+        let hidden = dest.hidden(&name).unwrap_or(false);
         println!(
-            "{kind}: on the drive before the remount: {name} ({} bytes)",
+            "{kind}: on the drive before the remount: {name} ({} bytes, hidden: {hidden})",
             bytes.len()
         );
+        // A copy killed while it was filled in under its name is never seen as an ordinary file:
+        // it is hidden from the moment it is made.
+        let pctwin_own = name
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .starts_with(".pctwin-");
+        if !pctwin_own && bytes != data() {
+            assert!(
+                hidden,
+                "{kind}: a partly copied file is visible under {name}"
+            );
+        }
     }
 }
 

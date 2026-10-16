@@ -16,10 +16,21 @@ use pctwin_gate::{
     IncomingPath, Naming, Proof, Sealed,
 };
 
+/// A drive that fills files in: exFAT where the system can tag and hide a file (Windows, macOS);
+/// on Linux, which can do neither, a drive that keeps identities (an exFAT drive would be refused
+/// there, nothing proving its files PCTwin's after a restart).
+fn fill_in_kind() -> DriveKind {
+    if cfg!(any(windows, target_os = "macos")) {
+        DriveKind::ExFat
+    } else {
+        DriveKind::Ext4
+    }
+}
+
 fn fill_in(root: &Path) -> Destination {
     Destination::open(root)
         .unwrap()
-        .with_profile(DriveProfile::of(DriveKind::ExFat).with_naming(Naming::FillIn))
+        .with_profile(DriveProfile::of(fill_in_kind()).with_naming(Naming::FillIn))
 }
 
 fn sealed<'d>(dest: &'d Destination, path: &str, bytes: &[u8]) -> Sealed<'d> {
@@ -45,6 +56,10 @@ struct Steps {
     log: Vec<String>,
     /// The bytes expected on read-back.
     expect: Vec<u8>,
+    /// Runs right after the read-back (to act as another program there).
+    after_read: Option<Box<dyn FnMut()>>,
+    /// Runs as the fill is recorded filled (to look at the file then).
+    at_filled: Option<Box<dyn FnMut()>>,
 }
 
 impl FillSteps for Steps {
@@ -56,10 +71,16 @@ impl FillSteps for Steps {
         let mut got = Vec::new();
         file.read_to_end(&mut got)?;
         self.log.push("read back".into());
+        if let Some(act) = self.after_read.as_mut() {
+            act();
+        }
         Ok(got == self.expect)
     }
     fn filled(&mut self) -> io::Result<()> {
         self.log.push("filled".into());
+        if let Some(look) = self.at_filled.as_mut() {
+            look();
+        }
         Ok(())
     }
     fn cleared(&mut self) -> io::Result<()> {
@@ -70,8 +91,8 @@ impl FillSteps for Steps {
 
 fn steps(expect: &[u8]) -> Steps {
     Steps {
-        log: Vec::new(),
         expect: expect.to_vec(),
+        ..Steps::default()
     }
 }
 
@@ -83,12 +104,12 @@ fn a_file_filled_in_lands_whole_and_the_steps_are_recorded_in_order() {
     let s = sealed(&dest, "Docs/a.bin", &bytes);
     assert_eq!(s.naming().unwrap(), Naming::FillIn);
     let plan = s.fill_plan().unwrap();
-    // exFAT's identities change: the creation-time tag proves the file, where the system can
-    // set one (Linux cannot: there nothing lasts past a restart).
+    // exFAT's identities change: the creation-time tag proves the file (Windows, macOS); the
+    // Linux stand-in keeps identities, which prove it there.
     let expected = if cfg!(any(windows, target_os = "macos")) {
         Proof::Token
     } else {
-        Proof::SameMountId
+        Proof::StableId
     };
     assert_eq!(plan.proof, expected);
     let name = s.next_name().unwrap();
@@ -134,22 +155,97 @@ fn a_plain_finish_fills_in_on_such_a_drive() {
     assert_eq!(names(root.path()), ["b.txt"]);
 }
 
-/// The creation time PCTwin tags the file with is on it while it is filled, where the system
-/// can set one; it proves the file PCTwin's where identities change.
+/// While it is filled, the file is hidden and carries PCTwin's tag (where the system can do
+/// both); once complete and checked it is shown, and gets back a real creation date (the checked
+/// copy's, as a file named by a move keeps), never the tag.
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
-fn the_file_is_tagged_with_its_creation_time() {
+fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
     let root = tempfile::tempdir().unwrap();
-    let dest = fill_in(root.path());
+    let dest = Arc::new(fill_in(root.path()));
     let s = sealed(&dest, "c.txt", b"xyz");
+    let real = std::fs::metadata(root.path().join(s.temp_path()))
+        .unwrap()
+        .created()
+        .unwrap();
     let plan = s.fill_plan().unwrap();
+    assert!(plan.tag.hidden);
     let tag = plan.tag.born.expect("this system sets creation times");
+    let seen = Arc::new(std::sync::Mutex::new(None));
     let mut st = steps(b"xyz");
+    let (d, k) = (Arc::clone(&dest), Arc::clone(&seen));
+    st.at_filled = Some(Box::new(move || {
+        *k.lock().unwrap() = Some((d.hidden("c.txt").unwrap(), d.born("c.txt").unwrap()));
+    }));
     let Claim::Named(c) = s.fill_as("c.txt", &plan, &mut st) else {
         panic!("not named");
     };
     c.keep();
-    assert_eq!(dest.born("c.txt").unwrap(), Some(tag));
+    assert_eq!(
+        *seen.lock().unwrap(),
+        Some((true, Some(tag))),
+        "while filled"
+    );
+    assert!(!dest.hidden("c.txt").unwrap(), "shown once complete");
+    assert_eq!(
+        dest.born("c.txt").unwrap(),
+        Some(pctwin_gate::Born::of(real))
+    );
+}
+
+/// Setting a modified time can move a creation time (APFS moves it back to the modified time):
+/// the tag is never exposed to that while it is the proof. A file whose original is older than
+/// any tag keeps its tag until it is recorded filled, and lands with the original's modified time
+/// and a real creation date.
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn an_old_original_never_costs_the_tag_and_never_leaves_it_behind() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Arc::new(fill_in(root.path()));
+    let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(347_155_200); // 1981
+    let mut file = dest
+        .create_file(&IncomingPath::parse("old.txt").unwrap(), 3)
+        .unwrap();
+    file.write_all(b"old").unwrap();
+    file.keep_modified_time(old);
+    let s = common::seal(file).unwrap();
+    let plan = s.fill_plan().unwrap();
+    let tag = plan.tag.born.unwrap();
+    let seen = Arc::new(std::sync::Mutex::new(None));
+    let mut st = steps(b"old");
+    let (d, k) = (Arc::clone(&dest), Arc::clone(&seen));
+    st.at_filled = Some(Box::new(move || {
+        *k.lock().unwrap() = d.born("old.txt").unwrap();
+    }));
+    let Claim::Named(c) = s.fill_as("old.txt", &plan, &mut st) else {
+        panic!("not named");
+    };
+    c.keep();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        Some(tag),
+        "the tag held until it was recorded filled"
+    );
+    let meta = std::fs::metadata(root.path().join("old.txt")).unwrap();
+    assert_eq!(meta.modified().unwrap(), old);
+    assert_ne!(
+        dest.born("old.txt").unwrap(),
+        Some(tag),
+        "no tag left on the person's file"
+    );
+}
+
+/// Linux can neither tag nor hide a file: a drive there whose identities change is never filled
+/// in (nothing would prove such a file PCTwin's after a restart).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_drive_that_could_not_prove_a_filled_file_is_never_filled() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path())
+        .unwrap()
+        .with_profile(DriveProfile::of(DriveKind::ExFat).with_naming(Naming::FillIn));
+    let s = sealed(&dest, "e.txt", b"e");
+    assert!(matches!(s.fill_plan(), Err(GateError::NoSafeName)));
 }
 
 /// A name already taken (even by an empty file) is never touched: the file gets a numbered name.
@@ -507,4 +603,122 @@ fn a_failure_leaves_pctwin_s_file_once_its_tag_was_changed() {
     });
     assert_eq!(log, ["made"]);
     assert!(root.path().join("o.bin").exists());
+}
+
+/// Another program wrote into PCTwin's file, in place (same length, same tag): a failure then
+/// leaves it, since PCTwin can remove only bytes it wrote.
+#[test]
+fn a_failure_leaves_a_file_another_program_wrote_into_in_place() {
+    let (root, log) = fail_after("p.bin", |dir, _| {
+        use std::io::{Seek, SeekFrom};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join("p.bin"))
+            .unwrap();
+        f.seek(SeekFrom::Start(10)).unwrap();
+        f.write_all(b"0123456789").unwrap();
+    });
+    assert_eq!(log, ["made"]);
+    let kept = std::fs::read(root.path().join("p.bin")).unwrap();
+    assert_eq!(kept.len(), 1000);
+    assert_eq!(&kept[10..20], b"0123456789");
+}
+
+/// Another program puts its file at the name after the read-back and before it is recorded
+/// filled: noticed by the last check, and its file kept.
+#[test]
+fn a_file_put_at_the_name_after_the_read_back_is_noticed() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = fill_in(root.path());
+    let bytes = vec![5u8; 3000];
+    let s = sealed(&dest, "q.bin", &bytes);
+    let plan = s.fill_plan().unwrap();
+    let dir = root.path().to_path_buf();
+    let mut st = steps(&bytes);
+    st.after_read = Some(Box::new(move || {
+        std::fs::write(dir.join("other.tmp"), b"their file").unwrap();
+        replace(&dir.join("other.tmp"), &dir.join("q.bin")).unwrap();
+    }));
+    let Claim::Failed(e, back) = s.fill_as("q.bin", &plan, &mut st) else {
+        panic!("a replaced file was called filled");
+    };
+    assert!(matches!(e, GateError::ReplacedWhileFilling), "{e:?}");
+    assert!(!st.log.iter().any(|l| l == "filled"), "{:?}", st.log);
+    assert_eq!(
+        std::fs::read(root.path().join("q.bin")).unwrap(),
+        b"their file"
+    );
+    back.persist();
+}
+
+/// After a restart, the gate proves a filled-in file PCTwin's again before it finishes or
+/// removes it, by the rule the journal recorded: the recorded identity where identities last, or
+/// the tag; and (to remove one) bytes that are exactly the start of the checked file. Anything
+/// else is left exactly as it is.
+#[test]
+fn after_a_restart_only_a_file_proven_pctwin_s_is_finished_or_removed() {
+    use pctwin_gate::{Born, Fill, FillFinish, FillRemoval, FillTag};
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    std::fs::write(root.path().join(".pctwin-t.part"), b"abcdefgh").unwrap();
+    let at = |name: &str, bytes: &[u8]| {
+        std::fs::write(root.path().join(name), bytes).unwrap();
+        let id = dest.stat(name).unwrap().unwrap().id;
+        (id, dest.born(name).unwrap())
+    };
+    let fill = |proof, made: Option<FileId>, born: Option<Born>| Fill {
+        final_path: "x".into(),
+        made,
+        tag: FillTag {
+            born,
+            hidden: false,
+        },
+        proof,
+    };
+    let other_born = Born {
+        secs: 1_000_000_000,
+        nanos: 0,
+    };
+    let at_name = |f: &Fill, name: &str| Fill {
+        final_path: name.into(),
+        ..f.clone()
+    };
+    // Proven by nothing that lasts: identity good only while held, or none at all.
+    for proof in [Proof::SameMountId, Proof::None] {
+        let (id, born) = at("n.bin", b"abcd");
+        let f = at_name(&fill(proof, Some(id), born), "n.bin");
+        assert_eq!(
+            dest.remove_fill("n.bin", &f, ".pctwin-t.part", 4).unwrap(),
+            FillRemoval::NotProven,
+            "{proof:?}"
+        );
+        let r = dest.finish_fill("n.bin", &f, None, None, |_| Ok(true), || Ok(()));
+        assert!(matches!(r, Ok(FillFinish::NotProven)), "{proof:?}: {r:?}");
+        assert!(root.path().join("n.bin").exists());
+    }
+    // A tag that is not the file's.
+    let (_, _) = at("t.bin", b"abcd");
+    let f = at_name(&fill(Proof::Token, None, Some(other_born)), "t.bin");
+    assert_eq!(
+        dest.remove_fill("t.bin", &f, ".pctwin-t.part", 4).unwrap(),
+        FillRemoval::NotProven
+    );
+    // PCTwin's by its tag, but its bytes are not the start of the checked file.
+    let (_, born) = at("b.bin", b"abXd");
+    if born.is_some() {
+        let f = at_name(&fill(Proof::Token, None, born), "b.bin");
+        assert_eq!(
+            dest.remove_fill("b.bin", &f, ".pctwin-t.part", 4).unwrap(),
+            FillRemoval::NotProven
+        );
+        assert!(root.path().join("b.bin").exists());
+    }
+    // PCTwin's by its recorded identity, and exactly the start of the checked file: removed.
+    let (id, _) = at("ok.bin", b"abcd");
+    let f = at_name(&fill(Proof::StableId, Some(id), None), "ok.bin");
+    assert_eq!(
+        dest.remove_fill("ok.bin", &f, ".pctwin-t.part", 4).unwrap(),
+        FillRemoval::Removed
+    );
+    assert!(!root.path().join("ok.bin").exists());
 }

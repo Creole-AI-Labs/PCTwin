@@ -465,9 +465,9 @@ impl Ledger for Breaks<'_> {
         self.check("filled")?;
         self.inner.filled(id)
     }
-    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
         self.check("fill-cleared")?;
-        self.inner.fill_cleared(id)
+        self.inner.fill_cleared(id, left)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.check("committed")?;
@@ -762,8 +762,8 @@ impl Ledger for Counting<'_> {
     fn filled(&self, id: u64) -> Result<(), JournalError> {
         self.inner.filled(id)
     }
-    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
-        self.inner.fill_cleared(id)
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        self.inner.fill_cleared(id, left)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.inner.committed(id, landed)

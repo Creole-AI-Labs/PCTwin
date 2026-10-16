@@ -107,7 +107,7 @@ const CHANGED: &str =
 const CHANGED_KEPT: &str = "the copy was interrupted as it finished, and the file changed afterwards, so it could not be confirmed; it was kept as it is";
 const LOST: &str = "the copy was interrupted as it finished, and the file was not found afterwards";
 const FILL_LEFT: &str = "the copy was interrupted while it was being written under its name, and PCTwin could not confirm that the file now there is its own unfinished copy, so it left it as it is";
-const FILL_LEFT_SAFE: &str = "the copy was interrupted while it was being written under its name, and the original's copy here could not be checked again, so PCTwin left its unfinished copy as it is; that hidden, partly copied file is safe to delete";
+const FILL_LEFT_SAFE: &str = "the copy was interrupted while it was being written under its name, and the original's copy here could not be checked again, so PCTwin left its own unfinished copy as it is; that partly copied file (hidden, on drives that can hide files) is safe to delete";
 const FILL_CHANGED: &str = "the copy was interrupted while it was being written under its name, and the unfinished copy there changed afterwards, so PCTwin left it as it is";
 
 /// What was left at the real name, for the person: where, and whether it may be deleted.

@@ -714,9 +714,14 @@ impl Destination {
             return Ok(*check);
         }
         let folder_path = || self.folder_path(dir, folder);
-        let check = naming::for_system(
-            naming::probe(dir, &folder_path, move_no_replace)?,
-            self.profile_of(dir).kind(),
+        let kind = self.profile_of(dir).kind();
+        let check = naming::provable(
+            naming::for_system(
+                naming::probe(dir, &folder_path, move_no_replace)?,
+                kind,
+                Platform::host(),
+            ),
+            kind,
             Platform::host(),
         );
         checks.insert(key, check);
@@ -2662,19 +2667,13 @@ impl<'d> Sealed<'d> {
         let born = check.exact_birth_time.then(fill::fresh_born);
         // Windows cannot read a drive's kind (it is unknown there unless a test gives one), but
         // only drives that keep identities have hard links.
-        let kind = self.destination.profile.kind();
+        let kind = self.destination.profile_of(&self.dir).kind();
         let stable = kind.keeps_identities() || (cfg!(windows) && check.hard_links);
-        let proof = if stable {
-            Proof::StableId
-        } else if born.is_some() {
-            Proof::Token
-        } else {
-            Proof::SameMountId
-        };
+        let proof = proof_for(stable, born.is_some()).ok_or(GateError::NoSafeName)?;
         Ok(FillPlan {
             tag: FillTag {
                 born,
-                hidden: false,
+                hidden: check.hidden && fill::CAN_HIDE,
             },
             proof,
         })
@@ -2706,9 +2705,15 @@ impl<'d> Sealed<'d> {
             Ok(_) => return Claim::Failed(GateError::NoSafeName, self),
             Err(e) => return Claim::Failed(e, self),
         }
-        // Made only if nothing has the name; never through a link.
+        // Made only if nothing has the name; never through a link. On Windows it is hidden as it
+        // is made, so it is never seen as an ordinary file.
         let mut options = OpenOptions::new();
         options.read(true).write(true).create_new(true);
+        #[cfg(windows)]
+        if plan.tag.hidden {
+            use cap_std::fs::OpenOptionsExt;
+            options.attributes(fill::FILE_ATTRIBUTE_HIDDEN);
+        }
         let mut target = match self.dir.open_with(&name, &options) {
             Ok(f) => f.into_std(),
             Err(e) if is_taken(&self.dir, &name, &e) => return Claim::Taken(self),
@@ -2738,8 +2743,14 @@ impl<'d> Sealed<'d> {
                 return Claim::Failed(e, self);
             }
             Err((e, false)) => {
-                // PCTwin's own partial copy goes, but only while the name still holds it.
-                if fill::still_ours(&self.dir, &name, &target, &progress).unwrap_or(false) {
+                // PCTwin's own partial copy goes, but only while the name still holds it and its
+                // bytes are exactly the bytes PCTwin copied (another program may have written into
+                // it); else it is left, and recovery decides and says so.
+                let ours = fill::still_ours(&self.dir, &name, &target, &progress).unwrap_or(false)
+                    && self.held.as_mut().is_some_and(|held| {
+                        fill::same_start_of(&mut target, held, progress.written).unwrap_or(false)
+                    });
+                if ours {
                     drop(target);
                     if self.dir.remove_file(&name).is_ok() {
                         let _ = sync_folder(&self.dir);
@@ -2768,6 +2779,9 @@ impl<'d> Sealed<'d> {
     ) -> Result<(), (GateError, bool)> {
         let early = |e: GateError| (e, false);
         let io = |e: io::Error| (GateError::Io(e), false);
+        if plan.tag.hidden {
+            fill::hide(target).map_err(io)?;
+        }
         if let Some(born) = plan.tag.born {
             fill::set_born(target, born).map_err(io)?;
             // Read back at once: a tag the drive did not keep exactly would prove nothing later.
@@ -2783,7 +2797,7 @@ impl<'d> Sealed<'d> {
             name,
             target,
             self.mark,
-            self.destination.profile.tries_markers(),
+            self.destination.profile_of(&self.dir).tries_markers(),
         )
         .map_err(early)?;
         if !kept && self.mark.is_some() {
@@ -2826,6 +2840,18 @@ impl<'d> Sealed<'d> {
         }
         steps.filled().map_err(io)?;
         let late = |e: io::Error| (GateError::Io(e), true);
+        // Shown only now, complete and checked.
+        if plan.tag.hidden {
+            fill::show(target, held).map_err(late)?;
+        }
+        // The tag goes: the file gets the creation date of PCTwin's copy (the checked file's),
+        // as a file named by a move keeps; then its modified time, last, since setting it can
+        // move a creation time (APFS).
+        if progress.born.is_some()
+            && let Ok(created) = held.metadata().and_then(|m| m.created())
+        {
+            fill::set_created(target, created).map_err(late)?;
+        }
         if let Ok(time) = held.metadata().and_then(|m| m.modified()) {
             target.set_modified(time).map_err(late)?;
         }
@@ -2905,6 +2931,19 @@ impl<'d> Sealed<'d> {
             },
             _destination: std::marker::PhantomData,
         }
+    }
+}
+
+/// How a file filled in under its real name is proven PCTwin's after a restart: its identity,
+/// where the drive keeps identities for good; else its tag, where the drive keeps one exactly;
+/// else nothing would, and such a file is never filled in.
+fn proof_for(stable_ids: bool, tag: bool) -> Option<Proof> {
+    if stable_ids {
+        Some(Proof::StableId)
+    } else if tag {
+        Some(Proof::Token)
+    } else {
+        None
     }
 }
 
@@ -3017,6 +3056,14 @@ mod tests {
         assert_eq!(by_names(0), Some(Removed::Gone));
         assert_eq!(by_names(1), None);
         assert_eq!(by_names(2), Some(Removed::Linked));
+    }
+
+    #[test]
+    fn a_filled_file_is_proven_by_what_lasts_or_never_filled_in() {
+        assert_eq!(proof_for(true, true), Some(Proof::StableId));
+        assert_eq!(proof_for(true, false), Some(Proof::StableId));
+        assert_eq!(proof_for(false, true), Some(Proof::Token));
+        assert_eq!(proof_for(false, false), None);
     }
 
     #[test]

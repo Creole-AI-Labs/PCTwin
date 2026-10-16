@@ -62,6 +62,9 @@ pub struct DriveCheck {
     /// A creation time set on a file is kept exactly (the tag that proves a file filled in under
     /// its real name is PCTwin's, where identities change).
     pub exact_birth_time: bool,
+    /// A file can be marked hidden through its handle (a file filled in under its real name is
+    /// hidden until it is complete).
+    pub hidden: bool,
 }
 
 impl DriveCheck {
@@ -75,6 +78,7 @@ impl DriveCheck {
             replaced_silently: false,
             exclusive_create: naming != Naming::NoSafeMethod,
             exact_birth_time: crate::fill::CAN_SET_BORN,
+            hidden: crate::fill::CAN_HIDE,
         }
     }
 }
@@ -128,6 +132,32 @@ pub(crate) fn classify(
         replaced_silently,
         exclusive_create,
         exact_birth_time: false,
+        hidden: false,
+    }
+}
+
+/// A drive that must fill files in may do so only if such a file can be hidden until it is
+/// complete and proven PCTwin's after a restart (a creation time it keeps exactly, or identities
+/// it keeps for good); else it is refused when it is chosen (security design notes, "Drives with
+/// no safe rename": "A drive where even this cannot be done safely is refused").
+pub(crate) fn provable(
+    check: DriveCheck,
+    kind: crate::DriveKind,
+    system: crate::Platform,
+) -> DriveCheck {
+    if check.naming != Naming::FillIn {
+        return check;
+    }
+    let lasting = check.exact_birth_time
+        || kind.keeps_identities()
+        || (system == crate::Platform::Windows && check.hard_links);
+    if lasting && check.hidden {
+        check
+    } else {
+        DriveCheck {
+            naming: Naming::NoSafeMethod,
+            ..check
+        }
     }
 }
 
@@ -268,6 +298,7 @@ fn run(
 ) -> io::Result<DriveCheck> {
     make(dir, a, PROBE_A)?;
     let exact_birth_time = crate::fill::keeps_born(dir, a);
+    let hidden = crate::fill::hides(dir, a);
     make(dir, b, PROBE_B)?;
     let exclusive_create = match make(dir, a, PROBE_B) {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => true,
@@ -304,6 +335,7 @@ fn run(
     };
     Ok(DriveCheck {
         exact_birth_time,
+        hidden,
         ..classify(
             link_new,
             link_onto_existing_refused,
@@ -560,6 +592,75 @@ mod trust_tests {
         assert_eq!(
             for_system(none, DriveKind::Fat, Platform::MacOs).naming,
             Naming::NoSafeMethod
+        );
+    }
+}
+
+#[cfg(test)]
+mod provable_tests {
+    use super::*;
+    use crate::{DriveKind, Platform};
+
+    fn fill_in(birth: bool, hidden: bool, hard_links: bool) -> DriveCheck {
+        DriveCheck {
+            naming: Naming::FillIn,
+            hard_links,
+            no_replace_move: false,
+            replaced_silently: false,
+            exclusive_create: true,
+            exact_birth_time: birth,
+            hidden,
+        }
+    }
+
+    #[test]
+    fn a_drive_is_filled_in_only_if_a_file_can_be_hidden_and_proven_after_a_restart() {
+        let mac = Platform::MacOs;
+        // exFAT on a Mac: tag and hidden mark both kept.
+        assert_eq!(
+            provable(fill_in(true, true, false), DriveKind::ExFat, mac).naming,
+            Naming::FillIn
+        );
+        // No hidden mark: refused.
+        assert_eq!(
+            provable(fill_in(true, false, false), DriveKind::ExFat, mac).naming,
+            Naming::NoSafeMethod
+        );
+        // Hidden but nothing lasting (no tag kept, identities change): refused.
+        assert_eq!(
+            provable(fill_in(false, true, false), DriveKind::ExFat, mac).naming,
+            Naming::NoSafeMethod
+        );
+        // Identities kept for good stand in for the tag.
+        assert_eq!(
+            provable(fill_in(false, true, false), DriveKind::Apfs, mac).naming,
+            Naming::FillIn
+        );
+        // On Windows, hard links mean identities that last.
+        assert_eq!(
+            provable(
+                fill_in(false, true, true),
+                DriveKind::Unknown,
+                Platform::Windows
+            )
+            .naming,
+            Naming::FillIn
+        );
+        // A drive FUSE serves on Linux: no tag, no hidden mark, identities unknown: refused.
+        assert_eq!(
+            provable(
+                fill_in(false, false, false),
+                DriveKind::Unknown,
+                Platform::Linux
+            )
+            .naming,
+            Naming::NoSafeMethod
+        );
+        // Drives that name at once are not touched.
+        let atomic = classify(true, true, &Moved::Taken, true, true, true);
+        assert_eq!(
+            provable(atomic, DriveKind::Unknown, Platform::Linux),
+            atomic
         );
     }
 }

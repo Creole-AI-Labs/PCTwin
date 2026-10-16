@@ -616,3 +616,62 @@ fn undo_is_recorded_beside_a_committed_write_and_never_changes_the_write() {
     assert!(UndoOutcome::Removed.is_final());
     assert!(!UndoOutcome::NotDone { why: "x".into() }.is_final());
 }
+
+/// A fill's steps in order; a step out of order is refused; and a file left at the real name
+/// (one PCTwin could not prove its own) is noted in the same step that goes back to the checked
+/// file, so it is known for good: after reopening, after any number of recoveries, and once
+/// the write is committed under another name.
+#[test]
+fn a_fill_s_steps_and_a_file_left_at_its_name_are_recorded_for_good() {
+    use pctwin_journal::{FillTag, Proof};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    let tag = FillTag {
+        born: None,
+        hidden: true,
+    };
+    let id = {
+        let j = Journal::open(&path).unwrap();
+        let id = j.plan(&planned(1)).unwrap();
+        j.staged(id, ".pctwin-77-1.part", &[]).unwrap();
+        assert!(matches!(j.filled(id), Err(JournalError::OutOfOrder { .. })));
+        j.verified(id, [7; 32], None).unwrap();
+        j.filling(id, "Documents/f1.txt", tag, Proof::Token)
+            .unwrap();
+        j.fill_made(id, landed().file.unwrap()).unwrap();
+        // Something else is made under the name: never forgotten silently.
+        assert!(matches!(
+            j.filling(id, "Documents/f1 (2).txt", tag, Proof::Token),
+            Err(JournalError::OutOfOrder { .. })
+        ));
+        j.fill_cleared(id, Some("a file PCTwin left at Documents/f1.txt"))
+            .unwrap();
+        assert!(matches!(
+            j.entry(id).unwrap().unwrap().state,
+            State::Verified { .. }
+        ));
+        j.filling(id, "Documents/f1 (2).txt", tag, Proof::Token)
+            .unwrap();
+        j.fill_made(id, landed().file.unwrap()).unwrap();
+        j.filled(id).unwrap();
+        j.committed(id, landed()).unwrap();
+        id
+    };
+    let j = Journal::open(&path).unwrap();
+    assert!(matches!(
+        &j.entry(id).unwrap().unwrap().state,
+        State::Committed { final_path, .. } if final_path == "Documents/f1 (2).txt"
+    ));
+    assert_eq!(
+        j.notes(id).unwrap(),
+        ["a file PCTwin left at Documents/f1.txt"]
+    );
+    // Clearing with nothing to say adds nothing.
+    let other = j.plan(&planned(2)).unwrap();
+    j.staged(other, ".pctwin-77-2.part", &[]).unwrap();
+    j.verified(other, [8; 32], None).unwrap();
+    j.filling(other, "Documents/f2.txt", tag, Proof::Token)
+        .unwrap();
+    j.fill_cleared(other, None).unwrap();
+    assert!(j.notes(other).unwrap().is_empty());
+}

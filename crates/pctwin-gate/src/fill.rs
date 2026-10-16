@@ -7,9 +7,11 @@
 //!    PCTwin's).
 //! 2. The real name is created only if nothing has it (an exclusive create, which never follows a
 //!    link). Something already there: the name is taken, and nothing of it is touched.
-//! 3. At once: the tag (a creation time no ordinary file has, where the drive keeps one exactly),
-//!    the hidden mark (where the drive holds one), the download marker; then its identity is
-//!    recorded.
+//! 3. At once: the hidden mark (made hidden as it is created on Windows, `fchflags` through its
+//!    handle on a Mac), the tag (a creation time no ordinary file has, which the drive keeps
+//!    exactly), the download marker; then its identity is recorded. A drive that cannot hide a
+//!    file, or keeps nothing that proves it PCTwin's after a restart, is refused when it is
+//!    chosen.
 //! 4. It is filled from the checked temporary file, through the handle held on it, without ever
 //!    setting its size first (so it never holds bytes that were not copied).
 //! 5. Made durable (`F_FULLFSYNC` where the system has it, else a flush), then read back and
@@ -18,12 +20,19 @@
 //! 6. Before it is recorded `Filled`, PCTwin checks the name still holds its own file (the same
 //!    file, with its tag and exactly the bytes copied). Another program that put its own file there
 //!    meanwhile is never touched: its file stays, and PCTwin's checked temporary file is kept.
-//! 7. Recorded `Filled`; then its modified time, shown (the hidden mark cleared), the folder
-//!    flushed; committed, and the temporary file removed, as for a hard-linked file.
+//! 7. Recorded `Filled`; then shown (the hidden mark cleared), its real creation date given back
+//!    (when PCTwin's copy was made: the tag is never left on the person's file), and its modified
+//!    time set last (setting it can move a creation time, as APFS does, so it never comes while
+//!    the tag is still the proof); the folder flushed; committed, and the temporary file removed,
+//!    as for a hard-linked file. A crash between giving back the date and committing leaves a
+//!    whole, shown file that nothing proves PCTwin's: recovery leaves it, says so, and names the
+//!    file again beside it (never removes or adopts it).
 //!
 //! On a failure before step 7, PCTwin's own partial copy is removed only while the name still
-//! holds it (checked as in step 6), and that is recorded; anything else is left. After a crash the
-//! journal's recovery table decides (finish, remove, or leave and report).
+//! holds it (checked as in step 6) and its bytes are exactly the bytes PCTwin copied (another
+//! program may have written into it), and that is recorded; anything else is left, for recovery
+//! to decide and report. After a crash the journal's recovery table decides (finish, remove, or
+//! leave and report).
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
@@ -125,20 +134,113 @@ fn as_time(born: Born) -> io::Result<std::time::SystemTime> {
 
 /// Gives the open file `file` the creation time `born`, through its handle.
 pub(crate) fn set_born(file: &std::fs::File, born: Born) -> io::Result<()> {
+    set_created(file, as_time(born)?)
+}
+
+/// Gives the open file `file` the creation time `at`, through its handle.
+pub(crate) fn set_created(file: &std::fs::File, at: std::time::SystemTime) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         use std::os::macos::fs::FileTimesExt;
-        file.set_times(std::fs::FileTimes::new().set_created(as_time(born)?))
+        file.set_times(std::fs::FileTimes::new().set_created(at))
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::FileTimesExt;
-        file.set_times(std::fs::FileTimes::new().set_created(as_time(born)?))
+        file.set_times(std::fs::FileTimes::new().set_created(at))
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (file, as_time(born)?);
+        let _ = (file, at);
         Err(io::ErrorKind::Unsupported.into())
+    }
+}
+
+/// Whether this system can mark a file hidden through its handle (macOS: `fchflags`; Windows: as
+/// it is made). Linux has no hidden mark.
+pub(crate) const CAN_HIDE: bool = cfg!(any(target_os = "macos", windows));
+
+/// Windows' hidden attribute.
+#[cfg(windows)]
+pub(crate) const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+
+/// Whether the open file `file` is marked hidden.
+pub(crate) fn is_hidden(file: &std::fs::File) -> io::Result<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        pctwin_lease::is_hidden(file)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Ok(file.metadata()?.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = file;
+        Ok(false)
+    }
+}
+
+/// Marks the open file `file` hidden through its handle (on Windows it was made hidden as it was
+/// created: this checks it is), and fails unless it reads back hidden.
+pub(crate) fn hide(file: &std::fs::File) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        pctwin_lease::set_hidden(file, true)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if is_hidden(file)? {
+            Ok(())
+        } else {
+            Err(io::Error::other("the drive did not keep the hidden mark"))
+        }
+    }
+}
+
+/// Clears the hidden mark on the open file `file`, through its handle: on Windows by giving it
+/// the attributes of `like` (one of PCTwin's own plain files, never hidden); and fails unless it
+/// reads back shown.
+pub(crate) fn show(file: &std::fs::File, like: &std::fs::File) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = like;
+        pctwin_lease::set_hidden(file, false)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        #[cfg(windows)]
+        file.set_permissions(like.metadata()?.permissions())?;
+        #[cfg(not(windows))]
+        let _ = like;
+        if is_hidden(file)? {
+            Err(io::Error::other("the drive did not clear the hidden mark"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Whether the drive under `dir` can hide a file through its handle: tried on the probe file
+/// `name` (PCTwin's own), which is shown again afterwards. Windows hides a file as it is made,
+/// which every drive it writes takes; each file is read back hidden all the same.
+pub(crate) fn hides(dir: &Dir, name: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        dir.open_with(name, &options)
+            .map(cap_std::fs::File::into_std)
+            .is_ok_and(|f| {
+                pctwin_lease::set_hidden(&f, true).is_ok()
+                    && pctwin_lease::set_hidden(&f, false).is_ok()
+            })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (dir, name);
+        cfg!(windows)
     }
 }
 
@@ -324,7 +426,11 @@ fn proven_fill(file: &std::fs::File, fill: &Fill) -> io::Result<bool> {
 }
 
 /// The two open files' first `len` bytes are the same, and `a` is exactly `len` long.
-fn same_start_of(a: &mut std::fs::File, b: &mut std::fs::File, len: u64) -> io::Result<bool> {
+pub(crate) fn same_start_of(
+    a: &mut std::fs::File,
+    b: &mut std::fs::File,
+    len: u64,
+) -> io::Result<bool> {
     if a.metadata()?.len() != len || b.metadata()?.len() < len {
         return Ok(false);
     }
@@ -371,10 +477,13 @@ impl crate::Destination {
     /// is proven PCTwin's right now: made durable, read back whole (`read_back`, given the file at
     /// its start), `filled` (record it, if not yet recorded), given `modified`, shown, and the
     /// folder flushed. Anything not proven is left exactly as it is.
+    /// The order is the fill's own: shown, the real creation date `created` given back (when
+    /// PCTwin's copy was made), the modified time `modified` set last.
     pub fn finish_fill(
         &self,
         stored: &str,
         fill: &Fill,
+        created: Option<std::time::SystemTime>,
         modified: Option<std::time::SystemTime>,
         read_back: impl FnOnce(&mut dyn Read) -> io::Result<bool>,
         filled: impl FnOnce() -> io::Result<()>,
@@ -403,6 +512,13 @@ impl crate::Destination {
         }
         drop(reader);
         filled()?;
+        if is_hidden(&file)? {
+            let like = plain_file(&dir)?;
+            show(&file, &like)?;
+        }
+        if fill.tag.born.is_some() {
+            set_created(&file, created.unwrap_or_else(std::time::SystemTime::now))?;
+        }
         if let Some(time) = modified {
             file.set_modified(time)?;
         }
@@ -499,4 +615,35 @@ fn read_full(r: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
         }
     }
     Ok(got)
+}
+
+/// One of PCTwin's own plain files in `dir`, made only for its attributes and removed at once
+/// (held open: Windows removes it when the handle closes). Never hidden.
+fn plain_file(dir: &Dir) -> io::Result<std::fs::File> {
+    use std::hash::{BuildHasher, RandomState};
+    let name = crate::temp_name(&format!(
+        "plain-{:016x}",
+        RandomState::new().hash_one(std::process::id())
+    ));
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    let file = dir.open_with(&name, &options)?.into_std();
+    let _ = dir.remove_file(&name);
+    Ok(file)
+}
+
+impl crate::Destination {
+    /// Whether the regular file at the stored path `stored` is marked hidden (`false` if there
+    /// is none). Never follows a link.
+    pub fn hidden(&self, stored: &str) -> io::Result<bool> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(false);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => is_hidden(&dir.open(name)?.into_std()),
+            Ok(_) => Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
 }

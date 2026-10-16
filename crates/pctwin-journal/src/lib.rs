@@ -85,6 +85,9 @@ const UNDO_FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new(
 const BLOCKS: TableDefinition<(u64, u64), [u8; 32]> = TableDefinition::new("blocks");
 /// One-way gates. `undo`: absent while undo is open, [`CLOSED`] once the wipe has started.
 const GATE: TableDefinition<&str, u8> = TableDefinition::new("gate");
+/// What the person should know about a write, kept for good (a file PCTwin left at a name because
+/// it could not prove it its own): entry, then its notes in order, as plain words.
+const NOTES: TableDefinition<(u64, u32), &str> = TableDefinition::new("notes");
 const UNDO_GATE: &str = "undo";
 const CLOSED: u8 = 1;
 
@@ -1058,6 +1061,7 @@ impl Journal {
             tx.open_table(UNDO).map_err(storage)?;
             tx.open_table(UNDO_FOLDERS).map_err(storage)?;
             tx.open_table(GATE).map_err(storage)?;
+            tx.open_table(NOTES).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -1338,10 +1342,12 @@ impl Journal {
         )
     }
 
-    /// The file that was being filled in is gone from its real name (PCTwin removed its own
-    /// partial copy, or found nothing there): back to the checked temporary file alone, to be
-    /// named again.
-    pub fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+    /// PCTwin no longer counts the file at the fill's real name as its own: it removed its own
+    /// partial copy, found nothing there, or left there a file it could not prove its own. Back to
+    /// the checked temporary file alone, to be named again. `left` says, in plain words, what was
+    /// left and where; it is kept for good in the same step ([`notes`](Self::notes)), so the
+    /// report and undo know of it however often recovery runs.
+    pub fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
         self.step(
             id,
             "fill-cleared",
@@ -1364,8 +1370,23 @@ impl Journal {
                 }),
                 _ => None,
             },
-            |_, _| Ok(()),
+            |tx, entry| match left {
+                Some(words) => add_note(tx, entry.id, words),
+                None => Ok(()),
+            },
         )
+    }
+
+    /// What the person should know about write `id`, in the order it was noted.
+    pub fn notes(&self, id: u64) -> Result<Vec<String>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(NOTES).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in table.range((id, 0)..=(id, u32::MAX)).map_err(storage)? {
+            let (_, v) = row.map_err(storage)?;
+            out.push(v.value().to_string());
+        }
+        Ok(out)
     }
 
     /// The file being filled in is complete, durable and read back against the fingerprint.
@@ -1970,7 +1991,7 @@ pub trait Ledger {
     /// See [`Journal::filled`].
     fn filled(&self, id: u64) -> Result<(), JournalError>;
     /// See [`Journal::fill_cleared`].
-    fn fill_cleared(&self, id: u64) -> Result<(), JournalError>;
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError>;
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
@@ -2025,8 +2046,8 @@ impl Ledger for Journal {
     fn filled(&self, id: u64) -> Result<(), JournalError> {
         Journal::filled(self, id)
     }
-    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
-        Journal::fill_cleared(self, id)
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        Journal::fill_cleared(self, id, left)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         Journal::committed(self, id, landed)
@@ -2164,5 +2185,20 @@ fn write_entry(
     entries
         .insert(entry.id, bytes.as_slice())
         .map_err(storage)?;
+    Ok(())
+}
+
+/// Adds `words` to write `id`'s notes, in the transaction `tx`.
+fn add_note(tx: &redb::WriteTransaction, id: u64, words: &str) -> Result<(), JournalError> {
+    let mut table = tx.open_table(NOTES).map_err(storage)?;
+    let next = match table
+        .range((id, 0)..=(id, u32::MAX))
+        .map_err(storage)?
+        .next_back()
+    {
+        Some(row) => row.map_err(storage)?.0.value().1.saturating_add(1),
+        None => 0,
+    };
+    table.insert((id, next), words).map_err(storage)?;
     Ok(())
 }

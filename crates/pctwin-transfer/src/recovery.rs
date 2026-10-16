@@ -64,12 +64,13 @@ pub fn recover_with(
             Action::Resume => done.resumable.push(entry.id),
             Action::Leave(why) => done.left.push((entry.id, why)),
             Action::Name | Action::Commit => {
-                let finished = finish(journal, &look, entry, &decision.action)?;
+                let finished = finish(journal, &look, entry, &decision.action, None)?;
                 record_finish(journal, &mut done, entry.id, finished)?;
             }
             Action::NameNoting(note) => {
+                // Kept for good in the journal, in the very step that goes back to the checked file.
+                let finished = finish(journal, &look, entry, &Action::Name, Some(&note))?;
                 done.notes.push((entry.id, note));
-                let finished = finish(journal, &look, entry, &Action::Name)?;
                 record_finish(journal, &mut done, entry.id, finished)?;
             }
             Action::FinishFill => {
@@ -210,9 +211,17 @@ fn finish_fill(
         .flatten()
         .and_then(|s| s.modified)
         .or_else(|| entry.write.source_modified_ns.and_then(time_of));
+    // The creation date of PCTwin's copy: the checked temporary file's (else now), so the tag
+    // never stays on the person's file.
+    let created = dest
+        .open_read(temp)
+        .ok()
+        .and_then(|f| f.metadata().ok())
+        .and_then(|m| m.created().ok());
     let finished = dest.finish_fill(
         &fill.final_path,
         fill,
+        created,
         modified,
         |f| reads_back_whole(f, &whole),
         || {
@@ -269,7 +278,7 @@ fn remove_fill_then_name(
             Err(e) => return Ok(Finish::Left(e.to_string())),
         }
     }
-    finish(journal, look, entry, &Action::Name)
+    finish(journal, look, entry, &Action::Name, None)
 }
 
 /// A time from nanoseconds since 1970.
@@ -287,6 +296,7 @@ fn finish(
     look: &DiskLook<'_>,
     entry: &Entry,
     action: &Action,
+    left: Option<&str>,
 ) -> Result<Finish, JournalError> {
     let dest = match look.destination(entry) {
         Ok(dest) => dest,
@@ -337,7 +347,7 @@ fn finish(
             // A fill that is not finishing: nothing of PCTwin's is at its name any more (or what
             // is there is left as it is), so the write goes back to its checked file.
             if matches!(entry.state, State::Filling { .. } | State::Filled { .. }) {
-                journal.fill_cleared(entry.id)?;
+                journal.fill_cleared(entry.id, left)?;
             }
             match name(journal, dest, entry, &source)? {
                 Naming::Named(claimed, filled_in) => (claimed, filled_in),

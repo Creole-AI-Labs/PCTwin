@@ -50,9 +50,10 @@ fn data(len: usize) -> Vec<u8> {
         .collect()
 }
 
-/// The drive profile of a drive with no safe rename.
+/// The drive profile of a drive with no safe rename, where a filled-in file can be proven
+/// PCTwin's after a restart (see `provable`).
 fn no_safe_rename() -> DriveProfile {
-    DriveProfile::of(DriveKind::ExFat).with_naming(Naming::FillIn)
+    provable()
 }
 
 fn table_for(dest: Destination) -> Destinations {
@@ -150,10 +151,12 @@ async fn a_move_onto_a_drive_with_no_safe_rename_lands_whole_through_the_journal
     assert_eq!(landed.size, bytes.len() as u64);
 }
 
-/// A journal that stops working at one step, as a full or failing system drive would.
+/// A journal that stops working at one step, as a full or failing system drive would; or that
+/// records one step and then the laptop stops dead (`dies_after`).
 struct Breaks<'j> {
     inner: &'j Journal,
     at: &'static str,
+    dies_after: &'static str,
 }
 
 impl Breaks<'_> {
@@ -163,6 +166,14 @@ impl Breaks<'_> {
         } else {
             Ok(())
         }
+    }
+    /// After `step` is recorded: stops dead there if asked to.
+    fn then(&self, step: &str, r: Result<(), JournalError>) -> Result<(), JournalError> {
+        if r.is_ok() && step == self.dies_after {
+            // Dead: nothing is tidied on the way out.
+            std::process::abort();
+        }
+        r
     }
 }
 
@@ -204,11 +215,11 @@ impl Ledger for Breaks<'_> {
     }
     fn filled(&self, id: u64) -> Result<(), JournalError> {
         self.check("filled")?;
-        self.inner.filled(id)
+        self.then("filled", self.inner.filled(id))
     }
-    fn fill_cleared(&self, id: u64) -> Result<(), JournalError> {
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
         self.check("fill-cleared")?;
-        self.inner.fill_cleared(id)
+        self.inner.fill_cleared(id, left)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.check("committed")?;
@@ -272,6 +283,7 @@ async fn a_journal_that_fails_at_any_step_of_a_fill_is_recovered_whole() {
         let breaks = Breaks {
             inner: &journal,
             at,
+            dies_after: "",
         };
         let sent = send(old.path(), &bytes, "b.bin", &table, &breaks).await;
         if at != "fill-cleared" {
@@ -279,6 +291,26 @@ async fn a_journal_that_fails_at_any_step_of_a_fill_is_recovered_whole() {
         }
         let r = pctwin_transfer::recover(&journal, &table).unwrap();
         assert!(r.failed.is_empty() && r.left.is_empty(), "{at}: {r:?}");
+        // The one known gap: the journal fails exactly as the shown, whole file is committed. By
+        // then its tag is gone (it got back its real dates), so where the tag is the only proof
+        // (Windows and macOS exFAT and FAT) nothing proves it PCTwin's: it is left and said so,
+        // never removed or adopted, and the file lands again beside it.
+        if at == "committed" && cfg!(any(windows, target_os = "macos")) {
+            assert_eq!(r.notes.len(), 1, "{r:?}");
+            assert!(r.notes[0].1.contains("b.bin"), "{r:?}");
+            let e = &journal.entries().unwrap()[0];
+            assert_eq!(journal.notes(e.id).unwrap().len(), 1, "kept for good");
+            assert_eq!(std::fs::read(usb.path().join("b.bin")).unwrap(), bytes);
+            assert_eq!(std::fs::read(usb.path().join("b (2).bin")).unwrap(), bytes);
+            // Asked again, nothing changes and nothing is lost from the record.
+            let again = pctwin_transfer::recover(&journal, &table).unwrap();
+            assert!(
+                again.committed.is_empty() && again.notes.is_empty(),
+                "{again:?}"
+            );
+            assert_eq!(journal.notes(e.id).unwrap().len(), 1);
+            continue;
+        }
         assert_landed_whole(&journal, usb.path(), "b.bin", &bytes);
     }
 }
@@ -305,6 +337,10 @@ fn a_laptop_that_stops_dead_mid_fill_is_recovered_whole() {
         "{:?}",
         e.state
     );
+    let State::Filling { fill, .. } = &e.state else {
+        unreachable!()
+    };
+    let tag = fill.tag.born;
     let partial = std::fs::metadata(usb.join("c.bin")).unwrap().len();
     assert!(partial > 0 && partial < BIG as u64, "{partial}");
     let table = table_for(
@@ -312,20 +348,25 @@ fn a_laptop_that_stops_dead_mid_fill_is_recovered_whole() {
             .unwrap()
             .with_profile(no_safe_rename()),
     );
-    let r = pctwin_transfer::recover(&journal, &table).unwrap();
-    // Linux keeps no creation time it can set, so nothing proves the partial copy PCTwin's after
-    // a restart there: it is left and the person told, and the file lands beside it.
+    // Never seen as an ordinary file: hidden from the moment it was made (where the system can
+    // hide a file; Linux cannot, and never fills files in on a real drive).
+    let dest = table.get("usb").unwrap();
     if cfg!(any(windows, target_os = "macos")) {
-        assert!(
-            r.failed.is_empty() && r.left.is_empty() && r.notes.is_empty(),
-            "{r:?}"
+        assert!(dest.hidden("c.bin").unwrap(), "a killed fill is visible");
+    }
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    assert!(
+        r.failed.is_empty() && r.left.is_empty() && r.notes.is_empty(),
+        "{r:?}"
+    );
+    assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
+    assert!(!dest.hidden("c.bin").unwrap(), "the finished file is shown");
+    if tag.is_some() {
+        assert_ne!(
+            dest.born("c.bin").unwrap(),
+            tag,
+            "no tag left on the person's file"
         );
-        assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
-    } else {
-        assert_eq!(r.notes.len(), 1, "{r:?}");
-        assert!(r.notes[0].1.contains("c.bin"), "{r:?}");
-        assert_eq!(std::fs::read(usb.join("c (2).bin")).unwrap(), data(BIG));
-        assert_eq!(names(&usb), ["c (2).bin", "c.bin"]);
     }
     let _ = old;
 }
@@ -362,4 +403,68 @@ async fn stops_dead_mid_fill() {
     );
     let _ = send(&old, &data(BIG), "c.bin", &table, &journal).await;
     unreachable!("the copy was meant to stop dead");
+}
+
+/// The laptop stops dead right after the fill is recorded filled: the file at its real name is
+/// whole and checked, but still hidden and tagged. Recovery proves it PCTwin's again and
+/// finishes it: shown, with its real dates (no tag), committed.
+#[test]
+fn a_laptop_that_stops_dead_once_a_file_is_filled_is_finished_shown_and_dated() {
+    let work = tempfile::tempdir().unwrap();
+    let (_, usb, jdir) = dirs(work.path());
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "stops_dead_once_filled",
+            "--nocapture",
+        ])
+        .env("PCTWIN_KILL_WORK", work.path())
+        .status()
+        .unwrap();
+    assert!(!status.success(), "the laptop was meant to stop dead");
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let e = &journal.entries().unwrap()[0];
+    let State::Filled { fill, .. } = &e.state else {
+        panic!("{:?}", e.state)
+    };
+    let tag = fill.tag.born;
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let dest = table.get("usb").unwrap();
+    assert_eq!(std::fs::read(usb.join("c.bin")).unwrap(), data(BIG));
+    if cfg!(any(windows, target_os = "macos")) {
+        assert!(dest.hidden("c.bin").unwrap(), "not yet shown");
+        assert_eq!(dest.born("c.bin").unwrap(), tag, "still tagged");
+    }
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    assert!(
+        r.failed.is_empty() && r.left.is_empty() && r.notes.is_empty(),
+        "{r:?}"
+    );
+    assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
+    assert!(!dest.hidden("c.bin").unwrap(), "shown once finished");
+    if tag.is_some() {
+        assert_ne!(
+            dest.born("c.bin").unwrap(),
+            tag,
+            "no tag left on the person's file"
+        );
+    }
+}
+
+/// The part run as a separate program by the test above.
+#[tokio::test]
+#[ignore = "run by a_laptop_that_stops_dead_once_a_file_is_filled_is_finished_shown_and_dated"]
+async fn stops_dead_once_filled() {
+    let work = PathBuf::from(std::env::var_os("PCTWIN_KILL_WORK").expect("run by its parent"));
+    let (old, usb, jdir) = dirs(&work);
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let breaks = Breaks {
+        inner: &journal,
+        at: "",
+        dies_after: "filled",
+    };
+    let _ = send(&old, &data(BIG), "c.bin", &table, &breaks).await;
+    unreachable!("the laptop was meant to stop dead");
 }

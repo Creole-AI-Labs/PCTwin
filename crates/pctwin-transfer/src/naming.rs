@@ -51,7 +51,7 @@ impl FillSteps for JournalFill<'_> {
         self.keep(r)
     }
     fn cleared(&mut self) -> io::Result<()> {
-        let r = self.journal.fill_cleared(self.id);
+        let r = self.journal.fill_cleared(self.id, None);
         self.keep(r)
     }
 }
