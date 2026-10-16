@@ -749,14 +749,203 @@ soon-rescue-body = Bring files back from a laptop that will not start, by connec
 soon-quick-send-title = Quick Send
 soon-quick-send-body = Send chosen files or folders to a laptop nearby, at any time, not only during a move. It is free, with no account, and it is coming in the first release.
 
+## X01 Move progress, compact
+
+progress-eyebrow = Your move
+progress-title = Settling you in.
+progress-title-paused = Move paused
+progress-paired = Paired
+progress-percent =
+    .aria-label = Move progress
+# $done and $total are already formatted sizes, for example "81.6 GB" and "120 GB".
+progress-amount = { $done } of { $total }
+# $range is a measured range, already formatted, for example "15 to 20 minutes".
+progress-time-left = About { $range } left
+progress-time-measuring = Working out the time left…
+# $speed is measured and already formatted, for example "62 MB/s".
+progress-speed = { $speed }, measured
+progress-count-needs-action =
+    { NUMBER($count) ->
+        [one] { $count } item needs your action
+       *[other] { $count } items need your action
+    }
+progress-current-copying = Now copying: { $name }
+progress-current-checking = Now checking: { $name }
+progress-needs-action =
+    { NUMBER($count) ->
+        [one] { $count } item needs your action. The rest keeps moving.
+       *[other] { $count } items need your action. The rest keeps moving.
+    }
+progress-see-needs-action = See what needs you
+progress-interrupted = The connection to the other laptop dropped. PCTwin is trying to reconnect. Nothing copied and checked is lost.
+progress-low-battery = { $label } is low on battery. Plug it in so the move is not interrupted.
+progress-old-safe = Your old laptop stays unchanged.
+progress-pause = Pause move
+progress-compact = Keep it compact
+progress-expand = See the whole move
+progress-stop = Stop the move
+
+## X02 Move progress, expanded
+
+progress-all-title = See the whole move.
+progress-all-body = Each operation keeps its own status and source.
+progress-metric-overall = overall progress
+progress-metric-committed = committed so far
+progress-metric-estimate = estimate
+progress-col-item = Operation
+progress-col-from = Source
+progress-col-status = State
+progress-state-waiting = Waiting
+progress-state-copying = Copying
+progress-state-verified = Verified
+progress-state-checking = Checking
+progress-state-paused = Paused
+progress-checked-note = An item counts as copied only after it is checked.
+
+## F09 Mini panel
+
+mini-title = Your move, nearby.
+mini-title-paused = Move paused.
+mini-what = moving your selected files
+mini-progress =
+    .aria-label = Move progress
+mini-pause = Pause
+mini-resume = Resume
+mini-open = Open move
+# Used when lane E reuses this panel for a Quick Send.
+mini-title-send = Your files are on their way.
+mini-what-send = sending selected files
+mini-open-send = Open send
+mini-progress-send =
+    .aria-label = Send progress
+
+## X05 Paused at a safe point
+
+pause-title = Paused at a safe point.
+pause-title-finishing = Pausing at a safe point…
+pause-body = Committed results stay recorded and pending actions wait.
+pause-finishing = Finishing { $name } first, so it is not left half-copied.
+pause-kept-title = Files
+pause-kept-body = Block checkpoint preserved.
+pause-waiting-title = Waiting
+pause-waiting-body =
+    { NUMBER($count) ->
+        [one] { $count } item still to copy. Nothing is lost.
+       *[other] { $count } items still to copy. Nothing is lost.
+    }
+pause-status-kept = Paused
+pause-status-waiting = Waiting
+pause-note = Pausing does not undo anything. Your old laptop stays unchanged.
+pause-resume = Resume saved move
+
+## X10 Stop the remaining move? (danger dialog)
+
+cancel-title = Stop the remaining move?
+cancel-body = Cancellation keeps committed data. It is separate from undo.
+cancel-copied-title = Copied files
+cancel-copied-body = Stay on the new laptop.
+cancel-rest-title = Future actions
+cancel-rest-body = Stop after safe checkpoint handling.
+cancel-partial-title = A file partly copied
+cancel-partial-body = Is never kept as if it were complete.
+cancel-old-title = Old laptop
+cancel-old-body = Remains untouched by cancellation.
+cancel-ack = I understand cancellation does not reverse the move
+cancel-stop = Stop and view the report
+cancel-keep = Keep moving
+
+## R01 Welcome to your next laptop (outcome)
+
+outcome-eyebrow = Move results
+outcome-title = Welcome to your next laptop.
+outcome-body = Here is what happened to the scope you approved.
+outcome-files-title = Selected files
+outcome-status-partial = Partial
+outcome-next-title = What to do next
+outcome-old-safe = Unresolved selected work stays visible. The source has not been cleaned or wiped.
+outcome-report = View complete report
+outcome-home = Return home
+
+## R02 Your move, item by item (detailed report)
+
+report-title = Your move, item by item.
+report-body = A factual local record with reasons and source-to-target mappings.
+report-filter-label = Show
+report-col-item = Item
+report-col-result = Outcome
+report-col-details = Evidence / next step
+report-from = From: { $path }
+report-to = To: { $path }
+report-none = No items have this result.
+report-more-details = More details
+
+# Evidence: how a copied item was checked.
+evidence-read-back = Checked by reading it back from the drive.
+evidence-memory = Checked from this laptop’s memory, not the drive.
+evidence-memory-explain = The copy was read back and matched, but through this laptop’s memory, so what was read may have come from memory rather than the drive. A fault in the drive itself might not show here, so opening the file once is a good check.
+evidence-not-checked = Not checked, because it did not finish.
+
+# Reasons: why an item did not finish. Each says what happened, then what to do.
+reason-not-enough-space = The new laptop ran out of space. Free up space on it, then move this item again.
+reason-changed-during-move = This file kept changing on the old laptop while it was being copied. Close any app using it, then move it again.
+reason-unreadable = The old laptop would not let PCTwin read this item. Check that it opens on the old laptop, then move it again.
+reason-not-verified = The copy did not match the original, so it was not kept. Move it again; if it fails again, the original may be damaged.
+reason-refused-by-safety-check = The new laptop’s safety check refused this item because of its name, place or size. The original is still on the old laptop, so you can copy it another way if you need it.
+reason-name-not-allowed = This name cannot be used on the new laptop, and no safe new name was possible. Rename it on the old laptop, then move it again.
+reason-install-failed = The app did not install. Install it from its maker’s website.
+reason-no-equivalent = There is no version of this app for the new laptop’s system. Look for a similar app that works there.
+reason-sign-in = It is in place, but you need to sign in. Open it and sign in.
+reason-activation = The app is in place, but it needs its licence on the new laptop. Open it and activate it with your licence or account.
+reason-permission = The new laptop needs to give permission first. Open the item and choose Allow when asked.
+reason-online-only = This file is stored online only, so it was not on the old laptop to copy. Download it on the new laptop from the app that stores it online.
+reason-manual-install = This app must come from its maker’s website. Download and install it there.
+reason-restart = The new laptop must restart to finish. Restart it when you are ready.
+reason-finish-by-hand = PCTwin cannot do this step for you. Follow the steps shown for it in this report.
+
 ## Item results (every item ends with one of these)
 
 status-copied = Copied
 status-reinstalled = Reinstalled
 status-converted = Converted
 status-needs-action = Needs action
-status-skipped = Skipped
+status-skipped-by-user = Skipped by you
 status-failed = Failed
+
+## Screens: words the copy deck did not cover (same voice)
+
+# $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
+progress-minutes = { $low } to { $high } minutes
+# $low and $high are numbers and $unit is already formatted, for example "MB/s". The result fills "{ $speed }, measured".
+progress-speed-range = { $low } to { $high } { $unit }
+progress-count-failed =
+    { NUMBER($count) ->
+        [one] { $count } item could not be copied
+       *[other] { $count } items could not be copied
+    }
+progress-queue-empty = Nothing has started yet.
+progress-approved-job = Approved job
+progress-route-old = Old laptop
+progress-route-new = New laptop
+progress-panel-pausing = Pausing
+outcome-metric-size = verified copies
+outcome-metric-action = need your action
+progress-percent-unknown = PCTwin is still working out the size of this move.
+mini-title-send-paused = Send paused.
+cancel-ack-hint = Tick the box above to turn on the stop button.
+progress-state-placing = Putting in place
+progress-state-existing = Already there
+outcome-stopped-title = Your move was stopped.
+outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
+# $done and $total are counts of items: what was copied and checked, and everything the person approved.
+outcome-files-summary = { $done } of { $total } items copied and checked.
+outcome-files-memory =
+    { NUMBER($count) ->
+        [one] { $count } checked from this laptop’s memory, not the drive.
+       *[other] { $count } checked from this laptop’s memory, not the drive.
+    }
+report-show-more = Show more
+# $shown and $total are counts of items.
+report-showing = Showing { $shown } of { $total }
 
 ## Component kit
 

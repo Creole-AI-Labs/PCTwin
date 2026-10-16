@@ -1,0 +1,343 @@
+/* Progress and result screens (X01, X02, F09, X05, X10, R01, R02). Only the app's tokens; logical
+   properties so right-to-left just works; sizes in rem so large text grows things instead of clipping. */
+
+/* Old laptop, an arrow, new laptop, and the paired chip */
+.mv-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+.mv-laptop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mv-laptop small {
+  display: block;
+  font-size: var(--type-tertiary);
+}
+
+.mv-arrow {
+  flex: none;
+}
+
+.mv-route .kit-chip {
+  margin-inline-start: auto;
+}
+
+/* The top of the compact view: title on one side, the measured percent on the other */
+.mv-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+
+
+
+/* A bordered panel: title and percent, the bar, a line under it */
+.mv-panel {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+}
+
+.mv-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.mv-panel .kit-progress {
+  margin-top: var(--space-3);
+}
+
+.mv-panel-note {
+  margin-top: var(--space-3);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.mv-note {
+  margin-top: var(--space-4);
+}
+
+.mv-note:empty {
+  display: none;
+}
+
+.mv-note > * + * {
+  margin-top: var(--space-3);
+}
+
+/* The "I understand" box sits in its own bordered card */
+.mv-confirm {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+}
+
+.mv-measure {
+  margin-top: var(--space-4);
+}
+
+.mv-unknown {
+  color: var(--colour-muted);
+  font-size: var(--type-body);
+}
+
+.mv-speed {
+  margin-top: var(--space-1);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+
+
+.mv-now {
+  margin-top: var(--space-3);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+  overflow-wrap: anywhere;
+}
+
+.mv-notices:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.mv-notices .kit-banner p {
+  margin: 0;
+}
+
+.mv-link {
+  min-height: var(--control-height);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--colour-blue);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.mv-safe {
+  margin-top: var(--space-5);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+
+
+
+
+/* The serious choices keep their words but read as such: the error colours, never colour alone */
+.mv-danger {
+  color: var(--colour-error-text);
+}
+
+.mv-danger-fill:not(:disabled) {
+  border-color: var(--colour-error-text);
+  background: var(--colour-error-text);
+  color: var(--colour-paper);
+}
+
+.mv-hint {
+  margin-top: var(--space-2);
+}
+
+.mv-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Tables (X02, R02): real tables when wide, stacked cards when narrow */
+.mv-table-wrap {
+  container-type: inline-size;
+  margin-top: var(--space-5);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  overflow: hidden;
+}
+
+.mv-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: var(--type-small);
+  text-align: start;
+}
+
+.mv-table th,
+.mv-table td {
+  padding: var(--space-3) var(--space-2);
+  border-block-end: 1px solid var(--colour-line-quiet);
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.mv-table thead th {
+  background: var(--colour-soft);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  font-weight: 600;
+}
+
+.mv-table tbody th {
+  font-weight: 600;
+}
+
+.mv-path {
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.mv-reason,
+.mv-evidence {
+  margin-block-start: var(--space-2);
+  font-size: var(--type-supporting);
+}
+
+.mv-evidence {
+  color: var(--colour-muted);
+}
+
+/* A check from memory is its own line, set apart by a rule and the words, not by colour */
+.mv-evidence-memory {
+  padding-inline-start: var(--space-2);
+  border-inline-start: 3px solid var(--colour-attention-text);
+  color: var(--colour-ink);
+  font-weight: 600;
+}
+
+.mv-details {
+  margin-block-start: var(--space-2);
+  font-size: var(--type-supporting);
+}
+
+.mv-details summary {
+  min-height: var(--control-small);
+  color: var(--colour-blue);
+  cursor: pointer;
+}
+
+.mv-details p {
+  margin-block-start: var(--space-2);
+  color: var(--colour-muted);
+}
+
+@container (max-width: 440px) {
+  .mv-table thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .mv-table,
+  .mv-table tbody,
+  .mv-table tr,
+  .mv-table th,
+  .mv-table td {
+    display: block;
+    inline-size: 100%;
+  }
+
+  .mv-table tr {
+    padding-block: var(--space-2);
+    border-block-end: 1px solid var(--colour-line-quiet);
+  }
+
+  .mv-table th,
+  .mv-table td {
+    padding: var(--space-1) 0;
+    border: 0;
+  }
+}
+
+.mv-empty,
+.mv-count {
+  margin-top: var(--space-4);
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+}
+
+/* Filter by result */
+.mv-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.mv-filter-button {
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-button);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  font: inherit;
+  font-size: var(--type-small);
+  cursor: pointer;
+}
+
+.mv-filter-button[aria-pressed="true"] {
+  border-color: var(--colour-blue);
+  background: var(--colour-soft);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--colour-blue);
+}
+
+.mv-filter-button:focus-visible {
+  outline: 2px solid var(--colour-focus);
+  outline-offset: 2px;
+}
+
+.mv-filter-count {
+  margin-inline-start: var(--space-1);
+  color: var(--colour-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The outcome */
+
+
+
+.mv-subtitle {
+  margin-top: var(--space-6);
+  font-size: var(--type-row-title);
+}
+
+.mv-next {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding-inline-start: var(--space-5);
+  font-size: var(--type-small);
+}
+
+/* The mini panel's group needs no box of its own */
+.kit-mini[data-kind] {
+  inline-size: 100%;
+}
