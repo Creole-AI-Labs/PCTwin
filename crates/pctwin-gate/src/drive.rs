@@ -7,7 +7,7 @@
 //!
 //! The type is read from the folder handle itself: Linux's `fstatfs` magic number, macOS's
 //! `f_fstypename`. Windows reads it from the volume list (`sysinfo`, already used by the scan, so
-//! no unsafe code of ours): each volume's mount folder is opened, and only a volume whose serial
+//! only safe calls of ours): each volume's mount folder is opened, and only a volume whose serial
 //! number is the open folder's own counts; volumes that disagree make it unknown. Where the type
 //! still cannot be read (a drive Windows does not list, a drive served by a program on Linux),
 //! the drive is asked how it keeps a file's last-access time, on two probe files of PCTwin's own:
