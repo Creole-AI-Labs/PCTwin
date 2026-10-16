@@ -3320,6 +3320,7 @@ dependencies = [
  "fs_at",
  "getrandom 0.3.4",
  "libproc",
+ "nix 0.31.3",
  "pctwin-gate",
  "pctwin-journal",
  "pctwin-lease",
@@ -3389,7 +3390,6 @@ name = "pctwin-lease"
 version = "0.1.0"
 dependencies = [
  "libc",
- "rustix",
  "signal-hook",
  "tempfile",
 ]

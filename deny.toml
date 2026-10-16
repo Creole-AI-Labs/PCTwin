@@ -61,10 +61,11 @@ deny = [
   { crate = "signal-hook", wrappers = ["pctwin-lease"] },
   # macOS: the system's list of programs with a file open, asked only by the gate's undo.
   { crate = "libproc", wrappers = ["pctwin-gate"] },
+  # macOS: a file's flags set by name (the hidden mark while a file is filled in), only by the
+  # gate (16 October 2026). Third-party crates that use nix themselves (checked 16 October 2026).
+  { crate = "nix", wrappers = ["pctwin-gate", "fs_at", "starship-battery"] },
   { crate = "rustix", wrappers = [
     "pctwin-gate",
-    # Reads a file's flags back through its handle on a Mac, around its one fchflags call.
-    "pctwin-lease",
     # Third-party crates that use rustix themselves (checked 9 October 2026).
     "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
     "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",

@@ -476,6 +476,8 @@ pub struct Destination {
     fill_hook: Option<fill::FillHook>,
     /// For tests: what runs after each step of showing a filled-in file.
     show_hook: Option<ShowHook>,
+    /// For tests: what runs around setting or clearing a file's hidden mark by name (macOS).
+    flags_hook: Option<ShowHook>,
     /// For tests: the faults this place fakes.
     #[cfg(feature = "fault-plan")]
     faults: Faults,
@@ -660,6 +662,7 @@ impl Destination {
             ),
             fill_hook: self.fill_hook.clone(),
             show_hook: self.show_hook.clone(),
+            flags_hook: self.flags_hook.clone(),
         })
     }
 
@@ -683,6 +686,7 @@ impl Destination {
             checks: Mutex::default(),
             fill_hook: None,
             show_hook: None,
+            flags_hook: None,
         }
     }
 
@@ -695,6 +699,20 @@ impl Destination {
         after: impl Fn(&str) -> io::Result<()> + Send + Sync + 'static,
     ) -> Self {
         self.show_hook = Some(std::sync::Arc::new(after));
+        self
+    }
+
+    /// For tests (macOS): `at` runs where a file's hidden mark is set or cleared by name, with the
+    /// step: `hide:named` or `show:named` before the name is checked to hold PCTwin's own file,
+    /// and `hide:checked` or `show:checked` between that check and the call (to put another file
+    /// at the name there, say).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_flags_hook(
+        mut self,
+        at: impl Fn(&str) -> io::Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.flags_hook = Some(std::sync::Arc::new(at));
         self
     }
 
@@ -2805,7 +2823,19 @@ impl<'d> Sealed<'d> {
         let early = |e: GateError| (e, false);
         let io = |e: io::Error| (GateError::Io(e), false);
         if plan.tag.hidden {
-            fill::hide(target).map_err(io)?;
+            fill::hide(
+                &self.dir,
+                name,
+                target,
+                self.destination.flags_hook.as_ref(),
+            )
+            .map_err(|e| {
+                if fill::is_replaced(&e) {
+                    early(GateError::ReplacedWhileFilling)
+                } else {
+                    io(e)
+                }
+            })?;
         }
         if let Some(born) = plan.tag.born {
             fill::set_born(target, born).map_err(io)?;

@@ -155,9 +155,104 @@ pub(crate) fn set_created(file: &std::fs::File, at: std::time::SystemTime) -> io
     }
 }
 
-/// Whether this system can mark a file hidden through its handle (macOS: `fchflags`; Windows: as
-/// it is made). Linux has no hidden mark.
+/// Whether this system can mark a file hidden (macOS: by name, checked through its handle;
+/// Windows: as it is made). Linux has no hidden mark.
 pub(crate) const CAN_HIDE: bool = cfg!(any(target_os = "macos", windows));
+
+/// Another file is at the name of the file PCTwin is filling in or showing: the name is refused,
+/// and that file is never filled, shown or removed.
+#[derive(Debug)]
+pub(crate) struct NameReplaced;
+
+impl std::fmt::Display for NameReplaced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another file was put at the name PCTwin was using")
+    }
+}
+
+impl std::error::Error for NameReplaced {}
+
+/// Whether `e` says another file was put at the name.
+pub(crate) fn is_replaced(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<NameReplaced>())
+}
+
+/// macOS: the hidden mark (`UF_HIDDEN`).
+#[cfg(target_os = "macos")]
+const UF_HIDDEN: u32 = 0x0000_8000;
+
+/// macOS: the open file's flags, read through its own handle.
+#[cfg(target_os = "macos")]
+fn flags_of(file: &std::fs::File) -> io::Result<u32> {
+    use std::os::macos::fs::MetadataExt;
+    Ok(file.metadata()?.st_flags())
+}
+
+/// macOS: whether the name `name` in `dir` holds the very file `file` PCTwin holds open (a plain
+/// file, not a link, with the same identity).
+#[cfg(target_os = "macos")]
+fn name_holds(dir: &Dir, name: &str, file: &std::fs::File) -> io::Result<bool> {
+    match dir.symlink_metadata(name) {
+        Ok(meta) if meta.is_file() => {}
+        Ok(_) => return Ok(false),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    }
+    let there = dir.open(name)?.into_std();
+    Ok(identity(&there)?.0 == identity(file)?.0)
+}
+
+/// macOS: marks the file PCTwin holds open as `file`, at `name` in `dir`, hidden, or clears the
+/// mark, keeping every other flag. No safe call sets a file's flags through its handle, so it is
+/// set by name (nix's `chflags`, by the folder's path now, read from the folder's own handle),
+/// and only after checking the name still holds this very file and no link; then the mark is
+/// read back through the handle, and must be as asked. Another file at the name refuses it
+/// ([`NameReplaced`]). `hook` (tests) runs before the check (`<op>:named`) and between the check
+/// and the call (`<op>:checked`), where `op` is `hide` or `show`.
+#[cfg(target_os = "macos")]
+fn set_hidden_named(
+    dir: &Dir,
+    name: &str,
+    file: &std::fs::File,
+    hidden: bool,
+    hook: Option<&crate::ShowHook>,
+) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let op = if hidden { "hide" } else { "show" };
+    let step = |at: &str| match hook {
+        Some(hook) => hook(&format!("{op}:{at}")),
+        None => Ok(()),
+    };
+    if name.contains('/') || name.is_empty() || name == "." || name == ".." {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let folder = rustix::fs::getpath(dir)?;
+    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(folder.as_bytes())).join(name);
+    step("named")?;
+    if !name_holds(dir, name, file)? {
+        return Err(io::Error::other(NameReplaced));
+    }
+    let now = flags_of(file)?;
+    let flags = if hidden {
+        now | UF_HIDDEN
+    } else {
+        now & !UF_HIDDEN
+    };
+    step("checked")?;
+    nix::unistd::chflags(&path, nix::sys::stat::FileFlag::from_bits_retain(flags))
+        .map_err(io::Error::from)?;
+    if (flags_of(file)? & UF_HIDDEN != 0) == hidden {
+        Ok(())
+    } else if name_holds(dir, name, file)? {
+        Err(io::Error::other(if hidden {
+            "the drive did not keep the hidden mark"
+        } else {
+            "the drive did not clear the hidden mark"
+        }))
+    } else {
+        Err(io::Error::other(NameReplaced))
+    }
+}
 
 /// Windows' hidden attribute.
 #[cfg(windows)]
@@ -167,7 +262,7 @@ pub(crate) const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
 pub(crate) fn is_hidden(file: &std::fs::File) -> io::Result<bool> {
     #[cfg(target_os = "macos")]
     {
-        pctwin_lease::is_hidden(file)
+        Ok(flags_of(file)? & UF_HIDDEN != 0)
     }
     #[cfg(windows)]
     {
@@ -181,15 +276,22 @@ pub(crate) fn is_hidden(file: &std::fs::File) -> io::Result<bool> {
     }
 }
 
-/// Marks the open file `file` hidden through its handle (on Windows it was made hidden as it was
-/// created: this checks it is), and fails unless it reads back hidden.
-pub(crate) fn hide(file: &std::fs::File) -> io::Result<()> {
+/// Marks the file PCTwin holds open as `file`, at `name` in `dir`, hidden (on a Mac by name,
+/// checked through the handle: [`set_hidden_named`]; on Windows it was made hidden as it was
+/// created: this checks it is), and fails unless it reads back hidden through the handle.
+pub(crate) fn hide(
+    dir: &Dir,
+    name: &str,
+    file: &std::fs::File,
+    hook: Option<&crate::ShowHook>,
+) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        pctwin_lease::set_hidden(file, true)
+        set_hidden_named(dir, name, file, true, hook)
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = (dir, name, hook);
         if is_hidden(file)? {
             Ok(())
         } else {
@@ -198,17 +300,25 @@ pub(crate) fn hide(file: &std::fs::File) -> io::Result<()> {
     }
 }
 
-/// Clears the hidden mark on the open file `file`, through its handle: on Windows by giving it
-/// the attributes of `like` (one of PCTwin's own plain files, never hidden); and fails unless it
-/// reads back shown.
-pub(crate) fn show_file(file: &std::fs::File, like: &std::fs::File) -> io::Result<()> {
+/// Clears the hidden mark on the file PCTwin holds open as `file`, at `name` in `dir`: on a Mac
+/// by name, checked through the handle ([`set_hidden_named`]); on Windows through the handle, by
+/// giving it the attributes of `like` (one of PCTwin's own plain files, never hidden); and fails
+/// unless it reads back shown through the handle.
+pub(crate) fn show_file(
+    dir: &Dir,
+    name: &str,
+    file: &std::fs::File,
+    like: &std::fs::File,
+    hook: Option<&crate::ShowHook>,
+) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let _ = like;
-        pctwin_lease::set_hidden(file, false)
+        set_hidden_named(dir, name, file, false, hook)
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = (dir, name, hook);
         #[cfg(windows)]
         file.set_permissions(like.metadata()?.permissions())?;
         #[cfg(not(windows))]
@@ -221,8 +331,8 @@ pub(crate) fn show_file(file: &std::fs::File, like: &std::fs::File) -> io::Resul
     }
 }
 
-/// Whether the drive under `dir` can hide a file through its handle: tried on the probe file
-/// `name` (PCTwin's own), which is shown again afterwards. Windows hides a file as it is made,
+/// Whether the drive under `dir` can hide a file: tried on the probe file `name` (PCTwin's own),
+/// which is shown again afterwards, each read back through its handle. Windows hides a file as it is made,
 /// which every drive it writes takes; each file is read back hidden all the same.
 pub(crate) fn hides(dir: &Dir, name: &str) -> bool {
     #[cfg(target_os = "macos")]
@@ -232,8 +342,8 @@ pub(crate) fn hides(dir: &Dir, name: &str) -> bool {
         dir.open_with(name, &options)
             .map(cap_std::fs::File::into_std)
             .is_ok_and(|f| {
-                pctwin_lease::set_hidden(&f, true).is_ok()
-                    && pctwin_lease::set_hidden(&f, false).is_ok()
+                set_hidden_named(dir, name, &f, true, None).is_ok()
+                    && set_hidden_named(dir, name, &f, false, None).is_ok()
             })
     }
     #[cfg(not(target_os = "macos"))]
@@ -731,7 +841,7 @@ impl crate::Destination {
         };
         if is_hidden(&file)? {
             let like = plain_file(&dir)?;
-            show_file(&file, &like)?;
+            show_file(&dir, name, &file, &like, self.flags_hook.as_ref())?;
         }
         step("shown")?;
         if let Some(ns) = show.modified_ns.and_then(|ns| u64::try_from(ns).ok()) {

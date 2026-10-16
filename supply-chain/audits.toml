@@ -7,6 +7,12 @@ criteria = "safe-to-deploy"
 version = "0.2.1"
 notes = "Reviewed 8 Oct 2026 for PCTwin's one use: FileExt::delete_by_handle on a std File opened by PCTwin with DELETE access. Read every unsafe block in src/win.rs and src/win/sugar.rs (22 + 4): SetFileInformationByHandle with FileDispositionInfoEx (DELETE|POSIX_SEMANTICS|IGNORE_READONLY), FileDispositionInfo and FileBasicInfo, each with a correctly sized, initialised struct and a live owned handle; NtCreateFile with zeroed OBJECT_ATTRIBUTES and a NUL-terminated UNICODE_STRING bounded by UNICODE_STRING_MAX_CHARS; the symlink-creation reparse buffer (an align_to_mut with a checked head; its own TODO notes alignment) and the read_dir entry parsing (trusts the kernel's offsets) are not used by PCTwin and were read, not exercised. No build script, no network, no file access beyond the caller's handles and paths. Unix code (nix/libc) not used by PCTwin."
 
+[[audits.nix]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.31.3"
+notes = "Reviewed 16 Oct 2026 for PCTwin's one use: nix::unistd::chflags(path, FileFlag) in pctwin-gate on macOS (the hidden mark on a file being filled in; the gate checks the name holds its own file first and reads the flags back through its handle). Read src/unistd.rs chflags (one unsafe: libc::chflags with the pointer of a NUL-terminated CStr that lives for the call, and the flags word), NixPath for str, OsStr, Path, CStr and [u8] in src/lib.rs (paths under 1024 bytes are copied into a stack buffer with copy_nonoverlapping, bounded by the length check, then NUL-terminated and validated with CStr::from_bytes_with_nul, so an interior NUL gives EINVAL; longer paths go through CString::new), Errno::result in src/errno.rs, and the FileFlag bitflags in src/sys/stat.rs (no unsafe). build.rs only declares cfg aliases: no network, no file access, no compiled code. Only the fs feature is enabled by PCTwin; other modules were not used and were not read in full. fs_at uses this version on Unix (not built for PCTwin's Unix targets)."
+
 [[audits.signal-hook]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"

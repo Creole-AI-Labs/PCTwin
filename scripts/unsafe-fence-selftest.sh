@@ -64,12 +64,12 @@ EOF
 expect fail "an allow(unsafe_code) spread over lines in pctwin-lease"
 
 fresh
-# The one exception moved out of fn sys_int: same count, wrong place.
-perl -0pi -e 's/(fn sys_int)/fn fcntl_moved() -> i32 { 0 }\n    $1/' "$work/r/$lease"
-perl -0pi -e 's/let r = unsafe \{.*?\n    \};/let r = fcntl_moved();/s' "$work/r/$lease"
+# The one exception moved out of fn fcntl_int: same count, wrong place.
+perl -0pi -e 's/(fn fcntl_int)/fn fcntl_moved() -> i32 { 0 }\n    $1/' "$work/r/$lease"
+perl -0pi -e 's/let r = unsafe \{ libc::fcntl\(fd, command, arg\) \};/let r = fcntl_moved();/' "$work/r/$lease"
 perl -0pi -e 's/fn fcntl_moved\(\) -> i32 \{ 0 \}/#[expect(unsafe_code, reason = "moved")]\n    fn fcntl_moved() -> i32 { unsafe { libc::getpid() } }/' "$work/r/$lease"
 perl -0pi -e 's/#\[expect\(\s*unsafe_code,\s*reason = "no safe binding[^"]*"\s*\)\]\s*//' "$work/r/$lease"
-expect fail "the one unsafe moved outside fn sys_int"
+expect fail "the one unsafe moved outside fn fcntl_int"
 
 fresh
 cat >>"$work/r/$lease" <<'EOF'

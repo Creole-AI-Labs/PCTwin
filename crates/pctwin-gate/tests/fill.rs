@@ -950,3 +950,111 @@ fn a_file_put_in_place_of_pctwin_s_hidden_one_is_never_shown_though_it_carries_t
     assert!(dest.hidden("u.txt").unwrap(), "their file is left as it is");
     assert_eq!(std::fs::read(root.path().join("u.txt")).unwrap(), b"theirs");
 }
+
+/// macOS: puts another program's file at `name` in `root` in one step (a rename over it), hidden
+/// with the system's own `chflags` command when `hidden`.
+#[cfg(target_os = "macos")]
+fn put_theirs(root: &Path, name: &str, hidden: bool) -> io::Result<()> {
+    let tmp = root.join("theirs.tmp");
+    std::fs::write(&tmp, b"theirs")?;
+    if hidden {
+        let ok = std::process::Command::new("chflags")
+            .arg("hidden")
+            .arg(&tmp)
+            .status()?
+            .success();
+        assert!(ok, "chflags hidden");
+    }
+    std::fs::rename(&tmp, root.join(name))
+}
+
+/// macOS: whether the file at `path` carries the hidden mark (read by the system's `ls -lO`).
+#[cfg(target_os = "macos")]
+fn marked_hidden(path: &Path) -> bool {
+    let out = std::process::Command::new("ls")
+        .arg("-lO")
+        .arg(path)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).contains("hidden")
+}
+
+/// macOS sets the hidden mark by name, so another file can be put at the name between PCTwin's
+/// exclusive create and the mark. PCTwin checks the name holds the very file it made before it
+/// marks it, and reads the mark back through its own handle after: another file at the name is
+/// never filled or removed, and the name is refused. Put there before the check, it is not
+/// hidden either; put there in the instant between the check and the call, the call by name
+/// reaches it (the one gap a call by name leaves), and the handle catches it.
+#[cfg(target_os = "macos")]
+#[test]
+fn another_file_put_at_the_name_before_it_is_hidden_is_never_hidden_filled_or_removed() {
+    for at in ["hide:named", "hide:checked"] {
+        let root = tempfile::tempdir().unwrap();
+        let r = root.path().to_path_buf();
+        let dest = fill_in(root.path()).with_flags_hook(move |step| {
+            if step == at {
+                put_theirs(&r, "g.txt", false)?;
+            }
+            Ok(())
+        });
+        let s = sealed(&dest, "g.txt", b"ours, whole");
+        let plan = s.fill_plan().unwrap();
+        let mut st = steps(b"ours, whole");
+        let Claim::Failed(e, _) = s.fill_as("g.txt", &plan, &mut st) else {
+            panic!("{at}: the name was meant to be refused");
+        };
+        assert!(matches!(e, GateError::ReplacedWhileFilling), "{at}: {e:?}");
+        assert!(
+            st.log.is_empty(),
+            "{at}: nothing recorded, never filled: {:?}",
+            st.log
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("g.txt")).unwrap(),
+            b"theirs",
+            "{at}: their file is left whole"
+        );
+        if at == "hide:named" {
+            // Caught before the mark: their file is not touched at all.
+            assert!(
+                !marked_hidden(&root.path().join("g.txt")),
+                "{at}: never hidden"
+            );
+        }
+    }
+}
+
+/// The same when a filled-in file is shown: the mark is cleared by name only while the name holds
+/// PCTwin's own file, and read back through its handle. Another file put at the name (hidden,
+/// here) is never reported shown and keeps its bytes; put there before the check, it keeps its
+/// mark too. (Put there in the instant between the check and the call, the call by name reaches
+/// it: the one gap a call by name leaves, which the handle then catches.)
+#[cfg(target_os = "macos")]
+#[test]
+fn another_file_put_at_the_name_before_it_is_shown_keeps_its_mark_and_nothing_is_shown() {
+    for at in ["show:named", "show:checked"] {
+        let root = tempfile::tempdir().unwrap();
+        let r = root.path().to_path_buf();
+        let dest = fill_in(root.path()).with_flags_hook(move |step| {
+            if step == at {
+                put_theirs(&r, "h.txt", true)?;
+            }
+            Ok(())
+        });
+        let s = sealed(&dest, "h.txt", b"ours, whole");
+        let plan = s.fill_plan().unwrap();
+        let Claim::Named(c) = s.fill_as("h.txt", &plan, &mut steps(b"ours, whole")) else {
+            panic!("{at}: not named");
+        };
+        let show = c.show().unwrap().clone();
+        c.keep();
+        let shown = dest.finish_show("h.txt", &show, ShowCheck::Made);
+        assert!(shown.is_err(), "{at}: never reported shown: {shown:?}");
+        let theirs = root.path().join("h.txt");
+        assert_eq!(std::fs::read(&theirs).unwrap(), b"theirs");
+        if at == "show:named" {
+            // Caught before the mark is cleared: their file keeps it.
+            assert!(marked_hidden(&theirs), "{at}: their file keeps its mark");
+        }
+    }
+}

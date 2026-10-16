@@ -40,8 +40,10 @@ rustix = { version = "1.1", features = ["fs"] }
 pctwin-lease = { path = "../pctwin-lease" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Marks a file being filled in under its real name hidden, through its handle (fchflags).
-pctwin-lease = { path = "../pctwin-lease" }
+# Marks a file being filled in under its real name hidden by name (chflags), safely; the gate
+# checks the name holds its own file first and reads the mark back through its handle (decided
+# 16 October 2026). Only the fs feature.
+nix = { version = "0.31", default-features = false, features = ["fs"] }
 # The list of programs with a file open, for the reason a copy is kept (decided 9 October 2026;
 # undo never removes on macOS since 13 October 2026). Safe bindings only.
 libproc = "0.14"
