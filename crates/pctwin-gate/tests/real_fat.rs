@@ -407,10 +407,10 @@ fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
 /// PCTwin and another program make the same name at the same moment, many times, the way this
 /// drive names files: exactly one of them gets it every time, and the other's file is never
 /// touched or mixed in. Each round gives one side or the other a different head start (up to a
-/// few times what making a file takes on this drive). Both sides winning proves little (the big
-/// head starts decide those rounds), so the test fails unless some rounds went against the head
-/// start: the side that started later still got the name, which happens only when the two really
-/// overlap. The split is printed for the CI log.
+/// few times what making a file takes on this drive, or a few microseconds). Both sides winning
+/// proves little (the big head starts decide those rounds), so the test fails unless some rounds
+/// went against the head start: the side that started later still got the name, which happens
+/// only when the two really overlap. The split is printed for the CI log.
 #[test]
 fn a_name_raced_for_is_never_shared() {
     use pctwin_gate::Claim;
@@ -456,8 +456,15 @@ fn a_name_raced_for_is_never_shared() {
             let theirs = dir.join(&name);
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
             let b = std::sync::Arc::clone(&barrier);
-            // A different head start each round, to one side or the other.
-            let head = step * ((round * 7919) % 400) / 100;
+            // A different head start each round, to one side or the other: in half the rounds up
+            // to a few times what making a file takes, in the other half a few microseconds, less
+            // than the threads' own start-up jitter (a drive that handles one request at a time
+            // lets the first to arrive win, so only such rounds can show a real overlap there).
+            let head = if (round / 2) % 2 == 0 {
+                step * ((round * 7919) % 400) / 100
+            } else {
+                std::time::Duration::from_nanos(u64::from((round * 7919) % 5000))
+            };
             let they_wait = round % 2 == 0;
             let other = std::thread::spawn(move || {
                 b.wait();
