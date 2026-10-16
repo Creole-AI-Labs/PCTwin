@@ -28,22 +28,27 @@ pub const FAT_LARGEST_FILE: u64 = (1 << 32) - 1;
 pub(crate) const TIME_PROBE: &[u8] = b"PCTwin drive test: file t. Safe to delete.
 ";
 
-/// The modified time the time-step test sets: 3 July 2001, 04:05:07.01 UTC (an odd second and a
-/// hundredth, which only a drive with two-second steps cannot keep).
-const TIME_PROBE_AT: std::time::Duration = std::time::Duration::from_millis(994_133_107_010);
+/// The last-access time the time test sets: 3 July 2001, 12:34:56 UTC. FAT keeps a file's
+/// last-access time as a date alone (local midnight), exFAT and NTFS keep the time of day too (a
+/// Windows exFAT drive keeps modified times in two-second steps like FAT, so only this tells them
+/// apart there). No time zone puts local midnight at 56 seconds past a minute, so a FAT drive
+/// never gives it back.
+const TIME_PROBE_AT: std::time::Duration = std::time::Duration::from_secs(994_163_696);
 
-/// Whether a modified time set to `set` and read back as `got` shows FAT's two-second steps: the
-/// read-back is an even whole second, and not what was set.
-pub(crate) fn two_second_steps(set: std::time::SystemTime, got: std::time::SystemTime) -> bool {
-    let Ok(d) = got.duration_since(std::time::UNIX_EPOCH) else {
-        return false;
+/// Whether a last-access time set to `set` and read back as `got` shows FAT's date-only keeping:
+/// the time of day is gone (it moved by at least a minute).
+pub(crate) fn date_only(set: std::time::SystemTime, got: std::time::SystemTime) -> bool {
+    let apart = match got.duration_since(set) {
+        Ok(d) => d,
+        Err(e) => e.duration(),
     };
-    got != set && d.subsec_nanos() == 0 && d.as_secs() % 2 == 0
+    apart >= std::time::Duration::from_secs(60)
 }
 
 /// Asks the drive under `dir` how it keeps time, on a probe file of PCTwin's own made only if
-/// free and removed at once: `Some(Fat)` for two-second steps, `None` if not (or the test could
-/// not run: a folder PCTwin may not write to, say; nothing is then assumed).
+/// free and removed at once: `Some(Fat)` for a last-access time kept as a date alone, `None` if
+/// not (or the test could not run: a folder PCTwin may not write to, say; nothing is then
+/// assumed).
 fn kind_by_time_step(dir: &Dir) -> Option<DriveKind> {
     use std::hash::{BuildHasher, RandomState};
     use std::io::Write;
@@ -55,7 +60,9 @@ fn kind_by_time_step(dir: &Dir) -> Option<DriveKind> {
     let kept = (|| {
         let mut f = dir.open_with(&name, &options).ok()?.into_std();
         f.write_all(TIME_PROBE).ok()?;
-        f.set_modified(set).ok()?;
+        f.sync_all().ok()?;
+        f.set_times(std::fs::FileTimes::new().set_accessed(set))
+            .ok()?;
         f.sync_all().ok()?;
         drop(f);
         dir.open(&name)
@@ -63,11 +70,11 @@ fn kind_by_time_step(dir: &Dir) -> Option<DriveKind> {
             .into_std()
             .metadata()
             .ok()?
-            .modified()
+            .accessed()
             .ok()
     })();
     let _ = dir.remove_file(&name);
-    kept.filter(|got| two_second_steps(set, *got))
+    kept.filter(|got| date_only(set, *got))
         .map(|_| DriveKind::Fat)
 }
 
@@ -314,27 +321,20 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
-    fn two_second_steps_are_told_from_finer_ones() {
+    fn a_date_only_access_time_is_told_from_one_with_its_time_of_day() {
         let set = UNIX_EPOCH + TIME_PROBE_AT;
-        // FAT: rounded to an even whole second, either way.
-        assert!(two_second_steps(
-            set,
-            UNIX_EPOCH + Duration::from_secs(994_133_106)
-        ));
-        assert!(two_second_steps(
-            set,
-            UNIX_EPOCH + Duration::from_secs(994_133_108)
-        ));
-        // exFAT keeps hundredths; NTFS, APFS and ext4 keep it exactly.
-        assert!(!two_second_steps(set, set));
-        assert!(!two_second_steps(
-            set,
-            UNIX_EPOCH + Duration::from_millis(994_133_107_000)
-        ));
-        assert!(!two_second_steps(
-            set,
-            UNIX_EPOCH + Duration::from_millis(994_133_106_500)
-        ));
+        // FAT: local midnight of that day (or a day either side), in any time zone.
+        for offset_minutes in [-720i64, -330, 0, 60, 345, 840] {
+            let local_midnight = 994_118_400 - offset_minutes * 60;
+            for day in [-1i64, 0, 1] {
+                let got = UNIX_EPOCH + Duration::from_secs((local_midnight + day * 86_400) as u64);
+                assert!(date_only(set, got), "{offset_minutes} {day}");
+            }
+        }
+        // exFAT keeps it to two seconds; NTFS, APFS and ext4 exactly.
+        assert!(!date_only(set, set));
+        assert!(!date_only(set, set - Duration::from_secs(1)));
+        assert!(!date_only(set, set + Duration::from_millis(1500)));
     }
 
     /// The test machine's own drive is not FAT, and the test leaves nothing behind.
