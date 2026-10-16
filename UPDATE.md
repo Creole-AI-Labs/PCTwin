@@ -18,6 +18,8 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **The move screens are built:** welcome, choosing which laptop is which, who's moving, what to do first, the scan and the plan to approve, move progress with pause and stop, the final report, and Quick Send with its history. They follow our designs, and nothing on them is for sale. They are not yet connected to the move itself.
 - **Our tests judge by progress, not the clock.** A slow test machine no longer fails a test; a test that is truly stuck still does.
 
+- **The screens now speak all seven launch languages.** French, Spanish, Portuguese, Arabic, Chinese and Hindi were made ahead of time by machine translation, in the same plain words as the English. Arabic reads right to left. Automatic checks stop a broken translation (a missing number, a wrong plural, a changed product name) from shipping. A second tool translates the text back to English to look for changed meaning; that check has finished for Arabic and part of Hindi, and the rest is waiting on a free daily limit.
+
 **In progress**
 
 - **USB sticks and memory cards.** These drives (FAT and exFAT) can't always give a file its name safely in one step. On those drives PCTwin writes the file hidden under its real name, checks it, then shows it, and a copy cut off halfway is cleaned up or finished on the next start. An independent review found problems, which are being fixed and reviewed again.

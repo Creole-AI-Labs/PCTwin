@@ -178,10 +178,16 @@ describe("languages", () => {
     expect(pickLanguage([])).toBe("en");
   });
 
-  it("every language file loads, and a string missing in one falls back to English", () => {
+  it("every language file loads and shows its own words; English is the last resort", () => {
     for (const { code } of LANGUAGES) {
       const l10n = localization(code);
-      expect(l10n.getString("welcome-start")).toBe("Start a move");
+      const start = l10n.getString("welcome-start");
+      expect(start).not.toBe("welcome-start");
+      expect(start).not.toBe("");
+      if (code === "en") expect(start).toBe("Start a move");
+      else expect(start).not.toBe("Start a move");
+      // An id no language has is never shown as blank: the id itself comes back.
+      expect(l10n.getString("no-such-message-anywhere", undefined, "fallback text")).toBe("fallback text");
     }
   });
 

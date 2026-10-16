@@ -3441,6 +3441,7 @@ dependencies = [
  "pctwin-journal",
  "pctwin-lab",
  "pctwin-link",
+ "pctwin-move",
  "pctwin-pairing",
  "pctwin-record",
  "pctwin-scan",
@@ -3469,6 +3470,19 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "zeroize",
+]
+
+[[package]]
+name = "pctwin-move"
+version = "0.1.0"
+dependencies = [
+ "pctwin-gate",
+ "pctwin-journal",
+ "pctwin-record",
+ "pctwin-transfer",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -3501,6 +3515,7 @@ version = "0.1.0"
 dependencies = [
  "pctwin-gate",
  "pctwin-journal",
+ "pctwin-move",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-transfer",
