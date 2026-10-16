@@ -2866,10 +2866,13 @@ impl<'d> Sealed<'d> {
                 return Claim::Failed(e, self);
             }
         }
-        drop(target);
-        // The temporary file stays until the journal has committed ([`Claimed::keep`]).
+        // The temporary file stays until the journal has committed ([`Claimed::keep`]); the
+        // filled-in file stays open until it is kept, so while PCTwin commits and shows it no other
+        // file can be given its number (Linux gives a freed one to the next file at once).
         self.temp = None;
-        Claim::Named(self.claimed(name, Some(temp)))
+        let mut claimed = self.claimed(name, Some(temp));
+        claimed._filled = Some(target);
+        Claim::Named(claimed)
     }
 
     /// Steps 3 to 7 of a fill (see the `fill` module notes). On failure, whether it had been
@@ -3054,6 +3057,7 @@ impl<'d> Sealed<'d> {
         Claimed {
             dir: self.dir.try_clone().ok(),
             _held: self.held.take(),
+            _filled: None,
             show: self.show.take(),
             temp,
             finished: Finished {
@@ -3119,6 +3123,9 @@ pub struct Claimed<'d> {
     show: Option<Show>,
     /// The file, still held open until it is kept (so its number stays its own until then).
     _held: Option<std::fs::File>,
+    /// A file filled in under its real name, held open until it is kept: while it is held, no
+    /// other file at its name can carry its recorded number, so the check before showing it holds.
+    _filled: Option<std::fs::File>,
     /// The temporary name, while the file still has it (drives with hard links).
     temp: Option<String>,
     finished: Finished,
