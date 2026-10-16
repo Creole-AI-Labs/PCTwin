@@ -9,11 +9,13 @@ import type { Soon } from "./ComingSoon";
 export default function Welcome({
   onStart,
   onSoon,
+  onQuick,
   unfinished,
   onResume,
 }: {
   onStart: () => void;
   onSoon: (which: Soon) => void;
+  onQuick: () => void;
   unfinished?: boolean;
   onResume?: () => void;
 }) {
@@ -75,9 +77,7 @@ export default function Welcome({
         <button
           type="button"
           className="button"
-          onClick={() => {
-            onSoon("quick-send");
-          }}
+          onClick={onQuick}
         >
           <Localized id="welcome-quick-send">
             <span>Quick Send</span>

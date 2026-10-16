@@ -189,3 +189,49 @@ proptest! {
         prop_assert_eq!(BlockMap::decode(&m.encode()).unwrap(), m);
     }
 }
+
+/// Taking blocks back (they read back wrong) matches a plain list of done blocks, wherever they
+/// fall in a run.
+#[test]
+fn removing_blocks_matches_a_plain_list() {
+    let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut rnd = move || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    for trial in 0..300 {
+        let count = 1 + rnd() % 200;
+        let mut map = BlockMap::new(count);
+        let mut model = vec![false; count as usize];
+        for _ in 0..400 {
+            let b = rnd() % (count + 3);
+            if rnd() % 2 == 0 {
+                let r = map.insert(b);
+                if b < count {
+                    assert_eq!(r.unwrap(), !model[b as usize], "trial {trial} insert {b}");
+                    model[b as usize] = true;
+                } else {
+                    assert!(r.is_err());
+                }
+            } else {
+                let was = b < count && model[b as usize];
+                assert_eq!(map.remove(b), was, "trial {trial} remove {b}");
+                if b < count {
+                    model[b as usize] = false;
+                }
+            }
+            let done = model.iter().filter(|d| **d).count() as u64;
+            assert_eq!(map.done_count(), done, "trial {trial}");
+            assert_eq!(map.is_full(), done == count);
+            for (i, d) in model.iter().enumerate() {
+                assert_eq!(map.contains(i as u64), *d, "trial {trial} block {i}");
+            }
+            let runs: Vec<_> = map.runs().collect();
+            for w in runs.windows(2) {
+                assert!(w[0].end < w[1].start, "runs touch or overlap: {runs:?}");
+            }
+        }
+    }
+}

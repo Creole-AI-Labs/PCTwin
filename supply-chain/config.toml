@@ -143,6 +143,16 @@ criteria = "safe-to-deploy"
 version = "1.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.borsh]]
+version = "1.8.1"
+criteria = "safe-to-run"
+notes = "Not reviewed and not compiled. Listed in Cargo.lock only because bit-vec 0.10.1 has an optional borsh feature; cargo metadata shows that feature is off (bit-vec resolves with default and std only). Exempted so cargo vet passes; drop when the lock no longer lists it."
+
+[[exemptions.borsh-derive]]
+version = "1.8.1"
+criteria = "safe-to-run"
+notes = "Not reviewed and not compiled. Same reason as borsh 1.8.1."
+
 [[exemptions.brotli]]
 version = "9.0.0"
 criteria = "safe-to-deploy"
@@ -953,10 +963,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num_enum_derive]]
 version = "0.7.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.objc2]]
-version = "0.6.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.objc2-app-kit]]
@@ -1874,14 +1880,6 @@ criteria = "safe-to-deploy"
 [[exemptions.zcheapstr]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.zerocopy]]
-version = "0.8.61"
-criteria = "safe-to-run"
-
-[[exemptions.zerocopy-derive]]
-version = "0.8.61"
-criteria = "safe-to-run"
 
 [[exemptions.zerofrom]]
 version = "0.1.8"

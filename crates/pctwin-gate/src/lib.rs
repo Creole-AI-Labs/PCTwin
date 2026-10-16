@@ -379,6 +379,8 @@ pub enum GateError {
     OutsideFile,
     #[error("the old laptop sent part of a file again")]
     Overlap,
+    #[error("only parts of a file that have arrived can be taken back")]
+    NotArrived,
     #[error("the old laptop sent a file in too many scattered pieces")]
     TooScattered,
     #[error("there is not enough free space on the new laptop for this file")]
@@ -1816,6 +1818,18 @@ impl Destinations {
         Ok(())
     }
 
+    /// For tests (feature `fault-plan`): the place labelled `id` fakes `plan`'s faults.
+    #[cfg(feature = "fault-plan")]
+    pub fn fake_faults(&mut self, id: &str, plan: FaultPlan) -> Result<(), GateError> {
+        let (place, destination) = self
+            .entries
+            .remove(id)
+            .ok_or(GateError::UnknownDestination)?;
+        self.entries
+            .insert(id.to_string(), (place, destination.with_faults(plan)));
+        Ok(())
+    }
+
     /// The approved place labelled `id`, or [`GateError::UnknownDestination`].
     pub fn get(&self, id: &str) -> Result<&Destination, GateError> {
         self.entries
@@ -2086,6 +2100,41 @@ impl<'d> IncomingFile<'d> {
         self.arrived
             .insert(part.start, part.joined_end.unwrap_or(part.end));
         self.received += part.len;
+    }
+
+    /// Takes back `len` bytes at `offset` that arrived (a block that read back wrong), so only
+    /// they can be written again: they no longer count as arrived, and any read-back that
+    /// matched no longer counts either. Refused unless every byte of it arrived and lies inside
+    /// the file. Splitting a part in two counts towards [`MAX_FILE_PARTS`].
+    pub fn take_back(&mut self, offset: u64, len: u64) -> Result<(), GateError> {
+        let end = offset
+            .checked_add(len)
+            .filter(|end| *end <= self.announced)
+            .ok_or(GateError::OutsideFile)?;
+        if len == 0 {
+            return Ok(());
+        }
+        let (start, part_end) = self
+            .arrived
+            .range(..=offset)
+            .next_back()
+            .map(|(s, e)| (*s, *e))
+            .filter(|(_, e)| *e >= end)
+            .ok_or(GateError::NotArrived)?;
+        let splits = start < offset && end < part_end;
+        if splits && self.arrived.len() >= MAX_FILE_PARTS {
+            return Err(GateError::TooScattered);
+        }
+        self.read_back = None;
+        self.arrived.remove(&start);
+        if start < offset {
+            self.arrived.insert(start, offset);
+        }
+        if end < part_end {
+            self.arrived.insert(end, part_end);
+        }
+        self.received -= len;
+        Ok(())
     }
 
     /// Closes it and keeps the partly received file on disk under its temporary name, for the
