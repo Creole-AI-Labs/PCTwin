@@ -577,3 +577,50 @@ fn a_drive_put_in_another_s_place_at_the_same_folder_is_judged_again() {
         "the new drive was tested again"
     );
 }
+
+/// A drive whose type cannot be read (a drive Windows does not list, one a program serves) is
+/// asked how it keeps a file's last-access time: FAT keeps a date alone. So every FAT drive is
+/// still found FAT, with its 4 GB limit, and no exFAT drive is; the test leaves no probe file.
+#[test]
+fn a_fat_drive_whose_type_cannot_be_read_is_found_by_its_time() {
+    use pctwin_gate::{DriveKind, FAT_LARGEST_FILE};
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        let dir = fresh(&drive.path, "pctwin-fat-time");
+        let dest = Destination::open_type_unread(&dir).unwrap();
+        let fat = !drive.kind.contains("exfat");
+        let kind = dest.profile().kind();
+        println!("time test on {}: {kind:?}", drive.show());
+        let expected = if fat {
+            DriveKind::Fat
+        } else {
+            DriveKind::Unknown
+        };
+        assert_eq!(kind, expected, "{}", drive.show());
+        assert_eq!(
+            dest.largest_file(),
+            fat.then_some(FAT_LARGEST_FILE),
+            "{}",
+            drive.show()
+        );
+        let big = dest.create_file(
+            &IncomingPath::parse("big.bin").unwrap(),
+            FAT_LARGEST_FILE + 1,
+        );
+        assert_eq!(
+            matches!(big, Err(GateError::TooBigForDrive { .. })),
+            fat,
+            "{}: {:?}",
+            drive.show(),
+            big.as_ref().err()
+        );
+        drop(big);
+        let probes: Vec<String> = settled_names(&dir)
+            .into_iter()
+            .filter(|n| n.starts_with(".pctwin-probe-"))
+            .collect();
+        assert!(probes.is_empty(), "{}: {probes:?}", drive.show());
+    });
+}
