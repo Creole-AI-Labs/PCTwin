@@ -847,13 +847,18 @@ fn a_folder_among_the_homes_that_nobody_explains_is_counted_by_its_owner_and_nev
         let ghost = s
             .places
             .iter()
-            .find(|p| {
-                p.placement.whose
-                    == Whose::FromOldAccount {
-                        account_id: Some("S-1-5-21-111-222-333-1077".into()),
-                    }
-            })
+            // (Bea's empty folder is another unexplained home in the one-person case.)
+            .find(|p| matches!(p.placement.whose, Whose::FromOldAccount { .. }) && p.bytes > 0)
             .expect("counted as from an old account");
+        // The owner's ID is kept where it is a person's ID on this system (a SID on Windows).
+        if cfg!(windows) {
+            assert_eq!(
+                ghost.placement.whose,
+                Whose::FromOldAccount {
+                    account_id: Some("S-1-5-21-111-222-333-1077".into())
+                }
+            );
+        }
         assert_eq!(ghost.bytes, 12);
         assert_eq!(ghost.path, None);
         // The mover's own old profile stays the mover's.
