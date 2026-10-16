@@ -398,9 +398,9 @@ fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
 
 /// PCTwin and another program make the same name at the same moment, many times, the way this
 /// drive names files: exactly one of them gets it every time, and the other's file is never
-/// touched or mixed in. Each round gives the other program a different head start, and the test
-/// fails unless both sides won some rounds, so it proves they really competed. The split is
-/// printed for the CI log.
+/// touched or mixed in. Each round gives one side or the other a different head start (up to a
+/// few times what making a file takes on this drive), and the test fails unless both sides won
+/// some rounds, so it proves they really competed. The split is printed for the CI log.
 #[test]
 fn a_name_raced_for_is_never_shared() {
     use pctwin_gate::Claim;
@@ -415,6 +415,20 @@ fn a_name_raced_for_is_never_shared() {
         let dest = Destination::open(&dir).unwrap();
         let naming = dest.check_drive().unwrap().naming;
         let ours = b"ours".to_vec();
+        // How long making a file takes on this drive, the measure of each head start.
+        let step = {
+            let started = std::time::Instant::now();
+            for i in 0..8 {
+                std::fs::write(dir.join(format!("w{i}.tmp")), b"w").unwrap();
+            }
+            (started.elapsed() / 8).max(std::time::Duration::from_micros(20))
+        };
+        let wait = |d: std::time::Duration| {
+            let until = std::time::Instant::now() + d;
+            while std::time::Instant::now() < until {
+                std::hint::spin_loop();
+            }
+        };
         let mut pending = None;
         let (mut won, mut lost) = (0, 0);
         for round in 0..300u32 {
@@ -432,12 +446,16 @@ fn a_name_raced_for_is_never_shared() {
             let theirs = dir.join(&name);
             let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
             let b = std::sync::Arc::clone(&barrier);
-            // A different head start each round, so both sides win some rounds.
-            let spins = (round * 7919) % 200_000;
+            // A different head start each round, to one side or the other.
+            let head = step * ((round * 7919) % 400) / 100;
+            let they_wait = round % 2 == 0;
             let other = std::thread::spawn(move || {
                 b.wait();
-                for _ in 0..spins {
-                    std::hint::spin_loop();
+                if they_wait {
+                    let until = std::time::Instant::now() + head;
+                    while std::time::Instant::now() < until {
+                        std::hint::spin_loop();
+                    }
                 }
                 match std::fs::OpenOptions::new()
                     .write(true)
@@ -453,6 +471,9 @@ fn a_name_raced_for_is_never_shared() {
                 }
             });
             barrier.wait();
+            if !they_wait {
+                wait(head);
+            }
             let claim = sealed.claim_as(&name);
             let they_won = other.join().unwrap();
             let got = std::fs::read(dir.join(&name)).unwrap();
