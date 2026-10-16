@@ -25,8 +25,7 @@
  *  - quicksend_choose_folder () -> { path, freeBytes | null }    Q09 "Choose a folder".
  *  - quicksend_conflicts { folder, ids } -> Conflict[]            Q10 (what is already in the folder).
  *      The engine today only keeps both (a taken name gets "(2)"); Skip is "do not tick the file" in Q08;
- *      Replace is NOT supported by the engine, so Q10 takes `allowReplace` and the bridge passes false
- *      until it is.
+ *      Replace does not exist: the safety gate never overwrites, so Q10 offers only Keep both and Skip.
  *  - quicksend_send { offer } -> Receipt   Q11 Start (send(ch, offer)). The sender's approval and the
  *      receiver's approval are separate; changing the selection clears the receiver's.
  *  - quicksend_progress event { phase, filesDone, filesTotal, bytesDone, bytesTotal, current, failed }
@@ -93,9 +92,7 @@ export type Conflict = {
   /** When the file already in the folder was last changed (ISO 8601), or null if unknown. */
   existingModified: string | null;
   /** Null until chosen, and again whenever the file in the folder changed since the person looked. */
-  choice: "keep-both" | "skip" | "replace" | null;
-  /** Replace needs its own separate confirmation for this exact file. */
-  replaceConfirmed: boolean;
+  choice: "keep-both" | "skip" | null;
   /** The file in the folder changed (or could not be read) since the person looked. */
   changed?: boolean;
 };

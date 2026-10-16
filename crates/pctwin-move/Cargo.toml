@@ -1,0 +1,23 @@
+[package]
+name = "pctwin-move"
+description = "One move from start to end, after pairing: the files to send, the new laptop's choices and approval, and every file's outcome, for the test lab and the app alike"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-gate = { path = "../pctwin-gate" }
+pctwin-journal = { path = "../pctwin-journal" }
+pctwin-record = { path = "../pctwin-record" }
+pctwin-transfer = { path = "../pctwin-transfer" }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true

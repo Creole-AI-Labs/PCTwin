@@ -48,8 +48,12 @@ export function toProblem(error: unknown): Problem {
 /** A label as words: "Blue Fox" in the chosen language, or the typed name (or "unnamed"). */
 export function labelText(l10n: ReactLocalization, label: Label): string {
   if (label.kind === "picked") {
+    // Some languages make the colour word agree with the animal word ("Renard bleu", "Panthère
+    // noire"). Those files carry a `label-gender-<animal>` message; the colour words read it as $gender.
+    const genderId = `label-gender-${label.animal}`;
+    const gender = l10n.getBundle(genderId) ? l10n.getString(genderId) : "";
     return l10n.getString("label-picked", {
-      colour: l10n.getString(`label-colour-${label.colour}`),
+      colour: l10n.getString(`label-colour-${label.colour}`, { gender }),
       animal: l10n.getString(`label-animal-${label.animal}`),
     });
   }

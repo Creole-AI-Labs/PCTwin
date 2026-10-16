@@ -258,6 +258,11 @@ jobs:
         timeout-minutes: 10
         shell: pwsh
         run: ./scripts/real-drives-windows.ps1 setup
+      # Build first, with no time limit of its own beyond the job's: the slower Mac runners take
+      # about 10 minutes to compile, and the 10-minute limit below is meant to catch a hung test.
+      - name: Build the real-drive tests
+        shell: bash
+        run: cargo test -p pctwin-gate --test real_fat --locked --no-run
       - name: Gate on real drives (before the remount)
         timeout-minutes: 10
         shell: bash

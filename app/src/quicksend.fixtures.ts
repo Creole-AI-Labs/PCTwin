@@ -31,7 +31,6 @@ export const CONFLICTS: Conflict[] = [
     newName: "Budget (2).xlsx",
     existingModified: "2026-10-14T09:30:00Z",
     choice: "keep-both",
-    replaceConfirmed: false,
   },
   {
     path: "Reference photos/beach.jpg",
@@ -40,7 +39,6 @@ export const CONFLICTS: Conflict[] = [
     newName: "beach (2).jpg",
     existingModified: null,
     choice: null,
-    replaceConfirmed: false,
   },
 ];
 
