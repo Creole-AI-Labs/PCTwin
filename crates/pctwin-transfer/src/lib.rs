@@ -32,6 +32,10 @@
 //! - [`FileSections`] splits a big file across lanes: each section runs in order on one lane, and
 //!   a free lane takes the back half of the section with the most left (never below twice
 //!   [`MIN_SECTION_BYTES`]). Done blocks are kept block by block for resume.
+//! - [`MoveMeter`] is what a running move has counted (blocks, bytes, and each file's [`Step`]
+//!   per destination, with the file being checked now), readable from any thread while it runs;
+//!   [`MoveControl`] stops it: no block is sent after a stop, and the run ends with
+//!   [`TransferError::Stopped`].
 //! - [`Progress`] gives one progress figure and one time left for the whole move, from every
 //!   lane's receipts, with the speed smoothed over about the last 20 seconds.
 //! - [`BlockMap`] records which blocks of a file are done, as runs joined when they touch, and is
@@ -48,6 +52,7 @@ mod landing;
 mod lanedriver;
 mod lanes;
 mod message;
+mod meter;
 mod netlanes;
 mod original;
 mod partials;
@@ -71,6 +76,7 @@ pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{
     GiveUpWhy, Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces,
 };
+pub use meter::{MeterReading, MoveControl, MoveMeter, Step, StepCounts};
 pub use netlanes::{LinkLanes, accept_lanes};
 pub use original::{
     Confirmed, MAX_CONFIRMED_AGE, MAX_ORIGINALS_PER_REQUEST, OriginalNow, OriginalsFault,
@@ -157,6 +163,9 @@ pub enum TransferError {
         "the other laptop stopped answering ({0}); check that both laptops are awake and on the same network, then start again"
     )]
     NoAnswer(String),
+    /// The person stopped the move on this laptop ([`MoveControl::stop`]).
+    #[error("the move was stopped on this laptop")]
+    Stopped,
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the

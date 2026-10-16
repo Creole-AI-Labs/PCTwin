@@ -13,7 +13,8 @@ use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, Journal, Permission, PlannedWrite, State};
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
-    Channel, ChannelError, ReceiverSession, SendJob, SenderSession, Tier, block_size_for, recover,
+    Channel, ChannelError, MoveMeter, ReceiverSession, SendJob, SenderSession, StepCounts, Tier,
+    block_size_for, recover,
 };
 use tokio::sync::mpsc;
 
@@ -856,4 +857,59 @@ async fn with_a_marker_floor_a_file_continued_after_a_restart_still_lands_marked
     let landed = w.mine.path().join("Videos/big.bin");
     assert_eq!(std::fs::read(&landed).unwrap(), w.data);
     assert_eq!(download_mark_of(&landed), Some(DownloadMark::Internet));
+}
+
+#[tokio::test]
+async fn after_a_restart_the_meter_counts_the_picked_up_file_as_copying_until_it_lands_once() {
+    let w = world();
+    let mut receiver = w.receiver();
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    let (mut a, mut b) = mem_pair_cut_after_received(300);
+    let written = receiver.meter();
+    let _ = common::unless_stuck(&written, SIZE as u64, async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await;
+    std::mem::forget(receiver);
+    drop(sender);
+    recover(&w.journal, &w.table).unwrap();
+    // The new laptop's app starts again: its meter starts from the plan, the file waiting.
+    let meter = MoveMeter::new();
+    let mut receiver = w.receiver().with_meter(meter.clone());
+    assert_eq!(receiver.restore().unwrap(), 1);
+    assert_eq!(meter.reading().files.waiting, 1);
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    let (mut a, mut b) = mem_pair(None);
+    let written = receiver.meter();
+    let mut seen = Vec::new();
+    let watch = async {
+        loop {
+            let r = meter.reading();
+            let done = r.files.copied == 1;
+            seen.push(r.files);
+            if done {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    };
+    let ((sent, received), ()) = common::unless_stuck(&written, SIZE as u64, async {
+        tokio::join!(
+            async { tokio::join!(sender.run(&mut a), receiver.run(&mut b)) },
+            watch
+        )
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    assert!(receiver.continued() >= 1);
+    // Picked up where it was: copying while the rest came, then copied, counted once.
+    assert!(seen.iter().any(|c| c.copying == 1), "{seen:?}");
+    let mut copied = StepCounts {
+        total: 1,
+        ..StepCounts::default()
+    };
+    copied.copied = 1;
+    assert_eq!(meter.reading().files, copied);
+    assert_eq!(meter.reading().bytes_checked, SIZE as u64);
 }
