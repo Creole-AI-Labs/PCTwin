@@ -3,9 +3,9 @@
 //! file never replaces anything" and "Drives with no safe rename", decided 15 October 2026).
 //!
 //! The test, in a folder of the drive:
-//! 1. Probe files a crash left behind (`.pctwin-probe-<random>-a`, `-b`, `-c`) are removed, but
-//!    only those holding the probe's own bytes and older than [`LEFTOVER_AGE`] (a test running
-//!    now, from another handle on the drive, is never disturbed); anything else stays.
+//! 1. Probe files a crash left behind (of every test: see the probes module) are removed, but
+//!    only those holding a probe's own bytes and older than a test takes (a test running now,
+//!    from another handle on the drive, is never disturbed); anything else stays.
 //! 2. Two probe files `a` and `b` are made, each only if nothing has its name; making `a` again
 //!    must then be refused (exclusive create works).
 //! 3. A hard link from `a` to a new name `c`, and from `a` onto `b`, which must be refused.
@@ -25,9 +25,9 @@
 //! at all ([`Naming::NoSafeMethod`]) and is refused when it is chosen. Each error number is read
 //! only against this result: an "invalid" from a drive whose test passed is the name itself.
 
-use std::hash::{BuildHasher, RandomState};
 use std::io::{self, Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::probes::{self, Probe};
 
 use cap_std::fs::{Dir, OpenOptions};
 
@@ -151,72 +151,6 @@ pub(crate) fn for_system(
     }
 }
 
-/// What the first and second probe files hold.
-pub(crate) const PROBE_A: &[u8] = b"PCTwin drive test: file a. Safe to delete.\n";
-pub(crate) const PROBE_B: &[u8] = b"PCTwin drive test: file b. Safe to delete.\n";
-const PROBE_PREFIX: &str = ".pctwin-probe-";
-/// Longest random part of a probe name accepted when clearing leftovers.
-const MAX_PROBE_TAG: usize = 32;
-
-static PROBES: AtomicU64 = AtomicU64::new(0);
-
-/// Whether `name` is one of the probe's names (`.pctwin-probe-<tag>-a`, `-b` or `-c`).
-fn is_probe_name(name: &str) -> bool {
-    name.strip_prefix(PROBE_PREFIX)
-        .and_then(|rest| {
-            rest.strip_suffix("-a")
-                .or_else(|| rest.strip_suffix("-b"))
-                .or_else(|| rest.strip_suffix("-c"))
-                // The time-step test's file (the drive module).
-                .or_else(|| rest.strip_suffix("-t"))
-        })
-        .is_some_and(|tag| {
-            !tag.is_empty()
-                && tag.len() <= MAX_PROBE_TAG
-                && tag.chars().all(|c| c.is_ascii_alphanumeric())
-        })
-}
-
-/// How old a probe file must be before it is taken as left by a crash: a test takes moments.
-pub(crate) const LEFTOVER_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-
-/// Removes the probe file `name` in `dir` if it is a regular file holding exactly the probe's
-/// own bytes (and, for a leftover, older than [`LEFTOVER_AGE`]); anything else is left. Never
-/// follows a link.
-fn remove_if_probe(dir: &Dir, name: &str, leftover: bool) -> io::Result<()> {
-    let meta = match dir.symlink_metadata(name) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    if leftover {
-        let modified = meta.modified()?.into_std();
-        let old = std::time::SystemTime::now()
-            .duration_since(modified)
-            .is_ok_and(|age| age >= LEFTOVER_AGE);
-        if !old {
-            return Ok(());
-        }
-    }
-    let longest = PROBE_A
-        .len()
-        .max(PROBE_B.len())
-        .max(crate::drive::TIME_PROBE.len()) as u64;
-    if !meta.is_file() || meta.len() > longest {
-        return Ok(());
-    }
-    let mut bytes = Vec::new();
-    dir.open(name)?.take(longest + 1).read_to_end(&mut bytes)?;
-    if bytes != PROBE_A && bytes != PROBE_B && bytes != crate::drive::TIME_PROBE {
-        return Ok(());
-    }
-    match dir.remove_file(name) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    }
-}
-
 /// Makes `name` in `dir` holding `bytes`, only if nothing has the name.
 fn make(dir: &Dir, name: &str, bytes: &[u8]) -> io::Result<()> {
     let mut options = OpenOptions::new();
@@ -233,20 +167,14 @@ pub(crate) fn probe(
     folder_path: FolderPath<'_>,
     move_no_replace: fn(&Dir, &str, &str, FolderPath<'_>) -> Moved,
 ) -> io::Result<DriveCheck> {
-    for entry in dir.entries()? {
-        let name = entry?.file_name();
-        if let Some(name) = name.to_str().filter(|n| is_probe_name(n)) {
-            remove_if_probe(dir, name, true)?;
-        }
-    }
-    let n = PROBES.fetch_add(1, Ordering::Relaxed);
-    let tag = RandomState::new().hash_one((std::process::id(), n));
-    let [a, b, c] = ["a", "b", "c"].map(|s| format!("{PROBE_PREFIX}{tag:016x}-{s}"));
+    probes::sweep(dir)?;
+    let tag = probes::new_tag();
+    let [a, b, c] = [Probe::DriveA, Probe::DriveB, Probe::DriveC].map(|p| p.name(tag));
     let result = run(dir, [&a, &b, &c], folder_path, move_no_replace);
     // Every probe file goes, whatever the test found.
     let mut cleared = Ok(());
     for name in [&a, &b, &c] {
-        if let Err(e) = remove_if_probe(dir, name, false) {
+        if let Err(e) = probes::remove_if_probe(dir, name, false) {
             cleared = Err(e);
         }
     }
@@ -261,15 +189,15 @@ fn run(
     folder_path: FolderPath<'_>,
     move_no_replace: fn(&Dir, &str, &str, FolderPath<'_>) -> Moved,
 ) -> io::Result<DriveCheck> {
-    make(dir, a, PROBE_A)?;
-    make(dir, b, PROBE_B)?;
-    let exclusive_create = match make(dir, a, PROBE_B) {
+    make(dir, a, probes::DRIVE_A)?;
+    make(dir, b, probes::DRIVE_B)?;
+    let exclusive_create = match make(dir, a, probes::DRIVE_B) {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => true,
         Err(e) => return Err(e),
         // Made over an existing file: exclusive create is not honoured. Put `a` back as it was.
         Ok(()) => {
             dir.remove_file(a)?;
-            make(dir, a, PROBE_A)?;
+            make(dir, a, probes::DRIVE_A)?;
             false
         }
     };
@@ -300,7 +228,7 @@ fn run(
         link_new,
         link_onto_existing_refused,
         &moved,
-        now == PROBE_B,
+        now == probes::DRIVE_B,
         moved_to_free_name,
         exclusive_create,
     ))
@@ -486,29 +414,6 @@ mod tests {
         }
         // A step that failed for another reason is no answer at all (the test is run again).
         assert!(!classify(false, false, &err(), true, true, true).no_replace_move);
-    }
-
-    #[test]
-    fn probe_names_are_recognised_and_nothing_else() {
-        for yes in [
-            ".pctwin-probe-0a-a",
-            ".pctwin-probe-ff00ff-b",
-            ".pctwin-probe-1-c",
-        ] {
-            assert!(is_probe_name(yes), "{yes}");
-        }
-        for no in [
-            ".pctwin-probe--a",
-            ".pctwin-probe-0a-d",
-            ".pctwin-probe-0a",
-            ".pctwin-probe-0/a-a",
-            ".pctwin-probe-0.-a",
-            "pctwin-probe-0-a",
-            ".pctwin-0-a.part",
-            &format!(".pctwin-probe-{}-a", "0".repeat(33)),
-        ] {
-            assert!(!is_probe_name(no), "{no}");
-        }
     }
 }
 

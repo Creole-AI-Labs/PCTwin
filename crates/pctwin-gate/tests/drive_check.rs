@@ -60,6 +60,15 @@ fn only_probe_files_holding_the_probe_s_own_bytes_are_cleared_away() {
     .unwrap();
     std::fs::write(root.path().join(".pctwin-probe-99-a"), [a, b"x"].concat()).unwrap();
     std::fs::create_dir(root.path().join(".pctwin-probe-5-a")).unwrap();
+    // The other tests' probe files, in the same one list: the time test's two and the read-back
+    // test's.
+    let time = pctwin_gate::time_probe_contents();
+    let read_back = pctwin_gate::read_back_probe_contents();
+    std::fs::write(root.path().join(".pctwin-probe-0123abcd-t"), time).unwrap();
+    std::fs::write(root.path().join(".pctwin-probe-0123abcd-u"), time).unwrap();
+    std::fs::write(root.path().join(".pctwin-probe-0123abcd-r"), &read_back).unwrap();
+    // A time probe's name holding a drive probe's bytes is not a time probe.
+    std::fs::write(root.path().join(".pctwin-probe-66-u"), a).unwrap();
     // A probe file of a test running now (another handle on the drive): never disturbed.
     std::fs::write(root.path().join(".pctwin-probe-77-a"), a).unwrap();
     // Left by a crash: older than any test takes.
@@ -70,6 +79,10 @@ fn only_probe_files_holding_the_probe_s_own_bytes_are_cleared_away() {
         ".pctwin-probe-77-b",
         ".pctwin-probe-0123abcd-c",
         ".pctwin-probe-99-a",
+        ".pctwin-probe-0123abcd-t",
+        ".pctwin-probe-0123abcd-u",
+        ".pctwin-probe-0123abcd-r",
+        ".pctwin-probe-66-u",
     ] {
         std::fs::File::options()
             .write(true)
@@ -84,10 +97,88 @@ fn only_probe_files_holding_the_probe_s_own_bytes_are_cleared_away() {
         [
             ".pctwin-probe-0123abcd-c",
             ".pctwin-probe-5-a",
+            ".pctwin-probe-66-u",
             ".pctwin-probe-77-a",
             ".pctwin-probe-99-a"
         ]
     );
+}
+
+/// The time test (asked when a drive's type cannot be read) clears the same leftovers in its own
+/// folder, which the drive test may never visit, by the same rules: only probe files holding a
+/// probe's own bytes, only when older than any test takes, never a folder or someone's file.
+#[test]
+fn the_time_test_clears_leftover_probe_files_by_the_same_rules() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let (a, _) = pctwin_gate::probe_contents();
+    let time = pctwin_gate::time_probe_contents();
+    let read_back = pctwin_gate::read_back_probe_contents();
+    std::fs::write(root.path().join(".pctwin-probe-1a-t"), time).unwrap();
+    std::fs::write(root.path().join(".pctwin-probe-1a-u"), time).unwrap();
+    std::fs::write(root.path().join(".pctwin-probe-1a-a"), a).unwrap();
+    std::fs::write(root.path().join(".pctwin-probe-1a-r"), &read_back).unwrap();
+    std::fs::write(root.path().join(".pctwin-probe-2b-u"), b"theirs").unwrap();
+    std::fs::create_dir(root.path().join(".pctwin-probe-3c-t")).unwrap();
+    // Young: a time test running now.
+    std::fs::write(root.path().join(".pctwin-probe-4d-u"), time).unwrap();
+    let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    for leftover in [
+        ".pctwin-probe-1a-t",
+        ".pctwin-probe-1a-u",
+        ".pctwin-probe-1a-a",
+        ".pctwin-probe-1a-r",
+        ".pctwin-probe-2b-u",
+    ] {
+        std::fs::File::options()
+            .write(true)
+            .open(root.path().join(leftover))
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+    }
+    assert_eq!(dest.time_test_kind(), None);
+    assert_eq!(
+        names(root.path()),
+        [
+            ".pctwin-probe-2b-u",
+            ".pctwin-probe-3c-t",
+            ".pctwin-probe-4d-u"
+        ]
+    );
+}
+
+/// Another program that writes into the time test's probe files while it runs (a sync tool, a
+/// virus scanner repairing a file) makes them its own: the time test never removes such a file,
+/// since it removes only a regular file holding exactly the probe's own bytes, and never one
+/// put in the probe's place, nor a folder.
+#[test]
+fn a_time_probe_another_program_wrote_into_is_never_removed() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let dir = root.path().to_path_buf();
+    let mut seen = Vec::new();
+    // Just before each probe is removed: the first is written into, the second replaced by a
+    // folder.
+    let kind = dest.time_test_kind_with(|name| {
+        let path = dir.join(name);
+        if seen.is_empty() {
+            std::fs::write(&path, b"their own now").unwrap();
+        } else {
+            std::fs::remove_file(&path).unwrap();
+            std::fs::create_dir(&path).unwrap();
+        }
+        seen.push(name.to_string());
+    });
+    assert_eq!(kind, None);
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert_eq!(std::fs::read(dir.join(&seen[0])).unwrap(), b"their own now");
+    assert!(dir.join(&seen[1]).is_dir());
+    assert_eq!(names(&dir), {
+        let mut both = seen.clone();
+        both.sort();
+        both
+    });
 }
 
 fn sealed_file<'d>(dest: &'d Destination, path: &str, bytes: &[u8]) -> pctwin_gate::Sealed<'d> {
@@ -162,4 +253,36 @@ fn a_drive_without_hard_links_names_by_a_move_that_never_replaces() {
         b"ours"
     );
     assert_eq!(names(root.path()), ["a (2).txt", "a.txt"]);
+}
+
+/// A link put in place of a time probe is never removed, even one pointing at a file that holds
+/// the probe's bytes: only a regular file at the name itself is PCTwin's probe.
+#[cfg(unix)]
+#[test]
+fn a_link_put_in_place_of_a_time_probe_is_never_removed() {
+    let root = tempfile::tempdir().unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let dir = root.path().to_path_buf();
+    std::fs::write(dir.join("t"), pctwin_gate::time_probe_contents()).unwrap();
+    let mut linked = Vec::new();
+    dest.time_test_kind_with(|name| {
+        let path = dir.join(name);
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink("t", &path).unwrap();
+        linked.push(name.to_string());
+    });
+    assert_eq!(linked.len(), 2);
+    for name in &linked {
+        assert!(
+            std::fs::symlink_metadata(dir.join(name))
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "{name}: the link was removed"
+        );
+    }
+    assert_eq!(
+        std::fs::read(dir.join("t")).unwrap(),
+        pctwin_gate::time_probe_contents()
+    );
 }
