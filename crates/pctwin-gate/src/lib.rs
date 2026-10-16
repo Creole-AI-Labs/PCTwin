@@ -446,10 +446,10 @@ pub struct Destination {
     forced: bool,
     /// Each drive under it, by its number, judged once: a drive mounted inside the approved
     /// folder gets its own rules and limits, not the folder's.
-    profiles: Mutex<HashMap<u64, DriveProfile>>,
+    profiles: Mutex<HashMap<drive::VolumeKey, DriveProfile>>,
     /// Whether files can be read back past the cache, tested once per drive (by its number):
     /// an approved folder can hold another drive mounted inside it.
-    read_back: Mutex<HashMap<u64, CheckedFrom>>,
+    read_back: Mutex<HashMap<drive::VolumeKey, CheckedFrom>>,
     /// For tests: the faults this place fakes.
     #[cfg(feature = "fault-plan")]
     faults: Faults,
@@ -595,6 +595,13 @@ impl Destination {
         self.profile
     }
 
+    /// For tests: asks the drive under this place how it keeps time now, as a drive whose type
+    /// cannot be read is asked (`Some(Fat)` only for FAT's date-alone last-access time).
+    #[doc(hidden)]
+    pub fn time_test_kind(&self) -> Option<DriveKind> {
+        drive::kind_by_time_step(&self.root)
+    }
+
     /// The largest single file this place's drive holds, if it has a limit (FAT32: 4 GB less
     /// one byte), so the plan can refuse a file that is too big before the move starts.
     pub fn largest_file(&self) -> Option<u64> {
@@ -690,17 +697,12 @@ impl Destination {
     /// removed. Where they cannot, every file is still read back and checked, through the cache,
     /// and its result says so.
     pub fn read_back_check(&self) -> CheckedFrom {
-        let volume = self
-            .root
-            .try_clone()
-            .ok()
-            .and_then(|d| identity(&d.into_std_file()).ok())
-            .map(|(id, _)| id.volume);
-        self.read_back_mode(volume, &self.root)
+        self.read_back_mode(&self.root)
     }
 
-    /// The tested answer for the drive numbered `volume` (tested in `dir` if not yet known).
-    fn read_back_mode(&self, volume: Option<u64>, dir: &Dir) -> CheckedFrom {
+    /// The tested answer for the drive the folder `dir` is on (tested there if not yet known).
+    fn read_back_mode(&self, dir: &Dir) -> CheckedFrom {
+        let volume = drive::volume_key(dir).ok();
         let known = |v| {
             self.read_back
                 .lock()
@@ -723,7 +725,7 @@ impl Destination {
         found
     }
 
-    fn read_back_known(&self) -> HashMap<u64, CheckedFrom> {
+    fn read_back_known(&self) -> HashMap<drive::VolumeKey, CheckedFrom> {
         self.read_back
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -740,7 +742,7 @@ impl Destination {
         pages_kept_out: bool,
     ) -> io::Result<ReadBack> {
         let id = identity(held).ok().map(|(id, _)| id);
-        let mut from = self.read_back_mode(id.map(|i| i.volume), dir);
+        let mut from = self.read_back_mode(dir);
         if !pages_kept_out && from == CheckedFrom::Drive {
             // macOS: the file's pages may still be cached, and a read past the cache takes them.
             from = CheckedFrom::Memory(WhyMemory::CannotSkipCache);
