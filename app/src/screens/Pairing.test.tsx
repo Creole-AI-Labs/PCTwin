@@ -140,8 +140,10 @@ describe("old laptop", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText(text("pair-old-rename-label"))).toBeNull();
     });
-    // Closing the field returns focus to the button that opened it.
-    expect(document.activeElement).toBe(button("pair-old-rename"));
+    // Closing the field returns focus to the button that opened it (moved once the field has gone).
+    await waitFor(() => {
+      expect(document.activeElement).toBe(button("pair-old-rename"));
+    });
 
     fireEvent.click(button("pair-old-rename"));
     fireEvent.click(button("pair-old-rename-cancel"));
