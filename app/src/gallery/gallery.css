@@ -54,3 +54,27 @@
 .gallery .kit-field + .kit-field {
   margin-top: var(--space-4);
 }
+
+/* The screens page: the controls, then one screen in its window frame. */
+.screens-page {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.screens-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: var(--type-supporting);
+}
+
+.screens-frame {
+  min-height: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-window);
+  background: var(--colour-canvas);
+}

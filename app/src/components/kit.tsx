@@ -296,14 +296,14 @@ export function Row({ icon, title, detail, end }: { icon?: ReactNode; title: Rea
 /* ---------- Result chips and badges ---------- */
 
 /** Every item ends with one of these (the honest-results rule). */
-export type Result = "copied" | "reinstalled" | "converted" | "needs-action" | "skipped" | "failed";
+export type Result = "copied" | "reinstalled" | "converted" | "needs-action" | "skipped-by-user" | "failed";
 
 const TONE: Record<Result, "good" | "warn" | "neutral" | "bad"> = {
   copied: "good",
   reinstalled: "good",
   converted: "good",
   "needs-action": "warn",
-  skipped: "neutral",
+  "skipped-by-user": "neutral",
   failed: "bad",
 };
 
@@ -333,13 +333,16 @@ export function Badge({ tone = "neutral", icon, children }: { tone?: "neutral" |
 
 /* ---------- Progress ---------- */
 
-/** Measured progress only: the value comes from work actually done, never an animation. */
-export function ProgressBar({ value, label, left, right }: { value: number; label: string; left?: ReactNode; right?: ReactNode }) {
-  const pct = Math.max(0, Math.min(100, Math.round(value * 100)));
+/**
+ * Measured progress only: the value comes from work actually done, never an animation. With no
+ * value (`null`: nothing measured yet) the bar stays empty and still, and says no number.
+ */
+export function ProgressBar({ value, label, left, right }: { value: number | null; label: string; left?: ReactNode; right?: ReactNode }) {
+  const pct = value === null ? null : Math.max(0, Math.min(100, Math.round(value * 100)));
   return (
     <>
-      <div className="kit-progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
-        <span className="kit-progress-fill" style={{ inlineSize: `${pct.toString()}%` }} />
+      <div className="kit-progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
+        {pct !== null && <span className="kit-progress-fill" style={{ inlineSize: `${pct.toString()}%` }} />}
       </div>
       {(left ?? right) && (
         <p className="kit-progress-meta">
@@ -361,8 +364,28 @@ export function ProgressValue({ value }: { value: number }) {
   );
 }
 
-/** The 360 × 240 mini panel (F09): what is moving, measured progress, pause and reopen. */
+/** A row of big numbers with a line under each (the mockups' metric cards). */
+export function Metrics({ items }: { items: readonly { value: ReactNode; label: ReactNode }[] }) {
+  return (
+    <dl className="kit-metrics">
+      {items.map((m, i) => (
+        <div key={i} className="kit-metric">
+          <dd>{m.value}</dd>
+          <dt>{m.label}</dt>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/**
+ * The 360 × 240 mini panel (F09): a title, the measured percent with what is moving, the bar, and
+ * pause and reopen. `kind` says whether it shows a move or a Quick Send (it names the panel for
+ * assistive technology and for styling); the words come from the caller. `value` is `null` until
+ * something is measured, and then no percent is shown.
+ */
 export function MiniProgress({
+  kind = "move",
   title,
   value,
   label,
@@ -371,21 +394,27 @@ export function MiniProgress({
   pause,
   open,
 }: {
+  kind?: "move" | "send";
   title: ReactNode;
-  value: number;
+  value: number | null;
   label: string;
   left?: ReactNode;
   right?: ReactNode;
   pause: ReactNode;
-  open: ReactNode;
+  /** An extra action at the end of the row; the app puts it in the footer instead. */
+  open?: ReactNode;
 }) {
+  const headingId = useId();
   return (
-    <div className="kit-mini">
-      <div className="kit-mini-heading">
-        <h3>{title}</h3>
-        <strong aria-hidden="true">{Math.round(value * 100)}%</strong>
-      </div>
-      <ProgressBar value={value} label={label} left={left} right={right} />
+    <div className="kit-mini" role="group" aria-labelledby={headingId} data-kind={kind}>
+      <h3 id={headingId} className="kit-mini-title">
+        {title}
+      </h3>
+      <p className="kit-mini-line">
+        {value !== null && <strong aria-hidden="true">{Math.round(value * 100)}%</strong>}
+        {left && <span>{left}</span>}
+      </p>
+      <ProgressBar value={value} label={label} right={right} />
       <div className="kit-mini-actions">
         {pause}
         {open}
@@ -412,7 +441,25 @@ export function Banner({ tone = "info", title, children }: { tone?: "info" | "re
  * A modal dialog: the native element keeps focus inside it and closes on Escape; focus returns to
  * where it was. The title names it for screen readers.
  */
-export function Dialog({ open, title, onClose, children, actions }: { open: boolean; title: ReactNode; onClose: () => void; children: ReactNode; actions?: ReactNode }) {
+export function Dialog({
+  open,
+  title,
+  onClose,
+  children,
+  actions,
+  closeLabel,
+  initialFocus = "first",
+}: {
+  open: boolean;
+  title: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  actions?: ReactNode;
+  /** The dismiss button's words; "Close" unless the caller says better ("Keep moving"). */
+  closeLabel?: ReactNode;
+  /** Where focus starts: the first button, or the dismiss button when the other choice is a risky one. */
+  initialFocus?: "first" | "close";
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
   const { l10n } = useLocalization();
@@ -423,7 +470,7 @@ export function Dialog({ open, title, onClose, children, actions }: { open: bool
     if (open && !el.open) {
       if (typeof el.showModal === "function") el.showModal();
       else el.setAttribute("open", "");
-      el.querySelector<HTMLElement>("[data-autofocus], button")?.focus();
+      el.querySelector<HTMLElement>(initialFocus === "close" ? "[data-close]" : "[data-autofocus], button")?.focus();
     }
     if (!open && el.open) {
       if (typeof el.close === "function") el.close();
@@ -432,7 +479,7 @@ export function Dialog({ open, title, onClose, children, actions }: { open: bool
     return () => {
       before?.focus();
     };
-  }, [open]);
+  }, [open, initialFocus]);
   return (
     <dialog
       ref={ref}
@@ -457,7 +504,7 @@ export function Dialog({ open, title, onClose, children, actions }: { open: bool
           <div className="kit-dialog-body">{children}</div>
           <div className="kit-dialog-actions">
             {actions}
-            <Button onClick={onClose}>{l10n.getString("dialog-close")}</Button>
+            <Button data-close="" onClick={onClose}>{closeLabel ?? l10n.getString("dialog-close")}</Button>
           </div>
         </>
       )}

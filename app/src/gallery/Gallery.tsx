@@ -29,7 +29,7 @@ import {
 import { ArrowForward, Laptop, Lock } from "../icons";
 import "./gallery.css";
 
-const RESULTS: Result[] = ["copied", "reinstalled", "converted", "needs-action", "skipped", "failed"];
+const RESULTS: Result[] = ["copied", "reinstalled", "converted", "needs-action", "skipped-by-user", "failed"];
 
 export default function Gallery() {
   const [code, setCode] = useState("");

@@ -1,19 +1,21 @@
 import { LocalizationProvider, Localized } from "@fluent/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
-import { HELP_URL, openExternal } from "./external";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
-import { Lock } from "./icons";
 import { setTrayLabels } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
+import ConnectionRoute from "./screens/ConnectionRoute";
+import { FooterProvider } from "./screens/FrameFooter";
 import PairNew from "./screens/PairNew";
 import PairOld from "./screens/PairOld";
+import PutTogether from "./screens/PutTogether";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
 
-type Screen = { id: "welcome" } | { id: "role" } | { id: "pair"; role: Role } | { id: "soon"; which: Soon };
+/** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), then pairing (C03 to C05). */
+type Screen = { id: "welcome" } | { id: "role" } | { id: "connect"; role: Role } | { id: "together"; role: Role } | { id: "pair"; role: Role } | { id: "soon"; which: Soon };
 
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
@@ -44,58 +46,49 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   return (
     <LocalizationProvider l10n={l10n}>
       <div className="app">
-        <header className="app-header">
-          <Localized id="brand-home" attrs={{ "aria-label": true }}>
-            <button
-              type="button"
-              className="brand"
-              aria-label="PCTwin home"
-              onClick={() => {
-                if (screen.id === "pair") void stopPairing().catch(() => undefined);
-                setScreen({ id: "welcome" });
-              }}
-            >
-              <span className="brand-mark">
-                <img src={lockup} alt="" />
-              </span>
-              <Localized id="app-name">
-                <span>PCTwin</span>
+        <FooterProvider>
+          <header className="app-header">
+            <Localized id="brand-home" attrs={{ "aria-label": true }}>
+              <button
+                type="button"
+                className="brand"
+                aria-label="PCTwin home"
+                onClick={() => {
+                  if (screen.id === "pair") void stopPairing().catch(() => undefined);
+                  setScreen({ id: "welcome" });
+                }}
+              >
+                <span className="brand-mark">
+                  <img src={lockup} alt="" />
+                </span>
+                <Localized id="app-name">
+                  <span>PCTwin</span>
+                </Localized>
+              </button>
+            </Localized>
+            <label className="language">
+              <Localized id="language-label">
+                <span className="visually-hidden">Language</span>
               </Localized>
-            </button>
-          </Localized>
-          <label className="language">
-            <Localized id="language-label">
-              <span className="visually-hidden">Language</span>
-            </Localized>
-            <select value={language} onChange={(e) => { choose(e.target.value as LanguageCode); }}>
-              {LANGUAGES.map((l) => (
-                <option key={l.code} value={l.code} lang={l.code}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </header>
-        <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
-          {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} onSoon={(which) => { setScreen({ id: "soon", which }); }} />}
-          {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
-          {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "pair", role }); }} />}
-          {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "role" }); }} />}
-          {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "role" }); }} />}
-        </main>
-        <footer className="app-footer">
-          <span className="free">
-            <Lock />
-            <Localized id="footer-free">
-              <span>Free personal moves. No account needed.</span>
-            </Localized>
-          </span>
-          <button type="button" className="link" onClick={() => void openExternal(HELP_URL)}>
-            <Localized id="footer-help">
-              <span>Help</span>
-            </Localized>
-          </button>
-        </footer>
+              <select value={language} onChange={(e) => { choose(e.target.value as LanguageCode); }}>
+                {LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code} lang={l.code}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </header>
+          <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
+            {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} onSoon={(which) => { setScreen({ id: "soon", which }); }} />}
+            {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
+            {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
+            {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}
+            {screen.id === "together" && <PutTogether onBack={() => { setScreen({ id: "connect", role: screen.role }); }} onContinue={() => { setScreen({ id: "pair", role: screen.role }); }} />}
+            {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} />}
+            {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} />}
+          </main>
+        </FooterProvider>
       </div>
     </LocalizationProvider>
   );
