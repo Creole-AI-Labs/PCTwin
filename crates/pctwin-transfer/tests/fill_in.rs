@@ -7,7 +7,6 @@
 // Tests make and remove files to test on; the no-file-changes fence is for the shipped code.
 #![allow(clippy::disallowed_methods)]
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use pctwin_gate::{Approved, Destination, Destinations, DriveKind, DriveProfile, Naming};
@@ -660,6 +659,7 @@ fn a_copy_not_yet_shown_is_never_undone() {
 #[cfg(windows)]
 #[test]
 fn a_hidden_file_that_is_not_pctwin_s_is_never_shown_and_is_reported() {
+    use std::io::Write;
     use std::os::windows::fs::OpenOptionsExt;
     let (_work, usb, journal) = stopped_at("journal:committed");
     let id = journal.entries().unwrap()[0].id;
