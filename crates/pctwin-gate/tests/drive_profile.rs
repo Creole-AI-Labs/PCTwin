@@ -223,13 +223,32 @@ fn a_file_too_big_for_a_fat_drive_is_refused_before_anything_is_made() {
     drop(exfat.create_file(&path, FAT_LARGEST_FILE + 1).unwrap());
 }
 
+/// Whether the folder `dir` really tells `a` and `A` apart (ext4 does; APFS, NTFS and FAT do
+/// not, whatever profile a test gives them).
+fn tells_case_apart(dir: &std::path::Path) -> bool {
+    std::fs::write(dir.join("case-probe"), b"").unwrap();
+    let apart = !dir.join("CASE-PROBE").exists();
+    std::fs::remove_file(dir.join("case-probe")).unwrap();
+    apart
+}
+
 /// On a drive that tells capital letters apart, a numbered clash of `A.jpg` starts at 2, not
 /// after the numbers `a.jpg` used; on one that does not, both spellings share one count, since
-/// they are one name there.
-#[cfg(unix)]
+/// they are one name there. A profile only changes how PCTwin counts, never what the drive does,
+/// so each case runs where the real folder behaves that way.
 #[test]
 fn clash_numbers_follow_the_drive_s_case_rule() {
     let root = tempfile::tempdir().unwrap();
+    if !tells_case_apart(root.path()) {
+        // The folder itself makes `A.jpg` the same name as `a.jpg`: one shared count.
+        let dest = Destination::open(root.path())
+            .unwrap()
+            .with_profile(DriveProfile::of(DriveKind::Apfs));
+        assert_eq!(write(&dest, "a.jpg", b"1").unwrap(), "a.jpg");
+        assert_eq!(write(&dest, "a.jpg", b"2").unwrap(), "a (2).jpg");
+        assert_eq!(write(&dest, "A.jpg", b"3").unwrap(), "A (3).jpg");
+        return;
+    }
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Ext4));

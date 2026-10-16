@@ -442,6 +442,11 @@ pub struct Destination {
     name_checks: std::sync::atomic::AtomicU64,
     /// The drive it is on, read when it was opened: its name rules and limits.
     profile: DriveProfile,
+    /// A profile a test forced on it, for every drive under it.
+    forced: bool,
+    /// Each drive under it, by its number, judged once: a drive mounted inside the approved
+    /// folder gets its own rules and limits, not the folder's.
+    profiles: Mutex<HashMap<u64, DriveProfile>>,
     /// Whether files can be read back past the cache, tested once per drive (by its number):
     /// an approved folder can hold another drive mounted inside it.
     read_back: Mutex<HashMap<u64, CheckedFrom>>,
@@ -543,7 +548,46 @@ impl Destination {
     #[must_use]
     pub fn with_profile(mut self, profile: DriveProfile) -> Self {
         self.profile = profile;
+        self.forced = true;
         self
+    }
+
+    /// The profile of the drive the folder `dir` (under this place) is on, judged once per
+    /// drive. A drive whose number cannot be read takes the approved folder's own.
+    fn profile_of(&self, dir: &Dir) -> DriveProfile {
+        if self.forced {
+            return self.profile;
+        }
+        let Ok(key) = drive::volume_key(dir) else {
+            return self.profile;
+        };
+        *self
+            .profiles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(key)
+            .or_insert_with(|| DriveProfile::read(dir))
+    }
+
+    /// The folders of a path that are already there, opened in turn without following a link
+    /// or making anything: the deepest one reached, and the stored names of all the folders (each
+    /// converted for the drive it is made on; folders not there yet will be made on the deepest
+    /// one's drive).
+    fn walk_folders(&self, folders: &[String]) -> io::Result<(Dir, Vec<String>)> {
+        let mut dir = self.root.try_clone()?;
+        let mut names = Vec::new();
+        let mut there = true;
+        for folder in folders {
+            let name = convert_name(folder, self.profile_of(&dir).name_rules()).name;
+            if there {
+                match dir.symlink_metadata(&name) {
+                    Ok(meta) if meta.is_dir() => dir = dir.open_dir(&name)?,
+                    _ => there = false,
+                }
+            }
+            names.push(name);
+        }
+        Ok((dir, names))
     }
 
     /// What is known about the drive this place is on, read when it was opened.
@@ -566,6 +610,13 @@ impl Destination {
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
             profile: self.profile,
+            forced: self.forced,
+            profiles: Mutex::new(
+                self.profiles
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .clone(),
+            ),
             read_back: Mutex::new(self.read_back_known()),
             #[cfg(feature = "fault-plan")]
             faults: Faults {
@@ -577,22 +628,32 @@ impl Destination {
 
     fn from_dir(root: Dir) -> Self {
         let profile = DriveProfile::read(&root);
+        let mut profiles = HashMap::new();
+        if let Ok(key) = drive::volume_key(&root) {
+            profiles.insert(key, profile);
+        }
         Self {
             root,
             root_path: None,
             clash_hints: Mutex::new(ClashHints::default()),
             name_checks: Default::default(),
             profile,
+            forced: false,
+            profiles: Mutex::new(profiles),
             read_back: Mutex::default(),
             #[cfg(feature = "fault-plan")]
             faults: Faults::default(),
         }
     }
 
-    /// The file name a file sent as `sent` is stored under on this drive, and every change made
-    /// to its folders' and its own names on the way.
-    fn converted(&self, sent: &IncomingPath) -> Result<(String, Vec<NameChange>), GateError> {
-        let rules = self.profile.name_rules();
+    /// The file name a file sent as `sent` is stored under in the folder `dir` (on that folder's
+    /// drive), and every change made to its folders' and its own names on the way.
+    fn converted(
+        &self,
+        sent: &IncomingPath,
+        dir: &Dir,
+    ) -> Result<(String, Vec<NameChange>), GateError> {
+        let rules = self.profile_of(dir).name_rules();
         let mut changes: Vec<NameChange> = Vec::new();
         for part in sent.components() {
             for c in convert_name(part, rules).changes {
@@ -609,9 +670,9 @@ impl Destination {
         Ok((name, changes))
     }
 
-    /// Refuses a file bigger than this place's drive holds, before anything is made.
-    fn check_fits(&self, announced: u64) -> Result<(), GateError> {
-        match self.profile.largest_file() {
+    /// Refuses a file bigger than the drive of `dir` holds, before anything is made.
+    fn check_fits(&self, dir: &Dir, announced: u64) -> Result<(), GateError> {
+        match self.profile_of(dir).largest_file() {
             Some(largest) if announced > largest => Err(GateError::TooBigForDrive { largest }),
             _ => Ok(()),
         }
@@ -809,18 +870,20 @@ impl Destination {
         announced: u64,
         tag: Option<&str>,
     ) -> Result<IncomingFile<'d>, GateError> {
-        self.check_fits(announced)?;
-        let rules = self.profile.name_rules();
         let (file_name, folders) = path
             .components()
             .split_last()
             .ok_or(GateError::Path(PathError::Empty))?;
+        // The drive the file lands on (the deepest folder already there: any folder still to be
+        // made is made on it) decides the largest file, before anything is made.
+        self.check_fits(&self.walk_folders(folders)?.0, announced)?;
         let mut changes = Vec::new();
         let mut shown = Vec::new();
         let mut created = Vec::new();
         let mut dir = self.root.try_clone()?;
         for folder in folders {
-            let converted = convert_name(folder, rules);
+            // Each name follows the rules of the drive it is made on.
+            let converted = convert_name(folder, self.profile_of(&dir).name_rules());
             changes.extend(converted.changes.iter().copied());
             let (opened, made) = open_or_create_folder(&dir, &converted.name)?;
             dir = opened;
@@ -829,7 +892,7 @@ impl Destination {
                 created.push(shown.join("/"));
             }
         }
-        let converted = convert_name(file_name, rules);
+        let converted = convert_name(file_name, self.profile_of(&dir).name_rules());
         changes.extend(converted.changes.iter().copied());
         let (file, temp_name) = match tag {
             Some(tag) => {
@@ -865,15 +928,20 @@ impl Destination {
     }
 
     /// The folder (inside the approved folder, `/` between folders) a file sent as `path` lands
-    /// in, with names converted exactly as for writing. Nothing on disk is looked at.
+    /// in, with names converted exactly as for writing (each for the drive it is made on).
+    /// Nothing is made and no link is followed.
     pub fn folder_of(&self, path: &IncomingPath) -> String {
-        let rules = self.profile.name_rules();
         let parts = path.components();
-        parts[..parts.len().saturating_sub(1)]
-            .iter()
-            .map(|f| convert_name(f, rules).name)
-            .collect::<Vec<_>>()
-            .join("/")
+        let folders = &parts[..parts.len().saturating_sub(1)];
+        match self.walk_folders(folders) {
+            Ok((_, names)) => names.join("/"),
+            // The approved folder cannot be looked at: its own drive's rules, for every name.
+            Err(_) => folders
+                .iter()
+                .map(|f| convert_name(f, self.profile.name_rules()).name)
+                .collect::<Vec<_>>()
+                .join("/"),
+        }
     }
 
     /// The size of the regular file at the stored path `stored`, or `None` if there is none (a
@@ -1079,13 +1147,13 @@ impl Destination {
         if meta.len() > announced {
             return Err(GateError::OutsideFile);
         }
-        self.check_fits(announced)?;
+        self.check_fits(&dir, announced)?;
         let mut options = OpenOptions::new();
         options.read(true).write(true);
         let file = dir.open_with(temp_name, &options)?.into_std();
         let pages_kept_out = read_back::keep_pages_out(&file);
         let file = File::from_std(file);
-        let (name, changes) = self.converted(sent)?;
+        let (name, changes) = self.converted(sent, &dir)?;
         Ok(IncomingFile {
             destination: self,
             dir,
@@ -1125,7 +1193,7 @@ impl Destination {
         {
             return Err(not_temp());
         }
-        let (name, changes) = self.converted(sent)?;
+        let (name, changes) = self.converted(sent, &dir)?;
         let held = dir.open(temp_name)?.into_std();
         if !held.metadata()?.is_file() {
             return Err(not_temp());
@@ -1195,19 +1263,18 @@ impl Destination {
     /// and size. Names are converted exactly as for writing; nothing is created and no link is
     /// followed out of the approved folder.
     pub fn find(&self, path: &IncomingPath) -> Option<(String, u64)> {
-        let rules = self.profile.name_rules();
         let (file_name, folders) = path.components().split_last()?;
         let mut dir = self.root.try_clone().ok()?;
         let mut shown = Vec::new();
         for folder in folders {
-            let name = convert_name(folder, rules).name;
+            let name = convert_name(folder, self.profile_of(&dir).name_rules()).name;
             if !dir.symlink_metadata(&name).ok()?.is_dir() {
                 return None;
             }
             dir = dir.open_dir(&name).ok()?;
             shown.push(name);
         }
-        let name = convert_name(file_name, rules).name;
+        let name = convert_name(file_name, self.profile_of(&dir).name_rules()).name;
         let meta = dir.symlink_metadata(&name).ok()?;
         if !meta.is_file() {
             return None;
@@ -1274,7 +1341,7 @@ impl Destination {
         let key = hints().key(
             folder,
             &format!("{base}{ext}"),
-            self.profile.tells_case_apart(),
+            self.profile_of(dir).tells_case_apart(),
         );
         let start = hints().next.get(&key).copied().unwrap_or(2).max(2);
         for attempt in start..start.saturating_add(MAX_CLASH_ATTEMPTS) {
@@ -2252,7 +2319,7 @@ impl<'d> IncomingFile<'d> {
         let mut mark_not_kept = None;
         if let Some(mark) = self.mark {
             // Before the time: writing Windows' marker can change the file's modified time.
-            let kept = self.destination.profile.tries_markers()
+            let kept = self.destination.profile_of(&self.dir).tries_markers()
                 && marks::put(&self.dir, temp_name, &file, mark)?;
             if !kept {
                 mark_not_kept = Some(mark);

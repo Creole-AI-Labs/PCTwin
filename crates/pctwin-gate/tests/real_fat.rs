@@ -306,3 +306,92 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
         }
     });
 }
+
+/// FAT drives hold files of up to 4 GB less one byte, on every system: a bigger one is refused at
+/// its start, before anything is made. exFAT has no such limit. (Windows cannot read a drive's
+/// type through its handle; the gate asks the drive how it keeps time instead.)
+#[test]
+fn a_fat_drive_refuses_a_file_over_4_gb_at_its_start_on_every_system() {
+    use pctwin_gate::FAT_LARGEST_FILE;
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        let dir = fresh(&drive.path, "pctwin-fat-big");
+        let dest = Destination::open(&dir).unwrap();
+        let fat = !drive.kind.contains("exfat");
+        let expected = fat.then_some(FAT_LARGEST_FILE);
+        assert_eq!(dest.largest_file(), expected, "{}", drive.show());
+        let big = dest.create_file(
+            &IncomingPath::parse("Films/big.mkv").unwrap(),
+            FAT_LARGEST_FILE + 1,
+        );
+        if fat {
+            assert!(
+                matches!(big, Err(GateError::TooBigForDrive { largest }) if largest == FAT_LARGEST_FILE),
+                "{}: {:?}",
+                drive.show(),
+                big.as_ref().err()
+            );
+            assert!(settled_names(&dir).is_empty(), "{}", drive.show());
+            assert!(
+                !dir.join("Films").exists(),
+                "{}: a folder was made",
+                drive.show()
+            );
+        } else {
+            drop(big.unwrap());
+        }
+    });
+}
+
+/// A drive mounted inside an approved folder gets its own name rules, not the folder's: CI mounts
+/// each drive under the runner's own folder (ext4 on Linux, APFS on a Mac), so a destination
+/// there writes `?` as it is beside the drive, and as a lookalike inside it. (On Windows every
+/// drive takes Windows' rules, so there is nothing to tell apart.)
+#[cfg(unix)]
+#[test]
+fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        let mount = drive
+            .path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let parent = drive.path.parent().unwrap();
+        let dest = Destination::open(parent).unwrap();
+        let outside = format!("pctwin-nested-{}/May?.txt", drive.kind);
+        let inside = format!("{mount}/pctwin-fat-nested/May?.txt");
+        let _ = std::fs::remove_dir_all(parent.join(format!("pctwin-nested-{}", drive.kind)));
+        let _ = std::fs::remove_dir_all(drive.path.join("pctwin-fat-nested"));
+        if !refuses(drive) {
+            assert_eq!(
+                write(&dest, &inside, b"in"),
+                format!("{mount}/pctwin-fat-nested/May\u{FF1F}.txt"),
+                "{}",
+                drive.show()
+            );
+        }
+        assert_eq!(
+            dest.folder_of(&IncomingPath::parse(&inside).unwrap()),
+            format!("{mount}/pctwin-fat-nested"),
+        );
+        assert_eq!(write(&dest, &outside, b"out"), outside, "{}", drive.show());
+        // A file too big for the drive inside is refused, though the folder's own drive takes it.
+        let big = dest.create_file(
+            &IncomingPath::parse(&format!("{mount}/big.bin")).unwrap(),
+            pctwin_gate::FAT_LARGEST_FILE + 1,
+        );
+        let fat = !drive.kind.contains("exfat");
+        assert_eq!(
+            matches!(big, Err(GateError::TooBigForDrive { .. })),
+            fat,
+            "{}",
+            drive.show()
+        );
+    });
+}

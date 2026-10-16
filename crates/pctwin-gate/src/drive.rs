@@ -8,9 +8,14 @@
 //! The type is read from the folder handle itself, never from a path: Linux's `fstatfs` magic
 //! number, macOS's `f_fstypename`. Windows has no safe way to read it from a handle with the
 //! crates this workspace already uses (`winapi-util` wraps no volume call, and calling
-//! `GetVolumeInformationByHandleW` directly needs unsafe code, which the workspace forbids), so
-//! there the type is [`DriveKind::Unknown`]: harmless for names, since Windows applies its own
-//! rules on every drive anyway.
+//! `GetVolumeInformationByHandleW` directly needs unsafe code with buffers, which the workspace
+//! forbids). Where the type cannot be read (Windows; a drive served by a program on Linux), the
+//! drive is asked how it keeps time instead, once, on a probe file of PCTwin's own: FAT keeps a
+//! file's modified time in two-second steps, exFAT and NTFS in hundredths or finer. So a FAT drive
+//! is known everywhere, and its 4 GB limit holds on every system.
+//!
+//! Each drive under a destination is judged on its own: a drive mounted inside an approved folder
+//! gets its own rules, not the folder's.
 
 use cap_std::fs::Dir;
 
@@ -18,6 +23,78 @@ use crate::{NameRules, Platform};
 
 /// The largest file a FAT drive (FAT12, FAT16, FAT32) holds: 4 GiB less one byte.
 pub const FAT_LARGEST_FILE: u64 = (1 << 32) - 1;
+
+/// What the time-step test's probe file holds.
+pub(crate) const TIME_PROBE: &[u8] = b"PCTwin drive test: file t. Safe to delete.
+";
+
+/// The modified time the time-step test sets: 3 July 2001, 04:05:07.01 UTC (an odd second and a
+/// hundredth, which only a drive with two-second steps cannot keep).
+const TIME_PROBE_AT: std::time::Duration = std::time::Duration::from_millis(994_133_107_010);
+
+/// Whether a modified time set to `set` and read back as `got` shows FAT's two-second steps: the
+/// read-back is an even whole second, and not what was set.
+pub(crate) fn two_second_steps(set: std::time::SystemTime, got: std::time::SystemTime) -> bool {
+    let Ok(d) = got.duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    got != set && d.subsec_nanos() == 0 && d.as_secs() % 2 == 0
+}
+
+/// Asks the drive under `dir` how it keeps time, on a probe file of PCTwin's own made only if
+/// free and removed at once: `Some(Fat)` for two-second steps, `None` if not (or the test could
+/// not run: a folder PCTwin may not write to, say; nothing is then assumed).
+fn kind_by_time_step(dir: &Dir) -> Option<DriveKind> {
+    use std::hash::{BuildHasher, RandomState};
+    use std::io::Write;
+    let tag = RandomState::new().hash_one(std::process::id());
+    let name = format!(".pctwin-probe-{tag:016x}-t");
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    let set = std::time::UNIX_EPOCH + TIME_PROBE_AT;
+    let kept = (|| {
+        let mut f = dir.open_with(&name, &options).ok()?.into_std();
+        f.write_all(TIME_PROBE).ok()?;
+        f.set_modified(set).ok()?;
+        f.sync_all().ok()?;
+        drop(f);
+        dir.open(&name)
+            .ok()?
+            .into_std()
+            .metadata()
+            .ok()?
+            .modified()
+            .ok()
+    })();
+    let _ = dir.remove_file(&name);
+    kept.filter(|got| two_second_steps(set, *got))
+        .map(|_| DriveKind::Fat)
+}
+
+/// The number of the drive the folder `dir` is on, as long as it stays plugged in.
+pub(crate) fn volume_key(dir: &Dir) -> std::io::Result<u64> {
+    #[cfg(unix)]
+    {
+        #[allow(
+            clippy::useless_conversion,
+            clippy::unnecessary_cast,
+            reason = "the device number's width differs by target"
+        )]
+        Ok(rustix::fs::fstat(dir)?.st_dev as u64)
+    }
+    #[cfg(windows)]
+    {
+        Ok(
+            winapi_util::file::information(dir.try_clone()?.into_std_file())?
+                .volume_serial_number(),
+        )
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = dir;
+        Ok(0)
+    }
+}
 
 /// The kind of file system an approved destination is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,9 +265,14 @@ impl DriveProfile {
     }
 
     /// The profile of the drive the open folder `dir` is on. A drive whose type cannot be read
-    /// is unknown, and gets the strictest rules.
+    /// is asked how it keeps time (FAT is found that way); otherwise it is unknown, and gets the
+    /// strictest rules.
     pub(crate) fn read(dir: &Dir) -> Self {
-        Self::of(read_kind(dir).unwrap_or(DriveKind::Unknown))
+        let kind = match read_kind(dir).unwrap_or(DriveKind::Unknown) {
+            DriveKind::Unknown => kind_by_time_step(dir).unwrap_or(DriveKind::Unknown),
+            kind => kind,
+        };
+        Self::of(kind)
     }
 }
 
@@ -224,4 +306,43 @@ fn read_kind(dir: &Dir) -> std::io::Result<DriveKind> {
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn read_kind(_dir: &Dir) -> std::io::Result<DriveKind> {
     Ok(DriveKind::Unknown)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn two_second_steps_are_told_from_finer_ones() {
+        let set = UNIX_EPOCH + TIME_PROBE_AT;
+        // FAT: rounded to an even whole second, either way.
+        assert!(two_second_steps(
+            set,
+            UNIX_EPOCH + Duration::from_secs(994_133_106)
+        ));
+        assert!(two_second_steps(
+            set,
+            UNIX_EPOCH + Duration::from_secs(994_133_108)
+        ));
+        // exFAT keeps hundredths; NTFS, APFS and ext4 keep it exactly.
+        assert!(!two_second_steps(set, set));
+        assert!(!two_second_steps(
+            set,
+            UNIX_EPOCH + Duration::from_millis(994_133_107_000)
+        ));
+        assert!(!two_second_steps(
+            set,
+            UNIX_EPOCH + Duration::from_millis(994_133_106_500)
+        ));
+    }
+
+    /// The test machine's own drive is not FAT, and the test leaves nothing behind.
+    #[test]
+    fn the_time_step_test_finds_no_fat_here_and_leaves_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        assert_eq!(kind_by_time_step(&dir), None);
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
 }
