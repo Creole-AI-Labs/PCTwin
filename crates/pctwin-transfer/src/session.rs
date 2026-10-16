@@ -901,6 +901,9 @@ impl SenderSession {
                         Some((reader, sections))
                     });
             if let Some((reader, sections)) = picked_up {
+                // Continued on its stream; any later fresh start is a new attempt on a new one,
+                // so nothing of this attempt still on its way can land in it.
+                self.attempted.insert(job);
                 self.read_version(job, reader.header().stamp);
                 self.states[job] = SendState::Open {
                     reader,

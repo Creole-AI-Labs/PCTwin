@@ -4223,3 +4223,256 @@ async fn a_reconnect_with_many_tickets_opens_only_what_may_be_in_flight() {
         reads.most_live()
     );
 }
+
+// ---------------------------------------------------------------- tickets are used once
+
+/// Opens from the disk; the first read of `path` at `offset` (after a seek there) fails as a
+/// drive error, once.
+struct FailOnceAt {
+    path: PathBuf,
+    offset: u64,
+    fired: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct FailOnceSource {
+    inner: Box<dyn Source>,
+    arm: Option<(u64, Arc<std::sync::atomic::AtomicBool>)>,
+    pos: u64,
+}
+
+impl Read for FailOnceSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if let Some((at, fired)) = &self.arm
+            && self.pos == *at
+            && !fired.swap(true, Ordering::SeqCst)
+        {
+            return Err(std::io::Error::other("the drive could not read this area"));
+        }
+        let n = self.inner.read(buf)?;
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl Seek for FailOnceSource {
+    fn seek(&mut self, to: SeekFrom) -> std::io::Result<u64> {
+        self.pos = self.inner.seek(to)?;
+        Ok(self.pos)
+    }
+}
+
+impl Source for FailOnceSource {
+    fn stamp(&mut self) -> std::io::Result<Stamp> {
+        self.inner.stamp()
+    }
+}
+
+impl Opener for FailOnceAt {
+    fn open(&self, path: &Path) -> std::io::Result<Box<dyn Source>> {
+        let inner = FsOpener.open(path)?;
+        let arm = (path == self.path).then(|| (self.offset, self.fired.clone()));
+        Ok(Box::new(FailOnceSource { inner, arm, pos: 0 }))
+    }
+}
+
+fn fail_once_at(path: &Path, offset: u64) -> Arc<FailOnceAt> {
+    Arc::new(FailOnceAt {
+        path: path.to_path_buf(),
+        offset,
+        fired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    })
+}
+
+/// A ticket saying the new laptop has `done` of the file `h` describes.
+fn ticket_with(h: &Header, done: std::ops::Range<u64>) -> ResumeTicket {
+    let mut map = BlockMap::new(h.block_count);
+    for b in done {
+        map.insert(b).unwrap();
+    }
+    ResumeTicket {
+        done: map,
+        block_size: h.block_size,
+        stamp: h.stamp,
+    }
+}
+
+/// Within one connection: a file continued from its ticket, then a read error ends it as changed
+/// and the new laptop drops what it had. Its one more try after everything else is a new attempt,
+/// on a new stream, from the beginning: the ticket was used once and is gone.
+#[tokio::test]
+async fn the_retry_after_a_read_error_never_reuses_the_ticket() {
+    let l = laptops(&[600_000]);
+    let h = header_of(&l, 0);
+    let mut sender =
+        SenderSession::new(jobs(&l), 1).with_opener(fail_once_at(&l.files[0].0, 3 * BLOCK));
+    let ticket = ticket_with(&h, 0..3);
+    let (starts, ok) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[(id(0), ticket.clone())]).await;
+        let mut starts = Vec::new();
+        loop {
+            match hear(new).await {
+                Message::StartFile {
+                    stream,
+                    resumed_done,
+                    ..
+                } => {
+                    starts.push((stream, resumed_done));
+                    answer_start(new, stream, None).await;
+                }
+                Message::Piece {
+                    stream, last: true, ..
+                } => receipt(new, stream, true).await,
+                Message::Piece { .. } => {}
+                // A file ended "changed": the new laptop drops what it had of it.
+                Message::EndFile {
+                    stream, changed, ..
+                } => done(new, stream, !changed).await,
+                Message::AllSent => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        starts
+    })
+    .await;
+    assert!(ok);
+    assert_eq!(starts.len(), 2, "{starts:?}");
+    assert_eq!(starts[0].1, 3, "first continued from the ticket");
+    assert_eq!(starts[1].1, 0, "the retry starts again whole");
+    assert_ne!(starts[1].0, starts[0].0, "the retry has a new stream");
+    assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
+}
+
+/// A skip never answered (lost with the connection) starts again on the next connection whatever
+/// the ticket says, and is compared again for free.
+#[tokio::test]
+async fn an_unanswered_skip_ignores_the_ticket() {
+    let l = laptops(&[600_000]);
+    let h = header_of(&l, 0);
+    let same = *blake3::hash(&l.files[0].1).as_bytes();
+    let reads = Reads::default();
+    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let ((), _) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, Some(same)).await;
+        let m = hear(new).await;
+        assert!(matches!(m, Message::Skip { .. }), "{m:?}");
+        // The connection goes before the skip is answered.
+    })
+    .await;
+    let prints = reads.prints();
+    let ticket = ticket_with(&h, 0..3);
+    let (resumed, ok) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[(id(0), ticket.clone())]).await;
+        let Message::StartFile {
+            stream,
+            resumed_done,
+            ..
+        } = hear(new).await
+        else {
+            panic!("expected a start")
+        };
+        answer_start(new, stream, Some(same)).await;
+        assert_eq!(hear(new).await, Message::Skip { stream });
+        done(new, stream, true).await;
+        assert_eq!(hear(new).await, Message::AllSent);
+        resumed_done
+    })
+    .await;
+    assert!(ok);
+    assert_eq!(resumed, 0, "the ticket of an unanswered skip was used");
+    assert_eq!(reads.prints(), prints, "compared again for free");
+    assert_eq!(reads.blocks(), 0);
+    assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::AlreadyThere));
+}
+
+/// The same retry on lanes: blocks of the attempt that ended are still on their way on a lane
+/// when the file starts again, and they are of the old attempt's stream, never the new one, so
+/// they cannot land in it. (A file of 72 MiB, so a lane takes its back half; the main connection
+/// meets the read error.)
+#[tokio::test]
+async fn blocks_still_on_a_lane_from_an_ended_attempt_cannot_land_in_its_retry() {
+    let old = tempfile::tempdir().unwrap();
+    let src = old.path().join("f0.bin");
+    std::fs::write(&src, vec![0u8; 72 << 20]).unwrap();
+    let h = FileSender::open(&src, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let job = SendJob {
+        item: id(0),
+        source: src.clone(),
+        destination: "me".into(),
+        path: "Documents/f0.bin".into(),
+        compressible: false,
+        tier: Tier::Rest,
+    };
+    let mut sender = SenderSession::new(vec![job], 1).with_opener(fail_once_at(&src, 20 * BLOCK));
+    let ticket = ticket_with(&h, 0..3);
+    let (mut main, new) = mem_pair();
+    let (lane, mut new_lane) = mem_pair();
+    let ended = tokio::sync::Notify::new();
+    let main_side = async {
+        // Owned here, so the connection goes when this side is done.
+        let mut new = new;
+        hello(&mut new, &[(id(0), ticket.clone())]).await;
+        let (first, _) = start_of(&hear(&mut new).await);
+        answer_start(&mut new, first, None).await;
+        loop {
+            match hear(&mut new).await {
+                Message::Piece {
+                    stream, last: true, ..
+                } => receipt(&mut new, stream, true).await,
+                Message::Piece { .. } => {}
+                Message::EndFile {
+                    stream,
+                    changed: true,
+                    ..
+                } => {
+                    done(&mut new, stream, false).await;
+                    // Now the lane goes, its blocks still unanswered.
+                    ended.notify_one();
+                }
+                Message::StartFile {
+                    stream,
+                    resumed_done,
+                    ..
+                } => return (first, stream, resumed_done),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    };
+    let lane_side = async {
+        let mut streams = BTreeSet::new();
+        loop {
+            tokio::select! {
+                got = new_lane.recv() => match got.map(|d| Message::decode(&d)) {
+                    Ok(Ok(Message::Piece { stream, .. })) => {
+                        streams.insert(stream);
+                    }
+                    _ => break,
+                },
+                () = ended.notified() => break,
+            }
+        }
+        drop(new_lane);
+        streams
+    };
+    let ((first, again, resumed_done), on_the_lane, _) =
+        tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::join!(
+                main_side,
+                lane_side,
+                sender.run_lanes(&mut main, vec![lane])
+            )
+        })
+        .await
+        .expect("hung");
+    assert!(
+        !on_the_lane.is_empty(),
+        "the lane carried blocks of the first attempt"
+    );
+    assert_eq!(on_the_lane, BTreeSet::from([first]));
+    assert_eq!(resumed_done, 0, "the retry starts again whole");
+    assert_ne!(again, first, "the retry has a new stream");
+}
