@@ -1,0 +1,25 @@
+[
+  {
+    "from": "drive"
+  },
+  {
+    "from": "memory",
+    "why": "cannot-skip-cache"
+  },
+  {
+    "from": "memory",
+    "why": "not-shown"
+  },
+  {
+    "from": "memory",
+    "why": "no-way"
+  },
+  {
+    "from": "memory",
+    "why": "stored-specially"
+  },
+  {
+    "from": "memory",
+    "why": "too-small"
+  }
+]

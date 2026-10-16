@@ -1,0 +1,81 @@
+/**
+ * The engine's own examples of every shape that crosses the bridge (written by the shell's test,
+ * src-tauri/src/contract.rs, into this folder) must each be read by bridge.ts exactly as sent.
+ * Every .json file here is found and tested, so a new shape cannot be left out: a file with no
+ * parse function fails. Regenerate the files with
+ *   PCTWIN_WRITE_CONTRACT=1 cargo test -p pctwin-app contract
+ */
+import { describe, expect, it } from "vitest";
+import { parseEvidence, parseLabelView, parseNearbyView, parseNewView, parseOldView, parseProblemView } from "../bridge";
+
+const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
+
+/** Each file's parse function, by file name. */
+const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
+  "label-view": parseLabelView,
+  "old-view": parseOldView,
+  "new-view": parseNewView,
+  "problem-view": parseProblemView,
+  "nearby-view": parseNearbyView,
+  evidence: parseEvidence,
+};
+
+const families = Object.entries(FILES).map(([path, examples]) => [path.replace(/^\.\/|\.json$/g, ""), examples] as const);
+
+describe("the engine's examples", () => {
+  it("are all here", () => {
+    expect(families.map(([name]) => name).sort()).toEqual(Object.keys(PARSERS).sort());
+  });
+
+  it.each(families)("%s: every example parses to exactly what was sent", (name, examples) => {
+    const parse = PARSERS[name];
+    expect(parse, `no parse function in bridge.ts for ${name}.json`).toBeDefined();
+    expect(Array.isArray(examples)).toBe(true);
+    const list = examples as unknown[];
+    expect(list.length).toBeGreaterThan(0);
+    for (const example of list) {
+      const parsed = parse?.(example);
+      expect(parsed, JSON.stringify(example)).not.toBeNull();
+      expect(parsed).toEqual(example);
+    }
+  });
+
+  it.each(families)("%s: a broken copy of each example is refused", (name, examples) => {
+    const parse = PARSERS[name] ?? (() => null);
+    for (const example of examples as Record<string, unknown>[]) {
+      // An extra field, a missing field and a field of the wrong type are each refused.
+      expect(parse({ ...example, extra: 1 }), "extra field").toBeNull();
+      for (const key of Object.keys(example)) {
+        const missing = Object.fromEntries(Object.entries(example).filter(([k]) => k !== key));
+        expect(parse(missing), `without ${key}`).toBeNull();
+        expect(parse({ ...example, [key]: { wrong: true } }), `${key} of the wrong type`).toBeNull();
+      }
+    }
+  });
+});
+
+describe("shapes the engine never sends are refused", () => {
+  it.each([
+    ["an unknown kind", parseOldView, { kind: "hacked" }],
+    ["a kind in the wrong case", parseOldView, { kind: "Paired" }],
+    ["a code without its countdown", parseOldView, { kind: "code", code: "123456" }],
+    ["a negative countdown", parseOldView, { kind: "wait", secondsLeft: -1 }],
+    ["a fractional countdown", parseOldView, { kind: "wait", secondsLeft: 1.5 }],
+    ["two numbers to choose from", parseOldView, { kind: "choose", round: 1, numbers: [1, 2] }],
+    ["a number too big for the screen", parseOldView, { kind: "choose", round: 1, numbers: [1, 2, 256] }],
+    ["a label with markup for a key", parseLabelView, { kind: "picked", colour: "<b>blue</b>", animal: "fox" }],
+    ["an unknown new-laptop kind", parseNewView, { kind: "pwned" }],
+    ["a problem without networks", parseProblemView, { key: "pairing-failed" }],
+    ["a problem with a network that is not text", parseProblemView, { key: "pairing-failed", networks: [1] }],
+    ["an empty problem key", parseProblemView, { key: "", networks: [] }],
+    ["a check from somewhere else", parseEvidence, { from: "cloud" }],
+    ["memory without a reason", parseEvidence, { from: "memory" }],
+    ["memory with an unknown reason", parseEvidence, { from: "memory", why: "because" }],
+    ["the drive with a reason", parseEvidence, { from: "drive", why: "no-way" }],
+    ["null", parseOldView, null],
+    ["a string", parseNewView, "paired"],
+    ["an array", parseEvidence, [{ from: "drive" }]],
+  ] as const)("%s", (_name, parse, value) => {
+    expect((parse as (v: unknown) => unknown)(value)).toBeNull();
+  });
+});

@@ -1,0 +1,19 @@
+[
+  {
+    "index": 0,
+    "label": {
+      "animal": "ant",
+      "colour": "blue",
+      "kind": "picked"
+    },
+    "sameLabelNearby": false
+  },
+  {
+    "index": 1,
+    "label": {
+      "kind": "named",
+      "name": "Kitchen laptop"
+    },
+    "sameLabelNearby": true
+  }
+]

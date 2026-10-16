@@ -1,11 +1,13 @@
 /**
  * The move in progress and its results, as the screens see them (X01, X02, F09, X05, X10, R01, R02).
  *
- * Every screen here is a view model: props in, events out. The bridge that fills them does not
- * exist yet, so nothing here calls the engine. What the shell must provide:
+ * Every screen here is a view model: props in, events out. The move's commands and events are not
+ * in the bridge (bridge.ts) yet, so nothing here calls the engine. What the shell must provide:
  *
  * Commands (Tauri `invoke`):
- * - `move_pause()`: ask the move to pause at a safe point. The file being written finishes first.
+ * - `move_pause()`: ask the move to pause at a safe point, which is a block boundary, not the end
+ *   of a file: only what is already on its way finishes first (at most 32 MiB, the transfer's
+ *   in-flight limit, IN_FLIGHT_BYTES in crates/pctwin-transfer); the file being written does not.
  *   Replies at once; the state then reads "pausing" until `move-state` says "paused".
  * - `move_resume()`: continue a paused move, or withdraw a pause that has not completed.
  * - `move_stop()`: stop the rest of the move. What is already copied and checked stays. Not undo.
@@ -20,7 +22,8 @@
  * Mirrors: `ItemStatus` and `Reason` in crates/pctwin-types (result.rs), the write steps in
  * crates/pctwin-journal (State), and `CheckedFrom` / `WhyMemory` in the gate's read-back
  * (crates/pctwin-gate, read_back.rs). Names are the engine's kebab-case names, which are also the
- * keys of their translated text.
+ * keys of their translated text. The evidence shape is checked against the engine's own output
+ * (src/contract/evidence.json, parsed by bridge.ts `parseEvidence`).
  */
 
 import type { Label } from "./pairing";
@@ -88,9 +91,19 @@ export function parseResult(value: unknown): ItemResult | null {
 
 /* ---------- Evidence: where a check read from ---------- */
 
-/** Why a check could not read past this laptop's cache (the gate's `WhyMemory`). */
-export type WhyMemory = "cannot-skip-cache" | "not-shown" | "no-way";
-export const WHY_MEMORY: readonly WhyMemory[] = ["cannot-skip-cache", "not-shown", "no-way"];
+/**
+ * Why a check could not read past this laptop's cache (the gate's `WhyMemory`, in its order): the
+ * drive refused, the drive did not show the read reached it, this system has no way, the file is
+ * stored specially (compressed, encrypted, inline), or the file is too small. Each has its own
+ * words in "more details" (`why-memory-<reason>`).
+ */
+export const WHY_MEMORY = ["cannot-skip-cache", "not-shown", "no-way", "stored-specially", "too-small"] as const;
+export type WhyMemory = (typeof WHY_MEMORY)[number];
+
+/** The words for one reason, shown under "more details" with the general explanation. */
+export function whyMemoryKey(why: WhyMemory): string {
+  return `why-memory-${why}`;
+}
 
 /**
  * Where the bytes of a check came from (the gate's `CheckedFrom`). Both are real checks; they are
@@ -258,10 +271,12 @@ export function formatSpeed(r: Range, locale: string): { low: string; high: stri
   return { low: f.format(r.low / 1000 ** u), high: f.format(r.high / 1000 ** u), unit };
 }
 
-/** A range of whole minutes is always two different numbers, so it reads as a range. */
+/**
+ * A measured range of minutes, rounded to whole minutes and otherwise as measured: never widened.
+ * When both ends round to the same number the screens say that one number ("about 7 minutes").
+ */
 export function minutesRange(r: Range): { low: number; high: number } {
-  const low = Math.max(0, Math.round(r.low));
-  return { low, high: Math.max(low + 1, Math.round(r.high)) };
+  return { low: Math.max(0, Math.round(r.low)), high: Math.max(0, Math.round(r.high)) };
 }
 
 /** The language the page is in (set by the app), for number formats. */

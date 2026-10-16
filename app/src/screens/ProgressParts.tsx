@@ -1,10 +1,10 @@
 /** Pieces shared by the progress and result screens: measured bar, counts, notices, state words. */
-import { Localized, useLocalization } from "@fluent/react";
+import { Localized, useLocalization, type ReactLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
 import { Banner, Badge, ProgressBar, ProgressValue, ResultChip, Row, RowList } from "../components/kit";
 import { ArrowForward, Check, Info, Laptop, Lock } from "../icons";
 import { labelText } from "../pairing";
-import { formatBytes, formatSpeed, groupState, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Reason } from "../move";
+import { formatBytes, formatSpeed, groupState, minutesRange, measuredPercent, pageLocale, type Evidence, type Outcome, type Phase, type GroupName, type GroupState, type MoveGroup, type MoveProgress, type Range, type Reason } from "../move";
 import "./progress.css";
 
 export { Eyebrow, Heading } from "./PairParts";
@@ -19,12 +19,20 @@ export function useAttribute() {
   };
 }
 
+/**
+ * Measured minutes as words: "15 to 20 minutes", or "7 minutes" when both ends are the same whole
+ * number (the range is never widened to look like one).
+ */
+export function minutesText(l10n: ReactLocalization, minutes: Range): string {
+  const { low, high } = minutesRange(minutes);
+  return low === high ? l10n.getString("progress-minutes-one", { minutes: low }) : l10n.getString("progress-minutes", { low, high });
+}
+
 /** The measured time left as words ("About 15 to 20 minutes left"), or null when nothing is measured. */
 export function useTimeLeft(progress: Pick<MoveProgress, "minutesLeft">): string | null {
   const { l10n } = useLocalization();
   if (!progress.minutesLeft) return null;
-  const range = l10n.getString("progress-minutes", minutesRange(progress.minutesLeft));
-  return l10n.getString("progress-time-left", { range });
+  return l10n.getString("progress-time-left", { range: minutesText(l10n, progress.minutesLeft) });
 }
 
 /** The measured speed as a range ("58 to 66 MB/s, measured"), or null. */

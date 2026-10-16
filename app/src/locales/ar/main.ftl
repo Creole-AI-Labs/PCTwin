@@ -1115,6 +1115,12 @@ evidence-read-back = تم التحقق بقراءته مرة أخرى من مح�
 evidence-memory = تم التحقق عبر ذاكرة هذا الحاسوب المحمول، لا عبر محرك الأقراص.
 evidence-memory-explain = قُرئت النسخة مرة أخرى وتطابقت، لكن عبر ذاكرة هذا الحاسوب المحمول، لذا ربما جاء ما قُرئ من الذاكرة لا من محرك الأقراص. قد لا يظهر هنا عطل في محرك الأقراص نفسه، لذا من الجيد فتح الملف مرة واحدة للتأكد.
 evidence-not-checked = لم يتم التحقق، لأنه لم يكتمل.
+# Machine-translated 16 October 2026; to be checked by the language team.
+why-memory-cannot-skip-cache = لم يسمح محرك الأقراص هذا لـ PCTwin بقراءته مباشرة، لذا تم التحقق عبر ذاكرة هذا الحاسوب المحمول. تعمل بعض محركات أقراص الشبكة وذواكر USB بهذه الطريقة.
+why-memory-not-shown = لم يتمكن محرك الأقراص هذا من إظهار أن قراءة PCTwin وصلت إليه فعلًا، لذا يُحسب التحقق كأنه تم عبر ذاكرة هذا الحاسوب المحمول.
+why-memory-no-way = لا يملك نظام هذا الحاسوب المحمول طريقة لقراءة محرك الأقراص هذا مباشرة، لذا تم التحقق عبر ذاكرته.
+why-memory-stored-specially = هذا الملف مخزّن بطريقة خاصة، مثل الضغط أو التشفير، لذا يقرؤه النظام عبر الذاكرة.
+why-memory-too-small = هذا الملف صغير جدًا، لذا يحفظه محرك الأقراص مع سجلاته الخاصة ويقرؤه النظام عبر الذاكرة.
 
 # Reasons: why an item did not finish. Each says what happened, then what to do.
 reason-not-enough-space = نفدت المساحة على الحاسوب المحمول الجديد. وفّر مساحة عليه، ثم ابدأ عملية نقل جديدة تشمل هذا العنصر.
@@ -1146,6 +1152,16 @@ status-failed = فشل
 
 # $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
 progress-minutes = من { $low } إلى { $high } دقيقة
+# Machine-translated 16 October 2026; to be checked by the language team.
+progress-minutes-one =
+    { NUMBER($minutes) ->
+        [zero] { $minutes } دقيقة
+        [one] دقيقة واحدة
+        [two] دقيقتين
+        [few] { $minutes } دقائق
+        [many] { $minutes } دقيقة
+       *[other] { $minutes } دقيقة
+    }
 # $low and $high are numbers and $unit is already formatted, for example "MB/s". The result fills "{ $speed }, measured".
 progress-speed-range = من { $low } إلى ⁦{ $high } { $unit }⁩
 progress-count-failed =

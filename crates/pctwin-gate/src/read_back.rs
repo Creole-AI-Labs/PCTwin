@@ -45,8 +45,43 @@ pub enum CheckedFrom {
     Memory(WhyMemory),
 }
 
-/// Why a check could not read past this laptop's cache.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl CheckedFrom {
+    /// Every value, drive first, then memory for each reason in [`WhyMemory::ALL`]'s order.
+    pub const ALL: [CheckedFrom; 6] = [
+        Self::Drive,
+        Self::Memory(WhyMemory::CannotSkipCache),
+        Self::Memory(WhyMemory::NotShown),
+        Self::Memory(WhyMemory::NoWay),
+        Self::Memory(WhyMemory::StoredSpecially),
+        Self::Memory(WhyMemory::TooSmall),
+    ];
+}
+
+/// The screens' shape (app/src/move.ts `Evidence`): `{ "from": "drive" }`, or
+/// `{ "from": "memory", "why": "<reason>" }` with the reason in kebab-case.
+impl serde::Serialize for CheckedFrom {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        match self {
+            Self::Drive => {
+                let mut s = serializer.serialize_struct("CheckedFrom", 1)?;
+                s.serialize_field("from", "drive")?;
+                s.end()
+            }
+            Self::Memory(why) => {
+                let mut s = serializer.serialize_struct("CheckedFrom", 2)?;
+                s.serialize_field("from", "memory")?;
+                s.serialize_field("why", why)?;
+                s.end()
+            }
+        }
+    }
+}
+
+/// Why a check could not read past this laptop's cache. Sent to the screens by its kebab-case
+/// name, which is also the key of its words there (`why-memory-<name>`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum WhyMemory {
     /// The drive refused to be read past the cache (some network drives and USB sticks).
     CannotSkipCache,
@@ -61,6 +96,17 @@ pub enum WhyMemory {
     /// The file is so small the drive may keep it inside its own records, which the system reads
     /// through its memory.
     TooSmall,
+}
+
+impl WhyMemory {
+    /// Every reason, in the screens' order (app/src/move.ts `WHY_MEMORY`).
+    pub const ALL: [WhyMemory; 5] = [
+        Self::CannotSkipCache,
+        Self::NotShown,
+        Self::NoWay,
+        Self::StoredSpecially,
+        Self::TooSmall,
+    ];
 }
 
 impl std::fmt::Display for CheckedFrom {
@@ -518,4 +564,71 @@ fn shown_uncached(dir: &Dir, name: &str) -> bool {
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn shown_uncached(_dir: &Dir, _name: &str) -> bool {
     false
+}
+
+#[cfg(test)]
+mod evidence_json {
+    use super::{CheckedFrom, WhyMemory};
+    use serde_json::json;
+
+    /// The screens' shape (app/src/move.ts `Evidence`): where the check read from, and why memory.
+    #[test]
+    fn evidence_reaches_the_screens_in_their_shape() {
+        let cases = [
+            (CheckedFrom::Drive, json!({ "from": "drive" })),
+            (
+                CheckedFrom::Memory(WhyMemory::CannotSkipCache),
+                json!({ "from": "memory", "why": "cannot-skip-cache" }),
+            ),
+            (
+                CheckedFrom::Memory(WhyMemory::NotShown),
+                json!({ "from": "memory", "why": "not-shown" }),
+            ),
+            (
+                CheckedFrom::Memory(WhyMemory::NoWay),
+                json!({ "from": "memory", "why": "no-way" }),
+            ),
+            (
+                CheckedFrom::Memory(WhyMemory::StoredSpecially),
+                json!({ "from": "memory", "why": "stored-specially" }),
+            ),
+            (
+                CheckedFrom::Memory(WhyMemory::TooSmall),
+                json!({ "from": "memory", "why": "too-small" }),
+            ),
+        ];
+        for (from, want) in cases {
+            assert_eq!(serde_json::to_value(from).unwrap(), want, "{from:?}");
+        }
+    }
+
+    /// The reason after `why` in [`WhyMemory::ALL`]. No catch-all arm: a new reason does not
+    /// compile until it has a place here, and then `ALL` must list it for the test to pass.
+    fn after(why: WhyMemory) -> Option<WhyMemory> {
+        match why {
+            WhyMemory::CannotSkipCache => Some(WhyMemory::NotShown),
+            WhyMemory::NotShown => Some(WhyMemory::NoWay),
+            WhyMemory::NoWay => Some(WhyMemory::StoredSpecially),
+            WhyMemory::StoredSpecially => Some(WhyMemory::TooSmall),
+            WhyMemory::TooSmall => None,
+        }
+    }
+
+    #[test]
+    fn every_reason_is_listed_once() {
+        let mut chain = vec![WhyMemory::CannotSkipCache];
+        while let Some(next) = after(*chain.last().unwrap()) {
+            chain.push(next);
+        }
+        assert_eq!(chain, WhyMemory::ALL);
+        let all = WhyMemory::ALL;
+        for (i, why) in all.iter().enumerate() {
+            assert!(!all[..i].contains(why), "{why:?} listed twice");
+        }
+        assert_eq!(CheckedFrom::ALL.len(), all.len() + 1);
+        for why in all {
+            assert!(CheckedFrom::ALL.contains(&CheckedFrom::Memory(why)));
+        }
+        assert!(CheckedFrom::ALL.contains(&CheckedFrom::Drive));
+    }
 }

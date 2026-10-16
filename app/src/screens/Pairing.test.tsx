@@ -154,7 +154,7 @@ describe("old laptop", () => {
   it("offers the three numbers; picking one sends it, and the note is always there", async () => {
     await renderOld();
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
-    await emit("pairing-old", { kind: "choose", round: 7, numbers: [142, 317, 859] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [42, 17, 85] });
 
     expect(heading().textContent).toBe(text("pair-choose-title"));
     expect(screen.getByText(text("pair-choose-note"))).toBeTruthy();
@@ -163,10 +163,10 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 49 });
     expect(heading().textContent).toBe(text("pair-choose-title"));
 
-    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 317 })) }));
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 17 })) }));
 
     fireEvent.click(button("pair-choose-confirm"));
-    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 7, number: 317 });
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_pick", { round: 7, number: 17 });
     expect(await screen.findByText(text("pair-choose-checking"))).toBeTruthy();
     noMissingText();
   });
@@ -360,7 +360,7 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "label", label: fox });
     await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
     expect(await violations()).toEqual([]);
-    await emit("pairing-old", { kind: "choose", round: 7, numbers: [142, 317, 859] });
+    await emit("pairing-old", { kind: "choose", round: 7, numbers: [42, 17, 85] });
     expect(await violations()).toEqual([]);
     await emit("pairing-old", { kind: "paired" });
     expect(await violations()).toEqual([]);

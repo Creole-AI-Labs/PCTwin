@@ -31,7 +31,11 @@ pctwin-session = { path = "../../crates/pctwin-session" }
 tokio = { version = "1.53.2", features = ["sync"] }
 
 [dev-dependencies]
+# The evidence shape the screens are tested against (src/contract.rs).
+pctwin-gate = { path = "../../crates/pctwin-gate" }
 pctwin-pairing = { path = "../../crates/pctwin-pairing" }
+# The real permission check on a mock runtime (src/lockdown.rs). Tests only; no new crate.
+tauri = { version = "2", features = ["tray-icon", "test"] }
 tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [lints]

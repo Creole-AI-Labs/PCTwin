@@ -3331,6 +3331,7 @@ version = "0.1.0"
 dependencies = [
  "pctwin-discovery",
  "pctwin-doctor",
+ "pctwin-gate",
  "pctwin-journey",
  "pctwin-link",
  "pctwin-pairing",
@@ -3391,6 +3392,8 @@ dependencies = [
  "pctwin-lease",
  "proptest",
  "rustix",
+ "serde",
+ "serde_json",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
