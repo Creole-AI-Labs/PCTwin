@@ -819,18 +819,75 @@ fn a_second_root_behind_the_system_root_is_walked_without_counting_twice() {
 }
 
 #[test]
-fn a_folder_among_the_homes_that_nobody_explains_is_never_written_off_as_the_systems() {
+fn a_folder_among_the_homes_that_nobody_explains_is_counted_by_its_owner_and_never_named() {
     let lab = lab();
-    write(&lab.c.join("Users/ghost/Desktop/plans.txt"), 12);
+    write(&lab.c.join("Users/ghost/Desktop/ghost-plans.txt"), 12);
+    write(&lab.c.join("Users/ada.OLD/Documents/old-cv.docx"), 9);
     write(&lab.c.join("Users/Default/NTUSER.DAT"), 5);
-    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
-    // One person: the unexplained folder is the mover's, found and moved.
-    let plans = find(&s, FolderRole::Other, "Users/ghost/Desktop/plans.txt");
-    assert_eq!(plans.owner, mover());
-    let default = s
-        .places
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "ada.OLD".into(),
+        AccessFact::Known(access_from_sddl(&format!("O:{ADA}D:P(A;OICI;FA;;;{ADA})")).unwrap()),
+    );
+    answers.0.insert(
+        "ghost".into(),
+        AccessFact::Known(
+            access_from_sddl(
+                "O:S-1-5-21-111-222-333-1077D:P(A;OICI;FA;;;S-1-5-21-111-222-333-1077)",
+            )
+            .unwrap(),
+        ),
+    );
+    for several in [false, true] {
+        let s = run(sized(facts(&lab, several), 0), &mut answers);
+        // Somebody's old home: counted, never named, never written off as the system's.
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("ghost-plans"), "several={several}");
+        assert!(!json.contains("ghost"), "several={several}");
+        let ghost = s
+            .places
+            .iter()
+            .find(|p| {
+                p.placement.whose
+                    == Whose::FromOldAccount {
+                        account_id: Some("S-1-5-21-111-222-333-1077".into()),
+                    }
+            })
+            .expect("counted as from an old account");
+        assert_eq!(ghost.bytes, 12);
+        assert_eq!(ghost.path, None);
+        // The mover's own old profile stays the mover's.
+        let cv = find(&s, FolderRole::Other, "Users/ada.OLD/Documents/old-cv.docx");
+        assert_eq!(cv.owner, mover());
+        let default = s
+            .places
+            .iter()
+            .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with("Default")))
+            .unwrap();
+        assert_eq!(default.placement.whose, Whose::System);
+    }
+}
+
+#[test]
+fn a_folder_whose_access_this_person_may_not_read_is_a_blind_spot_without_its_name() {
+    let lab = lab();
+    write(&lab.d.join("Theirs-secret-name/x.txt"), 4);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "Theirs-secret-name".into(),
+        AccessFact::Unknown {
+            why: "denied".into(),
+        },
+    );
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("Theirs-secret-name"));
+    let spot = s
+        .blind_spots
         .iter()
-        .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with("Default")))
-        .unwrap();
-    assert_eq!(default.placement.whose, Whose::System);
+        .find(|b| b.reason == BlindReason::AccessNotReadable)
+        .expect("a blind spot");
+    assert_eq!(spot.path, None);
+    assert!(spot.volume.is_some());
+    assert_ne!(s.top_line, TopLine::Everything);
 }

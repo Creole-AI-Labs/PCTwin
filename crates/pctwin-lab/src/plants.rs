@@ -704,6 +704,7 @@ pub fn check(
     exists: &dyn Fn(&str) -> bool,
 ) -> Vec<String> {
     let mut problems = Vec::new();
+    let mut notes = Vec::new();
     let text = sweep.to_string();
     let located = item_paths(sweep);
     let by_path: BTreeMap<&str, &Value> = located.iter().map(|(p, v)| (p.as_str(), *v)).collect();
@@ -841,10 +842,30 @@ pub fn check(
             }
         }
     }
-    // No invented items: everything in the record is really there.
+    // No invented items: everything in the record is really there. Inside the lab's own places
+    // nothing changes between the sweep and this check, so a missing path there is invented.
+    // Elsewhere the system itself may remove a file meanwhile (a rotated log), so a missing
+    // path there is reported as a note, not judged.
+    let mut lab_roots: Vec<String> = vec![norm(&roots.other_drive.to_string_lossy())];
+    lab_roots.extend(roots.homes.values().map(|h| norm(&h.to_string_lossy())));
+    lab_roots.extend(
+        spec.plants
+            .iter()
+            .filter_map(|p| roots.top_of(p))
+            .map(|t| norm(&t.to_string_lossy())),
+    );
+    let inside = |path: &str| {
+        lab_roots
+            .iter()
+            .any(|r| path == r || path.starts_with(&format!("{r}/")))
+    };
     for (path, _) in &located {
         if !exists(path) {
-            problems.push(format!("invented: {path}"));
+            if inside(path) {
+                problems.push(format!("invented: {path}"));
+            } else {
+                notes.push(format!("gone since the sweep (not judged): {path}"));
+            }
         }
     }
     // The top line follows the blind spots.
@@ -861,6 +882,9 @@ pub fn check(
             "top line {top} with finished={finished} and {} blind spots",
             blind.len()
         )),
+    }
+    for n in notes {
+        eprintln!("note: {n}");
     }
     problems
 }

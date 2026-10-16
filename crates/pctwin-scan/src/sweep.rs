@@ -1423,11 +1423,10 @@ impl Sweeper<'_> {
             }
         };
         if placement.whose == Whose::Undecided {
-            self.blind(
-                volume,
-                Some(path.to_string_lossy().into_owned()),
-                BlindReason::AccessNotReadable,
-            );
+            // This person may not even read who can open it, so it is someone else's: its name
+            // is never given, only the drive it is on.
+            let _ = path;
+            self.blind(volume, None, BlindReason::AccessNotReadable);
         }
         let record_place = owner.as_ref().map(|_| Place {
             role: FolderRole::Other,
@@ -1599,10 +1598,12 @@ impl Sweeper<'_> {
                 self.enqueue(child);
                 continue;
             }
-            // The system's own profiles (Default, All Users) are counted. Anything else that is
-            // nobody's home (Public when the system did not name it, a folder the census could
-            // not explain) is never written off as the system's: it is explored and placed like
-            // any folder outside a home.
+            // The system's own profiles (Default, All Users) are counted, and Public (when the
+            // system did not name it) is placed like any folder everyone can open. Anything else
+            // here is somebody's home folder that the census could not tie to an account: it is
+            // never explored by name. Its owner decides: the mover's own old profile
+            // (`ada.OLD`) stays the mover's; anyone else's is counted, never named, and goes to
+            // the approver as "From an old account" (or to that person, if they still exist).
             let text = name.display().to_string();
             if SYSTEM_PROFILES
                 .iter()
@@ -1612,11 +1613,59 @@ impl Sweeper<'_> {
                 let p = self.system_place(job.volume, &path, Space::TheSystem);
                 let child = self.child(job, &name, Zone::Count { place: p }, None);
                 self.enqueue(child);
-            } else {
+            } else if text.eq_ignore_ascii_case("Public") || text.eq_ignore_ascii_case("Shared") {
                 let child = self.child(job, &name, Zone::Explore { inside: None }, None);
                 self.enqueue(child);
+            } else {
+                self.unexplained_home(job, &entry, &name, &path);
             }
         }
+    }
+
+    /// A folder among the homes that no account explains: whose it is comes from its owner.
+    fn unexplained_home(&mut self, job: &Job, entry: &Entry, name: &ItemName, path: &Path) {
+        let owner = match self.read_access(path, entry.unix) {
+            AccessFact::Known(a) => a.owner,
+            AccessFact::NoOwners | AccessFact::Unknown { .. } => None,
+        };
+        if owner.as_deref() == Some(self.state.census.me.as_str()) {
+            let placement = Placement::new(Whose::Mover, Rule::InsideHome);
+            let p = self.start_place(job.volume, path, placement);
+            self.enter_place(job, name, p, 0);
+            return;
+        }
+        let whose = match owner {
+            Some(id)
+                if self
+                    .state
+                    .census
+                    .by_account(&id)
+                    .is_some_and(|r| r.kind != PersonKind::Leftover) =>
+            {
+                Whose::Person { account_id: id }
+            }
+            Some(id) if self.state.census.is_person_id(&id) => Whose::FromOldAccount {
+                account_id: Some(id),
+            },
+            _ => Whose::FromOldAccount { account_id: None },
+        };
+        let p = self.new_place(
+            job.volume,
+            None,
+            Placement::new(whose, Rule::InsideHome),
+            Fate::NotYours,
+            PlaceMeta {
+                record_place: None,
+                owner: None,
+                space: Space::OtherPeople,
+                private: true,
+                items: 0,
+                collapsed: None,
+                root_item: None,
+            },
+        );
+        let child = self.child(job, name, Zone::Count { place: p }, None);
+        self.enqueue(child);
     }
 
     fn system_place(&mut self, volume: usize, path: &Path, space: Space) -> usize {
