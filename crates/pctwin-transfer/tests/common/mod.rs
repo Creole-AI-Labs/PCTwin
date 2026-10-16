@@ -75,6 +75,52 @@ pub fn journal() -> &'static pctwin_journal::Journal {
     ))
 }
 
+/// How long a move may go without a single new byte landing on the new laptop before a test
+/// calls it stuck.
+#[allow(dead_code)]
+pub const STUCK_AFTER: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Runs a move to its end, judged by what it does rather than by the clock on the wall. It is
+/// called stuck only if nothing new lands on the new laptop (`landed`, the receiver's
+/// [`meter`](pctwin_transfer::ReceiverSession::meter)) for [`STUCK_AFTER`], or if more than four
+/// times the `to_move` bytes land (going round in circles). A slow disk only makes a move slower,
+/// so it can never fail a test here; a move that waits forever, or sends the same thing forever,
+/// still does.
+#[allow(dead_code)]
+pub async fn unless_stuck<T>(
+    landed: &std::sync::atomic::AtomicU64,
+    to_move: u64,
+    work: impl std::future::Future<Output = T>,
+) -> T {
+    use std::sync::atomic::Ordering;
+    use tokio::time::{Duration, Instant, sleep};
+    let start = landed.load(Ordering::SeqCst);
+    let mut last = start;
+    let mut since = Instant::now();
+    tokio::pin!(work);
+    loop {
+        tokio::select! {
+            done = &mut work => return done,
+            () = sleep(Duration::from_millis(250)) => {
+                let now = landed.load(Ordering::SeqCst);
+                let moved = now - start;
+                assert!(
+                    moved <= to_move.saturating_mul(4),
+                    "the move is going round in circles: {moved} bytes landed for {to_move}"
+                );
+                if now != last {
+                    last = now;
+                    since = Instant::now();
+                }
+                assert!(
+                    since.elapsed() < STUCK_AFTER,
+                    "the move is stuck: nothing landed for {STUCK_AFTER:?} ({moved} of {to_move})"
+                );
+            }
+        }
+    }
+}
+
 /// Which file this is on its drive, as the gate tells files apart (the gate's own tests prove
 /// that), worked out here independently of the crate under test.
 #[allow(dead_code)]

@@ -29,6 +29,144 @@ role-new-title = My new laptop
 role-new-body = Receive my setup from another laptop.
 role-note = Nothing moves until you review and approve the plan. Your old laptop stays unchanged during the move.
 
+## Frame parts (footer note, Back, steps)
+
+footer-note-move = Free personal moves
+footer-note-send = Free nearby sending
+frame-back = Back
+# Read out by screen readers only; the step shapes carry the meaning on screen.
+frame-step-done = Done
+frame-step-current = Now
+frame-step-todo = Next
+frame-step-position = Step { $number } of { $total }
+
+## F01 Unfinished move
+
+resume-open = Resume your move
+
+## C01 How will you connect?
+
+connect-eyebrow = Local move
+connect-title = How will you connect?
+connect-body = Use the same guided plan on every supported transport.
+connect-wifi-title = Wi-Fi
+connect-wifi-body = Release 1 · same local network.
+connect-wifi-status = Available
+connect-later = Ethernet or direct link, the PCTwin bridge cable and the encrypted drive archive are planned for Release 2.
+connect-usb-note = An ordinary USB cable does not create a supported host-to-host link.
+connect-use-wifi = Use Wi-Fi
+# Added: sizes and speeds as measured, shown the same way on every connection screen.
+connect-unit-mbps = { NUMBER($value, maximumFractionDigits: 0) } MB/s
+connect-unit-gb = { NUMBER($value, maximumFractionDigits: 1) } GB
+
+## C02 Put both laptops together
+
+connect-prep-title = Put both laptops together.
+connect-prep-body = Connect them to the same local network, then open PCTwin on each.
+connect-prep-step-1-title = Join the same Wi-Fi
+connect-prep-step-1-body = Internet is not needed for the LAN copy.
+# $network is the Wi-Fi name this laptop is on.
+connect-prep-step-1-network = Network: { $network }.
+connect-prep-step-2-title = Allow local-network access
+connect-prep-step-2-body = Use the genuine OS prompt if it appears.
+connect-prep-step-3-title = Choose a role on each laptop
+connect-prep-step-3-body = One sends. The other receives.
+connect-prep-note = Guest Wi-Fi or client isolation can block the link.
+connect-prep-continue = Continue to pairing
+
+## C06 Meet your other laptop
+
+peer-eyebrow = Local move
+peer-title = Meet your other laptop.
+peer-body = The confirmed pair is ready for a supported move.
+peer-sending = Sending
+peer-receiving = Receiving
+peer-old = Old laptop
+peer-new = New laptop
+peer-version-label = PCTwin
+# $version is the PCTwin version on that laptop, for example "1.0.3".
+peer-version = { $version }
+peer-status-update = Blocked
+peer-status-unsupported = Waiting
+peer-ready-note = Authenticated pairing comes before inventory. Unsupported versions need a trusted update.
+peer-version-differs = This pair needs a compatible signed build before the move can continue.
+peer-version-old-body = Incompatible protocol build: { $version }.
+peer-version-new-body = Needs a matching supported peer.
+peer-update-title = Trusted update
+peer-update-body = Use the compatible signed release.
+# $from and $to are system names, for example "Windows 11" and "macOS". The mockup sentence does not use them.
+peer-direction-unsupported = This platform direction is not supported by the selected release.
+peer-continue = Assess the connection
+
+## C07 Let’s check the route
+
+check-eyebrow = Local move
+check-title = Let’s check the route.
+check-body = Measured resources guide the plan and the time estimate.
+check-measuring = Measuring the connection…
+# The value next to it is already formatted, for example "62 MB/s".
+check-speed-label = local link
+check-space-label = free target space
+check-link-weak = Weak, so moving may be slow. Moving the laptops closer to the Wi-Fi router can help.
+check-power-title = Power
+check-power-both = Both laptops connected.
+check-power-battery = { $label } is running on battery. Plug it in so a long move is not interrupted.
+check-space-title = Storage
+check-space-body = { $free } free on the new laptop. Before anything moves, you will see whether your choices fit.
+check-internet-title = Internet
+check-internet-on = Needed for fresh app downloads, not this LAN file copy.
+check-internet-off = Not connected. That is fine: copying files does not need the internet.
+check-status-ready = Ready
+check-status-plug-in = Plug in
+check-status-connected = Available
+check-status-not-needed = Not needed
+# Added: what is said when something could not be read, so it is never shown as fine.
+check-status-unknown = Not known
+check-speed-unknown = PCTwin could not measure the connection this time. Check again in a moment.
+check-space-unknown = PCTwin could not read the free space on the new laptop.
+check-power-unknown = PCTwin could not tell whether { $label } is plugged in.
+check-internet-unknown = PCTwin could not tell whether this laptop is online. That is fine: copying files does not need the internet.
+check-again = Check again
+check-estimate-note = The time estimate is not a fixed promise.
+check-continue = Choose what to move
+
+## C09 Waiting for your other laptop
+
+reconnect-title = Waiting for your other laptop.
+reconnect-body = The last committed blocks are saved.
+# Added: the title of the saved-progress card (the mockup shows Move paused by connection).
+reconnect-card-title = Move paused by connection
+reconnect-progress =
+    .aria-label = Move paused by connection
+# $done is an already formatted size, for example "81.6 GB". $total is passed but not shown.
+reconnect-saved = Checkpoint: { $done } verified or committed; pending work remains.
+# $ago is already formatted, for example "45 seconds ago".
+reconnect-last-seen = Last seen { $ago }.
+reconnect-status-offline = Offline
+reconnect-status-trying = Reconnecting
+reconnect-status-pending = Pending
+reconnect-trying = Trying to reconnect by itself… Keep both laptops on, awake and on the same Wi-Fi.
+reconnect-expired = An expired ticket requires a fresh pairing and reconciliation.
+reconnect-unavailable = { $label } cannot be reached. Check that it is on, awake, has PCTwin open and is on the same Wi-Fi.
+reconnect-try-now = Retry connection
+reconnect-pair-again = Pair again
+reconnect-details = Resume security
+reconnect-details-body = Fresh traffic keys with a valid authenticated ticket.
+
+## C10 The connection has ended (dialog)
+
+ended-title = The connection has ended.
+ended-body = Your saved job stays available. The old code cannot be reused.
+ended-kept-title = Retained
+ended-kept-body = Committed move journal and verified results.
+ended-not-kept-title = Not retained
+ended-not-kept-body = Permission to continue with an unconfirmed peer.
+ended-pair-again = Pair again
+ended-pair-again-body = Start a fresh session and reconcile the job.
+ended-see-moved = Open the saved job
+ended-see-moved-body = Review what has already committed.
+ended-home = Return home
+
 ## Pairing, shared
 
 pair-back = Back

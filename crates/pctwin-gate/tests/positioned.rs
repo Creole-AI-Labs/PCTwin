@@ -4,6 +4,8 @@
 //! is never finished. Space for the whole file can be reserved first, so a full disk shows at the
 //! start, not at the end.
 
+mod common;
+
 use std::io::Write;
 
 use pctwin_gate::{Destination, GateError, IncomingPath, MAX_FILE_PARTS};
@@ -37,7 +39,7 @@ fn sections_written_in_any_order_make_the_whole_file() {
     f.write_at(0, &data[..300]).unwrap();
     f.write_at(300, &data[300..600]).unwrap();
     assert_eq!(f.written(), 1000);
-    let done = f.finish().unwrap();
+    let done = common::finish(f).unwrap();
     assert_eq!(
         std::fs::read(root.path().join(done.final_path)).unwrap(),
         data
@@ -61,7 +63,7 @@ fn nothing_is_written_twice() {
     // Right next to it on both sides is fine.
     f.write_at(0, &[2; 20]).unwrap();
     f.write_at(50, &[3; 50]).unwrap();
-    let done = f.finish().unwrap();
+    let done = common::finish(f).unwrap();
     let got = std::fs::read(root.path().join(done.final_path)).unwrap();
     assert_eq!(&got[..20], &[2; 20]);
     assert_eq!(&got[20..50], &[1; 30], "refused writes changed nothing");
@@ -101,7 +103,7 @@ fn a_file_with_a_hole_is_never_finished_and_leaves_nothing_behind() {
     f.write_at(0, &[1; 40]).unwrap();
     f.write_at(60, &[1; 40]).unwrap();
     assert!(matches!(
-        f.finish(),
+        common::finish(f),
         Err(GateError::SizeMismatch {
             announced: 100,
             received: 80
@@ -121,7 +123,7 @@ fn writing_in_order_still_works_and_mixes_with_sections() {
     f.write_all(&data[30..70]).unwrap();
     // The in-order writer may not run into a section already there.
     assert!(f.write_all(&[0]).is_err());
-    let done = f.finish().unwrap();
+    let done = common::finish(f).unwrap();
     assert_eq!(
         std::fs::read(root.path().join(done.final_path)).unwrap(),
         data
@@ -158,13 +160,13 @@ fn parts_that_touch_are_joined_however_they_arrive() {
     for i in 0..n {
         f.write_at(i, &[1]).unwrap();
     }
-    f.finish().unwrap();
+    common::finish(f).unwrap();
     // Backwards, one byte at a time.
     let mut f = dest.create_file(&path("b.bin"), n).unwrap();
     for i in (0..n).rev() {
         f.write_at(i, &[1]).unwrap();
     }
-    f.finish().unwrap();
+    common::finish(f).unwrap();
 }
 
 #[test]
@@ -178,7 +180,7 @@ fn space_for_the_whole_file_can_be_reserved_first() {
     eprintln!("reserved on this drive: {reserved}");
     f.write_at(2500, &data[2500..]).unwrap();
     f.write_at(0, &data[..2500]).unwrap();
-    let done = f.finish().unwrap();
+    let done = common::finish(f).unwrap();
     assert_eq!(
         std::fs::read(root.path().join(done.final_path)).unwrap(),
         data
@@ -240,6 +242,6 @@ proptest! {
             prop_assert_eq!(f.written(), covered.iter().filter(|c| **c).count() as u64);
         }
         let full = covered.iter().all(|c| *c);
-        prop_assert_eq!(f.finish().is_ok(), full);
+        prop_assert_eq!(common::finish(f).is_ok(), full);
     }
 }

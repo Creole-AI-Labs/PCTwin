@@ -14,6 +14,8 @@ PCTwin needs deep access to your laptops. Publishing the transfer engine lets an
 
 Early development. Nothing here is ready to move real data yet.
 
+For where we are and what we're working on, see [UPDATE.md](UPDATE.md).
+
 ## Built with
 
 - **Rust** for the transfer engine

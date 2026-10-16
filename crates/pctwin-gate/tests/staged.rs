@@ -5,6 +5,8 @@
 //! telling one file from another by identity, and touching nothing but PCTwin's own temporary
 //! files.
 
+mod common;
+
 use std::io::Write;
 
 use pctwin_gate::{Claim, Destination, GateError, IncomingPath, NameChange, temp_name};
@@ -47,7 +49,7 @@ fn a_tagged_file_is_written_under_the_temporary_name_the_journal_chose() {
     assert_eq!(file.temp_path(), "Docs/Tax/.pctwin-00ff-7.part");
     file.write_all(b"abc").unwrap();
     assert!(root.path().join("Docs/Tax/.pctwin-00ff-7.part").is_file());
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.final_path, "Docs/Tax/a.txt");
     assert_eq!(names(&root.path().join("Docs/Tax")), ["a.txt"]);
 }
@@ -83,7 +85,7 @@ fn sealing_checks_every_byte_arrived_and_an_unsealed_file_leaves_nothing() {
     let mut file = dest.create_file_tagged(&path("a.txt"), 4, "t-1").unwrap();
     file.write_all(b"abc").unwrap();
     assert!(matches!(
-        file.seal(),
+        common::seal(file),
         Err(GateError::SizeMismatch {
             announced: 4,
             received: 3
@@ -92,7 +94,7 @@ fn sealing_checks_every_byte_arrived_and_an_unsealed_file_leaves_nothing() {
     assert!(names(root.path()).is_empty());
     let mut file = dest.create_file_tagged(&path("b.txt"), 1, "t-2").unwrap();
     file.write_all(b"b").unwrap();
-    let sealed = file.seal().unwrap();
+    let sealed = common::seal(file).unwrap();
     assert_eq!(sealed.temp_path(), ".pctwin-t-2.part");
     assert!(root.path().join(".pctwin-t-2.part").is_file());
     drop(sealed);
@@ -104,7 +106,7 @@ fn the_real_name_is_found_first_then_claimed_and_both_names_stay_until_kept() {
     let (root, dest) = setup();
     let mut file = dest.create_file_tagged(&path("d/a.txt"), 2, "t-1").unwrap();
     file.write_all(b"hi").unwrap();
-    let sealed = file.seal().unwrap();
+    let sealed = common::seal(file).unwrap();
     // Found, not taken: the journal records it before the file gets it.
     assert_eq!(sealed.next_name().unwrap(), "d/a.txt");
     assert!(!root.path().join("d/a.txt").exists());
@@ -127,7 +129,7 @@ fn a_name_taken_after_it_was_found_is_never_replaced_and_the_file_comes_back() {
     let (root, dest) = setup();
     let mut file = dest.create_file_tagged(&path("a.txt"), 6, "t-1").unwrap();
     file.write_all(b"theirs").unwrap();
-    let sealed = file.seal().unwrap();
+    let sealed = common::seal(file).unwrap();
     let name = sealed.next_name().unwrap();
     assert_eq!(name, "a.txt");
     // Another program takes the name in between.
@@ -156,7 +158,7 @@ fn a_file_is_only_ever_named_inside_its_own_folder() {
     for elsewhere in ["a.txt", "e/a.txt", "d/../a.txt", "d/x/a.txt", "d/", ""] {
         let mut file = dest.create_file_tagged(&path("d/a.txt"), 1, "t-1").unwrap();
         file.write_all(b"x").unwrap();
-        let sealed = file.seal().unwrap();
+        let sealed = common::seal(file).unwrap();
         let Claim::Failed(_, sealed) = sealed.claim_as(elsewhere) else {
             panic!("named outside its folder: {elsewhere:?}")
         };
@@ -177,7 +179,7 @@ fn a_sealed_file_kept_for_later_stays_under_its_temporary_name() {
     let (root, dest) = setup();
     let mut file = dest.create_file_tagged(&path("a.txt"), 1, "t-1").unwrap();
     file.write_all(b"x").unwrap();
-    file.seal().unwrap().persist();
+    common::seal(file).unwrap().persist();
     assert_eq!(names(root.path()), [".pctwin-t-1.part"]);
 }
 
@@ -186,7 +188,7 @@ fn a_claimed_file_that_is_not_kept_stays_under_its_name_for_the_journal() {
     let (root, dest) = setup();
     let mut file = dest.create_file_tagged(&path("a.txt"), 1, "t-1").unwrap();
     file.write_all(b"x").unwrap();
-    let claimed = file.seal().unwrap().claim().unwrap();
+    let claimed = common::seal(file).unwrap().claim().unwrap();
     drop(claimed);
     // The journal already has its name: recovery finishes it, never a silent removal.
     assert!(root.path().join("a.txt").is_file());
@@ -255,7 +257,7 @@ fn a_sealed_file_has_one_identity_until_it_lands_and_keeps_it_under_its_name() {
     let (root, dest) = setup();
     let mut file = dest.create_file_tagged(&path("a.txt"), 2, "t-1").unwrap();
     file.write_all(b"hi").unwrap();
-    let sealed = file.seal().unwrap();
+    let sealed = common::seal(file).unwrap();
     let id = sealed.identity().unwrap();
     assert_eq!(dest.stat(".pctwin-t-1.part").unwrap().unwrap().id, id);
     let Claim::Named(claimed) = sealed.claim_as("a.txt") else {
@@ -397,7 +399,7 @@ fn a_partly_received_file_is_reopened_and_only_checked_bytes_count_as_arrived() 
         Err(GateError::OutsideFile)
     ));
     file.write_at(6, b"ghij").unwrap();
-    let done = file.finish().unwrap();
+    let done = common::finish(file).unwrap();
     assert_eq!(done.final_path, "d/a.txt");
     assert_eq!(
         std::fs::read(root.path().join("d/a.txt")).unwrap(),
@@ -473,7 +475,7 @@ fn names_with_colons_and_backslashes_land_on_systems_that_allow_them() {
         let tag = format!("t-{n}");
         let mut file = dest.create_file_tagged(&path(sent), 1, &tag).unwrap();
         file.write_all(b"x").unwrap();
-        let done = file.finish().unwrap();
+        let done = common::finish(file).unwrap();
         assert_eq!(&done.final_path, sent);
         assert_eq!(dest.look(sent).unwrap(), Some(1));
         assert!(dest.stat(sent).unwrap().is_some());
@@ -499,7 +501,7 @@ fn a_checked_file_found_again_after_a_restart_is_never_removed_by_being_dropped(
         .unwrap();
     file.write_all(b"abc").unwrap();
     let temp = file.temp_path();
-    file.seal().unwrap().persist();
+    common::seal(file).unwrap().persist();
     // Found again, then dropped without a name (an early return, an error on the way).
     drop(dest.reopen_sealed(&path("Docs/a.txt"), &temp).unwrap());
     assert_eq!(std::fs::read(root.path().join(&temp)).unwrap(), b"abc");
@@ -509,6 +511,6 @@ fn a_checked_file_found_again_after_a_restart_is_never_removed_by_being_dropped(
         .unwrap();
     fresh.write_all(b"abc").unwrap();
     let fresh_temp = fresh.temp_path();
-    drop(fresh.seal().unwrap());
+    drop(common::seal(fresh).unwrap());
     assert!(!root.path().join(&fresh_temp).exists());
 }
