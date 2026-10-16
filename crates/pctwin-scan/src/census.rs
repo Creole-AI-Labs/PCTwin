@@ -1013,8 +1013,9 @@ fn owner_of(_path: &Path) -> Option<String> {
     None
 }
 
-/// The longest any one system tool may take.
-const TOOL_LIMIT: Duration = Duration::from_secs(15);
+/// The longest any one system tool may take: a minute, because PowerShell alone can take most
+/// of 15 seconds to start on a slow or busy laptop (seen under load in review).
+const TOOL_LIMIT: Duration = Duration::from_secs(60);
 
 /// Runs a system tool with a time limit, without a console window on Windows. The answer is read
 /// while the tool runs, so a long answer can never stall it.
