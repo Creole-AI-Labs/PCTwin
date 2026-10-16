@@ -216,7 +216,8 @@ fn name_holds(dir: &Dir, name: &str, file: &std::fs::File) -> io::Result<bool> {
 /// following a link and must be PCTwin's file; its own flags, with only the hidden mark changed,
 /// are set; then the mark is read back through the handle, and must be as asked. Another file at
 /// the name refuses it ([`NameReplaced`]). `hook` (tests) runs before the checks
-/// (`<op>:named`) and just before the call (`<op>:checked`), where `op` is `hide` or `show`.
+/// (`<op>:named`), between the name check and the look at the exact path (`<op>:held`), and just
+/// before the call (`<op>:checked`), where `op` is `hide` or `show`.
 #[cfg(target_os = "macos")]
 fn set_hidden_named(
     dir: &Dir,
@@ -238,6 +239,7 @@ fn set_hidden_named(
     if !name_holds(dir, name, file)? {
         return Err(io::Error::other(NameReplaced));
     }
+    step("held")?;
     // The folder's path now, from its own handle, and the file at that exact path, not followed
     // if it is a link: it must be PCTwin's very file, and only its own hidden mark changes.
     let folder = rustix::fs::getpath(dir)?;

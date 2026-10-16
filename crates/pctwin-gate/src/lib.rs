@@ -714,8 +714,9 @@ impl Destination {
 
     /// For tests (macOS): `at` runs where a file's hidden mark is set or cleared by name, with the
     /// step: `hide:named` or `show:named` before the name is checked to hold PCTwin's own file,
-    /// and `hide:checked` or `show:checked` between that check and the call (to put another file
-    /// at the name there, say).
+    /// `hide:held` or `show:held` between that check and the look at the exact path, and
+    /// `hide:checked` or `show:checked` just before the call (to put another file at the name
+    /// there, say).
     #[doc(hidden)]
     #[must_use]
     pub fn with_flags_hook(

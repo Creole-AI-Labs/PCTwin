@@ -653,5 +653,36 @@ fn a_file_made_in_place_of_pctwin_s_is_told_apart_from_it() {
             "{}: a file made in place of a moved one passes as PCTwin's",
             drive.show()
         );
+        if refuses(drive) {
+            return;
+        }
+        // The gate itself: just after PCTwin made its file, another program removes it and makes
+        // its own at once at the name (likely in the very entry PCTwin's had). The file is never
+        // hidden, filled or removed, and the name is refused.
+        let theirs = dir.join("r.bin");
+        let once = std::sync::atomic::AtomicBool::new(false);
+        let at = theirs.clone();
+        let dest = Destination::open(&dir)
+            .unwrap()
+            .with_flags_hook(move |step| {
+                if step == "hide:named" && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    std::fs::remove_file(&at)?;
+                    std::fs::write(&at, b"theirs")?;
+                }
+                Ok(())
+            });
+        let r = try_write(&dest, "r.bin", b"ours");
+        assert!(r.is_err(), "{}: named over their file: {r:?}", drive.show());
+        assert_eq!(
+            std::fs::read(&theirs).unwrap(),
+            b"theirs",
+            "{}",
+            drive.show()
+        );
+        let flags = {
+            use std::os::macos::fs::MetadataExt;
+            std::fs::symlink_metadata(&theirs).unwrap().st_flags()
+        };
+        assert_eq!(flags & 0x8000, 0, "{}: their file was hidden", drive.show());
     });
 }

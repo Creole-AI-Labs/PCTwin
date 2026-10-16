@@ -1027,7 +1027,7 @@ fn marked_hidden(path: &Path) -> bool {
 #[cfg(target_os = "macos")]
 #[test]
 fn another_file_put_at_the_name_before_it_is_hidden_is_never_hidden_filled_or_removed() {
-    for at in ["hide:named", "hide:checked"] {
+    for at in ["hide:named", "hide:held", "hide:checked"] {
         let root = tempfile::tempdir().unwrap();
         let r = root.path().to_path_buf();
         let dest = fill_in(root.path()).with_flags_hook(move |step| {
@@ -1053,7 +1053,7 @@ fn another_file_put_at_the_name_before_it_is_hidden_is_never_hidden_filled_or_re
             b"theirs",
             "{at}: their file is left whole"
         );
-        if at == "hide:named" {
+        if at != "hide:checked" {
             // Caught before the mark: their file is not touched at all.
             assert!(
                 !marked_hidden(&root.path().join("g.txt")),
@@ -1071,7 +1071,7 @@ fn another_file_put_at_the_name_before_it_is_hidden_is_never_hidden_filled_or_re
 #[cfg(target_os = "macos")]
 #[test]
 fn another_file_put_at_the_name_before_it_is_shown_keeps_its_mark_and_nothing_is_shown() {
-    for at in ["show:named", "show:checked"] {
+    for at in ["show:named", "show:held", "show:checked"] {
         let root = tempfile::tempdir().unwrap();
         let r = root.path().to_path_buf();
         let dest = fill_in(root.path()).with_flags_hook(move |step| {
@@ -1091,7 +1091,7 @@ fn another_file_put_at_the_name_before_it_is_shown_keeps_its_mark_and_nothing_is
         assert!(shown.is_err(), "{at}: never reported shown: {shown:?}");
         let theirs = root.path().join("h.txt");
         assert_eq!(std::fs::read(&theirs).unwrap(), b"theirs");
-        if at == "show:named" {
+        if at != "show:checked" {
             // Caught before the mark is cleared: their file keeps it.
             assert!(marked_hidden(&theirs), "{at}: their file keeps its mark");
         }

@@ -879,6 +879,34 @@ async fn a_show_that_fails_part_way_is_finished_at_the_next_start() {
     assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
 }
 
+/// Recovery finishes a file recorded filled before a stop, but its show then fails part way (the
+/// drive errs): recovery says so, in plain words, and the show stays pending for the next start,
+/// never dropped as if the copy were finished and visible.
+#[test]
+fn recovery_says_when_a_show_it_starts_fails() {
+    let (_work, usb, journal) = stopped_at("journal:filled");
+    let failing = Destination::open(&usb)
+        .unwrap()
+        .with_profile(provable())
+        .with_show_hook(|step| {
+            if step == "modified" {
+                return Err(std::io::Error::other("the drive went away"));
+            }
+            Ok(())
+        });
+    let table = table_for(failing);
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    let id = journal.entries().unwrap()[0].id;
+    assert_eq!(r.committed, [id], "{r:?}");
+    assert!(
+        r.left
+            .iter()
+            .any(|(i, why)| *i == id && why.contains("starts again")),
+        "the failed show was dropped: {r:?}"
+    );
+    assert!(journal.show_pending(id).unwrap().is_some());
+}
+
 /// A copy committed while still hidden is never undone before it is shown: undo says it is still
 /// being finished, and touches nothing; once recovery has shown it, it is like any other copy.
 #[test]
