@@ -1,6 +1,12 @@
 
 # cargo-vet audits file
 
+[[audits.cfb]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.15.0"
+notes = "Reviewed 15 Oct 2026 for PCTwin's one use: pctwin-scan opens an untrusted Windows jump-list compound file from the old laptop from an in-memory Cursor and reads the DestList stream (usage.rs). Read the src/ diff (about 3000 lines, mostly new write-side features: balanced tree rebalancing, name index, chain cache, contiguous multi-sector IO, copy_to, mini stream rework). Same three dependencies as 0.14.0 (fnv, uuid, web-time). No unsafe code anywhere in the crate, no build script, no network or process use. Read path checks: the new Sectors::seek_contiguous bounds-checks the last sector against the sector count before any seek or read; open-time validation still rejects tree loops (visited set) and out-of-range sibling and child indexes before the new name_index is built (stack walk bounded by entry count); a FAT entry pointing past the table is now treated as end-of-chain in permissive mode rather than an error, and a double-pointed sector is still rejected. Residual: memory use of the new name_index and chain cache scales with file size, so callers should keep bounding the input size."
+
 [[audits.fs_at]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
