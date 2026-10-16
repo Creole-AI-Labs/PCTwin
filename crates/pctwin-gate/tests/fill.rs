@@ -198,15 +198,43 @@ fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
         .expect("a filled-in file has a show to finish")
         .clone();
     c.keep();
+    let now = |dest: &Destination| dest.stat("c.txt").unwrap().unwrap().id;
+    // Shown, and its identity given as it is after the show (the creation date is part of it
+    // on a Mac).
     assert_eq!(
         dest.finish_show("c.txt", &show, ShowCheck::Made).unwrap(),
-        Shown::Shown
+        Shown::Shown(now(&dest))
     );
     assert!(!dest.hidden("c.txt").unwrap(), "shown once complete");
-    // Asked again: already shown, nothing touched.
+    // Asked again: already shown, nothing touched; still the very file made.
     assert_eq!(
         dest.finish_show("c.txt", &show, ShowCheck::Made).unwrap(),
-        Shown::AlreadyShown
+        Shown::AlreadyShown(Some(now(&dest)))
+    );
+    // Shown already, but not the file PCTwin made: its identity is never taken.
+    let mut not_made = show.clone();
+    not_made.fill.made = Some(FileId {
+        volume: 7,
+        index: std::num::NonZeroU64::new(7).unwrap(),
+        born: None,
+    });
+    assert_eq!(
+        dest.finish_show("c.txt", &not_made, ShowCheck::Made)
+            .unwrap(),
+        Shown::AlreadyShown(None)
+    );
+    // After a restart: the very file, but bytes that are not the whole file's.
+    let mut changed = |_: &mut dyn Read| Ok(false);
+    assert_eq!(
+        dest.finish_show("c.txt", &show, ShowCheck::Bytes(&mut changed))
+            .unwrap(),
+        Shown::AlreadyShown(None)
+    );
+    let mut whole = |_: &mut dyn Read| Ok(true);
+    assert_eq!(
+        dest.finish_show("c.txt", &show, ShowCheck::Bytes(&mut whole))
+            .unwrap(),
+        Shown::AlreadyShown(Some(now(&dest)))
     );
     assert_eq!(
         dest.born("c.txt").unwrap(),
@@ -243,10 +271,10 @@ fn an_old_original_never_costs_the_tag_and_never_leaves_it_behind() {
     };
     let show = c.show().unwrap().clone();
     c.keep();
-    assert_eq!(
+    assert!(matches!(
         dest.finish_show("old.txt", &show, ShowCheck::Made).unwrap(),
-        Shown::Shown
-    );
+        Shown::Shown(_)
+    ));
     assert_eq!(
         *seen.lock().unwrap(),
         Some(tag),
@@ -783,10 +811,10 @@ fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
     assert!(dest.hidden("s.txt").unwrap(), "left exactly as it is");
     assert!(steps_seen.lock().unwrap().is_empty());
     // Proven: shown in order, the creation date given back last.
-    assert_eq!(
+    assert!(matches!(
         dest.finish_show("s.txt", &show, ShowCheck::Made).unwrap(),
-        Shown::Shown
-    );
+        Shown::Shown(_)
+    ));
     assert_eq!(
         *steps_seen.lock().unwrap(),
         ["shown", "modified", "created"]

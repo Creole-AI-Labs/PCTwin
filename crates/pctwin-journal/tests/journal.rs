@@ -720,7 +720,7 @@ fn a_filled_file_is_committed_with_its_show_pending_until_it_is_shown() {
         j.filled(id).unwrap();
         // Nothing is pending to be shown before the commit.
         assert!(matches!(
-            j.shown(id, None),
+            j.shown(id, None, None),
             Err(JournalError::OutOfOrder { .. })
         ));
         j.committed_showing(id, landed(), &show).unwrap();
@@ -740,14 +740,67 @@ fn a_filled_file_is_committed_with_its_show_pending_until_it_is_shown() {
     assert_eq!(pending[0].0.id, id);
     assert_eq!(pending[0].1, show);
     assert_eq!(j.show_pending(id).unwrap(), Some(show.clone()));
-    j.shown(id, Some("left hidden at Documents/f1.txt"))
+    j.shown(id, Some("left hidden at Documents/f1.txt"), None)
         .unwrap();
     assert!(j.unshown().unwrap().is_empty());
     assert_eq!(j.show_pending(id).unwrap(), None);
     assert_eq!(j.notes(id).unwrap(), ["left hidden at Documents/f1.txt"]);
+    // Nothing read after the show: the identity recorded at the commit stays.
+    let State::Committed { landed: kept, .. } = j.entry(id).unwrap().unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(kept, landed());
     // Shown once: not again.
     assert!(matches!(
-        j.shown(id, None),
+        j.shown(id, None, None),
         Err(JournalError::OutOfOrder { .. })
     ));
+}
+
+/// A file's identity can change as it is shown (on a Mac it carries the creation date, which is
+/// given back last), so the identity read after the show replaces the one recorded at the
+/// commit, in the same step that records it shown, and only then.
+#[test]
+fn the_identity_read_after_a_show_is_the_one_kept() {
+    use pctwin_journal::{Born, Fill, FillTag, Proof, Show};
+    let (_dir, j) = journal();
+    let tag = FillTag {
+        born: Some(Born {
+            secs: 1_766_000_000,
+            nanos: 0,
+        }),
+        hidden: true,
+    };
+    let show = Show {
+        fill: Fill {
+            final_path: "Documents/f2.txt".into(),
+            made: landed().file,
+            tag,
+            proof: Proof::Token,
+        },
+        created: None,
+        modified_ns: None,
+    };
+    let id = j.plan(&planned(2)).unwrap();
+    j.staged(id, ".pctwin-77-2.part", &[]).unwrap();
+    j.verified(id, [7; 32], None).unwrap();
+    j.filling(id, "Documents/f2.txt", tag, Proof::Token)
+        .unwrap();
+    j.fill_made(id, landed().file.unwrap()).unwrap();
+    j.filled(id).unwrap();
+    j.committed_showing(id, landed(), &show).unwrap();
+    let after = FileId {
+        born: Some(Born {
+            secs: 1_700_000_000,
+            nanos: 9,
+        }),
+        ..landed().file.unwrap()
+    };
+    j.shown(id, None, Some(after)).unwrap();
+    let State::Committed { landed: kept, .. } = j.entry(id).unwrap().unwrap().state else {
+        unreachable!()
+    };
+    assert_eq!(kept.file, Some(after));
+    assert_eq!(kept.size, landed().size);
+    assert_eq!(kept.modified_ns, landed().modified_ns);
 }

@@ -663,10 +663,14 @@ pub enum ShowCheck<'a> {
 /// How showing a committed, filled-in file ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shown {
-    /// Proven PCTwin's, then shown, with its real dates: record it shown.
-    Shown,
+    /// Proven PCTwin's, then shown, with its real dates: record it shown, with its identity as
+    /// it is now (on a Mac the identity carries the creation date, just given back).
+    Shown(FileId),
     /// Already shown (no longer hidden, and the tag that goes last is gone): record it shown.
-    AlreadyShown,
+    /// With its identity now when it is still the very file PCTwin made (the same file number
+    /// on the same drive, and, after a restart, its bytes the whole file's); otherwise the
+    /// identity recorded at the commit stays.
+    AlreadyShown(Option<FileId>),
     /// Nothing is at its name now: nothing left to do; record it shown.
     Gone,
     /// Hidden still, but nothing proves it PCTwin's now (another program's, or changed): left as
@@ -698,20 +702,28 @@ impl crate::Destination {
         let mut options = OpenOptions::new();
         options.read(true).write(true);
         let mut file = dir.open_with(name, &options)?.into_std();
-        let proven = proven_fill(&file, &show.fill)?
-            && match check {
-                ShowCheck::Made => show.fill.made == Some(identity(&file)?.0),
-                ShowCheck::Bytes(whole) => {
-                    file.seek(SeekFrom::Start(0))?;
-                    whole(&mut file)?
-                }
-            };
+        let now = identity(&file)?.0;
+        // After a restart, the bytes; in the same run, the identity recorded as made.
+        let whole = match check {
+            ShowCheck::Made => None,
+            ShowCheck::Bytes(whole) => {
+                file.seek(SeekFrom::Start(0))?;
+                Some(whole(&mut file)?)
+            }
+        };
+        let proven =
+            proven_fill(&file, &show.fill)? && whole.unwrap_or(show.fill.made == Some(now));
         if !proven {
-            return Ok(if is_hidden(&file)? {
-                Shown::NotProven
-            } else {
-                Shown::AlreadyShown
-            });
+            if is_hidden(&file)? {
+                return Ok(Shown::NotProven);
+            }
+            let same = show
+                .fill
+                .made
+                .is_some_and(|m| m.volume == now.volume && m.index == now.index);
+            return Ok(Shown::AlreadyShown(
+                (same && whole.unwrap_or(true)).then_some(now),
+            ));
         }
         let step = |what: &str| match &self.show_hook {
             Some(hook) => hook(what),
@@ -736,6 +748,6 @@ impl crate::Destination {
         step("created")?;
         full_sync(&file)?;
         crate::flush_name(&dir, name);
-        Ok(Shown::Shown)
+        Ok(Shown::Shown(identity(&file)?.0))
     }
 }

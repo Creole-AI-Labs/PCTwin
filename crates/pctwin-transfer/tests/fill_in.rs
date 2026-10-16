@@ -123,6 +123,16 @@ fn assert_landed_whole(journal: &Journal, dir: &Path, name: &str, bytes: &[u8]) 
     );
     assert!(journal.unfinished().unwrap().is_empty());
     assert!(journal.unshown().unwrap().is_empty(), "every copy is shown");
+    // The identity kept is the shown file's (on a Mac it carries the real creation date, given
+    // back after the commit), so Undo knows the file as it is now.
+    if let State::Committed { landed, .. } = &all[0].state {
+        let now = Destination::open(dir).unwrap().stat(name).unwrap().unwrap();
+        assert_eq!(
+            landed.file,
+            Some(now.id),
+            "the identity kept is the file's now"
+        );
+    }
     assert_eq!(std::fs::read(dir.join(name)).unwrap(), bytes);
     assert_eq!(names(dir), [name]);
     assert!(
@@ -235,9 +245,9 @@ impl Ledger for Breaks<'_> {
         self.check("committed")?;
         self.then("committed", self.inner.committed_showing(id, landed, show))
     }
-    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
         self.check("shown")?;
-        self.then("shown", self.inner.shown(id, left))
+        self.then("shown", self.inner.shown(id, left, file))
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.check("committed")?;

@@ -163,13 +163,21 @@ pub(crate) fn show_committed(
     check: ShowCheck<'_>,
 ) -> Result<Option<String>, JournalError> {
     match dest.finish_show(&show.fill.final_path, show, check) {
-        Ok(Shown::Shown | Shown::AlreadyShown | Shown::Gone) => {
-            journal.shown(id, None)?;
+        Ok(Shown::Shown(now)) => {
+            journal.shown(id, None, Some(now))?;
+            Ok(None)
+        }
+        Ok(Shown::AlreadyShown(now)) => {
+            journal.shown(id, None, now)?;
+            Ok(None)
+        }
+        Ok(Shown::Gone) => {
+            journal.shown(id, None, None)?;
             Ok(None)
         }
         Ok(Shown::NotProven) => {
             let note = left_hidden(&show.fill.final_path);
-            journal.shown(id, Some(&note))?;
+            journal.shown(id, Some(&note), None)?;
             Ok(Some(note))
         }
         Err(_) => Ok(None),

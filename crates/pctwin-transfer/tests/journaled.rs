@@ -478,9 +478,9 @@ impl Ledger for Breaks<'_> {
         self.check("committed")?;
         self.inner.committed_showing(id, landed, show)
     }
-    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
         self.check("shown")?;
-        self.inner.shown(id, left)
+        self.inner.shown(id, left, file)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.check("committed")?;
@@ -786,8 +786,8 @@ impl Ledger for Counting<'_> {
     ) -> Result<(), JournalError> {
         self.inner.committed_showing(id, landed, show)
     }
-    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
-        self.inner.shown(id, left)
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
+        self.inner.shown(id, left, file)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.inner.committed(id, landed)

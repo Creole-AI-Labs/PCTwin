@@ -1428,12 +1428,19 @@ impl Journal {
     }
 
     /// The committed file filled in under its name is shown (or there is nothing left PCTwin
-    /// may do to it: `left` then says, in plain words, what was left, kept for good).
-    pub fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+    /// may do to it: `left` then says, in plain words, what was left, kept for good). `file` is
+    /// its identity read after the show, which replaces the one recorded at the commit (on a Mac
+    /// the identity carries the creation date, given back last); `None` keeps that one.
+    pub fn shown(
+        &self,
+        id: u64,
+        left: Option<&str>,
+        file: Option<FileId>,
+    ) -> Result<(), JournalError> {
         let tx = self.db.begin_write().map_err(storage)?;
         {
-            let entries = tx.open_table(ENTRIES).map_err(storage)?;
-            let entry = read_entry(&entries, id)?;
+            let mut entries = tx.open_table(ENTRIES).map_err(storage)?;
+            let mut entry = read_entry(&entries, id)?;
             let mut table = tx.open_table(SHOWING).map_err(storage)?;
             let pending = table.remove(id).map_err(storage)?.is_some();
             if !pending || !matches!(entry.state, State::Committed { .. }) {
@@ -1443,6 +1450,10 @@ impl Journal {
                 });
             }
             drop(table);
+            if let (Some(file), State::Committed { landed, .. }) = (file, &mut entry.state) {
+                landed.file = Some(file);
+                write_entry(&mut entries, &entry)?;
+            }
             if let Some(words) = left {
                 add_note(&tx, id, words)?;
             }
@@ -2096,7 +2107,7 @@ pub trait Ledger {
     /// See [`Journal::committed_showing`].
     fn committed_showing(&self, id: u64, landed: Landed, show: &Show) -> Result<(), JournalError>;
     /// See [`Journal::shown`].
-    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError>;
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError>;
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
@@ -2157,8 +2168,8 @@ impl Ledger for Journal {
     fn committed_showing(&self, id: u64, landed: Landed, show: &Show) -> Result<(), JournalError> {
         Journal::committed_showing(self, id, landed, show)
     }
-    fn shown(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
-        Journal::shown(self, id, left)
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
+        Journal::shown(self, id, left, file)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         Journal::committed(self, id, landed)
