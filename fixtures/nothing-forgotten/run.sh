@@ -43,7 +43,8 @@ as_label() {
 
 sudo rm -rf "$work"
 sudo mkdir -p "$work/out" "$report"
-sudo chmod 755 "$work"
+sudo chown "$(id -u):$(id -g)" "$work"
+chmod 755 "$work"
 sudo chmod 1777 "$work/out" "$report"
 finish() {
   sudo chown -R "$(id -u)" "$report" 2>/dev/null
