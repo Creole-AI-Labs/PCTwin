@@ -32,7 +32,7 @@ pub struct Stamp {
 }
 
 impl Stamp {
-    fn of(meta: &std::fs::Metadata) -> Self {
+    pub(crate) fn of(meta: &std::fs::Metadata) -> Self {
         let modified_ns =
             meta.modified()
                 .ok()
@@ -188,7 +188,7 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
 /// Files and folders the system makes for itself: folder thumbnails and settings, the recycle bin
 /// and Trash, search and version indexes, Office's temporary lock files and the `._` files macOS
 /// leaves on other drives. Backup and migration tools skip these too.
-fn is_clutter(name: &str) -> bool {
+pub(crate) fn is_clutter(name: &str) -> bool {
     let lower = name.to_lowercase();
     matches!(
         lower.as_str(),
@@ -208,12 +208,12 @@ fn is_clutter(name: &str) -> bool {
         || lower.starts_with("._")
 }
 
-fn left_out(reason: LeftOutReason) -> Inclusion {
+pub(crate) fn left_out(reason: LeftOutReason) -> Inclusion {
     Inclusion::LeftOut { reason }
 }
 
 /// A name exactly as the system gave it.
-fn item_name(name: &OsStr) -> ItemName {
+pub(crate) fn item_name(name: &OsStr) -> ItemName {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
@@ -234,7 +234,7 @@ fn item_name(name: &OsStr) -> ItemName {
 /// macOS folders that act as one file. macOS also decides this from its own type database, which
 /// is not read here; these are the common kinds.
 #[derive(Debug, Clone, Copy)]
-enum Package {
+pub(crate) enum Package {
     App,
     Document,
     PhotosLibrary,
@@ -242,7 +242,7 @@ enum Package {
 }
 
 impl Package {
-    fn item_kind(self) -> ItemKind {
+    pub(crate) fn item_kind(self) -> ItemKind {
         match self {
             Package::App => ItemKind::App,
             _ => ItemKind::Folder,
@@ -250,7 +250,7 @@ impl Package {
     }
 }
 
-fn package_kind(name: &str) -> Option<Package> {
+pub(crate) fn package_kind(name: &str) -> Option<Package> {
     let ext = extension(name)?;
     Some(match ext.as_str() {
         "app" => Package::App,
@@ -268,7 +268,7 @@ fn extension(name: &str) -> Option<String> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Category {
+pub(crate) enum Category {
     Photo,
     Video,
     Music,
@@ -276,7 +276,7 @@ enum Category {
     Other,
 }
 
-fn category(name: &str) -> Category {
+pub(crate) fn category(name: &str) -> Category {
     let Some(ext) = extension(name) else {
         return Category::Other;
     };
@@ -295,7 +295,7 @@ fn category(name: &str) -> Category {
     }
 }
 
-fn count(category: Category, counts: &mut Counts) {
+pub(crate) fn count(category: Category, counts: &mut Counts) {
     match category {
         Category::Photo => counts.photos += 1,
         Category::Video => counts.videos += 1,
@@ -308,7 +308,7 @@ fn count(category: Category, counts: &mut Counts) {
 /// Counts the photos and videos in a Photos library from its originals (`originals` since
 /// Photos 5, `Masters` before), never its thumbnails or previews, and without opening its
 /// database.
-fn count_library(library: &Path, counts: &mut Counts) {
+pub(crate) fn count_library(library: &Path, counts: &mut Counts) {
     let mut pending: Vec<PathBuf> = ["originals", "Masters"]
         .iter()
         .map(|d| library.join(d))
