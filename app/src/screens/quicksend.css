@@ -315,10 +315,6 @@
   width: 100%;
 }
 
-.qs-replace {
-  margin-top: var(--space-3);
-}
-
 .qs-table-wrap {
   margin-top: var(--space-4);
   overflow-x: auto;

@@ -25,7 +25,7 @@ function Try<T>({ initial, children }: { initial: T; children: (value: T, set: (
   return <>{children(value, set)}</>;
 }
 
-function Keep({ conflicts, allowReplace = false }: { conflicts: Conflict[]; allowReplace?: boolean }) {
+function Keep({ conflicts }: { conflicts: Conflict[] }) {
   const [list, setList] = useState(conflicts);
   const [approved, setApproved] = useState(false);
   const change = (path: string, patch: Partial<Conflict>) => {
@@ -35,13 +35,9 @@ function Keep({ conflicts, allowReplace = false }: { conflicts: Conflict[]; allo
     <QuickKeep
       files={OFFER}
       conflicts={list}
-      allowReplace={allowReplace}
       approved={approved}
       onChoose={(path, choice) => {
-        change(path, { choice, replaceConfirmed: false, changed: false });
-      }}
-      onConfirmReplace={(path, on) => {
-        change(path, { replaceConfirmed: on });
+        change(path, { choice, changed: false });
       }}
       onApprovedChange={setApproved}
       onContinue={nothing}
@@ -146,7 +142,6 @@ export const samples: Sample[] = [
   { id: "Q10-default", title: "Keep your existing work safe", size: "everyday", render: () => <Keep conflicts={CONFLICTS} /> },
   { id: "Q10-no-conflicts", title: "Keep your existing work safe, no clashes", size: "everyday", render: () => <Keep conflicts={[]} /> },
   { id: "Q10-target-changed", title: "Keep your existing work safe, a file changed in the folder", size: "everyday", render: () => <Keep conflicts={[{ ...CONFLICTS[0], choice: null, changed: true }, CONFLICTS[1]]} /> },
-  { id: "Q10-replace-review", title: "Keep your existing work safe, replace needs its own confirmation", size: "everyday", render: () => <Keep allowReplace conflicts={[{ ...CONFLICTS[0], choice: "replace" }, { ...CONFLICTS[1], choice: "skip" }]} /> },
 
   { id: "Q11-waiting", title: "Approve this send, waiting for the receiver", size: "everyday", render: () => approve("waiting", false) },
   { id: "Q11-ready", title: "Approve this send, receiver accepted", size: "everyday", render: () => approve("accepted", true) },

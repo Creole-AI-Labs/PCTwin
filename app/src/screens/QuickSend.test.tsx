@@ -409,7 +409,7 @@ describe("Q09 Where should the files land?", () => {
 });
 
 describe("Q10 Keep your existing work safe", () => {
-  function Keep({ conflicts = CONFLICTS, allowReplace = false, onContinue = fn() }: { conflicts?: Conflict[]; allowReplace?: boolean; onContinue?: () => void }) {
+  function Keep({ conflicts = CONFLICTS, onContinue = fn() }: { conflicts?: Conflict[]; onContinue?: () => void }) {
     const [list, setList] = useState(conflicts);
     const [approved, setApproved] = useState(false);
     const change = (path: string, patch: Partial<Conflict>) => {
@@ -419,13 +419,9 @@ describe("Q10 Keep your existing work safe", () => {
       <QuickKeep
         files={OFFER}
         conflicts={list}
-        allowReplace={allowReplace}
         approved={approved}
         onChoose={(path, choice) => {
-          change(path, { choice, replaceConfirmed: false, changed: false });
-        }}
-        onConfirmReplace={(path, on) => {
-          change(path, { replaceConfirmed: on });
+          change(path, { choice, changed: false });
         }}
         onApprovedChange={setApproved}
         onContinue={onContinue}
@@ -456,19 +452,18 @@ describe("Q10 Keep your existing work safe", () => {
     expect(onContinue).toHaveBeenCalled();
   });
 
-  it("replace is offered only when the engine can, and needs its own separate confirmation", () => {
-    inApp(<Keep allowReplace />);
-    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "replace" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: text("qs-conflict-approve") }));
-    const go = button("qs-conflict-continue") as HTMLButtonElement;
-    expect(go.disabled).toBe(true);
-    expect(plain(screen.getByRole("alert").textContent)).toContain(plain(text("qs-replace-warning", { name: "beach.jpg" })));
-    fireEvent.click(screen.getByRole("checkbox", { name: nameHas(plain(text("qs-replace-confirm", { name: "beach.jpg" }))) }));
-    expect(go.disabled).toBe(false);
-    // Choosing something else again clears that confirmation.
-    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "skip" } });
-    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "replace" } });
-    expect(screen.getByRole<HTMLInputElement>("checkbox", { name: nameHas(plain(text("qs-replace-confirm", { name: "beach.jpg" }))) }).checked).toBe(false);
+  it("never offers Replace: every choice is exactly Keep both or Skip this item", () => {
+    inApp(<Keep />);
+    const boxes = screen.getAllByRole("combobox");
+    expect(boxes.length).toBe(CONFLICTS.length);
+    for (const box of boxes) {
+      // The "choose" placeholder (empty value) is not a choice.
+      const options = within(box)
+        .getAllByRole<HTMLOptionElement>("option")
+        .filter((o) => o.value !== "");
+      expect(options.map((o) => o.textContent)).toEqual([text("qs-keep-both"), text("qs-skip")]);
+      expect(options.map((o) => o.value)).not.toContain("replace");
+    }
   });
 
   it("a file that changed in the folder has no choice until chosen again", () => {
