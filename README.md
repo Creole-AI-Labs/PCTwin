@@ -2,6 +2,8 @@
 
 **Your setup. Your next laptop.**
 
+**Where we are:** see [UPDATE.md](UPDATE.md) for the latest progress, updated as work lands.
+
 PCTwin moves everything from your old laptop to your new one, whatever the brand or system: Windows, Mac or Linux. Pair the two laptops with a short code, and PCTwin moves your files, reinstalls your apps fresh and carries your settings across, then gives you a clear report of anything you still need to do.
 
 Moving your own laptops is free, with no limits.
