@@ -77,6 +77,28 @@ impl BlockMap {
         Ok(true)
     }
 
+    /// Marks `block` not done again (it read back wrong); `false` if it was not done.
+    pub fn remove(&mut self, block: u64) -> bool {
+        let Some((start, end)) = self
+            .runs
+            .range(..=block)
+            .next_back()
+            .map(|(s, e)| (*s, *e))
+            .filter(|(_, e)| *e > block)
+        else {
+            return false;
+        };
+        self.runs.remove(&start);
+        if start < block {
+            self.runs.insert(start, block);
+        }
+        if block + 1 < end {
+            self.runs.insert(block + 1, end);
+        }
+        self.done -= 1;
+        true
+    }
+
     /// The runs of done blocks, in order.
     pub fn runs(&self) -> impl Iterator<Item = Range<u64>> + '_ {
         self.runs.iter().map(|(s, e)| *s..*e)

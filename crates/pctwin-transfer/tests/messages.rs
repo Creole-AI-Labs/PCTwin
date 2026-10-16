@@ -75,6 +75,7 @@ fn all_kinds() -> Vec<Message> {
         Message::Receipt {
             stream: 7,
             block: 12,
+            written: true,
         },
         Message::ResumeFrom {
             stream: 7,
