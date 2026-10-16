@@ -93,8 +93,14 @@ function Invoke-As([string]$label, [string]$exe, [string[]]$arguments, [string]$
 }
 
 # One run as each account makes its profile folder, the way a first sign-in would.
-$cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-foreach ($l in $labels) { Invoke-As $l $cmd @('/c', 'exit', '0') "profile-$l" }
+$whoami = Join-Path $env:SystemRoot 'System32\whoami.exe'
+foreach ($l in $labels) { Invoke-As $l $whoami @() "profile-$l" }
+# Whether an account can list a folder: the lab's own snapshot does the listing.
+function Can-List([string]$label, [string]$dir) {
+    $q = Start-As $label $lab @('snapshot', $dir, (Join-Path $report 'peek.json')) 'peek'
+    $null = $q.WaitForExit(120000)
+    return ($q.ExitCode -eq 0)
+}
 function Get-ProfileOf([string]$label) {
     $sid = (Get-LocalUser -Name (Acct $label)).SID.Value
     return (Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $sid }).LocalPath
@@ -107,12 +113,8 @@ foreach ($l in $labels) {
     Write-Host "home $l = $h"
 }
 # Profile folders already refuse other standard users: verify, never assume.
-$peek = Start-As 'ada' $cmd @('/c', 'dir', $homes['cal']) 'peek-cal'
-$null = $peek.WaitForExit(60000)
-if ($peek.ExitCode -eq 0) { Bad "ada can list cal's profile folder; the test would prove nothing" }
-$peek = Start-As 'ada' $cmd @('/c', 'dir', $homes['bea']) 'peek-bea'
-$null = $peek.WaitForExit(60000)
-if ($peek.ExitCode -eq 0) {
+if (Can-List 'ada' $homes['cal']) { Bad "ada can list cal's profile folder; the test would prove nothing" }
+if (Can-List 'ada' $homes['bea']) {
     Label "bea's home listable by others" 'real' 'the system let ada list bea profile folder'
 } else {
     Label "bea's home listable by others" 'not reachable' 'Windows profile folders refuse other standard users; bea plants inside are refused to ada by the system default'
@@ -180,9 +182,7 @@ Note "the mover's real view"
 $observed = [ordered]@{ not_reachable = @() }
 foreach ($p in $spec.plants) {
     $dir = Top-Dir $p
-    $q = Start-As 'ada' $cmd @('/c', 'dir', $dir) 'peek'
-    $null = $q.WaitForExit(60000)
-    $listed = ($q.ExitCode -eq 0)
+    $listed = Can-List 'ada' $dir
     Write-Host "ada lists $dir ($($p.by), $($p.opens)): $listed"
     if ($p.by -eq 'ada' -and $p.opens -eq 'nobody' -and $listed) {
         $observed.not_reachable += $p.token
