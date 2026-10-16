@@ -168,8 +168,11 @@ pub fn volumes_this_laptop() -> Vec<Volume> {
     if cfg!(windows) {
         add_windows_network_and_discs(&mut out);
     }
-    // Folders inside one volume that are the mount of another are walked as that one.
-    let mounts: Vec<PathBuf> = out.iter().map(|v| v.mount.clone()).collect();
+    // Folders inside one volume that are the mount of another are walked as that one (or are
+    // the system's own views, like /proc); every mount the system lists counts, not only the
+    // drives above.
+    let mut mounts: Vec<PathBuf> = out.iter().map(|v| v.mount.clone()).collect();
+    mounts.extend(all_mount_points());
     for v in &mut out {
         v.skip.extend(
             mounts
@@ -187,10 +190,71 @@ pub fn volumes_this_laptop() -> Vec<Volume> {
                 v.skip.push(PathBuf::from("/System/Volumes"));
                 v.skip.push(PathBuf::from("/home"));
                 v.also.push(PathBuf::from("/System/Volumes/Data"));
+                // What the data volume shows through `/` (its firmlinks) is seen there, not
+                // again from the data volume's root.
+                let firmlinks = std::fs::read_to_string("/usr/share/firmlinks").unwrap_or_default();
+                v.skip.extend(firmlink_targets(&firmlinks));
             }
         }
     }
     out
+}
+
+/// macOS: the data-volume folders `/usr/share/firmlinks` shows through `/` (lines like
+/// `/Users<tab>Users`).
+pub fn firmlink_targets(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .filter_map(|l| l.split('\t').nth(1))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(|t| PathBuf::from("/System/Volumes/Data").join(t))
+        .collect()
+}
+
+/// Every mount point the system lists (Linux: `/proc/self/mounts`; elsewhere the drive list),
+/// including ones that are not drives (`/proc`, a tmpfs, a FUSE folder).
+fn all_mount_points() -> Vec<PathBuf> {
+    if cfg!(target_os = "linux") {
+        let text = std::fs::read_to_string("/proc/self/mounts").unwrap_or_default();
+        mount_points_from_proc(&text)
+    } else {
+        sysinfo::Disks::new_with_refreshed_list()
+            .list()
+            .iter()
+            .map(|d| d.mount_point().to_path_buf())
+            .collect()
+    }
+}
+
+/// Mount points from `/proc/self/mounts` (the second field, with `\040` for spaces and the like).
+pub fn mount_points_from_proc(text: &str) -> Vec<PathBuf> {
+    text.lines()
+        .filter_map(|l| l.split(' ').nth(1))
+        .map(unescape_octal)
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn unescape_octal(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && bytes[i + 1..i + 4]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
+        {
+            let v = (bytes[i + 1] - b'0') * 64 + (bytes[i + 2] - b'0') * 8 + (bytes[i + 3] - b'0');
+            out.push(v);
+            i += 4;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Windows: drive letters on USB disks, which can show as fixed drives.

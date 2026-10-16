@@ -300,7 +300,7 @@ fn things_in_odd_places_on_every_drive_are_found_and_the_systems_are_only_counte
         assert!(v.walked);
     }
     assert!(s.blind_spots.is_empty(), "{:?}", s.blind_spots);
-    assert_eq!(s.top_line, TopLine::Everything);
+    assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
 }
 
 #[test]
@@ -588,7 +588,7 @@ fn space_nobody_can_explain_is_a_blind_spot_and_small_gaps_are_not() {
     assert_eq!(s.top_line, TopLine::AccountedForExcept { places: 2 });
     let s = run(sized(facts(&lab, false), 4 * gb), &mut Answers::default());
     assert!(!s.volumes.iter().any(|v| v.flagged));
-    assert_eq!(s.top_line, TopLine::Everything);
+    assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
 }
 
 #[test]
@@ -614,7 +614,7 @@ fn removable_network_and_disc_drives_are_listed_not_walked() {
     assert!(!s.volumes[2].walked);
     assert_eq!(s.volumes[2].kind, VolumeKind::Removable);
     assert!(!s.volumes[3].walked);
-    assert_eq!(s.top_line, TopLine::Everything);
+    assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
 }
 
 #[test]
@@ -762,7 +762,10 @@ fn a_refusal_keeps_its_reason() {
             blind_reason_for(&Error::from_raw_os_error(5)),
             Some(BlindReason::NoPermission)
         );
-        assert_eq!(blind_reason_for(&Error::from_raw_os_error(2)), None);
+        assert_eq!(
+            blind_reason_for(&Error::from_raw_os_error(2)),
+            Some(BlindReason::ChangedDuringScan)
+        );
         assert_eq!(
             blind_reason_for(&Error::from_raw_os_error(32)),
             Some(BlindReason::InUse)
@@ -776,7 +779,10 @@ fn a_refusal_keeps_its_reason() {
             blind_reason_for(&Error::from_raw_os_error(13)),
             Some(BlindReason::NoPermission)
         );
-        assert_eq!(blind_reason_for(&Error::from_raw_os_error(2)), None);
+        assert_eq!(
+            blind_reason_for(&Error::from_raw_os_error(2)),
+            Some(BlindReason::ChangedDuringScan)
+        );
         let eperm = blind_reason_for(&Error::from_raw_os_error(1));
         if cfg!(target_os = "macos") {
             assert_eq!(eperm, Some(BlindReason::MacPrivacy));
@@ -802,6 +808,8 @@ fn a_second_root_behind_the_system_root_is_walked_without_counting_twice() {
     let mut f = sized(facts(&lab, false), 0);
     f.volumes[0].skip.push(lab.c.join("System").join("Volumes"));
     f.volumes[0].also.push(data.clone());
+    // macOS lists what the data volume shows through `/` in /usr/share/firmlinks.
+    f.volumes[0].skip.push(data.join("Users"));
     f.volumes[0].free_bytes += 7;
     let s = run(f, &mut Answers::default());
     find(
@@ -895,4 +903,326 @@ fn a_folder_whose_access_this_person_may_not_read_is_a_blind_spot_without_its_na
     assert_eq!(spot.path, None);
     assert!(spot.volume.is_some());
     assert_ne!(s.top_line, TopLine::Everything);
+}
+
+// --- Regressions from the fresh-context review (16 October 2026) ---------------------------
+
+#[test]
+fn a_folder_renamed_during_the_sweep_is_never_counted_as_looked_at() {
+    let lab = lab();
+    for i in 0..20 {
+        write(&lab.d.join(format!("Photos/Album{i}/beach{i}.jpg")), 10);
+    }
+    let stop = AtomicBool::new(false);
+    let mut renamed = false;
+    let d = lab.d.clone();
+    let s = sweep(
+        sized(facts(&lab, false), 0),
+        &mut Answers::default(),
+        &stop,
+        &mut |view| {
+            // Once the album waits to be listed (its parent was listed), it moves away.
+            if !renamed && String::from_utf8_lossy(&view.to_json()).contains("Album7") {
+                renamed = std::fs::rename(d.join("Photos/Album7"), d.join("Photos/Moved7")).is_ok();
+            }
+        },
+        &SweepLimits {
+            checkpoint_entries: 1,
+            checkpoint_every: std::time::Duration::ZERO,
+            ..SweepLimits::default()
+        },
+        None,
+    );
+    assert!(renamed);
+    assert!(s.finished);
+    assert!(
+        s.blind_spots
+            .iter()
+            .any(|b| b.reason == BlindReason::ChangedDuringScan),
+        "{:#?}",
+        s.blind_spots
+    );
+    assert_ne!(s.top_line, TopLine::Everything);
+}
+
+#[cfg(windows)]
+#[test]
+fn a_folder_whose_name_ends_in_a_dot_is_found() {
+    let lab = lab();
+    let odd = format!(r"\\?\{}\Notes.", lab.d.display());
+    std::fs::create_dir_all(&odd).unwrap();
+    std::fs::write(format!(r"{odd}\kept.txt"), b"12345").unwrap();
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    find(&s, FolderRole::Other, "Notes./kept.txt");
+    assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
+    std::fs::remove_file(format!(r"{odd}\kept.txt")).unwrap();
+    std::fs::remove_dir(&odd).unwrap();
+}
+
+#[test]
+fn another_persons_names_never_reach_the_frontier_or_a_stopped_sweep() {
+    let lab = lab();
+    for i in 0..15 {
+        write(&lab.bea.join(format!("BEA-PICS-{i}/BEA-PHOTO-{i}.jpg")), 10);
+    }
+    write(&lab.d.join("Shared/x.txt"), 1);
+    let stop = AtomicBool::new(false);
+    let mut saved = Vec::new();
+    let s = sweep(
+        sized(facts(&lab, true), 0),
+        &mut Answers::default(),
+        &stop,
+        &mut |view| {
+            saved.push(view.to_json());
+            if saved.len() == 3 {
+                stop.store(true, Ordering::SeqCst);
+            }
+        },
+        &SweepLimits {
+            checkpoint_entries: 1,
+            checkpoint_every: std::time::Duration::ZERO,
+            ..SweepLimits::default()
+        },
+        None,
+    );
+    for json in &saved {
+        assert!(!String::from_utf8_lossy(json).contains("BEA-"));
+    }
+    assert!(!serde_json::to_string(&s).unwrap().contains("BEA-"));
+    // Resumed, the sweep still counts her home, still without a name.
+    let resumed = sweep(
+        sized(facts(&lab, true), 0),
+        &mut Answers::default(),
+        &AtomicBool::new(false),
+        &mut |_| {},
+        &SweepLimits::default(),
+        s.frontier.clone(),
+    );
+    assert!(resumed.finished);
+    assert!(!serde_json::to_string(&resumed).unwrap().contains("BEA-"));
+    let bea = resumed
+        .places
+        .iter()
+        .find(|p| {
+            p.placement.whose
+                == Whose::Person {
+                    account_id: BEA.into(),
+                }
+        })
+        .unwrap();
+    assert_eq!(bea.bytes, 150);
+}
+
+#[test]
+fn another_persons_project_history_or_package_in_a_shared_folder_is_not_listed() {
+    let lab = lab();
+    write(&lab.d.join("Family/holiday.jpg"), 3);
+    write(&lab.d.join("Family/.git/BEA-COMMIT"), 3);
+    write(&lab.d.join("Family/BEA-DIARY.pages/Index.xml"), 3);
+    write(&lab.d.join("Family/node_modules/BEA-PKG/index.js"), 3);
+    let bea_only = || {
+        AccessFact::Known(
+            access_from_sddl(&format!("O:{BEA}D:P(A;;FA;;;BA)(A;OICI;FA;;;{BEA})")).unwrap(),
+        )
+    };
+    let mut answers = Answers::default();
+    for name in [".git", "BEA-DIARY.pages", "node_modules"] {
+        answers.0.insert(name.into(), bea_only());
+    }
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    assert_eq!(
+        find(&s, FolderRole::Other, "Family/holiday.jpg").owner,
+        Owner::Shared
+    );
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("BEA-"), "{json}");
+    assert!(!s.record.items.iter().any(|i| shown(i).contains(".git")));
+    assert!(
+        !s.record
+            .items
+            .iter()
+            .any(|i| shown(i).contains("node_modules"))
+    );
+    let theirs = s
+        .blind_spots
+        .iter()
+        .find(|b| {
+            b.reason
+                == BlindReason::AnotherPerson {
+                    account_id: Some(BEA.into()),
+                }
+        })
+        .expect("a blind spot for her corners");
+    assert_eq!(theirs.path, None);
+    assert_eq!(theirs.count, 3);
+}
+
+#[test]
+fn a_subfolder_everyone_can_read_inside_a_place_shared_by_two_stays_shared_by_two() {
+    let lab = lab();
+    write(&lab.d.join("Ours/Open/note.txt"), 3);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "Ours".into(),
+        AccessFact::Known(
+            access_from_sddl(&format!("O:{ADA}D:P(A;OICI;FA;;;{ADA})(A;OICI;FA;;;{BEA})")).unwrap(),
+        ),
+    );
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    let note = find(&s, FolderRole::Other, "Ours/Open/note.txt");
+    assert_eq!(
+        s.placement_of(&note.id).unwrap().whose,
+        Whose::Shared {
+            limited_to: vec![ADA.into(), BEA.into()]
+        }
+    );
+}
+
+#[test]
+fn a_home_that_is_its_own_volume_is_walked_once_and_as_that_persons_home() {
+    let lab = lab();
+    write(&lab.ada.join("code/main.rs"), 7);
+    write(&lab.bea.join("BEA-SECRET/letter.txt"), 9);
+    let mut f = sized(facts(&lab, true), 0);
+    // As a ZFS dataset or a systemd-homed home per person: each home is its own mount.
+    f.volumes[0].skip.push(lab.ada.clone());
+    f.volumes[0].skip.push(lab.bea.clone());
+    f.volumes
+        .push(volume(&lab.ada, false, VolumeKind::Internal, DiskKind::Ssd));
+    f.volumes
+        .push(volume(&lab.bea, false, VolumeKind::Internal, DiskKind::Ssd));
+    let s = run(f, &mut Answers::default());
+    let main: Vec<_> = s
+        .record
+        .items
+        .iter()
+        .filter(|i| shown(i).ends_with("main.rs"))
+        .collect();
+    assert_eq!(main.len(), 1, "listed once");
+    assert_eq!(main[0].owner, mover());
+    assert_eq!(main[0].place.role, FolderRole::Home);
+    assert!(!serde_json::to_string(&s).unwrap().contains("BEA-SECRET"));
+    let bea = s
+        .places
+        .iter()
+        .find(|p| {
+            p.placement.whose
+                == Whose::Person {
+                    account_id: BEA.into(),
+                }
+        })
+        .unwrap();
+    assert_eq!(bea.bytes, 9);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_old_homes_inside_an_older_copy_of_windows_are_placed_by_their_owners() {
+    let lab = lab();
+    write(&lab.c.join("Windows.old/Windows/System32/old.dll"), 50);
+    write(
+        &lab.c
+            .join("Windows.old/Users/olduser/Documents/OLD-LETTER.docx"),
+        20,
+    );
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "olduser".into(),
+        AccessFact::Known(
+            access_from_sddl("O:S-1-5-21-9-9-9-1001D:P(A;OICI;FA;;;S-1-5-21-9-9-9-1001)").unwrap(),
+        ),
+    );
+    let s = run(sized(facts(&lab, false), 0), &mut answers);
+    assert!(!serde_json::to_string(&s).unwrap().contains("OLD-LETTER"));
+    let old = s
+        .places
+        .iter()
+        .find(|p| matches!(p.placement.whose, Whose::FromOldAccount { .. }) && p.bytes == 20)
+        .expect("the old home is counted as from an old account");
+    assert_eq!(old.path, None);
+}
+
+#[test]
+fn local_groups_and_gone_accounts_do_not_widen_a_folder() {
+    let lab = lab();
+    write(&lab.d.join("Mine/a.txt"), 3);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "Mine".into(),
+        AccessFact::Known(
+            access_from_sddl(&format!(
+                "O:{ADA}D:P(A;OICI;FA;;;{ADA})(A;OICI;FA;;;S-1-5-21-111-222-333-1077)(A;OICI;FA;;;S-1-5-21-111-222-333-1012)"
+            ))
+            .unwrap(),
+        ),
+    );
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    assert_eq!(find(&s, FolderRole::Other, "Mine/a.txt").owner, mover());
+}
+
+#[test]
+fn two_blind_spots_that_cannot_be_named_still_count_as_two() {
+    let lab = lab();
+    write(&lab.d.join("Theirs-one/x.txt"), 1);
+    write(&lab.d.join("Theirs-two/y.txt"), 1);
+    let mut answers = Answers::default();
+    for n in ["Theirs-one", "Theirs-two"] {
+        answers.0.insert(
+            n.into(),
+            AccessFact::Unknown {
+                why: "denied".into(),
+            },
+        );
+    }
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    assert_eq!(s.top_line, TopLine::AccountedForExcept { places: 2 });
+    let spot = s
+        .blind_spots
+        .iter()
+        .find(|b| b.reason == BlindReason::AccessNotReadable)
+        .unwrap();
+    assert_eq!(spot.count, 2);
+}
+
+#[test]
+fn a_slow_checkpoint_never_stops_the_sweep_from_finishing() {
+    let lab = lab();
+    for i in 0..40 {
+        write(&lab.d.join(format!("Data/{i}/f.txt")), 1);
+    }
+    let mut saves = 0;
+    let s = sweep(
+        sized(facts(&lab, false), 0),
+        &mut Answers::default(),
+        &AtomicBool::new(false),
+        &mut |_| {
+            saves += 1;
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        },
+        &SweepLimits {
+            checkpoint_entries: 1,
+            checkpoint_every: std::time::Duration::ZERO,
+            ..SweepLimits::default()
+        },
+        None,
+    );
+    assert!(s.finished);
+    // Saving takes at most about a fifth of the time: far fewer saves than folders.
+    assert!(saves < 30, "{saves} saves");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_one_person_keeps_to_themselves_in_a_shared_folder_is_not_listed() {
+    let lab = lab();
+    write(&lab.d.join("Family/holiday.jpg"), 3);
+    write(&lab.d.join("Family/BEA-PRIVATE.txt"), 4);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "BEA-PRIVATE.txt".into(),
+        AccessFact::Known(access_from_sddl(&format!("O:{BEA}D:P(A;;FA;;;{BEA})")).unwrap()),
+    );
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    find(&s, FolderRole::Other, "Family/holiday.jpg");
+    assert!(!serde_json::to_string(&s).unwrap().contains("BEA-PRIVATE"));
 }

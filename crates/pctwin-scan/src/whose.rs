@@ -130,7 +130,9 @@ pub fn place(facts: &Facts<'_>, people: &dyn People) -> Placement {
         let rule = Rule::RulesFile { row: row.label() };
         let outside_homes = facts.home.is_none() && facts.around.is_none();
         let whose = match row.kind {
-            Kind::System | Kind::App | Kind::Junk if outside_homes => Whose::System,
+            Kind::System | Kind::App | Kind::Junk | Kind::OldSystem if outside_homes => {
+                Whose::System
+            }
             // Inside a person's things (a home, or a place already theirs): it stays theirs,
             // only counted.
             _ => match facts.around {
@@ -237,7 +239,14 @@ pub fn place(facts: &Facts<'_>, people: &dyn People) -> Placement {
             rule,
         }
     };
-    let readers: BTreeSet<&String> = access.people.iter().collect();
+    // Only people who exist read anything: a local group the system did not explain and an
+    // account that is gone are left out, which can only make a place narrower (a thing never
+    // lands where more people can open it than before).
+    let readers: BTreeSet<&String> = access
+        .people
+        .iter()
+        .filter(|id| id.as_str() == people.mover() || people.is_account(id))
+        .collect();
     match readers.len() {
         0 => match &access.owner {
             Some(owner) if owner.starts_with("S-1-5-21-") || owner.starts_with("S-1-12-1-") => {

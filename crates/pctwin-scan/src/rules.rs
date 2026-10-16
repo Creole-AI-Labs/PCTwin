@@ -19,6 +19,9 @@ pub enum Kind {
     Rebuildable,
     /// The person's own, counted and moved as one item (a project's history).
     KeepWhole,
+    /// An older copy of the system (`Windows.old`): the system's, except the old homes it
+    /// keeps, which are placed by their owners.
+    OldSystem,
 }
 
 /// Where a row applies.
@@ -144,6 +147,7 @@ impl Rules {
                 "junk" => Kind::Junk,
                 "rebuildable" => Kind::Rebuildable,
                 "keep-whole" => Kind::KeepWhole,
+                "old-system" => Kind::OldSystem,
                 _ => return Err(bad("unknown kind")),
             };
             if name.is_empty() || (place != Where::Under && name.contains('/')) {

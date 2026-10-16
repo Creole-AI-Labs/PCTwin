@@ -15,6 +15,8 @@
 #           junk         caches, temporary files and bins
 #           rebuildable  can be made again (downloaded packages, build output); counted as one item
 #           keep-whole   the person's own, counted and moved as one item (a project's history)
+#           old-system   an older copy of the system: the system's, except the old homes inside it,
+#                        which are placed by their owners
 # Names are compared ignoring case on Windows and macOS. Lines starting with # are notes.
 
 windows | sysroot | Windows | system
@@ -29,7 +31,7 @@ windows | sysroot | $SysReset | system
 windows | sysroot | $Windows.~BT | system
 windows | sysroot | $Windows.~WS | system
 windows | sysroot | $GetCurrent | system
-windows | sysroot | Windows.old | system
+windows | sysroot | Windows.old | old-system
 windows | sysroot | inetpub | app
 windows | sysroot | MSOCache | app
 windows | sysroot | OneDriveTemp | junk

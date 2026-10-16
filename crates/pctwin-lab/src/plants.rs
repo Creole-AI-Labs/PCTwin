@@ -383,6 +383,10 @@ pub struct Roots {
     pub other_drive: PathBuf,
     /// Each lab person's home folder, by label.
     pub homes: BTreeMap<String, PathBuf>,
+    /// Each lab person's account ID, by label, when the lab knows it: the check then ties every
+    /// other person's plant to that person's own count or blind spot.
+    #[serde(default)]
+    pub ids: BTreeMap<String, String>,
 }
 
 impl Roots {
@@ -610,6 +614,19 @@ fn norm(p: &str) -> String {
     }
 }
 
+/// The volume (as the sweep names it, normalised) a path is on: the longest mount that holds it.
+fn volume_of(sweep: &Value, path: &str) -> String {
+    sweep
+        .get("volumes")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .map(|v| norm(s(v, "mount")))
+        .filter(|m| path == m || path.starts_with(&format!("{m}/")) || m.is_empty())
+        .max_by_key(String::len)
+        .unwrap_or_default()
+}
+
 /// Where every record item really is, worked out from the sweep's own output: known folders from
 /// their place, home items from the mover's home, other items from their drive.
 pub fn item_paths(sweep: &Value) -> Vec<(String, &Value)> {
@@ -717,7 +734,6 @@ pub fn check(
         .get("blind_spots")
         .and_then(Value::as_array)
         .unwrap_or(&empty);
-    let reasons: Vec<&str> = blind.iter().map(|b| s(b, "reason")).collect();
     for p in &spec.plants {
         let (Some(file), Some(top)) = (roots.file_of(p), roots.top_of(p)) else {
             problems.push(format!("{}: no root to check", p.token));
@@ -796,16 +812,35 @@ pub fn check(
                         p.token
                     ));
                 }
+                // This plant, not just any: a nameless count of its owner's on its drive, or a
+                // blind spot with an allowed reason on its drive (for its owner, when the reason
+                // names one).
+                let vol = volume_of(sweep, &top_n);
+                let id = roots.ids.get(&p.by).map(String::as_str);
+                let is_theirs = |v: &Value| match v.get("account_id").and_then(Value::as_str) {
+                    Some(a) => id.is_none_or(|id| id == a),
+                    None => true,
+                };
                 let counted = sweep
                     .get("places")
                     .and_then(Value::as_array)
                     .is_some_and(|ps| {
                         ps.iter().any(|pl| {
+                            let placed = pl.get("placement").unwrap_or(&Value::Null);
                             pl.get("path").is_none_or(Value::is_null)
-                                && matches!(s(pl, "whose"), "person" | "from-old-account")
+                                && matches!(s(placed, "whose"), "person" | "from-old-account")
+                                && norm(s(pl, "volume")) == vol
+                                && is_theirs(placed)
+                                && pl.get("files").and_then(Value::as_u64).unwrap_or(0) > 0
                         })
                     });
-                if !counted && !reasons.iter().any(|r| allowed.iter().any(|a| a == r)) {
+                let spotted = blind.iter().any(|b| {
+                    allowed.iter().any(|a| a == s(b, "reason"))
+                        && norm(s(b, "volume")) == vol
+                        && b.get("path").is_none_or(Value::is_null)
+                        && is_theirs(b)
+                });
+                if !counted && !spotted {
                     problems.push(format!(
                         "{}: neither counted as someone else's nor a blind spot ({allowed:?})",
                         p.token

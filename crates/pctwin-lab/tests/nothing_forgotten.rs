@@ -36,6 +36,13 @@ impl AccessReader for FromSpec {
         let Some(p) = self.spec.plants.iter().find(|p| p.top() == name) else {
             return everyone();
         };
+        // On Windows a person who is not an administrator may not even read who can open
+        // another person's private folder: the system refuses (UnauthorizedAccessException).
+        if cfg!(windows) && p.by != self.spec.mover() && p.opens != Opens::Everyone {
+            return AccessFact::Unknown {
+                why: "UnauthorizedAccessException".into(),
+            };
+        }
         let owner = &self.ids[&p.by];
         let sddl = match p.opens {
             Opens::Everyone => format!("O:{owner}D:(A;;FA;;;{owner})(A;;0x1200a9;;;BU)"),
@@ -71,7 +78,12 @@ fn refuse(dir: &Path) -> bool {
     pctwin_lab::plants::set_access(dir, Opens::Nobody).is_ok() && std::fs::read_dir(dir).is_err()
 }
 
-fn run_one(seed: u64, people: usize) {
+/// One lab laptop, swept: the spec, its roots, the sweep's JSON and the folder holding it all
+/// (kept alive while the answer is checked). `None` when this account reads everything (root).
+fn lab_run(
+    seed: u64,
+    people: usize,
+) -> Option<(LaptopSpec, Roots, serde_json::Value, tempfile::TempDir)> {
     let spec = plan(seed, people);
     let base = tempfile::tempdir().unwrap();
     let c = base.path().join("C");
@@ -102,6 +114,7 @@ fn run_one(seed: u64, people: usize) {
         system_root: c.clone(),
         other_drive: d.clone(),
         homes: homes.clone(),
+        ids: ids.clone(),
     };
     plant(&spec, &roots, None).unwrap();
     // The snapshot reads everything, so the folders the mover may not open are opened for it,
@@ -130,7 +143,7 @@ fn run_one(seed: u64, people: usize) {
         let home = &homes[&p.label];
         if !refuse(home) {
             eprintln!("not reachable here: this account reads every folder (root)");
-            return;
+            return None;
         }
         closed.push(home.clone());
     }
@@ -169,7 +182,7 @@ fn run_one(seed: u64, people: usize) {
     };
     let mut reader = FromSpec {
         spec: spec.clone(),
-        ids,
+        ids: ids.clone(),
     };
     let stop = AtomicBool::new(false);
     let result = sweep(
@@ -193,18 +206,157 @@ fn run_one(seed: u64, people: usize) {
         pctwin_lab::compare(&before, &after).is_empty(),
         "the old laptop changed"
     );
-    let exists = |p: &str| PathBuf::from(p).exists() || Path::new(&p.replace('/', "\\")).exists();
-    let problems = check(&spec, &roots, &json, &Observed::default(), &exists);
-    assert!(
-        problems.is_empty(),
-        "seed {seed}, {people} people:\n{}\nblind spots: {:#?}",
-        problems.join("\n"),
-        result.blind_spots
-    );
     // With other people present, their closed homes are blind spots, so never "everything".
     if spec.several() {
         assert_ne!(result.top_line, pctwin_scan::TopLine::Everything);
     }
+    Some((spec, roots, json, base))
+}
+
+fn exists(p: &str) -> bool {
+    PathBuf::from(p).exists() || Path::new(&p.replace('/', "\\")).exists()
+}
+
+fn run_one(seed: u64, people: usize) {
+    let Some((spec, roots, json, _base)) = lab_run(seed, people) else {
+        return;
+    };
+    let problems = check(&spec, &roots, &json, &Observed::default(), &exists);
+    assert!(
+        problems.is_empty(),
+        "seed {seed}, {people} people:\n{}\nblind spots: {:#}\nunnamed places: {:#}",
+        problems.join("\n"),
+        json["blind_spots"],
+        serde_json::Value::Array(
+            json["places"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| p["path"].is_null())
+                .cloned()
+                .collect()
+        )
+    );
+}
+
+/// The checker must catch every way a sweep can fall short: each damaged copy of a good sweep's
+/// answer is reported.
+#[test]
+fn the_answer_key_catches_every_kind_of_wrong_sweep() {
+    use pctwin_lab::plants::Expect;
+    let Some((spec, roots, good, _base)) = lab_run(23, 4) else {
+        return;
+    };
+    let check_of = |v: &serde_json::Value| check(&spec, &roots, v, &Observed::default(), &exists);
+    assert!(check_of(&good).is_empty());
+    let token = |want: &dyn Fn(&Expect) -> bool| {
+        spec.plants
+            .iter()
+            .find(|p| want(&p.expect))
+            .map(|p| p.token.clone())
+            .unwrap()
+    };
+    let items = |v: &mut serde_json::Value| -> Vec<serde_json::Value> {
+        v["record"]["items"].as_array().unwrap().clone()
+    };
+    let names_token = |item: &serde_json::Value, t: &str| item["path"].to_string().contains(t);
+
+    // 1. A thing of the mover's missing from the record.
+    let mover = token(&|e| *e == Expect::Mover);
+    let mut bad = good.clone();
+    let kept: Vec<_> = items(&mut bad)
+        .into_iter()
+        .filter(|i| !names_token(i, &mover))
+        .collect();
+    bad["record"]["items"] = kept.into();
+    assert!(
+        check_of(&bad).iter().any(|l| l.contains(&mover)),
+        "missing item"
+    );
+
+    // 2. A shared thing given to the mover.
+    let shared = token(&|e| *e == Expect::Shared);
+    let mut bad = good.clone();
+    let mut list = items(&mut bad);
+    for i in &mut list {
+        if names_token(i, &shared) {
+            i["owner"] = serde_json::json!({"person": {"account_id": good["census"]["me"]}});
+        }
+    }
+    bad["record"]["items"] = list.into();
+    assert!(
+        check_of(&bad).iter().any(|l| l.contains(&shared)),
+        "wrong owner"
+    );
+
+    // 3. Another person's thing named anywhere.
+    let theirs = token(&|e| matches!(e, Expect::NotNamed { .. }));
+    let mut bad = good.clone();
+    bad["places"][0]["path"] = serde_json::Value::String(format!("D:/{theirs}"));
+    assert!(check_of(&bad).iter().any(|l| l.contains(&theirs)), "named");
+
+    // 4. Another person's thing neither counted nor a blind spot.
+    let mut bad = good.clone();
+    let places: Vec<_> = bad["places"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| !matches!(p["whose"].as_str(), Some("person" | "from-old-account")))
+        .cloned()
+        .collect();
+    bad["places"] = places.into();
+    bad["blind_spots"] = serde_json::json!([]);
+    bad["top_line"] = serde_json::json!({"line": "everything"});
+    assert!(
+        check_of(&bad).iter().any(|l| l.contains("neither counted")),
+        "forgotten silently"
+    );
+
+    // 5. "Everything" while a blind spot remains.
+    let mut bad = good.clone();
+    bad["top_line"] = serde_json::json!({"line": "everything"});
+    assert!(
+        check_of(&bad).iter().any(|l| l.contains("top line")),
+        "top line"
+    );
+
+    // 6. An invented item inside the lab's places.
+    let mut bad = good.clone();
+    let mut list = items(&mut bad);
+    let mut fake = list
+        .iter()
+        .filter(|i| names_token(i, &mover))
+        .max_by_key(|i| i["path"].as_array().map_or(0, Vec::len))
+        .cloned()
+        .unwrap();
+    // Inside the planted folder, where nothing changes between the sweep and the check.
+    let mut parts = fake["path"].as_array().unwrap().clone();
+    parts.pop();
+    parts.push(serde_json::json!({"text": "invented.txt"}));
+    fake["path"] = parts.into();
+    fake["id"] = serde_json::json!("0123456789abcdef0123456789abcdef");
+    list.push(fake);
+    bad["record"]["items"] = list.into();
+    assert!(
+        check_of(&bad).iter().any(|l| l.starts_with("invented")),
+        "invented"
+    );
+
+    // 7. A refused folder that is not a blind spot.
+    let locked = token(&|e| matches!(e, Expect::Unreadable { .. }));
+    let mut bad = good.clone();
+    let spots: Vec<_> = bad["blind_spots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|b| b["reason"] != "no-permission")
+        .cloned()
+        .collect();
+    bad["blind_spots"] = spots.into();
+    assert!(
+        check_of(&bad).iter().any(|l| l.contains(&locked)),
+        "refused folder"
+    );
 }
 
 #[test]
@@ -257,6 +409,7 @@ fn the_spec_and_roots_read_back_exactly_as_written() {
         system_root: PathBuf::from("C:/"),
         other_drive: PathBuf::from("E:/"),
         homes: BTreeMap::from([("ada".to_string(), PathBuf::from("C:/Users/ada"))]),
+        ids: BTreeMap::from([("ada".to_string(), "S-1-5-21-9-9-9-1000".to_string())]),
     };
     let back: Roots = serde_json::from_slice(&serde_json::to_vec(&roots).unwrap()).unwrap();
     assert_eq!(back, roots);
