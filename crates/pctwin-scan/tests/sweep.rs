@@ -799,3 +799,20 @@ fn a_second_root_behind_the_system_root_is_walked_without_counting_twice() {
     );
     assert_eq!(s.volumes[0].unexplained_bytes, 0);
 }
+
+#[test]
+fn a_folder_among_the_homes_that_nobody_explains_is_never_written_off_as_the_systems() {
+    let lab = lab();
+    write(&lab.c.join("Users/ghost/Desktop/plans.txt"), 12);
+    write(&lab.c.join("Users/Default/NTUSER.DAT"), 5);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    // One person: the unexplained folder is the mover's, found and moved.
+    let plans = find(&s, FolderRole::Other, "Users/ghost/Desktop/plans.txt");
+    assert_eq!(plans.owner, mover());
+    let default = s
+        .places
+        .iter()
+        .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with("Default")))
+        .unwrap();
+    assert_eq!(default.placement.whose, Whose::System);
+}

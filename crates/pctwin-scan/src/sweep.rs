@@ -41,6 +41,9 @@ use crate::scan::{
 use crate::volumes::{Volume, VolumeKind};
 use crate::whose::{Facts, HomeOf, People, Placement, Rule, Whose, place as place_by_ladder};
 
+/// The system's own folders in the profiles folder: counted, never anyone's.
+const SYSTEM_PROFILES: [&str; 3] = ["Default", "Default User", "All Users"];
+
 /// How far the first, breadth-first pass goes below each volume's root.
 pub const SHALLOW_DEPTH: u16 = 3;
 
@@ -1596,10 +1599,23 @@ impl Sweeper<'_> {
                 self.enqueue(child);
                 continue;
             }
-            // Default, All Users, Public's own corners: the system's.
-            let p = self.system_place(job.volume, &path, Space::TheSystem);
-            let child = self.child(job, &name, Zone::Count { place: p }, None);
-            self.enqueue(child);
+            // The system's own profiles (Default, All Users) are counted. Anything else that is
+            // nobody's home (Public when the system did not name it, a folder the census could
+            // not explain) is never written off as the system's: it is explored and placed like
+            // any folder outside a home.
+            let text = name.display().to_string();
+            if SYSTEM_PROFILES
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(&text))
+                || text.to_ascii_lowercase().starts_with("defaultuser")
+            {
+                let p = self.system_place(job.volume, &path, Space::TheSystem);
+                let child = self.child(job, &name, Zone::Count { place: p }, None);
+                self.enqueue(child);
+            } else {
+                let child = self.child(job, &name, Zone::Explore { inside: None }, None);
+                self.enqueue(child);
+            }
         }
     }
 
@@ -2078,7 +2094,31 @@ impl Sweeper<'_> {
                     }
                 }
                 Some(EntryKind::Link) => self.state.links += 1,
-                None => {}
+                None => {
+                    // Something whose details could not be read: never dropped silently. In
+                    // another person's place it is their blind spot (no name); in the system's
+                    // it is the system's own corner; otherwise it is listed.
+                    let meta = &self.state.meta[place];
+                    if meta.private {
+                        let job = Job {
+                            zone: Zone::Count { place },
+                            ..job.clone()
+                        };
+                        self.refused(&job, Refusal::NoPermission);
+                    } else if matches!(meta.space, Space::TheSystem | Space::Apps | Space::Junk) {
+                        self.state.vols[job.volume]
+                            .lines
+                            .entry(Space::SystemKeepsToItself)
+                            .or_insert((0, false))
+                            .1 = false;
+                    } else {
+                        self.blind(
+                            job.volume,
+                            Some(path.to_string_lossy().into_owned()),
+                            BlindReason::NoPermission,
+                        );
+                    }
+                }
             }
         }
     }
