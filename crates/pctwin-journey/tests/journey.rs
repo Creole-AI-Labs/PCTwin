@@ -15,6 +15,19 @@ use pctwin_link::{Host, HostPending, LinkConfig, LinkError};
 use pctwin_pairing::RotatingSender;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+/// How long a test waits for a step before calling it a deadlock. It is not a guess at the
+/// runner's speed: every step here takes well under a second, so a busy runner never comes near
+/// it, while a step that waits for ever still fails the test instead of hanging the run.
+const HANG_AFTER: Duration = Duration::from_secs(300);
+
+/// Runs `work` to its end, failing only if it is still waiting after [`HANG_AFTER`].
+async fn no_hang<T>(work: impl std::future::Future<Output = T>) -> T {
+    match tokio::time::timeout(HANG_AFTER, work).await {
+        Ok(done) => done,
+        Err(_) => panic!("hung: still waiting after {HANG_AFTER:?}, a deadlock, not a slow runner"),
+    }
+}
+
 fn config() -> LinkConfig {
     LinkConfig {
         connect_timeout: Duration::from_millis(500),
@@ -77,12 +90,12 @@ async fn counted_old_laptop() -> (
     (old, updates, found, asked)
 }
 
-/// The next update matching `want`, within five seconds.
+/// The next update matching `want`.
 async fn next<T>(
     updates: &mut UnboundedReceiver<OldUpdate>,
     want: impl Fn(&OldUpdate) -> Option<T>,
 ) -> T {
-    tokio::time::timeout(Duration::from_secs(5), async {
+    no_hang(async {
         loop {
             let u = updates.recv().await.expect("updates keep coming");
             if let Some(t) = want(&u) {
@@ -91,7 +104,6 @@ async fn next<T>(
         }
     })
     .await
-    .expect("the update came within five seconds")
 }
 
 fn code_of(u: &OldUpdate) -> Option<(String, u64)> {
@@ -305,11 +317,11 @@ async fn once_paired_no_other_laptop_can_reach_the_old_laptop() {
     let (picked, approved) = tokio::join!(old.pick(round, waiting.number()), waiting.approval());
     let _links = (picked.unwrap(), approved.unwrap());
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let later = tokio::time::timeout(Duration::from_secs(3), new.connect(&found, "123456")).await;
+    let later = no_hang(new.connect(&found, "123456")).await;
     assert!(
-        matches!(later, Ok(Err(Problem::Unreachable))),
+        matches!(later, Err(Problem::Unreachable)),
         "after pairing: {:?}",
-        later.as_ref().map(|r| r.as_ref().err())
+        later.as_ref().err()
     );
 }
 

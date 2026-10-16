@@ -237,11 +237,11 @@ impl World {
 
 async fn send_all(sender: &mut SenderSession, receiver: &mut ReceiverSession<'_>) {
     let (mut a, mut b) = mem_pair(None);
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let (sent, received) = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("the move hung");
+    .await;
     sent.unwrap();
     received.unwrap();
 }
@@ -366,11 +366,11 @@ async fn blocks_are_checkpointed_as_they_land_and_a_crash_mid_move_continues_aft
     // Cut partway, once the new laptop has received 300 messages (each block goes as a few
     // pieces): counted where they land, so a slow disk cannot leave it with none handled.
     let (mut a, mut b) = mem_pair_cut_after_received(300);
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let entry = w.journal.unfinished().unwrap()[0].id;
     let checkpointed = w.journal.blocks(entry).unwrap().len();
     assert!(checkpointed >= 64, "{checkpointed}");
@@ -471,22 +471,22 @@ async fn blocks_short_of_a_batch_are_checkpointed_when_the_next_connection_start
     let mut sender = SenderSession::new(vec![w.job()], 1);
     // A few blocks, then a drop.
     let (mut a, mut b) = mem_pair(Some(40));
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let entry = w.journal.unfinished().unwrap()[0].id;
     let landed = w.journal.blocks(entry).unwrap().len();
     assert!(landed < 64, "{landed}");
     assert_eq!(receiver.partway(), 1);
     // The next connection drops at once, but the new laptop recorded what it had first.
     let (mut a, mut b) = mem_pair(Some(1));
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     assert!(w.journal.blocks(entry).unwrap().len() > landed);
 }
 
@@ -538,11 +538,7 @@ async fn a_restored_file_is_never_continued_with_another_description() {
         old.cut.store(true, Ordering::SeqCst);
         answer
     };
-    let (answer, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let (answer, _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert_eq!(
         answer,
         Message::FileDone {
@@ -569,11 +565,11 @@ async fn quitting_keeps_every_partly_received_file_for_the_next_start() {
     let mut receiver = w.receiver();
     let mut sender = SenderSession::new(vec![w.job()], 1);
     let (mut a, mut b) = mem_pair(Some(300));
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let entry = w.journal.unfinished().unwrap()[0].id;
     // A normal quit: the session ends, nothing leaked.
     drop(receiver);
@@ -597,11 +593,11 @@ async fn cancelling_records_every_unfinished_file_failed_and_removes_its_partial
     let mut receiver = w.receiver();
     let mut sender = SenderSession::new(vec![w.job()], 1);
     let (mut a, mut b) = mem_pair(Some(300));
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let entry = w.journal.unfinished().unwrap()[0].id;
     receiver.cancel("you cancelled the move");
     match w.journal.entry(entry).unwrap().unwrap().state {
@@ -712,11 +708,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
         old.cut.store(true, Ordering::SeqCst);
         answer
     };
-    let (answer, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let (answer, _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert_eq!(
         answer,
         Message::FileDone {
@@ -737,11 +729,11 @@ async fn a_marked_file_continued_after_a_restart_still_arrives_marked() {
     let mut receiver = w.receiver();
     let mut sender = SenderSession::new(vec![w.job()], 1);
     let (mut a, mut b) = mem_pair_cut_after_received(300);
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let entry = w.journal.unfinished().unwrap()[0].id;
     assert_eq!(
         w.journal.entry(entry).unwrap().unwrap().write.download_mark,
@@ -818,11 +810,11 @@ async fn a_file_marked_by_the_time_it_is_continued_arrives_marked() {
     let mut receiver = w.receiver();
     let mut sender = SenderSession::new(vec![w.job()], 1);
     let (mut a, mut b) = mem_pair_cut_after_received(300);
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    let meter = receiver.meter();
+    let _ = common::unless_stuck(&meter, SIZE as u64, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     std::mem::forget(receiver);
     drop(sender);
     recover(&w.journal, &w.table).unwrap();

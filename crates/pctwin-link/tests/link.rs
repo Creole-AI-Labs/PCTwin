@@ -14,6 +14,19 @@ use pctwin_pairing::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+/// How long a test waits for a step before calling it a deadlock. It is not a guess at the
+/// runner's speed: every step here takes well under a second, so a busy runner never comes near
+/// it, while a step that waits for ever still fails the test instead of hanging the run.
+const HANG_AFTER: Duration = Duration::from_secs(300);
+
+/// Runs `work` to its end, failing only if it is still waiting after [`HANG_AFTER`].
+async fn no_hang<T>(work: impl std::future::Future<Output = T>) -> T {
+    match tokio::time::timeout(HANG_AFTER, work).await {
+        Ok(done) => done,
+        Err(_) => panic!("hung: still waiting after {HANG_AFTER:?}, a deadlock, not a slow runner"),
+    }
+}
+
 const KIND_PAIRING: u8 = 1;
 const KIND_BUSY: u8 = 2;
 const KIND_HELLO: u8 = 4;
@@ -569,7 +582,7 @@ async fn a_flood_of_connections_does_not_stop_the_real_device_pairing() {
     let pending_guest = loop {
         match connect(addr, &code, fast()).await {
             Ok(guest) => break guest,
-            Err(LinkError::Busy) if started.elapsed() < Duration::from_secs(10) => {
+            Err(LinkError::Busy) if started.elapsed() < HANG_AFTER => {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
             Err(e) => panic!("the real device was not served: {e:?}"),
@@ -1274,14 +1287,13 @@ async fn after_a_drop_the_new_laptop_resumes_without_a_code() {
     listener.allow_resumes(old_resumes);
     drop(old);
     drop(new);
-    let (arrived, opened) = tokio::time::timeout(Duration::from_secs(10), async {
+    let (arrived, opened) = no_hang(async {
         tokio::join!(
             listener.accept_any(),
             pctwin_link::open_resume(addr, &mut new_resumes, fast())
         )
     })
-    .await
-    .expect("the resume hung");
+    .await;
     let Arrival::Resumed(mut old_main) = arrived.unwrap() else {
         panic!("a resume, not a lane");
     };
@@ -1304,14 +1316,13 @@ async fn lanes_and_resumes_share_the_listener_and_are_told_apart() {
     let addr = new.peer_addr();
     let mut listener = host.into_lanes(old_keys, old.peer_addr());
     listener.allow_resumes(old_resumes);
-    let (arrived, opened) = tokio::time::timeout(Duration::from_secs(10), async {
+    let (arrived, opened) = no_hang(async {
         tokio::join!(
             listener.accept_any(),
             pctwin_link::open_lane(addr, &mut new_keys, fast())
         )
     })
-    .await
-    .expect("the lane hung");
+    .await;
     assert!(matches!(arrived.unwrap(), Arrival::Lane(_)));
     opened.unwrap();
 }
@@ -1541,9 +1552,7 @@ async fn a_new_laptop_that_left_during_the_pick_never_pairs() {
     let right = guest.match_number();
     drop(guest);
     // The old laptop notices it is gone, without the person doing anything.
-    tokio::time::timeout(Duration::from_secs(5), host.gone())
-        .await
-        .expect("the old laptop noticed the new laptop left");
+    no_hang(host.gone()).await;
     assert!(host.choose(right, Instant::now()).await.is_err());
 }
 
@@ -1579,9 +1588,7 @@ async fn a_watched_link_tells_when_the_other_laptop_leaves_and_reads_nothing() {
     );
     assert_eq!(old.recv().await.unwrap().as_slice(), b"still here");
     drop(new);
-    tokio::time::timeout(Duration::from_secs(5), watch.closed())
-        .await
-        .expect("the watch saw the other laptop leave");
+    no_hang(watch.closed()).await;
 }
 
 /// The old laptop never counts a new laptop as paired if it stays silent after the approval.

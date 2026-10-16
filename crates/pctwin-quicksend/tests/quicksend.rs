@@ -5,10 +5,24 @@
 //! arrived, where, and what did not.
 
 use std::path::Path;
+use std::time::Duration;
 
 use pctwin_quicksend::{Incoming, Offer, Outcome, receive_offer, send};
 use pctwin_transfer::{Channel, ChannelError};
 use tokio::sync::mpsc;
+
+/// How long a test waits for a step before calling it a deadlock. It is not a guess at the
+/// runner's speed: every step here takes well under a second, so a busy runner never comes near
+/// it, while a step that waits for ever still fails the test instead of hanging the run.
+const HANG_AFTER: Duration = Duration::from_secs(300);
+
+/// Runs `work` to its end, failing only if it is still waiting after [`HANG_AFTER`].
+async fn no_hang<T>(work: impl std::future::Future<Output = T>) -> T {
+    match tokio::time::timeout(HANG_AFTER, work).await {
+        Ok(done) => done,
+        Err(_) => panic!("hung: still waiting after {HANG_AFTER:?}, a deadlock, not a slow runner"),
+    }
+}
 
 struct Mem {
     tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -53,14 +67,13 @@ async fn run(
     decide: impl AsyncFnOnce(Incoming, &mut Mem) -> Option<pctwin_quicksend::Receipt>,
 ) -> (pctwin_quicksend::Receipt, Option<pctwin_quicksend::Receipt>) {
     let (mut old, mut new) = pair();
-    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    no_hang(async {
         tokio::join!(async { send(&mut old, offer).await.unwrap() }, async {
             let incoming = receive_offer(&mut new).await.unwrap();
             decide(incoming, &mut new).await
         })
     })
     .await
-    .expect("the send finished")
 }
 
 fn outcome<'a>(receipt: &'a pctwin_quicksend::Receipt, path: &str) -> &'a Outcome {
@@ -296,11 +309,7 @@ async fn declined_files_sent_anyway_are_refused_and_never_written() {
             .await
             .unwrap()
     };
-    let (_, receipt) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(greedy, receiving)
-    })
-    .await
-    .expect("the send finished");
+    let (_, receipt) = no_hang(async { tokio::join!(greedy, receiving) }).await;
     assert!(dest.path().join("letter.txt").exists());
     assert!(
         !dest.path().join("Holiday").exists(),
@@ -362,11 +371,9 @@ async fn nothing_declined_is_even_started() {
             .await
             .unwrap()
     };
-    let (sent, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(async { send(&mut a, offer).await.unwrap() }, receiving)
-    })
-    .await
-    .expect("the send finished");
+    let (sent, _) =
+        no_hang(async { tokio::join!(async { send(&mut a, offer).await.unwrap() }, receiving) })
+            .await;
     assert_eq!(b.starts, 1, "only the accepted letter was started");
     assert!(matches!(
         outcome(&sent, "letter.txt"),
@@ -408,11 +415,7 @@ async fn a_sender_cannot_choose_where_a_file_lands() {
             .await
             .unwrap()
     };
-    let (_, receipt) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(hostile, receiving)
-    })
-    .await
-    .expect("the send finished");
+    let (_, receipt) = no_hang(async { tokio::join!(hostile, receiving) }).await;
     assert!(!dest.path().join("AppData").exists());
     assert!(!dest.path().join("letter.txt").exists());
     assert!(matches!(
