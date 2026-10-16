@@ -130,10 +130,17 @@ struct Laptops {
     files: Vec<(PathBuf, Vec<u8>)>,
 }
 
-/// A big file (80 MiB: enough to split into two sections) and a few small ones.
+/// A big file (80 MiB: enough to split into two sections) and a few small ones, as (size, seed).
+const FILES: [(usize, u32); 4] = [(80 * MIB, 7), (300_000, 1), (40_000, 2), (2_000_000, 3)];
+
+/// The bytes of [`FILES`].
+fn bytes_to_move() -> u64 {
+    FILES.iter().map(|(len, _)| *len as u64).sum()
+}
+
 fn laptops() -> Laptops {
     let old = tempfile::tempdir().unwrap();
-    let files = [(80 * MIB, 7u32), (300_000, 1), (40_000, 2), (2_000_000, 3)]
+    let files = FILES
         .iter()
         .enumerate()
         .map(|(i, (len, seed))| {
@@ -200,19 +207,21 @@ fn connections(extra: usize) -> (Mem, Vec<Mem>, Mem, Vec<Mem>) {
     (old_main, old_lanes, new_main, new_lanes)
 }
 
+/// Moves [`FILES`] over these connections; fails the test only if the move gets stuck (see
+/// [`common::unless_stuck`]), never because the runner's disk is slow.
 async fn run(
     sender: &mut SenderSession,
     receiver: &mut ReceiverSession<'_>,
     (mut old_main, old_lanes, mut new_main, new_lanes): (Mem, Vec<Mem>, Mem, Vec<Mem>),
 ) -> (bool, bool) {
-    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+    let landed = receiver.meter();
+    let (s, r) = common::unless_stuck(&landed, bytes_to_move(), async {
         tokio::join!(
             sender.run_lanes(&mut old_main, old_lanes),
             receiver.run_lanes(&mut new_main, new_lanes)
         )
     })
-    .await
-    .expect("the move hung");
+    .await;
     (s.is_ok(), r.is_ok())
 }
 
@@ -469,14 +478,17 @@ async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
             }
         }),
     ));
-    let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+    // Forty files, each landed and recorded on its own: on a busy runner's disk that is slow,
+    // which is no reason to fail; a move that stops is.
+    let landed = receiver.meter();
+    let to_move = l.files.iter().map(|(_, b)| b.len() as u64).sum();
+    let (s, r) = common::unless_stuck(&landed, to_move, async {
         tokio::join!(
             sender.run_joining(&mut old_main, &mut old_joining),
             receiver.run_joining(&mut new_main, &mut new_joining)
         )
     })
-    .await
-    .expect("the move hung");
+    .await;
     s.unwrap();
     r.unwrap();
     assert_arrived(&l);
@@ -484,6 +496,48 @@ async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
         !carried.lock().unwrap().is_empty(),
         "the late lane carried nothing"
     );
+}
+
+// The tests' own judge of a stuck move, tested on a paused clock: a move is never called stuck for
+// being slow, and always is for stopping or for sending the same thing over and over.
+
+#[tokio::test(start_paused = true)]
+async fn a_move_that_is_slow_but_moving_is_never_called_stuck() {
+    let landed = std::sync::atomic::AtomicU64::new(0);
+    // A block every 50 seconds for an hour: far slower than any real move, yet never stopped.
+    let moved = common::unless_stuck(&landed, 1000, async {
+        for _ in 0..72 {
+            tokio::time::sleep(std::time::Duration::from_secs(50)).await;
+            landed.fetch_add(10, Ordering::SeqCst);
+        }
+        "moved"
+    })
+    .await;
+    assert_eq!(moved, "moved");
+}
+
+#[tokio::test(start_paused = true)]
+#[should_panic(expected = "the move is stuck")]
+async fn a_move_that_stops_is_called_stuck() {
+    let landed = std::sync::atomic::AtomicU64::new(0);
+    common::unless_stuck(&landed, 1000, async {
+        landed.fetch_add(10, Ordering::SeqCst);
+        std::future::pending::<()>().await;
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+#[should_panic(expected = "the move is going round in circles")]
+async fn a_move_that_sends_the_same_thing_forever_is_called_stuck() {
+    let landed = std::sync::atomic::AtomicU64::new(0);
+    common::unless_stuck(&landed, 1000, async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            landed.fetch_add(100, Ordering::SeqCst);
+        }
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -554,11 +608,10 @@ async fn a_whole_move_over_real_lanes_that_the_driver_opens_and_closes() {
         |_| meter.load(Ordering::SeqCst),
         || done.load(Ordering::SeqCst),
     );
-    let (sent, received, ()) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+    let (sent, received, ()) = common::unless_stuck(&meter, bytes_to_move(), async {
         tokio::join!(old_side, new_side, driving)
     })
-    .await
-    .expect("the move hung");
+    .await;
     sent.unwrap();
     received.unwrap();
     assert_arrived(&l);
@@ -690,7 +743,8 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
         left: 200,
     };
     let sending = &mut sender;
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+    let landed = receiver.meter();
+    let (sent, received) = common::unless_stuck(&landed, bytes_to_move(), async {
         tokio::join!(
             async move {
                 // The old laptop lets its end go when sending fails, so the new laptop sees the
@@ -703,8 +757,7 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
             receiver.run(&mut new_link)
         )
     })
-    .await
-    .expect("the move hung at the drop");
+    .await;
     assert!(sent.is_err(), "the old laptop noticed the drop");
     assert!(received.is_err(), "the new laptop noticed the drop");
     drop(new_link);
@@ -722,11 +775,10 @@ async fn a_move_whose_connection_drops_resumes_without_a_code_and_finishes() {
         panic!("a resume, not a lane");
     };
     let mut new_main = opened.unwrap();
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+    let (sent, received) = common::unless_stuck(&landed, bytes_to_move(), async {
         tokio::join!(sender.run(&mut old_main), receiver.run(&mut new_main))
     })
-    .await
-    .expect("the resumed move hung");
+    .await;
     sent.unwrap();
     received.unwrap();
     assert_arrived(&l);

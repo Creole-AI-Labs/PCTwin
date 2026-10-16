@@ -1,0 +1,145 @@
+/* Shared frame pieces: the footer bar, the top strip and the step list. Logical properties for right-to-left. */
+
+/* Footer: the note on the start side, the screen's action on the end side */
+.frame-note {
+  color: var(--colour-muted);
+}
+
+.frame-actions-host {
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.frame-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.frame-note + .frame-actions-host {
+  flex: 0 1 auto;
+}
+
+.app-footer > .frame-actions-host:only-child .frame-actions {
+  inline-size: 100%;
+  justify-content: space-between;
+}
+
+/* The note and the action wrap onto two lines when they do not fit side by side (narrow window, large text) */
+.app-footer {
+  flex-wrap: wrap;
+  padding-block: var(--space-2);
+}
+
+.frame-actions .kit-button {
+  min-block-size: var(--control-height);
+}
+
+/* With no footer to draw into (a screen shown alone) the actions sit at the end of the content */
+.frame-footer-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+}
+
+/* Top strip: Back at the start, the section label at the end */
+.frame-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+.frame-strip .back {
+  min-height: var(--control-height);
+}
+
+.frame-strip .eyebrow {
+  margin: 0;
+  text-align: end;
+}
+
+/* Steps: a marker for each (tick, dot, empty ring) joined by a line */
+.frame-steps {
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.frame-step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding-block-end: var(--space-5);
+}
+
+.frame-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  inset-block: 34px 2px;
+  inset-inline-start: 15px;
+  inline-size: 1px;
+  background: var(--colour-line);
+}
+
+.frame-step-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  inline-size: 32px;
+  block-size: 32px;
+  border: 1px solid var(--colour-line);
+  border-radius: 50%;
+  background: var(--colour-paper);
+}
+
+.frame-step-marker svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+.frame-step-done .frame-step-marker {
+  border-color: var(--colour-success-text);
+  background: var(--colour-success-surface);
+  color: var(--colour-success-text);
+}
+
+.frame-step-current .frame-step-marker {
+  border-color: var(--colour-blue);
+  background: var(--colour-blue);
+}
+
+.frame-step-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.frame-step-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.frame-step-body strong {
+  font-size: var(--type-row-title);
+  font-weight: 650;
+}
+
+.frame-step-body small {
+  color: var(--colour-muted);
+  font-size: var(--type-small);
+  line-height: 1.5;
+}
