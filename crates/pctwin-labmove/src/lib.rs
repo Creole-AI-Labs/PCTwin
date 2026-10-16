@@ -12,6 +12,10 @@
 //!
 //! Each side ends by writing a report of every item it handled. A side never claims a file moved
 //! unless the engine said so.
+//!
+//! Everything after pairing is `pctwin-move`, the same move the app runs: this crate only finds
+//! the folders, pairs through the handoff folder, answers the new laptop's choices by itself, and
+//! writes the reports.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -22,15 +26,13 @@ use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::Journal;
 use pctwin_lab::{Entry, Snapshot, compare};
 use pctwin_link::LinkConfig;
+use pctwin_move::{NotSentWhy, Steps, Stop};
 use pctwin_pairing::{PairingCode, RotatingSender};
 use pctwin_record::{
     FolderRole, Inclusion, Item, ItemKind, LaptopId, PersonTarget, Record, Storage,
 };
 use pctwin_scan::{FolderLookup, FoundFolder, Person};
-use pctwin_transfer::{
-    Allowance, LandingPlace, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession,
-    Tier, plan_order, role_label, shown_path,
-};
+use pctwin_transfer::{LandingPlace, ReceiveOutcome, SendOutcome, role_label, shown_path};
 use serde::{Deserialize, Serialize};
 
 /// How long either side waits for the other before giving up.
@@ -130,12 +132,10 @@ fn lab_folders(root: &Path) -> Vec<FolderLookup> {
         .collect()
 }
 
-fn compressible(path: &str) -> bool {
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    !matches!(
-        ext.as_str(),
-        "jpg" | "jpeg" | "png" | "mp3" | "mp4" | "zip" | "docx" | "xlsx" | "gz" | "7z"
-    )
+/// Where an item is shown in a report: its role's folder, then its path as it lands
+/// (`Documents/Letters/ada.txt`).
+fn shown_in_report(item: &Item) -> String {
+    format!("{}/{}", role_name(item.place.role), lab_landing(item).path)
 }
 
 /// The old laptop: scans, hosts pairing on `bind`, sends, and reports.
@@ -173,60 +173,26 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
         })
         .collect();
 
-    let mut report = Report::default();
-    let mut by_item = BTreeMap::new();
-    let mut shown_of = BTreeMap::new();
-    for item in &record.items {
-        let place = lab_landing(item);
-        let shown = format!("{}/{}", role_name(item.place.role), place.path);
-        let line = |outcome: &str| Line {
-            item: item.id.to_hex(),
-            path: shown.clone(),
-            outcome: outcome.into(),
-        };
-        if item.kind != ItemKind::File {
-            continue;
-        }
-        if let Inclusion::LeftOut { reason } = item.inclusion {
-            report.not_sent.push(line(&format!("left out: {reason:?}")));
-            continue;
-        }
-        let source = if let Some(blobs) = &blobs {
-            blobs.join(item.id.to_hex())
-        } else {
-            let Some(root) = roots.get(&item.place.role) else {
-                report.not_sent.push(line("no folder for its role"));
-                continue;
-            };
-            let mut source = root.clone();
+    let plan = pctwin_move::send_plan(
+        &record,
+        |item| {
+            if let Some(blobs) = &blobs {
+                return Some(blobs.join(item.id.to_hex()));
+            }
+            let mut source = roots.get(&item.place.role)?.clone();
             for part in item.path.parts() {
                 source.push(part.on_disk());
             }
-            source
-        };
-        shown_of.insert(item.id, shown.clone());
-        by_item.insert(
-            item.id,
-            SendJob {
-                item: item.id,
-                source,
-                compressible: compressible(&place.path),
-                destination: place.destination,
-                path: place.path,
-                tier: Tier::Rest,
-            },
-        );
-    }
-    // The order the app moves things in.
-    let order = plan_order(&record.items, &[], &BTreeMap::new(), 0);
-    let mut jobs = Vec::new();
-    for (id, tier) in order {
-        if let Some(mut job) = by_item.remove(&id) {
-            job.tier = tier;
-            jobs.push(job);
-        }
-    }
-    jobs.extend(by_item.into_values());
+            Some(source)
+        },
+        lab_landing,
+    );
+    let shown_of: BTreeMap<_, _> = record
+        .items
+        .iter()
+        .map(|item| (item.id, shown_in_report(item)))
+        .collect();
+    let shown = |id| shown_of.get(id).cloned().unwrap_or_default();
 
     let config = LinkConfig::default();
     let host = pctwin_link::Host::bind(bind.parse().map_err(err)?, config)
@@ -272,29 +238,58 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     let number = String::from_utf8(take(handoff, "number.txt").await?).map_err(err)?;
     let number: u8 = number.trim().parse().map_err(err)?;
     let mut link = pending.choose(number, Instant::now()).await.map_err(err)?;
-    pctwin_transfer::agree_version(&mut link, pctwin_transfer::MOVE_PROTOCOL)
-        .await
-        .map_err(err)?;
-    pctwin_transfer::send_inventory(&mut link, &record)
+    let sent = pctwin_move::send(&mut link, &record, plan)
         .await
         .map_err(err)?;
 
-    let mut sender = SenderSession::new(jobs.clone(), 4);
-    sender.run(&mut link).await.map_err(err)?;
-    for job in &jobs {
-        let outcome = match sender.outcome(job.item) {
+    let mut report = Report::default();
+    for file in &sent.files {
+        let outcome = match &file.outcome {
             Some(SendOutcome::Arrived) => "arrived".to_string(),
             Some(SendOutcome::AlreadyThere) => "already-there".to_string(),
             Some(SendOutcome::Failed(why)) => format!("failed: {why}"),
             None => "no outcome".to_string(),
         };
         report.lines.push(Line {
-            item: job.item.to_hex(),
-            path: shown_of.get(&job.item).cloned().unwrap_or_default(),
+            item: file.item.to_hex(),
+            path: shown(&file.item),
+            outcome,
+        });
+    }
+    for not in &sent.not_sent {
+        let outcome = match not.why {
+            NotSentWhy::LeftOut { reason } => format!("left out: {reason:?}"),
+            NotSentWhy::NoFolderForRole => "no folder for its role".to_string(),
+        };
+        report.not_sent.push(Line {
+            item: not.item.to_hex(),
+            path: shown(&not.item),
             outcome,
         });
     }
     Ok(report)
+}
+
+/// The new laptop's choices, made by the lab itself: every person on the old laptop lands in
+/// this account, the plan is approved as it is, and each item lands where [`lab_landing`] says.
+struct LabSteps {
+    account: String,
+}
+
+impl Steps for LabSteps {
+    async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+        Ok(PersonTarget::ExistingAccount {
+            account_id: self.account.clone(),
+        })
+    }
+
+    async fn approve(&mut self, _: &Record) -> Result<(), Stop> {
+        Ok(())
+    }
+
+    fn landing(&self, item: &Item) -> Option<LandingPlace> {
+        Some(lab_landing(item))
+    }
 }
 
 /// The new laptop: checks and approves the record, connects with the code, receives into
@@ -355,51 +350,36 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         pending.match_number().to_string().as_bytes(),
     )?;
     let mut link = pending.approval().await.map_err(err)?;
-    pctwin_transfer::agree_version(&mut link, pctwin_transfer::MOVE_PROTOCOL)
-        .await
-        .map_err(err)?;
-    let mut record = pctwin_transfer::receive_inventory(&mut link)
-        .await
-        .map_err(err)?;
-    // The person's choice on screen: the old laptop's person lands in this account.
-    let people: Vec<String> = record
-        .items
-        .iter()
-        .filter_map(|i| match &i.owner {
-            pctwin_record::Owner::Person { account_id } => Some(account_id.clone()),
-            _ => None,
-        })
-        .collect();
-    for person in people {
-        record.mapping.people.insert(
-            person,
-            PersonTarget::ExistingAccount {
-                account_id: account.clone(),
-            },
-        );
-    }
-    let approval = record.approve().map_err(err)?;
-    let allowance =
-        Allowance::from_record(&record, &approval, |i| Some(lab_landing(i))).map_err(err)?;
+    let plan = pctwin_move::receive_plan(
+        &mut link,
+        &mut LabSteps {
+            account: account.clone(),
+        },
+    )
+    .await
+    .map_err(err)?;
 
     let journal = Journal::open(journal).map_err(err)?;
-    let mut receiver = ReceiverSession::new(&table, allowance, &journal, &account);
-    receiver.run(&mut link).await.map_err(err)?;
+    let received = plan
+        .receive(&mut link, &table, &journal, &account)
+        .await
+        .map_err(err)?;
 
+    let items: BTreeMap<_, _> = received.record.items.iter().map(|i| (i.id, i)).collect();
     let mut report = Report::default();
-    for item in record.items.iter().filter(|i| i.kind == ItemKind::File) {
-        if !matches!(item.inclusion, Inclusion::Included) {
+    for file in &received.files {
+        let Some(item) = items.get(&file.item) else {
             continue;
-        }
+        };
         let folder = role_name(item.place.role);
-        let outcome = match receiver.outcome(item.id) {
+        let outcome = match &file.outcome {
             Some(ReceiveOutcome::Finished(f)) => format!("landed: {folder}/{}", f.final_path),
             Some(ReceiveOutcome::AlreadyThere(p)) => format!("already-there: {p}"),
             Some(ReceiveOutcome::Failed(why)) => format!("failed: {why}"),
             None => "no outcome".to_string(),
         };
         report.lines.push(Line {
-            item: item.id.to_hex(),
+            item: file.item.to_hex(),
             path: format!("{folder}/{}", shown_path(&item.path)),
             outcome,
         });

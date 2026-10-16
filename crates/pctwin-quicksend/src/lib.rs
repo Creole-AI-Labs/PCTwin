@@ -12,7 +12,7 @@
 //! - Both sides get a [`Receipt`]: what arrived and under which name, what was declined, and what
 //!   failed and why. As in a move, an interrupted send continues later with only what is missing.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use pctwin_gate::{Approved, Destinations};
@@ -23,7 +23,7 @@ use pctwin_record::{
 };
 use pctwin_transfer::{
     Allowance, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession, SendJob,
-    SendOutcome, SenderSession, SizeRoom, Tier, TransferError, agree_version, receive_inventory,
+    SendOutcome, SenderSession, SizeRoom, TransferError, agree_version, receive_inventory,
     send_inventory, shown_path,
 };
 
@@ -103,25 +103,6 @@ fn unique_name(name: &str, taken: &mut BTreeSet<String>) -> String {
     candidate
 }
 
-fn compressible(path: &str) -> bool {
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    !matches!(
-        ext.as_str(),
-        "jpg"
-            | "jpeg"
-            | "png"
-            | "heic"
-            | "mp3"
-            | "mp4"
-            | "mov"
-            | "zip"
-            | "docx"
-            | "xlsx"
-            | "gz"
-            | "7z"
-    )
-}
-
 impl Offer {
     /// An offer of `chosen` files and folders. Folders are offered with everything inside them
     /// that a move would take (links are not followed; what cannot be read is listed as left
@@ -134,7 +115,8 @@ impl Offer {
         let owner = Owner::Shared;
         let place = place();
         let mut record = Record::new(laptop);
-        let mut jobs = Vec::new();
+        // Where each offered file is read from.
+        let mut sources = BTreeMap::new();
         let mut taken = BTreeSet::new();
         for path in chosen {
             let meta =
@@ -160,7 +142,7 @@ impl Offer {
             };
             if meta.is_file() {
                 let file = item(ItemKind::File, top_path, meta.len(), Inclusion::Included);
-                jobs.push(job(&file, path.clone()));
+                sources.insert(file.id, path.clone());
                 record.items.push(file);
             } else if meta.is_dir() {
                 record
@@ -181,7 +163,7 @@ impl Offer {
                         inner.inclusion,
                     );
                     if found.kind == ItemKind::File && found.inclusion == Inclusion::Included {
-                        jobs.push(job(&found, source));
+                        sources.insert(found.id, source);
                     }
                     record.items.push(found);
                 }
@@ -190,6 +172,9 @@ impl Offer {
             }
         }
         record.validate()?;
+        // Sent as a move sends: in the order a move plans, each landing inside the chosen folder.
+        // What a folder holds that cannot be read is left out by the record and not sent.
+        let jobs = pctwin_move::send_plan(&record, |i| sources.get(&i.id).cloned(), landing).jobs;
         Ok(Self { record, jobs })
     }
 
@@ -202,18 +187,6 @@ impl Offer {
     #[doc(hidden)]
     pub fn into_parts(self) -> (Record, Vec<SendJob>) {
         (self.record, self.jobs)
-    }
-}
-
-fn job(item: &Item, source: PathBuf) -> SendJob {
-    let place = landing(item);
-    SendJob {
-        item: item.id,
-        source,
-        compressible: compressible(&place.path),
-        destination: place.destination,
-        path: place.path,
-        tier: Tier::Rest,
     }
 }
 

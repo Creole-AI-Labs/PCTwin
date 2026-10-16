@@ -13,6 +13,7 @@ pctwin-lab = { path = "../pctwin-lab" }
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-journal = { path = "../pctwin-journal" }
 pctwin-link = { path = "../pctwin-link" }
+pctwin-move = { path = "../pctwin-move" }
 pctwin-pairing = { path = "../pctwin-pairing" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
