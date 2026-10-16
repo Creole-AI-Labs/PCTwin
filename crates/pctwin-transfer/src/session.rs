@@ -483,6 +483,10 @@ pub struct SenderSession {
     /// Per job: the end (or stop) last said for it, said again on each new connection while it
     /// is unanswered.
     last_end: Vec<Option<Message>>,
+    /// Per job: what the new laptop said it has, on this connection; the file is continued from
+    /// it only when it is its turn to be in flight, so a reconnect opens no more files than may be
+    /// in flight, however many tickets come.
+    resume_from: Vec<Option<ResumeTicket>>,
 }
 
 impl SenderSession {
@@ -537,6 +541,7 @@ impl SenderSession {
             versions: vec![0; jobs_len],
             fingerprint: vec![None; jobs_len],
             last_end: vec![None; jobs_len],
+            resume_from: vec![None; jobs_len],
         }
     }
 
@@ -759,6 +764,8 @@ impl SenderSession {
         self.scheduler = Scheduler::new(self.capacity);
         self.ends.clear();
         self.skips.clear();
+        // Tickets are this connection's word only.
+        self.resume_from.iter_mut().for_each(|t| *t = None);
         for job in 0..self.jobs.len() {
             if matches!(self.states[job], SendState::Done(_)) || self.later.contains(&job) {
                 // Done, or still waiting for its second try at the end.
@@ -788,28 +795,9 @@ impl SenderSession {
                 }
                 _ => {}
             }
-            let picked_up = tickets.get(&job).and_then(|ticket| {
-                let j = &self.jobs[job];
-                let reader =
-                    FileSender::open_with(&*self.opener, &j.source, Some(ticket), j.compressible)
-                        .ok()?;
-                let sections = sections_for(reader.header(), &ticket.done.to_bools())?;
-                Some((reader, sections, ticket.done.done_count()))
-            });
-            // Without a ticket, or if the file changed since, it starts again from the beginning.
-            self.states[job] = match picked_up {
-                Some((reader, sections, resumed_done)) => {
-                    self.read_version(job, reader.header().stamp);
-                    SendState::Open {
-                        reader,
-                        sections,
-                        announced: false,
-                        resumed_done,
-                        cleared: false,
-                    }
-                }
-                None => SendState::Waiting,
-            };
+            // Opened (from its ticket, if it has one) only when it is its turn: see `open`.
+            self.resume_from[job] = tickets.remove(&job);
+            self.states[job] = SendState::Waiting;
             self.scheduler
                 .push(self.jobs[job].item, self.jobs[job].tier);
         }
@@ -899,8 +887,33 @@ impl SenderSession {
         out
     }
 
-    /// Opens a waiting file for a new attempt, with a new stream.
+    /// Opens a waiting file now that it is in flight: continued from the new laptop's ticket on
+    /// its own stream if it has one that fits the file as it is, else for a new attempt, with a
+    /// new stream.
     fn open(&mut self, job: usize) {
+        if let Some(ticket) = self.resume_from[job].take() {
+            let j = &self.jobs[job];
+            let picked_up =
+                FileSender::open_with(&*self.opener, &j.source, Some(&ticket), j.compressible)
+                    .ok()
+                    .and_then(|reader| {
+                        let sections = sections_for(reader.header(), &ticket.done.to_bools())?;
+                        Some((reader, sections))
+                    });
+            if let Some((reader, sections)) = picked_up {
+                self.read_version(job, reader.header().stamp);
+                self.states[job] = SendState::Open {
+                    reader,
+                    sections,
+                    announced: false,
+                    resumed_done: ticket.done.done_count(),
+                    cleared: false,
+                };
+                return;
+            }
+            // The file changed since, or the ticket does not fit: it starts again from the
+            // beginning.
+        }
         let j = &self.jobs[job];
         let opened = FileSender::open_with(&*self.opener, &j.source, None, j.compressible)
             .and_then(|reader| {
@@ -965,16 +978,15 @@ impl SenderSession {
         self.versions[job] > crate::MAX_ATTEMPTS
     }
 
-    /// The window after a loss: 1 MiB, or the block of the largest file open if that is bigger;
-    /// one block when the drive is read carefully. (One block always goes: see `work`.)
-    fn floor(&self) -> u64 {
-        let block = self
-            .states
+    /// The window after a loss: 1 MiB, or the block of the largest file in flight if that is
+    /// bigger (as this laptop last read it); one block when the drive is read carefully. (One
+    /// block always goes: see `work`.)
+    fn floor(&mut self) -> u64 {
+        let in_flight = self.scheduler.in_flight();
+        let block = in_flight
             .iter()
-            .filter_map(|s| match s {
-                SendState::Open { reader, .. } => Some(reader.header().block_size),
-                _ => None,
-            })
+            .filter_map(|item| self.attempt_stamp[self.by_item[item]])
+            .map(|s| crate::block_size_for(s.size))
             .max()
             .unwrap_or(crate::MIN_BLOCK);
         if self.careful {

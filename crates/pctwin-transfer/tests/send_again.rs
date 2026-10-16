@@ -1544,6 +1544,9 @@ struct Reads {
     /// Every source says it is this, whatever the file on disk is now (a file that grew while
     /// its size and time did not show it).
     claims: Option<Stamp>,
+    /// Sources open now, and the most open at once.
+    live: Arc<AtomicI64>,
+    most_live: Arc<AtomicI64>,
 }
 
 impl Reads {
@@ -1567,6 +1570,10 @@ impl Reads {
 
     fn prints(&self) -> u64 {
         self.prints.load(Ordering::SeqCst)
+    }
+
+    fn most_live(&self) -> i64 {
+        self.most_live.load(Ordering::SeqCst)
     }
 
     fn versions_read(&self) -> usize {
@@ -1609,6 +1616,12 @@ impl Seek for Counted {
     }
 }
 
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.reads.live.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 impl Source for Counted {
     fn stamp(&mut self) -> std::io::Result<Stamp> {
         let mut s = match self.reads.claims {
@@ -1640,8 +1653,11 @@ impl Source for Counted {
 impl Opener for Reads {
     fn open(&self, path: &Path) -> std::io::Result<Box<dyn Source>> {
         self.opens.fetch_add(1, Ordering::SeqCst);
+        let inner = FsOpener.open(path)?;
+        let now = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+        self.most_live.fetch_max(now, Ordering::SeqCst);
         Ok(Box::new(Counted {
-            inner: FsOpener.open(path)?,
+            inner,
             reads: self.clone(),
             seeked: false,
             opened_at: None,
@@ -3826,4 +3842,384 @@ proptest! {
             m.assert_reads_bounded(FLOOR, BLOCK, window);
         });
     }
+}
+
+// ---------------------------------------------------------------- the Test-Reviewer's survivors
+
+/// Takes blocks, receipting each "not written", until the old laptop says something else.
+async fn blocks_unwritten_then(new: &mut Mem) -> (u64, Message) {
+    let mut blocks = 0;
+    loop {
+        match hear(new).await {
+            Message::Piece {
+                stream, last: true, ..
+            } => {
+                blocks += 1;
+                receipt(new, stream, false).await;
+            }
+            Message::Piece { .. } => {}
+            other => return (blocks, other),
+        }
+    }
+}
+
+/// A new laptop that answers every block "not written", connection after connection (each
+/// starting afresh, or each with a resume ticket saying it has none): every answer counts, so the
+/// cap stops it, and nothing more is read.
+async fn answered_not_written_until_the_cap(with_ticket: bool) {
+    let l = laptops(&[300_000]);
+    let header = header_of(&l, 0);
+    let reads = Reads::default();
+    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let tickets = if with_ticket {
+        vec![(id(0), empty_ticket(&header))]
+    } else {
+        Vec::new()
+    };
+    let mut stopped = false;
+    for _ in 0..60 {
+        let (end, _) = connection(&mut sender, async |new: &mut Mem| {
+            hello(new, &tickets).await;
+            let (stream, _) = start_of(&hear(new).await);
+            answer_start(new, stream, None).await;
+            blocks_unwritten_then(new).await.1
+        })
+        .await;
+        if let Message::GiveUp { why, .. } = end {
+            assert_eq!(why, GiveUpWhy::ReadTooOften);
+            stopped = true;
+            break;
+        }
+        assert!(matches!(end, Message::EndFile { .. }), "{end:?}");
+    }
+    assert!(stopped, "answers \"not written\" were never counted");
+    assert!(
+        reads.blocks() <= cap_of(header.size) + WINDOW,
+        "{}",
+        reads.blocks()
+    );
+    let before = reads.blocks();
+    let ((), ok) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &tickets).await;
+        let Message::GiveUp { stream, why } = hear(new).await else {
+            panic!("expected the stop again")
+        };
+        assert_eq!(why, GiveUpWhy::ReadTooOften);
+        done(new, stream, false).await;
+        assert_eq!(hear(new).await, Message::AllSent);
+    })
+    .await;
+    assert!(ok);
+    assert_eq!(reads.blocks(), before, "nothing more was read");
+    match sender.outcome(id(0)) {
+        Some(SendOutcome::Failed(why)) => {
+            assert!(why.contains("asked for it again many more times"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn blocks_answered_not_written_count_toward_the_cap_across_reconnects() {
+    answered_not_written_until_the_cap(false).await;
+}
+
+#[tokio::test]
+async fn blocks_answered_not_written_count_toward_the_cap_with_resume_tickets() {
+    answered_not_written_until_the_cap(true).await;
+}
+
+/// Real laptops: every block arrives damaged (so the new laptop answers each "not written"), and
+/// the new laptop loses everything each time (a fresh record per connection, the connection
+/// going as the old laptop ends the file). Both laptops end with the cap's reason.
+#[tokio::test]
+async fn blocks_damaged_on_every_connection_stop_at_the_cap_on_both_laptops() {
+    /// Damages every block, and drops the moment the old laptop ends a file.
+    struct DamageAllDropAtEnd(Option<Mem>);
+
+    impl Channel for DamageAllDropAtEnd {
+        async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+            let Some(inner) = self.0.as_mut() else {
+                return Err(ChannelError);
+            };
+            match Message::decode(data) {
+                Ok(Message::EndFile { .. }) => {
+                    self.0 = None;
+                    Err(ChannelError)
+                }
+                Ok(Message::Piece {
+                    stream,
+                    last: true,
+                    mut bytes,
+                }) => {
+                    let at = bytes.len() - 1;
+                    bytes[at] ^= 0x5A;
+                    let m = Message::Piece {
+                        stream,
+                        last: true,
+                        bytes,
+                    };
+                    inner.send(&m.encode()).await
+                }
+                _ => inner.send(data).await,
+            }
+        }
+
+        async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+            self.0.as_mut().ok_or(ChannelError)?.recv().await
+        }
+    }
+
+    let l = laptops(&[MIB as usize]);
+    let table = table(&l, None);
+    let reads = Reads::default();
+    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let mut last = None;
+    for _ in 0..20 {
+        let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+        let (a, mut b) = mem_pair();
+        let mut a = DamageAllDropAtEnd(Some(a));
+        let (s, _) = tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+        })
+        .await
+        .expect("hung");
+        last = Some(receiver.outcome(id(0)));
+        if s.is_ok() {
+            break;
+        }
+    }
+    for why in [
+        match sender.outcome(id(0)) {
+            Some(SendOutcome::Failed(why)) => why.clone(),
+            other => panic!("{other:?}"),
+        },
+        match last.flatten() {
+            Some(ReceiveOutcome::Failed(why)) => why,
+            other => panic!("{other:?}"),
+        },
+    ] {
+        assert!(why.contains("asked for it again many more times"), "{why}");
+    }
+    assert!(reads.blocks() <= cap_of(MIB) + WINDOW, "{}", reads.blocks());
+}
+
+/// The file at `l`'s `n`th source, answered whole `times` times on fresh starts that the new
+/// laptop never ends, then `partly` of its blocks once more.
+async fn answer_again_and_again(sender: &mut SenderSession, times: u64, partly: u64) {
+    for _ in 0..times {
+        let (end, _) = connection(sender, async |new: &mut Mem| {
+            hello(new, &[]).await;
+            let (stream, _) = start_of(&hear(new).await);
+            answer_start(new, stream, None).await;
+            blocks_then(new).await.1
+        })
+        .await;
+        assert!(matches!(end, Message::EndFile { .. }), "{end:?}");
+    }
+    let ((), _) = connection(sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, None).await;
+        take_blocks(new, FLOOR / BLOCK).await;
+        for _ in 0..partly {
+            receipt(new, stream, true).await;
+        }
+        // Let the receipts be read before the connection goes.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    })
+    .await;
+}
+
+/// What was answered counts for one version only: a file answered close to the cap, then changed
+/// on the old laptop, arrives as its new version.
+#[tokio::test]
+async fn a_new_version_starts_its_count_again_and_arrives() {
+    let l = laptops(&[MIB as usize]);
+    let table = table(&l, None);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    // Version 1: five and a half times answered (the cap is six).
+    answer_again_and_again(&mut sender, 1 + REREADS - 1, 4).await;
+    // The file changes on the old laptop.
+    let changed = pattern(MIB as usize, 4242);
+    std::fs::write(&l.files[0].0, &changed).unwrap();
+    let f = std::fs::File::options()
+        .write(true)
+        .open(&l.files[0].0)
+        .unwrap();
+    f.set_modified(std::time::SystemTime::now() + Duration::from_secs(60))
+        .unwrap();
+    drop(f);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    assert_eq!(move_all(&mut sender, &mut receiver).await, (true, true));
+    assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
+    assert_eq!(std::fs::read(landed(&l, 0)).unwrap(), changed);
+}
+
+/// Receipts that land after the cap stopped a file give one stop, never another; and receipts that
+/// land after a file ended for another reason never change that reason.
+#[tokio::test]
+async fn receipts_after_a_stop_never_stop_it_again_or_change_why() {
+    // Exactly at the cap, then a connection with the floor in flight.
+    let l = laptops(&[MIB as usize]);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    answer_again_and_again(&mut sender, 1 + REREADS, 0).await;
+    let (said, ok) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, None).await;
+        take_blocks(new, FLOOR / BLOCK).await;
+        // Every block in flight answered: the first is over the cap, the rest land after.
+        for _ in 0..FLOOR / BLOCK {
+            receipt(new, stream, true).await;
+        }
+        let mut said = Vec::new();
+        loop {
+            match hear(new).await {
+                m @ (Message::GiveUp { stream, .. } | Message::EndFile { stream, .. }) => {
+                    said.push(m);
+                    done(new, stream, false).await;
+                }
+                Message::AllSent => return said,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    })
+    .await;
+    assert!(ok);
+    assert_eq!(
+        said,
+        vec![Message::GiveUp {
+            stream: start_stream(&said),
+            why: GiveUpWhy::ReadTooOften
+        }]
+    );
+    match sender.outcome(id(0)) {
+        Some(SendOutcome::Failed(why)) => {
+            assert!(why.contains("asked for it again many more times"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+
+    // Close to the cap, then the new laptop cannot write a block: the file ends for that reason,
+    // and the receipts landing after it (past the cap) change nothing.
+    let l = laptops(&[MIB as usize]);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    answer_again_and_again(&mut sender, 1 + REREADS, 0).await;
+    let (said, ok) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, None).await;
+        take_blocks(new, FLOOR / BLOCK).await;
+        say(new, &Message::Refused { stream }).await;
+        for _ in 1..FLOOR / BLOCK {
+            receipt(new, stream, true).await;
+        }
+        let mut said = Vec::new();
+        loop {
+            match hear(new).await {
+                m @ (Message::GiveUp { stream, .. } | Message::EndFile { stream, .. }) => {
+                    said.push(m);
+                    done(new, stream, false).await;
+                }
+                Message::AllSent => return said,
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+    })
+    .await;
+    assert!(ok);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        matches!(said[0], Message::EndFile { changed: true, .. }),
+        "{said:?}"
+    );
+    assert_eq!(
+        sender.outcome(id(0)),
+        Some(&SendOutcome::Failed(
+            "the new laptop could not write part of it".into()
+        ))
+    );
+}
+
+fn start_stream(said: &[Message]) -> u32 {
+    match said.first() {
+        Some(Message::GiveUp { stream, .. } | Message::EndFile { stream, .. }) => *stream,
+        _ => u32::MAX,
+    }
+}
+
+/// A file whose stamp moves while its fingerprint is read (it was written to meanwhile) is not
+/// identical, even though the bytes read match the file on the new laptop.
+#[tokio::test]
+async fn a_file_that_changed_while_its_fingerprint_was_read_is_not_identical() {
+    let l = laptops(&[300_000]);
+    let same = *blake3::hash(&l.files[0].1).as_bytes();
+    let reads = Reads::changing(None);
+    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let (next, _) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, Some(same)).await;
+        hear(new).await
+    })
+    .await;
+    assert!(
+        matches!(next, Message::Piece { .. }),
+        "sent, not skipped: {next:?}"
+    );
+    assert_eq!(reads.prints(), 300_000, "the whole fingerprint was read");
+    assert_ne!(sender.outcome(id(0)), Some(&SendOutcome::AlreadyThere));
+}
+
+/// A reconnect with resume tickets for more files than may be in flight: the old laptop opens
+/// only as many as may be in flight; the rest wait for room, and every one still arrives.
+#[tokio::test]
+async fn a_reconnect_with_many_tickets_opens_only_what_may_be_in_flight() {
+    const FILES: usize = 70;
+    const CAPACITY: usize = 4;
+    let l = laptops(&vec![10_000usize; FILES]);
+    let tickets: Vec<(ItemId, ResumeTicket)> = (0..FILES)
+        .map(|n| (id(n as u8), empty_ticket(&header_of(&l, n))))
+        .collect();
+    let reads = Reads::default();
+    let mut sender = SenderSession::new(jobs(&l), CAPACITY).with_opener(Arc::new(reads.clone()));
+    let ((), _) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &tickets).await;
+        // The starts of the files in flight come; nothing is answered.
+        let mut starts = 0;
+        while let Ok(Ok(d)) = tokio::time::timeout(Duration::from_millis(300), new.recv()).await {
+            if let Ok(Message::StartFile { .. }) = Message::decode(&d) {
+                starts += 1;
+            }
+        }
+        assert_eq!(starts, CAPACITY);
+    })
+    .await;
+    assert!(
+        reads.opens() <= CAPACITY as u64,
+        "{} files opened for {CAPACITY} in flight",
+        reads.opens()
+    );
+    assert!(
+        reads.most_live() <= CAPACITY as i64,
+        "{}",
+        reads.most_live()
+    );
+    // And each still arrives, a few at a time.
+    let table = table(&l, None);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    assert_eq!(move_all(&mut sender, &mut receiver).await, (true, true));
+    for n in 0..FILES {
+        assert_eq!(
+            sender.outcome(id(n as u8)),
+            Some(&SendOutcome::Arrived),
+            "{n}"
+        );
+    }
+    assert!(
+        reads.most_live() <= CAPACITY as i64,
+        "{}",
+        reads.most_live()
+    );
 }
