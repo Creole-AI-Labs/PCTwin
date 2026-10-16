@@ -45,7 +45,9 @@ sudo rm -rf "$work"
 sudo mkdir -p "$work/out" "$report"
 sudo chown "$(id -u):$(id -g)" "$work"
 chmod 755 "$work"
-sudo chmod 1777 "$work/out" "$report"
+sudo chmod 1777 "$work/out"
+sudo chown "$(id -u):$(id -g)" "$report"
+chmod 700 "$report"  # the evidence is for administrators only; the test accounts cannot read it
 finish() {
   sudo chown -R "$(id -u)" "$report" 2>/dev/null
   sudo chmod -R a+rX "$report" 2>/dev/null
@@ -122,9 +124,17 @@ case "$os" in
     ;;
   Darwin)
     other=/Volumes/PCTwinNF
-    sudo rm -f /tmp/pctwin-nf.dmg
-    hdiutil create -size 200m -fs APFS -volname PCTwinNF /tmp/pctwin-nf.dmg >/dev/null
-    hdiutil attach /tmp/pctwin-nf.dmg >/dev/null
+    # A disk image is reported removable by the system, so the second volume is a real
+    # internal APFS volume added to the boot drive's container.
+    container="$(diskutil info / | awk -F: '/Part of Whole/ {gsub(/ /,"",$2); print $2}')"
+    echo "boot container: $container"
+    if sudo diskutil apfs addVolume "$container" APFS PCTwinNF; then
+      second_volume=internal
+    else
+      second_volume=refused
+      bad "addVolume was refused on this runner; the second volume is not reachable here"
+      sudo mkdir -p "$other"
+    fi
     sudo diskutil enableOwnership "$other" || true
     # / is read-only on a Mac: the system drive's writable side is the data volume.
     sysroot=/System/Volumes/Data
@@ -231,8 +241,10 @@ set_fact macos_privacy "\"$privacy\""
 # 6. Before: the planted folders as an administrator sees them.
 snap_all() { # outdir
   mkdir -p "$1"
+  n=0
   while IFS=$'\t' read -r token by opens spot person top; do
-    sudo pctwin-lab snapshot "$(top_dir "$spot" "$person" "$top")" "$1/$token.json" \
+    n=$((n + 1))
+    sudo pctwin-lab snapshot "$(top_dir "$spot" "$person" "$top")" "$1/plant-$n.json" \
       || bad "snapshot of $token failed"
   done <"$work/tops.tsv"
 }
@@ -303,9 +315,17 @@ s = json.load(open(r + "/sweep.json"))
 json.dump(s.get("census"), open(r + "/census.json", "w"), indent=1)
 json.dump(s.get("top_line"), open(r + "/top_line.json", "w"))
 PY
-gzip -f "$report/sweep.json"
+sudo gzip -f "$report/sweep.json"
 label_fact "accounts and home folders" real "four local accounts made by the system; dee removed, her home kept"
-label_fact "second volume" real "$([ "$os" = Darwin ] && echo 'APFS disk image at /Volumes/PCTwinNF' || echo 'ext4 loop device at /mnt/pctwin-nf')"
+if [ "$os" = Darwin ]; then
+  if [ "${second_volume:-}" = internal ]; then
+    label_fact "second volume" real "internal APFS volume at /Volumes/PCTwinNF, added to the boot container"
+  else
+    label_fact "second volume" "not reachable" "diskutil apfs addVolume was refused on this runner"
+  fi
+else
+  label_fact "second volume" real "ext4 loop device at /mnt/pctwin-nf"
+fi
 label_fact "planted things" real "planted by each account, the system recorded the owners"
 label_fact "snapshots before and after" real "the planted folders only (not the whole machine), taken as root"
 exit "$fail"

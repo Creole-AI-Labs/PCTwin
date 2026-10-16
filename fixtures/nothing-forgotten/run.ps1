@@ -198,8 +198,12 @@ Label 'macOS privacy refusal' 'not reachable' 'not a Mac'
 # owner, so an administrator can still read it.
 function Snap-All([string]$dir) {
     New-Item -ItemType Directory -Force $dir | Out-Null
+    # Administrators only, and files named by number, so the mover can neither read nor name a plant here.
+    icacls $dir /inheritance:r /grant '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null
+    $n = 0
     foreach ($p in $spec.plants) {
-        & $lab snapshot (Top-Dir $p) (Join-Path $dir "$($p.token).json")
+        $n++
+        & $lab snapshot (Top-Dir $p) (Join-Path $dir "plant-$n.json")
         if ($LASTEXITCODE -ne 0) { Bad "snapshot of $($p.token) failed" }
     }
 }
