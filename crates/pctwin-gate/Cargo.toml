@@ -28,10 +28,12 @@ fs_at = "=0.2.1"
 # MoveFileExW without replacing, wrapped safely, for drives without hard links.
 tempfile = "3"
 winapi-util = "0.1.11"
+# Each volume's file system name, from the volume list, as the scan reads it (vetted; safe calls).
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 
 [target.'cfg(unix)'.dependencies]
 # 128 random bits from the system for undo's private names.
-getrandom = "0.3"
+getrandom = "0.4"
 # renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links.
 rustix = { version = "1.1", features = ["fs"] }
 

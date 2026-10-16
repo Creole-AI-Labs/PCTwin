@@ -6,7 +6,22 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Stage:** building the move itself (stage 1 of the plan). The foundations (stage 0) are done.
 - **Ready to use?** Not yet. Please don't move real files with it.
-- **Next:** the rest of the move screens, and finishing the checks that make sure every copied file is stored correctly.
+- **Next:** saying everything on the screens in plain words, connecting the screens to the move itself, and finishing safe copying onto USB sticks and memory cards (FAT and exFAT drives).
+
+## 16 October 2026
+
+**Done**
+
+- **Every copied file is read back from the drive and checked** before it gets its name. If Windows could only check a file from memory (for example in a folder Windows compresses), the report says so plainly.
+- **Damaged pieces are sent again.** If part of a file arrives damaged, or reads back wrong, only that part is sent again, at most twice. A file that still does not match is reported, never shown as copied.
+- **The old laptop is protected from being worn out.** A faulty or misbehaving new laptop can't make the old laptop read the same files over and over. After a dropped connection, what is sent again is limited to what the last connection actually achieved, and each file can be read only a few times its size. A poor connection makes a move slower, never a failure.
+- **The move screens are built:** welcome, choosing which laptop is which, who's moving, what to do first, the scan and the plan to approve, move progress with pause and stop, the final report, and Quick Send with its history. They follow our designs, and nothing on them is for sale. They are not yet connected to the move itself.
+- **Our tests judge by progress, not the clock.** A slow test machine no longer fails a test; a test that is truly stuck still does.
+
+**In progress**
+
+- **USB sticks and memory cards.** These drives (FAT and exFAT) can't always give a file its name safely in one step. On those drives PCTwin writes the file hidden under its real name, checks it, then shows it, and a copy cut off halfway is cleaned up or finished on the next start. An independent review found problems, which are being fixed and reviewed again.
+- **Plain words on every screen.** Some screen text still uses technical words from our designs. It is being rewritten so anyone can follow it.
 
 ## 15 October 2026
 

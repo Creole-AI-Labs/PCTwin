@@ -20,6 +20,8 @@ use pctwin_transfer::{
 };
 use tokio::sync::mpsc;
 
+mod common;
+
 /// One end of an in-memory connection that counts what it has read.
 struct Mem {
     tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -197,14 +199,13 @@ async fn a_record_crosses_a_real_paired_link() {
     let (mut old_link, mut new_link) = (old_link.unwrap(), new_link.unwrap());
 
     let sent = record(20_000);
-    let (s, r) = tokio::time::timeout(Duration::from_secs(60), async {
+    let (s, r) = common::no_hang(async {
         tokio::join!(
             send_inventory(&mut old_link, &sent),
             receive_inventory(&mut new_link)
         )
     })
-    .await
-    .unwrap();
+    .await;
     s.unwrap();
     assert_eq!(r.unwrap(), sent);
 }

@@ -138,6 +138,28 @@ impl Scheduler {
         self.sort_waiting();
     }
 
+    /// Puts a file back to finish (the new laptop asked for some of its blocks again): ahead of
+    /// every waiting file as important, which has not started yet, so files kept open on the new
+    /// laptop finish before new ones open there.
+    pub fn push_again(&mut self, item: ItemId, tier: Tier) {
+        let at = self
+            .waiting
+            .iter()
+            .position(|(_, t)| *t >= tier)
+            .unwrap_or(self.waiting.len());
+        self.waiting.insert(at, (item, tier));
+    }
+
+    /// How important `item` is now (raised if the person asked for it first), while it waits or
+    /// is in flight.
+    pub fn tier_of(&self, item: ItemId) -> Option<Tier> {
+        self.active
+            .iter()
+            .chain(&self.waiting)
+            .find(|(i, _)| *i == item)
+            .map(|(_, t)| *t)
+    }
+
     /// The person asked for these to move first, in this order, during the move.
     pub fn ask_first(&mut self, items: &[ItemId]) {
         for &item in items {

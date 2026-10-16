@@ -69,7 +69,9 @@ pub use inventory::{
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label, shown_path};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
 pub use lanes::{LaneTuner, MAX_LANES};
-pub use message::{Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces};
+pub use message::{
+    GiveUpWhy, Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces,
+};
 pub use netlanes::{LinkLanes, accept_lanes};
 pub use original::{
     Confirmed, MAX_CONFIRMED_AGE, MAX_ORIGINALS_PER_REQUEST, OriginalNow, OriginalsFault,
@@ -354,6 +356,12 @@ impl Block {
         out
     }
 
+    /// The block number its header says, without checking anything else (to name a block that
+    /// arrived damaged); `None` if even the header is not there.
+    pub fn number_in(bytes: &[u8]) -> Option<u64> {
+        Some(u64::from_be_bytes(bytes.get(2..10)?.try_into().ok()?))
+    }
+
     /// Reads a block, refusing anything damaged, longer than `max_len`, or that would expand past
     /// its announced length.
     pub fn decode(bytes: &[u8], max_len: u64) -> Result<Self, TransferError> {
@@ -612,6 +620,20 @@ pub struct Assembly<'d> {
     done: BlockMap,
     /// Each written block's fingerprint, for the whole file's.
     hashes: std::collections::BTreeMap<u64, [u8; 32]>,
+    /// The whole file was read back and matched, and nothing was written since.
+    checked: bool,
+}
+
+/// What reading a whole file back found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredCheck {
+    /// Every block read back as sent.
+    Matched,
+    /// These blocks read back wrong: they are taken back, to be sent again.
+    TakenBack(Vec<u64>),
+    /// The file cannot be put right by sending blocks again (it is longer on the drive than
+    /// sent).
+    CannotFix,
 }
 
 impl<'d> Assembly<'d> {
@@ -656,6 +678,7 @@ impl<'d> Assembly<'d> {
             header,
             done,
             hashes: std::collections::BTreeMap::new(),
+            checked: false,
         })
     }
 
@@ -705,6 +728,7 @@ impl<'d> Assembly<'d> {
             header,
             done,
             hashes,
+            checked: false,
         })
     }
 
@@ -741,6 +765,7 @@ impl<'d> Assembly<'d> {
         }
         self.file
             .write_at(block.index * self.header.block_size, &block.data)?;
+        self.checked = false;
         // In range and not yet done (both checked above), so this always marks it.
         let _ = self.done.insert(block.index);
         self.hashes.insert(block.index, block.hash);
@@ -779,10 +804,41 @@ impl<'d> Assembly<'d> {
         Ok(sealed.claim()?.keep())
     }
 
+    /// With every block here: reads the whole file back from the drive, past this laptop's cache,
+    /// against the sender's fingerprints. Blocks that read back wrong are taken back (no longer
+    /// done, their bytes no longer counted), so only they are asked for and written again.
+    pub fn check_stored(&mut self) -> Result<StoredCheck, TransferError> {
+        if !self.done.is_full() {
+            return Err(TransferError::Incomplete {
+                received: self.done.done_count(),
+                expected: self.header.block_count,
+            });
+        }
+        let sent: Vec<[u8; 32]> = self.hashes.values().copied().collect();
+        let check = self.file.verify(self.header.block_size, &sent)?;
+        if check.passed() {
+            self.checked = true;
+            return Ok(StoredCheck::Matched);
+        }
+        self.checked = false;
+        if check.too_long || check.bad_blocks.is_empty() {
+            return Ok(StoredCheck::CannotFix);
+        }
+        for &b in &check.bad_blocks {
+            self.file.take_back(
+                b * self.header.block_size,
+                block_len(&self.header, b) as u64,
+            )?;
+            self.done.remove(b);
+            self.hashes.remove(&b);
+        }
+        Ok(StoredCheck::TakenBack(check.bad_blocks))
+    }
+
     /// Only if every block arrived and the file did not change while it was read: makes sure the
     /// whole file is on disk (still under its temporary name) and gives its whole-file
     /// fingerprint. Otherwise the partial file is removed.
-    pub fn seal(self, trailer: Trailer) -> Result<(Sealed<'d>, [u8; 32]), TransferError> {
+    pub fn seal(mut self, trailer: Trailer) -> Result<(Sealed<'d>, [u8; 32]), TransferError> {
         if trailer.changed || trailer.stamp_after != self.header.stamp {
             return Err(TransferError::ChangedWhileRead);
         }
@@ -798,15 +854,18 @@ impl<'d> Assembly<'d> {
             self.hashes.values(),
         );
         // Read back from the drive, past this laptop's cache, against the sender's fingerprints:
-        // only a file stored correctly gets its name. A failed one is removed with the assembly.
-        let sent: Vec<[u8; 32]> = self.hashes.values().copied().collect();
-        let mut file = self.file;
-        let check = file.verify(self.header.block_size, &sent)?;
-        if !check.passed() {
-            return Err(TransferError::NotStored {
-                bad_blocks: (check.bad_blocks.len() as u64).max(1),
-            });
+        // only a file stored correctly gets its name (unless it was just checked and nothing was
+        // written since; the gate itself refuses a name without a current read-back). A failed
+        // one is removed with the assembly.
+        if !self.checked {
+            let sent: Vec<[u8; 32]> = self.hashes.values().copied().collect();
+            let check = self.file.verify(self.header.block_size, &sent)?;
+            if !check.passed() {
+                return Err(TransferError::NotStored {
+                    bad_blocks: (check.bad_blocks.len() as u64).max(1),
+                });
+            }
         }
-        Ok((file.seal()?, fingerprint))
+        Ok((self.file.seal()?, fingerprint))
     }
 }

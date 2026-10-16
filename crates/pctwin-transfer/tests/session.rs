@@ -136,9 +136,17 @@ struct Laptops {
     files: Vec<(PathBuf, Vec<u8>)>,
 }
 
+/// The three files on the old laptop: their sizes, and the seed of each one's bytes.
+const FILES: [(usize, u32); 3] = [(4_000, 1), (300_000, 2), (2_500_000, 3)];
+
+/// The bytes of all three files: what a whole move lands.
+fn bytes_to_move() -> u64 {
+    FILES.iter().map(|(len, _)| *len as u64).sum()
+}
+
 fn laptops() -> Laptops {
     let old = tempfile::tempdir().unwrap();
-    let files: Vec<(PathBuf, Vec<u8>)> = [(4_000, 1), (300_000, 2), (2_500_000, 3)]
+    let files: Vec<(PathBuf, Vec<u8>)> = FILES
         .iter()
         .enumerate()
         .map(|(i, (len, seed))| {
@@ -222,12 +230,12 @@ async fn run_both(
 ) -> (bool, bool) {
     let mut s = sender.lock().await;
     let mut r = receiver.lock().await;
-    // A move that hangs fails here instead of waiting forever.
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    // A move that is stuck fails here instead of waiting forever; a slow one just finishes.
+    let landed = r.meter();
+    let (sent, received) = common::unless_stuck(&landed, bytes_to_move(), async {
         tokio::join!(s.run(&mut a), r.run(&mut b))
     })
-    .await
-    .expect("the move hung");
+    .await;
     (sent.is_ok(), received.is_ok())
 }
 
@@ -275,11 +283,11 @@ async fn never_more_than_the_in_flight_limit_is_unconfirmed() {
     let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
     let (mut a, mut b) = mem_pair();
     let most = a.most_unconfirmed.clone();
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let landed = receiver.meter();
+    let (sent, received) = common::unless_stuck(&landed, bytes_to_move(), async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .unwrap();
+    .await;
     sent.unwrap();
     received.unwrap();
     assert_arrived(&l);
@@ -481,11 +489,11 @@ async fn a_move_runs_over_a_real_paired_link() {
 
     let mut sender = SenderSession::new(jobs(&l), 2);
     let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
-    let (sent, received) = tokio::time::timeout(Duration::from_secs(60), async {
+    let landed = receiver.meter();
+    let (sent, received) = common::unless_stuck(&landed, bytes_to_move(), async {
         tokio::join!(sender.run(&mut old_link), receiver.run(&mut new_link))
     })
-    .await
-    .unwrap();
+    .await;
     sent.unwrap();
     received.unwrap();
     assert_arrived(&l);
@@ -621,17 +629,14 @@ async fn three_blocks_then_a_drop<'d>(
                 hear(&mut old).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b as u64
+                    block: b as u64,
+                    written: true,
                 }
             );
         }
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert!(r.is_err(), "the connection dropped");
     (receiver, header, blocks)
 }
@@ -672,11 +677,7 @@ async fn continue_with(
         old.cut.store(true, Ordering::SeqCst);
         answer
     };
-    let (answer, _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let (answer, _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     answer
 }
 
@@ -759,11 +760,7 @@ async fn the_new_laptop_starts_only_what_the_approved_plan_allows() {
         assert_eq!(hear(&mut old).await, failed(0));
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     // Nothing was created or reserved for either.
     assert!(everything_under(l.new_mine.path()).is_empty());
     assert!(
@@ -832,7 +829,8 @@ async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
                     hear(lane).await,
                     Message::Receipt {
                         stream: 0,
-                        block: *b as u64
+                        block: *b as u64,
+                        written: true,
                     }
                 );
             }
@@ -855,11 +853,9 @@ async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
-    })
-    .await
-    .expect("hung");
+    let ((), r) =
+        common::no_hang(async { tokio::join!(script, receiver.run_lanes(&mut new, extra.into())) })
+            .await;
     r.unwrap();
     assert_eq!(
         std::fs::read(l.new_mine.path().join("Videos/big.bin")).unwrap(),
@@ -899,7 +895,8 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
                 hear(&mut old2).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b
+                    block: b,
+                    written: true,
                 }
             );
         }
@@ -913,7 +910,8 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
                 hear(&mut old).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b as u64
+                    block: b as u64,
+                    written: true,
                 }
             );
         }
@@ -935,11 +933,9 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
-    })
-    .await
-    .expect("hung");
+    let ((), r) =
+        common::no_hang(async { tokio::join!(script, receiver.run_lanes(&mut new, extra.into())) })
+            .await;
     r.unwrap();
     assert_eq!(
         std::fs::read(l.new_mine.path().join("Videos/big.bin")).unwrap(),
@@ -971,11 +967,9 @@ async fn an_extra_lane_cannot_start_end_or_skip_files() {
         assert_eq!(hear(&mut old).await, Message::Refused { stream: 0 });
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
-    })
-    .await
-    .expect("hung");
+    let ((), r) =
+        common::no_hang(async { tokio::join!(script, receiver.run_lanes(&mut new, extra.into())) })
+            .await;
     r.unwrap();
     assert!(receiver.outcome(id(2)).is_none());
     assert!(everything_under(l.new_mine.path()).is_empty());
@@ -1002,11 +996,9 @@ async fn pieces_for_a_file_never_started_are_still_answered() {
         }
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
-    })
-    .await
-    .expect("hung");
+    let ((), r) =
+        common::no_hang(async { tokio::join!(script, receiver.run_lanes(&mut new, extra.into())) })
+            .await;
     r.unwrap();
     assert!(everything_under(l.new_mine.path()).is_empty());
 }
@@ -1046,7 +1038,8 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
             hear(&mut old3).await,
             Message::Receipt {
                 stream: 0,
-                block: (n - 1) as u64
+                block: (n - 1) as u64,
+                written: true,
             }
         );
         say(&mut old2, last).await;
@@ -1054,7 +1047,8 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
             hear(&mut old2).await,
             Message::Receipt {
                 stream: 0,
-                block: 0
+                block: 0,
+                written: true,
             }
         );
         for (b, block) in blocks.iter().enumerate().take(n - 1).skip(1) {
@@ -1065,7 +1059,8 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
                 hear(&mut old).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b as u64
+                    block: b as u64,
+                    written: true,
                 }
             );
         }
@@ -1087,11 +1082,9 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run_lanes(&mut new, extra.into()))
-    })
-    .await
-    .expect("hung");
+    let ((), r) =
+        common::no_hang(async { tokio::join!(script, receiver.run_lanes(&mut new, extra.into())) })
+            .await;
     r.unwrap();
     assert_eq!(
         std::fs::read(l.new_mine.path().join("Videos/big.bin")).unwrap(),
@@ -1148,11 +1141,7 @@ async fn an_old_laptop_cannot_hold_more_than_the_open_file_limit() {
         }
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert!(matches!(
         receiver.outcome(id(n - 1)),
         Some(ReceiveOutcome::Failed(why)) if why.contains("too many")
@@ -1198,11 +1187,7 @@ async fn files_refused_at_their_start_do_not_count_toward_the_open_limit() {
         ));
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
 }
 
 /// The small file (one block), started on `stream`.
@@ -1280,11 +1265,7 @@ async fn an_approved_file_lands_once_however_often_it_is_started() {
         }
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert_eq!(files_under(l.new_mine.path()), 1, "one copy, not fourteen");
 }
@@ -1318,11 +1299,7 @@ async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
         assert!(files_under(l.new_mine.path()) <= 1);
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert!(matches!(
         receiver.outcome(id(0)),
@@ -1351,11 +1328,7 @@ async fn pieces_of_two_files_mixed_on_one_connection_end_it() {
         // A piece of another stream while that block is half sent.
         say(&mut old, &split_into_pieces(7, &blocks[0].encode())[0]).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert!(r.is_err(), "mixing pieces must end the connection");
 }
 
@@ -1399,11 +1372,7 @@ async fn pieces_for_a_file_that_is_not_open_are_answered_and_not_kept() {
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
 }
 
@@ -1427,11 +1396,7 @@ async fn refused_starts_do_not_pile_up_in_what_the_new_laptop_remembers() {
         }
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     // On the next connection, the new laptop's list of what it has does not repeat them.
     let (mut old, mut new) = mem_pair();
     let listing = async {
@@ -1507,7 +1472,8 @@ async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
             hear(&mut old).await,
             Message::Receipt {
                 stream: 1,
-                block: 0
+                block: 0,
+                written: true,
             }
         );
         say(
@@ -1528,11 +1494,7 @@ async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     // Nothing of the overflowed file was left behind.
     assert!(!l.new_mine.path().join("Documents/small.bin").exists());
@@ -1563,6 +1525,14 @@ async fn a_file_found_already_there_is_spent_too() {
             }
         ));
         say(&mut old, &Message::Skip { stream: 0 }).await;
+        // The skip is answered: it is already there.
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
         // Started again on another stream: refused, it is already there.
         let (again, _) = small_start(&l, 5);
         say(&mut old, &again).await;
@@ -1575,11 +1545,7 @@ async fn a_file_found_already_there_is_spent_too() {
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert_eq!(files_under(l.new_mine.path()), 1);
 }
@@ -1625,11 +1591,8 @@ async fn a_refused_block_stops_the_old_laptop_sending_that_file() {
         }
         blocks
     };
-    let (blocks, sent) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, sender.run(&mut old))
-    })
-    .await
-    .expect("hung");
+    let (blocks, sent) =
+        common::no_hang(async { tokio::join!(script, sender.run(&mut old)) }).await;
     sent.unwrap();
     assert!(
         blocks < total,
@@ -1677,11 +1640,7 @@ async fn a_stream_started_again_with_another_file_ends_the_first_in_the_journal_
         assert!(matches!(hear(&mut old).await, Message::Have { .. }));
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     let entries = journal.entries().unwrap();
     assert_eq!(entries.len(), 2);
     assert!(
@@ -1820,11 +1779,7 @@ async fn an_old_laptop_cannot_choose_where_an_approved_file_lands() {
         );
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     // Nothing was written anywhere, not even planned in the journal.
     assert!(everything_under(l.new_mine.path()).is_empty());
     assert!(everything_under(l.new_shared.path()).is_empty());
@@ -1846,11 +1801,7 @@ async fn an_old_laptop_cannot_choose_where_an_approved_file_lands() {
         );
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert_eq!(
         std::fs::read(l.new_mine.path().join("Documents/small.bin")).unwrap(),
@@ -1899,11 +1850,7 @@ async fn a_file_that_landed_keeps_its_line_whatever_is_started_after_it() {
         assert!(matches!(hear(&mut old).await, Message::Have { .. }));
         say(&mut old, &Message::AllSent).await;
     };
-    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert!(
         matches!(receiver.outcome(id(0)), Some(ReceiveOutcome::Finished(_))),
@@ -1996,11 +1943,7 @@ async fn with_no_growth_one_byte_over_the_approved_size_is_refused() {
         ));
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert!(matches!(
         receiver.outcome(id(0)),
         Some(ReceiveOutcome::Failed(_))
@@ -2031,7 +1974,8 @@ async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
             hear(&mut old).await,
             Message::Receipt {
                 stream: 0,
-                block: 0
+                block: 0,
+                written: true,
             }
         );
         // The same file on the same stream, announced somewhere else: as a fresh start, and as a
@@ -2059,16 +2003,13 @@ async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
             hear(&mut old).await,
             Message::Receipt {
                 stream: 0,
-                block: 1
+                block: 1,
+                written: true,
             }
         );
         old.cut.store(true, Ordering::SeqCst);
     };
-    let ((), _) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receiver.run(&mut new))
-    })
-    .await
-    .expect("hung");
+    let ((), _) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     assert_eq!(receiver.continued(), 0);
     assert_eq!(receiver.partway(), 1);
     assert!(!l.new_mine.path().join("Startup").exists());

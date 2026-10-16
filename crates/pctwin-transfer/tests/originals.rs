@@ -123,6 +123,8 @@ impl World {
             &self.journal,
             "1001",
         );
+        let to_move = files.iter().map(|(_, size)| size).sum();
+        let meter = receiver.meter();
         let mut sender = SenderSession::new(jobs.iter().map(|(j, _)| j.clone()).collect(), 2);
         let (a, b) = mem_pair();
         let send_side = async {
@@ -133,11 +135,10 @@ impl World {
             let mut b = b;
             receiver.run(&mut b).await
         };
-        let (s, r) = tokio::time::timeout(Duration::from_secs(30), async {
+        let (s, r) = common::unless_stuck(&meter, to_move, async {
             tokio::join!(send_side, receive_side)
         })
-        .await
-        .expect("the move hung");
+        .await;
         s.unwrap();
         r.unwrap();
         self.journal
@@ -169,11 +170,9 @@ async fn ask(sent: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> HashMap<ItemI
             serve_originals(&mut old, sent, &mut budget).await.unwrap();
         }
     };
-    let (answers, ()) = tokio::time::timeout(Duration::from_secs(30), async {
-        tokio::join!(check_originals(&mut new, journal, items), serve)
-    })
-    .await
-    .expect("the check hung");
+    let (answers, ()) =
+        common::no_hang(async { tokio::join!(check_originals(&mut new, journal, items), serve) })
+            .await;
     flatten(&answers.unwrap(), journal, items)
 }
 

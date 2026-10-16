@@ -52,8 +52,14 @@ pub enum Message {
         stamp_after: Stamp,
         changed: bool,
     },
-    /// Receiver: this block is written.
-    Receipt { stream: u32, block: u64 },
+    /// Receiver: this block is written (`written`), or it arrived damaged and was not; either way
+    /// the old laptop counts it answered, and a block not written is asked for again when its
+    /// file ends.
+    Receipt {
+        stream: u32,
+        block: u64,
+        written: bool,
+    },
     /// Receiver, after a new connection: continue this file (`item`; `stream` as it was, 0 after
     /// the new laptop's app restarted) from here.
     ResumeFrom {
@@ -61,7 +67,8 @@ pub enum Message {
         item: ItemId,
         ticket: ResumeTicket,
     },
-    /// Receiver: the file is finished under its real name (`ok`), or was not.
+    /// Receiver: the file is finished under its real name (`ok`), or was not. Also the answer to
+    /// `Skip`: `ok` when an identical file is already there.
     FileDone { stream: u32, ok: bool },
     /// Receiver, at the start of each connection: everything it already has has been listed
     /// (`ResumeFrom` and `FileDone`), so sending can begin.
@@ -74,7 +81,8 @@ pub enum Message {
         stream: u32,
         same_size: Option<[u8; 32]>,
     },
-    /// Sender: the file already there is identical, so it is not sent.
+    /// Sender: the file already there is identical, so it is not sent (answered with
+    /// `FileDone`).
     Skip { stream: u32 },
     /// Receiver, in place of a receipt: that block was not written (the file failed, is not open,
     /// or belongs to an earlier attempt), so its file will not finish.
@@ -88,6 +96,21 @@ pub enum Message {
         nonce: Nonce,
         answers: Vec<(ItemId, OriginalNow)>,
     },
+    /// Receiver, answering an end in place of `FileDone`: some blocks are missing or read back
+    /// wrong; send again those `ticket` does not list (the file stays open).
+    SendAgain { stream: u32, ticket: ResumeTicket },
+    /// Sender: it stops sending this file, for `why` (the file fails, and the new laptop says
+    /// why).
+    GiveUp { stream: u32, why: GiveUpWhy },
+}
+
+/// Why the old laptop stopped sending a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GiveUpWhy {
+    /// Parts of it were asked for again as often as one attempt allows.
+    AskedAgainTooOften,
+    /// It was read as many times as any file may be in one move.
+    ReadTooOften,
 }
 
 const START: u8 = 1;
@@ -103,6 +126,8 @@ const SKIP: u8 = 10;
 const REFUSED: u8 = 11;
 const CHECK_ORIGINALS: u8 = 12;
 const ORIGINALS: u8 = 13;
+const SEND_AGAIN: u8 = 14;
+const GIVE_UP: u8 = 15;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -144,10 +169,15 @@ impl Message {
                 put_stamp(&mut w, stamp_after);
                 w.push(u8::from(*changed));
             }
-            Message::Receipt { stream, block } => {
+            Message::Receipt {
+                stream,
+                block,
+                written,
+            } => {
                 w.push(RECEIPT);
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.extend_from_slice(&block.to_be_bytes());
+                w.push(u8::from(*written));
             }
             Message::ResumeFrom {
                 stream,
@@ -157,12 +187,20 @@ impl Message {
                 w.push(RESUME);
                 w.extend_from_slice(&stream.to_be_bytes());
                 w.extend_from_slice(&item_bytes(item));
-                w.extend_from_slice(&ticket.block_size.to_be_bytes());
-                put_stamp(&mut w, &ticket.stamp);
-                let map = ticket.done.encode();
-                // A map's wire form is at most a few tens of KiB, which fits in a u32.
-                w.extend_from_slice(&u32::try_from(map.len()).unwrap_or(u32::MAX).to_be_bytes());
-                w.extend_from_slice(&map);
+                put_ticket(&mut w, ticket);
+            }
+            Message::SendAgain { stream, ticket } => {
+                w.push(SEND_AGAIN);
+                w.extend_from_slice(&stream.to_be_bytes());
+                put_ticket(&mut w, ticket);
+            }
+            Message::GiveUp { stream, why } => {
+                w.push(GIVE_UP);
+                w.extend_from_slice(&stream.to_be_bytes());
+                w.push(match why {
+                    GiveUpWhy::AskedAgainTooOften => 0,
+                    GiveUpWhy::ReadTooOften => 1,
+                });
             }
             Message::FileDone { stream, ok } => {
                 w.push(DONE);
@@ -263,14 +301,23 @@ impl Message {
             RECEIPT => Message::Receipt {
                 stream,
                 block: r.u64()?,
+                written: r.flag()?,
             },
             RESUME => Message::ResumeFrom {
                 stream,
                 item: r.item()?,
-                ticket: ResumeTicket {
-                    block_size: r.u64()?,
-                    stamp: r.stamp()?,
-                    done: r.map()?,
+                ticket: r.ticket()?,
+            },
+            SEND_AGAIN => Message::SendAgain {
+                stream,
+                ticket: r.ticket()?,
+            },
+            GIVE_UP => Message::GiveUp {
+                stream,
+                why: match r.u8()? {
+                    0 => GiveUpWhy::AskedAgainTooOften,
+                    1 => GiveUpWhy::ReadTooOften,
+                    _ => return Err(damaged("unknown reason for stopping")),
                 },
             },
             DONE => Message::FileDone {
@@ -426,6 +473,15 @@ fn put_original(w: &mut Vec<u8>, now: &OriginalNow) {
     }
 }
 
+fn put_ticket(w: &mut Vec<u8>, ticket: &ResumeTicket) {
+    w.extend_from_slice(&ticket.block_size.to_be_bytes());
+    put_stamp(w, &ticket.stamp);
+    let map = ticket.done.encode();
+    // A map's wire form is at most a few tens of KiB, which fits in a u32.
+    w.extend_from_slice(&u32::try_from(map.len()).unwrap_or(u32::MAX).to_be_bytes());
+    w.extend_from_slice(&map);
+}
+
 fn put_stamp(w: &mut Vec<u8>, s: &Stamp) {
     w.extend_from_slice(&s.size.to_be_bytes());
     match s.modified_ns {
@@ -576,6 +632,14 @@ impl<'a> Reader<'a> {
             2 => Ok(OriginalNow::CannotLook),
             _ => Err(damaged("bad answer")),
         }
+    }
+
+    fn ticket(&mut self) -> Result<ResumeTicket, TransferError> {
+        Ok(ResumeTicket {
+            block_size: self.u64()?,
+            stamp: self.stamp()?,
+            done: self.map()?,
+        })
     }
 
     fn map(&mut self) -> Result<BlockMap, TransferError> {

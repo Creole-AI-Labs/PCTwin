@@ -10,12 +10,21 @@ import { FooterProvider } from "./screens/FrameFooter";
 import PairNew from "./screens/PairNew";
 import PairOld from "./screens/PairOld";
 import PutTogether from "./screens/PutTogether";
+import QuickHome from "./screens/QuickHome";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
 
-/** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), then pairing (C03 to C05). */
-type Screen = { id: "welcome" } | { id: "role" } | { id: "connect"; role: Role } | { id: "together"; role: Role } | { id: "pair"; role: Role } | { id: "soon"; which: Soon };
+/** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), then pairing (C03 to C05); and Quick Send's home. */
+type Screen =
+  | { id: "welcome" }
+  | { id: "role" }
+  | { id: "connect"; role: Role }
+  | { id: "together"; role: Role }
+  | { id: "pair"; role: Role }
+  | { id: "soon"; which: Soon }
+  // Quick Send home. `notice` is set when the person chose something the engine cannot do yet.
+  | { id: "quick"; notice: boolean };
 
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
@@ -80,7 +89,21 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             </label>
           </header>
           <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
-            {screen.id === "welcome" && <Welcome onStart={() => { setScreen({ id: "role" }); }} onSoon={(which) => { setScreen({ id: "soon", which }); }} />}
+            {screen.id === "welcome" && <Welcome
+                onStart={() => { setScreen({ id: "role" }); }}
+                onSoon={(which) => { setScreen({ id: "soon", which }); }}
+                onQuick={() => { setScreen({ id: "quick", notice: false }); }}
+              />}
+            {screen.id === "quick" && (
+              // Until the bridge exists nothing can be sent or received: each action says so, plainly, and changes nothing.
+              <QuickHome
+                notice={screen.notice}
+                onSend={() => { setScreen({ ...screen, notice: true }); }}
+                onReceive={() => { setScreen({ ...screen, notice: true }); }}
+                onHistory={() => { setScreen({ ...screen, notice: true }); }}
+                onBack={() => { setScreen({ id: "welcome" }); }}
+              />
+            )}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
             {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}

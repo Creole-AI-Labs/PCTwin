@@ -113,6 +113,11 @@ async fn move_all(
     Result<(), TransferError>,
     SenderSession,
 ) {
+    let to_move = jobs
+        .iter()
+        .map(|j| std::fs::metadata(&j.source).map_or(0, |m| m.len()))
+        .sum();
+    let meter = receiver.meter();
     let mut sender = SenderSession::new(jobs, 2);
     let (a, b) = mem_pair();
     // Each side's end closes when it stops, as a real link does when an app stops.
@@ -124,11 +129,10 @@ async fn move_all(
         let mut b = b;
         receiver.run(&mut b).await
     };
-    let (sent, received) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let (sent, received) = common::unless_stuck(&meter, to_move, async {
         tokio::join!(send_side, receive_side)
     })
-    .await
-    .expect("the move hung");
+    .await;
     (sent, received, sender)
 }
 
@@ -383,11 +387,14 @@ async fn a_file_that_changed_while_read_is_recorded_failed_never_verified() {
     let mut sender =
         SenderSession::new(vec![job.clone()], 1).with_opener(Arc::new(Growing(job.source.clone())));
     let (mut a, mut b) = mem_pair();
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+    let meter = receiver.meter();
+    // The file changes on every read, so it is honestly sent once per attempt, a byte longer each time.
+    let to_move = u64::from(pctwin_transfer::MAX_ATTEMPTS)
+        * (1000 + u64::from(pctwin_transfer::MAX_ATTEMPTS));
+    let _ = common::unless_stuck(&meter, to_move, async {
         tokio::join!(sender.run(&mut a), receiver.run(&mut b))
     })
-    .await
-    .expect("hung");
+    .await;
     let all = w.journal.entries().unwrap();
     assert!(!all.is_empty());
     for e in all {
@@ -621,13 +628,15 @@ async fn a_journal_that_fails_only_at_the_last_step_leaves_the_file_for_recovery
     assert!(!w.mine.path().join(temp).exists());
 }
 
-/// Damages the first block's piece, then cuts the connection before the old laptop can end the
-/// file, as a laptop that goes away would.
+/// Spoils the first block's piece (`grow`: makes it longer than any block of the file can be,
+/// which fails the file; else changes a byte of it, which only means it is sent again), then
+/// cuts the connection before the old laptop can end the file, as a laptop that goes away would.
 struct Damaging {
     inner: Mem,
     pieces: usize,
     sends: usize,
     cut_at: usize,
+    grow: bool,
 }
 
 impl Channel for Damaging {
@@ -637,12 +646,25 @@ impl Channel for Damaging {
             return Err(ChannelError);
         }
         let mut data = data.to_vec();
-        if let Ok(pctwin_transfer::Message::Piece { .. }) = pctwin_transfer::Message::decode(&data)
+        if let Ok(pctwin_transfer::Message::Piece { stream, .. }) =
+            pctwin_transfer::Message::decode(&data)
         {
             self.pieces += 1;
             if self.pieces == 1 {
-                let last = data.len() - 1;
-                data[last] ^= 0xFF;
+                if self.grow {
+                    // More pieces of the same block first, past the largest block a file has.
+                    for _ in 0..3 {
+                        let more = pctwin_transfer::Message::Piece {
+                            stream,
+                            last: false,
+                            bytes: vec![0u8; pctwin_transfer::PIECE_MAX],
+                        };
+                        self.inner.send(&more.encode()).await?;
+                    }
+                } else {
+                    let last = data.len() - 1;
+                    data[last] ^= 0xFF;
+                }
             }
         }
         self.inner.send(&data).await
@@ -667,6 +689,42 @@ async fn a_file_that_fails_is_recorded_with_its_reason_even_if_its_end_never_com
     );
     let mut sender = SenderSession::new(vec![job], 1);
     let (a, b) = mem_pair();
+    // Sends: the start, a block too big for the file, then the end, which never goes.
+    let send_side = async {
+        let mut a = Damaging {
+            inner: a,
+            pieces: 0,
+            sends: 0,
+            cut_at: 3,
+            grow: true,
+        };
+        sender.run(&mut a).await
+    };
+    let receive_side = async {
+        let mut b = b;
+        receiver.run(&mut b).await
+    };
+    let _ = common::no_hang(async { tokio::join!(send_side, receive_side) }).await;
+    let e = only_entry(&w.journal);
+    let State::Failed { why, .. } = &e.state else {
+        panic!("{:?}", e.state)
+    };
+    assert!(why.contains("grew past its size"), "{why}");
+    assert_eq!(std::fs::read_dir(w.mine.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn a_block_damaged_on_the_way_does_not_fail_its_file_and_is_kept_to_continue() {
+    let w = world();
+    let (job, data) = w.file(1, 1000, "me", "a.txt");
+    let mut receiver = ReceiverSession::new(
+        &w.table,
+        plan_for(&[(job.clone(), data)]),
+        &w.journal,
+        "1001",
+    );
+    let mut sender = SenderSession::new(vec![job], 1);
+    let (a, b) = mem_pair();
     // Sends: the start, the damaged block, then the end, which never goes.
     let send_side = async {
         let mut a = Damaging {
@@ -674,6 +732,7 @@ async fn a_file_that_fails_is_recorded_with_its_reason_even_if_its_end_never_com
             pieces: 0,
             sends: 0,
             cut_at: 3,
+            grow: false,
         };
         sender.run(&mut a).await
     };
@@ -686,12 +745,9 @@ async fn a_file_that_fails_is_recorded_with_its_reason_even_if_its_end_never_com
     })
     .await
     .expect("hung");
+    // Not failed: the block is asked for again when the move continues.
     let e = only_entry(&w.journal);
-    let State::Failed { why, .. } = &e.state else {
-        panic!("{:?}", e.state)
-    };
-    assert!(why.contains("damaged"), "{why}");
-    assert_eq!(std::fs::read_dir(w.mine.path()).unwrap().count(), 0);
+    assert!(matches!(e.state, State::Staged { .. }), "{:?}", e.state);
 }
 
 #[tokio::test]
@@ -850,11 +906,7 @@ async fn a_block_sent_over_and_over_is_recorded_once() {
         let mut new = new;
         receiver.run(&mut new).await
     };
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        tokio::join!(script, receive)
-    })
-    .await
-    .expect("hung");
+    let _ = common::no_hang(async { tokio::join!(script, receive) }).await;
     // One block landed: nothing to checkpoint in a batch yet.
     assert_eq!(counting.checkpoints.get(), 0);
     drop(receiver);

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Real FAT-family drives for the gate's real-drive tests, on a Linux runner.
 #
-# Usage: scripts/real-drives-linux.sh setup | remount
+# Usage: scripts/real-drives-linux.sh setup | remount | swap
 #   setup    makes three drives (vfat, the kernel's exFAT, exfat-fuse), mounts them under
 #            $RUNNER_TEMP and exports PCTWIN_FAT_DIRS (kind=path, separated by |) to later steps.
+#            Also makes one more vfat drive on a loop device, mounted at swap/drive, for the test
+#            of a drive put in another's place (PCTWIN_SWAP_DIR, PCTWIN_SWAP_CMD).
 #   remount  unmounts every drive and mounts it again at the same path with the same driver.
+#   swap     (run by that test) unmounts the swap drive and puts an ext4 image on the very same
+#            loop device, mounted at the same folder: a different drive with the same number.
 set -euo pipefail
 
 root="${RUNNER_TEMP:?RUNNER_TEMP is not set}"
@@ -96,9 +100,20 @@ setup)
     dirs="$dirs|$kind=$mnt"
   done
   mkdir -p "$root/fat-state"
+  # The drive for the swap test: vfat now, ext4 once the test asks.
+  truncate -s 32M "$root/swap-a.img" "$root/swap-b.img"
+  mkfs.vfat "$root/swap-a.img"
+  mkfs.ext4 -q -F "$root/swap-b.img"
+  swapdev="$(sudo losetup --find --show "$root/swap-a.img")"
+  echo "$swapdev" >"$root/swap-dev.txt"
+  mkdir -p "$root/swap/drive"
+  sudo mount -t vfat -o "uid=$(id -u),gid=$(id -g)" "$swapdev" "$root/swap/drive"
+  verify vfat "$root/swap/drive"
   {
     echo "PCTWIN_FAT_DIRS=$dirs"
     echo "PCTWIN_FAT_STATE=$root/fat-state"
+    echo "PCTWIN_SWAP_DIR=$root/swap"
+    echo "PCTWIN_SWAP_CMD=bash $(cd "$(dirname "$0")" && pwd)/real-drives-linux.sh swap"
   } >>"$GITHUB_ENV"
   echo "== mounts"
   findmnt -t vfat,exfat,fuseblk,fuse.exfat || true
@@ -129,8 +144,24 @@ remount)
   echo "== mount table after"
   findmnt -t vfat,exfat,fuseblk,fuse.exfat || true
   ;;
+swap)
+  dev="$(cat "$root/swap-dev.txt")"
+  mnt="$root/swap/drive"
+  sync
+  sudo umount "$mnt"
+  sudo losetup --detach "$dev"
+  sudo losetup "$dev" "$root/swap-b.img"
+  sudo mount -t ext4 "$dev" "$mnt"
+  sudo chown "$(id -u):$(id -g)" "$mnt"
+  fstype="$(findmnt -no FSTYPE "$mnt")"
+  if [ "$fstype" != ext4 ]; then
+    echo "::error::the swap drive is mounted as '$fstype', not ext4"
+    exit 1
+  fi
+  echo "swapped: $dev now holds ext4 at $mnt ($(stat -c %D "$mnt"))"
+  ;;
 *)
-  echo "usage: $0 setup|remount" >&2
+  echo "usage: $0 setup|remount|swap" >&2
   exit 2
   ;;
 esac
