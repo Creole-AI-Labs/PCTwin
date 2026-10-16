@@ -411,6 +411,8 @@ pub enum GateError {
     OutsideFile,
     #[error("the old laptop sent part of a file again")]
     Overlap,
+    #[error("only parts of a file that have arrived can be taken back")]
+    NotArrived,
     #[error("the old laptop sent a file in too many scattered pieces")]
     TooScattered,
     #[error("there is not enough free space on the new laptop for this file")]
@@ -455,13 +457,14 @@ pub struct Destination {
     forced: bool,
     /// Each drive under it, by its number, judged once: a drive mounted inside the approved
     /// folder gets its own rules and limits, not the folder's.
-    profiles: Mutex<HashMap<u64, DriveProfile>>,
+    profiles: Mutex<HashMap<drive::VolumeKey, DriveProfile>>,
     /// Whether files can be read back past the cache, tested once per drive (by its number):
     /// an approved folder can hold another drive mounted inside it.
-    read_back: Mutex<HashMap<u64, CheckedFrom>>,
-    /// What testing each drive under it found, by the drive's number: tested once, before its
-    /// first file is named (a folder under it can be another drive).
-    checks: Mutex<HashMap<u64, DriveCheck>>,
+    read_back: Mutex<HashMap<drive::VolumeKey, CheckedFrom>>,
+    /// What testing each drive under it found, by the drive's key: tested once, before its
+    /// first file is named (a folder under it can be another drive), and again for a drive put
+    /// in another's place.
+    checks: Mutex<HashMap<drive::VolumeKey, DriveCheck>>,
     /// For tests: the faults this place fakes.
     #[cfg(feature = "fault-plan")]
     faults: Faults,
@@ -607,6 +610,13 @@ impl Destination {
         self.profile
     }
 
+    /// For tests: asks the drive under this place how it keeps time now, as a drive whose type
+    /// cannot be read is asked (`Some(Fat)` only for FAT's date-alone last-access time).
+    #[doc(hidden)]
+    pub fn time_test_kind(&self) -> Option<DriveKind> {
+        drive::kind_by_time_step(&self.root)
+    }
+
     /// The largest single file this place's drive holds, if it has a limit (FAT32: 4 GB less
     /// one byte), so the plan can refuse a file that is too big before the move starts.
     pub fn largest_file(&self) -> Option<u64> {
@@ -694,6 +704,16 @@ impl Destination {
         Ok(check)
     }
 
+    /// For tests: how many drives this place has tested (one more for each drive put in
+    /// another's place, even at the same folder with the same number).
+    #[doc(hidden)]
+    pub fn drives_tested(&self) -> usize {
+        self.checks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
     /// Forgets every drive test (after a handle went stale: the drive was removed, or another
     /// put in its place), so the next file named tests again.
     fn forget_checks(&self) {
@@ -747,17 +767,12 @@ impl Destination {
     /// removed. Where they cannot, every file is still read back and checked, through the cache,
     /// and its result says so.
     pub fn read_back_check(&self) -> CheckedFrom {
-        let volume = self
-            .root
-            .try_clone()
-            .ok()
-            .and_then(|d| identity(&d.into_std_file()).ok())
-            .map(|(id, _)| id.volume);
-        self.read_back_mode(volume, &self.root)
+        self.read_back_mode(&self.root)
     }
 
-    /// The tested answer for the drive numbered `volume` (tested in `dir` if not yet known).
-    fn read_back_mode(&self, volume: Option<u64>, dir: &Dir) -> CheckedFrom {
+    /// The tested answer for the drive the folder `dir` is on (tested there if not yet known).
+    fn read_back_mode(&self, dir: &Dir) -> CheckedFrom {
+        let volume = drive::volume_key(dir).ok();
         let known = |v| {
             self.read_back
                 .lock()
@@ -780,7 +795,7 @@ impl Destination {
         found
     }
 
-    fn read_back_known(&self) -> HashMap<u64, CheckedFrom> {
+    fn read_back_known(&self) -> HashMap<drive::VolumeKey, CheckedFrom> {
         self.read_back
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -797,7 +812,7 @@ impl Destination {
         pages_kept_out: bool,
     ) -> io::Result<ReadBack> {
         let id = identity(held).ok().map(|(id, _)| id);
-        let mut from = self.read_back_mode(id.map(|i| i.volume), dir);
+        let mut from = self.read_back_mode(dir);
         if !pages_kept_out && from == CheckedFrom::Drive {
             // macOS: the file's pages may still be cached, and a read past the cache takes them.
             from = CheckedFrom::Memory(WhyMemory::CannotSkipCache);
@@ -2112,6 +2127,18 @@ impl Destinations {
         self.admit(id, place, Destination::from_dir(root))
     }
 
+    /// For tests (feature `fault-plan`): the place labelled `id` fakes `plan`'s faults.
+    #[cfg(feature = "fault-plan")]
+    pub fn fake_faults(&mut self, id: &str, plan: FaultPlan) -> Result<(), GateError> {
+        let (place, destination) = self
+            .entries
+            .remove(id)
+            .ok_or(GateError::UnknownDestination)?;
+        self.entries
+            .insert(id.to_string(), (place, destination.with_faults(plan)));
+        Ok(())
+    }
+
     /// The approved place labelled `id`, or [`GateError::UnknownDestination`].
     pub fn get(&self, id: &str) -> Result<&Destination, GateError> {
         self.entries
@@ -2382,6 +2409,41 @@ impl<'d> IncomingFile<'d> {
         self.arrived
             .insert(part.start, part.joined_end.unwrap_or(part.end));
         self.received += part.len;
+    }
+
+    /// Takes back `len` bytes at `offset` that arrived (a block that read back wrong), so only
+    /// they can be written again: they no longer count as arrived, and any read-back that
+    /// matched no longer counts either. Refused unless every byte of it arrived and lies inside
+    /// the file. Splitting a part in two counts towards [`MAX_FILE_PARTS`].
+    pub fn take_back(&mut self, offset: u64, len: u64) -> Result<(), GateError> {
+        let end = offset
+            .checked_add(len)
+            .filter(|end| *end <= self.announced)
+            .ok_or(GateError::OutsideFile)?;
+        if len == 0 {
+            return Ok(());
+        }
+        let (start, part_end) = self
+            .arrived
+            .range(..=offset)
+            .next_back()
+            .map(|(s, e)| (*s, *e))
+            .filter(|(_, e)| *e >= end)
+            .ok_or(GateError::NotArrived)?;
+        let splits = start < offset && end < part_end;
+        if splits && self.arrived.len() >= MAX_FILE_PARTS {
+            return Err(GateError::TooScattered);
+        }
+        self.read_back = None;
+        self.arrived.remove(&start);
+        if start < offset {
+            self.arrived.insert(start, offset);
+        }
+        if end < part_end {
+            self.arrived.insert(end, part_end);
+        }
+        self.received -= len;
+        Ok(())
     }
 
     /// Closes it and keeps the partly received file on disk under its temporary name, for the

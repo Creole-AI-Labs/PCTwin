@@ -119,6 +119,27 @@ fn mac_drive_types_are_read_from_their_names_loosely() {
 }
 
 #[test]
+fn windows_drive_types_are_read_from_their_volume_names() {
+    for (name, kind) in [
+        ("FAT", DriveKind::Fat),
+        ("FAT12", DriveKind::Fat),
+        ("FAT16", DriveKind::Fat),
+        ("FAT32", DriveKind::Fat),
+        ("fat32", DriveKind::Fat),
+        ("exFAT", DriveKind::ExFat),
+        ("NTFS", DriveKind::Ntfs),
+        ("ReFS", DriveKind::Unknown),
+        ("UDF", DriveKind::Unknown),
+        // Exact names only: nothing that merely contains "FAT" counts.
+        ("FAT32X", DriveKind::Unknown),
+        ("vfat", DriveKind::Unknown),
+        ("", DriveKind::Unknown),
+    ] {
+        assert_eq!(DriveKind::from_windows_name(name), kind, "{name:?}");
+    }
+}
+
+#[test]
 fn only_fat_has_a_largest_file() {
     for kind in ALL_KINDS {
         let expected = (kind == DriveKind::Fat).then_some(FAT_LARGEST_FILE);
@@ -191,7 +212,96 @@ fn the_drive_type_is_read_when_a_destination_opens() {
     if cfg!(target_os = "linux") {
         assert!(posix(kind), "{kind:?}");
     }
+    // Windows reads it from the volume the folder is on (the test machine's NTFS).
+    if cfg!(windows) {
+        assert_eq!(kind, DriveKind::Ntfs);
+    }
     assert_eq!(write(&dest, "a.txt", b"x").unwrap(), "a.txt");
+}
+
+/// Reads every time-test probe file it sees, as an indexer, a backup or a virus scanner does;
+/// or (`touch`) sets its last-access time to now, as a sync tool does.
+fn other_program(
+    root: std::path::PathBuf,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seen: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    touch: bool,
+) {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+    while !stop.load(Ordering::Relaxed) {
+        let Ok(list) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for e in list.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(".pctwin-probe-") {
+                continue;
+            }
+            if touch {
+                if let Ok(f) = std::fs::OpenOptions::new().write(true).open(e.path()) {
+                    let now = std::time::SystemTime::now();
+                    if f.set_times(std::fs::FileTimes::new().set_accessed(now))
+                        .is_ok()
+                    {
+                        seen.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            } else if let Ok(mut f) = std::fs::File::open(e.path()) {
+                let mut b = [0u8; 8];
+                if f.read(&mut b).is_ok() {
+                    seen.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+}
+
+/// Another program reading or touching the time test's probe files while it runs (an indexer, a
+/// virus scanner, a sync tool) moves their last-access time to now. The drive is still never
+/// taken for FAT, so no false 4 GB limit is ever set on it.
+#[test]
+fn another_program_reading_during_the_time_test_never_makes_a_drive_fat() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    for touch in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let seen = Arc::new(AtomicUsize::new(0));
+        let readers: Vec<_> = (0..2)
+            .map(|_| {
+                let (r, s, n) = (
+                    root.path().to_path_buf(),
+                    Arc::clone(&stop),
+                    Arc::clone(&seen),
+                );
+                std::thread::spawn(move || other_program(r, s, n, touch))
+            })
+            .collect();
+        let dest = Destination::open(root.path()).unwrap();
+        let mut fat = 0;
+        for _ in 0..300 {
+            if dest.time_test_kind() == Some(DriveKind::Fat) {
+                fat += 1;
+            }
+        }
+        for _ in 0..30 {
+            let d = Destination::open(root.path()).unwrap();
+            if d.profile().kind() == DriveKind::Fat || d.largest_file().is_some() {
+                fat += 1;
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        for r in readers {
+            r.join().unwrap();
+        }
+        let seen = seen.load(Ordering::Relaxed);
+        assert!(
+            seen > 0,
+            "touch={touch}: the other program never got to a probe file"
+        );
+        assert_eq!(fat, 0, "touch={touch}: taken for FAT ({seen} reads)");
+    }
 }
 
 /// A file bigger than a FAT drive can hold is refused at its start, before anything is made,

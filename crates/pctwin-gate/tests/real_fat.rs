@@ -308,8 +308,8 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
 }
 
 /// FAT drives hold files of up to 4 GB less one byte, on every system: a bigger one is refused at
-/// its start, before anything is made. exFAT has no such limit. (Windows cannot read a drive's
-/// type through its handle; the gate asks the drive how it keeps time instead.)
+/// its start, before anything is made. exFAT has no such limit. (Windows reads the drive's type
+/// from the volume list, for the volume with the folder's own number.)
 #[test]
 fn a_fat_drive_refuses_a_file_over_4_gb_at_its_start_on_every_system() {
     use pctwin_gate::FAT_LARGEST_FILE;
@@ -321,6 +321,14 @@ fn a_fat_drive_refuses_a_file_over_4_gb_at_its_start_on_every_system() {
         let dest = Destination::open(&dir).unwrap();
         let fat = !drive.kind.contains("exfat");
         let expected = fat.then_some(FAT_LARGEST_FILE);
+        if cfg!(windows) {
+            let kind = if fat {
+                pctwin_gate::DriveKind::Fat
+            } else {
+                pctwin_gate::DriveKind::ExFat
+            };
+            assert_eq!(dest.profile().kind(), kind, "{}", drive.show());
+        }
         assert_eq!(dest.largest_file(), expected, "{}", drive.show());
         let big = dest.create_file(
             &IncomingPath::parse("Films/big.mkv").unwrap(),
@@ -399,8 +407,10 @@ fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
 /// PCTwin and another program make the same name at the same moment, many times, the way this
 /// drive names files: exactly one of them gets it every time, and the other's file is never
 /// touched or mixed in. Each round gives one side or the other a different head start (up to a
-/// few times what making a file takes on this drive), and the test fails unless both sides won
-/// some rounds, so it proves they really competed. The split is printed for the CI log.
+/// few times what making a file takes on this drive). Both sides winning proves little (the big
+/// head starts decide those rounds), so the test fails unless some rounds went against the head
+/// start: the side that started later still got the name, which happens only when the two really
+/// overlap. The split is printed for the CI log.
 #[test]
 fn a_name_raced_for_is_never_shared() {
     use pctwin_gate::Claim;
@@ -430,7 +440,7 @@ fn a_name_raced_for_is_never_shared() {
             }
         };
         let mut pending = None;
-        let (mut won, mut lost) = (0, 0);
+        let (mut won, mut lost, mut upsets) = (0, 0, 0);
         for round in 0..300u32 {
             let name = format!("r{round}.bin");
             let sealed = match pending.take() {
@@ -476,6 +486,10 @@ fn a_name_raced_for_is_never_shared() {
             }
             let claim = sealed.claim_as(&name);
             let they_won = other.join().unwrap();
+            // The side that started later got the name.
+            if !head.is_zero() && they_won == they_wait {
+                upsets += 1;
+            }
             let got = std::fs::read(dir.join(&name)).unwrap();
             match claim {
                 Claim::Named(c) => {
@@ -494,13 +508,65 @@ fn a_name_raced_for_is_never_shared() {
             }
         }
         println!(
-            "race on {}: names by {naming:?}; PCTwin got the name {won} times, the other program {lost}",
+            "race on {}: names by {naming:?}; PCTwin got the name {won} times, the other program {lost}; {upsets} went against the head start",
             drive.show()
         );
         assert!(
-            won > 0 && lost > 0,
-            "{}: one side won every round ({won} to {lost}): the race proved nothing",
+            upsets > 0,
+            "{}: the head start decided every round ({won} to {lost}): the two never really overlapped",
             drive.show()
         );
     });
+}
+
+/// A drive put in another's place at the same folder, with the very number the first had (Linux
+/// gives a freed loop device to the next image): it is judged again, so it gets its own name
+/// rules and limits, never the old drive's. CI mounts a vfat drive inside an approved folder,
+/// names a file there, then puts ext4 on the same loop device at the same folder
+/// (PCTWIN_SWAP_CMD) while the destination stays open.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_drive_put_in_another_s_place_at_the_same_folder_is_judged_again() {
+    use std::os::unix::fs::MetadataExt;
+    if phase() == Phase::After {
+        return;
+    }
+    let Some(parent) = std::env::var_os("PCTWIN_SWAP_DIR").map(PathBuf::from) else {
+        assert!(
+            std::env::var_os("PCTWIN_REQUIRE_FAT").is_none(),
+            "PCTWIN_SWAP_DIR is not set"
+        );
+        return;
+    };
+    let swap = std::env::var("PCTWIN_SWAP_CMD").expect("PCTWIN_SWAP_CMD with PCTWIN_SWAP_DIR");
+    let drive = parent.join("drive");
+    let number = std::fs::metadata(&drive).unwrap().dev();
+    let dest = Destination::open(&parent).unwrap();
+    // vfat: Windows' rules.
+    assert_eq!(
+        write(&dest, "drive/before/May?.txt", b"vfat"),
+        "drive/before/May\u{FF1F}.txt"
+    );
+    let tested = dest.drives_tested();
+    let done = std::process::Command::new("sh")
+        .args(["-c", &swap])
+        .status()
+        .unwrap();
+    assert!(done.success(), "the swap failed");
+    assert_eq!(
+        std::fs::metadata(&drive).unwrap().dev(),
+        number,
+        "the new drive has the old one's number"
+    );
+    // ext4: the system's own rules, so the drive was judged again.
+    assert_eq!(
+        write(&dest, "drive/after/May?.txt", b"ext4"),
+        "drive/after/May?.txt"
+    );
+    // And it was tested again before its first file was named, not given the old drive's test.
+    assert_eq!(
+        dest.drives_tested(),
+        tested + 1,
+        "the new drive was tested again"
+    );
 }

@@ -497,6 +497,239 @@ label-animal-beaver = Beaver
 label-picked = { $colour } { $animal }
 label-unnamed = Unnamed laptop
 
+## M02 Finding your familiar setup
+
+scan-eyebrow = Reviewed move
+scan-title = Finding your familiar setup.
+scan-body = The inventory is saved so the scan can resume.
+scan-progress =
+    .aria-label = Scanning selected locations
+# $size is passed but not shown in the mockup line.
+scan-found =
+    { NUMBER($count) ->
+        [one] Scan: { $count } file discovered.
+       *[other] Scan: { $count } files discovered.
+    }
+scan-step-usual-title = Files and folders
+scan-step-usual-body = Accessible selected paths scanned.
+scan-step-other-title = Other folders and drives
+scan-step-other-body = Folders and drives you use outside the usual places.
+scan-step-protected-title = Protected locations
+scan-step-protected-body =
+    { NUMBER($count) ->
+        [one] { $count } location still needs permission.
+       *[other] { $count } locations still need permission.
+    }
+scan-step-done = Done
+scan-step-current = Now
+scan-step-todo = Next
+scan-unreadable-note = Unreadable locations remain visible. They are not counted as fully scanned.
+scan-status-not-searched = Not scanned
+scan-paused = Scan paused. Everything found so far is saved.
+scan-resumed = The scan picked up where it stopped.
+scan-partial =
+    { NUMBER($count) ->
+        [one] Partial scan: { $count } protected location is still excluded.
+       *[other] Partial scan: { $count } protected locations are still excluded.
+    }
+scan-allow = Allow access
+scan-pause = Pause
+scan-resume = Continue scanning
+scan-continue = Preview inventory
+
+## M03 Everything you chose, in view
+
+overview-eyebrow = Reviewed move
+overview-title = Everything you chose, in view.
+overview-body = Review the inventory before creating the move plan.
+# The metric value next to each label is passed in already formatted.
+overview-size-label = selected files
+overview-items-label =
+    { NUMBER($count) ->
+        [one] file
+       *[other] files
+    }
+overview-attention-label =
+    { NUMBER($count) ->
+        [one] needs your attention
+       *[other] need your attention
+    }
+overview-files-title = Files and folders
+overview-files-body = Documents, photos and selected custom locations.
+overview-dest-title = Where they go
+overview-dest-body = The place on the new laptop for each folder.
+overview-people-title = Profiles
+overview-people-body = Choose the receiving account for each.
+overview-review = Review
+overview-partial =
+    { NUMBER($count) ->
+        [one] Partial scan: { $count } protected location is still excluded.
+       *[other] Partial scan: { $count } protected locations are still excluded.
+    }
+overview-allow = Allow access
+overview-continue = Continue
+
+## M04 Keep what matters to you
+
+files-eyebrow = Reviewed move
+files-title = Keep what matters to you.
+files-body = Choose folders, secondary drives and custom locations.
+files-search-label = Find a local folder
+files-search-placeholder = Search selected paths
+files-select =
+    .aria-label = Move { $name }
+files-folder-detail =
+    { NUMBER($count) ->
+        [one] { $size } · { $count } file
+       *[other] { $size } · { $count } files
+    }
+files-status-protected = Needs permission
+files-protected-body = PCTwin needs your permission to read this folder. Its files are not counted until you allow it.
+files-allow = Allow access
+files-status-added = Custom path
+files-add = Add another folder
+files-remove =
+    .aria-label = Remove { $name }
+files-no-limit = The free core has no arbitrary file-size or folder-count cap.
+files-total =
+    { NUMBER($count) ->
+        [one] { $count } folder chosen, { $size } in total
+       *[other] { $count } folders chosen, { $size } in total
+    }
+files-none = Choose at least one folder to continue.
+files-continue = Choose destinations
+
+## M05 Give every file a home
+
+dest-eyebrow = Reviewed move
+dest-title = Give every file a home.
+dest-body = Map selected categories to a target you control.
+dest-col-chosen = Selected data
+dest-col-place = Destination
+dest-col-placement = Placement
+dest-placement-local = Local
+dest-placement-external = External
+dest-col-status = Status
+dest-select =
+    .aria-label = Destination for { $name }
+# $folder is a folder name on the new laptop, for example "Documents".
+dest-option-folder = New laptop / { $folder }
+# $drive is the name of a drive connected to the new laptop.
+dest-option-drive = External disk / { $drive }
+dest-option-choose = Choose folder
+dest-default-label = Default destination
+dest-status-ready = Ready
+dest-status-missing = Drive missing
+dest-status-space = Not enough space
+dest-all-ready = Every folder has a place on the new laptop.
+dest-missing = { $drive } is not connected to the new laptop. Connect it, or choose another place for these files.
+dest-space = { $place } has { $free } free, but these files need { $needed }. Free up space there, choose another place, or move fewer files.
+dest-change = Change
+dest-continue = Review the plan
+
+## M23 Approve the move you want
+
+plan-eyebrow = Reviewed move
+plan-title = Approve the move you want.
+plan-body = This versioned plan is the only authority for execution.
+plan-what-title = Selected scope
+# $size is already formatted, for example "120 GB". $count is passed but not shown.
+plan-what-body = { $size } of files. Selected folders and mapped destinations.
+plan-where-body =
+    { NUMBER($count) ->
+        [one] To { $count } place on the new laptop.
+       *[other] To { $count } places on the new laptop.
+    }
+plan-hand-title = Before you start
+plan-hand-body =
+    { NUMBER($count) ->
+        [one] { $count } step. It is listed in your report at the end.
+       *[other] { $count } steps. They are listed in your report at the end.
+    }
+plan-hand-none = Nothing, as far as PCTwin can tell now.
+plan-old-safe = Your old laptop stays unchanged. Files are copied, never taken off it.
+plan-edit = Change the plan
+plan-edit-note = Editing the plan invalidates approval for new operations.
+plan-approve = I approve this reviewed plan and its disclosed manual steps.
+plan-not-approved = The draft plan has not been approved. New executable operations remain blocked.
+plan-changed = These edits invalidate the previous approval for new operations.
+plan-start = Start the move
+
+## Plan screens: shared words and the lines the copy deck did not cover
+
+plan-back = Back
+# $n is a count of files or folders.
+plan-number = { NUMBER($n) }
+# $n is a number already rounded for reading, for example 18.4.
+plan-size-b = { NUMBER($n) } bytes
+plan-size-kb = { NUMBER($n) } KB
+plan-size-mb = { NUMBER($n) } MB
+plan-size-gb = { NUMBER($n) } GB
+plan-size-tb = { NUMBER($n) } TB
+# $size is a size already written out, for example "18.4 GB". Used when part of a folder could not be read.
+plan-size-at-least = at least { $size }
+plan-size-unknown = size unknown
+plan-role-home = Home folder
+plan-role-desktop = Desktop
+plan-role-documents = Documents
+plan-role-downloads = Downloads
+plan-role-pictures = Pictures
+plan-role-music = Music
+plan-role-videos = Videos
+plan-role-public = Public folder
+plan-role-app-data = App data
+plan-role-other = Other folder
+# $done and $total are counts of places this search has looked at and has to look at.
+scan-places = { $done } of { $total } places searched
+scan-card-title = Scanning selected locations
+scan-pausing = Pausing after the folder it is on. Everything found so far is saved.
+overview-row-attention = Needs attention
+files-status-work = Work or school
+files-work-body = Your work or school manages this folder, so it is left out unless you tick it.
+# $count is how many files in the folder are only online.
+files-online-only =
+    { NUMBER($count) ->
+        [one] { $count } file is only online, so it is not copied.
+       *[other] { $count } files are only online, so they are not copied.
+    }
+files-no-match = No folder matches that name.
+dest-status-none = Choose a place
+dest-status-readonly = Cannot be written to
+dest-status-format = File too big
+# $name is the folder that needs a place.
+dest-none = Choose a place for { $name } on the new laptop.
+# $place is a drive on the new laptop that cannot be written to.
+dest-readonly = { $place } is read-only, so nothing can be copied to it. Choose another place.
+# $place is the drive. Some drive formats cannot hold a single very large file.
+dest-format = A file in these folders is too big for the way { $place } is set up. Choose another place.
+# $folder is a folder on the new laptop and $drive the drive it is on.
+plan-place = { $folder } on { $drive }
+plan-group-to = Goes to { $place }
+plan-version = Plan version { $revision }
+plan-details = More details
+# $reference is a short code that names exactly this version of the plan.
+plan-reference = Reference { $reference }
+# $count is how many files are affected in each line below.
+plan-hand-cloud-only =
+    { NUMBER($count) ->
+        [one] { $count } file is only online. PCTwin does not download it. Make it available on the old laptop first, or leave it.
+       *[other] { $count } files are only online. PCTwin does not download them. Make them available on the old laptop first, or leave them.
+    }
+plan-hand-unreadable =
+    { NUMBER($count) ->
+        [one] { $count } item could not be opened, so it is not moving. Allow access, or leave it.
+       *[other] { $count } items could not be opened, so they are not moving. Allow access, or leave them.
+    }
+plan-hand-work-managed =
+    { NUMBER($count) ->
+        [one] { $count } item is managed by your work or school and is left out. Tick its folder to include it.
+       *[other] { $count } items are managed by your work or school and are left out. Tick their folders to include them.
+    }
+plan-blocked-someone-unmapped = Someone on the old laptop has no account chosen on the new one yet. Choose where each person's files go, then come back.
+plan-blocked-account-used-twice = Two people would end up in one account on the new laptop. Give each person their own.
+plan-blocked-invalid = This plan cannot be approved as it is. Go back and check what you chose.
+plan-blocked-fix = Choose accounts
+
 ## Tray menu
 
 tray-show = Show PCTwin
@@ -513,8 +746,159 @@ soon-restore-title = Restore setup
 soon-restore-body = Rebuild a laptop from a setup profile you saved after a move. This is coming in a later version.
 soon-rescue-title = Rescue a laptop
 soon-rescue-body = Bring files back from a laptop that will not start, by connecting its drive to a working one. This is coming in a later version.
-soon-quick-send-title = Quick Send
-soon-quick-send-body = Send chosen files or folders to a laptop nearby, at any time, not only during a move. It is free, with no account, and it is coming in the first release.
+
+## X01 Move progress, compact
+
+progress-eyebrow = Your move
+progress-title = Settling you in.
+progress-title-paused = Move paused
+progress-paired = Paired
+progress-percent =
+    .aria-label = Move progress
+# $done and $total are already formatted sizes, for example "81.6 GB" and "120 GB".
+progress-amount = { $done } of { $total }
+# $range is a measured range, already formatted, for example "15 to 20 minutes".
+progress-time-left = About { $range } left
+progress-time-measuring = Working out the time left…
+# $speed is measured and already formatted, for example "62 MB/s".
+progress-speed = { $speed }, measured
+progress-count-needs-action =
+    { NUMBER($count) ->
+        [one] { $count } item needs your action
+       *[other] { $count } items need your action
+    }
+progress-current-copying = Now copying: { $name }
+progress-current-checking = Now checking: { $name }
+progress-needs-action =
+    { NUMBER($count) ->
+        [one] { $count } item needs your action. The rest keeps moving.
+       *[other] { $count } items need your action. The rest keeps moving.
+    }
+progress-see-needs-action = See what needs you
+progress-interrupted = The connection to the other laptop dropped. PCTwin is trying to reconnect. Nothing copied and checked is lost.
+progress-low-battery = { $label } is low on battery. Plug it in so the move is not interrupted.
+progress-old-safe = Your old laptop stays unchanged.
+progress-pause = Pause move
+progress-compact = Keep it compact
+progress-expand = See the whole move
+progress-stop = Stop the move
+
+## X02 Move progress, expanded
+
+progress-all-title = See the whole move.
+progress-all-body = Each operation keeps its own status and source.
+progress-metric-overall = overall progress
+progress-metric-committed = committed so far
+progress-metric-estimate = estimate
+progress-col-item = Operation
+progress-col-from = Source
+progress-col-status = State
+progress-state-waiting = Waiting
+progress-state-copying = Copying
+progress-state-verified = Verified
+progress-state-checking = Checking
+progress-state-paused = Paused
+progress-checked-note = An item counts as copied only after it is checked.
+
+## F09 Mini panel
+
+mini-title = Your move, nearby.
+mini-title-paused = Move paused.
+mini-what = moving your selected files
+mini-progress =
+    .aria-label = Move progress
+mini-pause = Pause
+mini-resume = Resume
+mini-open = Open move
+# Used when lane E reuses this panel for a Quick Send.
+mini-title-send = Your files are on their way.
+mini-what-send = sending selected files
+mini-open-send = Open send
+mini-progress-send =
+    .aria-label = Send progress
+
+## X05 Paused at a safe point
+
+pause-title = Paused at a safe point.
+pause-title-finishing = Pausing at a safe point…
+pause-body = Committed results stay recorded and pending actions wait.
+pause-finishing = Finishing { $name } first, so it is not left half-copied.
+pause-kept-title = Files
+pause-kept-body = Block checkpoint preserved.
+pause-waiting-title = Waiting
+pause-waiting-body =
+    { NUMBER($count) ->
+        [one] { $count } item still to copy. Nothing is lost.
+       *[other] { $count } items still to copy. Nothing is lost.
+    }
+pause-status-kept = Paused
+pause-status-waiting = Waiting
+pause-note = Pausing does not undo anything. Your old laptop stays unchanged.
+pause-resume = Resume saved move
+
+## X10 Stop the remaining move? (danger dialog)
+
+cancel-title = Stop the remaining move?
+cancel-body = Cancellation keeps committed data. It is separate from undo.
+cancel-copied-title = Copied files
+cancel-copied-body = Stay on the new laptop.
+cancel-rest-title = Future actions
+cancel-rest-body = Stop after safe checkpoint handling.
+cancel-partial-title = A file partly copied
+cancel-partial-body = Is never kept as if it were complete.
+cancel-old-title = Old laptop
+cancel-old-body = Remains untouched by cancellation.
+cancel-ack = I understand cancellation does not reverse the move
+cancel-stop = Stop and view the report
+cancel-keep = Keep moving
+
+## R01 Welcome to your next laptop (outcome)
+
+outcome-eyebrow = Move results
+outcome-title = Welcome to your next laptop.
+outcome-body = Here is what happened to the scope you approved.
+outcome-files-title = Selected files
+outcome-status-partial = Partial
+outcome-next-title = What to do next
+outcome-old-safe = Unresolved selected work stays visible. The source has not been cleaned or wiped.
+outcome-report = View complete report
+outcome-home = Return home
+
+## R02 Your move, item by item (detailed report)
+
+report-title = Your move, item by item.
+report-body = A factual local record with reasons and source-to-target mappings.
+report-filter-label = Show
+report-col-item = Item
+report-col-result = Outcome
+report-col-details = Evidence / next step
+report-from = From: { $path }
+report-to = To: { $path }
+report-none = No items have this result.
+report-more-details = More details
+
+# Evidence: how a copied item was checked.
+evidence-read-back = Checked by reading it back from the drive.
+evidence-memory = Checked from this laptop’s memory, not the drive.
+evidence-memory-explain = The copy was read back and matched, but through this laptop’s memory, so what was read may have come from memory rather than the drive. A fault in the drive itself might not show here, so opening the file once is a good check.
+evidence-not-checked = Not checked, because it did not finish.
+
+# Reasons: why an item did not finish. Each says what happened, then what to do.
+reason-not-enough-space = The new laptop ran out of space. Free up space on it, then move this item again.
+reason-changed-during-move = This file kept changing on the old laptop while it was being copied. Close any app using it, then move it again.
+reason-unreadable = The old laptop would not let PCTwin read this item. Check that it opens on the old laptop, then move it again.
+reason-not-verified = The copy did not match the original, so it was not kept. Move it again; if it fails again, the original may be damaged.
+reason-refused-by-safety-check = The new laptop’s safety check refused this item because of its name, place or size. The original is still on the old laptop, so you can copy it another way if you need it.
+reason-name-not-allowed = This name cannot be used on the new laptop, and no safe new name was possible. Rename it on the old laptop, then move it again.
+reason-install-failed = The app did not install. Install it from its maker’s website.
+reason-no-equivalent = There is no version of this app for the new laptop’s system. Look for a similar app that works there.
+reason-sign-in = It is in place, but you need to sign in. Open it and sign in.
+reason-activation = The app is in place, but it needs its licence on the new laptop. Open it and activate it with your licence or account.
+reason-permission = The new laptop needs to give permission first. Open the item and choose Allow when asked.
+reason-online-only = This file is stored online only, so it was not on the old laptop to copy. Download it on the new laptop from the app that stores it online.
+reason-manual-install = This app must come from its maker’s website. Download and install it there.
+reason-restart = The new laptop must restart to finish. Restart it when you are ready.
+reason-finish-by-hand = PCTwin cannot do this step for you. Follow the steps shown for it in this report.
 
 ## Item results (every item ends with one of these)
 
@@ -522,11 +906,383 @@ status-copied = Copied
 status-reinstalled = Reinstalled
 status-converted = Converted
 status-needs-action = Needs action
-status-skipped = Skipped
+status-skipped-by-user = Skipped by you
 status-failed = Failed
+
+## Screens: words the copy deck did not cover (same voice)
+
+# $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
+progress-minutes = { $low } to { $high } minutes
+# $low and $high are numbers and $unit is already formatted, for example "MB/s". The result fills "{ $speed }, measured".
+progress-speed-range = { $low } to { $high } { $unit }
+progress-count-failed =
+    { NUMBER($count) ->
+        [one] { $count } item could not be copied
+       *[other] { $count } items could not be copied
+    }
+progress-queue-empty = Nothing has started yet.
+progress-approved-job = Approved job
+progress-route-old = Old laptop
+progress-route-new = New laptop
+progress-panel-pausing = Pausing
+outcome-metric-size = verified copies
+outcome-metric-action = need your action
+progress-percent-unknown = PCTwin is still working out the size of this move.
+mini-title-send-paused = Send paused.
+cancel-ack-hint = Tick the box above to turn on the stop button.
+progress-state-placing = Putting in place
+progress-state-existing = Already there
+outcome-stopped-title = Your move was stopped.
+outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
+# $done and $total are counts of items: what was copied and checked, and everything the person approved.
+outcome-files-summary = { $done } of { $total } items copied and checked.
+outcome-files-memory =
+    { NUMBER($count) ->
+        [one] { $count } checked from this laptop’s memory, not the drive.
+       *[other] { $count } checked from this laptop’s memory, not the drive.
+    }
+report-show-more = Show more
+# $shown and $total are counts of items.
+report-showing = Showing { $shown } of { $total }
 
 ## Component kit
 
 dialog-close = Close
 toast-dismiss = Dismiss
 code-label = Six-digit code
+
+## Shared Quick Send words
+
+qs-eyebrow = Quick Send
+qs-eyebrow-receiving = Receiving on this device
+# The route between the two laptops, for example "Blue Fox" to "Green Owl".
+qs-route =
+    .aria-label = From { $from } to { $to }
+qs-route-sender = Sender · this approved session
+qs-route-receiver = Receiver · same usable Wi-Fi
+qs-tally =
+    { NUMBER($count) ->
+        [one] { $count } selected item · { $size }
+       *[other] { $count } selected items · { $size }
+    }
+qs-tally-badge = Local send
+
+## Q01 Quick Send home
+
+qs-home-title = A few files. Straight across.
+qs-home-body = Send selected work to a nearby device.
+qs-send-title = Send files
+qs-send-body = Choose files or folders on this laptop.
+qs-receive-title = Receive files
+qs-receive-body = Turn on receiving for this session.
+qs-history-title = Local handover receipts
+qs-history-body = Find received locations and unfinished items.
+qs-home-action = Choose files
+qs-receiving = Ready to receive. Other laptops nearby see this one as { $label }.
+qs-receive-stop = Stop receiving
+qs-no-nearby = No laptops found nearby. Open PCTwin on the other laptop and keep both on the same Wi-Fi.
+
+## Q02 Choose files and folders
+
+qs-choose-title = What are you sending?
+qs-choose-body = Choose only the files and folders you want to share.
+qs-drop =
+    .aria-label = Drop area for files and folders
+qs-drop-title = Drop files or folders here
+qs-drop-body = Or add them with Add files or Add folders.
+qs-drop-active = Let go to add them.
+qs-add-files = Add files
+qs-add-folders = Add folders
+qs-remove =
+    .aria-label = Remove { $name }
+# $kind is the file type, for example "PDF document" or "8 photos".
+qs-file-detail = { $size } · { $kind }
+qs-empty = Nothing chosen yet. Add files or folders to send.
+qs-online-only = Cloud-only files need an available original before they can be sent.
+qs-protected = PCTwin cannot read { $name }. Allow access, or remove it from the list.
+qs-allow = Allow access
+qs-choose-continue = Review selected files
+
+## Q03 Check what you are sharing
+
+qs-check-title = Check what you are sharing.
+qs-check-body = Review the selected material before it leaves this device.
+qs-check-included = Included
+qs-check-shared-note = Selected filenames and ordinary file metadata are shared with the approved recipient.
+qs-check-changed = { $name } changed since you chose it. Check it again.
+qs-check-ack = I have reviewed the selected material
+qs-check-ack-hint = Remove anything private before sending.
+qs-check-continue = Choose a receiving device
+
+## Q04 Who should receive it?
+
+qs-who-title = Who should receive it?
+qs-who-body = Choose the session label shown on the other device.
+qs-who-nearby = Nearby receiver · same Wi-Fi.
+qs-who-code = Use a pairing code
+qs-who-code-body = Enter the code shown on the sender.
+qs-who-same-label = Two laptops nearby have this name. Check the name on the other laptop’s screen.
+qs-who-busy = { $label } is busy with another send. Wait a moment, then try again.
+qs-who-note = The receiving device approves the offer and chooses its destination.
+qs-who-action = Show my send code
+
+## Q08 Incoming offer (receiving laptop)
+
+qs-offer-title = Someone wants to send you files.
+qs-offer-body = Review this offer on the receiving device.
+qs-offer-note = Receiving saves approved copies. It does not open or run them.
+qs-offer-accept = Accept offer and choose a folder
+qs-offer-decline = Decline this offer
+qs-offer-declined = You declined. Nothing was saved on this laptop.
+qs-offer-changed = The sender changed the files. Check the new list before you accept.
+qs-offer-gone = { $label } is no longer available. Nothing was saved on this laptop.
+
+## Q09 Where should the files land?
+
+qs-land-title = Where should the files land?
+qs-land-body = You choose the receiving folder on this device.
+qs-land-folder-label = Receiving folder
+qs-land-choose = Another approved folder
+qs-land-space-title = Space available
+qs-land-space = { $free } available · { $needed } needed.
+qs-land-status-fits = Fits
+qs-land-status-no-space = Not enough space
+qs-land-no-space = This folder has { $free } free, but these files need { $needed }. Choose another folder or free up space.
+qs-land-unavailable = This folder is not available. Connect its drive, or choose another folder.
+qs-land-denied = PCTwin is not allowed to save in this folder. Choose another folder.
+qs-land-note = If files already exist, you review the conflict choices before writing.
+qs-land-confirm = Use this folder for this offer
+qs-land-confirm-hint = Only the reviewed files may be saved here.
+qs-land-use = Use this folder
+
+## Q10 Keep your existing work safe
+
+qs-conflict-title = Keep your existing work safe.
+qs-conflict-body = Choose what happens when a filename already exists.
+qs-conflict-col-file = Item
+qs-conflict-col-existing = Existing copy
+qs-conflict-col-choice = Choice
+# $when is already formatted, for example "yesterday".
+qs-conflict-existing = Edited { $when }
+qs-conflict-none = No existing copy
+qs-conflict-select =
+    .aria-label = What happens to { $name }
+qs-keep-both = Keep both
+qs-skip = Skip this item
+qs-replace = Replace after separate review
+qs-add-new = Add new
+qs-keep-both-note = Keep both preserves the existing file. The received copy is saved as { $newName }.
+qs-no-conflicts = None of these files are in the folder yet. Nothing will be replaced.
+qs-replace-separate = Replacing needs its own confirmation, separate from the other choices.
+qs-replace-warning = Replacing removes the existing target version from this location. Review that exact file separately.
+qs-replace-confirm = I separately approve replacing { $name }
+qs-replace-confirm-hint = Its current identity and write state must still be checked.
+qs-conflict-target-changed = A changed or inaccessible target stays unresolved until it is reviewed.
+qs-conflict-approve = I approve these receiving choices
+qs-conflict-continue = Confirm receiving choices
+
+## Q11 Ready to send this selection?
+
+qs-approve-title = Ready to send this selection?
+qs-approve-body = The sender reviews the exact handover before starting.
+qs-approve-receiver-title = Recipient
+qs-approve-receiver-waiting = Waiting for the receiving device’s approved offer and folder.
+qs-approve-receiver-ready = The receiver approved this offer, folder and conflict choices.
+qs-approve-files-title = Files
+qs-approve-files-same = Selected source versions need to remain unchanged.
+qs-approve-files-changed = Some files changed since you checked them. Check them again.
+qs-approve-existing-title = Existing files
+qs-approve-existing-body = Keep both where reviewed.
+qs-status-waiting = Pending
+qs-status-accepted = Approved
+qs-status-unchanged = Review
+qs-status-changed = Changed
+qs-approve-ack = Send this reviewed selection
+qs-approve-ack-hint = I approve these files and this recipient.
+qs-approve-start = Start approved send
+qs-approve-cleared = You changed the files, so { $label } must accept them again.
+qs-approve-withdrawn = { $label } no longer accepts this send. Nothing was sent.
+
+## Q12 Send progress
+
+qs-sending-title = Your files are on their way.
+qs-sending-body = Selected copies travel directly between these devices.
+qs-sending-progress =
+    .aria-label = Sending selected files
+qs-sending-current = Now sending: { $name }
+# $speed is measured and already formatted, for example "3.1 MB/s".
+qs-sending-speed = observed { $speed }
+qs-step-copying = Copying
+qs-step-copying-body =
+    { NUMBER($done) ->
+        [one] { $done } selected item received.
+       *[other] { $done } selected items received.
+    }
+qs-step-checking = Checking
+qs-step-checking-body = Completed files are checked individually.
+qs-step-receipt = Receipt
+qs-step-receipt-body = Locations and unresolved items appear at the end.
+qs-sending-paused = Paused. Files already received and checked are kept.
+qs-sending-disconnected = The connection to { $label } dropped. Files already checked are kept. Trying again by itself…
+qs-sending-needs-action =
+    { NUMBER($count) ->
+        [one] { $count } item needs your action.
+       *[other] { $count } items need your action.
+    }
+qs-pause = Pause send
+qs-resume = Resume
+qs-compact = Keep compact
+qs-stop = Stop this send
+qs-sending-complete-title = The selected handover is complete
+qs-sending-complete-body = Copy checks finished. Review the actual receiving locations.
+qs-sending-receipt = View current receipt
+
+## Q14 Handover receipt (both laptops)
+
+qs-receipt-title = Here is your handover receipt.
+qs-receipt-body = See exactly what arrived and where it landed.
+qs-receipt-box-title = Your files arrived
+qs-receipt-box-body = The selected copies were checked.
+qs-receipt-arrived =
+    { NUMBER($count) ->
+        [one] { $count } selected item received
+       *[other] { $count } selected items received
+    }
+qs-receipt-size = { $size } checked against the source
+qs-receipt-saved-as = { $path }
+qs-receipt-not-arrived = The complete folder has not been verified.
+qs-receipt-status-verified = Verified
+qs-receipt-status-unfinished = Unfinished
+qs-receipt-not-completed = Not completed.
+qs-receipt-stopped-row = Received and checked before stopping.
+qs-receipt-partial =
+    { NUMBER($count) ->
+        [one] { $count } item still needs attention.
+       *[other] { $count } items still need attention.
+    }
+qs-receipt-stopped = This send was stopped. Complete received copies remain in their approved folder.
+qs-receipt-not-opened = PCTwin did not open or run any received file.
+qs-receipt-ack = Acknowledge receipt
+# $when is already formatted, for example "today at 14:05".
+qs-receipt-acked = Receipt acknowledged { $when }.
+qs-receipt-ack-note = Acknowledging this receipt does not confirm the files were opened or used.
+qs-receipt-offline = { $label } is offline, so it has not seen this receipt yet. The receipt is saved on this laptop.
+qs-receipt-missing = Send missing pieces
+qs-receipt-missing-body = Review only the affected selected files.
+qs-receipt-history = All local receipts
+qs-receipt-done = Back to Quick Send
+
+## Q19 Finish the missing part
+
+qs-missing-title = Finish the missing part.
+qs-missing-body = Use the prior receipt to review unfinished work.
+qs-missing-status-there = Keep
+qs-missing-status-missing = Needs action
+qs-missing-there-body = The received copy was checked.
+qs-missing-missing-body = Review the missing or incomplete selected material.
+qs-missing-note = Completed files are preserved. New or changed material needs its own approval.
+qs-missing-ack = Send the missing selected material
+qs-missing-ack-hint = Recheck current source versions and receiving approval.
+qs-missing-complete = Everything already arrived. There is nothing left to send.
+qs-missing-unavailable = The earlier receipt cannot be found, so PCTwin cannot tell what is missing. Start a new send instead.
+qs-missing-continue = Review this focused send
+
+## Q20 Stop this handover? (and decline)
+
+qs-stop-title = Stop this handover?
+qs-stop-body = Review what has already arrived before stopping.
+qs-stop-arrived-title = Complete received copies
+qs-stop-arrived-body = Stay in the approved receiving folder.
+qs-stop-rest-title = Pending work
+qs-stop-rest-body = No new transfer work starts after stopping.
+qs-stop-partial-title = Partial temporary files
+qs-stop-partial-body = Reconciled and cleaned under the task’s policy.
+qs-stop-status-keep = Keep
+qs-stop-status-stop = Stop
+qs-stop-status-review = Review
+qs-stop-ack = Stop this named send
+qs-stop-ack-hint = This does not delete complete received copies.
+qs-stop-confirm = Stop and view the receipt
+qs-stop-keep = Keep sending
+qs-decline-title = Decline these files?
+qs-decline-body = Nothing is saved on this laptop, and the sender is told you declined.
+qs-decline-confirm = Decline
+qs-already-finished = This send has already finished. See the receipt for what arrived.
+
+## F08 Your moves, kept locally (history)
+
+history-title = Your moves, kept locally.
+history-body = Reopen a report or resume a journalled job.
+history-row-move = { $from } → { $to }
+history-row-sent = Sent to { $label }
+history-row-received = Received from { $label }
+history-status-finished = Completed
+history-status-steps-left =
+    { NUMBER($count) ->
+        [one] Completed with { $count } manual step
+       *[other] Completed with { $count } manual steps
+    }
+history-status-paused = Paused
+history-status-stopped = Cancelled safely
+history-status-partial = Not all arrived
+history-open-report = Report
+history-open-receipt = Receipt
+history-continue = Continue
+history-export = Export history
+history-exported = History saved as { $path }.
+history-export-failed = The history could not be saved there. Choose another folder and try again.
+history-note = This history stays on this laptop. Nothing is sent anywhere unless you export it and share it yourself.
+history-empty = Your first local journal and report will appear here.
+history-empty-title = No moves recorded yet
+history-start = Start a new move
+
+## Quick Send: words the mockups do not have (added while building; same voice)
+
+qs-soon-note = Quick Send is not switched on in this version yet. Nothing has been sent or received.
+qs-tally-counting =
+    { NUMBER($count) ->
+        [one] { $count } selected item · size still being counted
+       *[other] { $count } selected items · size still being counted
+    }
+qs-gone = { $name } is not there any more. It may have been moved or deleted. Untick it, or put it back and add it again.
+qs-choose-why-problems = Some ticked items cannot be sent yet. Untick them, or fix them as described, to continue.
+qs-check-missing = { $name } is not there any more. Go back and remove it, or put it back.
+qs-check-unreadable = PCTwin cannot read { $name } any more. Allow access, or go back and remove it.
+qs-check-show-all =
+    { NUMBER($count) ->
+        [one] Show the file
+       *[other] Show all { $count } files
+    }
+qs-check-change = Change what I am sending
+qs-land-none = No folder chosen yet.
+qs-land-space-unknown = PCTwin could not measure the free space here. These files need { $needed }.
+qs-conflict-existing-unknown = Already there
+qs-conflict-choice-open = Not chosen yet
+qs-conflict-why = Choose what happens to every file, then tick the box, to continue.
+qs-approve-folder-title = Receiving folder
+qs-status-recipient-choice = Recipient choice
+qs-sending-card = Sending selected files
+qs-progress-of = of { $total }
+qs-receipt-partial-title = Not everything arrived
+qs-receipt-metric-items =
+    { NUMBER($count) ->
+        [one] selected item received
+       *[other] selected items received
+    }
+qs-receipt-metric-size = checked against the source
+qs-receipt-sent-as = Sent as { $path }
+qs-receipt-renamed = A file with that name was already there, so this one has a new name.
+qs-receipt-chip-already = Already there
+qs-receipt-already = An identical file was already there ({ $path }), so it was not sent again.
+qs-receipt-chip-declined = Not accepted
+qs-receipt-declined-send = The other laptop did not accept this file, so it was not sent.
+qs-receipt-declined-receive = You did not accept this file, so it was not saved.
+qs-receipt-more = More details
+qs-receipt-empty = Nothing was sent, so there is nothing to show.
+qs-receipt-already-count =
+    { NUMBER($count) ->
+        [one] { $count } item was already there as an identical file
+       *[other] { $count } items were already there as identical files
+    }
+qs-missing-new-send = Start a new send
+history-open-name = { $what }: { $title }

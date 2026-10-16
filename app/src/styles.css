@@ -293,13 +293,14 @@ h1.welcome span {
 
 .secondary-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   margin-top: var(--space-3);
 }
 
 .secondary-actions .button {
-  flex: 1;
+  flex: 1 1 auto;
   padding: var(--space-2) 10px;
   font-size: var(--type-supporting);
 }

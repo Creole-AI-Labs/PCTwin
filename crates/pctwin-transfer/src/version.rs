@@ -20,13 +20,15 @@ use crate::{Channel, TransferError};
 pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 
 /// The move protocol versions this release speaks. Each new version keeps the one before it
-/// (Engineering Plan 9.2: the current protocol and at least one version back).
+/// (Engineering Plan 9.2: the current protocol and at least one version back), counting from the
+/// first released one. Version 2 added sending damaged blocks again (receipts say whether a block
+/// was written, and `SendAgain`); version 1 was never released, so nothing needs it.
 pub const MOVE_PROTOCOL: Versions = Versions {
-    oldest: 1,
-    newest: 1,
+    oldest: 2,
+    newest: 2,
 };
 
-/// Message kind, kept apart from the transfer's own (1 to 13) and the inventory's (32, 33).
+/// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33).
 const KIND: u8 = 34;
 const LEN: usize = 5;
 

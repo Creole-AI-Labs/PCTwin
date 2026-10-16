@@ -59,7 +59,7 @@ const nothing = () => undefined;
 
 describe("F01 Welcome with an unfinished move", () => {
   it("is unchanged when no move is waiting: Start a move, no Resume", () => {
-    inApp(<Welcome onStart={nothing} onSoon={nothing} />);
+    inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} />);
     expect(screen.getByRole("button", { name: text("welcome-start") })).toBeTruthy();
     expect(screen.queryByRole("button", { name: text("resume-open") })).toBeNull();
   });
@@ -67,7 +67,7 @@ describe("F01 Welcome with an unfinished move", () => {
   it("the primary button reads Resume your move, not Start a move, and reopens the saved move", () => {
     const onStart = vi.fn();
     const onResume = vi.fn();
-    inApp(<Welcome onStart={onStart} onSoon={nothing} unfinished onResume={onResume} />);
+    inApp(<Welcome onStart={onStart} onSoon={nothing} onQuick={nothing} unfinished onResume={onResume} />);
     const button = screen.getByRole("button", { name: text("resume-open") });
     expect(screen.queryByRole("button", { name: text("welcome-start") })).toBeNull();
     button.focus();
@@ -79,7 +79,7 @@ describe("F01 Welcome with an unfinished move", () => {
   });
 
   it("changes nothing else: same picture, headline and secondary choices, nothing paid, no accessibility violations", async () => {
-    inApp(<Welcome onStart={nothing} onSoon={nothing} unfinished onResume={nothing} />);
+    inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} unfinished onResume={nothing} />);
     expect(heading().textContent).toBe("Your setup.Your next laptop.");
     expect(document.querySelector(".illustration")).toBeTruthy();
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Resume your move", "Restore setup", "Rescue a laptop", "Quick Send"]);
