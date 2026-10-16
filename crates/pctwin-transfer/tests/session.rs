@@ -621,7 +621,8 @@ async fn three_blocks_then_a_drop<'d>(
                 hear(&mut old).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b as u64
+                    block: b as u64,
+                    written: true,
                 }
             );
         }
@@ -832,7 +833,8 @@ async fn a_file_sent_in_sections_over_three_lanes_arrives_whole() {
                     hear(lane).await,
                     Message::Receipt {
                         stream: 0,
-                        block: *b as u64
+                        block: *b as u64,
+                        written: true,
                     }
                 );
             }
@@ -899,7 +901,8 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
                 hear(&mut old2).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b
+                    block: b,
+                    written: true,
                 }
             );
         }
@@ -913,7 +916,8 @@ async fn a_lane_that_drops_mid_block_loses_nothing_and_the_rest_goes_on_the_main
                 hear(&mut old).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b as u64
+                    block: b as u64,
+                    written: true,
                 }
             );
         }
@@ -1046,7 +1050,8 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
             hear(&mut old3).await,
             Message::Receipt {
                 stream: 0,
-                block: (n - 1) as u64
+                block: (n - 1) as u64,
+                written: true,
             }
         );
         say(&mut old2, last).await;
@@ -1054,7 +1059,8 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
             hear(&mut old2).await,
             Message::Receipt {
                 stream: 0,
-                block: 0
+                block: 0,
+                written: true,
             }
         );
         for (b, block) in blocks.iter().enumerate().take(n - 1).skip(1) {
@@ -1065,7 +1071,8 @@ async fn pieces_from_two_lanes_for_one_file_are_kept_apart() {
                 hear(&mut old).await,
                 Message::Receipt {
                     stream: 0,
-                    block: b as u64
+                    block: b as u64,
+                    written: true,
                 }
             );
         }
@@ -1507,7 +1514,8 @@ async fn a_block_bigger_than_its_files_block_size_fails_that_file() {
             hear(&mut old).await,
             Message::Receipt {
                 stream: 1,
-                block: 0
+                block: 0,
+                written: true,
             }
         );
         say(
@@ -1563,6 +1571,14 @@ async fn a_file_found_already_there_is_spent_too() {
             }
         ));
         say(&mut old, &Message::Skip { stream: 0 }).await;
+        // The skip is answered: it is already there.
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
         // Started again on another stream: refused, it is already there.
         let (again, _) = small_start(&l, 5);
         say(&mut old, &again).await;
@@ -2031,7 +2047,8 @@ async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
             hear(&mut old).await,
             Message::Receipt {
                 stream: 0,
-                block: 0
+                block: 0,
+                written: true,
             }
         );
         // The same file on the same stream, announced somewhere else: as a fresh start, and as a
@@ -2059,7 +2076,8 @@ async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
             hear(&mut old).await,
             Message::Receipt {
                 stream: 0,
-                block: 1
+                block: 1,
+                written: true,
             }
         );
         old.cut.store(true, Ordering::SeqCst);

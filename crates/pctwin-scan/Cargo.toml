@@ -10,7 +10,7 @@ publish.workspace = true
 
 [dependencies]
 pctwin-types = { path = "../pctwin-types" }
-cfb = "0.14"
+cfb = "0.15"
 dirs = "7.0.0"
 lnk = "0.6.4"
 pctwin-record = { path = "../pctwin-record" }

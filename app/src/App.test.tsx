@@ -103,7 +103,6 @@ describe("screens", () => {
   it.each([
     ["Restore setup", "Restore setup"],
     ["Rescue a laptop", "Rescue a laptop"],
-    ["Quick Send", "Quick Send"],
   ])("%s opens a coming-soon page that changes nothing, and Back returns", async (button, heading) => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(button) }));
@@ -112,6 +111,30 @@ describe("screens", () => {
     expect(screen.getByText(/later version|first release/)).toBeTruthy();
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
+  it("Quick Send opens its home, says plainly that nothing is connected yet, and Back returns", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
+    expect(screen.queryByText("Coming soon")).toBeNull();
+    // Send, Receive and history are real cards; until the bridge exists each one says so and changes nothing.
+    for (const id of ["qs-send-title", "qs-receive-title", "qs-history-title"]) {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString(id)) }));
+      expect(screen.getByRole("status").textContent).toContain(l10n.getString("qs-soon-note"));
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
+    }
+    expect(tauri.invoke).not.toHaveBeenCalled();
+    // The window footer carries the free-sending note and the main action, also while the notice is showing.
+    const footer = within(screen.getByRole("contentinfo"));
+    expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();
+    expect(footer.getByRole("button", { name: l10n.getString("qs-home-action") })).toBeTruthy();
+    expect(footer.queryByText(l10n.getString("footer-free"))).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(within(screen.getByRole("contentinfo")).getByText(l10n.getString("footer-free"))).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });

@@ -49,7 +49,7 @@ export const samples: Sample[] = [
     id: "F01-unfinished",
     title: "Welcome with an unfinished move",
     size: "everyday",
-    render: () => <Welcome onStart={nothing} onSoon={nothing} unfinished onResume={nothing} />,
+    render: () => <Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} unfinished onResume={nothing} />,
   },
   { id: "C01-default", title: "How will you connect?", size: "everyday", render: () => <ConnectionRoute onBack={nothing} onWifi={nothing} /> },
   { id: "C02-default", title: "Put both laptops together", size: "everyday", render: () => <PutTogether onBack={nothing} onContinue={nothing} /> },
