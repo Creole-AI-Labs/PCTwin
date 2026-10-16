@@ -13,8 +13,9 @@ use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::{FileId, Journal, JournalError, Landed, Ledger, PlannedWrite};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    Channel, ChannelError, MeterReading, MoveControl, MoveMeter, ReceiveOutcome, ReceiverSession,
-    SendJob, SendOutcome, SenderSession, Step, StepCounts, Tier, TransferError,
+    Channel, ChannelError, Header, Message, MeterReading, MoveControl, MoveMeter, ReceiveOutcome,
+    ReceiverSession, SendJob, SendOutcome, SenderSession, Stamp, Step, StepCounts, Tier,
+    TransferError, block_size_for,
 };
 use tokio::sync::mpsc;
 
@@ -254,6 +255,8 @@ async fn both_meters_count_every_file_and_byte_by_destination_and_can_be_read_du
     assert!(seen_receive.iter().any(|r| r.files.copying > 0));
     // The old laptop counts a file sent whole as checking until the new laptop answers for it.
     assert!(seen_send.iter().any(|s| s.files.checking > 0));
+    // Confirmed is its own count: blocks were seen sent and not yet confirmed.
+    assert!(seen_send.iter().any(|s| s.blocks_confirmed < s.blocks_sent));
     assert!(
         seen_receive
             .windows(2)
@@ -520,6 +523,9 @@ async fn a_stop_made_while_the_old_laptop_is_busy_sending_stops_the_very_next_bl
     assert!(matches!(sent, Err(TransferError::Stopped)), "{sent:?}");
     // The block being sent when the stop came was finished; not one more was started.
     assert_eq!(meter.reading().blocks_sent, 3);
+    // None was confirmed yet: the session's own count is the meter's, not the blocks sent.
+    assert_eq!(sender.blocks_confirmed(), 0);
+    assert_eq!(meter.reading().blocks_confirmed, 0);
 }
 
 #[tokio::test]
@@ -547,4 +553,339 @@ async fn a_file_gone_soon_after_copying_is_counted_failed_and_its_bytes_no_longe
     assert_eq!(r.files.failed, 1);
     assert_eq!(r.groups["me"].failed, 1);
     assert_eq!(r.bytes_checked, 3000);
+}
+
+// ------------------------------------------------ an old laptop scripted message by message
+
+fn header(size: u64) -> Header {
+    let block_size = block_size_for(size);
+    Header {
+        size,
+        block_size,
+        block_count: size.div_ceil(block_size),
+        stamp: Stamp {
+            size,
+            modified_ns: Some(1),
+        },
+        source_file: None,
+        mark: None,
+    }
+}
+
+async fn say(ch: &mut Mem, m: &Message) {
+    ch.send(&m.encode()).await.unwrap();
+}
+
+async fn hear(ch: &mut Mem) -> Message {
+    Message::decode(&ch.recv().await.unwrap()).unwrap()
+}
+
+/// Reads the new laptop's hello up to `Ready`: what it said it holds.
+async fn hello(ch: &mut Mem) -> Vec<Message> {
+    let mut said = Vec::new();
+    loop {
+        match hear(ch).await {
+            Message::Ready => return said,
+            m => said.push(m),
+        }
+    }
+}
+
+fn start(stream: u32, n: u8, size: u64) -> Message {
+    Message::StartFile {
+        stream,
+        item: id(n),
+        destination: "me".into(),
+        path: format!("f{n}.bin"),
+        header: header(size),
+        resumed_done: 0,
+    }
+}
+
+/// Runs the new laptop against `script` (the old laptop's side) to the end.
+async fn against<F: std::future::Future<Output = ()>>(
+    receiver: &mut ReceiverSession<'_>,
+    script: impl FnOnce(Mem) -> F,
+) -> Result<(), TransferError> {
+    let (a, mut b) = mem_pair();
+    let (ran, ()) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(receiver.run(&mut b), script(a))
+    })
+    .await
+    .expect("the new laptop answered");
+    ran
+}
+
+#[tokio::test]
+async fn a_file_whose_attempt_ends_without_a_line_is_counted_waiting_not_copying() {
+    let w = world();
+    let jobs = vec![w.file(1, 1000, "me"), w.file(2, 2000, "me")];
+    let meter = MoveMeter::new();
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
+    // File 2 starts on the stream file 1 is on: file 1's attempt ends with no line.
+    against(&mut receiver, |mut a| async move {
+        hello(&mut a).await;
+        say(&mut a, &start(1, 1, 1000)).await;
+        assert!(matches!(hear(&mut a).await, Message::Have { .. }));
+        say(&mut a, &start(1, 2, 2000)).await;
+        assert!(matches!(hear(&mut a).await, Message::Have { .. }));
+        say(&mut a, &Message::AllSent).await;
+    })
+    .await
+    .unwrap();
+    assert_eq!(receiver.outcome(id(1)), None);
+    let r = meter.reading();
+    assert_eq!(r.files.copying, 1, "{r:?}");
+    assert_eq!(r.files.waiting, 1, "{r:?}");
+}
+
+#[tokio::test]
+async fn an_attempt_dropped_at_a_new_connection_is_counted_waiting_again() {
+    let w = world();
+    let jobs = vec![w.file(1, 1000, "me")];
+    let meter = MoveMeter::new();
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
+    // A block that grows past its size fails the attempt; it stays open until it ends.
+    against(&mut receiver, |mut a| async move {
+        hello(&mut a).await;
+        say(&mut a, &start(1, 1, 1000)).await;
+        assert!(matches!(hear(&mut a).await, Message::Have { .. }));
+        let piece = vec![0u8; pctwin_transfer::PIECE_MAX];
+        for _ in 0..3 {
+            say(
+                &mut a,
+                &Message::Piece {
+                    stream: 1,
+                    last: false,
+                    bytes: piece.clone(),
+                },
+            )
+            .await;
+        }
+        say(&mut a, &Message::AllSent).await;
+    })
+    .await
+    .unwrap();
+    assert_eq!(meter.reading().files.copying, 1);
+    // The next connection: the failed attempt is let go, and the file waits to start again.
+    against(&mut receiver, |mut a| async move {
+        let said = hello(&mut a).await;
+        assert!(
+            !said.iter().any(|m| matches!(m, Message::ResumeFrom { .. })),
+            "{said:?}"
+        );
+        say(&mut a, &Message::AllSent).await;
+    })
+    .await
+    .unwrap();
+    let r = meter.reading();
+    assert_eq!(r.files.copying, 0, "{r:?}");
+    assert_eq!(r.files.waiting, 1, "{r:?}");
+}
+
+/// A journal that refuses to record a file as checked, as a full system drive would.
+struct NoVerified<'j>(&'j Journal);
+
+impl Ledger for NoVerified<'_> {
+    fn temp_tag(&self, id: u64) -> String {
+        self.0.temp_tag(id)
+    }
+    fn plan(&self, w: &PlannedWrite) -> Result<u64, JournalError> {
+        self.0.plan(w)
+    }
+    fn staged(
+        &self,
+        id: u64,
+        temp: &str,
+        made: &[(String, Option<FileId>)],
+    ) -> Result<(), JournalError> {
+        self.0.staged(id, temp, made)
+    }
+    fn verified(&self, _: u64, _: [u8; 32], _: Option<FileId>) -> Result<(), JournalError> {
+        Err(JournalError::Storage("the system drive is full".into()))
+    }
+    fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
+        self.0.applied(id, final_path)
+    }
+    fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
+        self.0.committed(id, landed)
+    }
+    fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError> {
+        self.0.existing(id, stored_path)
+    }
+    fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
+        self.0.failed(id, why)
+    }
+    fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), JournalError> {
+        self.0.checkpoint(id, blocks, durable)
+    }
+    fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError> {
+        self.0.blocks(id)
+    }
+    fn unfinished(&self) -> Result<Vec<pctwin_journal::Entry>, JournalError> {
+        self.0.unfinished()
+    }
+}
+
+#[tokio::test]
+async fn a_move_stopped_by_the_journal_while_checking_leaves_nothing_counted_checking() {
+    let w = world();
+    let jobs = vec![w.file(1, 3000, "me")];
+    let journal = NoVerified(&w.journal);
+    let meter = MoveMeter::new();
+    let mut sender = SenderSession::new(jobs.clone(), 1);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &journal, "1000").with_meter(meter.clone());
+    let (a, b) = mem_pair();
+    let (_, received) = tokio::time::timeout(Duration::from_secs(60), async {
+        tokio::join!(
+            async {
+                let mut a = a;
+                sender.run(&mut a).await
+            },
+            async {
+                let mut b = b;
+                receiver.run(&mut b).await
+            }
+        )
+    })
+    .await
+    .unwrap();
+    assert!(
+        matches!(received, Err(TransferError::Record(_))),
+        "{received:?}"
+    );
+    let r = meter.reading();
+    assert_eq!(r.files.checking, 0, "{r:?}");
+    assert_eq!(r.checking, None);
+    assert_eq!(r.files.waiting, 1, "{r:?}");
+    assert_eq!(r.bytes_checked, 0);
+}
+
+/// Stops the move on the old laptop at the moment it hears the new laptop answer a start.
+struct StopOnHave {
+    inner: Mem,
+    control: MoveControl,
+}
+
+impl Channel for StopOnHave {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        self.inner.send(data).await
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        let m = self.inner.recv().await?;
+        if matches!(Message::decode(&m), Ok(Message::Have { .. })) {
+            self.control.stop();
+        }
+        Ok(m)
+    }
+}
+
+#[tokio::test]
+async fn a_stop_when_nothing_is_in_flight_yet_still_ends_as_stopped() {
+    for (files, capacity) in [(1u8, 1usize), (2, 1), (3, 2)] {
+        let w = world();
+        let jobs: Vec<SendJob> = (1..=files).map(|n| w.file(n, 300_000, "me")).collect();
+        let control = MoveControl::new();
+        let mut sender = SenderSession::new(jobs.clone(), capacity).with_control(control.clone());
+        let mut receiver = ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000");
+        let (a, b) = mem_pair();
+        let (sent, _) = tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::join!(
+                async {
+                    let mut a = StopOnHave {
+                        inner: a,
+                        control: control.clone(),
+                    };
+                    sender.run(&mut a).await
+                },
+                async {
+                    let mut b = b;
+                    receiver.run(&mut b).await
+                }
+            )
+        })
+        .await
+        .unwrap();
+        assert!(
+            matches!(sent, Err(TransferError::Stopped)),
+            "{files} files, {capacity} at once: {sent:?}"
+        );
+        assert_eq!(sender.blocks_sent(), 0);
+    }
+}
+
+#[tokio::test]
+async fn a_meter_given_to_a_new_session_starts_again_from_its_plan() {
+    let w = world();
+    let first = vec![w.file(1, 2000, "me"), w.file(2, 3000, "shared")];
+    let meter = MoveMeter::new();
+    let mut sender = SenderSession::new(first.clone(), 2).with_meter(meter.clone());
+    let mut receiver = ReceiverSession::new(&w.table, plan(&first), &w.journal, "1000");
+    let (mut a, mut b) = mem_pair();
+    let written = receiver.meter();
+    let (sent, received) = common::unless_stuck(&written, 5000, async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    assert_eq!(meter.reading().files.copied, 2);
+    assert!(meter.reading().blocks_sent > 0);
+    // The same meter, given to the next move's session: only that move counts.
+    let next = vec![w.file(3, 1000, "me")];
+    let _sender = SenderSession::new(next, 1).with_meter(meter.clone());
+    let r = meter.reading();
+    assert_eq!(r.files, counts(1, Step::Waiting));
+    assert_eq!(r.groups.len(), 1);
+    assert_eq!(
+        (
+            r.blocks_sent,
+            r.blocks_confirmed,
+            r.bytes_sent,
+            r.bytes_confirmed
+        ),
+        (0, 0, 0, 0)
+    );
+    let later = vec![w.file(4, 4000, "shared")];
+    let _receiver =
+        ReceiverSession::new(&w.table, plan(&later), &w.journal, "1000").with_meter(meter.clone());
+    let r = meter.reading();
+    assert_eq!(r.files, counts(1, Step::Waiting));
+    assert_eq!(r.bytes_planned, 4000);
+    assert_eq!(
+        (r.bytes_written, r.bytes_checked, r.bytes_already_there),
+        (0, 0, 0)
+    );
+}
+
+#[tokio::test]
+async fn cancelling_counts_every_unfinished_file_failed() {
+    let w = world();
+    let jobs = vec![w.file(1, 1000, "me"), w.file(2, 2000, "me")];
+    let meter = MoveMeter::new();
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
+    // File 1 is open when the old laptop goes quiet; file 2 never started.
+    against(&mut receiver, |mut a| async move {
+        hello(&mut a).await;
+        say(&mut a, &start(1, 1, 1000)).await;
+        assert!(matches!(hear(&mut a).await, Message::Have { .. }));
+        say(&mut a, &Message::AllSent).await;
+    })
+    .await
+    .unwrap();
+    assert_eq!(meter.reading().files.copying, 1);
+    receiver.cancel("the move was stopped");
+    let r = meter.reading();
+    assert_eq!(r.files.failed, 1, "{r:?}");
+    assert_eq!(r.files.copying, 0, "{r:?}");
+    assert_eq!(r.files.waiting, 1, "{r:?}");
 }

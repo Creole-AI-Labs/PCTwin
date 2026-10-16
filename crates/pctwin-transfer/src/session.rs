@@ -417,9 +417,14 @@ impl States {
         std::mem::replace(&mut self.v[job], SendState::Waiting)
     }
 
-    /// `job`'s state, to change within its step (never from one step to another).
-    fn fields(&mut self, job: usize) -> &mut SendState {
-        &mut self.v[job]
+    /// `job`'s state, to change within its step only; a change of step through it fails the
+    /// tests the moment it is let go.
+    fn fields(&mut self, job: usize) -> SameStep<'_> {
+        let step = step_of(&self.v[job]);
+        SameStep {
+            state: &mut self.v[job],
+            step,
+        }
     }
 
     fn count(&mut self, job: usize) {
@@ -446,6 +451,35 @@ impl std::ops::Index<usize> for States {
     type Output = SendState;
     fn index(&self, job: usize) -> &SendState {
         &self.v[job]
+    }
+}
+
+/// One job's state, open for a change within its step (see [`States::fields`]).
+struct SameStep<'s> {
+    state: &'s mut SendState,
+    step: Step,
+}
+
+impl std::ops::Deref for SameStep<'_> {
+    type Target = SendState;
+    fn deref(&self) -> &SendState {
+        self.state
+    }
+}
+
+impl std::ops::DerefMut for SameStep<'_> {
+    fn deref_mut(&mut self) -> &mut SendState {
+        self.state
+    }
+}
+
+impl Drop for SameStep<'_> {
+    fn drop(&mut self) {
+        debug_assert_eq!(
+            step_of(self.state),
+            self.step,
+            "a sent file changed step without the meter counting it"
+        );
     }
 }
 
@@ -851,6 +885,10 @@ impl SenderSession {
                 } else if alive.get() > 0 {
                     // Other lanes are still at work: wait until one of them changes something.
                     wake.await;
+                } else if state.borrow().control.stopped() {
+                    // Nothing to send because the move was stopped: that is a stop, never a
+                    // move that stopped making progress.
+                    return Err(TransferError::Stopped);
                 } else {
                     // Nothing is owed and no lane is left to change anything: waiting would
                     // never end, so say so rather than hang.
@@ -1015,7 +1053,7 @@ impl SenderSession {
                 announced,
                 resumed_done,
                 ..
-            } = self.states.fields(job)
+            } = &mut *self.states.fields(job)
                 && !*announced
             {
                 *announced = true;
@@ -1205,23 +1243,27 @@ impl SenderSession {
         for item in self.scheduler.in_flight() {
             let job = self.by_item[&item];
             let stream = self.streams[job];
-            let SendState::Open {
-                reader,
-                sections,
-                cleared: true,
-                ..
-            } = self.states.fields(job)
-            else {
-                continue;
+            let (b, read) = {
+                let mut open = self.states.fields(job);
+                let SendState::Open {
+                    reader,
+                    sections,
+                    cleared: true,
+                    ..
+                } = &mut *open
+                else {
+                    continue;
+                };
+                let next = sections.next_block(lane_no).or_else(|| {
+                    sections.claim(lane_no)?;
+                    sections.next_block(lane_no)
+                });
+                let Some(b) = next else {
+                    continue;
+                };
+                (b, reader.block_at(u64::from(b)))
             };
-            let next = sections.next_block(lane_no).or_else(|| {
-                sections.claim(lane_no)?;
-                sections.next_block(lane_no)
-            });
-            let Some(b) = next else {
-                continue;
-            };
-            match reader.block_at(u64::from(b)) {
+            match read {
                 Ok(block) => {
                     self.budget.read_ok();
                     let raw = block.data.len() as u64;
@@ -1381,7 +1423,7 @@ impl SenderSession {
 
     /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
     fn checked(&mut self, job: usize, identical: bool) {
-        if let SendState::Open { cleared, .. } = self.states.fields(job) {
+        if let SendState::Open { cleared, .. } = &mut *self.states.fields(job) {
             if identical {
                 self.skips.push(job);
             } else {
@@ -1467,7 +1509,7 @@ impl SenderSession {
                 self.meter.block_confirmed(raw);
                 // Only the current attempt counts; a receipt for an earlier one frees room only.
                 if let Some(&job) = self.job_of.get(&stream)
-                    && let SendState::Open { sections, .. } = self.states.fields(job)
+                    && let SendState::Open { sections, .. } = &mut *self.states.fields(job)
                 {
                     let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
                     // In order per lane, as sent; a mismatch can only mean the new laptop
@@ -1612,7 +1654,7 @@ impl SenderSession {
         }
         self.window = self.floor();
         for job in 0..self.states.len() {
-            if let SendState::Open { sections, .. } = self.states.fields(job) {
+            if let SendState::Open { sections, .. } = &mut *self.states.fields(job) {
                 sections.lane_lost(lane_no);
             }
         }
@@ -2005,6 +2047,53 @@ impl<'d> ReceiverSession<'d> {
         }
     }
 
+    /// The step `item` is at, from this session's state alone: copying while an attempt at it is
+    /// open, else what its line says, else waiting. (Checking is only ever inside a landing.)
+    fn step_now(&self, item: ItemId) -> Step {
+        if self.streams.values().any(|s| s.item == item) {
+            return Step::Copying;
+        }
+        self.outcome(item)
+            .map_or(Step::Waiting, |o| outcome_step(&o))
+    }
+
+    /// An attempt let go because another start took its place: its partial file is removed with
+    /// it (already failed if it had failed), and its file is counted as it now stands.
+    fn started_again(&mut self, old: Incoming<'d>) {
+        self.allowance.ended(old.item, false);
+        drop(old.assembly);
+        let _ = self.journal.failed(old.entry, "it was started again");
+        self.settle(old.item);
+    }
+
+    /// Counts `item` at the step its state says, after anything that may have changed it.
+    fn settle(&mut self, item: ItemId) {
+        let step = self.step_now(item);
+        self.step(item, step);
+    }
+
+    /// Counts every planned file at the step its state says (when a run ends partway).
+    fn settle_all(&mut self) {
+        let items: Vec<ItemId> = self.steps.keys().copied().collect();
+        for item in items {
+            self.settle(item);
+        }
+    }
+
+    /// In tests: every planned file is counted at the step its state says. (Plans of tests are
+    /// small; a real move's is not looked through.)
+    fn check_steps(&self) {
+        if cfg!(debug_assertions) && self.steps.len() <= 4096 {
+            for (item, (_, at)) in &self.steps {
+                debug_assert_eq!(
+                    *at,
+                    self.step_now(*item),
+                    "a received file is counted at the wrong step"
+                );
+            }
+        }
+    }
+
     /// Files picked up partway after a dropped connection, rather than started again.
     pub fn continued(&self) -> u64 {
         self.continued
@@ -2119,11 +2208,17 @@ impl<'d> ReceiverSession<'d> {
     pub fn cancel(mut self, why: &str) {
         self.checkpoint();
         let journal = self.journal;
+        let mut failed = Vec::new();
         for s in self.streams.values_mut().chain(self.restored.values_mut()) {
             if let Some(assembly) = s.assembly.take() {
                 drop(assembly);
                 let _ = journal.failed(s.entry, why);
+                failed.push(s.item);
             }
+        }
+        // The meter outlives the session: its unfinished files end failed there too.
+        for item in failed {
+            self.step(item, Step::Failed);
         }
     }
 
@@ -2195,6 +2290,7 @@ impl<'d> ReceiverSession<'d> {
         let state = RefCell::new(self);
         // Say what is already here, so the old laptop continues from there.
         let hello = state.borrow_mut().hello();
+        state.borrow().check_steps();
         for m in &hello {
             send(main, m).await?;
         }
@@ -2204,7 +2300,13 @@ impl<'d> ReceiverSession<'d> {
             loop {
                 let m = recv(main).await?;
                 // Never held across a wait, so every lane can take its turn.
-                let (replies, finished) = state.borrow_mut().handle(m, &mut slot)?;
+                let handled = state.borrow_mut().handle(m, &mut slot);
+                if handled.is_err() {
+                    // The run ends partway through a change: count every file as it is left.
+                    state.borrow_mut().settle_all();
+                }
+                state.borrow().check_steps();
+                let (replies, finished) = handled?;
                 for r in &replies {
                     send(main, r).await?;
                 }
@@ -2256,10 +2358,7 @@ impl<'d> ReceiverSession<'d> {
             if let Some(old) = self.streams.remove(&k) {
                 self.allowance.ended(old.item, false);
                 // Counted as its line says, or waiting for the old laptop to start it again.
-                let step = self
-                    .outcome(old.item)
-                    .map_or(Step::Waiting, |o| outcome_step(&o));
-                self.step(old.item, step);
+                self.settle(old.item);
             }
         }
         let mut list = Vec::new();
@@ -2342,14 +2441,12 @@ impl<'d> ReceiverSession<'d> {
                         a.keep_stricter_mark(header.mark);
                     }
                     if let Some(old) = self.streams.remove(&stream) {
-                        self.allowance.ended(old.item, false);
-                        drop(old.assembly);
-                        let _ = self.journal.failed(old.entry, "it was started again");
+                        self.started_again(old);
                     }
                     self.streams.insert(stream, s);
                 }
                 if continuing || restored {
-                    self.step(item, Step::Copying);
+                    self.settle(item);
                     self.continued += 1;
                     replies.push(Message::Have {
                         stream,
@@ -2372,10 +2469,7 @@ impl<'d> ReceiverSession<'d> {
                     .chain(self.restored.remove(&item))
                     .collect();
                 for old in olds {
-                    self.allowance.ended(old.item, false);
-                    // Its partial file is removed with it (already failed if it had failed).
-                    drop(old.assembly);
-                    let _ = self.journal.failed(old.entry, "it was started again");
+                    self.started_again(old);
                 }
                 let block_size = header.block_size;
                 let size = header.size;
@@ -2432,7 +2526,7 @@ impl<'d> ReceiverSession<'d> {
                         rounds: 0,
                     },
                 );
-                self.step(item, Step::Copying);
+                self.settle(item);
             }
             Message::Piece {
                 stream,
@@ -2675,10 +2769,7 @@ impl<'d> ReceiverSession<'d> {
         if self.refused.len() < MAX_REMEMBERED_REFUSALS || self.refused.contains_key(&item) {
             self.refused.insert(item, why);
         }
-        // Counted as `outcome` reports it: a file already here keeps its line.
-        if !self.ended.get(&item).is_some_and(Ended::spent) {
-            self.step(item, Step::Failed);
-        }
+        self.settle(item);
     }
 
     /// Records how `item`'s attempt on `stream` ended. A file already on this laptop keeps its
@@ -2695,7 +2786,6 @@ impl<'d> ReceiverSession<'d> {
             return false;
         }
         self.refused.remove(&item);
-        self.step(item, outcome_step(&outcome));
         if let (ReceiveOutcome::Finished(_), Some((_, size))) = (&outcome, &landed) {
             self.meter.checked_bytes(*size);
         }
@@ -2707,6 +2797,7 @@ impl<'d> ReceiverSession<'d> {
                 landed,
             },
         );
+        self.settle(item);
         true
     }
 
@@ -2757,10 +2848,7 @@ impl<'d> ReceiverSession<'d> {
             }
         }
         for item in &gone {
-            if let Some((group, at)) = self.steps.get_mut(item) {
-                self.meter.step(*group, *at, Step::Failed);
-                *at = Step::Failed;
-            }
+            self.settle(*item);
         }
         gone
     }
