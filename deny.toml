@@ -63,6 +63,8 @@ deny = [
   { crate = "libproc", wrappers = ["pctwin-gate"] },
   { crate = "rustix", wrappers = [
     "pctwin-gate",
+    # Reads a file's flags back through its handle on a Mac, around its one fchflags call.
+    "pctwin-lease",
     # Third-party crates that use rustix themselves (checked 9 October 2026).
     "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
     "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",
