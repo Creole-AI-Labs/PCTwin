@@ -286,3 +286,52 @@ fn a_link_put_in_place_of_a_time_probe_is_never_removed() {
         pctwin_gate::time_probe_contents()
     );
 }
+
+/// A probe file a crash or a full drive left part-written (empty, or only the start of its bytes)
+/// is PCTwin's own clutter under PCTwin's own name: once old enough to be a leftover, the sweep
+/// clears it like a whole one. A young one, and one holding anything but the start of its own
+/// kind's bytes, stays. (The review's probe.)
+#[test]
+fn part_written_leftover_probe_files_are_cleared_too() {
+    let root = tempfile::tempdir().unwrap();
+    let names = |dir: &std::path::Path| {
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    };
+    let rb = pctwin_gate::read_back_probe_contents();
+    let (a, _) = pctwin_gate::probe_contents();
+    let t = pctwin_gate::time_probe_contents();
+    let at = |name: &str, bytes: &[u8]| std::fs::write(root.path().join(name), bytes).unwrap();
+    at(".pctwin-probe-0aa1-r", &rb);
+    at(".pctwin-probe-0aa1-t", t);
+    at(".pctwin-probe-0bb2-r", &rb[..70_000]);
+    at(".pctwin-probe-0cc3-r", b"");
+    at(".pctwin-probe-0dd4-t", &t[..10]);
+    at(".pctwin-probe-0ee5-a", b"");
+    at(".pctwin-probe-0ff6-b", &a[..a.len() / 2]);
+    // Not the start of its own kind's bytes: stays.
+    at(".pctwin-probe-0aa7-t", b"zz someone's");
+    let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(24 * 3600);
+    for n in names(root.path()) {
+        std::fs::File::options()
+            .write(true)
+            .open(root.path().join(&n))
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+    }
+    // Young: a test may be writing it now. Stays.
+    at(".pctwin-probe-0aa8-u", &t[..5]);
+    let dest = Destination::open(root.path()).unwrap();
+    let _ = dest.time_test_kind();
+    let _ = dest.check_drive();
+    let _ = dest.read_back_check();
+    assert_eq!(
+        names(root.path()),
+        [".pctwin-probe-0aa7-t", ".pctwin-probe-0aa8-u"]
+    );
+}

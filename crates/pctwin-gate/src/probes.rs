@@ -84,6 +84,18 @@ impl Probe {
         }
     }
 
+    /// Whether `bytes` are the start of what a probe file of this kind holds (nothing at all
+    /// included): a probe a crash or a full drive left part-written.
+    fn holds_part(self, bytes: &[u8]) -> bool {
+        match self {
+            Self::DriveA | Self::DriveB | Self::DriveC => {
+                DRIVE_A.starts_with(bytes) || DRIVE_B.starts_with(bytes)
+            }
+            Self::TimeT | Self::TimeU => TIME.starts_with(bytes),
+            Self::ReadBack => read_back_bytes().starts_with(bytes),
+        }
+    }
+
     /// The longest a probe file of this kind is.
     fn longest(self) -> usize {
         match self {
@@ -114,8 +126,9 @@ pub(crate) fn kind_of(name: &str) -> Option<Probe> {
 }
 
 /// Removes the probe file `name` in `dir` if it is a regular file holding exactly its kind's own
-/// bytes (and, for a leftover, older than [`LEFTOVER_AGE`]); anything else is left, and so is a
-/// name that is not a probe's. Never follows a link.
+/// bytes, or, for a leftover (older than [`LEFTOVER_AGE`]), the start of them (a probe a crash or
+/// a full drive left part-written); anything else is left, and so is a name that is not a
+/// probe's. Never follows a link.
 pub(crate) fn remove_if_probe(dir: &Dir, name: &str, leftover: bool) -> io::Result<()> {
     let Some(kind) = kind_of(name) else {
         return Ok(());
@@ -140,7 +153,12 @@ pub(crate) fn remove_if_probe(dir: &Dir, name: &str, leftover: bool) -> io::Resu
     }
     let mut bytes = Vec::new();
     dir.open(name)?.take(longest + 1).read_to_end(&mut bytes)?;
-    if !kind.holds(&bytes) {
+    let ours = if leftover {
+        kind.holds_part(&bytes)
+    } else {
+        kind.holds(&bytes)
+    };
+    if !ours {
         return Ok(());
     }
     match dir.remove_file(name) {

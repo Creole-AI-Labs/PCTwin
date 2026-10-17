@@ -196,7 +196,7 @@ fn run(
         Err(e) => return Err(e),
         // Made over an existing file: exclusive create is not honoured. Put `a` back as it was.
         Ok(()) => {
-            dir.remove_file(a)?;
+            probes::remove_if_probe(dir, a, false)?;
             make(dir, a, probes::DRIVE_A)?;
             false
         }
@@ -205,8 +205,8 @@ fn run(
     let link_onto_existing_refused = link_new
         && matches!(dir.hard_link(a, dir, b), Err(e) if e.kind() == io::ErrorKind::AlreadyExists);
     if link_new {
-        // The link is another name for `a`'s bytes: removed with the rest.
-        dir.remove_file(c)?;
+        // The link is another name for `a`'s bytes: removed with the rest, the same careful way.
+        probes::remove_if_probe(dir, c, false)?;
     }
     let moved = move_no_replace(dir, a, b, folder_path);
     if let Moved::Failed(e) = moved {
