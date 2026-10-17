@@ -262,6 +262,9 @@ pub struct VolumeReport {
     pub unexplained_bytes: u64,
     /// The gap is big enough to be a blind spot.
     pub flagged: bool,
+    /// Shares its space with this volume (one file system mounted in several places); its gap
+    /// is judged there.
+    pub same_space_as: Option<String>,
 }
 
 /// The line at the top of the person's summary.
@@ -502,8 +505,6 @@ struct Whole {
     inside_refused: bool,
     /// The owners met inside (Unix user IDs), for the census.
     owners: BTreeSet<u32>,
-    /// The stop flag was raised: the count is thrown away and starts again on resume.
-    stopped: bool,
 }
 
 /// What a walker hands back.
@@ -513,17 +514,15 @@ enum Listing {
 }
 
 /// Counts everything below `root` without keeping a name: links are not followed and other
-/// file systems mounted inside are not entered.
-fn count_whole(root: &Path, stop: &AtomicBool) -> Whole {
+/// file systems mounted inside are not entered. It always runs to the end, even when the sweep
+/// is asked to stop: a half-done count could only be resumed by keeping the names inside, so a
+/// stop waits for it instead (one home at most per walker).
+fn count_whole(root: &Path) -> Whole {
     let mut w = Whole::default();
     let root_dev = dev_of(root);
-    let mut pending = vec![root.to_path_buf()];
+    let mut pending = vec![for_listing(root)];
     let mut first = true;
     while let Some(dir) = pending.pop() {
-        if stop.load(Ordering::SeqCst) {
-            w.stopped = true;
-            return w;
-        }
         let reader = match std::fs::read_dir(&dir) {
             Ok(r) => r,
             Err(e) => {
@@ -963,7 +962,7 @@ impl Sweeper<'_> {
             .max_by_key(|r| r.home.as_ref().map_or(0, |h| h.components().count()))
             .map(|r| (r.kind, r.account_id.clone(), r.home.clone()));
         let Some((kind, id, home)) = owner else {
-            return Zone::Explore { inside: None };
+            return self.mount_context(volume);
         };
         let exact = home.as_ref().is_some_and(|h| same_place(h, &mount));
         let shown = Some(mount.to_string_lossy().into_owned());
@@ -1016,6 +1015,59 @@ impl Sweeper<'_> {
             },
         );
         Zone::Whole { place: p }
+    }
+
+    /// A volume mounted inside another (`/var`, `/opt` or `/home` as their own file systems, a
+    /// folder-mounted Windows volume) is what that place would be: the profiles folder, or
+    /// whatever the rules file says the folder it is mounted at is. Elsewhere it is explored.
+    fn mount_context(&mut self, volume: usize) -> Zone {
+        let v = self.facts.volumes[volume].clone();
+        if self
+            .state
+            .census
+            .profiles_root
+            .as_ref()
+            .is_some_and(|r| same_place(r, &v.mount))
+        {
+            return Zone::Profiles;
+        }
+        let parent = self
+            .facts
+            .volumes
+            .iter()
+            .filter(|o| !same_place(&o.mount, &v.mount) && is_within(&v.mount, &o.mount))
+            .max_by_key(|o| o.mount.components().count())
+            .cloned();
+        let Some(parent) = parent else {
+            return Zone::Explore { inside: None };
+        };
+        let Ok(inner) = v.mount.strip_prefix(&parent.mount) else {
+            return Zone::Explore { inside: None };
+        };
+        for (i, part) in inner.iter().enumerate() {
+            let name = part.to_string_lossy();
+            let row = if i == 0 {
+                self.facts.rules.at_root(&name, parent.is_system)
+            } else {
+                None
+            }
+            .or_else(|| self.facts.rules.anywhere(&name));
+            let Some(row) = row else { continue };
+            if !matches!(
+                row.kind,
+                Kind::System | Kind::App | Kind::Junk | Kind::OldSystem
+            ) {
+                continue;
+            }
+            let placement = Placement {
+                whose: Whose::System,
+                kind: Some(row.kind),
+                rule: Rule::RulesFile { row: row.label() },
+            };
+            let p = self.start_place(volume, &v.mount, placement);
+            return Zone::Count { place: p };
+        }
+        Zone::Explore { inside: None }
     }
 
     fn mount_text(&self, volume: usize) -> String {
@@ -1191,7 +1243,7 @@ impl Sweeper<'_> {
             add_counts(&mut self.state.counts, &scan.counts);
             self.state.links += scan.links;
             for dir in scan.unreadable {
-                let why = std::fs::read_dir(&dir)
+                let why = std::fs::read_dir(for_listing(&dir))
                     .err()
                     .map(|e| Refusal::of(&e))
                     .unwrap_or(Refusal::Other(None));
@@ -1296,7 +1348,7 @@ impl Sweeper<'_> {
                             break;
                         };
                         let listed = if whole {
-                            Listing::Whole(count_whole(&path, stop))
+                            Listing::Whole(count_whole(&path))
                         } else {
                             Listing::Dir(list_dir(&path, keys && want_keys))
                         };
@@ -1438,11 +1490,6 @@ impl Sweeper<'_> {
         let Zone::Whole { place } = job.zone else {
             return;
         };
-        if w.stopped {
-            // Thrown away: the place is counted again from its root.
-            self.requeue(job);
-            return;
-        }
         for uid in &w.owners {
             let id = uid.to_string();
             if self.state.census.by_account(&id).is_none() {
@@ -1503,8 +1550,11 @@ impl Sweeper<'_> {
                 self.blind(job.volume, None, reason);
                 return;
             }
-            if matches!(meta.space, Space::TheSystem | Space::Apps | Space::Junk) {
-                // The system's own corners: named on the volume's line, size unknown.
+            if matches!(meta.space, Space::TheSystem | Space::Apps | Space::Junk)
+                && why != Refusal::Gone
+            {
+                // The system's own corners: named on the volume's line, size unknown. (One that
+                // changed during the scan was not seen at all, so it is a blind spot below.)
                 let line = self.state.vols[job.volume]
                     .lines
                     .entry(Space::SystemKeepsToItself)
@@ -2413,7 +2463,12 @@ impl Sweeper<'_> {
                 census: &self.state.census,
             },
         );
-        narrows(&placement.whose, &around.whose, &self.state.census.me).then_some(placement)
+        let whose = narrowed(&placement.whose, &around.whose, &self.state.census.me)?;
+        Some(Placement {
+            whose,
+            kind: None,
+            rule: placement.rule,
+        })
     }
 
     /// Goes into a folder that starts place `p`, below `base`.
@@ -2633,9 +2688,12 @@ impl Sweeper<'_> {
                     if SYSTEM_PROFILES
                         .iter()
                         .any(|n| n.eq_ignore_ascii_case(&text))
-                        || text.eq_ignore_ascii_case("Public")
                     {
                         let child = self.child(job, &name, Zone::Count { place }, None);
+                        self.enqueue(child);
+                    } else if text.eq_ignore_ascii_case("Public") {
+                        // The old shared folder: everyone's things, placed like any folder.
+                        let child = self.child(job, &name, Zone::Explore { inside: None }, None);
                         self.enqueue(child);
                     } else {
                         self.unexplained_home(job, &entry, &name, &path);
@@ -2746,13 +2804,38 @@ impl Sweeper<'_> {
 
     fn finish(mut self, finished: bool) -> Sweep {
         let frontier = (!finished).then(|| self.view(Vec::new()).save());
+        // Volumes that share one file system's space (btrfs sub-volumes mounted apart, APFS
+        // volumes in one container) all report the same used space: they are judged together,
+        // on the one mounted highest, against everything seen on any of them.
+        let shares = |a: &Volume, b: &Volume| {
+            a.kind == VolumeKind::Internal
+                && b.kind == VolumeKind::Internal
+                && a.total_bytes > 0
+                && a.total_bytes == b.total_bytes
+                && a.free_bytes == b.free_bytes
+                && a.file_system.eq_ignore_ascii_case(&b.file_system)
+        };
+        let n = self.facts.volumes.len();
+        let vols = &self.facts.volumes;
+        let lead: Vec<usize> = (0..n)
+            .map(|i| {
+                (0..n)
+                    .filter(|&j| j == i || shares(&vols[i], &vols[j]))
+                    .min_by_key(|&j| (vols[j].mount.components().count(), j))
+                    .unwrap_or(i)
+            })
+            .collect();
+        let mut group_seen = vec![0u64; n];
+        for i in 0..n {
+            group_seen[lead[i]] += self.state.vols[i].seen;
+        }
         let mut volumes = Vec::new();
         for (i, v) in self.facts.volumes.iter().enumerate() {
             let seen = &self.state.vols[i];
             let used = v.used_bytes();
             let walked = seen.walked && v.kind == VolumeKind::Internal;
-            let unexplained = if walked {
-                used.saturating_sub(seen.seen)
+            let unexplained = if walked && lead[i] == i {
+                used.saturating_sub(group_seen[i])
             } else {
                 0
             };
@@ -2788,6 +2871,7 @@ impl Sweeper<'_> {
                     .collect(),
                 unexplained_bytes: unexplained,
                 flagged,
+                same_space_as: (lead[i] != i).then(|| self.facts.volumes[lead[i]].label()),
             });
         }
         let removed = &self.state.removed;
@@ -2850,25 +2934,70 @@ impl Sweeper<'_> {
     }
 }
 
-/// Whether `child` is narrower than the shared place `parent` around it: fewer people could open
-/// it. Anything this person may not even judge (an old account's, unreadable access) counts as
-/// narrower, so it is never listed as shared.
-fn narrows(child: &Whose, parent: &Whose, me: &str) -> bool {
-    let Whose::Shared { limited_to: around } = parent else {
-        return false;
-    };
-    let allowed = |id: &str| around.is_empty() || around.iter().any(|a| a == id);
-    match child {
-        Whose::Shared { limited_to } if limited_to.is_empty() => false,
-        Whose::Shared { limited_to } => {
-            limited_to.iter().all(|id| allowed(id))
-                && (around.is_empty() || limited_to.len() < around.len())
-        }
-        Whose::Mover => allowed(me),
-        Whose::Person { account_id } => allowed(account_id),
-        Whose::FromOldAccount { .. } | Whose::Undecided => true,
-        Whose::System => false,
+/// Who could open a place, as a set.
+enum Readers {
+    Everyone,
+    These(BTreeSet<String>),
+    /// This person can't judge (a gone account's, unreadable access).
+    NotJudged,
+}
+
+fn readers(w: &Whose, me: &str) -> Readers {
+    match w {
+        Whose::Mover => Readers::These(BTreeSet::from([me.to_string()])),
+        Whose::Person { account_id } => Readers::These(BTreeSet::from([account_id.clone()])),
+        Whose::Shared { limited_to } if limited_to.is_empty() => Readers::Everyone,
+        Whose::Shared { limited_to } => Readers::These(limited_to.iter().cloned().collect()),
+        Whose::System => Readers::Everyone,
+        Whose::FromOldAccount { .. } | Whose::Undecided => Readers::NotJudged,
     }
+}
+
+/// Below the shared place `parent`, whose `child` is: only the people both lists allow (it lands
+/// where no more people can open it than could before, and no fewer than its own list
+/// allows of the place's people). `None` when that is the place's own answer.
+fn narrowed(child: &Whose, parent: &Whose, me: &str) -> Option<Whose> {
+    if !matches!(parent, Whose::Shared { .. }) {
+        return None;
+    }
+    let around = readers(parent, me);
+    let own = match readers(child, me) {
+        Readers::NotJudged => return Some(child.clone()),
+        r => r,
+    };
+    let both: BTreeSet<String> = match (&around, &own) {
+        (Readers::Everyone, Readers::Everyone) => return None,
+        (Readers::Everyone, Readers::These(c)) => c.clone(),
+        (Readers::These(_), Readers::Everyone) => return None,
+        (Readers::These(p), Readers::These(c)) => {
+            let both: BTreeSet<String> = p.intersection(c).cloned().collect();
+            if both == *p {
+                return None;
+            }
+            if both.is_empty() {
+                // Nobody the place allows may open it: someone else's, never listed here.
+                return Some(match c.iter().next() {
+                    Some(only) if c.len() == 1 => Whose::Person {
+                        account_id: only.clone(),
+                    },
+                    _ => Whose::Undecided,
+                });
+            }
+            both
+        }
+        (Readers::NotJudged, _) | (_, Readers::NotJudged) => return None,
+    };
+    let mut ids = both.into_iter();
+    Some(match (ids.next(), ids.next()) {
+        (Some(one), None) if one == me => Whose::Mover,
+        (Some(one), None) => Whose::Person { account_id: one },
+        (Some(a), Some(b)) => {
+            let mut limited_to = vec![a, b];
+            limited_to.extend(ids);
+            Whose::Shared { limited_to }
+        }
+        (None, _) => Whose::Undecided,
+    })
 }
 
 fn with<'a>(parts: &'a [String], last: &'a str) -> Vec<&'a str> {
@@ -2951,22 +3080,41 @@ fn outer_known(folders: &[FolderLookup]) -> Vec<(usize, PathBuf)> {
 /// The path the system lists a folder through. On Windows that is the `\\?\` form, which takes
 /// every name exactly as it is on the disk: a folder named `notes.` or `CON` is listed under its
 /// real name instead of one Windows tidied up (which would not exist).
-fn for_listing(path: &Path) -> PathBuf {
-    if cfg!(windows) {
+pub(crate) fn for_listing(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        // The `\\?\` form takes no `/`: turn them round first (name by name, exactly).
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .map(|u| {
+                if u == u16::from(b'/') {
+                    u16::from(b'\\')
+                } else {
+                    u
+                }
+            })
+            .collect();
+        let path = PathBuf::from(std::ffi::OsString::from_wide(&wide));
         let text = path.as_os_str().to_string_lossy();
         if text.starts_with(r"\\?\") || text.starts_with(r"\\.\") {
-            return path.to_path_buf();
+            return path;
         }
-        if let Some(unc) = text.strip_prefix(r"\\") {
-            return PathBuf::from(format!(r"\\?\UNC\{unc}"));
+        if let Some(rest) = text.strip_prefix(r"\\") {
+            return PathBuf::from(format!(r"\\?\UNC\{rest}"));
         }
         if path.is_absolute() {
             let mut long = std::ffi::OsString::from(r"\\?\");
             long.push(path.as_os_str());
             return PathBuf::from(long);
         }
+        path
     }
-    path.to_path_buf()
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
 }
 
 #[cfg(unix)]

@@ -357,6 +357,63 @@ fn the_answer_key_catches_every_kind_of_wrong_sweep() {
         check_of(&bad).iter().any(|l| l.contains(&locked)),
         "refused folder"
     );
+
+    // Another person's things are tied to their own drive and their own account.
+    let others_to = |v: &mut serde_json::Value, f: &dyn Fn(&mut serde_json::Value)| {
+        for pl in v["places"].as_array_mut().unwrap() {
+            if pl["path"].is_null()
+                && matches!(
+                    pl["placement"]["whose"].as_str(),
+                    Some("person" | "from-old-account")
+                )
+            {
+                f(pl);
+            }
+        }
+        for b in v["blind_spots"].as_array_mut().unwrap() {
+            if b["path"].is_null() {
+                f(b);
+            }
+        }
+    };
+    let not_named = |lines: &[String]| {
+        spec.plants
+            .iter()
+            .filter(|p| matches!(p.expect, Expect::NotNamed { .. }))
+            .any(|p| lines.iter().any(|l| l.contains(&p.token)))
+    };
+    // 8. On another drive.
+    let mut bad = good.clone();
+    others_to(&mut bad, &|x| x["volume"] = serde_json::json!("Z:"));
+    assert!(not_named(&check_of(&bad)), "wrong drive");
+    // 9. Someone else's.
+    let mut bad = good.clone();
+    others_to(&mut bad, &|x| {
+        if x.get("placement").is_some() {
+            x["placement"]["account_id"] = serde_json::json!("S-1-5-21-0-0-0-1");
+        } else if x.get("account_id").is_some() {
+            x["account_id"] = serde_json::json!("S-1-5-21-0-0-0-1");
+        }
+    });
+    assert!(not_named(&check_of(&bad)), "wrong person");
+    // 10. Fewer places in a blind spot than rely on it.
+    if good["blind_spots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|b| b["count"].as_u64().unwrap_or(1) > 1)
+    {
+        let mut bad = good.clone();
+        for b in bad["blind_spots"].as_array_mut().unwrap() {
+            b["count"] = serde_json::json!(1);
+        }
+        assert!(
+            check_of(&bad)
+                .iter()
+                .any(|l| l.contains("rely on blind spots")),
+            "short count"
+        );
+    }
 }
 
 #[test]

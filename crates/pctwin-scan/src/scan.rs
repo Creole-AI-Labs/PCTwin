@@ -92,7 +92,7 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
     let mut pending: Vec<(PathBuf, Vec<ItemName>, Option<usize>)> =
         vec![(root.to_path_buf(), Vec::new(), None)];
     while let Some((dir, parts, item)) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+        let Ok(entries) = std::fs::read_dir(crate::sweep::for_listing(&dir)) else {
             if let Some(i) = item {
                 scan.items[i].inclusion = left_out(LeftOutReason::Unreadable);
             }
@@ -104,7 +104,7 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
                 scan.unreadable.push(dir.clone());
                 continue;
             };
-            let path = entry.path();
+            let path = dir.join(entry.file_name());
             let file_name = entry.file_name();
             let mut item_parts = parts.clone();
             item_parts.push(item_name(&file_name));

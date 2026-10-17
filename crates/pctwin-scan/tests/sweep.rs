@@ -1226,3 +1226,179 @@ fn a_file_one_person_keeps_to_themselves_in_a_shared_folder_is_not_listed() {
     find(&s, FolderRole::Other, "Family/holiday.jpg");
     assert!(!serde_json::to_string(&s).unwrap().contains("BEA-PRIVATE"));
 }
+
+// --- Regressions from the second fresh-context review (17 October 2026) --------------------
+
+const CARL: &str = "S-1-5-21-111-222-333-1003";
+
+fn three(lab: &Lab) -> SweepFacts {
+    let mut f = facts(lab, true);
+    let carl = lab.c.join("Users").join("carl");
+    std::fs::create_dir_all(&carl).unwrap();
+    f.census
+        .residents
+        .push(resident(CARL, PersonKind::Other, &carl));
+    f
+}
+
+#[test]
+fn a_folder_two_others_share_inside_a_place_shared_by_two_lands_only_with_the_people_both_allow() {
+    let lab = lab();
+    write(&lab.d.join("Ours/AdaCarl/plan.txt"), 3);
+    write(&lab.d.join("Ours/CarlOnly/CARL-SECRET.txt"), 3);
+    let sddl = |ids: &[&str]| {
+        let aces: String = ids.iter().map(|id| format!("(A;OICI;FA;;;{id})")).collect();
+        AccessFact::Known(access_from_sddl(&format!("O:{ADA}D:P{aces}")).unwrap())
+    };
+    let mut answers = Answers::default();
+    answers.0.insert("Ours".into(), sddl(&[ADA, BEA]));
+    answers.0.insert("AdaCarl".into(), sddl(&[ADA, CARL]));
+    answers.0.insert("CarlOnly".into(), sddl(&[CARL]));
+    let s = run(sized(three(&lab), 0), &mut answers);
+    // Bea could not open it before, so she never gets it; Ada could, so it is hers.
+    let plan = find(&s, FolderRole::Other, "Ours/AdaCarl/plan.txt");
+    assert_eq!(plan.owner, mover());
+    assert_eq!(s.placement_of(&plan.id).unwrap().whose, Whose::Mover);
+    assert!(!serde_json::to_string(&s).unwrap().contains("CARL-SECRET"));
+    assert!(!serde_json::to_string(&s).unwrap().contains("CarlOnly"));
+}
+
+#[test]
+fn a_system_folder_that_is_its_own_volume_is_still_the_systems() {
+    let lab = lab();
+    let system_dir = if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "System"
+    } else {
+        "var"
+    };
+    let mounted = lab.c.join(system_dir);
+    write(&mounted.join("log/syslog"), 40);
+    let mut f = sized(facts(&lab, true), 0);
+    f.volumes[0].skip.push(mounted.clone());
+    let mut inner = volume(&mounted, false, VolumeKind::Internal, DiskKind::Ssd);
+    inner.total_bytes = 1 << 40;
+    inner.free_bytes = (1 << 40) - 40;
+    f.volumes.push(inner);
+    let s = run(f, &mut Answers::default());
+    assert!(!s.record.items.iter().any(|i| shown(i).contains("syslog")));
+    let place = s
+        .places
+        .iter()
+        .find(|p| p.path.as_deref().is_some_and(|x| x.ends_with(system_dir)))
+        .expect("counted as the system's");
+    assert_eq!(place.placement.whose, Whose::System);
+    assert_eq!(place.bytes, 40);
+}
+
+#[test]
+fn volumes_that_share_one_file_systems_space_are_judged_together() {
+    let lab = lab();
+    write(&lab.c.join("Projects/a.txt"), 10);
+    write(&lab.d.join("Photos/b.jpg"), 20);
+    let gb = 1024 * 1024 * 1024u64;
+    let mut f = facts(&lab, false);
+    let used = du(&lab.c) + du(&lab.d) + 6 * gb;
+    for v in &mut f.volumes {
+        v.total_bytes = 1 << 40;
+        v.free_bytes = (1 << 40) - used;
+    }
+    let s = run(f, &mut Answers::default());
+    let gaps: Vec<_> = s
+        .blind_spots
+        .iter()
+        .filter(|b| matches!(b.reason, BlindReason::Unexplained { .. }))
+        .collect();
+    assert_eq!(gaps.len(), 1, "{gaps:#?}");
+    assert!(matches!(gaps[0].reason, BlindReason::Unexplained { bytes } if bytes == 6 * gb));
+    assert_eq!(s.volumes[1].same_space_as, Some(s.volumes[0].mount.clone()));
+    assert_eq!(s.volumes[1].unexplained_bytes, 0);
+}
+
+#[test]
+fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
+    let lab = lab();
+    let apps = if cfg!(windows) {
+        "Program Files"
+    } else if cfg!(target_os = "macos") {
+        "Applications"
+    } else {
+        "opt"
+    };
+    for i in 0..20 {
+        write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
+    }
+    let stop = AtomicBool::new(false);
+    let mut renamed = false;
+    let base = lab.c.join(apps);
+    let s = sweep(
+        sized(facts(&lab, false), 0),
+        &mut Answers::default(),
+        &stop,
+        &mut |view| {
+            if !renamed && String::from_utf8_lossy(&view.to_json()).contains("App7") {
+                renamed = std::fs::rename(base.join("App7"), base.join("Moved7")).is_ok();
+            }
+        },
+        &SweepLimits {
+            checkpoint_entries: 1,
+            checkpoint_every: std::time::Duration::ZERO,
+            ..SweepLimits::default()
+        },
+        None,
+    );
+    assert!(renamed);
+    assert!(
+        s.blind_spots
+            .iter()
+            .any(|b| b.reason == BlindReason::ChangedDuringScan),
+        "{:#?}",
+        s.blind_spots
+    );
+    assert_ne!(s.top_line, TopLine::Everything);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_shared_folder_of_an_older_copy_of_windows_is_placed_like_any_folder() {
+    let lab = lab();
+    write(
+        &lab.c.join("Windows.old/Users/Public/Documents/flyer.pdf"),
+        8,
+    );
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let flyer = find(
+        &s,
+        FolderRole::Other,
+        "Windows.old/Users/Public/Documents/flyer.pdf",
+    );
+    assert_eq!(flyer.owner, mover());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_folder_whose_name_ends_in_a_dot_inside_a_special_folder_is_found() {
+    let lab = lab();
+    let docs = lab.ada.join("Documents");
+    let odd = format!(r"\\?\{}\Drafts.", docs.display());
+    std::fs::create_dir_all(&odd).unwrap();
+    std::fs::write(format!(r"{odd}\draft.txt"), b"123").unwrap();
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    find(&s, FolderRole::Documents, "Drafts./draft.txt");
+    assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
+    std::fs::remove_file(format!(r"{odd}\draft.txt")).unwrap();
+    std::fs::remove_dir(&odd).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn a_drive_written_with_forward_slashes_is_still_listed() {
+    let lab = lab();
+    write(&lab.d.join("Photos/a.jpg"), 5);
+    let mut f = sized(facts(&lab, false), 0);
+    f.volumes[1].mount = PathBuf::from(lab.d.to_string_lossy().replace('\\', "/"));
+    let s = run(f, &mut Answers::default());
+    assert!(s.record.items.iter().any(|i| shown(i).ends_with("a.jpg")));
+    assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
+}

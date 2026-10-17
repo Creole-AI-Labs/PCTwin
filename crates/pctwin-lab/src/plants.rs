@@ -614,6 +614,9 @@ fn norm(p: &str) -> String {
     }
 }
 
+/// The places that rely on blind spots, and the reasons those blind spots may give.
+type Relying = (Vec<String>, Vec<String>);
+
 /// The volume (as the sweep names it, normalised) a path is on: the longest mount that holds it.
 fn volume_of(sweep: &Value, path: &str) -> String {
     sweep
@@ -722,6 +725,7 @@ pub fn check(
 ) -> Vec<String> {
     let mut problems = Vec::new();
     let mut notes = Vec::new();
+    let mut relying: Vec<(String, Option<String>, Vec<String>, String)> = Vec::new();
     let text = sweep.to_string();
     let located = item_paths(sweep);
     let by_path: BTreeMap<&str, &Value> = located.iter().map(|(p, v)| (p.as_str(), *v)).collect();
@@ -845,6 +849,14 @@ pub fn check(
                         "{}: neither counted as someone else's nor a blind spot ({allowed:?})",
                         p.token
                     ));
+                } else if !counted {
+                    // A refused home is one place, whatever is inside it; elsewhere each planted
+                    // folder is its own place.
+                    let unit = match &p.spot {
+                        Spot::Home { person } => format!("home of {person}"),
+                        _ => p.token.clone(),
+                    };
+                    relying.push((vol, id.map(str::to_string), allowed.clone(), unit));
                 }
             }
             Expect::Unreadable { reasons: allowed } => {
@@ -875,6 +887,75 @@ pub fn check(
                     ));
                 }
             }
+        }
+    }
+    // Every one of another person's things that only a blind spot stands for is counted in it:
+    // the blind spots on a drive for a person (or without one) count at least as many places
+    // as rely on them.
+    let mut groups: BTreeMap<(String, Option<String>), Relying> = BTreeMap::new();
+    for (vol, id, allowed, unit) in &relying {
+        let g = groups.entry((vol.clone(), id.clone())).or_default();
+        if !g.0.contains(unit) {
+            g.0.push(unit.clone());
+        }
+        for a in allowed {
+            if !g.1.contains(a) {
+                g.1.push(a.clone());
+            }
+        }
+    }
+    for ((vol, id), (tokens, allowed)) in &groups {
+        let available: u64 = blind
+            .iter()
+            .filter(|b| {
+                norm(s(b, "volume")) == *vol
+                    && allowed.iter().any(|a| a == s(b, "reason"))
+                    && b.get("path").is_none_or(Value::is_null)
+                    && match (b.get("account_id").and_then(Value::as_str), id) {
+                        (Some(a), Some(id)) => a == id,
+                        _ => true,
+                    }
+            })
+            .map(|b| b.get("count").and_then(Value::as_u64).unwrap_or(1))
+            .sum();
+        if available < tokens.len() as u64 {
+            problems.push(format!(
+                "{}: {} places on {vol} rely on blind spots that count only {available}",
+                tokens.join(", "),
+                tokens.len()
+            ));
+        }
+    }
+    // And on each drive, everyone's together: a blind spot that names nobody can stand for one
+    // place only, whoever's it is.
+    let mut by_drive: BTreeMap<String, Relying> = BTreeMap::new();
+    for (vol, _, allowed, unit) in &relying {
+        let g = by_drive.entry(vol.clone()).or_default();
+        if !g.0.contains(unit) {
+            g.0.push(unit.clone());
+        }
+        for a in allowed {
+            if !g.1.contains(a) {
+                g.1.push(a.clone());
+            }
+        }
+    }
+    for (vol, (units, allowed)) in &by_drive {
+        let available: u64 = blind
+            .iter()
+            .filter(|b| {
+                norm(s(b, "volume")) == *vol
+                    && allowed.iter().any(|a| a == s(b, "reason"))
+                    && b.get("path").is_none_or(Value::is_null)
+            })
+            .map(|b| b.get("count").and_then(Value::as_u64).unwrap_or(1))
+            .sum();
+        if available < units.len() as u64 {
+            problems.push(format!(
+                "{}: {} places on {vol} rely on blind spots that count only {available}",
+                units.join(", "),
+                units.len()
+            ));
         }
     }
     // No invented items: everything in the record is really there. Inside the lab's own places
