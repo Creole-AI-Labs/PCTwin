@@ -386,6 +386,30 @@ fn the_answer_key_catches_every_kind_of_wrong_sweep() {
     let mut bad = good.clone();
     others_to(&mut bad, &|x| x["volume"] = serde_json::json!("Z:"));
     assert!(not_named(&check_of(&bad)), "wrong drive");
+    // 8b. Only the counts moved: the leftover's things (its readable home is counted, not a
+    // blind spot) must be missed on their own drive.
+    let leftover = spec
+        .people
+        .iter()
+        .find(|p| p.role == Role::Leftover)
+        .map(|p| p.label.clone())
+        .unwrap();
+    let left_token = spec
+        .plants
+        .iter()
+        .find(|p| p.by == leftover)
+        .map(|p| p.token.clone())
+        .unwrap();
+    let mut bad = good.clone();
+    for pl in bad["places"].as_array_mut().unwrap() {
+        if pl["path"].is_null() {
+            pl["volume"] = serde_json::json!("Z:");
+        }
+    }
+    assert!(
+        check_of(&bad).iter().any(|l| l.contains(&left_token)),
+        "a count on the wrong drive"
+    );
     // 9. Someone else's.
     let mut bad = good.clone();
     others_to(&mut bad, &|x| {
