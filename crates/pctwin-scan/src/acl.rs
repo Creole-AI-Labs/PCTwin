@@ -144,7 +144,14 @@ impl AccessReader for UnixAccess {
 struct WindowsAcl {
     helper: Option<Helper>,
     broken: Option<String>,
+    /// Times the helper had to be started again in a row (a slow answer, or it stopped).
+    restarts: u32,
 }
+
+/// One folder whose permissions take longer than this to read is answered "unknown" and the
+/// helper is started again; only after this many failures in a row is it given up for the sweep.
+const ASK_LIMIT: Duration = Duration::from_secs(20);
+const MOST_RESTARTS: u32 = 3;
 
 struct Helper {
     child: Child,
@@ -221,23 +228,34 @@ impl WindowsAcl {
         let helper = self.start()?;
         let sent = writeln!(helper.input, "{text}").and_then(|()| helper.input.flush());
         let answer = match sent {
-            Ok(()) => helper.lines.recv_timeout(Duration::from_secs(20)),
+            Ok(()) => helper.lines.recv_timeout(ASK_LIMIT),
             Err(e) => {
-                let why = format!("the permissions helper stopped: {e}");
-                self.broken = Some(why.clone());
-                self.helper = None;
-                return Err(why);
+                return Err(self.failed(format!("the permissions helper stopped: {e}")));
             }
         };
         match answer {
-            Ok(line) => Ok(line),
-            Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => {
-                let why = "the permissions helper stopped answering".to_string();
-                self.broken = Some(why.clone());
-                self.helper = None;
-                Err(why)
+            Ok(line) => {
+                self.restarts = 0;
+                Ok(line)
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                Err(self.failed("reading this folder's permissions took too long".to_string()))
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(self.failed("the permissions helper stopped answering".to_string()))
             }
         }
+    }
+
+    /// This one answer failed: the helper is started again for the next folder, and given up
+    /// only after several failures in a row (then every later folder says why).
+    fn failed(&mut self, why: String) -> String {
+        self.helper = None;
+        self.restarts += 1;
+        if self.restarts >= MOST_RESTARTS {
+            self.broken = Some(format!("{why} ({MOST_RESTARTS} times in a row)"));
+        }
+        why
     }
 }
 
