@@ -2805,10 +2805,19 @@ impl Sweeper<'_> {
     fn finish(mut self, finished: bool) -> Sweep {
         let frontier = (!finished).then(|| self.view(Vec::new()).save());
         // Volumes that share one file system's space (btrfs sub-volumes mounted apart, APFS
-        // volumes in one container) all report the same used space: they are judged together,
-        // on the one mounted highest, against everything seen on any of them.
+        // volumes in one container, ZFS datasets in one pool) all report the same used space:
+        // they are judged together, on the one mounted highest, against everything seen on any
+        // of them. Only those file systems pool their space; two drives of another kind that
+        // happen to be the same size and equally full stay apart.
+        let pooled = |v: &Volume| {
+            matches!(
+                v.file_system.to_ascii_lowercase().as_str(),
+                "btrfs" | "apfs" | "zfs" | "bcachefs"
+            )
+        };
         let shares = |a: &Volume, b: &Volume| {
-            a.kind == VolumeKind::Internal
+            pooled(a)
+                && a.kind == VolumeKind::Internal
                 && b.kind == VolumeKind::Internal
                 && a.total_bytes > 0
                 && a.total_bytes == b.total_bytes

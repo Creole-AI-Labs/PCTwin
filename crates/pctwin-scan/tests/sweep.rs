@@ -1303,7 +1303,15 @@ fn volumes_that_share_one_file_systems_space_are_judged_together() {
     for v in &mut f.volumes {
         v.total_bytes = 1 << 40;
         v.free_bytes = (1 << 40) - used;
+        v.file_system = "btrfs".into();
     }
+    // Two NTFS drives that are the same size and equally full are two drives.
+    let mut apart = f.clone();
+    for v in &mut apart.volumes {
+        v.file_system = "NTFS".into();
+    }
+    let a = run(apart, &mut Answers::default());
+    assert_eq!(a.volumes[1].same_space_as, None);
     let s = run(f, &mut Answers::default());
     let gaps: Vec<_> = s
         .blind_spots
