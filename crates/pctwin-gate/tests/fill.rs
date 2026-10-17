@@ -234,19 +234,25 @@ fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
     );
     // After a restart, where identities may change: the whole file's bytes prove it PCTwin's
     // copy, but the identity is not taken from another file.
+    let mut renumbered = show.clone();
+    renumbered.fill.made = Some(FileId {
+        volume: 7,
+        index: std::num::NonZeroU64::new(7).unwrap(),
+        born: None,
+    });
     let mut all = |_: &mut dyn Read| Ok(true);
     assert_eq!(
-        dest.finish_show("c.txt", &not_made, ShowCheck::Bytes(&mut all))
+        dest.finish_show("c.txt", &renumbered, ShowCheck::Bytes(&mut all))
             .unwrap(),
         Shown::AlreadyShown(None)
     );
-    // After a restart nothing is held: the bytes prove it PCTwin's copy, and the identity is
-    // never taken on that alone (the one recorded at the commit stays).
+    // After a restart nothing is held: the bytes prove it PCTwin's copy, and its identity now is
+    // kept where its file number is still the one recorded when it was made.
     let mut whole = |_: &mut dyn Read| Ok(true);
     assert_eq!(
         dest.finish_show("c.txt", &show, ShowCheck::Bytes(&mut whole))
             .unwrap(),
-        Shown::AlreadyShown(None)
+        Shown::AlreadyShown(Some(now(&dest)))
     );
     assert_eq!(
         dest.born("c.txt").unwrap(),

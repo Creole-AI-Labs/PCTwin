@@ -845,9 +845,17 @@ impl crate::Destination {
                 let same = identity(held)?.0 == now;
                 (same, same)
             }
+            // Proven by its bytes alone. Its identity now is kept (for Undo) only where its file
+            // number is still the one recorded when it was made (a drive whose numbers last);
+            // the number never decides whether it is PCTwin's.
             ShowCheck::Bytes(whole) => {
                 file.seek(SeekFrom::Start(0))?;
-                (whole(&mut file)?, false)
+                let same_number = show
+                    .fill
+                    .made
+                    .is_some_and(|m| m.volume == now.volume && m.index == now.index);
+                let mine = whole(&mut file)?;
+                (mine, mine && same_number)
             }
         };
         let proven = proven_fill(&file, &show.fill)? && mine;
