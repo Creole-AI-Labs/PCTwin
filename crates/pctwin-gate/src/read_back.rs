@@ -35,18 +35,21 @@ const MOST_AT_ONCE: usize = 4 * 1024 * 1024;
 /// Size of the probe file each drive is tested with: two aligned chunks.
 const PROBE_BYTES: usize = 2 * ALIGN;
 
-/// Where the bytes of a read-back came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheckedFrom {
-    /// Read from the drive itself, past this laptop's cache.
-    Drive,
-    /// Read through this laptop's cache: the file was still checked, but its bytes may have come
-    /// from this laptop's memory rather than the drive. "More details" says so.
-    Memory(WhyMemory),
+pctwin_types::listed_enum! {
+    /// Where the bytes of a read-back came from.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum CheckedFrom {
+        /// Read from the drive itself, past this laptop's cache.
+        Drive,
+        /// Read through this laptop's cache: the file was still checked, but its bytes may have come
+        /// from this laptop's memory rather than the drive. "More details" says so.
+        Memory(WhyMemory),
+    }
 }
 
 impl CheckedFrom {
-    /// Every value, drive first, then memory for each reason in [`WhyMemory::ALL`]'s order.
+    /// Every value, drive first, then memory for each reason in [`WhyMemory::ALL`]'s order (its
+    /// test checks it against `VARIANTS`).
     pub const ALL: [CheckedFrom; 6] = [
         Self::Drive,
         Self::Memory(WhyMemory::CannotSkipCache),
@@ -78,28 +81,31 @@ impl serde::Serialize for CheckedFrom {
     }
 }
 
-/// Why a check could not read past this laptop's cache. Sent to the screens by its kebab-case
-/// name, which is also the key of its words there (`why-memory-<name>`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum WhyMemory {
-    /// The drive refused to be read past the cache (some network drives and USB sticks).
-    CannotSkipCache,
-    /// The drive accepted a read past the cache but did not show the read reached the drive (it
-    /// allowed a read that only the cache could answer), so it is not counted as one.
-    NotShown,
-    /// This system has no way to read this drive past its cache.
-    NoWay,
-    /// The file is stored in a way the system reads through its memory (compressed, encrypted,
-    /// kept inline or journalled), whatever the drive allows.
-    StoredSpecially,
-    /// The file is so small the drive may keep it inside its own records, which the system reads
-    /// through its memory.
-    TooSmall,
+pctwin_types::listed_enum! {
+    /// Why a check could not read past this laptop's cache. Sent to the screens by its kebab-case
+    /// name, which is also the key of its words there (`why-memory-<name>`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum WhyMemory {
+        /// The drive refused to be read past the cache (some network drives and USB sticks).
+        CannotSkipCache,
+        /// The drive accepted a read past the cache but did not show the read reached the drive (it
+        /// allowed a read that only the cache could answer), so it is not counted as one.
+        NotShown,
+        /// This system has no way to read this drive past its cache.
+        NoWay,
+        /// The file is stored in a way the system reads through its memory (compressed, encrypted,
+        /// kept inline or journalled), whatever the drive allows.
+        StoredSpecially,
+        /// The file is so small the drive may keep it inside its own records, which the system reads
+        /// through its memory.
+        TooSmall,
+    }
 }
 
 impl WhyMemory {
-    /// Every reason, in the screens' order (app/src/move.ts `WHY_MEMORY`).
+    /// Every reason, in the screens' order (app/src/move.ts `WHY_MEMORY`); its test checks it
+    /// against `VARIANTS`.
     pub const ALL: [WhyMemory; 5] = [
         Self::CannotSkipCache,
         Self::NotShown,
@@ -602,33 +608,21 @@ mod evidence_json {
         }
     }
 
-    /// The reason after `why` in [`WhyMemory::ALL`]. No catch-all arm: a new reason does not
-    /// compile until it has a place here, and then `ALL` must list it for the test to pass.
-    fn after(why: WhyMemory) -> Option<WhyMemory> {
-        match why {
-            WhyMemory::CannotSkipCache => Some(WhyMemory::NotShown),
-            WhyMemory::NotShown => Some(WhyMemory::NoWay),
-            WhyMemory::NoWay => Some(WhyMemory::StoredSpecially),
-            WhyMemory::StoredSpecially => Some(WhyMemory::TooSmall),
-            WhyMemory::TooSmall => None,
-        }
-    }
-
+    /// `ALL` lists every reason once, in declared order, and `CheckedFrom::ALL` every value:
+    /// both are checked against the variant names made with the enums (`listed_enum!`), so a new
+    /// reason or a new kind of evidence that is not listed fails here.
     #[test]
-    fn every_reason_is_listed_once() {
-        let mut chain = vec![WhyMemory::CannotSkipCache];
-        while let Some(next) = after(*chain.last().unwrap()) {
-            chain.push(next);
+    fn every_reason_and_every_value_is_listed_once() {
+        let names: Vec<&str> = WhyMemory::ALL.iter().map(WhyMemory::variant).collect();
+        assert_eq!(names, WhyMemory::VARIANTS);
+
+        let kinds: Vec<&str> = CheckedFrom::ALL.iter().map(CheckedFrom::variant).collect();
+        for kind in CheckedFrom::VARIANTS {
+            assert!(kinds.contains(kind), "CheckedFrom::ALL has no {kind}");
         }
-        assert_eq!(chain, WhyMemory::ALL);
-        let all = WhyMemory::ALL;
-        for (i, why) in all.iter().enumerate() {
-            assert!(!all[..i].contains(why), "{why:?} listed twice");
-        }
-        assert_eq!(CheckedFrom::ALL.len(), all.len() + 1);
-        for why in all {
-            assert!(CheckedFrom::ALL.contains(&CheckedFrom::Memory(why)));
-        }
-        assert!(CheckedFrom::ALL.contains(&CheckedFrom::Drive));
+        assert_eq!(CheckedFrom::VARIANTS, ["Drive", "Memory"]);
+        let mut want = vec![CheckedFrom::Drive];
+        want.extend(WhyMemory::ALL.map(CheckedFrom::Memory));
+        assert_eq!(CheckedFrom::ALL.to_vec(), want);
     }
 }

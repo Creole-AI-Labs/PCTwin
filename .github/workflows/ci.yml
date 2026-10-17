@@ -448,6 +448,12 @@ jobs:
           wait "$pid"
           cat "$marker"
           grep -q "titled PCTwin" "$marker"
+      # The permission sweep (tests/permissions.rs) again as the app ships: a release build (Tauri
+      # refuses and stores permissions differently without debug checks) with the app's own
+      # protocol, as `tauri build` makes it. Once per system, so each overlay is included.
+      - name: Permission sweep, release build
+        if: contains(fromJSON('["windows-latest", "macos-latest", "ubuntu-latest"]'), matrix.os)
+        run: cargo test -p pctwin-app --release --locked --features tauri/custom-protocol --test permissions
       - name: Keep the unsigned app
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

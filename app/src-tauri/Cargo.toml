@@ -18,7 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# Tauri's default features without `dynamic-acl`, which would let code grant the screens more while
+# the app runs (src/lockdown.rs keeps it off; tests/permissions.rs checks what is granted).
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
@@ -28,14 +30,16 @@ pctwin-doctor = { path = "../../crates/pctwin-doctor" }
 pctwin-journey = { path = "../../crates/pctwin-journey" }
 pctwin-link = { path = "../../crates/pctwin-link" }
 pctwin-session = { path = "../../crates/pctwin-session" }
+# `listed_enum!`: the views the screens are sent, declared with the list of their variants.
+pctwin-types = { path = "../../crates/pctwin-types" }
 tokio = { version = "1.53.2", features = ["sync"] }
 
 [dev-dependencies]
 # The evidence shape the screens are tested against (src/contract.rs).
 pctwin-gate = { path = "../../crates/pctwin-gate" }
 pctwin-pairing = { path = "../../crates/pctwin-pairing" }
-# The real permission check on a mock runtime (src/lockdown.rs). Tests only; no new crate.
-tauri = { version = "2", features = ["tray-icon", "test"] }
+# The real permission check on a mock runtime (tests/permissions.rs). Tests only; no new crate.
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon", "test"] }
 tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [lints]

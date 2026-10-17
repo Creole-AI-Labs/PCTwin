@@ -1,41 +1,150 @@
-//! The screens' permission check, for real: the app's commands and its generated permissions
-//! (build.rs and capabilities/, compiled into this test by `generate_context!`) on Tauri's mock
-//! runtime. A command the main window is not granted, or any command from another window, is
-//! refused by Tauri itself before it runs.
+//! The screens' reach, proven on what Tauri really resolves (Security Design, "The web view is
+//! untrusted"). The app is built the way it ships: its own builder function (`app`, the one
+//! `run()` uses, setup included) and its own generated context (`context`: tauri.conf.json merged
+//! with this system's tauri.<system>.conf.json, and the permissions the build resolved from
+//! build.rs, capabilities/ and permissions/). It runs on Tauri's mock runtime.
 //!
-//! Pairing's state is left out on purpose: a command that gets past the permission check then
-//! stops at "state not managed" (or at its missing arguments), so nothing here pairs, touches the
-//! network or opens anything.
+//! Then every command Tauri knows (every command of every manifest the build wrote: core, plugins
+//! and the app's own) is called from the main window with a local origin, from the main window
+//! with remote origins, and from another window. Everything is refused except exactly
+//! [`SCREENS_MAY_CALL`] from the main window's own pages. A command granted anywhere (a capability
+//! file, an inline capability in a platform overlay, a permission set in permissions/, a plugin's
+//! default set, or a grant made while the app runs) fails this. CI runs it on Windows, macOS and
+//! Linux, so each system's overlay is included, in debug and in release.
+//!
+//! Nothing here pairs, touches the network or opens anything: a refused command never runs, and a
+//! granted one is sent arguments of the wrong type, so it stops before doing anything. Two granted
+//! commands are checked differently: `set_window_mode` really runs (it resizes the mock window),
+//! and `pairing_new_search`, which takes no arguments and would search the network, is checked on
+//! the resolved permissions only.
 
+use std::collections::BTreeSet;
+
+use serde_json::{Value, json};
 use tauri::Manager;
-use tauri::ipc::{CallbackFn, InvokeBody};
+use tauri::ipc::{CallbackFn, InvokeBody, Origin};
 use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// The quoted names in build.rs's `COMMANDS` (src/lockdown.rs checks they are the registered ones).
-fn commands() -> Vec<String> {
-    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/build.rs")).unwrap();
-    let open = "const COMMANDS: &[&str] = &[";
-    let rest = &text[text.find(open).unwrap() + open.len()..];
-    let list = &rest[..rest.find("];").unwrap()];
-    let names: Vec<String> = list
-        .split(',')
-        .map(|s| s.trim().trim_matches('"').to_owned())
-        .filter(|s| !s.is_empty())
-        .collect();
-    assert!(
-        names.len() >= 11,
-        "the parse found too few commands: {names:?}"
-    );
-    names
+/// Exactly what the screens may call: the app's eleven commands, listening to its own events, and
+/// opening our own site in the browser. Changing this list is a security decision.
+const SCREENS_MAY_CALL: [&str; 14] = [
+    "set_window_mode",
+    "set_tray_labels",
+    "pairing_old_start",
+    "pairing_old_pick",
+    "pairing_old_decline",
+    "pairing_old_shuffle",
+    "pairing_old_rename",
+    "pairing_old_start_again",
+    "pairing_stop",
+    "pairing_new_search",
+    "pairing_new_connect",
+    "plugin:event|listen",
+    "plugin:event|unlisten",
+    "plugin:opener|open_url",
+];
+
+/// The app's own commands among them (build.rs `COMMANDS`).
+fn app_commands() -> Vec<&'static str> {
+    SCREENS_MAY_CALL
+        .iter()
+        .copied()
+        .filter(|c| !c.starts_with("plugin:"))
+        .collect()
 }
 
+/// The pages of the app's own screens, as Tauri serves them on this system.
+const LOCAL: &str = if cfg!(any(windows, target_os = "android")) {
+    "http://tauri.localhost"
+} else {
+    "tauri://localhost"
+};
+
+/// Pages that are not the app's own: anyone's, and our own website (which may link to the app, but
+/// is still a remote page and must never reach it).
+const REMOTE: [&str; 2] = ["https://evil.example/", "https://getpctwin.com/"];
+
+/// A file the build writes into this crate's OUT_DIR, which `generate_context!` resolves from.
+fn generated(name: &str) -> Value {
+    let path = std::path::Path::new(env!("OUT_DIR")).join(name);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name} is not JSON: {e}"))
+}
+
+/// The name the screens invoke a manifest's command by (as tauri-utils resolves it).
+fn invoke_name(manifest: &str, command: &str) -> String {
+    if manifest == "__app-acl__" {
+        command.to_owned()
+    } else if let Some(core) = manifest.strip_prefix("core:") {
+        format!("plugin:{core}|{command}")
+    } else {
+        format!("plugin:{manifest}|{command}")
+    }
+}
+
+/// Every command named by any permission of any manifest the build knows: Tauri's core, each
+/// plugin the app has, and the app itself. A command no permission names cannot be granted.
+fn every_known_command() -> BTreeSet<String> {
+    let manifests = generated("acl-manifests.json");
+    let manifests = manifests.as_object().expect("a map of manifests");
+    let mut all = BTreeSet::new();
+    for (key, manifest) in manifests {
+        let permissions = manifest["permissions"].as_object().expect("permissions");
+        for permission in permissions.values() {
+            for list in ["allow", "deny"] {
+                for c in permission["commands"][list]
+                    .as_array()
+                    .expect("a command list")
+                {
+                    all.insert(invoke_name(key, c.as_str().expect("a command name")));
+                }
+            }
+        }
+    }
+    // The sweep is only as good as its list: it must include the core, both plugins and the app.
+    for needed in [
+        "plugin:window|create",
+        "plugin:webview|create_webview_window",
+        "plugin:app|app_show",
+        "plugin:path|resolve_directory",
+        "plugin:opener|open_path",
+        "plugin:opener|reveal_item_in_dir",
+        "plugin:window-state|save_window_state",
+        "plugin:event|emit",
+        "pairing_stop",
+    ] {
+        assert!(all.contains(needed), "the manifests lack {needed}");
+    }
+    assert!(all.len() > 150, "too few commands found: {}", all.len());
+    // Names no manifest has are refused too.
+    for unknown in [
+        "not_a_command",
+        "plugin:fs|read_file",
+        "plugin:shell|execute",
+        "plugin:navigation-guard|anything",
+    ] {
+        all.insert(unknown.to_owned());
+    }
+    all
+}
+
+/// The app as it ships, on the mock runtime, started: building does not run the app's setup;
+/// Tauri runs it (after making the config's windows) on the event loop's first turn, as the real
+/// app does when it starts. One turn of the mock loop does exactly that and nothing else.
 fn app() -> App<MockRuntime> {
-    mock_builder()
-        .invoke_handler(pctwin_app_lib::invoke_handler())
-        .build(tauri::generate_context!(test = true))
-        .expect("the mock app builds")
+    let mut app = pctwin_app_lib::app(mock_builder())
+        .build(pctwin_app_lib::context())
+        .expect("the app builds on the mock runtime");
+    #[allow(deprecated)]
+    app.run_iteration(|_, _| {});
+    assert!(
+        app.get_webview_window("main").is_some(),
+        "the start made the main window from the config"
+    );
+    app
 }
 
 fn window(app: &App<MockRuntime>, label: &str) -> WebviewWindow<MockRuntime> {
@@ -46,13 +155,8 @@ fn window(app: &App<MockRuntime>, label: &str) -> WebviewWindow<MockRuntime> {
     })
 }
 
-/// What the screens get back for `cmd` with `args`, from the window `w`.
-fn call(w: &WebviewWindow<MockRuntime>, cmd: &str, args: serde_json::Value) -> Result<(), String> {
-    let url = if cfg!(any(windows, target_os = "android")) {
-        "http://tauri.localhost"
-    } else {
-        "tauri://localhost"
-    };
+/// What a page at `url` in window `w` gets back for `cmd` with `args`: Ok, or the error as text.
+fn call(w: &WebviewWindow<MockRuntime>, url: &str, cmd: &str, args: Value) -> Result<(), String> {
     get_ipc_response(
         w,
         InvokeRequest {
@@ -66,97 +170,359 @@ fn call(w: &WebviewWindow<MockRuntime>, cmd: &str, args: serde_json::Value) -> R
         },
     )
     .map(|_| ())
-    .map_err(|e| e.to_string())
+    .map_err(|e| match e {
+        Value::String(s) => s,
+        other => other.to_string(),
+    })
 }
 
-/// Tauri's permission check said no (debug builds give the reason, release builds the same words).
-fn refused(result: &Result<(), String>) -> bool {
-    matches!(result, Err(e) if e.contains("not allowed"))
+/// Whether `result` is Tauri's permission check refusing `cmd`, and nothing else: release builds
+/// say "Command <cmd> not allowed by ACL"; debug builds start with the command's name and "not
+/// allowed" or "explicitly denied". A command's own error never starts that way.
+fn refused(cmd: &str, result: &Result<(), String>) -> bool {
+    let Err(error) = result else {
+        return false;
+    };
+    let pretty = match cmd.strip_prefix("plugin:") {
+        Some(rest) => rest.replacen('|', ".", 1),
+        None => cmd.to_owned(),
+    };
+    *error == format!("Command {cmd} not allowed by ACL")
+        || error.starts_with(&format!("{pretty} not allowed"))
+        || error.starts_with(&format!("{pretty} explicitly denied"))
+}
+
+/// Arguments of the wrong type for a granted command, so it stops before it does anything.
+fn wrong_arguments(cmd: &str) -> Value {
+    match cmd {
+        "set_tray_labels" => json!({ "show": 1, "quit": 2 }),
+        "pairing_old_start" => json!({ "network": 5 }),
+        "pairing_old_pick" => json!({ "round": "x", "number": "y" }),
+        "pairing_old_decline" => json!({ "round": "x" }),
+        "pairing_old_rename" => json!({ "name": 7 }),
+        "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
+        "plugin:event|listen" | "plugin:event|unlisten" => json!({ "event": 1 }),
+        _ => json!({}),
+    }
 }
 
 #[test]
-fn the_main_window_may_call_each_granted_command() {
+fn from_the_main_windows_own_pages_only_the_closed_list_is_let_through() {
     let app = app();
     let main = window(&app, "main");
-    // Asking for a size by name works end to end.
+    let mut let_through = BTreeSet::new();
+    for cmd in every_known_command() {
+        if cmd == "pairing_new_search" || cmd == "set_window_mode" {
+            // Checked below, and in the resolved-permissions test.
+            let_through.insert(cmd);
+            continue;
+        }
+        let result = call(&main, LOCAL, &cmd, wrong_arguments(&cmd));
+        if !refused(&cmd, &result) {
+            let_through.insert(cmd);
+        }
+    }
+    let wanted: BTreeSet<String> = SCREENS_MAY_CALL.iter().map(|c| (*c).to_owned()).collect();
+    let extra: Vec<_> = let_through.difference(&wanted).collect();
+    let missing: Vec<_> = wanted.difference(&let_through).collect();
+    assert!(
+        extra.is_empty(),
+        "the screens can reach more than the closed list: {extra:?}"
+    );
+    assert!(
+        missing.is_empty(),
+        "the screens are refused what they need: {missing:?}"
+    );
+    // A granted command really runs end to end: asking for a size by name.
     assert_eq!(
-        call(
-            &main,
-            "set_window_mode",
-            serde_json::json!({ "mode": "mini" })
-        ),
+        call(&main, LOCAL, "set_window_mode", json!({ "mode": "mini" })),
         Ok(())
     );
-    for cmd in commands() {
-        // No arguments: a granted command is let through, then stops at a missing argument or at
-        // pairing's unmanaged state. Only the permission check says "not allowed".
-        let result = call(&main, &cmd, serde_json::json!({}));
-        assert!(result.is_err(), "{cmd} ran without its arguments or state");
-        assert!(
-            !refused(&result),
-            "{cmd} was refused to the main window: {result:?}"
-        );
-    }
 }
 
 #[test]
-fn any_other_window_is_refused_every_command() {
-    let app = app();
-    let other = window(&app, "other");
-    for cmd in commands() {
-        let result = call(&other, &cmd, serde_json::json!({}));
-        assert!(
-            refused(&result),
-            "{cmd} must be refused to another window: {result:?}"
-        );
-    }
-    let result = call(
-        &other,
-        "set_window_mode",
-        serde_json::json!({ "mode": "mini" }),
-    );
-    assert!(refused(&result), "{result:?}");
-}
-
-#[test]
-fn the_main_window_is_refused_what_is_not_granted() {
+fn remote_pages_and_other_windows_are_refused_every_command() {
     let app = app();
     let main = window(&app, "main");
-    for (cmd, args) in [
-        // Opening a new window or web view (for a remote page, say), or changing this one.
-        (
-            "plugin:webview|create_webview_window",
-            serde_json::json!({ "options": { "label": "x", "url": "https://evil.example/" } }),
-        ),
-        (
-            "plugin:window|create",
-            serde_json::json!({ "options": { "label": "x" } }),
-        ),
-        (
-            "plugin:window|set_size",
-            serde_json::json!({ "label": "main", "value": { "Logical": { "width": 1, "height": 1 } } }),
-        ),
-        ("plugin:app|app_show", serde_json::json!({})),
-        (
-            "plugin:path|resolve_directory",
-            serde_json::json!({ "directory": 11 }),
-        ),
-        // Plugins the app has, whose other commands are not granted.
-        (
-            "plugin:window-state|save_window_state",
-            serde_json::json!({ "flags": 0 }),
-        ),
-        (
-            "plugin:opener|open_path",
-            serde_json::json!({ "path": "C:/Windows/System32/cmd.exe" }),
-        ),
-        // A name the app does not have.
-        ("not_a_command", serde_json::json!({})),
+    let other = window(&app, "other");
+    let mut reached = Vec::new();
+    for cmd in every_known_command() {
+        for (who, w, url) in [
+            ("main", &main, REMOTE[0]),
+            ("main", &main, REMOTE[1]),
+            ("other", &other, LOCAL),
+        ] {
+            let result = call(w, url, &cmd, json!({}));
+            if !refused(&cmd, &result) {
+                reached.push(format!("{who} at {url}: {cmd} => {result:?}"));
+            }
+        }
+    }
+    assert!(
+        reached.is_empty(),
+        "reached from outside the main window's own pages: {reached:#?}"
+    );
+}
+
+#[test]
+fn the_browser_opens_our_own_site_only() {
+    let app = app();
+    let main = window(&app, "main");
+    for url in [
+        "https://example.com/",
+        "https://getpctwin.com.evil.example/",
+        "https://evil.example/?https://getpctwin.com/",
+        "http://getpctwin.com/",
+        "file:///C:/Windows/System32/cmd.exe",
+        "mailto:someone@example.com",
     ] {
-        let result = call(&main, cmd, args);
-        assert!(
-            refused(&result),
-            "{cmd} must be refused to the main window: {result:?}"
+        let result = call(
+            &main,
+            LOCAL,
+            "plugin:opener|open_url",
+            json!({ "url": url }),
+        );
+        assert_eq!(
+            result,
+            Err(format!("Not allowed to open url {url}")),
+            "{url} must be refused by the opener's scope"
         );
     }
+}
+
+/// The same answer straight from the permissions Tauri resolved at build time, with no command
+/// run and no error text read: for every command, window and origin.
+#[test]
+fn the_resolved_permissions_grant_exactly_the_closed_list() {
+    let mut context = pctwin_app_lib::context::<MockRuntime>();
+    let authority = context.runtime_authority_mut();
+    let local = Origin::Local;
+    let remote: Vec<Origin> = REMOTE
+        .iter()
+        .map(|u| Origin::Remote {
+            url: u.parse().unwrap(),
+        })
+        .collect();
+    let mut granted = BTreeSet::new();
+    for cmd in every_known_command() {
+        if authority
+            .resolve_access(&cmd, "main", "main", &local)
+            .is_some()
+        {
+            granted.insert(cmd.clone());
+        }
+        for label in ["other", "main2", "Main", "*"] {
+            assert!(
+                authority
+                    .resolve_access(&cmd, label, label, &local)
+                    .is_none(),
+                "{cmd} is granted to window {label}"
+            );
+        }
+        for origin in &remote {
+            assert!(
+                authority
+                    .resolve_access(&cmd, "main", "main", origin)
+                    .is_none(),
+                "{cmd} is granted to a remote page"
+            );
+        }
+    }
+    let wanted: BTreeSet<String> = SCREENS_MAY_CALL.iter().map(|c| (*c).to_owned()).collect();
+    assert_eq!(granted, wanted);
+}
+
+/// The app manifest the build made from build.rs's `COMMANDS`: one allow and one deny permission
+/// per command, and nothing else (no permission sets, no default, no scope), so no file in
+/// permissions/ can widen a name like `allow-pairing-stop`.
+#[test]
+fn the_apps_own_permissions_are_one_per_command() {
+    let manifests = generated("acl-manifests.json");
+    let app = &manifests["__app-acl__"];
+    let mut want = serde_json::Map::new();
+    for cmd in app_commands() {
+        let dashed = cmd.replace('_', "-");
+        want.insert(
+            format!("allow-{dashed}"),
+            json!({ "allow": [cmd], "deny": [] }),
+        );
+        want.insert(
+            format!("deny-{dashed}"),
+            json!({ "allow": [], "deny": [cmd] }),
+        );
+    }
+    let permissions = app["permissions"].as_object().expect("permissions");
+    let have: serde_json::Map<String, Value> = permissions
+        .iter()
+        .map(|(id, p)| {
+            let keys: BTreeSet<&str> = p.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(
+                keys,
+                BTreeSet::from(["identifier", "description", "commands"]),
+                "{id} has more than commands (a scope or platforms)"
+            );
+            assert_eq!(p["identifier"], json!(id));
+            (id.clone(), p["commands"].clone())
+        })
+        .collect();
+    assert_eq!(Value::Object(have), Value::Object(want));
+    assert_eq!(app["default_permission"], Value::Null);
+    assert_eq!(app["permission_sets"], json!({}));
+    assert_eq!(app["global_scope_schema"], Value::Null);
+}
+
+/// The capability files the build resolved: one, for the main window's own pages, granting the
+/// closed list. (Inline capabilities in the config are refused by the merged-config test.)
+#[test]
+fn the_resolved_capabilities_are_the_one_default() {
+    let mut caps = generated("capabilities.json");
+    let default = caps
+        .as_object_mut()
+        .expect("a map of capabilities")
+        .get_mut("default")
+        .expect("the default capability");
+    default
+        .as_object_mut()
+        .unwrap()
+        .remove("description")
+        .expect("a description");
+    let mut permissions: Vec<Value> = app_commands()
+        .iter()
+        .map(|c| json!(format!("allow-{}", c.replace('_', "-"))))
+        .collect();
+    permissions.extend([
+        json!("core:event:allow-listen"),
+        json!("core:event:allow-unlisten"),
+        json!({ "identifier": "opener:allow-open-url", "allow": [{ "url": "https://getpctwin.com/*" }] }),
+    ]);
+    assert_eq!(
+        caps,
+        json!({
+            "default": {
+                "identifier": "default",
+                "local": true,
+                "windows": ["main"],
+                "permissions": permissions,
+            }
+        })
+    );
+}
+
+/// The content security policy as decided; any change is a decision, made here on purpose.
+const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'";
+
+/// The config the app really runs with (tauri.conf.json merged with this system's overlay, and
+/// anything the build was given in TAURI_CONFIG), not the text of one file.
+#[test]
+fn the_merged_config_keeps_the_lockdown() {
+    let context = pctwin_app_lib::context::<MockRuntime>();
+    let config = serde_json::to_value(context.config()).expect("the config serialises");
+    let app = &config["app"];
+
+    assert_eq!(
+        app["withGlobalTauri"],
+        json!(false),
+        "the screens reach Tauri through bridge.ts only, never a global"
+    );
+    assert_eq!(
+        app["security"],
+        json!({
+            "csp": CSP,
+            "freezePrototype": true,
+            "dangerousDisableAssetCspModification": false,
+            "assetProtocol": { "scope": [], "enable": false },
+            "pattern": { "use": "brownfield" },
+            "capabilities": ["default"],
+        }),
+        "app.security changed (CSP, capabilities, asset protocol, isolation or headers)"
+    );
+
+    // Settings that are left out are not there at all (the config skips empty ones), so a new
+    // key anywhere here (a tray, a proxy, browser arguments, a parent window, a data folder) is a
+    // change to decide on, not something to miss.
+    let keys = |v: &Value| -> BTreeSet<String> { v.as_object().unwrap().keys().cloned().collect() };
+    let names =
+        |list: &[&str]| -> BTreeSet<String> { list.iter().map(|k| (*k).to_owned()).collect() };
+    assert_eq!(
+        keys(app),
+        names(&[
+            "enableGTKAppId",
+            "macOSPrivateApi",
+            "security",
+            "windows",
+            "withGlobalTauri"
+        ]),
+        "app settings changed"
+    );
+    assert_eq!(app["macOSPrivateApi"], json!(false));
+
+    let windows = app["windows"].as_array().expect("windows");
+    assert_eq!(windows.len(), 1, "one window only");
+    let main = &windows[0];
+    assert_eq!(main["label"], json!("main"));
+    assert_eq!(
+        main["url"],
+        json!("index.html"),
+        "the window shows the app's own screens only"
+    );
+    for (key, value) in [
+        ("create", json!(true)),
+        ("useHttpsScheme", json!(false)),
+        ("browserExtensionsEnabled", json!(false)),
+        ("javascriptDisabled", json!(false)),
+    ] {
+        assert_eq!(main[key], value, "windows[0].{key} changed");
+    }
+    assert_eq!(
+        keys(main),
+        names(&[
+            "acceptFirstMouse",
+            "allowLinkPreview",
+            "alwaysOnBottom",
+            "alwaysOnTop",
+            "browserExtensionsEnabled",
+            "center",
+            "closable",
+            "contentProtected",
+            "create",
+            "decorations",
+            "disableInputAccessoryView",
+            "dragDropEnabled",
+            "focus",
+            "focusable",
+            "fullscreen",
+            "generalAutofillEnabled",
+            "height",
+            "hiddenTitle",
+            "incognito",
+            "javascriptDisabled",
+            "label",
+            "limitNavigationsToAppBoundDomains",
+            "maximizable",
+            "maximized",
+            "minHeight",
+            "minWidth",
+            "minimizable",
+            "noRedirectionBitmap",
+            "resizable",
+            "scrollBarStyle",
+            "shadow",
+            "skipTaskbar",
+            "title",
+            "titleBarStyle",
+            "transparent",
+            "url",
+            "useHttpsScheme",
+            "visible",
+            "visibleOnAllWorkspaces",
+            "width",
+            "zoomHotkeysEnabled",
+        ]),
+        "a window setting was added (a proxy, browser arguments, a parent, a data folder...)"
+    );
+
+    // The screens come from the app's own files, or the local dev server while developing.
+    assert_eq!(config["build"]["frontendDist"], json!("../dist"));
+    assert_eq!(config["build"]["devUrl"], json!("http://localhost:1420/"));
+    assert_eq!(config["plugins"], json!({}), "no plugin settings");
 }

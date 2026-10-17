@@ -71,15 +71,34 @@ describe("nothing unchecked reaches a screen", () => {
     expect(seen).toEqual([{ kind: "paired" }, { kind: "problem", problem: FAILED }, { kind: "problem", problem: FAILED }]);
   });
 
+  /** What `reply` was rejected with; a reply that resolves fails the test. */
+  async function rejectionOf(reply: Promise<unknown>): Promise<unknown> {
+    const outcome = await reply.then(
+      (value: unknown) => ({ resolved: true, value }),
+      (error: unknown) => ({ resolved: false, value: error }),
+    );
+    expect(outcome.resolved, `resolved with ${JSON.stringify(outcome.value)}`).toBe(false);
+    return outcome.value;
+  }
+
   it("a search reply that does not parse is the generic problem, and so is a wrong number", async () => {
     tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false }]);
     await expect(pairingNewSearch()).resolves.toEqual([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false }]);
     tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" } }]);
-    expect(toProblem(await pairingNewSearch().catch((e: unknown) => e))).toEqual(FAILED);
+    expect(toProblem(await rejectionOf(pairingNewSearch()))).toEqual(FAILED);
     tauri.invoke.mockResolvedValueOnce(42);
     await expect(pairingNewConnect(0, "123456")).resolves.toBe(42);
     tauri.invoke.mockResolvedValueOnce(4200);
-    expect(toProblem(await pairingNewConnect(0, "123456").catch((e: unknown) => e))).toEqual(FAILED);
+    expect(toProblem(await rejectionOf(pairingNewConnect(0, "123456")))).toEqual(FAILED);
+  });
+
+  it("the shown number is refused above 255, the largest the engine can send", async () => {
+    tauri.invoke.mockResolvedValueOnce(255);
+    await expect(pairingNewConnect(0, "123456")).resolves.toBe(255);
+    for (const wrong of [256, -1, 4.5, "42", null]) {
+      tauri.invoke.mockResolvedValueOnce(wrong);
+      await expect(pairingNewConnect(0, "123456"), String(wrong)).rejects.toThrow("did not have the engine's shape");
+    }
   });
 
   it("a rejection is the engine's problem only when it has the engine's shape", () => {

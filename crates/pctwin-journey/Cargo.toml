@@ -13,6 +13,8 @@ pctwin-discovery = { path = "../pctwin-discovery" }
 pctwin-link = { path = "../pctwin-link" }
 pctwin-pairing = { path = "../pctwin-pairing" }
 pctwin-session = { path = "../pctwin-session" }
+# `listed_enum!`: the problems, declared with the list of their variants.
+pctwin-types = { path = "../pctwin-types" }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt", "sync", "time", "macros"] }
 

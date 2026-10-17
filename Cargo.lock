@@ -3336,6 +3336,7 @@ dependencies = [
  "pctwin-link",
  "pctwin-pairing",
  "pctwin-session",
+ "pctwin-types",
  "serde",
  "serde_json",
  "tauri",
@@ -3390,6 +3391,7 @@ dependencies = [
  "pctwin-gate",
  "pctwin-journal",
  "pctwin-lease",
+ "pctwin-types",
  "proptest",
  "rustix",
  "serde",
@@ -3422,6 +3424,7 @@ dependencies = [
  "pctwin-link",
  "pctwin-pairing",
  "pctwin-session",
+ "pctwin-types",
  "thiserror 2.0.21",
  "tokio",
 ]

@@ -825,7 +825,7 @@ evidence-read-back = 已从硬盘读回进行检查。
 evidence-memory = 通过这台笔记本电脑的内存检查，而不是硬盘。
 evidence-memory-explain = 副本已读回并且一致，但读取经过了这台笔记本电脑的内存，所以读到的内容可能来自内存而不是硬盘。硬盘本身的故障可能不会在这里显示，所以打开一次文件是个不错的检查方法。
 evidence-not-checked = 未检查，因为没有完成。
-# Machine-translated 16 October 2026; to be checked by the language team.
+# Machine-translated 16 October 2026.
 why-memory-cannot-skip-cache = 这个硬盘不允许PCTwin直接读取它，所以检查是经过这台笔记本电脑的内存完成的。有些网络硬盘和USB闪存盘就是这样。
 why-memory-not-shown = 这个硬盘无法证明PCTwin的读取真的到达了它，所以这次检查算作经过这台笔记本电脑的内存完成。
 why-memory-no-way = 这台笔记本电脑的系统没有办法直接读取这个硬盘，所以检查是经过它的内存完成的。
@@ -860,7 +860,7 @@ status-failed = 失败
 ## Screens: words the copy deck did not cover (same voice)
 
 progress-minutes = { $low }到{ $high }分钟
-# Machine-translated 16 October 2026; to be checked by the language team.
+# Machine-translated 16 October 2026.
 progress-minutes-one =
     { NUMBER($minutes) ->
        *[other] { $minutes }分钟

@@ -3,29 +3,23 @@
 //! (contract.test.ts) parses each one with the same functions bridge.ts uses, so a change on
 //! either side that the other does not follow fails a test.
 //!
-//! Each list below is made by walking an exhaustive `match` (no catch-all arm): a new variant does
-//! not compile until it is given a place in the walk, and then it is in the files.
+//! Each enum that crosses the bridge is declared with the names of all its variants
+//! (`pctwin_types::listed_enum!`), and a test below requires every one of them in the examples, each
+//! with its own tag on the wire. A new variant is in that list the moment it exists, so it cannot be
+//! left out of the files.
 //!
 //! The files must match: `cargo test -p pctwin-app contract` fails when they differ, and
 //! `PCTWIN_WRITE_CONTRACT=1 cargo test -p pctwin-app contract` writes them.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use pctwin_discovery::Label;
-use pctwin_gate::CheckedFrom;
+use pctwin_gate::{CheckedFrom, WhyMemory};
 use pctwin_journey::Problem;
 use serde_json::Value;
 
 use crate::pairing::{LabelView, NearbyView, NewView, OldView, ProblemView};
-
-/// Follows `after` from `first` until it ends: every value the walk reaches, in order.
-fn walk<T>(first: T, after: impl Fn(&T) -> Option<T>) -> Vec<T> {
-    let mut all = vec![first];
-    while let Some(next) = after(all.last().unwrap()) {
-        all.push(next);
-    }
-    all
-}
 
 fn picked() -> LabelView {
     // Colour 4 and animal 0 are "blue" and "ant".
@@ -40,10 +34,7 @@ fn named() -> LabelView {
 }
 
 fn labels() -> Vec<LabelView> {
-    walk(picked(), |v| match v {
-        LabelView::Picked { .. } => Some(named()),
-        LabelView::Named { .. } => None,
-    })
+    vec![picked(), named()]
 }
 
 fn choose_network() -> ProblemView {
@@ -51,44 +42,42 @@ fn choose_network() -> ProblemView {
 }
 
 fn old_views() -> Vec<OldView> {
-    let mut all = walk(OldView::Label { label: picked() }, |v| match v {
-        OldView::Label { .. } => Some(OldView::Code {
+    vec![
+        OldView::Label { label: picked() },
+        OldView::Code {
             code: "123456".into(),
             seconds_left: 42,
-        }),
-        OldView::Code { .. } => Some(OldView::Wait { seconds_left: 30 }),
-        OldView::Wait { .. } => Some(OldView::Locked),
-        OldView::Locked => Some(OldView::Choose {
+        },
+        OldView::Wait { seconds_left: 30 },
+        OldView::Locked,
+        OldView::Choose {
             round: 3,
             numbers: [11, 42, 87],
-        }),
-        OldView::Choose { .. } => Some(OldView::Paired),
-        OldView::Paired => Some(OldView::TimedOut),
-        OldView::TimedOut => Some(OldView::Left),
-        OldView::Left => Some(OldView::Lost),
-        OldView::Lost => None,
-    });
-    all.push(OldView::Label { label: named() });
-    all
+        },
+        OldView::Paired,
+        OldView::TimedOut,
+        OldView::Left,
+        OldView::Lost,
+        OldView::Label { label: named() },
+    ]
 }
 
 fn new_views() -> Vec<NewView> {
-    walk(NewView::Paired, |v| match v {
-        NewView::Paired => Some(NewView::Problem {
+    vec![
+        NewView::Paired,
+        NewView::Problem {
             problem: Problem::WrongCode.into(),
-        }),
-        NewView::Problem { .. } => Some(NewView::Lost),
-        NewView::Lost => None,
-    })
-    .into_iter()
-    .chain([NewView::Problem {
-        problem: choose_network(),
-    }])
-    .collect()
+        },
+        NewView::Lost,
+        NewView::Problem {
+            problem: choose_network(),
+        },
+    ]
 }
 
-/// Every problem the journey has (its own list, which its tests keep whole), as a rejected command
-/// carries it; choosing a network comes with networks to choose from.
+/// Every problem the journey has (`Problem::all()`, which its test checks against the variants
+/// made with the enum), as a rejected command carries it; choosing a network comes with networks
+/// to choose from.
 fn problems() -> Vec<ProblemView> {
     Problem::all()
         .into_iter()
@@ -180,33 +169,79 @@ fn the_example_files_match_the_engine() {
     );
 }
 
+/// The `kind` tags in a family's examples.
+fn tags(examples: Value) -> BTreeSet<String> {
+    examples
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["kind"].as_str().expect("a kind tag").to_owned())
+        .collect()
+}
+
+/// Each enum's examples hold every one of its variants (named by the enum's own list, made with
+/// it), and the wire tags are as many as the variants, so no two variants look alike to the screens.
 #[test]
-fn every_view_variant_is_in_the_examples() {
-    let kinds = |v: Value| -> Vec<String> {
-        v.as_array()
-            .unwrap()
-            .iter()
-            .map(|e| e["kind"].as_str().unwrap().to_owned())
-            .collect()
-    };
-    let old = kinds(json(old_views()));
-    for k in [
-        "label",
-        "code",
-        "wait",
-        "locked",
-        "choose",
-        "paired",
-        "timed-out",
-        "left",
-        "lost",
-    ] {
-        assert!(old.contains(&k.to_owned()), "old-view has no {k}");
+fn every_variant_is_in_the_examples_with_its_own_tag() {
+    fn check<T: serde::Serialize>(
+        family: &str,
+        examples: &[T],
+        variant: fn(&T) -> &'static str,
+        all: &[&str],
+    ) {
+        let have: BTreeSet<&str> = examples.iter().map(variant).collect();
+        let want: BTreeSet<&str> = all.iter().copied().collect();
+        let missing: Vec<_> = want.difference(&have).collect();
+        assert!(
+            missing.is_empty(),
+            "{family}.json has no example of {missing:?}"
+        );
+        assert_eq!(
+            tags(json(examples)).len(),
+            all.len(),
+            "{family}.json: two variants share a tag"
+        );
     }
-    let new = kinds(json(new_views()));
-    for k in ["paired", "problem", "lost"] {
-        assert!(new.contains(&k.to_owned()), "new-view has no {k}");
-    }
-    assert_eq!(problems().len(), Problem::all().len());
-    assert_eq!(CheckedFrom::ALL.len(), 6);
+    check(
+        "label-view",
+        &labels(),
+        LabelView::variant,
+        LabelView::VARIANTS,
+    );
+    check(
+        "old-view",
+        &old_views(),
+        OldView::variant,
+        OldView::VARIANTS,
+    );
+    check(
+        "new-view",
+        &new_views(),
+        NewView::variant,
+        NewView::VARIANTS,
+    );
+
+    // Problems: one example per problem, each with its own key.
+    let keys: BTreeSet<&str> = problems().iter().map(|p| p.key).collect();
+    assert_eq!(problems().len(), Problem::VARIANTS.len());
+    assert_eq!(
+        keys.len(),
+        Problem::VARIANTS.len(),
+        "two problems share a key"
+    );
+
+    // Evidence: every value (the gate's test checks `ALL` against its variants), each distinct.
+    let evidence: BTreeSet<String> = CheckedFrom::ALL
+        .iter()
+        .map(|e| json(e).to_string())
+        .collect();
+    assert_eq!(evidence.len(), CheckedFrom::ALL.len());
+    let reasons: BTreeSet<&str> = CheckedFrom::ALL
+        .iter()
+        .filter_map(|e| match e {
+            CheckedFrom::Memory(why) => Some(why.variant()),
+            CheckedFrom::Drive => None,
+        })
+        .collect();
+    assert_eq!(reasons.len(), WhyMemory::VARIANTS.len());
 }

@@ -54,6 +54,29 @@ describe("the engine's examples", () => {
   });
 });
 
+/** The screens' words in every launch language. */
+const LOCALES = import.meta.glob<string>("../locales/*/main.ftl", { query: "?raw", import: "default", eager: true });
+const SEVEN_LANGUAGES = ["ar", "en", "es", "fr", "hi", "pt", "zh-CN"];
+
+describe("every problem the engine can send has words", () => {
+  it("in all seven languages", () => {
+    const languages = Object.keys(LOCALES)
+      .map((path) => path.split("/")[2])
+      .sort();
+    expect(languages).toEqual(SEVEN_LANGUAGES);
+    const problems = FILES["./problem-view.json"] as { key: string }[] | undefined;
+    expect(problems?.length).toBeGreaterThan(0);
+    const missing: string[] = [];
+    for (const [path, text] of Object.entries(LOCALES)) {
+      for (const { key } of problems ?? []) {
+        // A Fluent message: the key at the start of a line, then "=".
+        if (!new RegExp(`^${key} *=`, "m").test(text)) missing.push(`${path}: ${key}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});
+
 describe("shapes the engine never sends are refused", () => {
   it.each([
     ["an unknown kind", parseOldView, { kind: "hacked" }],

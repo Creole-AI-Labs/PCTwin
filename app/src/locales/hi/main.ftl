@@ -1008,7 +1008,7 @@ evidence-read-back = ड्राइव से वापस पढ़कर ज�
 evidence-memory = इस लैपटॉप की मेमोरी से जाँचा गया, ड्राइव से नहीं।
 evidence-memory-explain = कॉपी को वापस पढ़ा गया और वह मेल खाई, लेकिन इस लैपटॉप की मेमोरी के ज़रिए, इसलिए हो सकता है कि जो पढ़ा गया वह ड्राइव के बजाय मेमोरी से आया हो। ड्राइव में ही कोई ख़राबी हो तो वह यहाँ शायद न दिखे, इसलिए फ़ाइल को एक बार खोलकर देखना अच्छी जाँच है।
 evidence-not-checked = जाँचा नहीं गया, क्योंकि यह पूरा नहीं हुआ।
-# Machine-translated 16 October 2026; to be checked by the language team.
+# Machine-translated 16 October 2026.
 why-memory-cannot-skip-cache = इस ड्राइव ने PCTwin को इसे सीधे पढ़ने नहीं दिया, इसलिए जाँच इस लैपटॉप की मेमोरी के ज़रिए हुई। कुछ नेटवर्क ड्राइव और USB स्टिक ऐसे ही काम करती हैं।
 why-memory-not-shown = यह ड्राइव यह नहीं दिखा सकी कि PCTwin का पढ़ना सच में उस तक पहुँचा, इसलिए इस जाँच को इस लैपटॉप की मेमोरी से हुई जाँच माना गया।
 why-memory-no-way = इस लैपटॉप के सिस्टम के पास इस ड्राइव को सीधे पढ़ने का कोई तरीका नहीं है, इसलिए जाँच उसकी मेमोरी के ज़रिए हुई।
@@ -1045,7 +1045,7 @@ status-failed = विफल
 
 # $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
 progress-minutes = { $low } से { $high } मिनट
-# Machine-translated 16 October 2026; to be checked by the language team.
+# Machine-translated 16 October 2026.
 progress-minutes-one =
     { NUMBER($minutes) ->
         [one] { $minutes } मिनट

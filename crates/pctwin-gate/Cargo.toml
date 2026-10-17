@@ -22,6 +22,8 @@ fs4 = { version = "1.1", default-features = false, features = ["sync"] }
 # How a check was read (drive or memory, and why) goes to the screens as plain data. Serialize
 # only: the engine never takes evidence from the screens.
 serde = { version = "1", features = ["derive"] }
+# `listed_enum!`: the evidence values, declared with the list of their variants.
+pctwin-types = { path = "../pctwin-types" }
 thiserror = "2.0.21"
 unicode-normalization = "0.1.25"
 

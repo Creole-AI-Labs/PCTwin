@@ -1028,7 +1028,7 @@ evidence-read-back = Verificado lendo a cópia de volta do disco.
 evidence-memory = Verificado pela memória deste notebook, não pelo disco.
 evidence-memory-explain = A cópia foi lida de volta e era igual, mas pela memória deste notebook, então o que foi lido pode ter vindo da memória e não do disco. Um defeito no próprio disco pode não aparecer aqui, então abrir o arquivo uma vez é uma boa verificação.
 evidence-not-checked = Não verificado, porque não terminou.
-# Machine-translated 16 October 2026; to be checked by the language team.
+# Machine-translated 16 October 2026.
 why-memory-cannot-skip-cache = Este disco não deixou o PCTwin lê-lo diretamente, então a verificação passou pela memória deste notebook. Alguns discos de rede e pendrives USB funcionam assim.
 why-memory-not-shown = Este disco não conseguiu mostrar que a leitura do PCTwin chegou mesmo até ele, então a verificação conta como feita pela memória deste notebook.
 why-memory-no-way = O sistema deste notebook não tem como ler este disco diretamente, então a verificação passou pela memória dele.
@@ -1065,7 +1065,7 @@ status-failed = Falhou
 
 # $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
 progress-minutes = { $low } a { $high } minutos
-# Machine-translated 16 October 2026; to be checked by the language team.
+# Machine-translated 16 October 2026.
 progress-minutes-one =
     { NUMBER($minutes) ->
         [one] { $minutes } minuto
