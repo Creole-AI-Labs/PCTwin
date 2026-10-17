@@ -910,7 +910,7 @@ fn a_folder_whose_access_this_person_may_not_read_is_a_blind_spot_without_its_na
 #[test]
 fn a_folder_renamed_during_the_sweep_is_never_counted_as_looked_at() {
     let lab = lab();
-    for i in 0..20 {
+    for i in 0..200 {
         write(&lab.d.join(format!("Photos/Album{i}/beach{i}.jpg")), 10);
     }
     let stop = AtomicBool::new(false);
@@ -921,9 +921,9 @@ fn a_folder_renamed_during_the_sweep_is_never_counted_as_looked_at() {
         &mut Answers::default(),
         &stop,
         &mut |view| {
-            // Once the album waits to be listed (its parent was listed), it moves away.
-            if !renamed && String::from_utf8_lossy(&view.to_json()).contains("Album7") {
-                renamed = std::fs::rename(d.join("Photos/Album7"), d.join("Photos/Moved7")).is_ok();
+            // Once an album waits to be listed (its parent was listed), it moves away.
+            if !renamed {
+                renamed = rename_a_queued_folder(&view.to_json(), &d.join("Photos"), "Album", 200);
             }
         },
         &SweepLimits {
@@ -1319,7 +1319,13 @@ fn volumes_that_share_one_file_systems_space_are_judged_together() {
         .filter(|b| matches!(b.reason, BlindReason::Unexplained { .. }))
         .collect();
     assert_eq!(gaps.len(), 1, "{gaps:#?}");
-    assert!(matches!(gaps[0].reason, BlindReason::Unexplained { bytes } if bytes == 6 * gb));
+    // (macOS and Linux count what files take on the disk, so the gap is used minus that.)
+    let seen = s.volumes[0].seen_bytes + s.volumes[1].seen_bytes;
+    assert!(
+        matches!(gaps[0].reason, BlindReason::Unexplained { bytes } if bytes == used - seen),
+        "{gaps:#?}"
+    );
+    assert!(used - seen >= 6 * gb);
     assert_eq!(s.volumes[1].same_space_as, Some(s.volumes[0].mount.clone()));
     assert_eq!(s.volumes[1].unexplained_bytes, 0);
 }
@@ -1334,7 +1340,7 @@ fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
     } else {
         "opt"
     };
-    for i in 0..20 {
+    for i in 0..200 {
         write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
     }
     let stop = AtomicBool::new(false);
@@ -1345,8 +1351,8 @@ fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
         &mut Answers::default(),
         &stop,
         &mut |view| {
-            if !renamed && String::from_utf8_lossy(&view.to_json()).contains("App7") {
-                renamed = std::fs::rename(base.join("App7"), base.join("Moved7")).is_ok();
+            if !renamed {
+                renamed = rename_a_queued_folder(&view.to_json(), &base, "App", 200);
             }
         },
         &SweepLimits {
@@ -1409,4 +1415,16 @@ fn a_drive_written_with_forward_slashes_is_still_listed() {
     let s = run(f, &mut Answers::default());
     assert!(s.record.items.iter().any(|i| shown(i).ends_with("a.jpg")));
     assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
+}
+
+/// Renames one folder named `<prefix><n>` that the frontier shows still waiting to be listed.
+fn rename_a_queued_folder(frontier: &[u8], base: &Path, prefix: &str, count: usize) -> bool {
+    let text = String::from_utf8_lossy(frontier);
+    for i in (0..count).rev() {
+        let name = format!("{prefix}{i}");
+        if text.contains(&format!("\"{name}\"")) && base.join(&name).is_dir() {
+            return std::fs::rename(base.join(&name), base.join(format!("Moved-{name}"))).is_ok();
+        }
+    }
+    false
 }
