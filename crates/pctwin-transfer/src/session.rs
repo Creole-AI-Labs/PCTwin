@@ -2780,15 +2780,22 @@ fn land(
                     modified_ns: show.modified_ns,
                     file: Some(file_id(stat.id)),
                 };
-                let end = crate::naming::commit_and_show(journal, dest, entry, landed, &show)
-                    .map_err(record)?;
+                let Some(check) = claimed.show_check() else {
+                    return Err(record(pctwin_journal::JournalError::Storage(
+                        "a filled-in file not held".into(),
+                    )));
+                };
+                let end =
+                    crate::naming::commit_and_show(journal, dest, entry, landed, &show, check)
+                        .map_err(record)?;
                 // Kept whatever the show came to: the journal has it, and recovery or the person
                 // finishes it. Reported copied only once shown.
                 let finished = claimed.keep();
                 return Ok(match end {
                     crate::naming::ShowEnd::Shown => ReceiveOutcome::Finished(finished),
-                    crate::naming::ShowEnd::Gone => ReceiveOutcome::Failed(REMOVED_AT_ONCE.into()),
-                    crate::naming::ShowEnd::Left(why) | crate::naming::ShowEnd::Later(why) => {
+                    crate::naming::ShowEnd::Gone(why)
+                    | crate::naming::ShowEnd::Left(why)
+                    | crate::naming::ShowEnd::Later(why) => {
                         ReceiveOutcome::NeedsAction { finished, why }
                     }
                 });

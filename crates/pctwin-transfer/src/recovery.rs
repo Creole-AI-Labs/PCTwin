@@ -70,8 +70,7 @@ pub fn recover_with(
         let check = pctwin_gate::ShowCheck::Bytes(&mut bytes);
         match show_committed(journal, dest, entry.id, &show, check)? {
             ShowEnd::Shown => done.shown.push(entry.id),
-            ShowEnd::Gone => done.notes.push((entry.id, GONE_BEFORE_SHOWN.into())),
-            ShowEnd::Left(note) => done.notes.push((entry.id, note)),
+            ShowEnd::Gone(note) | ShowEnd::Left(note) => done.notes.push((entry.id, note)),
             ShowEnd::Later(why) => done.left.push((entry.id, why)),
         }
     }
@@ -127,10 +126,6 @@ enum Finish {
     Left(String),
 }
 
-/// Said of a committed copy found gone from its name before it was shown.
-const GONE_BEFORE_SHOWN: &str =
-    "it was copied, but removed from its name before PCTwin could make it visible";
-
 /// How finishing a write that was filled in under its name ended, by how its show ended.
 fn committed(end: ShowEnd) -> Finish {
     match end {
@@ -148,15 +143,12 @@ fn record_finish(
 ) -> Result<(), JournalError> {
     match finished {
         Finish::Committed => done.committed.push(id),
-        Finish::CommittedShowing(end) => {
-            done.committed.push(id);
-            match end {
-                ShowEnd::Shown => {}
-                ShowEnd::Gone => done.notes.push((id, GONE_BEFORE_SHOWN.into())),
-                ShowEnd::Left(note) => done.notes.push((id, note)),
-                ShowEnd::Later(why) => done.left.push((id, why)),
-            }
-        }
+        // Committed in the journal, but not a finished, visible copy: never listed committed.
+        Finish::CommittedShowing(end) => match end {
+            ShowEnd::Shown => done.committed.push(id),
+            ShowEnd::Gone(note) | ShowEnd::Left(note) => done.notes.push((id, note)),
+            ShowEnd::Later(why) => done.left.push((id, why)),
+        },
         Finish::Failed(why) => {
             journal.failed(id, &why)?;
             done.failed.push((id, why));
@@ -294,7 +286,10 @@ fn finish_fill(
                 modified_ns: show.modified_ns,
                 file: Some(stat.id),
             };
-            let end = commit_and_show(journal, dest, entry.id, landed, &show)?;
+            // After a restart nothing of the file is held: it is proven by its whole bytes.
+            let mut bytes = |f: &mut dyn std::io::Read| reads_back_whole(f, &whole);
+            let check = pctwin_gate::ShowCheck::Bytes(&mut bytes);
+            let end = commit_and_show(journal, dest, entry.id, landed, &show, check)?;
             let _ = dest.remove_temp(temp);
             Ok(committed(end))
         }
@@ -361,7 +356,8 @@ fn finish(
     // name is a new file: the gate read it back whole just now, so its identity is what landed.
     let commit_if_proven = |stored: &str,
                             filled_in: bool,
-                            show: Option<&pctwin_gate::Show>|
+                            show: Option<&pctwin_gate::Show>,
+                            claimed_check: Option<pctwin_gate::ShowCheck<'_>>|
      -> Result<Finish, JournalError> {
         let sealed = if filled_in {
             match dest.stat(stored) {
@@ -382,8 +378,12 @@ fn finish(
                             modified_ns: show.modified_ns,
                             file: Some(stat.id),
                         };
+                        // Named again just now: the very file PCTwin holds.
+                        let Some(check) = claimed_check else {
+                            return Ok(Finish::Left("a filled-in file not held".into()));
+                        };
                         Ok(committed(commit_and_show(
-                            journal, dest, entry.id, landed, show,
+                            journal, dest, entry.id, landed, show, check,
                         )?))
                     }
                     None => {
@@ -409,7 +409,7 @@ fn finish(
     };
     let (claimed, filled_in) = match (&entry.state, action) {
         (State::Applied { final_path, .. }, Action::Commit) => {
-            return commit_if_proven(final_path, false, None);
+            return commit_if_proven(final_path, false, None, None);
         }
         (_, Action::Commit) => return Ok(Finish::Failed(NOT_NAMED.into())),
         (_, _) => {
@@ -426,7 +426,12 @@ fn finish(
         }
     };
     // Committed while the temporary name still holds the file, then the temporary name goes.
-    let finish = commit_if_proven(&claimed.finished().final_path, filled_in, claimed.show())?;
+    let finish = commit_if_proven(
+        &claimed.finished().final_path,
+        filled_in,
+        claimed.show(),
+        claimed.show_check(),
+    )?;
     if matches!(finish, Finish::Committed) {
         claimed.keep();
     }

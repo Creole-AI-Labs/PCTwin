@@ -197,30 +197,31 @@ fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
         .show()
         .expect("a filled-in file has a show to finish")
         .clone();
+    // PCTwin's file, as the claim holds it open.
+    let held = std::fs::File::open(root.path().join("c.txt")).unwrap();
     c.keep();
     let now = |dest: &Destination| dest.stat("c.txt").unwrap().unwrap().id;
     // Shown, and its identity given as it is after the show (the creation date is part of it
     // on a Mac).
     assert_eq!(
-        dest.finish_show("c.txt", &show, ShowCheck::Made).unwrap(),
+        dest.finish_show("c.txt", &show, ShowCheck::Held(&held))
+            .unwrap(),
         Shown::Shown(now(&dest))
     );
     assert!(!dest.hidden("c.txt").unwrap(), "shown once complete");
     // Asked again: already shown, nothing touched; still the very file made.
     assert_eq!(
-        dest.finish_show("c.txt", &show, ShowCheck::Made).unwrap(),
+        dest.finish_show("c.txt", &show, ShowCheck::Held(&held))
+            .unwrap(),
         Shown::AlreadyShown(Some(now(&dest)))
     );
     // Visible, its tag gone, but not the file PCTwin made: nothing proves it PCTwin's copy, so
     // it is never recorded as shown (another program's file at the name is not PCTwin's copy).
-    let mut not_made = show.clone();
-    not_made.fill.made = Some(FileId {
-        volume: 7,
-        index: std::num::NonZeroU64::new(7).unwrap(),
-        born: None,
-    });
+    let not_made = show.clone();
+    std::fs::write(root.path().join("another.txt"), b"another").unwrap();
+    let another = std::fs::File::open(root.path().join("another.txt")).unwrap();
     assert_eq!(
-        dest.finish_show("c.txt", &not_made, ShowCheck::Made)
+        dest.finish_show("c.txt", &not_made, ShowCheck::Held(&another))
             .unwrap(),
         Shown::NotProven
     );
@@ -239,11 +240,13 @@ fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
             .unwrap(),
         Shown::AlreadyShown(None)
     );
+    // After a restart nothing is held: the bytes prove it PCTwin's copy, and the identity is
+    // never taken on that alone (the one recorded at the commit stays).
     let mut whole = |_: &mut dyn Read| Ok(true);
     assert_eq!(
         dest.finish_show("c.txt", &show, ShowCheck::Bytes(&mut whole))
             .unwrap(),
-        Shown::AlreadyShown(Some(now(&dest)))
+        Shown::AlreadyShown(None)
     );
     assert_eq!(
         dest.born("c.txt").unwrap(),
@@ -279,9 +282,12 @@ fn an_old_original_never_costs_the_tag_and_never_leaves_it_behind() {
         panic!("not named");
     };
     let show = c.show().unwrap().clone();
+    // PCTwin's file, as the claim holds it open.
+    let held = std::fs::File::open(root.path().join("old.txt")).unwrap();
     c.keep();
     assert!(matches!(
-        dest.finish_show("old.txt", &show, ShowCheck::Made).unwrap(),
+        dest.finish_show("old.txt", &show, ShowCheck::Held(&held))
+            .unwrap(),
         Shown::Shown(_)
     ));
     assert_eq!(
@@ -868,6 +874,8 @@ fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
         panic!("not named");
     };
     let show = c.show().unwrap().clone();
+    // PCTwin's file, as the claim holds it open.
+    let held = std::fs::File::open(root.path().join("s.txt")).unwrap();
     c.keep();
     // Not proven: the recorded tag is not this file's.
     let mut other = show.clone();
@@ -877,14 +885,16 @@ fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
     });
     other.fill.proof = Proof::Token;
     assert_eq!(
-        dest.finish_show("s.txt", &other, ShowCheck::Made).unwrap(),
+        dest.finish_show("s.txt", &other, ShowCheck::Held(&held))
+            .unwrap(),
         Shown::NotProven
     );
     assert!(dest.hidden("s.txt").unwrap(), "left exactly as it is");
     assert!(steps_seen.lock().unwrap().is_empty());
     // Proven: shown in order, the creation date given back last.
     assert!(matches!(
-        dest.finish_show("s.txt", &show, ShowCheck::Made).unwrap(),
+        dest.finish_show("s.txt", &show, ShowCheck::Held(&held))
+            .unwrap(),
         Shown::Shown(_)
     ));
     assert_eq!(
@@ -895,7 +905,7 @@ fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
     let mut gone = show.clone();
     gone.fill.final_path = "nothing.txt".into();
     assert_eq!(
-        dest.finish_show("nothing.txt", &gone, ShowCheck::Made)
+        dest.finish_show("nothing.txt", &gone, ShowCheck::Held(&held))
             .unwrap(),
         Shown::Gone
     );
@@ -960,6 +970,8 @@ fn a_file_put_in_place_of_pctwin_s_hidden_one_is_never_shown_though_it_carries_t
         panic!("not named");
     };
     let show = c.show().unwrap().clone();
+    // PCTwin's file, as the claim holds it open.
+    let held = std::fs::File::open(root.path().join("u.txt")).unwrap();
     c.keep();
     std::fs::remove_file(root.path().join("u.txt")).unwrap();
     std::fs::OpenOptions::new()
@@ -973,7 +985,8 @@ fn a_file_put_in_place_of_pctwin_s_hidden_one_is_never_shown_though_it_carries_t
     // Tunnelling: their file has PCTwin's tag.
     assert_eq!(dest.born("u.txt").unwrap(), show.fill.tag.born);
     assert_eq!(
-        dest.finish_show("u.txt", &show, ShowCheck::Made).unwrap(),
+        dest.finish_show("u.txt", &show, ShowCheck::Held(&held))
+            .unwrap(),
         Shown::NotProven
     );
     let mut whole = |f: &mut dyn Read| {
@@ -1086,8 +1099,10 @@ fn another_file_put_at_the_name_before_it_is_shown_keeps_its_mark_and_nothing_is
             panic!("{at}: not named");
         };
         let show = c.show().unwrap().clone();
+        // PCTwin's file, as the claim holds it open.
+        let held = std::fs::File::open(root.path().join("h.txt")).unwrap();
         c.keep();
-        let shown = dest.finish_show("h.txt", &show, ShowCheck::Made);
+        let shown = dest.finish_show("h.txt", &show, ShowCheck::Held(&held));
         assert!(shown.is_err(), "{at}: never reported shown: {shown:?}");
         let theirs = root.path().join("h.txt");
         assert_eq!(std::fs::read(&theirs).unwrap(), b"theirs");

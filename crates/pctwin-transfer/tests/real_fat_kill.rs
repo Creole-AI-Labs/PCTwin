@@ -220,6 +220,14 @@ fn after(kind: &str, drive: &Path) {
         State::Committed { final_path, .. } => {
             assert_eq!(std::fs::read(dir.join(final_path)).unwrap(), want, "{kind}");
             assert_eq!(r.committed, [e.id], "{kind}");
+            // Committed means the person's copy: visible, nothing left to show, nothing to say.
+            let dest = Destination::open(&dir).unwrap();
+            assert!(
+                !dest.hidden(final_path).unwrap(),
+                "{kind}: committed but left hidden: {r:?}"
+            );
+            assert!(journal.unshown().unwrap().is_empty(), "{kind}: {r:?}");
+            assert!(journal.notes(e.id).unwrap().is_empty(), "{kind}: {r:?}");
         }
         State::Failed { why, .. } => assert!(!why.is_empty(), "{kind}"),
         State::Staged { .. } => assert!(
@@ -233,6 +241,77 @@ fn after(kind: &str, drive: &Path) {
             "{kind}: left at {} without a reason: {r:?}",
             step(other)
         ),
+    }
+}
+
+/// A whole move onto each real drive, never stopped: reported copied in the same move, and the
+/// file visible under its name with nothing left to show (on a drive with no safe rename it is
+/// filled in under its name, so this proves the show works on the real drive).
+#[tokio::test]
+async fn a_whole_move_onto_a_real_drive_lands_visible_and_reported_copied() {
+    if phase() == "after" {
+        return;
+    }
+    for (kind, drive) in drives() {
+        let dir = drive.join("pctwin-fat-live");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = state(&format!("live-{kind}"));
+        let _ = std::fs::remove_file(st.join("j.redb"));
+        let journal = Journal::open(&st.join("j.redb")).unwrap();
+        let table = table(&dir);
+        let naming = table.get("usb").unwrap().check_drive().unwrap().naming;
+        if naming == Naming::NoSafeMethod {
+            println!("{kind}: refused, as it must be");
+            continue;
+        }
+        let source = st.join("source.bin");
+        std::fs::write(&source, data()).unwrap();
+        let job = SendJob {
+            item: ItemId::from_hex(&format!("02{}", "0".repeat(30))).unwrap(),
+            source,
+            destination: "usb".into(),
+            path: NAME.into(),
+            compressible: false,
+            tier: Tier::Rest,
+        };
+        let plan = common::approved_jobs(&[(&job, SIZE as u64)]);
+        let mut receiver = ReceiverSession::new(&table, plan, &journal, "501");
+        let mut sender = SenderSession::new(vec![job.clone()], 2);
+        let (a_tx, b_rx) = mpsc::unbounded_channel();
+        let (b_tx, a_rx) = mpsc::unbounded_channel();
+        let mut a = Mem {
+            tx: a_tx,
+            rx: a_rx,
+            die_after: None,
+            got: 0,
+        };
+        let mut b = Mem {
+            tx: b_tx,
+            rx: b_rx,
+            die_after: None,
+            got: 0,
+        };
+        let (_, received) = tokio::join!(sender.run(&mut a), receiver.run(&mut b));
+        received.unwrap();
+        let outcome = receiver.outcome(job.item);
+        println!("{kind}: names by {naming:?}; outcome {outcome:?}");
+        let Some(pctwin_transfer::ReceiveOutcome::Finished(done)) = outcome else {
+            panic!("{kind}: not reported copied: {outcome:?}");
+        };
+        let dest = table.get("usb").unwrap();
+        assert_eq!(
+            std::fs::read(dir.join(&done.final_path)).unwrap(),
+            data(),
+            "{kind}"
+        );
+        assert!(
+            !dest.hidden(&done.final_path).unwrap(),
+            "{kind}: left hidden"
+        );
+        assert!(journal.unshown().unwrap().is_empty(), "{kind}");
+        let id = journal.entries().unwrap()[0].id;
+        assert!(journal.notes(id).unwrap().is_empty(), "{kind}");
     }
 }
 

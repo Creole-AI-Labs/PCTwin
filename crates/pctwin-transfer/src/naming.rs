@@ -144,8 +144,8 @@ fn left_unproven(stored: &str) -> String {
 pub(crate) enum ShowEnd {
     /// Shown (now or before), with its real dates, and recorded so.
     Shown,
-    /// Nothing is at its name now; recorded, nothing to show.
-    Gone,
+    /// Nothing is at its name now: recorded with these plain words, nothing to show.
+    Gone(String),
     /// Not proven PCTwin's copy: left as it is, and recorded with these plain words.
     Left(String),
     /// Could not be shown now (the drive refused or went away): still hidden, recorded as
@@ -169,11 +169,15 @@ pub(crate) fn commit_and_show(
     id: u64,
     landed: Landed,
     show: &Show,
+    check: ShowCheck<'_>,
 ) -> Result<ShowEnd, JournalError> {
     journal.committed_showing(id, landed, show)?;
-    // Just filled in by this very program: its recorded identity is the second check.
-    show_committed(journal, dest, id, show, ShowCheck::Made)
+    show_committed(journal, dest, id, show, check)
 }
+
+/// Said of a committed copy found gone from its name before it was shown.
+pub(crate) const GONE_BEFORE_SHOWN: &str =
+    "it was copied, but removed from its name before PCTwin could make it visible";
 
 /// Shows a committed file filled in under its real name, and records it shown. A drive that
 /// cannot be reached now leaves it pending: recovery finishes it at the next start.
@@ -194,8 +198,8 @@ pub(crate) fn show_committed(
             Ok(ShowEnd::Shown)
         }
         Ok(Shown::Gone) => {
-            journal.shown(id, None, None)?;
-            Ok(ShowEnd::Gone)
+            journal.shown(id, Some(GONE_BEFORE_SHOWN), None)?;
+            Ok(ShowEnd::Gone(GONE_BEFORE_SHOWN.into()))
         }
         Ok(Shown::NotProven) => {
             let note = left_unproven(&show.fill.final_path);

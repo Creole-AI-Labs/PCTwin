@@ -280,6 +280,12 @@ impl Ledger for Breaks<'_> {
             std::fs::remove_file(&at).unwrap();
             their_empty_hidden(&at);
         }
+        // Or PCTwin's file is simply removed there (security software, say).
+        if let Some(usb) = std::env::var_os("PCTWIN_REMOVE_AFTER_COMMIT").map(PathBuf::from)
+            && r.is_ok()
+        {
+            std::fs::remove_file(usb.join(&show.fill.final_path)).unwrap();
+        }
         r
     }
     fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
@@ -679,7 +685,32 @@ fn a_file_replaced_before_it_is_shown_is_reported_in_the_same_move() {
     assert_eq!(journal.notes(id).unwrap().len(), 1, "kept for good");
 }
 
-/// The part run as a separate program by the test above: a whole move, its outcome written to
+/// PCTwin's file is removed from its name just after the copy is committed, before it is shown:
+/// the person is told in the same move, and the journal keeps the same words for good.
+#[test]
+fn a_file_removed_before_it_is_shown_is_reported_and_noted() {
+    let work = tempfile::tempdir().unwrap();
+    let (_, usb, jdir) = dirs(work.path());
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "moves_and_reports", "--nocapture"])
+        .env("PCTWIN_KILL_WORK", work.path())
+        .env("PCTWIN_REMOVE_AFTER_COMMIT", &usb)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let said = std::fs::read_to_string(work.path().join("outcome.txt")).unwrap();
+    assert!(said.starts_with("Some(NeedsAction"), "{said}");
+    assert!(said.contains("removed from its name"), "{said}");
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let id = journal.entries().unwrap()[0].id;
+    let notes = journal.notes(id).unwrap();
+    assert!(
+        notes.len() == 1 && notes[0].contains("removed from its name"),
+        "{notes:?}"
+    );
+}
+
+/// The part run as a separate program by the tests above: a whole move, its outcome written to
 /// outcome.txt.
 #[tokio::test]
 #[ignore = "run by a_file_replaced_before_it_is_shown_is_reported_in_the_same_move"]
@@ -879,6 +910,51 @@ async fn a_show_that_fails_part_way_is_finished_at_the_next_start() {
     assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
 }
 
+/// After a stop at Filled, the same bytes and the same tag come back at the name as a new file
+/// record (as a drive that numbers files by where they sit gives after a remount, or a file
+/// whose number changes as it fills): it is PCTwin's copy by its tag and its whole bytes, so
+/// recovery finishes it, shows it with its real dates, and leaves nothing hidden or pending. (The
+/// review's probe: before, the number recorded when it was made was asked for, and the copy was
+/// committed and left hidden for good.)
+#[cfg(windows)]
+#[test]
+fn a_copy_whose_file_number_changed_is_still_finished_and_shown() {
+    use std::io::Write;
+    use std::os::windows::fs::{FileTimesExt, OpenOptionsExt};
+    let (_work, usb, journal) = stopped_at("journal:filled");
+    let e = journal.entries().unwrap()[0].clone();
+    let State::Filled { fill, .. } = &e.state else {
+        panic!("{:?}", e.state);
+    };
+    let tag = fill.tag.born.unwrap();
+    let at = usb.join("c.bin");
+    let content = std::fs::read(&at).unwrap();
+    std::fs::remove_file(&at).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .attributes(0x2)
+        .open(&at)
+        .unwrap();
+    f.write_all(&content).unwrap();
+    let born = std::time::UNIX_EPOCH
+        + std::time::Duration::new(u64::try_from(tag.secs).unwrap(), tag.nanos);
+    f.set_times(std::fs::FileTimes::new().set_created(born))
+        .unwrap();
+    f.sync_all().unwrap();
+    drop(f);
+    let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    assert!(r.notes.is_empty() && r.left.is_empty(), "{r:?}");
+    assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
+    let dest = table.get("usb").unwrap();
+    assert_ne!(
+        dest.born("c.bin").unwrap(),
+        Some(tag),
+        "the tag left behind"
+    );
+}
+
 /// Recovery finishes a file recorded filled before a stop, but its show then fails part way (the
 /// drive errs): recovery says so, in plain words, and the show stays pending for the next start,
 /// never dropped as if the copy were finished and visible.
@@ -897,7 +973,8 @@ fn recovery_says_when_a_show_it_starts_fails() {
     let table = table_for(failing);
     let r = pctwin_transfer::recover(&journal, &table).unwrap();
     let id = journal.entries().unwrap()[0].id;
-    assert_eq!(r.committed, [id], "{r:?}");
+    // Not a finished, visible copy yet: never listed as committed, only as waiting.
+    assert!(r.committed.is_empty(), "{r:?}");
     assert!(
         r.left
             .iter()

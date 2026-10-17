@@ -3024,11 +3024,16 @@ impl<'d> Sealed<'d> {
                 // No journal: nothing to record first, so it is shown at once.
                 Claim::Named(mut claimed) => {
                     if let Some(show) = claimed.show.take() {
-                        destination.finish_show(
-                            &claimed.finished.final_path,
-                            &show,
-                            fill::ShowCheck::Made,
-                        )?;
+                        let check = claimed
+                            .show_check()
+                            .ok_or(GateError::ReplacedWhileFilling)?;
+                        match destination.finish_show(&claimed.finished.final_path, &show, check)? {
+                            fill::Shown::Shown(_) | fill::Shown::AlreadyShown(_) => {}
+                            // Not shown: never handed back as a finished, visible copy.
+                            fill::Shown::Gone | fill::Shown::NotProven => {
+                                return Err(GateError::ReplacedWhileFilling);
+                            }
+                        }
                     }
                     return Ok(claimed);
                 }
@@ -3143,6 +3148,12 @@ impl Claimed<'_> {
     /// ([`Destination::finish_show`]), then record it shown.
     pub fn show(&self) -> Option<&Show> {
         self.show.as_ref()
+    }
+
+    /// For a file filled in under its real name: the check that it is still PCTwin's when it is
+    /// shown, by the very file PCTwin holds open until it is kept.
+    pub fn show_check(&self) -> Option<ShowCheck<'_>> {
+        self._filled.as_ref().map(ShowCheck::Held)
     }
 
     /// Removes the temporary name; the file stays under its real name. If another program holds

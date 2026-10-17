@@ -787,9 +787,11 @@ pub(crate) fn nanos_of(t: std::time::SystemTime) -> i64 {
 /// the file that had it (file-system tunnelling, on NTFS and FAT), so a tag alone could pass
 /// another program's file.
 pub enum ShowCheck<'a> {
-    /// In the program that filled it in, the drive not mounted again since: its identity, as
-    /// recorded when it was made (tunnelling never carries a file's number).
-    Made,
+    /// In the program that filled it in: the very file PCTwin still holds open
+    /// ([`crate::Claimed::show_check`]), compared as it is now. A number recorded earlier is
+    /// never asked for: on FAT and exFAT a file's number changes as it fills or across a
+    /// remount, and Linux gives a freed number to the next file at once.
+    Held(&'a std::fs::File),
     /// After a restart: its bytes, read now, against the whole file's fingerprint.
     Bytes(&'a mut dyn FnMut(&mut dyn Read) -> io::Result<bool>),
 }
@@ -837,25 +839,23 @@ impl crate::Destination {
         options.read(true).write(true);
         let mut file = dir.open_with(name, &options)?.into_std();
         let now = identity(&file)?.0;
-        // After a restart, the bytes; in the same run, the identity recorded as made.
-        let whole = match check {
-            ShowCheck::Made => None,
+        // In the same run, the very file PCTwin holds, as it is now; after a restart, its bytes.
+        let (mine, same) = match check {
+            ShowCheck::Held(held) => {
+                let same = identity(held)?.0 == now;
+                (same, same)
+            }
             ShowCheck::Bytes(whole) => {
                 file.seek(SeekFrom::Start(0))?;
-                Some(whole(&mut file)?)
+                (whole(&mut file)?, false)
             }
         };
-        let proven =
-            proven_fill(&file, &show.fill)? && whole.unwrap_or(show.fill.made == Some(now));
+        let proven = proven_fill(&file, &show.fill)? && mine;
         if !proven {
             // Its tag gone: already shown, but only if it is PCTwin's copy, not hidden, and the
-            // very file made (in the same run), or the whole file's bytes (after a restart, when
-            // its identity may have changed). Anything else is left exactly as it is.
-            let same = show
-                .fill
-                .made
-                .is_some_and(|m| m.volume == now.volume && m.index == now.index);
-            let ours = !is_hidden(&file)? && whole.unwrap_or(same);
+            // very file PCTwin holds (in the same run), or the whole file's bytes (after a
+            // restart). Anything else is left exactly as it is.
+            let ours = !is_hidden(&file)? && mine;
             return Ok(if ours {
                 Shown::AlreadyShown(same.then_some(now))
             } else {
