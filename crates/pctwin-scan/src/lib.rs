@@ -6,8 +6,10 @@
 //!   is. A folder that is not there is reported missing, never guessed.
 //! - [`classify`] says whether a folder is on the system drive, another drive or network share, or
 //!   inside a cloud storage folder.
-//! - [`list_people`] lists everyone with an account on the laptop, by the system's own account ID,
-//!   from the list every system keeps for everyone; nobody's files are opened.
+//! - [`census_this_laptop`] counts everyone on the laptop by the system's own account ID, never by
+//!   path, in five kinds ([`PersonKind`]): the mover, another person, an account never used, a
+//!   leftover from a removed account, and a work or school account. [`list_people`] is everyone
+//!   in it with an account and a home folder. Nobody's files are opened.
 //! - [`measure`] counts what a folder holds from folder listings alone: no file is opened, files
 //!   that are only in the cloud are counted but never downloaded, links are never followed, and
 //!   whatever can't be read is listed. [`Size`] is honest when another person's folder can't be
@@ -30,6 +32,7 @@
 //!   pinned folders) and [`personal_essentials`] matches it to the scanned items, so their own
 //!   essentials move first. Read only on the old laptop, used only for the order, sent nowhere.
 
+mod census;
 mod drives;
 mod folders;
 mod health;
@@ -40,6 +43,11 @@ mod scan;
 mod state;
 mod usage;
 
+pub use census::{
+    Account, Census, CensusFacts, FoundBy, PersonKind, Resident, SystemKind, accounts_from_dscl,
+    accounts_from_get_local_user, accounts_from_passwd, census_from, census_this_laptop,
+    profile_list_from_reg, service_homes_from_dscl, service_homes_from_passwd, sid_from_whoami,
+};
 pub use drives::{
     CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
 };
