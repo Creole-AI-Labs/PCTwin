@@ -20,6 +20,7 @@ use crate::meter::{Group, MoveControl, MoveMeter, Step};
 use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
+use crate::send_states::States;
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
     OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
@@ -358,156 +359,6 @@ pub struct SendJob {
     pub tier: Tier,
 }
 
-/// The old laptop's step for a file in this state (see [`Step`]).
-fn step_of(state: &SendState) -> Step {
-    match state {
-        SendState::Waiting => Step::Waiting,
-        SendState::Open { .. } => Step::Copying,
-        // Sent whole, or found identical there: waiting for the new laptop to say it checked it.
-        SendState::Ended { failure: None, .. } | SendState::Skipping => Step::Checking,
-        // Failed here; only told to the new laptop so far.
-        SendState::Ended {
-            failure: Some(_), ..
-        } => Step::Failed,
-        SendState::Done(SendOutcome::Arrived) => Step::Copied,
-        SendState::Done(SendOutcome::AlreadyThere) => Step::AlreadyThere,
-        SendState::Done(SendOutcome::Failed(_)) => Step::Failed,
-    }
-}
-
-/// Each job's state, with every change of step counted in the meter: a change is made through
-/// [`slot`](Self::slot) (counted when it is let go) or [`take`](Self::take) followed by one;
-/// [`fields`](Self::fields) is for changes within a step only, which [`check`](Self::check)
-/// confirms in tests.
-struct States {
-    v: Vec<SendState>,
-    /// Per job: its group in the meter, and the step the meter counts it in.
-    group: Vec<Group>,
-    counted: Vec<Step>,
-    meter: MoveMeter,
-}
-
-impl States {
-    fn new(jobs: &[SendJob], meter: MoveMeter) -> Self {
-        meter.reset();
-        let group = jobs.iter().map(|j| meter.plan(&j.destination, 0)).collect();
-        Self {
-            v: jobs.iter().map(|_| SendState::Waiting).collect(),
-            group,
-            counted: vec![Step::Waiting; jobs.len()],
-            meter,
-        }
-    }
-
-    fn len(&self) -> usize {
-        self.v.len()
-    }
-
-    fn iter(&self) -> std::slice::Iter<'_, SendState> {
-        self.v.iter()
-    }
-
-    /// To change `job`'s state; the meter counts the change when the slot is let go.
-    fn slot(&mut self, job: usize) -> StateSlot<'_> {
-        StateSlot { states: self, job }
-    }
-
-    /// Takes `job`'s state out to replace it (with [`slot`](Self::slot)), counted only then.
-    fn take(&mut self, job: usize) -> SendState {
-        std::mem::replace(&mut self.v[job], SendState::Waiting)
-    }
-
-    /// `job`'s state, to change within its step only; a change of step through it fails the
-    /// tests the moment it is let go.
-    fn fields(&mut self, job: usize) -> SameStep<'_> {
-        let step = step_of(&self.v[job]);
-        SameStep {
-            state: &mut self.v[job],
-            step,
-        }
-    }
-
-    fn count(&mut self, job: usize) {
-        let now = step_of(&self.v[job]);
-        if now != self.counted[job] {
-            self.meter.step(self.group[job], self.counted[job], now);
-            self.counted[job] = now;
-        }
-    }
-
-    /// In tests: every job is counted in the step its state is in.
-    fn check(&self) {
-        debug_assert!(
-            self.v
-                .iter()
-                .zip(&self.counted)
-                .all(|(s, c)| step_of(s) == *c),
-            "a sent file changed step without the meter counting it"
-        );
-    }
-}
-
-impl std::ops::Index<usize> for States {
-    type Output = SendState;
-    fn index(&self, job: usize) -> &SendState {
-        &self.v[job]
-    }
-}
-
-/// One job's state, open for a change within its step (see [`States::fields`]).
-struct SameStep<'s> {
-    state: &'s mut SendState,
-    step: Step,
-}
-
-impl std::ops::Deref for SameStep<'_> {
-    type Target = SendState;
-    fn deref(&self) -> &SendState {
-        self.state
-    }
-}
-
-impl std::ops::DerefMut for SameStep<'_> {
-    fn deref_mut(&mut self) -> &mut SendState {
-        self.state
-    }
-}
-
-impl Drop for SameStep<'_> {
-    fn drop(&mut self) {
-        debug_assert_eq!(
-            step_of(self.state),
-            self.step,
-            "a sent file changed step without the meter counting it"
-        );
-    }
-}
-
-/// One job's state, open for a change (see [`States::slot`]).
-struct StateSlot<'s> {
-    states: &'s mut States,
-    job: usize,
-}
-
-impl std::ops::Deref for StateSlot<'_> {
-    type Target = SendState;
-    fn deref(&self) -> &SendState {
-        &self.states.v[self.job]
-    }
-}
-
-impl std::ops::DerefMut for StateSlot<'_> {
-    fn deref_mut(&mut self) -> &mut SendState {
-        &mut self.states.v[self.job]
-    }
-}
-
-impl Drop for StateSlot<'_> {
-    fn drop(&mut self) {
-        self.states.count(self.job);
-    }
-}
-
 /// How a sent file ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SendOutcome {
@@ -522,7 +373,7 @@ pub enum SendOutcome {
     clippy::large_enum_variant,
     reason = "one per file in flight (a bounded few); boxing the reader buys nothing"
 )]
-enum SendState {
+pub(crate) enum SendState {
     Waiting,
     Open {
         reader: FileSender,
@@ -828,6 +679,7 @@ impl SenderSession {
         after_loss: bool,
     ) -> Result<(), TransferError> {
         self.resume(main).await?;
+        self.states.check();
         if after_loss {
             self.window = self.floor();
         }
@@ -856,6 +708,7 @@ impl SenderSession {
                     // blocks. It is owed, so waiting for it cannot hang.
                     let m = recv(main).await?;
                     state.borrow_mut().answer(0, m)?;
+                    state.borrow().states.check();
                     compare_fingerprints(&state).await;
                     changed.notify_waiters();
                     continue;
@@ -878,6 +731,7 @@ impl SenderSession {
                     // A reply is owed on this connection, so waiting for it cannot hang.
                     let m = recv(main).await?;
                     state.borrow_mut().answer(0, m)?;
+                    state.borrow().states.check();
                     compare_fingerprints(&state).await;
                     changed.notify_waiters();
                 } else if state.borrow().all_done() {
@@ -1053,7 +907,7 @@ impl SenderSession {
                 announced,
                 resumed_done,
                 ..
-            } = &mut *self.states.fields(job)
+            } = &mut *self.states.slot(job)
                 && !*announced
             {
                 *announced = true;
@@ -1244,7 +1098,7 @@ impl SenderSession {
             let job = self.by_item[&item];
             let stream = self.streams[job];
             let (b, read) = {
-                let mut open = self.states.fields(job);
+                let mut open = self.states.slot(job);
                 let SendState::Open {
                     reader,
                     sections,
@@ -1423,7 +1277,7 @@ impl SenderSession {
 
     /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
     fn checked(&mut self, job: usize, identical: bool) {
-        if let SendState::Open { cleared, .. } = &mut *self.states.fields(job) {
+        if let SendState::Open { cleared, .. } = &mut *self.states.slot(job) {
             if identical {
                 self.skips.push(job);
             } else {
@@ -1509,7 +1363,7 @@ impl SenderSession {
                 self.meter.block_confirmed(raw);
                 // Only the current attempt counts; a receipt for an earlier one frees room only.
                 if let Some(&job) = self.job_of.get(&stream)
-                    && let SendState::Open { sections, .. } = &mut *self.states.fields(job)
+                    && let SendState::Open { sections, .. } = &mut *self.states.slot(job)
                 {
                     let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
                     // In order per lane, as sent; a mismatch can only mean the new laptop
@@ -1654,7 +1508,7 @@ impl SenderSession {
         }
         self.window = self.floor();
         for job in 0..self.states.len() {
-            if let SendState::Open { sections, .. } = &mut *self.states.fields(job) {
+            if let SendState::Open { sections, .. } = &mut *self.states.slot(job) {
                 sections.lane_lost(lane_no);
             }
         }
@@ -1786,6 +1640,7 @@ async fn send_lane<C: Channel>(
                 {
                     Ok(m) => {
                         let answered = state.borrow_mut().answer(lane, m).is_ok();
+                        state.borrow().states.check();
                         changed.notify_waiters();
                         answered
                     }
@@ -2050,8 +1905,14 @@ impl<'d> ReceiverSession<'d> {
     /// The step `item` is at, from this session's state alone: copying while an attempt at it is
     /// open, else what its line says, else waiting. (Checking is only ever inside a landing.)
     fn step_now(&self, item: ItemId) -> Step {
-        if self.streams.values().any(|s| s.item == item) {
-            return Step::Copying;
+        if let Some(s) = self.streams.values().find(|s| s.item == item) {
+            // An attempt that failed here stays until the old laptop ends it: it is failed now
+            // (the journal already says so), not copying.
+            return if s.failure.is_some() || s.assembly.is_none() {
+                Step::Failed
+            } else {
+                Step::Copying
+            };
         }
         self.outcome(item)
             .map_or(Step::Waiting, |o| outcome_step(&o))
@@ -2081,9 +1942,10 @@ impl<'d> ReceiverSession<'d> {
     }
 
     /// In tests: every planned file is counted at the step its state says. (Plans of tests are
-    /// small; a real move's is not looked through.)
+    /// small; a real move's, past [`CHECKED_PLAN`] files, is not looked through, so a debug build
+    /// of the app stays quick.)
     fn check_steps(&self) {
-        if cfg!(debug_assertions) && self.steps.len() <= 4096 {
+        if cfg!(debug_assertions) && self.steps.len() <= CHECKED_PLAN {
             for (item, (_, at)) in &self.steps {
                 debug_assert_eq!(
                     *at,
@@ -2208,17 +2070,20 @@ impl<'d> ReceiverSession<'d> {
     pub fn cancel(mut self, why: &str) {
         self.checkpoint();
         let journal = self.journal;
-        let mut failed = Vec::new();
+        let mut ended = Vec::new();
         for s in self.streams.values_mut().chain(self.restored.values_mut()) {
             if let Some(assembly) = s.assembly.take() {
                 drop(assembly);
                 let _ = journal.failed(s.entry, why);
-                failed.push(s.item);
             }
+            ended.push(s.item);
         }
-        // The meter outlives the session: its unfinished files end failed there too.
-        for item in failed {
-            self.step(item, Step::Failed);
+        // The meter outlives the session: every attempt ends here, so each of its files is
+        // failed there too, whatever was left of it.
+        for item in ended {
+            if !self.ended.get(&item).is_some_and(Ended::spent) {
+                self.step(item, Step::Failed);
+            }
         }
     }
 
@@ -2760,6 +2625,8 @@ impl<'d> ReceiverSession<'d> {
             // If this does not get through, recovery finds its partial file gone and records it.
             let _ = self.journal.failed(s.entry, &why);
             s.failure = Some(why);
+            let item = s.item;
+            self.settle(item);
         }
     }
 
@@ -3020,6 +2887,9 @@ fn outcome_step(outcome: &ReceiveOutcome) -> Step {
         ReceiveOutcome::Failed(_) => Step::Failed,
     }
 }
+
+/// Plans up to this many files are checked against the meter after every message in debug builds.
+const CHECKED_PLAN: usize = 256;
 
 /// Every file of the approved plan, counted waiting in the group of its destination.
 fn plan_steps(allowance: &Allowance, meter: &MoveMeter) -> HashMap<ItemId, (Group, Step)> {

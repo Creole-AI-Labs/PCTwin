@@ -641,13 +641,14 @@ async fn a_file_whose_attempt_ends_without_a_line_is_counted_waiting_not_copying
 }
 
 #[tokio::test]
-async fn an_attempt_dropped_at_a_new_connection_is_counted_waiting_again() {
+async fn a_failed_attempt_is_counted_failed_and_waiting_again_once_let_go() {
     let w = world();
     let jobs = vec![w.file(1, 1000, "me")];
     let meter = MoveMeter::new();
     let mut receiver =
         ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
-    // A block that grows past its size fails the attempt; it stays open until it ends.
+    // A block that grows past its size fails the attempt; it stays until the old laptop ends
+    // it, counted failed (the journal already says so).
     against(&mut receiver, |mut a| async move {
         hello(&mut a).await;
         say(&mut a, &start(1, 1, 1000)).await;
@@ -668,7 +669,8 @@ async fn an_attempt_dropped_at_a_new_connection_is_counted_waiting_again() {
     })
     .await
     .unwrap();
-    assert_eq!(meter.reading().files.copying, 1);
+    let r = meter.reading();
+    assert_eq!((r.files.copying, r.files.failed), (0, 1), "{r:?}");
     // The next connection: the failed attempt is let go, and the file waits to start again.
     against(&mut receiver, |mut a| async move {
         let said = hello(&mut a).await;
@@ -888,4 +890,69 @@ async fn cancelling_counts_every_unfinished_file_failed() {
     assert_eq!(r.files.failed, 1, "{r:?}");
     assert_eq!(r.files.copying, 0, "{r:?}");
     assert_eq!(r.files.waiting, 1, "{r:?}");
+}
+
+/// Sends a start of file 1 and a block that grows past its size: the attempt fails here.
+async fn a_failed_attempt(mut a: Mem) {
+    hello(&mut a).await;
+    say(&mut a, &start(1, 1, 1000)).await;
+    assert!(matches!(hear(&mut a).await, Message::Have { .. }));
+    let piece = vec![0u8; pctwin_transfer::PIECE_MAX];
+    for _ in 0..3 {
+        say(
+            &mut a,
+            &Message::Piece {
+                stream: 1,
+                last: false,
+                bytes: piece.clone(),
+            },
+        )
+        .await;
+    }
+    say(&mut a, &Message::AllSent).await;
+}
+
+#[tokio::test]
+async fn cancelling_after_an_attempt_failed_here_leaves_it_failed_never_copying() {
+    let w = world();
+    let jobs = vec![w.file(1, 1000, "me"), w.file(2, 2000, "me")];
+    let meter = MoveMeter::new();
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
+    against(&mut receiver, a_failed_attempt).await.unwrap();
+    receiver.cancel("the move was stopped");
+    let r = meter.reading();
+    assert_eq!(r.files.copying, 0, "{r:?}");
+    assert_eq!(r.files.failed, 1, "{r:?}");
+    assert_eq!(r.files.waiting, 1, "{r:?}");
+}
+
+#[tokio::test]
+async fn a_skip_the_new_laptop_cannot_confirm_adds_no_already_there_bytes() {
+    let w = world();
+    let jobs = vec![w.file(1, 1000, "me")];
+    let meter = MoveMeter::new();
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
+    // Nothing like file 1 is here, yet the old laptop says to skip it.
+    against(&mut receiver, |mut a| async move {
+        hello(&mut a).await;
+        say(&mut a, &start(1, 1, 1000)).await;
+        assert!(matches!(hear(&mut a).await, Message::Have { .. }));
+        say(&mut a, &Message::Skip { stream: 1 }).await;
+        assert_eq!(
+            hear(&mut a).await,
+            Message::FileDone {
+                stream: 1,
+                ok: false
+            }
+        );
+        say(&mut a, &Message::AllSent).await;
+    })
+    .await
+    .unwrap();
+    let r = meter.reading();
+    assert_eq!(r.files.failed, 1, "{r:?}");
+    assert_eq!(r.files.already_there, 0, "{r:?}");
+    assert_eq!(r.bytes_already_there, 0);
 }
