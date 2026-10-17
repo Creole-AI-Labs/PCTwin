@@ -253,6 +253,13 @@ async fn shuffle_and_rename_change_the_label_shown() {
 #[test]
 fn every_problem_has_its_own_translation_key() {
     let all = Problem::all();
+    // Every problem once, in order: checked against the names made with the enum.
+    let names: Vec<&str> = all.iter().map(Problem::variant).collect();
+    assert_eq!(
+        names,
+        Problem::VARIANTS,
+        "Problem::all() must list every problem"
+    );
     let keys: BTreeSet<&str> = all.iter().map(Problem::key).collect();
     assert_eq!(keys.len(), all.len());
     for k in keys {

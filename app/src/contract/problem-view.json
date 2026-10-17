@@ -1,0 +1,69 @@
+[
+  {
+    "key": "pairing-code-invalid",
+    "networks": []
+  },
+  {
+    "key": "pairing-code-wrong",
+    "networks": []
+  },
+  {
+    "key": "pairing-code-expired",
+    "networks": []
+  },
+  {
+    "key": "pairing-busy",
+    "networks": []
+  },
+  {
+    "key": "pairing-wait",
+    "networks": []
+  },
+  {
+    "key": "pairing-locked",
+    "networks": []
+  },
+  {
+    "key": "pairing-unreachable",
+    "networks": []
+  },
+  {
+    "key": "pairing-wrong-number",
+    "networks": []
+  },
+  {
+    "key": "pairing-no-match",
+    "networks": []
+  },
+  {
+    "key": "pairing-timed-out",
+    "networks": []
+  },
+  {
+    "key": "pairing-connection-lost",
+    "networks": []
+  },
+  {
+    "key": "pairing-different-version",
+    "networks": []
+  },
+  {
+    "key": "pairing-name-invalid",
+    "networks": []
+  },
+  {
+    "key": "pairing-no-network",
+    "networks": []
+  },
+  {
+    "key": "pairing-choose-network",
+    "networks": [
+      "Ethernet",
+      "Wi-Fi"
+    ]
+  },
+  {
+    "key": "pairing-failed",
+    "networks": []
+  }
+]

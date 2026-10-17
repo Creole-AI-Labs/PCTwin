@@ -3,11 +3,14 @@
 //! - [`ItemStatus`]: how each selected item ended (the honest-results rule).
 //! - [`ItemResult`]: a status with the [`Reason`] the person sees whenever an item did not finish.
 //! - [`format`]: the one rule every saved format follows (engineering notes 9.11).
+//! - [`listed_enum!`]: an enum and the names of all its variants, declared together, so a list of
+//!   them (the screens' example files, translation checks) cannot leave one out.
 
 use serde::{Deserialize, Serialize};
 
 pub mod format;
 mod result;
+mod variants;
 
 pub use result::{ItemResult, Reason, ResultError};
 

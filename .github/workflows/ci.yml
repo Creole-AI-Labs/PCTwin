@@ -397,6 +397,22 @@ jobs:
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
         run: cargo test --workspace --locked --no-fail-fast
+      # The screens' example files (app/src/contract) are the engine's own output. Made again
+      # here, they must equal what is checked in, so a shape that crosses the bridge cannot change
+      # without the screens' contract test (contract.test.ts) seeing the new shape.
+      - name: Bridge example files are current
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          PCTWIN_WRITE_CONTRACT: "1"
+        run: |
+          cargo test -p pctwin-app --locked --lib contract::the_example_files_match_the_engine
+          git diff --exit-code -- app/src/contract
+          if [ -n "$(git status --porcelain -- app/src/contract)" ]; then
+            git status --porcelain -- app/src/contract
+            echo "app/src/contract has files that are not checked in" >&2
+            exit 1
+          fi
       # The desktop app, built and packaged on every system and kept unsigned for two weeks.
       # One package type per system keeps the build free of extra downloads.
       - name: Build the app
@@ -432,6 +448,12 @@ jobs:
           wait "$pid"
           cat "$marker"
           grep -q "titled PCTwin" "$marker"
+      # The permission sweep (tests/permissions.rs) again as the app ships: a release build (Tauri
+      # refuses and stores permissions differently without debug checks) with the app's own
+      # protocol, as `tauri build` makes it. Once per system, so each overlay is included.
+      - name: Permission sweep, release build
+        if: contains(fromJSON('["windows-latest", "macos-latest", "ubuntu-latest"]'), matrix.os)
+        run: cargo test -p pctwin-app --release --locked --features tauri/custom-protocol --test permissions
       - name: Keep the unsigned app
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

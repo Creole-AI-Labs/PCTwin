@@ -287,17 +287,19 @@ impl<S: Serving> Pairing<S> {
     }
 }
 
-/// A label as the screens show it: a colour and an animal to translate, or the typed name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum LabelView {
-    Picked {
-        colour: &'static str,
-        animal: &'static str,
-    },
-    Named {
-        name: String,
-    },
+pctwin_types::listed_enum! {
+    /// A label as the screens show it: a colour and an animal to translate, or the typed name.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[serde(tag = "kind", rename_all = "kebab-case")]
+    pub enum LabelView {
+        Picked {
+            colour: &'static str,
+            animal: &'static str,
+        },
+        Named {
+            name: String,
+        },
+    }
 }
 
 impl From<&Label> for LabelView {
@@ -313,32 +315,34 @@ impl From<&Label> for LabelView {
     }
 }
 
-/// What the old laptop's screen shows now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum OldView {
-    Label {
-        label: LabelView,
-    },
-    Code {
-        code: String,
-        #[serde(rename = "secondsLeft")]
-        seconds_left: u64,
-    },
-    Wait {
-        #[serde(rename = "secondsLeft")]
-        seconds_left: u64,
-    },
-    Locked,
-    Choose {
-        round: u64,
-        numbers: [u8; 3],
-    },
-    Paired,
-    TimedOut,
-    Left,
-    /// The paired connection died before the move began: pairing is over, start again.
-    Lost,
+pctwin_types::listed_enum! {
+    /// What the old laptop's screen shows now.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[serde(tag = "kind", rename_all = "kebab-case")]
+    pub enum OldView {
+        Label {
+            label: LabelView,
+        },
+        Code {
+            code: String,
+            #[serde(rename = "secondsLeft")]
+            seconds_left: u64,
+        },
+        Wait {
+            #[serde(rename = "secondsLeft")]
+            seconds_left: u64,
+        },
+        Locked,
+        Choose {
+            round: u64,
+            numbers: [u8; 3],
+        },
+        Paired,
+        TimedOut,
+        Left,
+        /// The paired connection died before the move began: pairing is over, start again.
+        Lost,
+    }
 }
 
 impl From<OldUpdate> for OldView {
@@ -356,16 +360,18 @@ impl From<OldUpdate> for OldView {
     }
 }
 
-/// What the new laptop's screen hears after its number is shown.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum NewView {
-    Paired,
-    Problem {
-        problem: ProblemView,
-    },
-    /// The paired connection died before the move began: pairing is over, start again.
-    Lost,
+pctwin_types::listed_enum! {
+    /// What the new laptop's screen hears after its number is shown.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[serde(tag = "kind", rename_all = "kebab-case")]
+    pub enum NewView {
+        Paired,
+        Problem {
+            problem: ProblemView,
+        },
+        /// The paired connection died before the move began: pairing is over, start again.
+        Lost,
+    }
 }
 
 /// A problem as the screens show it: its translation key, and the networks to choose from when

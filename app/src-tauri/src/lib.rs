@@ -1,11 +1,23 @@
 //! PCTwin desktop app entry point: the window, the tray icon and the lock-down around the screens.
+//!
+//! The screens are an untrusted web view. They may call only the commands in [`invoke_handler`],
+//! each allowed by name: build.rs lists them for the app's permission manifest, and
+//! capabilities/default.json grants each one to the main window only. lockdown.rs checks the
+//! inputs Tauri builds its permissions from (and the config it really merged); tests/permissions.rs
+//! builds the real app with [`app`] and [`context`] on Tauri's mock runtime and calls every command
+//! Tauri knows, so anything granted beyond the closed list fails it.
 
+#[cfg(test)]
+mod contract;
+#[cfg(test)]
+mod lockdown;
 mod pairing;
 
 use serde::Deserialize;
+use tauri::ipc::Invoke;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, LogicalSize, Manager, Runtime, Url, WebviewWindow, Wry};
+use tauri::{AppHandle, Builder, Context, LogicalSize, Manager, Runtime, Url, WebviewWindow, Wry};
 
 /// The three window sizes from the design system, in logical pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -31,7 +43,7 @@ impl WindowMode {
 
 /// The screens may ask for one of the three sizes by name, never an arbitrary size or position.
 #[tauri::command]
-fn set_window_mode(window: WebviewWindow, mode: WindowMode) -> Result<(), String> {
+fn set_window_mode<R: Runtime>(window: WebviewWindow<R>, mode: WindowMode) -> Result<(), String> {
     let (width, height) = mode.size();
     window
         .set_size(LogicalSize::new(width, height))
@@ -109,7 +121,11 @@ const TRAY_QUIT: &str = "quit";
 /// Tray menu labels come from the screens' translation files, so the menu speaks the person's
 /// language; until the screens send them, the menu has the app's name only.
 #[tauri::command]
-fn set_tray_labels(app: AppHandle, show: String, quit: String) -> Result<(), String> {
+fn set_tray_labels<R: Runtime>(
+    app: AppHandle<R>,
+    show: String,
+    quit: String,
+) -> Result<(), String> {
     let short = |s: &str| s.chars().take(60).collect::<String>();
     let menu = tray_menu(&app, &short(&show), &short(&quit)).map_err(|e| e.to_string())?;
     if let Some(tray) = app.tray_by_id("main") {
@@ -137,33 +153,56 @@ pub fn allowed_navigation(url: &Url) -> bool {
     }
 }
 
-fn navigation_guard() -> tauri::plugin::TauriPlugin<Wry> {
+fn navigation_guard<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("navigation-guard")
         .on_navigation(|_webview, url| allowed_navigation(url))
         .build()
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
+/// Every command the screens may call. A command must also be listed in build.rs and granted in
+/// capabilities/default.json, or the screens are refused it.
+fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        set_window_mode,
+        set_tray_labels,
+        pairing::pairing_old_start,
+        pairing::pairing_old_pick,
+        pairing::pairing_old_decline,
+        pairing::pairing_old_shuffle,
+        pairing::pairing_old_rename,
+        pairing::pairing_old_start_again,
+        pairing::pairing_stop,
+        pairing::pairing_new_search,
+        pairing::pairing_new_connect,
+    ]
+}
+
+/// The app's config, assets and permissions as the build made them: tauri.conf.json merged with
+/// this system's tauri.<system>.conf.json, and the permissions resolved from build.rs and
+/// capabilities/. The one context the app runs with; the permission tests use it too.
+pub fn context<R: Runtime>() -> Context<R> {
+    tauri::generate_context!()
+}
+
+/// The tray needs the system's real window toolkit. Tauri's mock runtime (the permission tests)
+/// has none, so there the app is built without its tray and everything else is the same.
+fn has_tray<R: Runtime>() -> bool {
+    std::any::TypeId::of::<R>() == std::any::TypeId::of::<Wry>()
+}
+
+/// Everything the app adds to Tauri: its plugins, state, commands, page-load check, setup and
+/// window events. [`run`] and the permission tests (tests/permissions.rs) both build from this one
+/// function, so the tests check the app as it really is. Nothing here, or anywhere else, may grant
+/// the screens more at run time: Tauri's `dynamic-acl` feature is off (Cargo.toml), and lockdown.rs
+/// refuses code that names a capability or the permission store.
+pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
+    builder
         .plugin(navigation_guard())
         .plugin(tauri_plugin_opener::init())
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(pairing::new_state())
-        .invoke_handler(tauri::generate_handler![
-            set_window_mode,
-            set_tray_labels,
-            pairing::pairing_old_start,
-            pairing::pairing_old_pick,
-            pairing::pairing_old_decline,
-            pairing::pairing_old_shuffle,
-            pairing::pairing_old_rename,
-            pairing::pairing_old_start_again,
-            pairing::pairing_stop,
-            pairing::pairing_new_search,
-            pairing::pairing_new_connect,
-        ])
+        .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens
         // have finished loading, and quits. Without it, nothing here runs.
@@ -190,6 +229,9 @@ pub fn run() {
             });
         })
         .setup(|app| {
+            if !has_tray::<R>() {
+                return Ok(());
+            }
             let menu = tray_menu(app.handle(), "PCTwin", "PCTwin")?;
             let mut tray = TrayIconBuilder::with_id("main")
                 .tooltip("PCTwin")
@@ -219,7 +261,12 @@ pub fn run() {
                 refresh_tray_icon(window.app_handle());
             }
         })
-        .run(tauri::generate_context!())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    app(Builder::default())
+        .run(context())
         .expect("error while running PCTwin");
 }
 
