@@ -307,6 +307,26 @@ fn a_finished_file_is_still_there_after_the_drive_is_mounted_again() {
     });
 }
 
+/// What the race's fill checks its read-back against (a fill with no journal).
+struct Expect(Vec<u8>);
+
+impl pctwin_gate::FillSteps for Expect {
+    fn made(&mut self, _: pctwin_gate::FileId) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn read_back(&mut self, file: &mut dyn std::io::Read) -> std::io::Result<bool> {
+        let mut got = Vec::new();
+        file.read_to_end(&mut got)?;
+        Ok(got == self.0)
+    }
+    fn filled(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn cleared(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// FAT drives hold files of up to 4 GB less one byte, on every system: a bigger one is refused at
 /// its start, before anything is made. exFAT has no such limit. (Windows reads the drive's type
 /// from the volume list, for the volume with the folder's own number.)
@@ -413,14 +433,11 @@ fn a_drive_mounted_inside_the_approved_folder_gets_its_own_rules() {
 /// only when the two really overlap. The split is printed for the CI log.
 #[test]
 fn a_name_raced_for_is_never_shared() {
-    use pctwin_gate::Claim;
+    use pctwin_gate::{Claim, Naming};
     if phase() == Phase::After {
         return;
     }
     each_drive(|drive| {
-        if refuses(drive) {
-            return;
-        }
         let dir = fresh(&drive.path, "pctwin-fat-race");
         let dest = Destination::open(&dir).unwrap();
         let naming = dest.check_drive().unwrap().naming;
@@ -491,7 +508,12 @@ fn a_name_raced_for_is_never_shared() {
             if !they_wait {
                 wait(head);
             }
-            let claim = sealed.claim_as(&name);
+            let claim = if naming == Naming::FillIn {
+                let plan = sealed.fill_plan().unwrap();
+                sealed.fill_as(&name, &plan, &mut Expect(ours.clone()))
+            } else {
+                sealed.claim_as(&name)
+            };
             let they_won = other.join().unwrap();
             // The side that started later got the name.
             if !head.is_zero() && they_won == they_wait {
@@ -576,4 +598,91 @@ fn a_drive_put_in_another_s_place_at_the_same_folder_is_judged_again() {
         tested + 1,
         "the new drive was tested again"
     );
+}
+
+/// On FAT and exFAT a file's number is where its entry sits, which a file made in place of a
+/// removed or moved one can take. PCTwin tells its own open file from such a file before it sets
+/// or clears a hidden mark by name (the same file, by number and creation time, and still
+/// linked), so this checks, on each real drive, that the check tells them apart when the other
+/// file is made at once (the worst case). Prints what each drive gave, for the CI log.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_file_made_in_place_of_pctwin_s_is_told_apart_from_it() {
+    use std::os::unix::fs::MetadataExt;
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        let dir = fresh(&drive.path, "pctwin-fat-slot");
+        let same = |held: &std::fs::File, at: &Path| {
+            let there = std::fs::File::open(at).unwrap();
+            let id_same = pctwin_gate::file_identity(held).unwrap()
+                == pctwin_gate::file_identity(&there).unwrap();
+            let linked = held.metadata().unwrap().nlink() > 0;
+            (id_same, linked)
+        };
+        // Removed, and another file made at once at its name.
+        let at = dir.join("s.bin");
+        std::fs::write(&at, b"ours").unwrap();
+        let held = std::fs::File::open(&at).unwrap();
+        std::fs::remove_file(&at).unwrap();
+        std::fs::write(&at, b"theirs").unwrap();
+        let (id_same, linked) = same(&held, &at);
+        println!(
+            "{}: removed then made: same number and time {id_same}, ours still linked {linked}",
+            drive.show()
+        );
+        assert!(
+            !(id_same && linked),
+            "{}: a file made in place of a removed one passes as PCTwin's",
+            drive.show()
+        );
+        // Moved away, and another file made at once at its name.
+        let at = dir.join("m.bin");
+        std::fs::write(&at, b"ours").unwrap();
+        let held = std::fs::File::open(&at).unwrap();
+        std::fs::rename(&at, dir.join("moved.bin")).unwrap();
+        std::fs::write(&at, b"theirs").unwrap();
+        let (id_same, linked) = same(&held, &at);
+        println!(
+            "{}: moved then made: same number and time {id_same}, ours still linked {linked}",
+            drive.show()
+        );
+        assert!(
+            !(id_same && linked),
+            "{}: a file made in place of a moved one passes as PCTwin's",
+            drive.show()
+        );
+        if refuses(drive) {
+            return;
+        }
+        // The gate itself: just after PCTwin made its file, another program removes it and makes
+        // its own at once at the name (likely in the very entry PCTwin's had). The file is never
+        // hidden, filled or removed, and the name is refused.
+        let theirs = dir.join("r.bin");
+        let once = std::sync::atomic::AtomicBool::new(false);
+        let at = theirs.clone();
+        let dest = Destination::open(&dir)
+            .unwrap()
+            .with_flags_hook(move |step| {
+                if step == "hide:named" && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    std::fs::remove_file(&at)?;
+                    std::fs::write(&at, b"theirs")?;
+                }
+                Ok(())
+            });
+        let r = try_write(&dest, "r.bin", b"ours");
+        assert!(r.is_err(), "{}: named over their file: {r:?}", drive.show());
+        assert_eq!(
+            std::fs::read(&theirs).unwrap(),
+            b"theirs",
+            "{}",
+            drive.show()
+        );
+        let flags = {
+            use std::os::macos::fs::MetadataExt;
+            std::fs::symlink_metadata(&theirs).unwrap().st_flags()
+        };
+        assert_eq!(flags & 0x8000, 0, "{}: their file was hidden", drive.show());
+    });
 }

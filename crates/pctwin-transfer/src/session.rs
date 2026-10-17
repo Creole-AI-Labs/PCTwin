@@ -1716,6 +1716,14 @@ fn hash_reader(reader: &mut impl std::io::Read) -> std::io::Result<[u8; 32]> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReceiveOutcome {
     Finished(Finished),
+    /// Copied and checked, and kept, but not finished as a visible, proven copy: filled in under
+    /// its name and not yet shown (shown when PCTwin starts again), or a file PCTwin could not
+    /// prove its own was found at its name and left as it is. Never reported as copied; `why`
+    /// says, in plain words, what happened and what comes next.
+    NeedsAction {
+        finished: Finished,
+        why: String,
+    },
     /// An identical file was already there (its stored path); nothing was copied.
     AlreadyThere(String),
     Failed(String),
@@ -1782,7 +1790,9 @@ impl Ended {
     fn spent(&self) -> bool {
         matches!(
             self.outcome,
-            ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_)
+            ReceiveOutcome::Finished(_)
+                | ReceiveOutcome::NeedsAction { .. }
+                | ReceiveOutcome::AlreadyThere(_)
         )
     }
 }
@@ -2264,7 +2274,11 @@ impl<'d> ReceiverSession<'d> {
                         ReceiveOutcome::Failed(why)
                     }
                 };
-                let ok = matches!(outcome, ReceiveOutcome::Finished(_));
+                // Landed (kept on this laptop, never sent again), even when it still needs action.
+                let ok = matches!(
+                    outcome,
+                    ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
+                );
                 self.allowance.ended(s.item, ok);
                 let landed = ok.then(|| (s.destination.clone(), s.size));
                 self.end(s.item, stream, outcome, landed);
@@ -2711,6 +2725,7 @@ fn land(
         sealed.persist();
         Ok(ReceiveOutcome::Failed(format!("{why}; {FINISHED_LATER}")))
     };
+    let (size, block_size) = (assembly.header().size, assembly.header().block_size);
     let (mut sealed, fingerprint) = match assembly.seal(trailer) {
         Ok(sealed) => sealed,
         Err(e) => return fail(e.to_string()),
@@ -2733,11 +2748,22 @@ fn land(
             Ok(name) => name,
             Err(e) => return later(sealed, &e),
         };
-        if let Err(e) = journal.applied(entry, &name) {
-            sealed.persist();
-            return Err(record(e));
-        }
-        match sealed.claim_as(&name) {
+        let whole = crate::naming::Whole {
+            size,
+            block_size,
+            fingerprint,
+        };
+        // Recorded first, then named the way the drive allows (filled in, on a drive with no
+        // safe rename).
+        let named = match crate::naming::name_as(journal, entry, sealed, &name, whole) {
+            Ok(named) => named,
+            Err(broke) => {
+                let (e, back) = *broke;
+                back.persist();
+                return Err(record(e));
+            }
+        };
+        match named.claim {
             Claim::Named(c) => break c,
             // Another program took the name first: another name, recorded first again.
             Claim::Taken(back) => sealed = back,
@@ -2747,16 +2773,44 @@ fn land(
     // Committed while the temporary name still holds the file, then the temporary name goes.
     match dest.stat(&claimed.finished().final_path) {
         Ok(Some(stat)) => {
-            journal
-                .committed(
-                    entry,
-                    Landed {
-                        size: stat.len,
-                        modified_ns: stat.modified.map(crate::nanos),
-                        file: Some(file_id(stat.id)),
-                    },
-                )
-                .map_err(record)?;
+            if let Some(show) = claimed.show().cloned() {
+                // Filled in under its name: committed while still hidden and tagged, then shown.
+                let landed = Landed {
+                    size: stat.len,
+                    modified_ns: show.modified_ns,
+                    file: Some(file_id(stat.id)),
+                };
+                let Some(check) = claimed.show_check() else {
+                    return Err(record(pctwin_journal::JournalError::Storage(
+                        "a filled-in file not held".into(),
+                    )));
+                };
+                let end =
+                    crate::naming::commit_and_show(journal, dest, entry, landed, &show, check)
+                        .map_err(record)?;
+                // Kept whatever the show came to: the journal has it, and recovery or the person
+                // finishes it. Reported copied only once shown.
+                let finished = claimed.keep();
+                return Ok(match end {
+                    crate::naming::ShowEnd::Shown => ReceiveOutcome::Finished(finished),
+                    crate::naming::ShowEnd::Gone(why)
+                    | crate::naming::ShowEnd::Left(why)
+                    | crate::naming::ShowEnd::Later(why) => {
+                        ReceiveOutcome::NeedsAction { finished, why }
+                    }
+                });
+            } else {
+                journal
+                    .committed(
+                        entry,
+                        Landed {
+                            size: stat.len,
+                            modified_ns: stat.modified.map(crate::nanos),
+                            file: Some(file_id(stat.id)),
+                        },
+                    )
+                    .map_err(record)?;
+            }
             Ok(ReceiveOutcome::Finished(claimed.keep()))
         }
         // Gone the moment it got its name: never reported copied.
