@@ -44,6 +44,7 @@ mod macos_check;
 mod marks;
 mod naming;
 mod original;
+mod probes;
 mod read_back;
 mod siblings;
 #[cfg(unix)]
@@ -57,7 +58,19 @@ pub use naming::{DriveCheck, Naming};
 /// probe files as a crash would.
 #[doc(hidden)]
 pub fn probe_contents() -> (&'static [u8], &'static [u8]) {
-    (naming::PROBE_A, naming::PROBE_B)
+    (probes::DRIVE_A, probes::DRIVE_B)
+}
+
+/// For tests: what the time test's probe files hold.
+#[doc(hidden)]
+pub fn time_probe_contents() -> &'static [u8] {
+    probes::TIME
+}
+
+/// For tests: what the read-back test's probe file holds.
+#[doc(hidden)]
+pub fn read_back_probe_contents() -> Vec<u8> {
+    probes::read_back_bytes()
 }
 pub use original::open_original;
 pub use read_back::{CheckedFrom, ReadBack, Verification, WhyMemory};
@@ -549,6 +562,21 @@ impl Destination {
         Ok(dest)
     }
 
+    /// For tests (feature `fault-plan`): opens `path` as if its drive's type could not be read,
+    /// so the drive is judged as such a drive is: by how it keeps time.
+    #[cfg(feature = "fault-plan")]
+    #[doc(hidden)]
+    pub fn open_type_unread(path: &Path) -> io::Result<Self> {
+        let mut dest = Self::open(path)?;
+        dest.profile = DriveProfile::judge(&dest.root, DriveKind::Unknown);
+        let key = drive::volume_key(&dest.root)?;
+        dest.profiles
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key, dest.profile);
+        Ok(dest)
+    }
+
     /// How many names have been checked so far while choosing free names for files written here.
     /// A few per file is normal; a count that grows with the number of files already there means
     /// numbering has become slow (the gate's tests assert it, rather than timing it).
@@ -615,6 +643,13 @@ impl Destination {
     #[doc(hidden)]
     pub fn time_test_kind(&self) -> Option<DriveKind> {
         drive::kind_by_time_step(&self.root)
+    }
+
+    /// For tests: [`time_test_kind`](Self::time_test_kind), with `before_removal` run on each
+    /// probe file's name just before PCTwin removes it (another program acting then).
+    #[doc(hidden)]
+    pub fn time_test_kind_with(&self, mut before_removal: impl FnMut(&str)) -> Option<DriveKind> {
+        drive::kind_by_time_step_with(&self.root, &mut before_removal)
     }
 
     /// The largest single file this place's drive holds, if it has a limit (FAT32: 4 GB less
@@ -783,9 +818,7 @@ impl Destination {
         if let Some(found) = volume.and_then(known) {
             return found;
         }
-        let n = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let probe_name = temp_name(&format!("probe-{}-{n}", std::process::id()));
-        let found = read_back::probe(dir, &probe_name, self.uncached_refused());
+        let found = read_back::probe(dir, self.uncached_refused());
         if let Some(v) = volume {
             self.read_back
                 .lock()
