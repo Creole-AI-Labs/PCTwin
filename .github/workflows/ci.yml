@@ -553,6 +553,104 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Engineering Plan 5.1 and 9.16: "nothing forgotten" on the real machine. Four real local
+  # accounts (the mover, another person, one with a locked home, one removed and left behind), a
+  # second real volume, things planted as each account, then the real drive-wide sweep as the
+  # mover and the answer key checked. Release build: the sweep walks the whole runner.
+  nothing-forgotten:
+    name: Nothing forgotten on a real machine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        if: runner.os == 'Linux'
+        with:
+          # The guard's start-up step runs on every system whatever the `if` says, and on
+          # Windows a blocking policy also blocks the certificate revocation check, so the
+          # toolchain download fails. Block on Linux; elsewhere only watch.
+          egress-policy: ${{ runner.os == 'Linux' && 'block' || 'audit' }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            static.rust-lang.org:443
+            index.crates.io:443
+            azure.archive.ubuntu.com:80
+            azure.archive.ubuntu.com:443
+            archive.ubuntu.com:80
+            security.ubuntu.com:80
+            esm.ubuntu.com:443
+            motd.ubuntu.com:443
+            packages.microsoft.com:443
+            ppa.launchpadcontent.net:443
+            static.crates.io:443
+            crates.io:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # On Windows the network guard's start-up step runs even though the guard itself is
+      # Linux-only, and for a few seconds it leaves the runner with no DNS: the toolchain
+      # download then failed. Wait (bounded) until names resolve.
+      - name: Wait for DNS (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          for ($i = 1; $i -le 60; $i++) {
+            try { Resolve-DnsName static.rust-lang.org -ErrorAction Stop | Out-Null; Write-Host "DNS ready after $i tries"; exit 0 } catch { Start-Sleep -Seconds 2 }
+          }
+          Write-Error "DNS did not come back within two minutes"
+          exit 1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the lab and the sweep (release)
+        run: cargo build --locked --release -p pctwin-lab -p pctwin-scan --bins
+      - name: Nothing forgotten (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: bash fixtures/nothing-forgotten/run.sh "$PWD/target/release" /tmp/pctwin-nf "${{ github.run_number }}"
+      - name: Nothing forgotten (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./fixtures/nothing-forgotten/run.ps1 -Bin "$PWD\target\release" -Work 'C:\pctwin-nf' -Seed '${{ github.run_number }}'
+      # The evidence sits outside the workspace (the test accounts cannot enter the runner's
+      # folders), so it is copied in before it is kept.
+      - name: Gather the evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p nf-evidence
+          for d in /tmp/pctwin-nf/report /c/pctwin-nf/report; do
+            if [ -d "$d" ]; then cp -r "$d/." nf-evidence/ 2>/dev/null || sudo cp -r "$d/." nf-evidence/ || true; fi
+          done
+          sudo chown -R "$(id -u)" nf-evidence 2>/dev/null || true
+          ls -la nf-evidence || true
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          PY=$(command -v python3 || command -v python)
+          "$PY" fixtures/nothing-forgotten/summary.py nf-evidence >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nothing-forgotten-${{ matrix.os }}
+          path: nf-evidence
+          if-no-files-found: warn
+          retention-days: 14
+
   # Task List 0.7: cross-system handoff. One job scans a synthetic laptop and saves a lab package
   # (its record and each file under its item ID); a job on another system moves that package
   # through the real engine, so names born on one system meet the other system's safety gate.
