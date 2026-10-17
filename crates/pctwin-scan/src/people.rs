@@ -16,53 +16,11 @@ pub struct Person {
     pub is_me: bool,
 }
 
-/// Everyone with an account on this laptop, read from the list the system keeps for everyone
-/// (no administrator rights needed, nobody's files opened). System and service accounts are left
-/// out.
+/// Everyone with an account and a home folder on this laptop, from the census: read from the
+/// lists the system keeps for everyone (no administrator rights needed, nobody's files opened).
+/// System and service accounts are left out.
 pub fn list_people() -> Vec<Person> {
-    let me = dirs::home_dir().unwrap_or_default();
-    if cfg!(windows) {
-        let out = run(
-            "reg",
-            &[
-                "query",
-                r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList",
-                "/s",
-                "/v",
-                "ProfileImagePath",
-            ],
-        );
-        people_from_profile_list(&out, &me)
-    } else if cfg!(target_os = "macos") {
-        let out = run(
-            "dscl",
-            &[
-                ".",
-                "-readall",
-                "/Users",
-                "NFSHomeDirectory",
-                "RealName",
-                "UniqueID",
-            ],
-        );
-        people_from_dscl(&out, &me)
-    } else {
-        // getent also lists accounts from a network directory; /etc/passwd is the fallback.
-        let mut passwd = run("getent", &["passwd"]);
-        if passwd.trim().is_empty() {
-            passwd = std::fs::read_to_string("/etc/passwd").unwrap_or_default();
-        }
-        let defs = std::fs::read_to_string("/etc/login.defs").ok();
-        people_from_passwd(&passwd, uid_range_from_login_defs(defs.as_deref()), &me)
-    }
-}
-
-fn run(program: &str, args: &[&str]) -> String {
-    std::process::Command::new(program)
-        .args(args)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default()
+    crate::census::census_this_laptop().to_people()
 }
 
 /// Windows: `reg query ...\ProfileList /s /v ProfileImagePath`. Real people have local account

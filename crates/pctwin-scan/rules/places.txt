@@ -1,0 +1,124 @@
+# The rules file: places whose kind is known from where they are, before anyone's access is
+# looked at (Engineering Plan 9.16, "Whose is it"). A hit puts the place in that bucket and the
+# sweep only counts it: one line in the report, never a list of what is inside.
+#
+# Each row: system | where | name | kind
+#   system  windows, mac, linux or any
+#   where   root     directly under the root of any drive the sweep walks
+#           sysroot  directly under the root of the drive the system runs from
+#           home     directly under a person's home folder
+#           under    a path below a person's home folder, folders separated by /
+#           any      a folder with this name anywhere
+#   kind    system       part of the operating system
+#           app          installed programs and what they keep for everyone
+#           app-data     what one program keeps for one person (counted per program folder)
+#           junk         caches, temporary files and bins
+#           rebuildable  can be made again (downloaded packages, build output); counted as one item
+#           keep-whole   the person's own, counted and moved as one item (a project's history)
+#           old-system   an older copy of the system: the system's, except the old homes inside it,
+#                        which are placed by their owners
+# Names are compared ignoring case on Windows and macOS. Lines starting with # are notes.
+
+windows | sysroot | Windows | system
+windows | sysroot | Program Files | app
+windows | sysroot | Program Files (x86) | app
+windows | sysroot | ProgramData | app
+windows | sysroot | Recovery | system
+windows | sysroot | PerfLogs | system
+windows | sysroot | Config.Msi | system
+windows | sysroot | $WinREAgent | system
+windows | sysroot | $SysReset | system
+windows | sysroot | $Windows.~BT | system
+windows | sysroot | $Windows.~WS | system
+windows | sysroot | $GetCurrent | system
+windows | sysroot | Windows.old | old-system
+windows | sysroot | inetpub | app
+windows | sysroot | MSOCache | app
+windows | sysroot | OneDriveTemp | junk
+windows | sysroot | ESD | junk
+windows | sysroot | Intel | app
+windows | sysroot | AMD | app
+windows | sysroot | NVIDIA | app
+windows | sysroot | Drivers | app
+windows | sysroot | pagefile.sys | system
+windows | sysroot | hiberfil.sys | system
+windows | sysroot | swapfile.sys | system
+windows | sysroot | DumpStack.log.tmp | system
+windows | sysroot | DumpStack.log | system
+windows | root | System Volume Information | system
+windows | root | $Recycle.Bin | junk
+windows | root | $RECYCLE.BIN | junk
+windows | root | $Extend | system
+windows | root | WindowsApps | app
+windows | root | Program Files | app
+windows | root | Program Files (x86) | app
+windows | root | SteamLibrary | rebuildable
+windows | home | AppData | app-data
+windows | home | NTUSER.DAT | system
+windows | home | ntuser.ini | system
+windows | home | ntuser.dat.LOG1 | system
+windows | home | ntuser.dat.LOG2 | system
+windows | under | AppData/Local/Temp | junk
+
+mac | sysroot | System | system
+mac | sysroot | Library | app
+mac | sysroot | Applications | app
+mac | sysroot | usr | system
+mac | sysroot | bin | system
+mac | sysroot | sbin | system
+mac | sysroot | private | system
+mac | sysroot | opt | app
+mac | sysroot | cores | junk
+mac | sysroot | etc | system
+mac | sysroot | var | system
+mac | sysroot | tmp | junk
+mac | sysroot | .vol | system
+mac | sysroot | .VolumeIcon.icns | system
+mac | root | .Spotlight-V100 | system
+mac | root | .fseventsd | system
+mac | root | .DocumentRevisions-V100 | system
+mac | root | .TemporaryItems | junk
+mac | root | .Trashes | junk
+mac | root | .PKInstallSandboxManager-SystemSoftware | system
+mac | root | Applications | app
+mac | home | Library | app-data
+mac | home | .Trash | junk
+mac | under | Library/Caches | junk
+
+linux | sysroot | bin | system
+linux | sysroot | boot | system
+linux | sysroot | etc | system
+linux | sysroot | lib | system
+linux | sysroot | lib32 | system
+linux | sysroot | lib64 | system
+linux | sysroot | libx32 | system
+linux | sysroot | sbin | system
+linux | sysroot | usr | system
+linux | sysroot | var | system
+linux | sysroot | snap | app
+linux | sysroot | opt | app
+linux | sysroot | tmp | junk
+linux | sysroot | root | system
+linux | sysroot | swapfile | system
+linux | sysroot | swap.img | system
+linux | sysroot | sysroot | system
+linux | sysroot | ostree | system
+linux | root | lost+found | system
+linux | home | .cache | junk
+linux | home | .config | app-data
+linux | home | .local | app-data
+linux | home | snap | app-data
+linux | home | .var | app-data
+linux | home | .mozilla | app-data
+linux | home | .thunderbird | app-data
+linux | under | .local/share/Trash | junk
+
+any | any | node_modules | rebuildable
+any | any | .git | keep-whole
+any | any | .hg | keep-whole
+any | any | .svn | keep-whole
+any | any | steamapps | rebuildable
+any | any | .venv | rebuildable
+any | any | __pycache__ | rebuildable
+any | any | .gradle | rebuildable
+any | any | .tox | rebuildable
