@@ -79,6 +79,12 @@ criteria = "safe-to-deploy"
 delta = "2.7.0 -> 2.7.1"
 notes = "Reviewed 15 Oct 2026. Only changes: Cargo.toml (version, tauri-plugin build dependency raised to 2.7.1) and the iOS Swift entry point made public (initPlugin). No Rust source change, so the open-path/open-url permission checks are untouched."
 
+[[audits.thread-priority]]
+who = "PCTwin maintainers"
+criteria = "safe-to-deploy"
+version = "3.1.1"
+notes = "Read in full for the code compiled on Windows and Linux, the two systems PCTwin uses it on (20 October 2026). Every unsafe block is a direct system call with arguments the crate owns: Windows SetThreadPriority, GetThreadPriority, GetCurrentThread, SetThreadPriorityBoost, SetThreadIdealProcessor; Linux pthread_setschedparam, pthread_getschedparam, setpriority, sched_get_priority_min/max, the sched_getattr/sched_setattr syscalls with a correctly sized struct, errno through libc's accessor, and a zero-initialised sched_param (plain integers). No pointer arithmetic, no memory outside its own locals, no network, no file access, no build script. Used only to put PCTwin's own sweep threads into background priority."
+
 [[audits.zeroize]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
