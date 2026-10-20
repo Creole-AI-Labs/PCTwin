@@ -3,8 +3,9 @@
 
 use pctwin_record::{
     CloudProvider, EncodedInventory, FolderRole, Inclusion, InventoryReader, Item, ItemId,
-    ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason, MAX_PAGE_BYTES, ManagedBy, Owner,
-    PAGE_ITEMS, Place, Portability, RecordError, Storage, decode_inventory, encode_inventory,
+    ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason, MAX_HELD, MAX_PAGE_BYTES, ManagedBy,
+    Owner, PAGE_ITEMS, Place, Portability, RecordError, Storage, decode_inventory,
+    encode_inventory,
 };
 
 fn laptop() -> LaptopId {
@@ -594,4 +595,175 @@ fn an_owner_listed_twice_is_refused_even_when_both_are_used() {
         pages: vec![page(0, 0, &[], &[[0, 0, u32::MAX], [1, 0, u32::MAX]])],
     };
     decode_inventory(&fine).unwrap();
+}
+
+/// A page holding, when `chain` is set, the deepest and longest folder chain a path may have
+/// (127 folders of 31 bytes), then `count` items in its deepest folder, with IDs from `first_id`.
+fn heavy_page(number: u32, chain: bool, count: u32, first_id: u64) -> Vec<u8> {
+    const ROOT: u32 = u32::MAX;
+    let name = |p: &mut Vec<u8>, s: &str| {
+        p.push(0);
+        p.extend_from_slice(&(s.len() as u32).to_be_bytes());
+        p.extend_from_slice(s.as_bytes());
+    };
+    let mut p = Vec::new();
+    let (first, defined) = if chain { (0u32, 127u32) } else { (127, 0) };
+    for v in [number, first, defined, count] {
+        p.extend_from_slice(&v.to_be_bytes());
+    }
+    for i in 0..defined {
+        p.extend_from_slice(&(if i == 0 { ROOT } else { i - 1 }).to_be_bytes());
+        name(&mut p, &"x".repeat(31));
+    }
+    for k in 0..count {
+        let mut id = [0u8; 16];
+        id[..8].copy_from_slice(&(first_id + u64::from(k)).to_be_bytes());
+        p.extend_from_slice(&id);
+        p.push(0);
+        p.extend_from_slice(&0u32.to_be_bytes());
+        p.extend_from_slice(&0u32.to_be_bytes());
+        p.extend_from_slice(&126u32.to_be_bytes());
+        name(&mut p, "f");
+        p.extend_from_slice(&5u64.to_be_bytes());
+        p.extend_from_slice(&[0, 0, 0, 0]);
+    }
+    p
+}
+
+fn manifest_of(items: u64, pages: u32) -> Vec<u8> {
+    let mut m = manifest(items);
+    m[36..40].copy_from_slice(&pages.to_be_bytes());
+    m
+}
+
+fn why(e: RecordError) -> &'static str {
+    match e {
+        RecordError::BadInventory(why) => why,
+        other => panic!("refused for another reason: {other:?}"),
+    }
+}
+
+/// Every item carries its whole path once read, so a small page of items deep in a long chain
+/// once read as hundreds of megabytes. What a page's items will hold is counted before any is
+/// copied, and a page past [`MAX_PAGE_HELD`] is refused.
+#[test]
+fn a_page_that_would_take_too_much_memory_is_refused_before_it_is_copied() {
+    // 10,000 items 128 parts deep: about 120 MB once read, from a page of half a megabyte.
+    let mut reader = InventoryReader::start(&manifest_of(10_000, 1)).unwrap();
+    let page = heavy_page(0, true, 10_000, 0);
+    assert!(page.len() < 1024 * 1024);
+    let t = std::time::Instant::now();
+    let got = reader.page(&page).unwrap_err();
+    assert_eq!(why(got), "a page that takes more memory than PCTwin allows");
+    assert!(t.elapsed() < std::time::Duration::from_secs(5));
+    // With 3,000 items (about 37 MB once read, counting every folder name each path repeats) it is
+    // still refused; with 2,000 (about 25 MB) it is read.
+    let mut reader = InventoryReader::start(&manifest_of(3_000, 1)).unwrap();
+    assert_eq!(
+        why(reader.page(&heavy_page(0, true, 3_000, 0)).unwrap_err()),
+        "a page that takes more memory than PCTwin allows"
+    );
+    // The same page with 2,000 items (about 25 MB once read) is read.
+    let mut reader = InventoryReader::start(&manifest_of(2_000, 1)).unwrap();
+    assert_eq!(
+        reader.page(&heavy_page(0, true, 2_000, 0)).unwrap().len(),
+        2_000
+    );
+}
+
+/// Pages each within their share still add up: the whole inventory past [`MAX_HELD`] is refused.
+/// (About 87,000 items of 128 parts: 36 seconds in a debug build, so it runs on request with
+/// `cargo test --release -- --ignored`; the count itself is checked by a fast test inside the
+/// module.)
+#[test]
+#[ignore = "slow in a debug build; run with --release -- --ignored"]
+fn an_inventory_that_would_take_too_much_memory_in_all_is_refused() {
+    let pages = 100u32;
+    let mut reader = InventoryReader::start(&manifest_of(u64::from(pages) * 2_000, pages)).unwrap();
+    let mut refused_at = None;
+    for n in 0..pages {
+        let page = heavy_page(n, n == 0, 2_000, u64::from(n) * 2_000);
+        match reader.page(&page) {
+            // Each page's items are let go at once, as a laptop writing pages to disk would.
+            Ok(items) => drop(items),
+            Err(e) => {
+                assert_eq!(
+                    why(e),
+                    "an inventory that takes more memory than PCTwin allows"
+                );
+                refused_at = Some(n);
+                break;
+            }
+        }
+    }
+    // About 12 KB an item: the limit is met near 87,000 items, the 44th page.
+    let at = refused_at.expect("the whole inventory was read");
+    let per_item = MAX_HELD / (u64::from(at + 1) * 2_000);
+    assert!((10_000..=13_000).contains(&per_item), "{at} {per_item}");
+}
+
+/// The writer counts the same way, ending a page early, so an honest laptop with long paths
+/// never meets the limit: it sends more, smaller pages.
+#[test]
+fn the_writer_ends_a_page_early_rather_than_pass_what_a_page_may_hold() {
+    let docs = place(FolderRole::Documents, Storage::SystemDrive);
+    let chain: Vec<String> = (0..127)
+        .map(|i| format!("{i:03}{}", "x".repeat(28)))
+        .collect();
+    let items: Vec<Item> = (0..6_000u64)
+        .map(|i| {
+            let mut parts: Vec<&str> = chain.iter().map(String::as_str).collect();
+            let f = format!("f{i}");
+            parts.push(&f);
+            item(person("S-1"), docs.clone(), text(&parts), i)
+        })
+        .collect();
+    let enc = encode_inventory(&laptop(), &items).unwrap();
+    assert!(enc.pages.len() >= 3, "{} pages", enc.pages.len());
+    assert!(enc.pages.iter().all(|p| p.len() < MAX_PAGE_BYTES / 8));
+    let (_, back, _) = decode_inventory(&enc).unwrap();
+    assert_eq!(back, items);
+}
+
+/// Folders count too: a page of nothing but long folder chains, each with one item, is refused
+/// once its folders and items together pass [`MAX_PAGE_HELD`].
+#[test]
+fn a_page_whose_folders_would_take_too_much_memory_is_refused() {
+    const ROOT: u32 = u32::MAX;
+    let chains = 1_200u32;
+    let name = |p: &mut Vec<u8>, s: &str| {
+        p.push(0);
+        p.extend_from_slice(&(s.len() as u32).to_be_bytes());
+        p.extend_from_slice(s.as_bytes());
+    };
+    let mut p = Vec::new();
+    for v in [0, 0, chains * 127, chains] {
+        p.extend_from_slice(&v.to_be_bytes());
+    }
+    for c in 0..chains {
+        for i in 0..127u32 {
+            let parent = if i == 0 { ROOT } else { c * 127 + i - 1 };
+            p.extend_from_slice(&parent.to_be_bytes());
+            name(&mut p, &format!("{c:031}"));
+        }
+    }
+    for c in 0..chains {
+        let mut id = [0u8; 16];
+        id[..4].copy_from_slice(&c.to_be_bytes());
+        p.extend_from_slice(&id);
+        p.push(0);
+        p.extend_from_slice(&0u32.to_be_bytes());
+        p.extend_from_slice(&0u32.to_be_bytes());
+        p.extend_from_slice(&(c * 127 + 126).to_be_bytes());
+        name(&mut p, "f");
+        p.extend_from_slice(&5u64.to_be_bytes());
+        p.extend_from_slice(&[0, 0, 0, 0]);
+    }
+    assert!(p.len() <= MAX_PAGE_BYTES);
+    // The items alone take about 15 MB once read; with their 152,400 folders, more than 32 MB.
+    let mut reader = InventoryReader::start(&manifest_of(u64::from(chains), 1)).unwrap();
+    assert_eq!(
+        why(reader.page(&p).unwrap_err()),
+        "a page that takes more memory than PCTwin allows"
+    );
 }

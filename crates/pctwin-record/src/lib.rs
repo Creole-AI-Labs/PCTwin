@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 pub mod inventory;
 
 pub use inventory::{
-    EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_PAGE_BYTES, MAX_PATH_BYTES,
-    MAX_PATH_DEPTH, PAGE_ITEMS, decode_inventory, encode_inventory,
+    EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_HELD, MAX_PAGE_BYTES, MAX_PAGE_HELD,
+    MAX_PATH_BYTES, MAX_PATH_DEPTH, PAGE_ITEMS, decode_inventory, encode_inventory,
 };
 use sha2::{Digest, Sha256};
 
