@@ -67,13 +67,25 @@ pub fn pairing_candidates(interfaces: &[Interface]) -> Vec<String> {
     names
 }
 
-/// The connection to pair on without asking: the only candidate named like Wi-Fi (Wi-Fi, WLAN,
-/// wireless, wlan0, wlp2s0, wlo1). `None` otherwise, even with a single candidate: a lone wired or
-/// unrecognised connection may be a VPN or overlay network that looks ordinary (when the real
-/// Wi-Fi has no private address), so the person confirms it rather than PCTwin assuming it.
+/// The connection to pair on without asking: the only candidate the system says is Wi-Fi (by the
+/// adapter's kind: a Mac's `en0`, a German Windows' "WLAN" and a renamed adapter all count); where
+/// the system could not say, the only candidate named like Wi-Fi (Wi-Fi, WLAN, wireless, wlan0,
+/// wlp2s0, wlo1). `None` otherwise, even with a single candidate: a lone wired or unrecognised
+/// connection may be a VPN or overlay network that looks ordinary (when the real Wi-Fi has no
+/// private address), so the person confirms it rather than PCTwin assuming it.
 pub fn likely_wifi(interfaces: &[Interface]) -> Option<String> {
     let candidates = pairing_candidates(interfaces);
-    let wifi: Vec<&String> = candidates.iter().filter(|n| looks_like_wifi(n)).collect();
+    let told = interfaces.iter().any(|i| i.wifi.is_some());
+    let is_wifi = |name: &String| {
+        if told {
+            interfaces
+                .iter()
+                .any(|i| i.name == *name && i.wifi == Some(true))
+        } else {
+            looks_like_wifi(name)
+        }
+    };
+    let wifi: Vec<&String> = candidates.iter().filter(|n| is_wifi(n)).collect();
     match wifi.as_slice() {
         [only] => Some((*only).clone()),
         _ => None,
