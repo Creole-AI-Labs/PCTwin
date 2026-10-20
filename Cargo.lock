@@ -3435,6 +3435,8 @@ name = "pctwin-lab"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "pctwin-record",
+ "pctwin-scan",
  "serde",
  "serde_json",
  "tempfile",
@@ -3571,6 +3573,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
+ "winapi-util",
 ]
 
 [[package]]

@@ -22,6 +22,9 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 tempfile = "3"
 thiserror = "2.0.21"
 
+[target.'cfg(windows)'.dependencies]
+winapi-util = "0.1.11"
+
 [dev-dependencies]
 proptest = "1.11.0"
 
