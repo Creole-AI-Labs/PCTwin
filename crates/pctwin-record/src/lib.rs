@@ -18,6 +18,12 @@ use std::collections::{BTreeMap, HashSet};
 
 use pctwin_types::format::{Format, FormatError};
 use serde::{Deserialize, Serialize};
+pub mod inventory;
+
+pub use inventory::{
+    EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_PAGE_BYTES, PAGE_ITEMS,
+    decode_inventory, encode_inventory,
+};
 use sha2::{Digest, Sha256};
 
 /// The record format this app writes and reads.
@@ -53,6 +59,8 @@ pub enum RecordError {
     StaleApproval,
     #[error("the system's random number source failed")]
     Random,
+    #[error("this inventory cannot be read: {0}")]
+    BadInventory(&'static str),
 }
 
 /// Writes fixed-size IDs as lowercase hex.
