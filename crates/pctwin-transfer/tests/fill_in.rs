@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use pctwin_gate::{Approved, Destination, Destinations, DriveKind, DriveProfile, Naming};
-use pctwin_journal::{FileId, Journal, JournalError, Landed, Ledger, PlannedWrite, Proof, State};
+use pctwin_journal::{FileId, Journal, JournalError, Landed, Ledger, PlannedWrite, State};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
     Channel, ChannelError, ReceiverSession, SendJob, SenderSession, Tier, TransferError,
@@ -1118,7 +1118,7 @@ fn another_programs_file_with_pctwins_tag_is_never_removed_on_windows() {
     let State::Filling { fill, .. } = &e.state else {
         panic!("{:?}", e.state)
     };
-    assert_eq!(fill.proof, Proof::Token);
+    assert_eq!(fill.proof, pctwin_journal::Proof::Token);
     let tag = fill.tag.born.expect("a tag was given");
     let path = usb.join("c.bin");
     std::fs::remove_file(&path).unwrap();
