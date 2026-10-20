@@ -142,14 +142,37 @@ fn the_windows_profile_list_gives_the_profiles_folder_and_every_entry() {
 }
 
 #[test]
-fn local_accounts_that_cannot_sign_in_are_not_people() {
+fn local_accounts_that_cannot_sign_in_are_kept_and_marked() {
     let accounts = accounts_from_get_local_user(LOCAL_USERS_ENGLISH);
-    let ids: Vec<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
-    assert_eq!(ids, [sid(1001), sid(1005), sid(1002)]);
-    assert_eq!(accounts[0].name, "Ada");
-    assert_eq!(accounts[0].full_name.as_deref(), Some("Ada Obi"));
-    assert_eq!(accounts[1].full_name, None);
+    assert_eq!(accounts.len(), 7);
+    let on: Vec<&str> = accounts
+        .iter()
+        .filter(|a| !a.switched_off)
+        .map(|a| a.id.as_str())
+        .collect();
+    assert_eq!(on, [sid(1001), sid(1005), sid(1002)]);
+    let ada = accounts.iter().find(|a| a.name == "Ada").unwrap();
+    assert_eq!(ada.full_name.as_deref(), Some("Ada Obi"));
+    let emeka = accounts.iter().find(|a| a.name == "Emeka").unwrap();
+    assert_eq!(emeka.full_name, None);
     assert!(accounts.iter().all(|a| !a.managed && a.home.is_none()));
+}
+
+/// A person's account switched off (a child's account, say) still has that person's files: it is
+/// another person, never "left from a removed account" (found by the how-and-why walk, 20 October
+/// 2026). Switched-off accounts with no folder (the built-in ones) stay out.
+#[test]
+fn a_switched_off_account_with_a_folder_is_a_person_not_a_leftover() {
+    let users = LOCAL_USERS_ENGLISH.replace("1002\t1\tTunde", "1002\t0\tTunde");
+    assert_ne!(users, LOCAL_USERS_ENGLISH);
+    let census = census_from(english_facts(
+        &sid(1001),
+        Some(accounts_from_get_local_user(&users)),
+    ));
+    let tunde = named(&census, "Tunde");
+    assert_eq!(tunde.kind, PersonKind::Other);
+    assert_eq!(tunde.account_id.as_deref(), Some(sid(1002).as_str()));
+    assert_eq!(tunde.home.as_deref(), Some(Path::new(r"C:\Users\Tunde")));
 }
 
 #[test]
@@ -687,6 +710,7 @@ fn the_deepest_home_owns_a_path() {
             full_name: None,
             home: Some("/data".into()),
             managed: false,
+            switched_off: false,
         },
         Account {
             id: "1001".into(),
@@ -694,6 +718,7 @@ fn the_deepest_home_owns_a_path() {
             full_name: None,
             home: Some("/data/kid".into()),
             managed: false,
+            switched_off: false,
         },
     ];
     let census = census_from(CensusFacts {

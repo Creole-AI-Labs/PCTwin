@@ -118,6 +118,9 @@ pub struct Account {
     pub home: Option<PathBuf>,
     /// A work or school account.
     pub managed: bool,
+    /// Switched off (Windows): it cannot sign in now, but its person's files may still be here.
+    #[serde(default)]
+    pub switched_off: bool,
 }
 
 /// What the census is built from, read from the system or written by a test.
@@ -402,6 +405,10 @@ fn windows_residents(facts: &CensusFacts, accounts: &[Account], places: &Places)
             .map(|(_, path)| path)
             .filter(|path| places.present(path))
             .cloned();
+        // A switched-off account with no folder holds nothing and nobody (the built-in ones).
+        if account.switched_off && home.is_none() {
+            continue;
+        }
         let mut found_by = vec![FoundBy::AccountList];
         if entry.is_some() {
             found_by.push(FoundBy::ProfilesFolder);
@@ -655,8 +662,9 @@ fn expand(text: &str, vars: &[(&str, &str)]) -> String {
 }
 
 /// Windows: `Get-LocalUser`, one account per line: SID, enabled (1 or 0), name and full name,
-/// separated by tabs. Accounts that are switched off (the built-in Administrator, Guest,
-/// DefaultAccount and WDAGUtilityAccount usually are) cannot sign in and are left out.
+/// separated by tabs. Accounts that are switched off are kept and marked: the built-in
+/// Administrator, Guest, DefaultAccount and WDAGUtilityAccount usually are and have no folder, so
+/// they are nobody; a person's account switched off still has that person's files.
 pub fn accounts_from_get_local_user(output: &str) -> Vec<Account> {
     output
         .lines()
@@ -665,7 +673,7 @@ pub fn accounts_from_get_local_user(output: &str) -> Vec<Account> {
             let (id, enabled, name) = (f.next()?.trim(), f.next()?.trim(), f.next()?.trim());
             let full = f.next().unwrap_or("").trim();
             let enabled = enabled == "1" || enabled.eq_ignore_ascii_case("true");
-            if !enabled || !id.starts_with("S-") {
+            if !id.starts_with("S-") {
                 return None;
             }
             Some(Account {
@@ -674,6 +682,7 @@ pub fn accounts_from_get_local_user(output: &str) -> Vec<Account> {
                 full_name: (!full.is_empty()).then(|| full.to_string()),
                 home: None,
                 managed: false,
+                switched_off: !enabled,
             })
         })
         .collect()
@@ -755,6 +764,7 @@ pub fn accounts_from_dscl(output: &str) -> Vec<Account> {
                 full_name: full,
                 home: dscl_first(record, "NFSHomeDirectory").map(PathBuf::from),
                 managed,
+                switched_off: false,
             })
         })
         .collect()
@@ -809,6 +819,7 @@ pub fn accounts_from_passwd(
             full_name: (!full.is_empty()).then(|| full.to_string()),
             home: Some(PathBuf::from(home)),
             managed,
+            switched_off: false,
         });
     }
     accounts
