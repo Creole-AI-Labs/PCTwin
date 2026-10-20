@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Carried by the app bundle at Contents/Library/LaunchDaemons/. SMAppService registers it for the
+  length of a move (an administrator allows it in System Settings, Login Items) and unregisters
+  it at the end. BundleProgram is inside the signed bundle; launchd starts it on demand only.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.creoleailabs.pctwin.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/pctwin-helper</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.creoleailabs.pctwin</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

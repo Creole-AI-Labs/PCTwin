@@ -26,11 +26,13 @@ One workspace (`Cargo.toml`), the app in `app/src-tauri`, and one crate per job 
 | `pctwin-gate` | The safety gate: the new laptop trusts nothing that arrives |
 | `pctwin-journal` | The change journal, so a crash is reconciled and a move can be undone |
 | `pctwin-power` | Keeping both laptops awake and watching the battery |
-| `pctwin-lease` | The one place that calls the system unsafely (Linux write leases) |
+| `pctwin-lease` | The first place that calls the system unsafely (Linux write leases) |
+| `pctwin-helper-os` | The administrator helper's system calls: the system's prompt, its private channel, who is calling (the second and last unsafe place, 20 October 2026) |
 
 ## Rules that come with it
 
-- `unsafe` code is forbidden in every crate except `pctwin-lease`; CI checks this fence.
+- `unsafe` code is forbidden everywhere except the functions `scripts/unsafe-fence.sh` lists in
+  `pctwin-lease` and `pctwin-helper-os`; CI checks this fence.
 - Security-sensitive crates (`pctwin-gate`, `pctwin-pairing`, `pctwin-link`) get a second review
   in a fresh context.
 - Dependencies point one way: the safety gate, the journal and the record never depend on the

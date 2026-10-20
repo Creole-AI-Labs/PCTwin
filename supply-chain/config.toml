@@ -993,6 +993,11 @@ criteria = "safe-to-deploy"
 version = "0.3.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.objc2-security]]
+version = "0.3.2"
+criteria = "safe-to-deploy"
+notes = "Not reviewed and not compiled. Listed in Cargo.lock only because objc2-service-management 0.3.2 has an optional objc2-security dependency (for the deprecated SMJob authorization functions); pctwin-helper-os turns off its default features and does not enable it (cargo tree --target aarch64-apple-darwin -i objc2-security finds nothing). Exempted so cargo vet passes; drop when the lock no longer lists it."
+
 [[exemptions.objc2-ui-kit]]
 version = "0.3.2"
 criteria = "safe-to-deploy"

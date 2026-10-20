@@ -392,7 +392,7 @@ jobs:
         run: bash scripts/public-only.sh
       - name: Lint
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Unsafe fence (only pctwin-lease may loosen unsafe_code)
+      - name: Unsafe fence (only the listed functions in pctwin-lease and pctwin-helper-os)
         shell: bash
         run: bash scripts/unsafe-fence.sh
       - name: Unsafe fence self-test (it must catch attributes spread over lines)
@@ -532,6 +532,15 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Build the lab tools
         run: cargo build --locked -p pctwin-lab -p pctwin-labmove
+      # The administrator helper's system calls with a real second account, and the real prompt
+      # where it cannot ask anyone: Windows (UAC prompts are off on the runners) makes a
+      # throwaway account and checks the helper's pipe refuses it; Linux and macOS check a
+      # socket in a private folder refuses `nobody`; Linux runs pkexec with no polkit agent;
+      # macOS reads Service Management's state (registering needs a Developer ID signature).
+      - name: Helper system calls with a second account (pctwin-helper-os)
+        env:
+          PCTWIN_HELPER_OS_ADMIN_TESTS: "1"
+        run: cargo test --locked -p pctwin-helper-os -- --ignored --nocapture --test-threads=1
       - name: Move between two accounts (Linux and macOS)
         if: runner.os != 'Windows'
         # /tmp, not the runner's temp folder: that sits in the runner's home, which the two test
