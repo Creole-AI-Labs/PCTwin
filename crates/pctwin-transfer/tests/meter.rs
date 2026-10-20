@@ -122,7 +122,8 @@ fn plan(jobs: &[SendJob]) -> pctwin_transfer::Allowance {
 
 /// Every count is one of the steps, and they add up.
 fn adds_up(c: &StepCounts) -> bool {
-    c.waiting + c.copying + c.checking + c.copied + c.already_there + c.failed == c.total
+    c.waiting + c.copying + c.checking + c.copied + c.already_there + c.needs_action + c.failed
+        == c.total
 }
 
 fn counts(total: u64, step: Step) -> StepCounts {
@@ -136,6 +137,7 @@ fn counts(total: u64, step: Step) -> StepCounts {
         Step::Checking => c.checking = total,
         Step::Copied => c.copied = total,
         Step::AlreadyThere => c.already_there = total,
+        Step::NeedsAction => c.needs_action = total,
         Step::Failed => c.failed = total,
     }
     c
@@ -170,6 +172,35 @@ impl Ledger for Watching<'_> {
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         self.inner.applied(id, final_path)
+    }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: pctwin_journal::FillTag,
+        proof: pctwin_journal::Proof,
+    ) -> Result<(), JournalError> {
+        self.inner.filling(id, final_path, tag, proof)
+    }
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        self.inner.fill_made(id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), JournalError> {
+        self.inner.filled(id)
+    }
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        self.inner.fill_cleared(id, left)
+    }
+    fn committed_showing(
+        &self,
+        id: u64,
+        landed: Landed,
+        show: &pctwin_journal::Show,
+    ) -> Result<(), JournalError> {
+        self.inner.committed_showing(id, landed, show)
+    }
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
+        self.inner.shown(id, left, file)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.inner.committed(id, landed)
@@ -710,6 +741,35 @@ impl Ledger for NoVerified<'_> {
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         self.0.applied(id, final_path)
+    }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: pctwin_journal::FillTag,
+        proof: pctwin_journal::Proof,
+    ) -> Result<(), JournalError> {
+        self.0.filling(id, final_path, tag, proof)
+    }
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        self.0.fill_made(id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), JournalError> {
+        self.0.filled(id)
+    }
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        self.0.fill_cleared(id, left)
+    }
+    fn committed_showing(
+        &self,
+        id: u64,
+        landed: Landed,
+        show: &pctwin_journal::Show,
+    ) -> Result<(), JournalError> {
+        self.0.committed_showing(id, landed, show)
+    }
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
+        self.0.shown(id, left, file)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.0.committed(id, landed)

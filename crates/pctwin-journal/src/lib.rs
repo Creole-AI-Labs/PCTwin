@@ -48,7 +48,9 @@ use serde::{Deserialize, Serialize};
 ///   `Undo::Done`, with `UndoOutcome::Deleted` and `UndoOutcome::KeptAt`; and every PCTwin that
 ///   reads it honours the undo gate in the `gate` table. (The undo stages changed shape on 9
 ///   October 2026 without a new number: format 2 had never shipped, so no journal on any laptop
-///   holds the older shape. Once it ships, any change of shape needs a new number.) Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
+///   holds the older shape. Once it ships, any change of shape needs a new number.) The write
+///   steps `State::Filling` and `State::Filled` (a file filled in under its real name on a drive
+///   with no safe rename) joined it on 15 October 2026, still before it shipped. Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
 ///   and could allow undo after the wipe, so it must refuse this journal instead.
 /// - **1**: undo set copies aside or sent them to the Recycle Bin (`Undo::Aside`,
 ///   `UndoOutcome::Trashed`). Opening a format-1 journal that holds no undo record (of a file or
@@ -83,6 +85,12 @@ const UNDO_FOLDERS: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new(
 const BLOCKS: TableDefinition<(u64, u64), [u8; 32]> = TableDefinition::new("blocks");
 /// One-way gates. `undo`: absent while undo is open, [`CLOSED`] once the wipe has started.
 const GATE: TableDefinition<&str, u8> = TableDefinition::new("gate");
+/// What the person should know about a write, kept for good (a file PCTwin left at a name because
+/// it could not prove it its own): entry, then its notes in order, as plain words.
+const NOTES: TableDefinition<(u64, u32), &str> = TableDefinition::new("notes");
+/// Files filled in under their real names, committed but not yet shown: entry, then what showing
+/// it needs ([`Show`], as JSON). Kept until it is recorded shown.
+const SHOWING: TableDefinition<u64, &[u8]> = TableDefinition::new("showing");
 const UNDO_GATE: &str = "undo";
 const CLOSED: u8 = 1;
 
@@ -186,6 +194,17 @@ pub struct Born {
 }
 
 impl Born {
+    /// Whether a creation time read back now is this tag: the same time to the fraction of a
+    /// second, or that time moved by a whole number of quarter hours, up to a day and two hours
+    /// either way. FAT keeps local time, and macOS converts it with the offset in force when the
+    /// drive was mounted, so a change of time zone or summer time between two mounts moves every
+    /// time on the drive by the difference (every offset is a whole quarter hour). The checks of
+    /// the file's bytes that follow a tag stay exactly as strict.
+    pub fn same_tag(self, got: Born) -> bool {
+        let moved = got.secs - self.secs;
+        got.nanos == self.nanos && moved % 900 == 0 && moved.abs() <= 26 * 3600
+    }
+
     /// A birth time from the system's clock value.
     pub fn of(t: std::time::SystemTime) -> Self {
         match t.duration_since(std::time::UNIX_EPOCH) {
@@ -321,6 +340,75 @@ pub struct Landed {
     pub file: Option<FileId>,
 }
 
+/// How a file PCTwin made under its real name before it was complete is proven PCTwin's after a
+/// crash (security design notes, "Proving a file is PCTwin's, per drive", decided 15 October
+/// 2026). Nothing that cannot be proven PCTwin's is removed or adopted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Proof {
+    /// The drive keeps each file's identity for good (NTFS, APFS, ext4): the identity recorded
+    /// once the file was made.
+    StableId,
+    /// Identities change (FAT and exFAT after a remount): the creation time PCTwin gave the file
+    /// at once ([`FillTag::born`]); its checked temporary file is proven by the name the journal
+    /// gave it with the whole file's fingerprint.
+    Token,
+    /// The identity holds only while the drive stays mounted as it was: proof while PCTwin still
+    /// holds the file, none after a restart.
+    SameMountId,
+    /// Nothing proves it after a restart: left as it is and reported.
+    None,
+}
+
+impl Proof {
+    /// Whether this proof can ever be enough to remove a file after a restart. A creation-time
+    /// tag can be inherited on Windows: a file made at a name freed moments before gets the old
+    /// file's creation time ("file-name tunnelling"), so another program's file there would carry
+    /// PCTwin's tag. There the tag proves a file is PCTwin's only enough to finish it when its
+    /// bytes are the whole checked file, never to remove it. macOS and Linux do not tunnel names.
+    pub const fn proves_for_removal(self) -> bool {
+        match self {
+            Self::StableId => true,
+            Self::Token => !cfg!(windows),
+            Self::SameMountId | Self::None => false,
+        }
+    }
+}
+
+/// The tag given at once to a file being filled in under its real name, chosen and recorded
+/// before the file exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FillTag {
+    /// The creation time given to it: a value no ordinary file has, on a drive that keeps it
+    /// exactly. `None` where the drive cannot keep one.
+    pub born: Option<Born>,
+    /// Whether it was to be marked hidden until it is complete (where the drive holds that mark).
+    pub hidden: bool,
+}
+
+/// A file being filled in under its real name: where, how it is proven PCTwin's, and which file
+/// it is once it exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fill {
+    pub final_path: String,
+    /// The file made under the real name, recorded once it exists (`None` until then).
+    pub made: Option<FileId>,
+    pub tag: FillTag,
+    pub proof: Proof,
+}
+
+/// What showing a file filled in under its real name needs once it is committed (still hidden
+/// and tagged then): the fill (where, its tag, how it is proven PCTwin's), and the real dates it
+/// gets back, the modified time last.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Show {
+    pub fill: Fill,
+    /// The creation date of PCTwin's copy (the checked temporary file's).
+    pub created: Option<Born>,
+    /// The original's modified time, nanoseconds since 1970.
+    pub modified_ns: Option<i64>,
+}
+
 /// How far a write got.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "step")]
@@ -346,6 +434,24 @@ pub enum State {
         fingerprint: [u8; 32],
         file: Option<FileId>,
     },
+    /// A drive with no safe rename: the real name `fill.final_path` is created only if nothing has
+    /// it, tagged at once, then filled from the checked temporary file `temp` (security design
+    /// notes, "Drives with no safe rename"). Recorded before the file is made.
+    Filling {
+        temp: String,
+        fingerprint: [u8; 32],
+        /// The checked temporary file's identity.
+        file: Option<FileId>,
+        fill: Fill,
+    },
+    /// The file at the real name is complete, durable and read back against the fingerprint; its
+    /// modified time, showing it and committing remain.
+    Filled {
+        temp: String,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        fill: Fill,
+    },
     Committed {
         final_path: String,
         fingerprint: [u8; 32],
@@ -370,6 +476,8 @@ impl State {
             State::Staged { .. } => "staged",
             State::Verified { .. } => "verified",
             State::Applied { .. } => "applied",
+            State::Filling { .. } => "filling",
+            State::Filled { .. } => "filled",
             State::Committed { .. } => "committed",
             State::Existing { .. } => "existing",
             State::Failed { .. } => "failed",
@@ -994,6 +1102,8 @@ impl Journal {
             tx.open_table(UNDO).map_err(storage)?;
             tx.open_table(UNDO_FOLDERS).map_err(storage)?;
             tx.open_table(GATE).map_err(storage)?;
+            tx.open_table(NOTES).map_err(storage)?;
+            tx.open_table(SHOWING).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -1183,6 +1293,12 @@ impl Journal {
                     fingerprint,
                     file,
                     ..
+                }
+                | State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill: Fill { made: None, .. },
                 } => Some(State::Applied {
                     temp: temp.clone(),
                     final_path: final_path.into(),
@@ -1195,7 +1311,246 @@ impl Journal {
         )
     }
 
-    /// Finished, under the name it was applied with, as `landed`.
+    /// A drive with no safe rename: the real name `final_path` is about to be made only if free,
+    /// tagged with `tag` at once, and filled from the checked temporary file. Recorded before the
+    /// file is made; again with another name if something took this one first.
+    pub fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: FillTag,
+        proof: Proof,
+    ) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "filling",
+            |s| match s {
+                State::Verified {
+                    temp,
+                    fingerprint,
+                    file,
+                }
+                | State::Applied {
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
+                }
+                | State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill: Fill { made: None, .. },
+                } => Some(State::Filling {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                    fill: Fill {
+                        final_path: final_path.into(),
+                        made: None,
+                        tag,
+                        proof,
+                    },
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// The file being filled in now exists, as `made`.
+    pub fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "fill-made",
+            |s| match s {
+                State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill,
+                } if fill.made.is_none() => Some(State::Filling {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                    fill: Fill {
+                        made: Some(made),
+                        ..fill.clone()
+                    },
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// PCTwin no longer counts the file at the fill's real name as its own: it removed its own
+    /// partial copy, found nothing there, or left there a file it could not prove its own. Back to
+    /// the checked temporary file alone, to be named again. `left` says, in plain words, what was
+    /// left and where; it is kept for good in the same step ([`notes`](Self::notes)), so the
+    /// report and undo know of it however often recovery runs.
+    pub fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "fill-cleared",
+            |s| match s {
+                State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
+                }
+                | State::Filled {
+                    temp,
+                    fingerprint,
+                    file,
+                    ..
+                } => Some(State::Verified {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                }),
+                _ => None,
+            },
+            |tx, entry| match left {
+                Some(words) => add_note(tx, entry.id, words),
+                None => Ok(()),
+            },
+        )
+    }
+
+    /// A file filled in under its real name is committed while still hidden and tagged, as
+    /// `landed` (its modified time the original's, as it will be once shown), with what showing
+    /// it needs kept for good until [`shown`](Self::shown). Only from `Filled`. The copy is then
+    /// finished; showing it can no longer cost it its proof, since the tag goes only after this.
+    pub fn committed_showing(
+        &self,
+        id: u64,
+        landed: Landed,
+        show: &Show,
+    ) -> Result<(), JournalError> {
+        let bytes = serde_json::to_vec(show).map_err(storage)?;
+        self.step(
+            id,
+            "committed",
+            |s| match s {
+                State::Filled {
+                    fill: Fill { final_path, .. },
+                    fingerprint,
+                    ..
+                } => Some(State::Committed {
+                    final_path: final_path.clone(),
+                    fingerprint: *fingerprint,
+                    landed,
+                }),
+                _ => None,
+            },
+            |tx, entry| {
+                let mut table = tx.open_table(SHOWING).map_err(storage)?;
+                table.insert(entry.id, bytes.as_slice()).map_err(storage)?;
+                Ok(())
+            },
+        )
+    }
+
+    /// The committed file filled in under its name is shown (or there is nothing left PCTwin
+    /// may do to it: `left` then says, in plain words, what was left, kept for good). `file` is
+    /// its identity read after the show, which replaces the one recorded at the commit (on a Mac
+    /// the identity carries the creation date, given back last); `None` keeps that one.
+    pub fn shown(
+        &self,
+        id: u64,
+        left: Option<&str>,
+        file: Option<FileId>,
+    ) -> Result<(), JournalError> {
+        let tx = self.db.begin_write().map_err(storage)?;
+        {
+            let mut entries = tx.open_table(ENTRIES).map_err(storage)?;
+            let mut entry = read_entry(&entries, id)?;
+            let mut table = tx.open_table(SHOWING).map_err(storage)?;
+            let pending = table.remove(id).map_err(storage)?.is_some();
+            if !pending || !matches!(entry.state, State::Committed { .. }) {
+                return Err(JournalError::OutOfOrder {
+                    from: entry.state.name(),
+                    to: "shown",
+                });
+            }
+            drop(table);
+            if let (Some(file), State::Committed { landed, .. }) = (file, &mut entry.state) {
+                landed.file = Some(file);
+                write_entry(&mut entries, &entry)?;
+            }
+            if let Some(words) = left {
+                add_note(&tx, id, words)?;
+            }
+        }
+        tx.commit().map_err(storage)
+    }
+
+    /// Every committed file filled in under its name and not yet shown, with what showing it
+    /// needs, oldest first (recovery finishes them).
+    pub fn unshown(&self) -> Result<Vec<(Entry, Show)>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(SHOWING).map_err(storage)?;
+        let entries = tx.open_table(ENTRIES).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in table.iter().map_err(storage)? {
+            let (k, v) = row.map_err(storage)?;
+            let show: Show = serde_json::from_slice(v.value())
+                .map_err(|e| damaged(format!("a pending show: {e}")))?;
+            out.push((read_entry(&entries, k.value())?, show));
+        }
+        Ok(out)
+    }
+
+    /// What showing write `id`'s file still needs, if it is committed and not yet shown.
+    pub fn show_pending(&self, id: u64) -> Result<Option<Show>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(SHOWING).map_err(storage)?;
+        match table.get(id).map_err(storage)? {
+            Some(v) => serde_json::from_slice(v.value())
+                .map(Some)
+                .map_err(|e| damaged(format!("a pending show: {e}"))),
+            None => Ok(None),
+        }
+    }
+
+    /// What the person should know about write `id`, in the order it was noted.
+    pub fn notes(&self, id: u64) -> Result<Vec<String>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = tx.open_table(NOTES).map_err(storage)?;
+        let mut out = Vec::new();
+        for row in table.range((id, 0)..=(id, u32::MAX)).map_err(storage)? {
+            let (_, v) = row.map_err(storage)?;
+            out.push(v.value().to_string());
+        }
+        Ok(out)
+    }
+
+    /// The file being filled in is complete, durable and read back against the fingerprint.
+    pub fn filled(&self, id: u64) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "filled",
+            |s| match s {
+                State::Filling {
+                    temp,
+                    fingerprint,
+                    file,
+                    fill,
+                } => Some(State::Filled {
+                    temp: temp.clone(),
+                    fingerprint: *fingerprint,
+                    file: *file,
+                    fill: fill.clone(),
+                }),
+                _ => None,
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// Finished, under the name it was applied with (or filled in under), as `landed`.
     pub fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         self.step(
             id,
@@ -1203,6 +1558,11 @@ impl Journal {
             |s| match s {
                 State::Applied {
                     final_path,
+                    fingerprint,
+                    ..
+                }
+                | State::Filled {
+                    fill: Fill { final_path, .. },
                     fingerprint,
                     ..
                 } => Some(State::Committed {
@@ -1756,6 +2116,24 @@ pub trait Ledger {
         file: Option<FileId>,
     ) -> Result<(), JournalError>;
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError>;
+    /// See [`Journal::filling`].
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: FillTag,
+        proof: Proof,
+    ) -> Result<(), JournalError>;
+    /// See [`Journal::fill_made`].
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError>;
+    /// See [`Journal::filled`].
+    fn filled(&self, id: u64) -> Result<(), JournalError>;
+    /// See [`Journal::fill_cleared`].
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError>;
+    /// See [`Journal::committed_showing`].
+    fn committed_showing(&self, id: u64, landed: Landed, show: &Show) -> Result<(), JournalError>;
+    /// See [`Journal::shown`].
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError>;
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
@@ -1794,6 +2172,30 @@ impl Ledger for Journal {
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         Journal::applied(self, id, final_path)
+    }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: FillTag,
+        proof: Proof,
+    ) -> Result<(), JournalError> {
+        Journal::filling(self, id, final_path, tag, proof)
+    }
+    fn fill_made(&self, id: u64, made: FileId) -> Result<(), JournalError> {
+        Journal::fill_made(self, id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), JournalError> {
+        Journal::filled(self, id)
+    }
+    fn fill_cleared(&self, id: u64, left: Option<&str>) -> Result<(), JournalError> {
+        Journal::fill_cleared(self, id, left)
+    }
+    fn committed_showing(&self, id: u64, landed: Landed, show: &Show) -> Result<(), JournalError> {
+        Journal::committed_showing(self, id, landed, show)
+    }
+    fn shown(&self, id: u64, left: Option<&str>, file: Option<FileId>) -> Result<(), JournalError> {
+        Journal::shown(self, id, left, file)
     }
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError> {
         Journal::committed(self, id, landed)
@@ -1931,5 +2333,20 @@ fn write_entry(
     entries
         .insert(entry.id, bytes.as_slice())
         .map_err(storage)?;
+    Ok(())
+}
+
+/// Adds `words` to write `id`'s notes, in the transaction `tx`.
+fn add_note(tx: &redb::WriteTransaction, id: u64, words: &str) -> Result<(), JournalError> {
+    let mut table = tx.open_table(NOTES).map_err(storage)?;
+    let next = match table
+        .range((id, 0)..=(id, u32::MAX))
+        .map_err(storage)?
+        .next_back()
+    {
+        Some(row) => row.map_err(storage)?.0.value().1.saturating_add(1),
+        None => 0,
+    };
+    table.insert((id, next), words).map_err(storage)?;
     Ok(())
 }

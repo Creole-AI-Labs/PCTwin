@@ -3388,6 +3388,7 @@ dependencies = [
  "fs_at",
  "getrandom 0.4.3",
  "libproc",
+ "nix 0.31.3",
  "pctwin-gate",
  "pctwin-journal",
  "pctwin-lease",
@@ -3434,6 +3435,8 @@ name = "pctwin-lab"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "pctwin-record",
+ "pctwin-scan",
  "serde",
  "serde_json",
  "tempfile",
@@ -3570,6 +3573,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
+ "winapi-util",
 ]
 
 [[package]]
