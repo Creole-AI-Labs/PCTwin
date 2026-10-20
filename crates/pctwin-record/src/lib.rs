@@ -605,3 +605,25 @@ impl Record {
         }
     }
 }
+
+#[cfg(test)]
+mod name_room {
+    use super::*;
+
+    /// The text shown for a name that is not valid text holds exactly its length (a lossy
+    /// conversion may keep a third more room), as the scan inventory counts it.
+    #[test]
+    fn the_text_of_a_name_kept_exactly_holds_only_its_length() {
+        let mut bytes = vec![0xFF];
+        bytes.extend(std::iter::repeat_n(b'a', 1364));
+        let mut wide = vec![0xD800];
+        wide.extend(std::iter::repeat_n(0x61, 3999));
+        for name in [
+            ItemName::from_unix_bytes(&bytes),
+            ItemName::from_windows_wide(&wide),
+        ] {
+            assert!(name.exact().is_some());
+            assert_eq!(name.text.capacity(), name.text.len());
+        }
+    }
+}
