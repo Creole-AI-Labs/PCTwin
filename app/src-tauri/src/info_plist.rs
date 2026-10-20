@@ -1,0 +1,86 @@
+//! The Mac app's Info.plist additions (src-tauri/Info.plist, which `tauri build` merges into the
+//! bundle's own). Since macOS 15 an app must say why it talks to devices on the local network and
+//! name every Bonjour service it announces or looks for; without these keys a Mac cannot find the
+//! other laptop at all, and the permission question is never asked. CI also reads the keys back
+//! from the built PCTwin.app (ci.yml, "The Mac app declares the local network").
+
+use std::path::PathBuf;
+
+fn plist() -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Info.plist");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+        .replace("\r\n", "\n")
+}
+
+/// The XML element that follows `<key>name</key>`, whitespace trimmed.
+fn value_of(text: &str, name: &str) -> String {
+    let key = format!("<key>{name}</key>");
+    let start = text
+        .find(&key)
+        .unwrap_or_else(|| panic!("Info.plist has no {name}"))
+        + key.len();
+    let rest = text[start..].trim_start();
+    let tag = &rest[1..rest.find('>').expect("an element")];
+    let close = format!("</{tag}>");
+    let end = rest.find(&close).expect("the element closes") + close.len();
+    rest[..end].to_owned()
+}
+
+/// The `<string>` values inside `element`.
+fn strings(element: &str) -> Vec<String> {
+    element
+        .split("<string>")
+        .skip(1)
+        .map(|s| s.split("</string>").next().unwrap().trim().to_owned())
+        .collect()
+}
+
+/// A service type as Info.plist names it: without the `.local.` domain.
+fn bonjour_name(service_type: &str) -> &str {
+    service_type
+        .strip_suffix(".local.")
+        .expect("a .local. service")
+}
+
+#[test]
+fn the_mac_app_says_why_it_uses_the_local_network() {
+    let text = plist();
+    let why = value_of(&text, "NSLocalNetworkUsageDescription");
+    let why = strings(&why);
+    assert_eq!(why.len(), 1, "one plain sentence");
+    let why = &why[0];
+    assert!(why.starts_with("PCTwin "), "{why}");
+    assert!(why.len() > 30 && why.len() < 200, "{why}");
+}
+
+#[test]
+fn the_mac_app_names_every_service_it_announces_or_looks_for() {
+    let text = plist();
+    let services = strings(&value_of(&text, "NSBonjourServices"));
+    assert!(value_of(&text, "NSBonjourServices").starts_with("<array>"));
+    let want = [
+        // Pairing: the old laptop announces it, the new laptop looks for it.
+        bonjour_name(pctwin_discovery::SERVICE_TYPE),
+        // The connection doctor's check that this laptop hears its own announcement.
+        bonjour_name(pctwin_doctor::probe::CHECK_SERVICE),
+    ];
+    assert_eq!(services, want);
+    assert_eq!(want, ["_pctwin._tcp", "_pctwin-check._tcp"]);
+}
+
+#[test]
+fn the_plist_only_adds_keys_and_never_overrides_what_tauri_writes() {
+    // Tauri writes the name, identifier and version from tauri.conf.json; a second copy here
+    // could disagree with it.
+    let text = plist();
+    let keys: Vec<&str> = text
+        .split("<key>")
+        .skip(1)
+        .map(|s| s.split("</key>").next().unwrap())
+        .collect();
+    assert_eq!(
+        keys,
+        ["NSLocalNetworkUsageDescription", "NSBonjourServices"]
+    );
+}

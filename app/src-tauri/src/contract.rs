@@ -19,7 +19,7 @@ use pctwin_gate::{CheckedFrom, WhyMemory};
 use pctwin_journey::Problem;
 use serde_json::Value;
 
-use crate::pairing::{LabelView, NearbyView, NewView, OldView, ProblemView};
+use crate::pairing::{HeadsUp, LabelView, NearbyView, NewView, OldView, ProblemView};
 
 fn picked() -> LabelView {
     // Colour 4 and animal 0 are "blue" and "ant".
@@ -103,6 +103,10 @@ fn nearby() -> Vec<NearbyView> {
     ]
 }
 
+fn heads_ups() -> Vec<HeadsUp> {
+    vec![HeadsUp::LocalNetwork, HeadsUp::Firewall]
+}
+
 fn json(examples: impl serde::Serialize) -> Value {
     serde_json::to_value(examples).expect("examples serialise")
 }
@@ -116,6 +120,7 @@ fn families() -> Vec<(&'static str, Value)> {
         ("problem-view", json(problems())),
         ("nearby-view", json(nearby())),
         ("evidence", json(CheckedFrom::ALL)),
+        ("heads-up", json(heads_ups())),
     ]
 }
 
@@ -220,6 +225,12 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
         NewView::variant,
         NewView::VARIANTS,
     );
+    check(
+        "heads-up",
+        &heads_ups(),
+        HeadsUp::variant,
+        HeadsUp::VARIANTS,
+    );
 
     // Problems: one example per problem, each with its own key.
     let keys: BTreeSet<&str> = problems().iter().map(|p| p.key).collect();
@@ -264,6 +275,7 @@ fn calls() -> Value {
             { "name": "pairing_old_shuffle", "args": [] },
             { "name": "pairing_old_rename", "args": [["name", "Kitchen laptop"]] },
             { "name": "pairing_old_start_again", "args": [] },
+            { "name": "pairing_heads_up", "args": [["role", "old"]] },
             { "name": "pairing_stop", "args": [] },
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },

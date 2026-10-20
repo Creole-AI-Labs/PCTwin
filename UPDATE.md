@@ -8,6 +8,14 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Ready to use?** Not yet. Please don't move real files with it.
 - **Next:** saying everything on the screens in plain words, connecting the screens to the move itself, and finishing safe copying onto USB sticks and memory cards (FAT and exFAT drives).
 
+## 20 October 2026
+
+**Done**
+
+- **Clearer pairing when someone guesses codes.** After five wrong codes, the old laptop now says plainly that someone on this network tried wrong codes, suggests using your phone's hotspot instead, and waits for you to choose Start again.
+- **A fresh code after sleep.** If the old laptop sleeps while showing a code, that code stops working, and a new one shows the moment it wakes.
+- **No surprise questions.** Before pairing starts, PCTwin says what a Mac (finding devices on your network) or Windows Firewall is about to ask, and which answer lets your laptops find each other. If a Mac said no, PCTwin says where to switch it back on.
+
 ## 16 October 2026
 
 **Done**

@@ -1,9 +1,9 @@
 /** Pieces shared by the pairing screens: the Back and progress strip, the focus-taking heading, eyebrow, and problem notice. */
 import { Localized, useLocalization } from "@fluent/react";
 import { useEffect, useRef } from "react";
-import { Banner } from "../components/kit";
-import { ArrowBack } from "../icons";
-import type { Problem } from "../pairing";
+import { Banner, Button } from "../components/kit";
+import { ArrowBack, ArrowForward, Info } from "../icons";
+import { HEADS_UP_TEXT, markHeadsUpSeen, type HeadsUp, type Problem } from "../pairing";
 import "./pairing.css";
 
 /** Back (when there is somewhere to go) and the three connection dots; the active one shows the stage. */
@@ -66,5 +66,41 @@ export function ProblemNotice({ problem }: { problem: Problem }) {
         </Localized>
       </Banner>
     </div>
+  );
+}
+
+/**
+ * Before pairing starts: what the system is about to ask, and the answer that lets the laptops
+ * find each other, so its question is never a surprise. Continue starts pairing (and the question).
+ */
+export function HeadsUpStep({ eyebrow, notes, onContinue }: { eyebrow: string; notes: HeadsUp[]; onContinue: () => void }) {
+  return (
+    <>
+      <Eyebrow id={eyebrow} />
+      <Heading key="heads-up" id="pair-heads-up-title" />
+      {notes.map((n) => (
+        <div className="note" key={n.kind}>
+          <Info />
+          <Localized id={HEADS_UP_TEXT[n.kind]}>
+            <p className="note-text" />
+          </Localized>
+        </div>
+      ))}
+      <div className="pair-section">
+        <Button
+          variant="primary"
+          className="pair-block"
+          icon={<ArrowForward />}
+          onClick={() => {
+            markHeadsUpSeen(notes);
+            onContinue();
+          }}
+        >
+          <Localized id="pair-heads-up-continue">
+            <span />
+          </Localized>
+        </Button>
+      </div>
+    </>
   );
 }

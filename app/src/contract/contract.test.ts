@@ -6,7 +6,7 @@
  *   PCTWIN_WRITE_CONTRACT=1 cargo test -p pctwin-app contract
  */
 import { describe, expect, it } from "vitest";
-import { parseEvidence, parseLabelView, parseNearbyView, parseNewView, parseOldView, parseProblemView } from "../bridge";
+import { parseEvidence, parseHeadsUp, parseLabelView, parseNearbyView, parseNewView, parseOldView, parseProblemView } from "../bridge";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
 
@@ -18,6 +18,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "problem-view": parseProblemView,
   "nearby-view": parseNearbyView,
   evidence: parseEvidence,
+  "heads-up": parseHeadsUp,
 };
 
 const families = Object.entries(FILES).map(([path, examples]) => [path.replace(/^\.\/|\.json$/g, ""), examples] as const);

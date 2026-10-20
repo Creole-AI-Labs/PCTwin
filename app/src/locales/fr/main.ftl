@@ -171,6 +171,10 @@ ended-home = Retour à l’accueil
 
 pair-back = Retour
 pair-try-again = Réessayer
+pair-heads-up-title = Votre ordinateur peut vous poser une question.
+pair-heads-up-local-network = Votre Mac va demander si PCTwin peut trouver des appareils sur votre réseau local. Choisissez Autoriser, pour que vos deux ordinateurs portables puissent se trouver.
+pair-heads-up-firewall = Windows peut demander si PCTwin peut accepter des connexions. Choisissez Autoriser, pour que votre nouvel ordinateur portable puisse joindre celui-ci.
+pair-heads-up-continue = Continuer
 
 ## C03 Old laptop: show the code
 
@@ -206,8 +210,9 @@ pair-old-wait-body =
         [many] Cet essai n’a pas fonctionné. Un nouveau code apparaît dans { $seconds } secondes.
        *[other] Cet essai n’a pas fonctionné. Un nouveau code apparaît dans { $seconds } secondes.
     }
-pair-old-locked-title = Association arrêtée.
-pair-old-locked-body = Il y a eu trop d’essais erronés, l’association a donc été arrêtée pour protéger cet ordinateur portable. Rien n’a été partagé. Recommencez quand vous le souhaitez.
+pair-old-locked-title = Quelqu’un sur ce réseau a essayé de mauvais codes.
+pair-old-locked-body = Après cinq mauvais codes, l’association s’est arrêtée pour protéger cet ordinateur portable. Rien n’a été partagé. Si c’était vous, choisissez Recommencer pour obtenir un nouveau code.
+pair-old-locked-hotspot = Si vous ne savez pas qui c’était, connectez plutôt les deux ordinateurs portables au partage de connexion de votre téléphone, puis choisissez Recommencer.
 pair-old-start-again = Recommencer
 pair-old-timed-out = Aucun numéro n’a été choisi à temps, voici donc un nouveau code.
 pair-old-declined = Les numéros ne correspondaient pas, rien n’a donc été partagé. Voici un nouveau code.
@@ -277,6 +282,7 @@ pairing-different-version = Les deux ordinateurs portables n’ont pas la même 
 pairing-name-invalid = Ce nom ne peut pas être utilisé. Essayez un nom plus court, avec des lettres et des chiffres.
 pairing-no-network = Cet ordinateur portable n’est sur aucun réseau Wi-Fi ou filaire. Connectez-le, puis réessayez.
 pairing-choose-network = Cet ordinateur portable est sur plusieurs réseaux. Choisissez celui de votre nouvel ordinateur :
+pairing-local-network-refused = Votre Mac n’autorise pas PCTwin à trouver des ordinateurs portables sur ce réseau. Si votre Mac vient de vous le demander, choisissez Autoriser, puis réessayez. Sinon, ouvrez Réglages Système, choisissez Confidentialité et sécurité, puis Réseau local, activez PCTwin et réessayez.
 pairing-failed = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Réessayez.
 
 ## M06 Match people to their profiles (Who’s moving?)

@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "local-network"
+  },
+  {
+    "kind": "firewall"
+  }
+]

@@ -10,6 +10,8 @@
 #[cfg(test)]
 mod contract;
 #[cfg(test)]
+mod info_plist;
+#[cfg(test)]
 mod lockdown;
 mod pairing;
 
@@ -174,6 +176,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         pairing::pairing_old_shuffle,
         pairing::pairing_old_rename,
         pairing::pairing_old_start_again,
+        pairing::pairing_heads_up,
         pairing::pairing_stop,
         pairing::pairing_new_search,
         pairing::pairing_new_connect,

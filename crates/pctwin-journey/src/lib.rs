@@ -60,6 +60,8 @@ pctwin_types::listed_enum! {
         NoNetwork,
         #[error("choose the network the other laptop is on")]
         ChooseNetwork(Vec<String>),
+        #[error("the system may not be letting PCTwin use the local network")]
+        LocalNetworkRefused,
         #[error("pairing did not work")]
         Failed,
     }
@@ -84,6 +86,7 @@ impl Problem {
             Self::InvalidName => "pairing-name-invalid",
             Self::NoNetwork => "pairing-no-network",
             Self::ChooseNetwork(_) => "pairing-choose-network",
+            Self::LocalNetworkRefused => "pairing-local-network-refused",
             Self::Failed => "pairing-failed",
         }
     }
@@ -107,6 +110,7 @@ impl Problem {
             Self::InvalidName,
             Self::NoNetwork,
             Self::ChooseNetwork(Vec::new()),
+            Self::LocalNetworkRefused,
             Self::Failed,
         ]
     }

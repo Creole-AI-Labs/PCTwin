@@ -786,3 +786,117 @@ describe("new numbers and the checking state", () => {
     expect((tile(4) as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+describe("someone tried wrong codes, and the system's own questions", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("locked says someone on this network tried wrong codes, suggests a phone hotspot, and only Start again restarts", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "locked" });
+    expect(heading().textContent).toBe(text("pair-old-locked-title"));
+    expect(heading().textContent).toBe("Someone on this network tried wrong codes.");
+    expect(screen.getByText(withText(text("pair-old-locked-body")))).toBeTruthy();
+    expect(screen.getByText(withText(text("pair-old-locked-hotspot")))).toBeTruthy();
+    // No code is on screen while locked, and nothing restarts by itself.
+    expect(screen.queryByRole("group", { name: /\d \d \d/ })).toBeNull();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("pairing_old_start_again");
+    expect(await violations()).toEqual([]);
+    fireEvent.click(button("pair-old-start-again"));
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start_again");
+    await emit("pairing-old", { kind: "code", code: "654321", secondsLeft: 60 });
+    expect(heading().textContent).toBe(text("pair-old-title"));
+    noMissingText();
+  });
+
+  it("on a Mac, the old laptop says what the Mac will ask before it starts, and starts on Continue", async () => {
+    replies.pairing_heads_up = () => [{ kind: "local-network" }];
+    inApp(<PairOld onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-heads-up-title"));
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_heads_up", { role: "old" });
+    expect(screen.getByText(withText(text("pair-heads-up-local-network")))).toBeTruthy();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("pairing_old_start", expect.anything());
+    expect(await violations()).toEqual([]);
+    fireEvent.click(button("pair-heads-up-continue"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    noMissingText();
+  });
+
+  it("a note shown once is not shown again: the next start goes straight to the code", async () => {
+    replies.pairing_heads_up = () => [{ kind: "firewall" }];
+    inApp(<PairOld onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pair-heads-up-firewall")))).toBeTruthy();
+    });
+    fireEvent.click(button("pair-heads-up-continue"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    cleanup();
+    tauri.invoke.mockClear();
+    await renderOld();
+    expect(screen.queryByText(withText(text("pair-heads-up-firewall")))).toBeNull();
+  });
+
+  it("when the notes cannot be asked for, pairing starts as usual", async () => {
+    replies.pairing_heads_up = () => {
+      throw problem("pairing-failed");
+    };
+    await renderOld();
+    expect(heading().textContent).toBe(text("pair-old-title"));
+  });
+
+  it("an old laptop whose Mac refuses the local network says where to switch it on, and Try again starts again", async () => {
+    let refuse = true;
+    replies.pairing_old_start = () => {
+      if (refuse) throw problem("pairing-local-network-refused");
+    };
+    await renderOld();
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pairing-local-network-refused")))).toBeTruthy();
+    });
+    expect(text("pairing-local-network-refused")).toContain("Privacy & Security");
+    refuse = false;
+    tauri.invoke.mockClear();
+    fireEvent.click(button("pair-try-again"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    noMissingText();
+  });
+
+  it("on a Mac, the new laptop says what the Mac will ask before it looks", async () => {
+    replies.pairing_heads_up = () => [{ kind: "local-network" }];
+    replies.pairing_new_search = () => [];
+    inApp(<PairNew onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-heads-up-title"));
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_heads_up", { role: "new" });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("pairing_new_search");
+    fireEvent.click(button("pair-heads-up-continue"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
+    });
+    noMissingText();
+  });
+
+  it("a new laptop that found nothing because its Mac refuses the local network says so, with where to switch it on", async () => {
+    replies.pairing_new_search = () => {
+      throw problem("pairing-local-network-refused");
+    };
+    inApp(<PairNew onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-new-none-title"));
+    });
+    expect(screen.getByText(withText(text("pairing-local-network-refused")))).toBeTruthy();
+    expect(button("pair-new-search-again")).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    noMissingText();
+  });
+});

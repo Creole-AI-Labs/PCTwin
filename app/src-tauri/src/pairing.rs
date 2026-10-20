@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pctwin_discovery::{Found, Label};
+use pctwin_doctor::{Cause, Evidence, Role};
 use pctwin_journey::{NewJourney, OldJourney, OldUpdate, Problem, Serving, Waiting};
 use pctwin_link::{Link, LinkConfig};
 use pctwin_session::OldLaptop;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::{Mutex, mpsc};
@@ -408,6 +409,81 @@ fn config() -> LinkConfig {
     LinkConfig::default()
 }
 
+pctwin_types::listed_enum! {
+    /// A short note shown before pairing starts, so a question the system is about to ask never
+    /// comes as a surprise.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+    #[serde(tag = "kind", rename_all = "kebab-case")]
+    pub enum HeadsUp {
+        /// A Mac asks whether PCTwin may find devices on the local network (on both laptops:
+        /// announcing and finding both need it).
+        LocalNetwork,
+        /// Windows Firewall asks whether PCTwin may accept connections (on the old laptop, the
+        /// one that listens).
+        Firewall,
+    }
+}
+
+/// Which laptop the screens are about to start pairing as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PairRole {
+    Old,
+    New,
+}
+
+/// The systems whose questions differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum System {
+    Mac,
+    Windows,
+    Other,
+}
+
+impl System {
+    /// The system this app was built for.
+    pub fn this() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Mac
+        } else if cfg!(windows) {
+            Self::Windows
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// The notes to show before `role` starts pairing on `system`.
+pub fn heads_up(role: PairRole, system: System) -> Vec<HeadsUp> {
+    match (system, role) {
+        (System::Mac, _) => vec![HeadsUp::LocalNetwork],
+        (System::Windows, PairRole::Old) => vec![HeadsUp::Firewall],
+        (System::Windows, PairRole::New) | (System::Other, _) => Vec::new(),
+    }
+}
+
+/// Whether the connection doctor's rules take a refused send to the local-discovery group
+/// (`blocked`) on this system to mean the Mac's Local Network permission is off. A refusal also
+/// shows while the Mac's question is still waiting for an answer, which is why the words say both.
+pub fn local_network_refused(role: Role, blocked: Option<bool>, is_macos: bool) -> bool {
+    let evidence = Evidence {
+        multicast_send_blocked: blocked,
+        is_macos,
+        old_laptops_found: (role == Role::NewLaptop).then_some(0),
+        ..Evidence::default()
+    };
+    pctwin_doctor::diagnose(&evidence, role)
+        .findings
+        .iter()
+        .any(|f| f.cause == Cause::MacLocalNetworkDenied)
+}
+
+/// [`local_network_refused`] on this laptop. Only a Mac is asked (elsewhere nothing is sent).
+fn local_network_refused_here(role: Role) -> bool {
+    cfg!(target_os = "macos")
+        && local_network_refused(role, pctwin_doctor::probe::multicast_send_blocked(), true)
+}
+
 /// Old laptop: starts pairing with a new random label, on `network` (the one the person chose)
 /// or on the likely Wi-Fi. When it cannot tell which network, the problem lists them. Only when
 /// this laptop is doing nothing in pairing: leave first (`pairing_stop`).
@@ -423,6 +499,10 @@ pub async fn pairing_old_start<R: Runtime>(
     state
         .begin_old(
             async {
+                // Without the Mac's Local Network permission, no new laptop could find this one.
+                if local_network_refused_here(Role::OldLaptop) {
+                    return Err(Problem::LocalNetworkRefused);
+                }
                 let label = Label::random().map_err(|_| Problem::Failed)?;
                 match network {
                     Some(name) => {
@@ -488,6 +568,12 @@ pub async fn pairing_old_start_again(state: State<'_, AppPairing>) -> Result<(),
     Ok(())
 }
 
+/// Either laptop: the notes to show before starting pairing as `role` on this system.
+#[tauri::command]
+pub fn pairing_heads_up(role: PairRole) -> Vec<HeadsUp> {
+    heads_up(role, System::this())
+}
+
 /// Either laptop: leaves pairing (the old laptop stops listening and announcing; the new laptop
 /// stops waiting for an approval; a paired link not yet used is let go).
 #[tauri::command]
@@ -502,6 +588,10 @@ pub async fn pairing_new_search(
     state: State<'_, AppPairing>,
 ) -> Result<Vec<NearbyView>, ProblemView> {
     let found = NewJourney::new(config()).search(SEARCH_WAIT).await?;
+    // Finding nothing, on a Mac that refuses local discovery: say why, and where to fix it.
+    if found.is_empty() && local_network_refused_here(Role::NewLaptop) {
+        return Err(Problem::LocalNetworkRefused.into());
+    }
     let views = nearby_views(&found);
     *state.found.lock().await = found;
     Ok(views)
@@ -1269,5 +1359,70 @@ mod tests {
             serde_json::to_value(NewView::Lost).unwrap(),
             serde_json::json!({ "kind": "lost" })
         );
+    }
+
+    #[test]
+    fn a_mac_explains_the_local_network_question_on_both_laptops() {
+        for role in [PairRole::Old, PairRole::New] {
+            assert_eq!(heads_up(role, System::Mac), vec![HeadsUp::LocalNetwork]);
+        }
+    }
+
+    #[test]
+    fn windows_explains_the_firewall_question_only_where_the_laptop_listens() {
+        assert_eq!(
+            heads_up(PairRole::Old, System::Windows),
+            vec![HeadsUp::Firewall]
+        );
+        assert!(heads_up(PairRole::New, System::Windows).is_empty());
+        for role in [PairRole::Old, PairRole::New] {
+            assert!(heads_up(role, System::Other).is_empty());
+        }
+    }
+
+    #[test]
+    fn this_system_gets_its_own_notes() {
+        let want = if cfg!(target_os = "macos") {
+            System::Mac
+        } else if cfg!(windows) {
+            System::Windows
+        } else {
+            System::Other
+        };
+        assert_eq!(System::this(), want);
+        assert_eq!(
+            pairing_heads_up(PairRole::Old),
+            heads_up(PairRole::Old, want)
+        );
+    }
+
+    #[test]
+    fn heads_up_notes_reach_the_screens_by_kind() {
+        assert_eq!(
+            serde_json::to_value(heads_up(PairRole::Old, System::Mac)).unwrap(),
+            serde_json::json!([{ "kind": "local-network" }])
+        );
+        assert_eq!(
+            serde_json::to_value(HeadsUp::Firewall).unwrap(),
+            serde_json::json!({ "kind": "firewall" })
+        );
+        let role: PairRole = serde_json::from_value(serde_json::json!("new")).unwrap();
+        assert_eq!(role, PairRole::New);
+        assert!(serde_json::from_value::<PairRole>(serde_json::json!("both")).is_err());
+    }
+
+    #[test]
+    fn a_refused_send_on_a_mac_means_the_local_network_permission() {
+        use pctwin_doctor::Role;
+        for role in [Role::OldLaptop, Role::NewLaptop] {
+            assert!(local_network_refused(role, Some(true), true));
+            // Sending works, or could not be told: never blamed on the permission.
+            assert!(!local_network_refused(role, Some(false), true));
+            assert!(!local_network_refused(role, None, true));
+            // Only a Mac has the permission.
+            assert!(!local_network_refused(role, Some(true), false));
+        }
+        let p = ProblemView::from(Problem::LocalNetworkRefused);
+        assert_eq!(p.key, "pairing-local-network-refused");
     }
 }

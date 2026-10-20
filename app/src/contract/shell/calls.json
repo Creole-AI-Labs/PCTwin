@@ -71,6 +71,15 @@
       "name": "pairing_old_start_again"
     },
     {
+      "args": [
+        [
+          "role",
+          "old"
+        ]
+      ],
+      "name": "pairing_heads_up"
+    },
+    {
       "args": [],
       "name": "pairing_stop"
     },

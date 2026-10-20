@@ -38,6 +38,12 @@ export type NewEvent = { kind: "paired" } | { kind: "problem"; problem: Problem 
 
 export type Nearby = { index: number; label: Label; sameLabelNearby: boolean };
 
+/** A note shown before pairing starts: a question this system is about to ask (`HeadsUp`). */
+export type HeadsUp = { kind: "local-network" } | { kind: "firewall" };
+
+/** Which laptop the screens are about to start pairing as. */
+export type PairRole = "old" | "new";
+
 /** What anything unexpected becomes: the generic "something went wrong, try again" text. */
 export const FAILED: Problem = { key: "pairing-failed", networks: [] };
 
@@ -154,6 +160,19 @@ export function parseNearbyList(value: unknown): Nearby[] | null {
   return list.every((n): n is Nearby => n !== null) ? list : null;
 }
 
+/** One note to show before pairing starts (`HeadsUp`). */
+export function parseHeadsUp(value: unknown): HeadsUp | null {
+  const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
+  return (kind === "local-network" || kind === "firewall") && exactly(value, ["kind"]) ? { kind } : null;
+}
+
+/** The notes' reply: every entry must parse, or none is used. */
+export function parseHeadsUpList(value: unknown): HeadsUp[] | null {
+  if (!Array.isArray(value)) return null;
+  const list = (value as unknown[]).map(parseHeadsUp);
+  return list.every((n): n is HeadsUp => n !== null) ? list : null;
+}
+
 /** The number the new laptop shows (a Rust `u8`). */
 export function parseShownNumber(value: unknown): number | null {
   return isCount(value, 255) ? value : null;
@@ -204,6 +223,7 @@ export const pairingOldShuffle = () => run("pairing_old_shuffle");
 export const pairingOldRename = (name: string) => run("pairing_old_rename", { name });
 export const pairingOldStartAgain = () => run("pairing_old_start_again");
 export const pairingStop = () => run("pairing_stop");
+export const pairingHeadsUp = (role: PairRole) => ask("pairing_heads_up", parseHeadsUpList, { role });
 export const pairingNewSearch = () => ask("pairing_new_search", parseNearbyList);
 export const pairingNewConnect = (index: number, code: string) => ask("pairing_new_connect", parseShownNumber, { index, code });
 

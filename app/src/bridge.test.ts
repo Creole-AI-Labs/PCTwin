@@ -7,6 +7,7 @@ import {
   FAILED,
   listenPairingNew,
   listenPairingOld,
+  pairingHeadsUp,
   pairingNewConnect,
   pairingNewSearch,
   pairingOldDecline,
@@ -111,6 +112,16 @@ describe("nothing unchecked reaches a screen", () => {
     expect(toProblem(await rejectionOf(pairingNewConnect(0, "123456")))).toEqual(FAILED);
   });
 
+  it("a notes reply is used only when every note has the engine's shape", async () => {
+    tauri.invoke.mockResolvedValueOnce([{ kind: "local-network" }, { kind: "firewall" }]);
+    await expect(pairingHeadsUp("new")).resolves.toEqual([{ kind: "local-network" }, { kind: "firewall" }]);
+    expect(tauri.invoke).toHaveBeenLastCalledWith("pairing_heads_up", { role: "new" });
+    for (const wrong of [[{ kind: "local-network" }, { kind: "something-new" }], [{ kind: "firewall", more: 1 }], { kind: "firewall" }, null]) {
+      tauri.invoke.mockResolvedValueOnce(wrong);
+      expect(toProblem(await rejectionOf(pairingHeadsUp("old"))), JSON.stringify(wrong)).toEqual(FAILED);
+    }
+  });
+
   it("the shown number is refused above 255, the largest the engine can send", async () => {
     tauri.invoke.mockResolvedValueOnce(255);
     await expect(pairingNewConnect(0, "123456")).resolves.toBe(255);
@@ -131,7 +142,7 @@ describe("nothing unchecked reaches a screen", () => {
 
 describe("the engine's names (contract/shell/calls.json, written by the engine)", () => {
   it("every command is called by its own name with exactly its own arguments", async () => {
-    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "pairing_new_search" ? [] : command === "pairing_new_connect" ? 42 : null));
+    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "pairing_new_search" || command === "pairing_heads_up" ? [] : command === "pairing_new_connect" ? 42 : null));
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     try {
       await setWindowMode("mini");
@@ -142,6 +153,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingOldShuffle();
       await pairingOldRename("Kitchen laptop");
       await pairingOldStartAgain();
+      await pairingHeadsUp("old");
       await pairingStop();
       await pairingNewSearch();
       await pairingNewConnect(0, "123456");

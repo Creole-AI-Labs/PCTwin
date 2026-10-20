@@ -8,7 +8,8 @@
 //!    and an odd last digit, so the receiver can name which live code it holds
 //!    ([`PairingCode::parity`], [`RotatingSender::message_1_for`]) at the cost of one bit. Each code carries a random
 //!    session tag in the messages, so a reply is matched to the code it was made from and a stray
-//!    reply never burns the current code.
+//!    reply never burns the current code. After the laptop sleeps, every code shown before is
+//!    retired and a fresh one shows at once ([`WAKE_GAP`]).
 //! 2. Each code gets exactly one attempt. Failed attempts are budgeted: after each failure the
 //!    sender pauses before showing a new code (1, 2, 4, 8 seconds), and after
 //!    [`MAX_FAILED_ATTEMPTS`] failures in a row pairing locks until the person on the sender
@@ -62,7 +63,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 use std::ops::RangeInclusive;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
@@ -84,6 +85,10 @@ pub const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(180);
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Failed attempts in a row before pairing locks until the person on the sender starts again.
 pub const MAX_FAILED_ATTEMPTS: u32 = 5;
+/// How far the calendar clock may run ahead of the sender's own clock between two looks before
+/// the sender takes it that the laptop slept (and retires the codes shown before). `Instant` does
+/// not count sleep on every system; the calendar clock does.
+pub const WAKE_GAP: Duration = Duration::from_secs(5);
 /// Largest pairing message accepted, in bytes.
 pub const MAX_MESSAGE_LEN: usize = 512;
 /// Range of the match number shown during confirmation.
@@ -1113,6 +1118,44 @@ pub struct RotatingSender {
     failures: u32,
     blocked_until: Option<Instant>,
     locked: bool,
+    wake: WakeWatch,
+}
+
+/// The calendar clock the sender compares its own clock with to notice sleep.
+type WallClock = Box<dyn Fn() -> SystemTime + Send>;
+
+/// Notices that the laptop slept: between two looks, the calendar clock (which counts sleep) moved
+/// on more than [`WAKE_GAP`] beyond the sender's own clock (which may not). A calendar clock set
+/// back, or the sender's clock running ahead, is never taken for sleep. A calendar clock set
+/// forward by hand is, which only costs a fresh code.
+struct WakeWatch {
+    wall: WallClock,
+    last: Instant,
+    last_wall: SystemTime,
+}
+
+impl WakeWatch {
+    fn new(now: Instant, wall: WallClock) -> Self {
+        let last_wall = wall();
+        Self {
+            wall,
+            last: now,
+            last_wall,
+        }
+    }
+
+    /// Looks at both clocks at `now`; true if the laptop slept since the last look.
+    fn slept(&mut self, now: Instant) -> bool {
+        let wall_now = (self.wall)();
+        let own = now.saturating_duration_since(self.last);
+        // A calendar clock set back gives no gap (and becomes the new baseline).
+        let calendar = wall_now
+            .duration_since(self.last_wall)
+            .unwrap_or(Duration::ZERO);
+        self.last = self.last.max(now);
+        self.last_wall = wall_now;
+        calendar > own.saturating_add(WAKE_GAP)
+    }
 }
 
 struct SenderEntry {
@@ -1136,14 +1179,23 @@ impl SenderEntry {
 }
 
 impl RotatingSender {
-    /// Creates the first code at time `now`.
+    /// Creates the first code at time `now`, watching the system's calendar clock for sleep.
     pub fn new(now: Instant) -> Result<Self, PairingError> {
+        Self::with_wall_clock(now, SystemTime::now)
+    }
+
+    /// [`new`](Self::new) with the calendar clock to compare against (tests move it by hand).
+    pub fn with_wall_clock(
+        now: Instant,
+        wall: impl Fn() -> SystemTime + Send + 'static,
+    ) -> Result<Self, PairingError> {
         Ok(Self {
             current: SenderEntry::new(now, 0)?,
             previous: None,
             failures: 0,
             blocked_until: None,
             locked: false,
+            wake: WakeWatch::new(now, Box::new(wall)),
         })
     }
 
@@ -1201,14 +1253,25 @@ impl RotatingSender {
         self.failures
     }
 
-    /// Advances to time `now`: ends a finished cool-down with a fresh code, replaces the code
-    /// when its minute is up, and forgets a previous code once its grace period ends.
-    /// Returns `true` if a new code is now showing.
+    /// Advances to time `now`: after the laptop slept, retires every code shown before (a fresh
+    /// one shows at once, or when a pause ends); ends a finished cool-down with a fresh code,
+    /// replaces the code when its minute is up, and forgets a previous code once its grace period
+    /// ends. Returns `true` if a new code is now showing.
     pub fn tick(&mut self, now: Instant) -> Result<bool, PairingError> {
+        let slept = self.wake.slept(now);
         if self.locked {
             return Ok(false);
         }
         let mut rotated = false;
+        if slept {
+            // Both live codes were on screen before the sleep: neither may be used after it.
+            self.previous = None;
+            if self.blocked_until.is_none() {
+                // Nothing else is live now, so any even/odd will do; differ from the retired one.
+                self.current = SenderEntry::new(now, 1 - self.current.code.parity())?;
+                rotated = true;
+            }
+        }
         if let Some(until) = self.blocked_until {
             if now < until {
                 return Ok(false);

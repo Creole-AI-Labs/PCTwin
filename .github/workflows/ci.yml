@@ -425,6 +425,21 @@ jobs:
             Linux) bundles=deb ;;
           esac
           pnpm tauri build --ci --bundles "$bundles"
+      # The Mac app as built must carry the Local Network keys (src-tauri/Info.plist, merged by
+      # `tauri build`): without them macOS 15 lets it find no other laptop and never asks.
+      - name: The Mac app declares the local network
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          plist="$(ls -d target/release/bundle/macos/*.app)/Contents/Info.plist"
+          why="$(plutil -extract NSLocalNetworkUsageDescription raw -o - "$plist")"
+          echo "why: $why"
+          [ -n "$why" ]
+          services="$(plutil -extract NSBonjourServices json -o - "$plist")"
+          echo "services: $services"
+          [ "$services" = '["_pctwin._tcp","_pctwin-check._tcp"]' ]
+          # Tauri's own keys are still there.
+          [ "$(plutil -extract CFBundleIdentifier raw -o - "$plist")" = com.creoleailabs.pctwin ]
       # Phase 0 exit gate, "the blank app opens": the built app starts, its window loads the
       # screens, and it quits by itself (PCTWIN_SMOKE_TEST); a crash or a hang fails here.
       - name: The app opens
