@@ -846,7 +846,7 @@ version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libc]]
-version = "0.2.190"
+version = "0.2.191"
 criteria = "safe-to-deploy"
 
 [[exemptions.libdbus-sys]]
@@ -1137,12 +1137,8 @@ criteria = "safe-to-deploy"
 version = "6.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand]]
-version = "0.9.5"
-criteria = "safe-to-run"
-
 [[exemptions.redb]]
-version = "4.3.0"
+version = "4.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
@@ -1282,7 +1278,7 @@ version = "0.4.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha2]]
-version = "0.11.0"
+version = "0.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.signal-hook]]
@@ -1349,6 +1345,10 @@ criteria = "safe-to-deploy"
 version = "0.12.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.static_vcruntime]]
+version = "3.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.string_cache]]
 version = "0.9.0"
 criteria = "safe-to-deploy"
@@ -1362,7 +1362,7 @@ version = "1.4.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.swift-rs]]
-version = "1.0.8"
+version = "1.0.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
@@ -1410,7 +1410,7 @@ version = "2.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tauri-build]]
-version = "2.7.1"
+version = "2.7.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tauri-codegen]]
@@ -1426,7 +1426,7 @@ version = "2.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tauri-plugin-opener]]
-version = "2.7.0"
+version = "2.7.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tauri-plugin-window-state]]
@@ -1442,7 +1442,7 @@ version = "2.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tauri-utils]]
-version = "2.10.1"
+version = "2.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tauri-winres]]
@@ -1490,7 +1490,7 @@ version = "1.13.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio]]
-version = "1.53.2"
+version = "1.53.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-macros]]
@@ -1918,15 +1918,15 @@ version = "1.0.23"
 criteria = "safe-to-deploy"
 
 [[exemptions.zstd]]
-version = "0.13.3"
+version = "0.14.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.zstd-safe]]
-version = "7.3.0"
+version = "8.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.zstd-sys]]
-version = "2.1.0+zstd.1.5.7"
+version = "2.1.2+zstd.1.5.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.zvariant]]
