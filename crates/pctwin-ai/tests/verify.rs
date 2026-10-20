@@ -120,6 +120,16 @@ fn crafted_app_names_are_cut_and_lose_hidden_lines() {
     assert!(clean.chars().count() <= 120);
 }
 
+/// Text that displays one way and reads another (a right-to-left override, zero-width
+/// characters, invisible tag letters) is removed before the model sees it; letters of any script
+/// stay (found by the how-and-why walk, 20 October 2026).
+#[test]
+fn invisible_formatting_in_app_names_is_removed() {
+    let sneaky = "Notes\u{202E}txt.exe\u{200B}\u{2066}x\u{2069}\u{FEFF}\u{E0041}\u{E0042}";
+    assert_eq!(clean_clue(sneaky), "Notestxt.exex");
+    assert_eq!(clean_clue("Café 写真 مرحبا"), "Café 写真 مرحبا");
+}
+
 #[test]
 fn without_a_model_nothing_is_suggested_and_nothing_breaks() {
     let answer = NoModel.suggest(&clues()).unwrap();

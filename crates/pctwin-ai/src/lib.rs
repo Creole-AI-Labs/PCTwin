@@ -39,13 +39,35 @@ pub struct Clues {
     pub apps: Vec<AppClue>,
 }
 
-/// Cuts clue text short and drops control characters, so a crafted app name cannot hide extra
-/// lines or markup in what the model reads.
+/// Cuts clue text short and drops control characters and invisible formatting characters
+/// (direction overrides and isolates, zero-width spaces and joiners, the byte-order mark, tag
+/// characters), so a crafted app name cannot hide extra lines, markup, or text a person reading
+/// the clue would not see.
 pub fn clean_clue(text: &str) -> String {
     text.chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !is_invisible_format(*c))
         .take(MAX_CLUE)
         .collect()
+}
+
+/// Unicode format characters that change how text displays or hide text: the soft hyphen, the
+/// Arabic letter mark, the Mongolian vowel separator, zero-width space, non-joiner and joiner,
+/// the left-to-right and right-to-left marks, embeddings, overrides and isolates, the word joiner
+/// and invisible operators, the byte-order mark, interlinear annotations and tag characters.
+fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
 }
 
 impl Clues {
