@@ -23,7 +23,9 @@
 //!   the moment a folder is defined. And before anything is copied, the reader works out what
 //!   each folder and each item will take once read (every part of its path, every name, its
 //!   owner and place) and refuses a page whose share passes [`MAX_PAGE_HELD`], or an inventory
-//!   whose whole passes [`MAX_HELD`]. The writer ends a page early by the same count, so an
+//!   whose whole passes [`MAX_HELD`]. Every allocation is charged by its size through one
+//!   function, more than the Windows, macOS and Linux allocators take, so the count is an upper
+//!   bound on what is held, not an estimate. The writer ends a page early by the same count, so an
 //!   honest laptop never meets the page limit. (A few hundred kilobytes of nested folders once
 //!   read as gigabytes, since every item carries its whole path: found by a fresh-context review,
 //!   20 October 2026. Capping path parts and name bytes alone still let a 0.5 MB page take
@@ -58,27 +60,24 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// Most memory one page's folders and items may take once read, as the reader counts it.
 /// An ordinary page of 10,000 files takes about 10 MB.
 pub const MAX_PAGE_HELD: u64 = 32 * 1024 * 1024;
-/// Most memory a whole inventory may take once read: between 850,000 and 900,000 files eight
-/// folders deep (measured 21 October 2026: 0.71 GB requested for 850,000), and at worst 1.35 GB
-/// of process memory (peak commit on Windows, measured with hostile inventories of every shape,
-/// names that are not valid text and the longest exact Windows names the heaviest), less than
-/// move protocol 2 allowed (1.5 GB). Received pages kept on disk (Engineering Plan 9.11, step C) will lift
-/// the count of files without raising this.
+/// Most memory a whole inventory may take once read, as the reader counts it. The count is an
+/// upper bound on what the allocator takes (see [`alloc_held`]), so the reader never holds more
+/// than this for the items and folders it has read, plus one page's bytes and its own fixed
+/// running room. A CI step measures it on Windows, macOS and Linux
+/// (`scripts/inventory-memory.py`). An honest laptop with files eight folders deep fits 750,000
+/// files (800,000 are refused; measured 21 October 2026). Received pages kept on disk
+/// (Engineering Plan 9.11, step C) will lift the count of files without raising this.
 pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
 /// What an item takes before its names: the item itself, three times over (a list that grows
 /// as pages arrive holds up to twice its items, and three times for the moment it moves), and
 /// its ID in the reader's set. Fixed numbers rather than this build's type sizes, so two PCTwin
-/// versions count alike; a test checks they cover the real sizes. These costs and the two limits are part of the format: the
-/// writer splits pages by them, so changing any needs a new [`INVENTORY_FORMAT`].
-const ITEM_COST: u64 = 448 + ALLOC;
-/// What each part of a path takes before its name's bytes.
+/// versions count alike; a test checks they cover the real sizes. These costs, [`alloc_held`]
+/// and the two limits are part of the format: the writer splits pages by them, so changing any
+/// needs a new [`INVENTORY_FORMAT`].
+const ITEM_COST: u64 = 448;
+/// What each part of a path takes in the path's list, before its name's bytes.
 const NAME_COST: u64 = 64;
-/// What each separate allocation costs beyond the bytes asked for: the allocator's own record
-/// and rounding (about 18 bytes measured on Windows; Linux's smallest block is 32 bytes for any
-/// request up to 24). Counted for every name, every exact form, every path, every copy of an
-/// owner or a place, and every folder key. The item's own cost carries its path's.
-const ALLOC: u64 = 32;
-/// What a folder takes in the reader before its name's bytes: the folder and its key, three
+/// What a folder takes in the reader before its name and key: the folder and its key, three
 /// times over, as the lists and the set that hold them grow.
 const FOLDER_COST: u64 = 384;
 /// Most owners and most places in one inventory.
@@ -197,50 +196,56 @@ fn label(s: &str) -> Result<(), RecordError> {
 
 // ---------------------------------------------------------------- what is held
 
-/// The bytes a name holds: its text and, when kept, its exact form.
+/// What one allocation of `n` bytes may take from the allocator, counted on the side of too
+/// much. Every separate allocation the reader makes (a name's text, its exact form, a copy of an
+/// owner or a place, a folder's key, an item's path) is counted through this one function:
+/// - a quarter more than asked: Windows keeps up to 17% more for blocks of 1 to 16 KB;
+/// - or, past 1,008 bytes, the next multiple of 512 (macOS's blocks of that size), and below it
+///   the next multiple of 16;
+/// - and 32 bytes more for the allocator's own record (Linux's smallest block is 32 bytes).
+fn alloc_held(n: u64) -> u64 {
+    if n == 0 {
+        return 0;
+    }
+    let quantum = if n > 1008 { 512 } else { 16 };
+    (n + n / 4).max(n.div_ceil(quantum) * quantum) + 32
+}
+
+/// What a name holds: its text and, when kept, its exact form, each its own allocation.
 fn name_heap(n: &ItemName) -> u64 {
     let exact = match n.exact() {
         None => 0,
-        Some(RawName::Unix(b)) => b.len() as u64 + ALLOC,
-        Some(RawName::Windows(w)) => 2 * w.len() as u64 + ALLOC,
+        Some(RawName::Unix(b)) => alloc_held(b.len() as u64),
+        Some(RawName::Windows(w)) => alloc_held(2 * w.len() as u64),
     };
-    held_text(n.display()) + exact
+    alloc_held(n.display().len() as u64) + exact
 }
 
-/// The bytes a copied text holds: none when empty, else its length and one allocation.
-fn held_text(s: &str) -> u64 {
-    if s.is_empty() {
-        0
-    } else {
-        s.len() as u64 + ALLOC
-    }
-}
-
-/// The bytes each item's copy of this owner holds.
+/// What each item's copy of this owner holds.
 fn owner_heap(o: &Owner) -> u64 {
     match o {
-        Owner::Person { account_id } => held_text(account_id),
+        Owner::Person { account_id } => alloc_held(account_id.len() as u64),
         Owner::Shared | Owner::System => 0,
     }
 }
 
-/// The bytes each item's copy of this place holds.
+/// What each item's copy of this place holds.
 fn place_heap(p: &Place) -> u64 {
     match &p.storage {
-        Storage::OtherDrive { drive } => held_text(drive),
+        Storage::OtherDrive { drive } => alloc_held(drive.len() as u64),
         Storage::SystemDrive | Storage::Cloud { .. } => 0,
     }
 }
 
 /// What a folder takes in the reader: itself, its name, and its key (the name as written).
 fn folder_held(name: &ItemName, written: usize) -> u64 {
-    FOLDER_COST + name_heap(name) + written as u64 + ALLOC
+    FOLDER_COST + name_heap(name) + alloc_held(written as u64)
 }
 
 /// What an item takes once read: itself, its owner and place, and every part of its path.
 /// `chain` is what the names of its folders hold.
 fn item_held(owner: u64, place: u64, depth: usize, chain: u64, name: &ItemName) -> u64 {
-    ITEM_COST + owner + place + depth as u64 * NAME_COST + chain + name_heap(name)
+    ITEM_COST + owner + place + alloc_held(depth as u64 * NAME_COST) + chain + name_heap(name)
 }
 
 /// Adds `cost` to the page's and the whole inventory's count, refusing either past its limit.
@@ -1051,6 +1056,58 @@ mod tests {
         assert!(3 * size_of::<Item>() + 2 * size_of::<ItemId>() <= ITEM_COST as usize);
         assert!(size_of::<ItemName>() <= NAME_COST as usize);
         assert!(3 * (size_of::<Folder>() + size_of::<FolderKey>() + 1) <= FOLDER_COST as usize);
+    }
+
+    /// The allocation charge: never less than Windows (measured: 8,000 bytes took 9,366 and
+    /// 10,000 took 11,678), macOS (blocks past 1,008 bytes in multiples of 512) or Linux (32
+    /// bytes at the least) take.
+    #[test]
+    fn an_allocation_is_charged_at_least_what_any_system_takes() {
+        assert_eq!(alloc_held(0), 0);
+        assert_eq!(alloc_held(1), 48);
+        assert_eq!(alloc_held(1008), 1292);
+        assert_eq!(alloc_held(1025), 1568);
+        assert!(alloc_held(8000) >= 9366);
+        assert!(alloc_held(10_000) >= 11_678);
+        for n in 1..20_000u64 {
+            let got = alloc_held(n);
+            assert!(got > n * 117 / 100 && got >= 32, "{n}");
+            if n > 1008 {
+                assert!(got >= n.div_ceil(512) * 512, "{n}");
+            }
+        }
+    }
+
+    /// Every separate allocation is charged, each through the one function.
+    #[test]
+    fn every_allocation_of_a_name_an_owner_a_place_a_folder_and_a_path_is_charged() {
+        let text = ItemName::from_text("report.docx");
+        assert_eq!(name_heap(&text), alloc_held(11));
+        let unix = ItemName::from_unix_bytes(&[b'a', 0xFF, b'b']);
+        assert_eq!(name_heap(&unix), alloc_held(5) + alloc_held(3));
+        let wide = ItemName::from_windows_wide(&[0xD800, 0x61]);
+        assert_eq!(name_heap(&wide), alloc_held(4) + alloc_held(4));
+        let person = Owner::Person {
+            account_id: "S-1-5-21".into(),
+        };
+        assert_eq!(owner_heap(&person), alloc_held(8));
+        assert_eq!(owner_heap(&Owner::Shared), 0);
+        let drive = Place {
+            role: FolderRole::Music,
+            storage: Storage::OtherDrive {
+                drive: "USB-7".into(),
+            },
+        };
+        assert_eq!(place_heap(&drive), alloc_held(5));
+        assert_eq!(
+            folder_held(&wide, 13),
+            FOLDER_COST + name_heap(&wide) + alloc_held(13)
+        );
+        assert_eq!(
+            item_held(7, 9, 3, 100, &text),
+            ITEM_COST + 7 + 9 + alloc_held(3 * NAME_COST) + 100 + name_heap(&text)
+        );
+        assert_eq!(ITEM_COST, 448);
     }
 
     /// Each limit is met on its own: a page past its share, and pages each within theirs that

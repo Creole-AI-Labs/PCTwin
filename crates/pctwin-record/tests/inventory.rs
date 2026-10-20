@@ -651,14 +651,14 @@ fn why(e: RecordError) -> &'static str {
 /// copied, and a page past [`MAX_PAGE_HELD`] is refused.
 #[test]
 fn a_page_that_would_take_too_much_memory_is_refused_before_it_is_copied() {
-    // 10,000 items 128 parts deep: about 170 MB once read, from a page of half a megabyte.
+    // 10,000 items 128 parts deep: about 200 MB once read, from a page of half a megabyte.
     let mut reader = InventoryReader::start(&manifest_of(10_000, 1)).unwrap();
     let page = heavy_page(0, true, 10_000, 0);
     assert!(page.len() < 1024 * 1024);
     let got = reader.page(&page).unwrap_err();
     assert_eq!(why(got), "a page that takes more memory than PCTwin allows");
-    // With 3,000 items (about 50 MB once read, counting every folder name each path repeats) it is
-    // still refused; with 1,500 (about 25 MB) it is read.
+    // With 3,000 items (about 60 MB once read, counting every folder name each path repeats) it is
+    // still refused; with 1,500 (about 30 MB) it is read.
     let mut reader = InventoryReader::start(&manifest_of(3_000, 1)).unwrap();
     assert_eq!(
         why(reader.page(&heavy_page(0, true, 3_000, 0)).unwrap_err()),
@@ -672,7 +672,7 @@ fn a_page_that_would_take_too_much_memory_is_refused_before_it_is_copied() {
 }
 
 /// Pages each within their share still add up: the whole inventory past [`MAX_HELD`] is refused.
-/// (About 80,000 items of 128 parts: 40 seconds in a debug build, so it runs on request with
+/// (About 68,000 items of 128 parts: 40 seconds in a debug build, so it runs on request with
 /// `cargo test --release -- --ignored`; the count itself is checked by a fast test inside the
 /// module.)
 #[test]
@@ -696,10 +696,10 @@ fn an_inventory_that_would_take_too_much_memory_in_all_is_refused() {
             }
         }
     }
-    // About 16.7 KB an item: the limit is met near 80,000 items, the 54th page.
+    // About 19.7 KB an item: the limit is met near 68,000 items, the 46th page.
     let at = refused_at.expect("the whole inventory was read");
     let per_item = MAX_HELD / (u64::from(at + 1) * 1_500);
-    assert!((15_000..=18_000).contains(&per_item), "{at} {per_item}");
+    assert!((18_000..=21_000).contains(&per_item), "{at} {per_item}");
 }
 
 /// The writer counts the same way, ending a page early, so an honest laptop with long paths
@@ -760,7 +760,7 @@ fn a_page_whose_folders_would_take_too_much_memory_is_refused() {
         p.extend_from_slice(&[0, 0, 0, 0]);
     }
     assert!(p.len() <= MAX_PAGE_BYTES);
-    // The items alone take about 20 MB once read; with their 152,400 folders, more than 32 MB.
+    // The items alone take about 24 MB once read; with their 152,400 folders, more than 32 MB.
     let mut reader = InventoryReader::start(&manifest_of(u64::from(chains), 1)).unwrap();
     assert_eq!(
         why(reader.page(&p).unwrap_err()),
@@ -796,7 +796,7 @@ fn an_owner_or_a_place_nothing_uses_is_refused_each_on_its_own() {
 
 /// Every name is its own allocation, and an allocator keeps more than the bytes asked for (its
 /// smallest block is 32 bytes on Linux), so one-byte names are counted at what they really take.
-/// 3,000 items 128 parts deep in one-byte folders take about 39 MB counted so, but only 27 MB
+/// 3,000 items 128 parts deep in one-byte folders take about 51 MB counted so, but only 26 MB
 /// counted by their bytes alone.
 #[test]
 fn each_name_is_counted_with_what_its_allocation_takes() {
@@ -806,23 +806,23 @@ fn each_name_is_counted_with_what_its_allocation_takes() {
         why(got.unwrap_err()),
         "a page that takes more memory than PCTwin allows"
     );
-    let mut reader = InventoryReader::start(&manifest_of(2_000, 1)).unwrap();
+    let mut reader = InventoryReader::start(&manifest_of(1_500, 1)).unwrap();
     assert_eq!(
         reader
-            .page(&chain_page(0, true, 2_000, 0, "d"))
+            .page(&chain_page(0, true, 1_500, 0, "d"))
             .unwrap()
             .len(),
-        2_000
+        1_500
     );
 }
 
 /// A name that is not valid text keeps its exact bytes as a second allocation, counted too:
-/// 2,200 items 128 parts deep in folders named by one byte that is not text take about 38 MB
+/// 1,700 items 128 parts deep in folders named by one byte that is not text take about 39 MB
 /// counted so, and 29 MB without that second allocation.
 #[test]
 fn a_name_kept_exactly_is_counted_with_its_second_allocation() {
     const ROOT: u32 = u32::MAX;
-    let count = 2_200u32;
+    let count = 1_700u32;
     let mut p = Vec::new();
     for v in [0, 0, 127, count] {
         p.extend_from_slice(&v.to_be_bytes());
