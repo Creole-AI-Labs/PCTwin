@@ -532,8 +532,9 @@ fn the_merged_config_keeps_the_lockdown() {
 /// value of the right type, a value of the wrong type under the name is refused as that argument
 /// (a renamed or reordered parameter is refused as a missing one instead). Nothing runs: each call
 /// stops at the wrong type. Then, with every argument right, the call must get past its arguments,
-/// so the command takes nothing the screens do not send; `pairing_old_start` and
-/// `pairing_new_search` are left out of that step because they would pair or search the network.
+/// so the command takes nothing the screens do not send; `pairing_old_start`, `pairing_new_search`
+/// and `set_tray_labels` are left out of that step because they would pair, search the network or
+/// build a native menu off the main thread.
 #[test]
 fn the_screens_argument_names_are_the_commands_own() {
     let path =
@@ -566,7 +567,12 @@ fn the_screens_argument_names_are_the_commands_own() {
             );
             given.insert(key.to_owned(), arg[1].clone());
         }
-        if cmd == "pairing_old_start" || cmd == "pairing_new_search" {
+        // These would pair, search the network, or build a native menu (which macOS allows only
+        // on the main thread); their names are proven above all the same.
+        if matches!(
+            cmd,
+            "pairing_old_start" | "pairing_new_search" | "set_tray_labels"
+        ) {
             continue;
         }
         if let Err(error) = call(&main, LOCAL, cmd, Value::Object(given)) {
