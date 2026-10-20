@@ -154,11 +154,15 @@ pub enum RawName {
 }
 
 impl RawName {
+    /// The text shown, holding exactly its length: a lossy conversion may keep up to a third
+    /// more room, and the scan inventory counts what a name holds by its length.
     fn lossy(&self) -> String {
-        match self {
+        let mut text = match self {
             Self::Unix(b) => String::from_utf8_lossy(b).into_owned(),
             Self::Windows(w) => String::from_utf16_lossy(w),
-        }
+        };
+        text.shrink_to_fit();
+        text
     }
 
     fn is_valid_text(&self) -> bool {

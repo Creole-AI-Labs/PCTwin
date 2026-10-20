@@ -58,9 +58,11 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// Most memory one page's folders and items may take once read, as the reader counts it.
 /// An ordinary page of 10,000 files takes about 10 MB.
 pub const MAX_PAGE_HELD: u64 = 32 * 1024 * 1024;
-/// Most memory a whole inventory may take once read: about 1.15 million files eight folders
-/// deep (measured 20 October 2026: 0.9 GB), near what move protocol 2 could carry, and at worst
-/// (measured with hostile inventories of every shape) 1.24 GB, less than it allowed (1.5 GB). Received pages kept on disk (Engineering Plan 9.11, step C) will lift
+/// Most memory a whole inventory may take once read: between 850,000 and 900,000 files eight
+/// folders deep (measured 21 October 2026: 0.71 GB requested for 850,000), and at worst 1.35 GB
+/// of process memory (peak commit on Windows, measured with hostile inventories of every shape,
+/// names that are not valid text and the longest exact Windows names the heaviest), less than
+/// move protocol 2 allowed (1.5 GB). Received pages kept on disk (Engineering Plan 9.11, step C) will lift
 /// the count of files without raising this.
 pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
 /// What an item takes before its names: the item itself, three times over (a list that grows
@@ -68,9 +70,14 @@ pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
 /// its ID in the reader's set. Fixed numbers rather than this build's type sizes, so two PCTwin
 /// versions count alike; a test checks they cover the real sizes. These costs and the two limits are part of the format: the
 /// writer splits pages by them, so changing any needs a new [`INVENTORY_FORMAT`].
-const ITEM_COST: u64 = 448;
+const ITEM_COST: u64 = 448 + ALLOC;
 /// What each part of a path takes before its name's bytes.
 const NAME_COST: u64 = 64;
+/// What each separate allocation costs beyond the bytes asked for: the allocator's own record
+/// and rounding (about 18 bytes measured on Windows; Linux's smallest block is 32 bytes for any
+/// request up to 24). Counted for every name, every exact form, every path, every copy of an
+/// owner or a place, and every folder key. The item's own cost carries its path's.
+const ALLOC: u64 = 32;
 /// What a folder takes in the reader before its name's bytes: the folder and its key, three
 /// times over, as the lists and the set that hold them grow.
 const FOLDER_COST: u64 = 384;
@@ -194,16 +201,25 @@ fn label(s: &str) -> Result<(), RecordError> {
 fn name_heap(n: &ItemName) -> u64 {
     let exact = match n.exact() {
         None => 0,
-        Some(RawName::Unix(b)) => b.len(),
-        Some(RawName::Windows(w)) => 2 * w.len(),
+        Some(RawName::Unix(b)) => b.len() as u64 + ALLOC,
+        Some(RawName::Windows(w)) => 2 * w.len() as u64 + ALLOC,
     };
-    (n.display().len() + exact) as u64
+    held_text(n.display()) + exact
+}
+
+/// The bytes a copied text holds: none when empty, else its length and one allocation.
+fn held_text(s: &str) -> u64 {
+    if s.is_empty() {
+        0
+    } else {
+        s.len() as u64 + ALLOC
+    }
 }
 
 /// The bytes each item's copy of this owner holds.
 fn owner_heap(o: &Owner) -> u64 {
     match o {
-        Owner::Person { account_id } => account_id.len() as u64,
+        Owner::Person { account_id } => held_text(account_id),
         Owner::Shared | Owner::System => 0,
     }
 }
@@ -211,14 +227,14 @@ fn owner_heap(o: &Owner) -> u64 {
 /// The bytes each item's copy of this place holds.
 fn place_heap(p: &Place) -> u64 {
     match &p.storage {
-        Storage::OtherDrive { drive } => drive.len() as u64,
+        Storage::OtherDrive { drive } => held_text(drive),
         Storage::SystemDrive | Storage::Cloud { .. } => 0,
     }
 }
 
 /// What a folder takes in the reader: itself, its name, and its key (the name as written).
 fn folder_held(name: &ItemName, written: usize) -> u64 {
-    FOLDER_COST + name_heap(name) + written as u64
+    FOLDER_COST + name_heap(name) + written as u64 + ALLOC
 }
 
 /// What an item takes once read: itself, its owner and place, and every part of its path.
@@ -1080,7 +1096,13 @@ mod tests {
         };
         // One folder "a" and the item: what the reader would hold for them.
         let cost = folder_held(&ItemName::from_text("a"), 6)
-            + item_held(0, 0, 2, 1, &ItemName::from_text("b"));
+            + item_held(
+                0,
+                0,
+                2,
+                name_heap(&ItemName::from_text("a")),
+                &ItemName::from_text("b"),
+            );
         for (before, fits) in [(MAX_HELD - cost, true), (MAX_HELD - cost + 1, false)] {
             let mut known = Folders {
                 index: HashMap::new(),
