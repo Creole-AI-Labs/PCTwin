@@ -811,14 +811,14 @@ async fn a_device_bound_item_marked_to_move_is_refused_in_pages() {
 /// A paired sender that keeps sending pages cannot grow the new laptop's memory without limit:
 /// what the pages will hold is counted as they arrive, and the list is refused once it passes
 /// what an inventory may hold (`pctwin_record::MAX_HELD`), long before its announced pages end.
-/// (About 107,000 items 128 parts deep cross first: slow in a debug build, so it runs on request
+/// (About 80,000 items 128 parts deep cross first: slow in a debug build, so it runs on request
 /// with `cargo test --release -- --ignored`.)
 #[tokio::test]
 #[ignore = "slow in a debug build; run with --release -- --ignored"]
 async fn a_sender_that_keeps_sending_pages_is_stopped_at_the_memory_limit() {
     const ROOT: u32 = u32::MAX;
     let pages = 1_000u32;
-    let per_page = 2_000u32;
+    let per_page = 1_500u32;
     // The manifest of a record of one person in Documents, announcing far more than will cross.
     let one = record(1);
     let mut manifest = pctwin_record::encode_inventory(&one.source_laptop, &one.items)
