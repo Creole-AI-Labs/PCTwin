@@ -362,6 +362,10 @@ impl Incoming {
                             Some(ReceiveOutcome::Finished(done)) => Outcome::Arrived {
                                 landed_as: done.final_path.clone(),
                             },
+                            // Not finished as a visible, proven copy: never "arrived".
+                            Some(ReceiveOutcome::NeedsAction { why, .. }) => {
+                                Outcome::Failed { why: why.clone() }
+                            }
                             Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
                                 landed_as: stored.clone(),
                             },
