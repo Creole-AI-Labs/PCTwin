@@ -356,9 +356,7 @@ pub mod probe {
         if_addrs::get_if_addrs().ok().map(|list| {
             list.iter()
                 .map(|i| Interface {
-                    wifi: wifi
-                        .as_ref()
-                        .map(|names| names.iter().any(|n| *n == i.name)),
+                    wifi: wifi.as_ref().map(|names| names.contains(&i.name)),
                     index: i.index,
                     prefix_len: Some(match &i.addr {
                         if_addrs::IfAddr::V4(a) => a.prefixlen,
