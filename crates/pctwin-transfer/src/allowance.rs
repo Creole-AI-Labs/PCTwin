@@ -179,6 +179,13 @@ impl Allowance {
         self.files.get(&item).map(|f| &f.place)
     }
 
+    /// Every approved file: its id, the destination it lands in, and its approved size.
+    pub(crate) fn planned(&self) -> impl Iterator<Item = (ItemId, &str, u64)> {
+        self.files
+            .iter()
+            .map(|(id, f)| (*id, f.place.destination.as_str(), f.size))
+    }
+
     /// Whether `item` is in the plan and announced exactly where the plan says it lands
     /// (`destination` and `path` inside it), or why not. Nothing about the attempt is counted.
     pub fn check_place(&self, item: ItemId, destination: &str, path: &str) -> Result<(), Refusal> {
