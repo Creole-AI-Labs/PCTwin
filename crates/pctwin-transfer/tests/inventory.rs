@@ -733,3 +733,156 @@ async fn a_laptop_one_version_behind_gets_the_list_it_reads() {
     s.unwrap();
     assert_eq!(r.unwrap(), sent);
 }
+
+// ---------- found by the fresh-context review of 20 October 2026 ----------
+
+/// [`hostile_paged`], also returning how many messages the new laptop read.
+async fn hostile_paged_counted(frames: Vec<Vec<u8>>) -> (Result<Record, TransferError>, usize) {
+    let (mut old, mut new) = pair();
+    for f in &frames {
+        old.send(f).await.unwrap();
+    }
+    drop(old);
+    let got = receive_inventory(&mut new, PAGED).await;
+    (got, new.read.load(Ordering::SeqCst))
+}
+
+/// A header that claims more than a manifest or a page may hold is refused on sight: nothing
+/// after it is read, so nothing is held.
+#[tokio::test]
+async fn a_header_claiming_too_much_is_refused_before_anything_is_held() {
+    let full = part(&vec![7; PIECE_MAX]);
+    // The manifest, one byte over its limit, and the largest a header can claim.
+    for len in [
+        pctwin_record::inventory::MAX_MANIFEST_BYTES as u32 + 1,
+        u32::MAX,
+    ] {
+        let frames = vec![paged_head(u32::MAX, len), full.clone(), full.clone()];
+        let (got, read) = hostile_paged_counted(frames).await;
+        refused(got);
+        assert_eq!(read, 1, "read past a header claiming {len} bytes");
+    }
+    // A page, one byte over its limit, after a good manifest.
+    let sent = record(3);
+    let good = paged_frames(&sent);
+    let manifest_frames = good.len() - 2;
+    let mut frames = good[..manifest_frames].to_vec();
+    frames.push(paged_head(0, pctwin_record::MAX_PAGE_BYTES as u32 + 1));
+    frames.push(full.clone());
+    frames.push(full);
+    let (got, read) = hostile_paged_counted(frames).await;
+    refused(got);
+    assert_eq!(read, manifest_frames + 1);
+}
+
+/// Every piece of a page but its last is full, so how many pieces a page takes is fixed by its
+/// length. A page larger than one piece that starts with a short piece is refused, even though
+/// its bytes add up.
+#[tokio::test]
+async fn a_short_piece_before_the_last_of_a_page_is_refused() {
+    let sent = record(12_000);
+    let enc = pctwin_record::encode_inventory(&sent.source_laptop, &sent.items).unwrap();
+    let page = &enc.pages[0];
+    assert!(page.len() > 2 * PIECE_MAX, "the page fits one piece");
+    let mut frames = vec![paged_head(u32::MAX, enc.manifest.len() as u32)];
+    frames.extend(enc.manifest.chunks(PIECE_MAX).map(part));
+    frames.push(paged_head(0, page.len() as u32));
+    frames.push(part(&page[..PIECE_MAX - 1]));
+    frames.extend(page[PIECE_MAX - 1..].chunks(PIECE_MAX).map(part));
+    let why = refused(hostile_paged(frames).await);
+    assert!(why.contains("not full"), "{why}");
+}
+
+/// A list sent in pages passes every rule a saved record does: an item that only works on the
+/// old laptop, marked to move, is refused, as it is in JSON.
+#[tokio::test]
+async fn a_device_bound_item_marked_to_move_is_refused_in_pages() {
+    let mut sent = record(3);
+    sent.items[1].portability = Portability::DeviceBound;
+    let got = hostile_paged(paged_frames(&sent)).await;
+    refused(got);
+    // The same list with that item left out is read.
+    sent.items[1].inclusion = Inclusion::LeftOut {
+        reason: pctwin_record::LeftOutReason::DeviceBound,
+    };
+    assert_eq!(hostile_paged(paged_frames(&sent)).await.unwrap(), sent);
+}
+
+/// A paired sender that keeps sending pages cannot grow the new laptop's memory without limit:
+/// what the pages will hold is counted as they arrive, and the list is refused once it passes
+/// what an inventory may hold (`pctwin_record::MAX_HELD`), long before its announced pages end.
+/// (About 107,000 items 128 parts deep cross first: slow in a debug build, so it runs on request
+/// with `cargo test --release -- --ignored`.)
+#[tokio::test]
+#[ignore = "slow in a debug build; run with --release -- --ignored"]
+async fn a_sender_that_keeps_sending_pages_is_stopped_at_the_memory_limit() {
+    const ROOT: u32 = u32::MAX;
+    let pages = 1_000u32;
+    let per_page = 2_000u32;
+    // The manifest of a record of one person in Documents, announcing far more than will cross.
+    let one = record(1);
+    let mut manifest = pctwin_record::encode_inventory(&one.source_laptop, &one.items)
+        .unwrap()
+        .manifest;
+    manifest[28..36].copy_from_slice(&(u64::from(pages) * u64::from(per_page)).to_be_bytes());
+    manifest[36..40].copy_from_slice(&pages.to_be_bytes());
+    let name = |p: &mut Vec<u8>, s: &str| {
+        p.push(0);
+        p.extend_from_slice(&(s.len() as u32).to_be_bytes());
+        p.extend_from_slice(s.as_bytes());
+    };
+    // Page 0 defines a chain of 127 folders of 31 bytes; every page puts its items at the bottom.
+    let page = |n: u32| {
+        let mut p = Vec::new();
+        let (first, defined) = if n == 0 { (0u32, 127u32) } else { (127, 0) };
+        for v in [n, first, defined, per_page] {
+            p.extend_from_slice(&v.to_be_bytes());
+        }
+        for i in 0..defined {
+            p.extend_from_slice(&(if i == 0 { ROOT } else { i - 1 }).to_be_bytes());
+            name(&mut p, &"x".repeat(31));
+        }
+        for k in 0..per_page {
+            let mut id = [0u8; 16];
+            id[..8].copy_from_slice(&(u64::from(n) << 32 | u64::from(k)).to_be_bytes());
+            p.extend_from_slice(&id);
+            p.push(0);
+            p.extend_from_slice(&0u32.to_be_bytes());
+            p.extend_from_slice(&0u32.to_be_bytes());
+            p.extend_from_slice(&126u32.to_be_bytes());
+            name(&mut p, "f");
+            p.extend_from_slice(&5u64.to_be_bytes());
+            p.extend_from_slice(&[0, 0, 0, 0]);
+        }
+        p
+    };
+    let (mut old, mut new) = pair();
+    let sender = async move {
+        let blob = |index: u32, bytes: Vec<u8>| {
+            let mut frames = vec![paged_head(index, bytes.len() as u32)];
+            frames.extend(bytes.chunks(PIECE_MAX).map(part));
+            frames
+        };
+        for f in blob(u32::MAX, manifest) {
+            if old.send(&f).await.is_err() {
+                return 0;
+            }
+        }
+        for n in 0..pages {
+            for f in blob(n, page(n)) {
+                if old.send(&f).await.is_err() {
+                    return n;
+                }
+            }
+        }
+        pages
+    };
+    let receiver = async {
+        let got = receive_inventory(&mut new, PAGED).await;
+        drop(new);
+        got
+    };
+    let (_, got) = tokio::join!(sender, receiver);
+    let why = refused(got);
+    assert!(why.contains("more memory than PCTwin allows"), "{why}");
+}

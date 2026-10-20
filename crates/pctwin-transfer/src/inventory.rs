@@ -24,7 +24,10 @@
 //! Memory: receiving holds about 2.9 times the record's JSON size at its peak, and the record
 //! itself about 1.7 times (measured with 300,000 items, 14 October 2026), so the limit means about
 //! 1.5 GB at the very most: an honest laptop with about 1.8 million files, or a sender that sends
-//! the largest record allowed.
+//! the largest record allowed. In pages (move protocol 3), the new laptop holds one page's bytes
+//! (at most 8 MB) besides the items read so far, and the reader counts what each page will hold
+//! before copying it, refusing the list past `pctwin_record::MAX_HELD`: at worst 1.24 GB
+//! (measured 20 October 2026), however many pages a sender announces or sends.
 
 use std::io::Read;
 use std::time::Duration;
