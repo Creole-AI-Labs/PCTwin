@@ -437,3 +437,161 @@ fn an_exact_name_that_is_valid_text_is_refused() {
     };
     decode_inventory(&enc).unwrap();
 }
+
+// ---------- found by the fresh-context review of 20 October 2026 ----------
+
+/// A short page of deeply nested folders once made every item carry the whole chain, so a page
+/// of a few hundred kilobytes took gigabytes. A path is now at most as deep and as long as the
+/// safety gate allows, checked when each folder is defined, before anything is copied.
+#[test]
+fn a_chain_of_folders_deeper_than_a_path_may_be_is_refused_at_once() {
+    const ROOT: u32 = u32::MAX;
+    // 10,000 folders, each inside the last, and one item at the bottom.
+    let mut folders: Vec<(u32, String)> = vec![(ROOT, "d".into())];
+    for i in 1..10_000u32 {
+        folders.push((i - 1, "d".into()));
+    }
+    let named: Vec<(u32, &str)> = folders.iter().map(|(p, n)| (*p, n.as_str())).collect();
+    let deep = page(0, 0, &named, &[[0, 0, 9_999]]);
+    let t = std::time::Instant::now();
+    let enc = EncodedInventory {
+        manifest: manifest(1),
+        pages: vec![deep],
+    };
+    assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+    assert!(t.elapsed() < std::time::Duration::from_secs(1));
+    // Exactly as deep as allowed is read; one more is not.
+    let ok: Vec<(u32, String)> = std::iter::once((ROOT, "d".to_string()))
+        .chain((1..(pctwin_record::MAX_PATH_DEPTH as u32 - 1)).map(|i| (i - 1, "d".to_string())))
+        .collect();
+    let named: Vec<(u32, &str)> = ok.iter().map(|(p, n)| (*p, n.as_str())).collect();
+    let last = ok.len() as u32 - 1;
+    let fits = EncodedInventory {
+        manifest: manifest(1),
+        pages: vec![page(0, 0, &named, &[[0, 0, last]])],
+    };
+    let (_, items, _) = decode_inventory(&fits).unwrap();
+    assert_eq!(items[0].path.parts().len(), pctwin_record::MAX_PATH_DEPTH);
+    let mut over = ok.clone();
+    over.push((last, "d".into()));
+    let named: Vec<(u32, &str)> = over.iter().map(|(p, n)| (*p, n.as_str())).collect();
+    let too_deep = EncodedInventory {
+        manifest: manifest(1),
+        pages: vec![page(0, 0, &named, &[[0, 0, last + 1]])],
+    };
+    assert!(matches!(refused(&too_deep), RecordError::BadInventory(_)));
+}
+
+#[test]
+fn a_path_longer_than_a_path_may_be_is_refused() {
+    const ROOT: u32 = u32::MAX;
+    let long = "x".repeat(2100);
+    let enc = EncodedInventory {
+        manifest: manifest(1),
+        pages: vec![page(0, 0, &[(ROOT, &long), (0, &long)], &[[0, 0, 1]])],
+    };
+    assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+    // The encoder never writes one.
+    let docs = place(FolderRole::Documents, Storage::SystemDrive);
+    let deep: Vec<String> = (0..200).map(|i| format!("d{i}")).collect();
+    let deep: Vec<&str> = deep.iter().map(String::as_str).collect();
+    let too_deep = item(person("S-1"), docs, text(&deep), 1);
+    assert!(encode_inventory(&laptop(), &[too_deep]).is_err());
+}
+
+/// The reader accepts nothing PCTwin never writes: a folder defined twice, a folder nothing on
+/// its page uses, an owner or a place nothing uses.
+#[test]
+fn folders_owners_and_places_nothing_uses_or_defined_twice_are_refused() {
+    const ROOT: u32 = u32::MAX;
+    for bad in [
+        page(0, 0, &[(ROOT, "A"), (ROOT, "A")], &[[0, 0, 0]]), // the same folder twice
+        page(0, 0, &[(ROOT, "A"), (ROOT, "B")], &[[0, 0, 0]]), // B used by nothing
+    ] {
+        let enc = EncodedInventory {
+            manifest: manifest(1),
+            pages: vec![bad],
+        };
+        assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+    }
+    // A manifest listing a second owner and a second place that no item uses.
+    let docs = place(FolderRole::Documents, Storage::SystemDrive);
+    let two = [
+        item(person("S-1"), docs.clone(), text(&["a"]), 1),
+        item(
+            person("S-2"),
+            place(FolderRole::Music, Storage::SystemDrive),
+            text(&["b"]),
+            2,
+        ),
+    ];
+    let wide = encode_inventory(&laptop(), &two).unwrap().manifest;
+    let only_first = page(0, 0, &[], &[[0, 0, ROOT]]);
+    let mut m = wide;
+    m[28..36].copy_from_slice(&1u64.to_be_bytes());
+    let enc = EncodedInventory {
+        manifest: m,
+        pages: vec![only_first],
+    };
+    assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+}
+
+/// A manifest written by hand: `owners` people (by account ID) and one place.
+fn manifest_with(owners: &[&str], items: u64) -> Vec<u8> {
+    let mut m = b"PCTWINV2".to_vec();
+    m.extend_from_slice(&2u32.to_be_bytes());
+    m.extend_from_slice(&[0x11; 16]);
+    m.extend_from_slice(&items.to_be_bytes());
+    m.extend_from_slice(&1u32.to_be_bytes());
+    m.extend_from_slice(&(owners.len() as u32).to_be_bytes());
+    for o in owners {
+        m.push(0);
+        m.extend_from_slice(&(o.len() as u32).to_be_bytes());
+        m.extend_from_slice(o.as_bytes());
+    }
+    m.extend_from_slice(&1u32.to_be_bytes());
+    m.extend_from_slice(&[2, 0]); // Documents, on the system drive
+    m
+}
+
+#[test]
+fn an_item_whose_own_name_takes_its_path_over_the_limit_is_refused() {
+    const ROOT: u32 = u32::MAX;
+    // The folder alone fits (4,091 bytes); with "/f.txt" the path is 4,097.
+    let folder = "x".repeat(4091);
+    let enc = EncodedInventory {
+        manifest: manifest(1),
+        pages: vec![page(0, 0, &[(ROOT, &folder)], &[[0, 0, 0]])],
+    };
+    assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+}
+
+#[test]
+fn the_same_folder_defined_twice_is_refused_even_when_both_are_used() {
+    const ROOT: u32 = u32::MAX;
+    let enc = EncodedInventory {
+        manifest: manifest(2),
+        pages: vec![page(
+            0,
+            0,
+            &[(ROOT, "A"), (ROOT, "A")],
+            &[[0, 0, 0], [0, 0, 1]],
+        )],
+    };
+    assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+}
+
+#[test]
+fn an_owner_listed_twice_is_refused_even_when_both_are_used() {
+    let enc = EncodedInventory {
+        manifest: manifest_with(&["S-1", "S-1"], 2),
+        pages: vec![page(0, 0, &[], &[[0, 0, u32::MAX], [1, 0, u32::MAX]])],
+    };
+    assert!(matches!(refused(&enc), RecordError::BadInventory(_)));
+    // Two different owners, both used, are read.
+    let fine = EncodedInventory {
+        manifest: manifest_with(&["S-1", "S-2"], 2),
+        pages: vec![page(0, 0, &[], &[[0, 0, u32::MAX], [1, 0, u32::MAX]])],
+    };
+    decode_inventory(&fine).unwrap();
+}

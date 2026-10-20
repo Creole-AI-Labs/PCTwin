@@ -1,5 +1,5 @@
 //! The scan inventory, version 2, from the other laptop: any manifest and pages are read or
-//! refused, never a crash; an inventory that is read encodes back to exactly the same bytes.
+//! refused, never a crash; an inventory that is read encodes and reads back to the same items.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
@@ -18,6 +18,8 @@ fuzz_target!(|data: &[u8]| {
     };
     if let Ok((laptop, items, fingerprint)) = decode_inventory(&encoded) {
         let again = encode_inventory(&laptop, &items).expect("what was read encodes");
-        assert_eq!(again.fingerprint(), fingerprint, "one encoding of each inventory");
+        let (_, back, _) = decode_inventory(&again).expect("what was encoded reads");
+        assert_eq!(back, items);
+        let _ = fingerprint;
     }
 });

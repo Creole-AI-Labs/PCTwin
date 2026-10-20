@@ -10,12 +10,20 @@
 //!   folder and its own name.
 //! - The form is a compact binary one written by hand (a kind byte where there is a choice,
 //!   fixed-width big-endian numbers, lengths before bytes), as the transfer messages are, so no
-//!   serialisation library enters the supply chain. There is exactly one encoding of each
-//!   inventory, so encoding what was decoded gives the same bytes.
+//!   serialisation library enters the supply chain. Encoding is deterministic, and the reader
+//!   accepts nothing PCTwin never writes (a folder defined twice or never used, an owner or a
+//!   place nobody uses); where pages end may differ, which is why the fingerprint is taken over
+//!   the bytes as they crossed rather than over a re-encoding.
 //! - [`InventoryReader`] reads it as coming from a stranger: every length is checked before it is
 //!   read, every index must be in range, a folder's parent must come before it, names follow the
 //!   rules of [`ItemPath`], no item ID appears twice, pages come in order and add up to exactly
 //!   what the manifest announced. Nothing panics on any input.
+//! - **Memory is bounded by what was sent, never multiplied.** A path is at most
+//!   [`MAX_PATH_DEPTH`] parts and [`MAX_PATH_BYTES`] bytes, as the safety gate allows, checked
+//!   the moment a folder is defined; the whole inventory holds at most [`MAX_TOTAL_PARTS`] path
+//!   parts and [`MAX_TOTAL_PATH_BYTES`] bytes of names. (Without these, a short page of deeply
+//!   nested folders made every item carry the whole chain: found by a fresh-context review,
+//!   20 October 2026.)
 //! - The **fingerprint** is taken over the bytes exactly as they crossed (the manifest, then each
 //!   page, each with its length), never over a laptop's own re-encoding, so two laptops on
 //!   different PCTwin versions agree on it.
@@ -39,6 +47,15 @@ pub const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 /// Longest name, in bytes (or UTF-16 units for an exact Windows name).
 pub const MAX_NAME_LEN: usize = 4096;
+/// Most parts in one path (its folders and its own name), as the safety gate allows.
+pub const MAX_PATH_DEPTH: usize = 128;
+/// Most bytes in one path, its names and the separators between them, as the safety gate allows.
+pub const MAX_PATH_BYTES: usize = 4096;
+/// Most path parts across the whole inventory (an honest laptop of two million files, eight
+/// folders deep, needs sixteen million).
+pub const MAX_TOTAL_PARTS: u64 = 32 * 1024 * 1024;
+/// Most bytes of path names across the whole inventory.
+pub const MAX_TOTAL_PATH_BYTES: u64 = 1024 * 1024 * 1024;
 /// Most owners and most places in one inventory.
 const MAX_TABLE: u32 = 65_536;
 /// Longest text in an owner or a place (an account ID, a drive ID).
@@ -135,6 +152,15 @@ impl Writer {
         }
         Ok(())
     }
+}
+
+/// The length a path counts as: each name's bytes, and one separator between names.
+fn path_bytes(parts: &[ItemName]) -> usize {
+    parts.iter().map(|n| n.display().len()).sum::<usize>() + parts.len().saturating_sub(1)
+}
+
+fn path_too_long(parts: &[ItemName]) -> bool {
+    parts.len() > MAX_PATH_DEPTH || path_bytes(parts) > MAX_PATH_BYTES
 }
 
 fn label(s: &str) -> Result<(), RecordError> {
@@ -272,6 +298,9 @@ fn encode_page(
     let mut body = Writer(Vec::new());
     let mut taken = 0;
     for (k, item) in items.iter().enumerate().take(PAGE_ITEMS) {
+        if path_too_long(item.path.parts()) {
+            return Err(bad("a path deeper or longer than PCTwin can move"));
+        }
         // Work out this item on the side, so a page that would grow too large ends before it.
         let mut f = Writer(Vec::new());
         let mut added: Vec<((u32, Vec<u8>), u32)> = Vec::new();
@@ -455,12 +484,27 @@ pub struct InventoryReader {
     pages: u32,
     owners: Vec<Owner>,
     places: Vec<Place>,
-    /// Every folder so far: its parent (or [`ROOT`]) and its name.
-    folders: Vec<(u32, ItemName)>,
+    owner_used: Vec<bool>,
+    place_used: Vec<bool>,
+    folders: Vec<Folder>,
+    /// Each folder once: its parent and its name as written.
+    folder_keys: HashSet<(u32, Vec<u8>)>,
     next_page: u32,
     items_read: u64,
+    parts_read: u64,
+    path_bytes_read: u64,
     ids: HashSet<ItemId>,
     hash: Fingerprinter,
+}
+
+/// A folder defined by a page.
+struct Folder {
+    parent: u32,
+    name: ItemName,
+    /// Parts in its path (itself included), and the path's bytes.
+    depth: usize,
+    bytes: usize,
+    used: bool,
 }
 
 impl InventoryReader {
@@ -510,13 +554,19 @@ impl InventoryReader {
             return Err(bad("the manifest has bytes after its end"));
         }
         // Stored once: a table with the same entry twice is not one PCTwin writes.
-        for (i, o) in owners.iter().enumerate() {
-            if owners[..i].contains(o) {
+        let mut seen = HashSet::new();
+        for o in &owners {
+            let mut w = Writer(Vec::new());
+            w.owner(o)?;
+            if !seen.insert(w.0) {
                 return Err(bad("an owner is listed twice"));
             }
         }
-        for (i, p) in places.iter().enumerate() {
-            if places[..i].contains(p) {
+        seen.clear();
+        for p in &places {
+            let mut w = Writer(Vec::new());
+            w.place(p)?;
+            if !seen.insert(w.0) {
                 return Err(bad("a place is listed twice"));
             }
         }
@@ -524,11 +574,16 @@ impl InventoryReader {
             laptop: LaptopId(id),
             items,
             pages,
+            owner_used: vec![false; owners.len()],
+            place_used: vec![false; places.len()],
             owners,
             places,
             folders: Vec::new(),
+            folder_keys: HashSet::new(),
             next_page: 0,
             items_read: 0,
+            parts_read: 0,
+            path_bytes_read: 0,
             ids: HashSet::new(),
             hash: Fingerprinter::new(manifest),
         })
@@ -574,16 +629,39 @@ impl InventoryReader {
         if count as u64 > left || (last && count as u64 != left) {
             return Err(bad("the pages do not add up to the items announced"));
         }
+        let first_new = self.folders.len();
         for _ in 0..new_folders {
             let parent = r.u32()?;
-            if parent != ROOT && parent as usize >= self.folders.len() {
-                return Err(bad("a folder's parent does not come before it"));
-            }
             let name = r.name()?;
+            let (depth, bytes) = if parent == ROOT {
+                (1, name.display().len())
+            } else {
+                let p = self
+                    .folders
+                    .get_mut(parent as usize)
+                    .ok_or(bad("a folder's parent does not come before it"))?;
+                p.used = true;
+                (p.depth + 1, p.bytes + 1 + name.display().len())
+            };
+            // Room is left for at least the item's own name.
+            if depth >= MAX_PATH_DEPTH || bytes >= MAX_PATH_BYTES {
+                return Err(bad("a folder deeper or longer than a path may be"));
+            }
+            let mut key = Writer(Vec::new());
+            key.name(&name)?;
+            if !self.folder_keys.insert((parent, key.0)) {
+                return Err(bad("a folder is defined twice"));
+            }
             if self.folders.len() >= ROOT as usize {
                 return Err(bad("too many folders"));
             }
-            self.folders.push((parent, name));
+            self.folders.push(Folder {
+                parent,
+                name,
+                depth,
+                bytes,
+                used: false,
+            });
         }
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
@@ -591,16 +669,20 @@ impl InventoryReader {
             id.copy_from_slice(r.take(16)?);
             let id = ItemId(id);
             let kind = kind_of(r.u8()?)?;
+            let o = r.u32()? as usize;
             let owner = self
                 .owners
-                .get(r.u32()? as usize)
+                .get(o)
                 .ok_or(bad("an owner index out of range"))?
                 .clone();
+            self.owner_used[o] = true;
+            let p = r.u32()? as usize;
             let place = self
                 .places
-                .get(r.u32()? as usize)
+                .get(p)
                 .ok_or(bad("a place index out of range"))?
                 .clone();
+            self.place_used[p] = true;
             let folder = r.u32()?;
             let name = r.name()?;
             let size_bytes = r.u64()?;
@@ -632,6 +714,10 @@ impl InventoryReader {
         if !r.rest.is_empty() {
             return Err(bad("a page has bytes after its end"));
         }
+        // A page defines only the folders its own items need.
+        if self.folders[first_new..].iter().any(|f| !f.used) {
+            return Err(bad("a page defines a folder nothing in it uses"));
+        }
         self.hash.page(bytes);
         self.next_page += 1;
         self.items_read += count as u64;
@@ -643,20 +729,40 @@ impl InventoryReader {
         if self.next_page != self.pages || self.items_read != self.items {
             return Err(bad("pages are missing"));
         }
+        if self.owner_used.contains(&false) || self.place_used.contains(&false) {
+            return Err(bad("an owner or a place nothing uses"));
+        }
         Ok(self.hash.finish())
     }
 
-    fn path_of(&self, folder: u32, name: ItemName) -> Result<ItemPath, RecordError> {
-        let mut parts = vec![name];
-        let mut at = folder;
-        // Parents always come before their folders, so this walk ends.
-        while at != ROOT {
-            let (parent, n) = self
+    fn path_of(&mut self, folder: u32, name: ItemName) -> Result<ItemPath, RecordError> {
+        let (depth, bytes) = if folder == ROOT {
+            (1, name.display().len())
+        } else {
+            let f = self
                 .folders
-                .get(at as usize)
+                .get_mut(folder as usize)
                 .ok_or(bad("a folder index out of range"))?;
-            parts.push(n.clone());
-            at = *parent;
+            f.used = true;
+            (f.depth + 1, f.bytes + 1 + name.display().len())
+        };
+        if depth > MAX_PATH_DEPTH || bytes > MAX_PATH_BYTES {
+            return Err(bad("a path deeper or longer than PCTwin can move"));
+        }
+        // Counted before anything is copied, so the whole inventory stays within its bounds.
+        self.parts_read += depth as u64;
+        self.path_bytes_read += bytes as u64;
+        if self.parts_read > MAX_TOTAL_PARTS || self.path_bytes_read > MAX_TOTAL_PATH_BYTES {
+            return Err(bad("more path names than PCTwin holds in one inventory"));
+        }
+        let mut parts = Vec::with_capacity(depth);
+        parts.push(name);
+        let mut at = folder;
+        // Parents always come before their folders, and depth is bounded, so this walk ends.
+        while at != ROOT {
+            let f = &self.folders[at as usize];
+            parts.push(f.name.clone());
+            at = f.parent;
         }
         parts.reverse();
         ItemPath::new(parts).map_err(|_| bad("a path that breaks the rules"))
