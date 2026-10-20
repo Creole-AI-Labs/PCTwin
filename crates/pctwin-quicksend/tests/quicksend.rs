@@ -257,8 +257,10 @@ async fn an_offer_with_a_persons_things_is_refused() {
     let (mut a, mut b) = pair();
     let (_, got) = tokio::join!(
         async {
-            let _ = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL).await;
-            let _ = pctwin_transfer::send_inventory(&mut a, &record).await;
+            let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+                .await
+                .unwrap_or(pctwin_transfer::PAGED_FROM);
+            let _ = pctwin_transfer::send_inventory(&mut a, &record, v).await;
         },
         receive_offer(&mut b)
     );
@@ -286,10 +288,10 @@ async fn declined_files_sent_anyway_are_refused_and_never_written() {
     let (record, jobs) = offer.into_parts();
     let (mut a, mut b) = pair();
     let greedy = async {
-        pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+        let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
             .await
             .unwrap();
-        pctwin_transfer::send_inventory(&mut a, &record)
+        pctwin_transfer::send_inventory(&mut a, &record, v)
             .await
             .unwrap();
         let _answer = a.recv().await.unwrap();
@@ -398,10 +400,10 @@ async fn a_sender_cannot_choose_where_a_file_lands() {
     }
     let (mut a, mut b) = pair();
     let hostile = async {
-        pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+        let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
             .await
             .unwrap();
-        pctwin_transfer::send_inventory(&mut a, &record)
+        pctwin_transfer::send_inventory(&mut a, &record, v)
             .await
             .unwrap();
         let _answer = a.recv().await.unwrap();

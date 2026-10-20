@@ -166,8 +166,8 @@ pub async fn send<C: Channel>(
     record: &Record,
     plan: SendPlan,
 ) -> Result<Sent, MoveError> {
-    agree_version(link, MOVE_PROTOCOL).await?;
-    send_inventory(link, record).await?;
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
+    send_inventory(link, record, version).await?;
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
     let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT);
     sender.run(link).await?;
@@ -243,8 +243,8 @@ pub async fn receive_plan<C: Channel, S: Steps>(
     link: &mut C,
     steps: &mut S,
 ) -> Result<ApprovedPlan, MoveError> {
-    agree_version(link, MOVE_PROTOCOL).await?;
-    let mut record = receive_inventory(link).await?;
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
+    let mut record = receive_inventory(link, version).await?;
     let mut people = BTreeSet::new();
     let owners: Vec<String> = record
         .items

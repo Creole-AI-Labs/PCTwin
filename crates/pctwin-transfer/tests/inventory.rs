@@ -14,6 +14,9 @@ use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, ManagedBy, Owner,
     PersonTarget, Place, Portability, Record, SharedTarget, Storage,
 };
+/// The move protocol that sends the list as one JSON document (these tests' subject).
+const JSON: u16 = 2;
+
 use pctwin_transfer::{
     Channel, ChannelError, INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, Message,
     PIECE_MAX, TransferError, receive_inventory, send_inventory,
@@ -95,7 +98,7 @@ async fn hostile(frames: Vec<Vec<u8>>) -> (Result<Record, TransferError>, usize)
         old.send(f).await.unwrap();
     }
     drop(old);
-    let got = receive_inventory(&mut new).await;
+    let got = receive_inventory(&mut new, JSON).await;
     (got, new.read.load(Ordering::SeqCst))
 }
 
@@ -130,7 +133,10 @@ fn refused(got: Result<Record, TransferError>) -> String {
 async fn a_record_arrives_exactly_as_it_was_sent() {
     let sent = record(3);
     let (mut old, mut new) = pair();
-    let (s, r) = tokio::join!(send_inventory(&mut old, &sent), receive_inventory(&mut new));
+    let (s, r) = tokio::join!(
+        send_inventory(&mut old, &sent, JSON),
+        receive_inventory(&mut new, JSON)
+    );
     s.unwrap();
     let got = r.unwrap();
     assert_eq!(got, sent);
@@ -142,7 +148,10 @@ async fn a_large_record_travels_in_pieces_that_each_fit_the_link() {
     // Unique names barely compress, so this needs many pieces.
     let sent = record(40_000);
     let (mut old, mut new) = pair();
-    let (s, r) = tokio::join!(send_inventory(&mut old, &sent), receive_inventory(&mut new));
+    let (s, r) = tokio::join!(
+        send_inventory(&mut old, &sent, JSON),
+        receive_inventory(&mut new, JSON)
+    );
     s.unwrap();
     assert_eq!(r.unwrap(), sent);
     assert!(
@@ -155,7 +164,7 @@ async fn a_large_record_travels_in_pieces_that_each_fit_the_link() {
 async fn every_message_of_the_exchange_fits_the_link() {
     let sent = record(40_000);
     let (mut old, mut new) = pair();
-    send_inventory(&mut old, &sent).await.unwrap();
+    send_inventory(&mut old, &sent, JSON).await.unwrap();
     drop(old);
     while let Ok(m) = new.recv().await {
         assert!(
@@ -201,8 +210,8 @@ async fn a_record_crosses_a_real_paired_link() {
     let sent = record(20_000);
     let (s, r) = common::no_hang(async {
         tokio::join!(
-            send_inventory(&mut old_link, &sent),
-            receive_inventory(&mut new_link)
+            send_inventory(&mut old_link, &sent, JSON),
+            receive_inventory(&mut new_link, JSON)
         )
     })
     .await;
@@ -452,7 +461,7 @@ async fn sending_a_record_with_choices_about_people_is_refused_on_the_old_laptop
     let mut r = record(2);
     r.mapping.people.insert("1000".into(), PersonTarget::Skip);
     let (mut old, _new) = pair();
-    let got = send_inventory(&mut old, &r).await;
+    let got = send_inventory(&mut old, &r, JSON).await;
     assert!(matches!(got, Err(TransferError::Inventory(_))), "{got:?}");
 }
 
@@ -511,7 +520,7 @@ fn no_answer(got: &Result<Record, TransferError>) -> bool {
 async fn an_old_laptop_that_never_starts_is_given_up_on() {
     let (_old, mut new) = pair();
     let t = tokio::time::Instant::now();
-    let got = receive_inventory(&mut new).await;
+    let got = receive_inventory(&mut new, JSON).await;
     assert!(no_answer(&got), "{got:?}");
     assert!(t.elapsed() >= INVENTORY_PIECE_WAIT, "{:?}", t.elapsed());
     assert!(t.elapsed() < INVENTORY_PIECE_WAIT + Duration::from_secs(1));
@@ -526,7 +535,7 @@ async fn an_old_laptop_that_stops_part_way_is_given_up_on() {
         old.send(f).await.unwrap();
     }
     let t = tokio::time::Instant::now();
-    let got = receive_inventory(&mut new).await;
+    let got = receive_inventory(&mut new, JSON).await;
     assert!(no_answer(&got), "{got:?}");
     assert!(t.elapsed() < INVENTORY_PIECE_WAIT + Duration::from_secs(1));
     drop(old);
@@ -558,7 +567,7 @@ async fn a_slow_but_steady_old_laptop_is_never_cut_off() {
     let pieces = 10;
     let mut new = steady(pieces, INVENTORY_PIECE_WAIT - Duration::from_secs(1));
     let t = tokio::time::Instant::now();
-    let got = receive_inventory(&mut new).await;
+    let got = receive_inventory(&mut new, JSON).await;
     refused(got);
     assert!(t.elapsed() >= (INVENTORY_PIECE_WAIT - Duration::from_secs(1)) * pieces as u32);
 }
@@ -567,6 +576,160 @@ async fn a_slow_but_steady_old_laptop_is_never_cut_off() {
 #[tokio::test(start_paused = true)]
 async fn one_piece_later_than_the_wait_is_given_up_on() {
     let mut new = steady(3, INVENTORY_PIECE_WAIT + Duration::from_secs(1));
-    let got = receive_inventory(&mut new).await;
+    let got = receive_inventory(&mut new, JSON).await;
     assert!(no_answer(&got), "{got:?}");
+}
+
+// ---------- move protocol 3: the list in pages (scan inventory version 2) ----------
+
+/// The move protocol that sends the list in pages.
+const PAGED: u16 = pctwin_transfer::PAGED_FROM;
+
+/// A paged header: which piece of the list follows (the manifest is `u32::MAX`) and its length.
+fn paged_head(index: u32, len: u32) -> Vec<u8> {
+    let mut h = vec![35];
+    h.extend_from_slice(&index.to_be_bytes());
+    h.extend_from_slice(&len.to_be_bytes());
+    h
+}
+
+/// What a well-behaved old laptop sends for `record`, as frames.
+fn paged_frames(record: &Record) -> Vec<Vec<u8>> {
+    let enc = pctwin_record::encode_inventory(&record.source_laptop, &record.items).unwrap();
+    let mut frames = Vec::new();
+    let mut blob = |index: u32, bytes: &[u8]| {
+        frames.push(paged_head(index, bytes.len() as u32));
+        for piece in bytes.chunks(PIECE_MAX) {
+            frames.push(part(piece));
+        }
+    };
+    blob(u32::MAX, &enc.manifest);
+    for (n, page) in enc.pages.iter().enumerate() {
+        blob(n as u32, page);
+    }
+    frames
+}
+
+async fn hostile_paged(frames: Vec<Vec<u8>>) -> Result<Record, TransferError> {
+    let (mut old, mut new) = pair();
+    for f in &frames {
+        old.send(f).await.unwrap();
+    }
+    drop(old);
+    receive_inventory(&mut new, PAGED).await
+}
+
+#[tokio::test]
+async fn a_large_list_crosses_in_pages_and_arrives_exactly() {
+    let sent = record(25_000);
+    let (mut old, mut new) = pair();
+    let (s, r) = tokio::join!(
+        send_inventory(&mut old, &sent, PAGED),
+        receive_inventory(&mut new, PAGED)
+    );
+    s.unwrap();
+    assert_eq!(r.unwrap(), sent);
+}
+
+#[tokio::test]
+async fn the_paged_list_is_what_a_good_sender_sends_frame_for_frame() {
+    let sent = record(12_000);
+    let frames = paged_frames(&sent);
+    assert_eq!(hostile_paged(frames).await.unwrap(), sent);
+}
+
+#[tokio::test]
+async fn a_paged_list_that_breaks_a_rule_on_the_way_is_refused() {
+    let sent = record(12_000);
+    let good = paged_frames(&sent);
+    let refused = |r: Result<Record, TransferError>| {
+        assert!(matches!(r, Err(TransferError::Inventory(_))), "{r:?}");
+    };
+    // Missing its last frame: the list stops arriving.
+    let mut cut = good.clone();
+    cut.pop();
+    assert!(hostile_paged(cut).await.is_err());
+    // A page announced under another number.
+    let mut renumbered = good.clone();
+    let i = renumbered
+        .iter()
+        .position(|f| f.len() == 9 && f[0] == 35 && f[1..5] == 0u32.to_be_bytes())
+        .unwrap();
+    renumbered[i][1..5].copy_from_slice(&1u32.to_be_bytes());
+    refused(hostile_paged(renumbered).await);
+    // A page announced larger than a page may be.
+    let mut big = vec![paged_head(
+        u32::MAX,
+        (pctwin_record::MAX_PAGE_BYTES + 1) as u32,
+    )];
+    big.push(part(&[0; 10]));
+    refused(hostile_paged(big).await);
+    // An empty manifest.
+    refused(hostile_paged(vec![paged_head(u32::MAX, 0)]).await);
+    // A short piece before the last.
+    let manifest = pctwin_record::encode_inventory(&sent.source_laptop, &sent.items)
+        .unwrap()
+        .manifest;
+    let half = manifest.len() / 2;
+    let short = vec![
+        paged_head(u32::MAX, manifest.len() as u32),
+        part(&manifest[..half]),
+        part(&manifest[half..]),
+    ];
+    if manifest.len() > PIECE_MAX {
+        refused(hostile_paged(short).await);
+    }
+    // More of a piece than announced.
+    let over = vec![paged_head(u32::MAX, 4), part(&[1, 2, 3, 4, 5])];
+    refused(hostile_paged(over).await);
+    // The old JSON start where pages are expected.
+    refused(hostile_paged(vec![start(10, 10)]).await);
+}
+
+#[tokio::test]
+async fn the_old_laptop_never_sends_choices_about_people_in_pages_either() {
+    let mut decided = record(3);
+    decided.mapping.people.insert(
+        "1000".into(),
+        PersonTarget::ExistingAccount {
+            account_id: "ada".into(),
+        },
+    );
+    let (mut old, _new) = pair();
+    let got = send_inventory(&mut old, &decided, PAGED).await;
+    assert!(matches!(got, Err(TransferError::Inventory(_))), "{got:?}");
+}
+
+#[tokio::test]
+async fn an_empty_list_is_refused_in_pages_as_in_json() {
+    let empty = record(0);
+    let (mut old, mut new) = pair();
+    let (_, r) = tokio::join!(
+        send_inventory(&mut old, &empty, PAGED),
+        receive_inventory(&mut new, PAGED)
+    );
+    assert!(r.is_err());
+}
+
+/// A laptop one version behind (move protocol 2) and one on this release agree on 2, and the list
+/// then crosses as one JSON document, as the older laptop expects.
+#[tokio::test]
+async fn a_laptop_one_version_behind_gets_the_list_it_reads() {
+    use pctwin_transfer::{MOVE_PROTOCOL, Versions, agree_version};
+    let older = Versions::new(2, 2).unwrap();
+    let sent = record(50);
+    let (mut old, mut new) = pair();
+    let (s, r) = tokio::join!(
+        async {
+            let v = agree_version(&mut old, MOVE_PROTOCOL).await?;
+            assert_eq!(v, JSON);
+            send_inventory(&mut old, &sent, v).await
+        },
+        async {
+            let v = agree_version(&mut new, older).await?;
+            receive_inventory(&mut new, v).await
+        }
+    );
+    s.unwrap();
+    assert_eq!(r.unwrap(), sent);
 }

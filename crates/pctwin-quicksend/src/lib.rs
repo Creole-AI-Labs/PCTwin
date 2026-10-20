@@ -235,8 +235,8 @@ pub struct Receipt {
 
 /// Sender: offers `offer` over `ch` (already paired), then sends what the receiver accepts.
 pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickError> {
-    agree_version(ch, MOVE_PROTOCOL).await?;
-    send_inventory(ch, &offer.record).await?;
+    let version = agree_version(ch, MOVE_PROTOCOL).await?;
+    send_inventory(ch, &offer.record, version).await?;
     let offered = files_of(&offer.record);
     let accepted = read_accepted(ch, &offered).await?;
     let jobs: Vec<SendJob> = offer
@@ -285,8 +285,8 @@ pub struct Incoming {
 /// Receiver: the offer from the other laptop over `ch` (already paired): names and sizes only.
 /// Refused unless it is a Quick Send (everything in it shared, nothing about people).
 pub async fn receive_offer(ch: &mut impl Channel) -> Result<Incoming, QuickError> {
-    agree_version(ch, MOVE_PROTOCOL).await?;
-    let record = receive_inventory(ch).await?;
+    let version = agree_version(ch, MOVE_PROTOCOL).await?;
+    let record = receive_inventory(ch, version).await?;
     if record.items.iter().any(|i| i.owner != Owner::Shared) {
         return Err(QuickError::NotAQuickSend);
     }
