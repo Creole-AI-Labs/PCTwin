@@ -69,6 +69,9 @@ pub struct SweepLimits {
     /// A place with more items than this is counted as one item (the record that lists any
     /// number of items comes in a later version).
     pub place_items: usize,
+    /// A pause after each folder of a nameless count. Zero, except in tests, where it lets a stop
+    /// or a save land while such a count is under way.
+    pub count_pause: Duration,
 }
 
 impl Default for SweepLimits {
@@ -78,6 +81,7 @@ impl Default for SweepLimits {
             checkpoint_every: Duration::from_secs(5),
             most_walkers: 4,
             place_items: 250_000,
+            count_pause: Duration::ZERO,
         }
     }
 }
@@ -403,7 +407,8 @@ enum Zone {
     /// Counted into one record item.
     Collapse { item: usize, place: usize },
     /// Another person's home, or one from an old account: counted in one go by a walker, so no
-    /// name below it is ever kept, queued or saved. A stopped count starts again from its root.
+    /// name below it is ever kept, queued or saved. A stopped count goes on from where it got to,
+    /// kept by position only (see [`WholeCursor`]).
     Whole { place: usize },
     /// An older copy of Windows (`Windows.old`): the system's, except its `Users` folder.
     OldSystem { place: usize },
@@ -541,8 +546,9 @@ enum Listing {
 }
 
 /// How far a nameless count got: its totals so far, and where it is by position alone. Each
-/// open folder, from the top, is kept as how many folders it holds and how many of them were
-/// begun (taken in name order), so a stopped count resumes without a single name being saved.
+/// open folder, from the top, is kept as how many folders it holds, how many of them were begun
+/// (taken in name order) and when it last changed, so a stopped count resumes without a single
+/// name being saved, and a folder renamed, added or removed meanwhile is noticed.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct WholeCursor {
     files: u64,
@@ -550,7 +556,7 @@ struct WholeCursor {
     seen: u64,
     inside_refused: bool,
     owners: BTreeSet<u32>,
-    at: Vec<(u32, u32)>,
+    at: Vec<(u32, u32, u64)>,
 }
 
 impl WholeCursor {
@@ -568,9 +574,10 @@ impl WholeCursor {
 
 /// Counts everything below `root` without keeping a name: links are not followed and other
 /// file systems mounted inside are not entered. A stop ends it after the folder in hand and
-/// hands back a [`WholeCursor`]; given that cursor again (`from`), it goes on from there. If the
-/// folders on the way to that position no longer hold the same number of folders, the place
-/// changed, and it is counted again from the start rather than guessed. `report` is told the
+/// hands back a [`WholeCursor`]; given that cursor again (`from`), it goes on from there. If any
+/// folder on the way to that position changed since (a name inside renamed, added or removed
+/// moves its last-change time; its folder count is checked too), the place is counted again from
+/// the start rather than guessed. `report` is told the
 /// cursor after every folder, so a save made while the count runs keeps its progress too.
 fn count_whole(
     root: &Path,
@@ -585,8 +592,9 @@ fn count_whole(
         Some(r) => r,
         None => {
             let mut c = WholeCursor::default();
+            let when = changed(&top);
             match list_whole(&top, root_dev, Some(&mut c)) {
-                Ok(dirs) => (c, vec![(dirs, 0usize)]),
+                Ok(dirs) => (c, vec![(dirs, 0usize, when)]),
                 Err(e) => {
                     return Ok(Whole {
                         root_refused: Some(Refusal::of(&e)),
@@ -599,10 +607,10 @@ fn count_whole(
     loop {
         c.at = open
             .iter()
-            .map(|(dirs, next)| (count_u32(dirs.len()), count_u32(*next)))
+            .map(|(dirs, next, when)| (count_u32(dirs.len()), count_u32(*next), *when))
             .collect();
         report(&c);
-        let Some((dirs, next)) = open.last_mut() else {
+        let Some((dirs, next, _)) = open.last_mut() else {
             break;
         };
         if *next >= dirs.len() {
@@ -614,8 +622,9 @@ fn count_whole(
         }
         let dir = dirs[*next].clone();
         *next += 1;
+        let when = changed(&dir);
         match list_whole(&dir, root_dev, Some(&mut c)) {
-            Ok(inner) => open.push((inner, 0)),
+            Ok(inner) => open.push((inner, 0, when)),
             Err(_) => c.inside_refused = true,
         }
     }
@@ -627,25 +636,43 @@ fn count_u32(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
+/// One open folder of a nameless count: the folders inside, how many were begun, and when it
+/// last changed.
+type OpenFolder = (Vec<PathBuf>, usize, u64);
+
+/// When a folder last changed (a name inside added, removed or renamed), in nanoseconds since
+/// 1970; 0 when the system can't say, which never matches, so such a count is never resumed.
+fn changed(dir: &Path) -> u64 {
+    std::fs::metadata(dir)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| u64::try_from(d.as_nanos()).ok())
+        .unwrap_or(0)
+}
+
 /// Opens the folders on the way to a saved position again, counting nothing. `None` when any of
-/// them can't be listed or holds a different number of folders than when the count stopped.
-#[allow(clippy::type_complexity)]
+/// them can't be listed, changed since the count stopped, or holds a different number of folders.
 fn reopen_whole(
     top: &Path,
     root_dev: Option<u64>,
     c: WholeCursor,
-) -> Option<(WholeCursor, Vec<(Vec<PathBuf>, usize)>)> {
-    let mut open: Vec<(Vec<PathBuf>, usize)> = Vec::new();
-    for &(held, begun) in &c.at {
+) -> Option<(WholeCursor, Vec<OpenFolder>)> {
+    let mut open: Vec<OpenFolder> = Vec::new();
+    for &(held, begun, when) in &c.at {
         let dir = match open.last() {
             None => top.to_path_buf(),
-            Some((dirs, next)) => dirs.get(next.checked_sub(1)?)?.clone(),
+            Some((dirs, next, _)) => dirs.get(next.checked_sub(1)?)?.clone(),
         };
+        let now = changed(&dir);
+        if now == 0 || now != when {
+            return None;
+        }
         let dirs = list_whole(&dir, root_dev, None).ok()?;
         if count_u32(dirs.len()) != held || begun > held {
             return None;
         }
-        open.push((dirs, begun as usize));
+        open.push((dirs, begun as usize, when));
     }
     if open.is_empty() {
         return None;
@@ -1514,6 +1541,7 @@ impl Sweeper<'_> {
         entries: &mut u64,
     ) -> bool {
         let want_keys = cfg!(windows);
+        let pause = self.limits.count_pause;
         let (job_send, job_recv) = channel::<WalkerJob>();
         let job_recv = Arc::new(Mutex::new(job_recv));
         let (done_send, done_recv) = channel::<(usize, Listing)>();
@@ -1538,6 +1566,9 @@ impl Sweeper<'_> {
                             let mut report = |c: &WholeCursor| {
                                 if let Ok(mut m) = counting.lock() {
                                     m.insert(ticket, c.clone());
+                                }
+                                if !pause.is_zero() {
+                                    std::thread::sleep(pause);
                                 }
                             };
                             match count_whole(&path, from, stop, &mut report) {
@@ -3499,6 +3530,33 @@ mod whole_count_tests {
             assert!(!saved.contains(name), "{saved}");
         }
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_folder_renamed_during_the_pause_is_never_counted_twice() {
+        // Renaming a folder already counted moves the rest in name order while every folder
+        // count stays the same; the resume must still start again, never go on in the wrong place.
+        for after in 0..30 {
+            let root = home("renamed");
+            // Alpha is bigger than the others, so counting the wrong folder shows.
+            for i in 0..20 {
+                std::fs::write(root.join("Alpha").join(format!("big-{i}.bin")), [7u8; 100])
+                    .unwrap();
+            }
+            let Err(c) = stopping_after(&root, None, after) else {
+                std::fs::remove_dir_all(&root).unwrap();
+                continue;
+            };
+            std::fs::rename(root.join("Alpha"), root.join("Delta")).unwrap();
+            let resumed =
+                count_whole(&root, Some(c), &AtomicBool::new(false), &mut |_| {}).unwrap();
+            assert_eq!(
+                totals(&resumed),
+                totals(&whole_at_once(&root)),
+                "stopped after {after}"
+            );
+            std::fs::remove_dir_all(&root).unwrap();
+        }
     }
 
     #[test]

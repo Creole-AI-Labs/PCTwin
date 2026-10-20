@@ -1534,3 +1534,73 @@ fn a_path_with_a_dot_part_is_still_listed() {
     let s = run(f, &mut Answers::default());
     assert!(s.record.items.iter().any(|i| shown(i).ends_with("a.jpg")));
 }
+
+#[test]
+fn a_sweep_stopped_again_and_again_during_another_persons_count_finishes_with_the_same_answer() {
+    let lab = lab();
+    for i in 0..120 {
+        write(&lab.bea.join(format!("BEA-{i}/BEA-{i}.jpg")), 10);
+    }
+    write(&lab.d.join("Shared/x.txt"), 1);
+    let whole = sweep(
+        sized(facts(&lab, true), 0),
+        &mut Answers::default(),
+        &AtomicBool::new(false),
+        &mut |_| {},
+        &SweepLimits::default(),
+        None,
+    );
+    let bea_of = |s: &Sweep| {
+        s.places
+            .iter()
+            .find(|p| {
+                p.placement.whose
+                    == Whose::Person {
+                        account_id: BEA.into(),
+                    }
+            })
+            .map(|p| (p.files, p.bytes))
+    };
+    // Each run is stopped as soon as a save shows Bea's count under way.
+    let limits = SweepLimits {
+        checkpoint_entries: 1,
+        checkpoint_every: std::time::Duration::ZERO,
+        count_pause: std::time::Duration::from_millis(5),
+        ..SweepLimits::default()
+    };
+    let mut frontier = None;
+    let mut stopped_mid_count = 0;
+    let done = loop {
+        assert!(stopped_mid_count < 40, "the sweep never finished");
+        let stop = AtomicBool::new(false);
+        let s = sweep(
+            sized(facts(&lab, true), 0),
+            &mut Answers::default(),
+            &stop,
+            &mut |view| {
+                let json = String::from_utf8_lossy(&view.to_json()).into_owned();
+                assert!(!json.contains("BEA-"));
+                if json.contains("\"whole_at\":{") {
+                    stop.store(true, Ordering::SeqCst);
+                }
+            },
+            &limits,
+            frontier.take(),
+        );
+        if s.finished {
+            break s;
+        }
+        // The stopped sweep kept how far the count got.
+        let saved = serde_json::to_string(s.frontier.as_ref().unwrap()).unwrap();
+        assert!(
+            saved.contains("\"whole_at\":{"),
+            "the stop lost the count's place"
+        );
+        stopped_mid_count += 1;
+        frontier = s.frontier;
+    };
+    assert!(stopped_mid_count >= 2, "the count was not stopped partway");
+    assert_eq!(bea_of(&done), bea_of(&whole));
+    assert_eq!(done.volumes, whole.volumes);
+    assert_eq!(done.top_line, whole.top_line);
+}
