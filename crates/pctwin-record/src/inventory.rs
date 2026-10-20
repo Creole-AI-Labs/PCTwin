@@ -58,20 +58,22 @@ pub const MAX_PATH_BYTES: usize = 4096;
 /// Most memory one page's folders and items may take once read, as the reader counts it.
 /// An ordinary page of 10,000 files takes about 10 MB.
 pub const MAX_PAGE_HELD: u64 = 32 * 1024 * 1024;
-/// Most memory a whole inventory may take once read: about 1.2 million files eight folders
-/// deep (measured 20 October 2026), near what move protocol 2 could carry, in less memory than
-/// it allowed (1.5 GB). Received pages kept on disk (Engineering Plan 9.11, step C) will lift
+/// Most memory a whole inventory may take once read: about 1.15 million files eight folders
+/// deep (measured 20 October 2026: 0.9 GB), near what move protocol 2 could carry, and at worst
+/// (measured with hostile inventories of every shape) 1.24 GB, less than it allowed (1.5 GB). Received pages kept on disk (Engineering Plan 9.11, step C) will lift
 /// the count of files without raising this.
-pub const MAX_HELD: u64 = 1024 * 1024 * 1024;
-/// What an item takes before its names: the item itself and its ID in the reader's set. Fixed
-/// numbers rather than this build's type sizes, so two PCTwin versions count alike; a test
-/// checks they cover the real sizes. These costs and the two limits are part of the format: the
+pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
+/// What an item takes before its names: the item itself, three times over (a list that grows
+/// as pages arrive holds up to twice its items, and three times for the moment it moves), and
+/// its ID in the reader's set. Fixed numbers rather than this build's type sizes, so two PCTwin
+/// versions count alike; a test checks they cover the real sizes. These costs and the two limits are part of the format: the
 /// writer splits pages by them, so changing any needs a new [`INVENTORY_FORMAT`].
-const ITEM_COST: u64 = 160;
+const ITEM_COST: u64 = 448;
 /// What each part of a path takes before its name's bytes.
 const NAME_COST: u64 = 64;
-/// What a folder takes in the reader before its name's bytes (the folder, and its key).
-const FOLDER_COST: u64 = 160;
+/// What a folder takes in the reader before its name's bytes: the folder and its key, three
+/// times over, as the lists and the set that hold them grow.
+const FOLDER_COST: u64 = 384;
 /// Most owners and most places in one inventory.
 const MAX_TABLE: u32 = 65_536;
 /// Longest text in an owner or a place (an account ID, a drive ID).
@@ -1025,15 +1027,14 @@ mod tests {
     use super::*;
     use std::mem::size_of;
 
-    /// The fixed costs cover what this build really holds: an item and its ID in a set (a set
-    /// keeps at most about twice its entries' room), a path part, and a folder with its key.
+    /// The fixed costs cover what this build really holds: an item in a growing list and its ID
+    /// in a set (a set keeps at most about twice its entries' room), a path part, and a folder
+    /// with its key.
     #[test]
     fn the_fixed_costs_cover_the_real_sizes() {
-        assert!(size_of::<Item>() + 2 * size_of::<ItemId>() <= ITEM_COST as usize);
+        assert!(3 * size_of::<Item>() + 2 * size_of::<ItemId>() <= ITEM_COST as usize);
         assert!(size_of::<ItemName>() <= NAME_COST as usize);
-        assert!(
-            size_of::<Folder>() + 2 * (size_of::<(u32, Vec<u8>)>() + 1) <= FOLDER_COST as usize
-        );
+        assert!(3 * (size_of::<Folder>() + size_of::<FolderKey>() + 1) <= FOLDER_COST as usize);
     }
 
     /// Each limit is met on its own: a page past its share, and pages each within theirs that
