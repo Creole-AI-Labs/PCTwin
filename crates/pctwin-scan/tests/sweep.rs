@@ -1334,7 +1334,6 @@ fn volumes_that_share_one_file_systems_space_are_judged_together() {
 
 #[test]
 fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
-    let lab = lab();
     let apps = if cfg!(windows) {
         "Program Files"
     } else if cfg!(target_os = "macos") {
@@ -1342,29 +1341,40 @@ fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
     } else {
         "opt"
     };
-    for i in 0..200 {
-        write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
+    // The rename has to land while an app folder is still waiting in the sweep's queue; on a fast
+    // machine the queue can drain before the first look, so a sweep that never got the chance is
+    // tried again on a fresh laptop (seen on ubuntu-24.04-arm).
+    let mut swept = None;
+    for _ in 0..20 {
+        let lab = lab();
+        for i in 0..200 {
+            write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
+        }
+        let stop = AtomicBool::new(false);
+        let mut renamed = false;
+        let base = lab.c.join(apps);
+        let s = sweep(
+            sized(facts(&lab, false), 0),
+            &mut Answers::default(),
+            &stop,
+            &mut |view| {
+                if !renamed {
+                    renamed = rename_a_queued_folder(&view.to_json(), &base, "App", 200);
+                }
+            },
+            &SweepLimits {
+                checkpoint_entries: 1,
+                checkpoint_every: std::time::Duration::ZERO,
+                ..SweepLimits::default()
+            },
+            None,
+        );
+        if renamed {
+            swept = Some(s);
+            break;
+        }
     }
-    let stop = AtomicBool::new(false);
-    let mut renamed = false;
-    let base = lab.c.join(apps);
-    let s = sweep(
-        sized(facts(&lab, false), 0),
-        &mut Answers::default(),
-        &stop,
-        &mut |view| {
-            if !renamed {
-                renamed = rename_a_queued_folder(&view.to_json(), &base, "App", 200);
-            }
-        },
-        &SweepLimits {
-            checkpoint_entries: 1,
-            checkpoint_every: std::time::Duration::ZERO,
-            ..SweepLimits::default()
-        },
-        None,
-    );
-    assert!(renamed);
+    let s = swept.expect("no sweep in 20 left an app folder queued long enough to rename it");
     assert!(
         s.blind_spots
             .iter()
