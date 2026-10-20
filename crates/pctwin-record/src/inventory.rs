@@ -10,12 +10,24 @@
 //!   folder and its own name.
 //! - The form is a compact binary one written by hand (a kind byte where there is a choice,
 //!   fixed-width big-endian numbers, lengths before bytes), as the transfer messages are, so no
-//!   serialisation library enters the supply chain. There is exactly one encoding of each
-//!   inventory, so encoding what was decoded gives the same bytes.
+//!   serialisation library enters the supply chain. Encoding is deterministic, and the reader
+//!   accepts nothing PCTwin never writes (a folder defined twice or never used, an owner or a
+//!   place nobody uses); where pages end may differ, which is why the fingerprint is taken over
+//!   the bytes as they crossed rather than over a re-encoding.
 //! - [`InventoryReader`] reads it as coming from a stranger: every length is checked before it is
 //!   read, every index must be in range, a folder's parent must come before it, names follow the
 //!   rules of [`ItemPath`], no item ID appears twice, pages come in order and add up to exactly
 //!   what the manifest announced. Nothing panics on any input.
+//! - **Memory is bounded by what is held, never by the bytes that crossed.** A path is at most
+//!   [`MAX_PATH_DEPTH`] parts and [`MAX_PATH_BYTES`] bytes, as the safety gate allows, checked
+//!   the moment a folder is defined. And before anything is copied, the reader works out what
+//!   each folder and each item will take once read (every part of its path, every name, its
+//!   owner and place) and refuses a page whose share passes [`MAX_PAGE_HELD`], or an inventory
+//!   whose whole passes [`MAX_HELD`]. The writer ends a page early by the same count, so an
+//!   honest laptop never meets the page limit. (A few hundred kilobytes of nested folders once
+//!   read as gigabytes, since every item carries its whole path: found by a fresh-context review,
+//!   20 October 2026. Capping path parts and name bytes alone still let a 0.5 MB page take
+//!   147 MB, so the count is of memory itself.)
 //! - The **fingerprint** is taken over the bytes exactly as they crossed (the manifest, then each
 //!   page, each with its length), never over a laptop's own re-encoding, so two laptops on
 //!   different PCTwin versions agree on it.
@@ -39,6 +51,27 @@ pub const MAX_PAGE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 /// Longest name, in bytes (or UTF-16 units for an exact Windows name).
 pub const MAX_NAME_LEN: usize = 4096;
+/// Most parts in one path (its folders and its own name), as the safety gate allows.
+pub const MAX_PATH_DEPTH: usize = 128;
+/// Most bytes in one path, its names and the separators between them, as the safety gate allows.
+pub const MAX_PATH_BYTES: usize = 4096;
+/// Most memory one page's folders and items may take once read, as the reader counts it.
+/// An ordinary page of 10,000 files takes about 10 MB.
+pub const MAX_PAGE_HELD: u64 = 32 * 1024 * 1024;
+/// Most memory a whole inventory may take once read: about 1.2 million files eight folders
+/// deep (measured 20 October 2026), near what move protocol 2 could carry, in less memory than
+/// it allowed (1.5 GB). Received pages kept on disk (Engineering Plan 9.11, step C) will lift
+/// the count of files without raising this.
+pub const MAX_HELD: u64 = 1024 * 1024 * 1024;
+/// What an item takes before its names: the item itself and its ID in the reader's set. Fixed
+/// numbers rather than this build's type sizes, so two PCTwin versions count alike; a test
+/// checks they cover the real sizes. These costs and the two limits are part of the format: the
+/// writer splits pages by them, so changing any needs a new [`INVENTORY_FORMAT`].
+const ITEM_COST: u64 = 160;
+/// What each part of a path takes before its name's bytes.
+const NAME_COST: u64 = 64;
+/// What a folder takes in the reader before its name's bytes (the folder, and its key).
+const FOLDER_COST: u64 = 160;
 /// Most owners and most places in one inventory.
 const MAX_TABLE: u32 = 65_536;
 /// Longest text in an owner or a place (an account ID, a drive ID).
@@ -137,9 +170,72 @@ impl Writer {
     }
 }
 
+/// The length a path counts as: each name's bytes, and one separator between names.
+fn path_bytes(parts: &[ItemName]) -> usize {
+    parts.iter().map(|n| n.display().len()).sum::<usize>() + parts.len().saturating_sub(1)
+}
+
+fn path_too_long(parts: &[ItemName]) -> bool {
+    parts.len() > MAX_PATH_DEPTH || path_bytes(parts) > MAX_PATH_BYTES
+}
+
 fn label(s: &str) -> Result<(), RecordError> {
     if s.len() > MAX_LABEL {
         return Err(bad("an owner or place is too long"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------- what is held
+
+/// The bytes a name holds: its text and, when kept, its exact form.
+fn name_heap(n: &ItemName) -> u64 {
+    let exact = match n.exact() {
+        None => 0,
+        Some(RawName::Unix(b)) => b.len(),
+        Some(RawName::Windows(w)) => 2 * w.len(),
+    };
+    (n.display().len() + exact) as u64
+}
+
+/// The bytes each item's copy of this owner holds.
+fn owner_heap(o: &Owner) -> u64 {
+    match o {
+        Owner::Person { account_id } => account_id.len() as u64,
+        Owner::Shared | Owner::System => 0,
+    }
+}
+
+/// The bytes each item's copy of this place holds.
+fn place_heap(p: &Place) -> u64 {
+    match &p.storage {
+        Storage::OtherDrive { drive } => drive.len() as u64,
+        Storage::SystemDrive | Storage::Cloud { .. } => 0,
+    }
+}
+
+/// What a folder takes in the reader: itself, its name, and its key (the name as written).
+fn folder_held(name: &ItemName, written: usize) -> u64 {
+    FOLDER_COST + name_heap(name) + written as u64
+}
+
+/// What an item takes once read: itself, its owner and place, and every part of its path.
+/// `chain` is what the names of its folders hold.
+fn item_held(owner: u64, place: u64, depth: usize, chain: u64, name: &ItemName) -> u64 {
+    ITEM_COST + owner + place + depth as u64 * NAME_COST + chain + name_heap(name)
+}
+
+/// Adds `cost` to the page's and the whole inventory's count, refusing either past its limit.
+fn hold(page: &mut u64, whole: &mut u64, cost: u64) -> Result<(), RecordError> {
+    *page += cost;
+    *whole += cost;
+    if *page > MAX_PAGE_HELD {
+        return Err(bad("a page that takes more memory than PCTwin allows"));
+    }
+    if *whole > MAX_HELD {
+        return Err(bad(
+            "an inventory that takes more memory than PCTwin allows",
+        ));
     }
     Ok(())
 }
@@ -216,8 +312,11 @@ pub fn encode_inventory(
     }
 
     // Pages: folders defined when first needed, then the items.
-    let mut folder_ix: HashMap<(u32, Vec<u8>), u32> = HashMap::new();
-    let mut folder_count: u32 = 0;
+    let mut folders = Folders {
+        index: HashMap::new(),
+        count: 0,
+        held: 0,
+    };
     let mut pages: Vec<Vec<u8>> = Vec::new();
     let mut start = 0;
     while start < items.len() {
@@ -226,8 +325,7 @@ pub fn encode_inventory(
             &items[start..],
             &item_owner[start..],
             &item_place[start..],
-            &mut folder_ix,
-            &mut folder_count,
+            &mut folders,
         )?;
         pages.push(page);
         start += used;
@@ -256,57 +354,86 @@ pub fn encode_inventory(
     })
 }
 
-/// One page from the front of `items`: as many as fit in [`PAGE_ITEMS`] and [`MAX_PAGE_BYTES`].
-/// Returns the page and how many items it took.
+/// A folder by its parent and its name as written.
+type FolderKey = (u32, Vec<u8>);
+
+/// The folders written so far: each by its parent and its name as written, with its index and
+/// what the names of its path hold; how many; and what the reader will hold, in all, once it has
+/// read the pages written so far.
+struct Folders {
+    index: HashMap<FolderKey, (u32, u64)>,
+    count: u32,
+    held: u64,
+}
+
+/// One page from the front of `items`: as many as fit in [`PAGE_ITEMS`], [`MAX_PAGE_BYTES`] and
+/// [`MAX_PAGE_HELD`]. Returns the page and how many items it took.
 fn encode_page(
     number: usize,
     items: &[Item],
     owners: &[u32],
     places: &[u32],
-    folder_ix: &mut HashMap<(u32, Vec<u8>), u32>,
-    folder_count: &mut u32,
+    known: &mut Folders,
 ) -> Result<(Vec<u8>, usize), RecordError> {
-    let first_folder = *folder_count;
+    let first_folder = known.count;
     let mut folders = Writer(Vec::new());
     let mut new_folders: u32 = 0;
     let mut body = Writer(Vec::new());
+    let mut page_held: u64 = 0;
     let mut taken = 0;
     for (k, item) in items.iter().enumerate().take(PAGE_ITEMS) {
+        if path_too_long(item.path.parts()) {
+            return Err(bad("a path deeper or longer than PCTwin can move"));
+        }
         // Work out this item on the side, so a page that would grow too large ends before it.
         let mut f = Writer(Vec::new());
-        let mut added: Vec<((u32, Vec<u8>), u32)> = Vec::new();
+        let mut added: Vec<(FolderKey, (u32, u64))> = Vec::new();
+        let mut cost: u64 = 0;
         let parts = item.path.parts();
         let mut parent = ROOT;
+        let mut chain: u64 = 0;
         for name in &parts[..parts.len() - 1] {
             let mut nw = Writer(Vec::new());
             nw.name(name)?;
             let key = (parent, nw.0.clone());
-            let known = folder_ix
+            let found = known
+                .index
                 .get(&key)
                 .copied()
-                .or_else(|| added.iter().find(|(k, _)| *k == key).map(|(_, i)| *i));
-            parent = match known {
-                Some(i) => i,
+                .or_else(|| added.iter().find(|(k, _)| *k == key).map(|(_, v)| *v));
+            (parent, chain) = match found {
+                Some(v) => v,
                 None => {
-                    let i = folder_count
+                    let i = known
+                        .count
                         .checked_add(new_folders)
                         .and_then(|n| n.checked_add(u32::try_from(added.len()).ok()?))
                         .filter(|n| *n < ROOT)
                         .ok_or(bad("too many folders"))?;
+                    let here = chain + name_heap(name);
+                    cost += folder_held(name, nw.0.len());
                     f.u32(key.0);
                     f.0.extend_from_slice(&key.1);
-                    added.push((key, i));
-                    i
+                    added.push((key, (i, here)));
+                    (i, here)
                 }
             };
         }
+        let name = &parts[parts.len() - 1];
+        cost += item_held(
+            owner_heap(&item.owner),
+            place_heap(&item.place),
+            parts.len(),
+            chain,
+            name,
+        );
         let mut b = Writer(Vec::new());
         b.0.extend_from_slice(&item.id.0);
         b.u8(kind_code(item.kind));
         b.u32(owners[k]);
         b.u32(places[k]);
         b.u32(parent);
-        b.name(&parts[parts.len() - 1])?;
+        b.name(name)?;
         b.u64(item.size_bytes);
         b.u8(portability_code(item.portability));
         b.u8(managed_code(item.managed_by));
@@ -320,21 +447,28 @@ fn encode_page(
         b.u8(inclusion_code(item.inclusion));
         // Header: number, first folder, folder count, item count (4 numbers of 4 bytes).
         let size = 16 + folders.0.len() + f.0.len() + body.0.len() + b.0.len();
-        if size > MAX_PAGE_BYTES {
+        if size > MAX_PAGE_BYTES || page_held + cost > MAX_PAGE_HELD {
             if taken == 0 {
                 return Err(bad("one item is larger than a page"));
             }
             break;
         }
+        if known.held + cost > MAX_HELD {
+            return Err(bad(
+                "an inventory that takes more memory than PCTwin allows",
+            ));
+        }
+        page_held += cost;
+        known.held += cost;
         folders.0.extend_from_slice(&f.0);
         new_folders += u32::try_from(added.len()).map_err(|_| bad("too many folders"))?;
-        for (key, i) in added {
-            folder_ix.insert(key, i);
+        for (key, v) in added {
+            known.index.insert(key, v);
         }
         body.0.extend_from_slice(&b.0);
         taken = k + 1;
     }
-    *folder_count += new_folders;
+    known.count += new_folders;
     let mut page = Writer(Vec::with_capacity(16 + folders.0.len() + body.0.len()));
     page.u32(u32::try_from(number).map_err(|_| bad("too many pages"))?);
     page.u32(first_folder);
@@ -455,12 +589,31 @@ pub struct InventoryReader {
     pages: u32,
     owners: Vec<Owner>,
     places: Vec<Place>,
-    /// Every folder so far: its parent (or [`ROOT`]) and its name.
-    folders: Vec<(u32, ItemName)>,
+    owner_used: Vec<bool>,
+    place_used: Vec<bool>,
+    /// What each item's copy of an owner or a place holds.
+    owner_heap: Vec<u64>,
+    place_heap: Vec<u64>,
+    folders: Vec<Folder>,
+    /// Each folder once: its parent and its name as written.
+    folder_keys: HashSet<(u32, Vec<u8>)>,
     next_page: u32,
     items_read: u64,
+    /// What the folders and items read so far hold, as [`MAX_HELD`] counts it.
+    held: u64,
     ids: HashSet<ItemId>,
     hash: Fingerprinter,
+}
+
+/// A folder defined by a page.
+struct Folder {
+    parent: u32,
+    name: ItemName,
+    /// Parts in its path (itself included), the path's bytes, and what the path's names hold.
+    depth: usize,
+    bytes: usize,
+    chain: u64,
+    used: bool,
 }
 
 impl InventoryReader {
@@ -510,13 +663,19 @@ impl InventoryReader {
             return Err(bad("the manifest has bytes after its end"));
         }
         // Stored once: a table with the same entry twice is not one PCTwin writes.
-        for (i, o) in owners.iter().enumerate() {
-            if owners[..i].contains(o) {
+        let mut seen = HashSet::new();
+        for o in &owners {
+            let mut w = Writer(Vec::new());
+            w.owner(o)?;
+            if !seen.insert(w.0) {
                 return Err(bad("an owner is listed twice"));
             }
         }
-        for (i, p) in places.iter().enumerate() {
-            if places[..i].contains(p) {
+        seen.clear();
+        for p in &places {
+            let mut w = Writer(Vec::new());
+            w.place(p)?;
+            if !seen.insert(w.0) {
                 return Err(bad("a place is listed twice"));
             }
         }
@@ -524,11 +683,17 @@ impl InventoryReader {
             laptop: LaptopId(id),
             items,
             pages,
+            owner_used: vec![false; owners.len()],
+            place_used: vec![false; places.len()],
+            owner_heap: owners.iter().map(owner_heap).collect(),
+            place_heap: places.iter().map(place_heap).collect(),
             owners,
             places,
             folders: Vec::new(),
+            folder_keys: HashSet::new(),
             next_page: 0,
             items_read: 0,
+            held: 0,
             ids: HashSet::new(),
             hash: Fingerprinter::new(manifest),
         })
@@ -574,16 +739,50 @@ impl InventoryReader {
         if count as u64 > left || (last && count as u64 != left) {
             return Err(bad("the pages do not add up to the items announced"));
         }
+        let first_new = self.folders.len();
+        let mut page_held: u64 = 0;
         for _ in 0..new_folders {
             let parent = r.u32()?;
-            if parent != ROOT && parent as usize >= self.folders.len() {
-                return Err(bad("a folder's parent does not come before it"));
-            }
             let name = r.name()?;
+            let (depth, bytes, chain) = if parent == ROOT {
+                (1, name.display().len(), name_heap(&name))
+            } else {
+                let p = self
+                    .folders
+                    .get_mut(parent as usize)
+                    .ok_or(bad("a folder's parent does not come before it"))?;
+                p.used = true;
+                (
+                    p.depth + 1,
+                    p.bytes + 1 + name.display().len(),
+                    p.chain + name_heap(&name),
+                )
+            };
+            // Room is left for at least the item's own name.
+            if depth >= MAX_PATH_DEPTH || bytes >= MAX_PATH_BYTES {
+                return Err(bad("a folder deeper or longer than a path may be"));
+            }
+            let mut key = Writer(Vec::new());
+            key.name(&name)?;
+            hold(
+                &mut page_held,
+                &mut self.held,
+                folder_held(&name, key.0.len()),
+            )?;
+            if !self.folder_keys.insert((parent, key.0)) {
+                return Err(bad("a folder is defined twice"));
+            }
             if self.folders.len() >= ROOT as usize {
                 return Err(bad("too many folders"));
             }
-            self.folders.push((parent, name));
+            self.folders.push(Folder {
+                parent,
+                name,
+                depth,
+                bytes,
+                chain,
+                used: false,
+            });
         }
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
@@ -591,16 +790,20 @@ impl InventoryReader {
             id.copy_from_slice(r.take(16)?);
             let id = ItemId(id);
             let kind = kind_of(r.u8()?)?;
+            let o = r.u32()? as usize;
             let owner = self
                 .owners
-                .get(r.u32()? as usize)
+                .get(o)
                 .ok_or(bad("an owner index out of range"))?
                 .clone();
+            self.owner_used[o] = true;
+            let p = r.u32()? as usize;
             let place = self
                 .places
-                .get(r.u32()? as usize)
+                .get(p)
                 .ok_or(bad("a place index out of range"))?
                 .clone();
+            self.place_used[p] = true;
             let folder = r.u32()?;
             let name = r.name()?;
             let size_bytes = r.u64()?;
@@ -612,7 +815,7 @@ impl InventoryReader {
                 _ => return Err(bad("an unknown download size marker")),
             };
             let inclusion = inclusion_of(r.u8()?)?;
-            let path = self.path_of(folder, name)?;
+            let path = self.path_of(folder, name, o, p, &mut page_held)?;
             if !self.ids.insert(id) {
                 return Err(RecordError::DuplicateId);
             }
@@ -632,6 +835,10 @@ impl InventoryReader {
         if !r.rest.is_empty() {
             return Err(bad("a page has bytes after its end"));
         }
+        // A page defines only the folders its own items need.
+        if self.folders[first_new..].iter().any(|f| !f.used) {
+            return Err(bad("a page defines a folder nothing in it uses"));
+        }
         self.hash.page(bytes);
         self.next_page += 1;
         self.items_read += count as u64;
@@ -643,20 +850,45 @@ impl InventoryReader {
         if self.next_page != self.pages || self.items_read != self.items {
             return Err(bad("pages are missing"));
         }
+        if self.owner_used.contains(&false) || self.place_used.contains(&false) {
+            return Err(bad("an owner or a place nothing uses"));
+        }
         Ok(self.hash.finish())
     }
 
-    fn path_of(&self, folder: u32, name: ItemName) -> Result<ItemPath, RecordError> {
-        let mut parts = vec![name];
-        let mut at = folder;
-        // Parents always come before their folders, so this walk ends.
-        while at != ROOT {
-            let (parent, n) = self
+    /// The path of an item named `name` in `folder`, owned by owner `o` in place `p`, once what
+    /// it will hold is counted (before anything is copied).
+    fn path_of(
+        &mut self,
+        folder: u32,
+        name: ItemName,
+        o: usize,
+        p: usize,
+        page_held: &mut u64,
+    ) -> Result<ItemPath, RecordError> {
+        let (depth, bytes, chain) = if folder == ROOT {
+            (1, name.display().len(), 0)
+        } else {
+            let f = self
                 .folders
-                .get(at as usize)
+                .get_mut(folder as usize)
                 .ok_or(bad("a folder index out of range"))?;
-            parts.push(n.clone());
-            at = *parent;
+            f.used = true;
+            (f.depth + 1, f.bytes + 1 + name.display().len(), f.chain)
+        };
+        if depth > MAX_PATH_DEPTH || bytes > MAX_PATH_BYTES {
+            return Err(bad("a path deeper or longer than PCTwin can move"));
+        }
+        let cost = item_held(self.owner_heap[o], self.place_heap[p], depth, chain, &name);
+        hold(page_held, &mut self.held, cost)?;
+        let mut parts = Vec::with_capacity(depth);
+        parts.push(name);
+        let mut at = folder;
+        // Parents always come before their folders, and depth is bounded, so this walk ends.
+        while at != ROOT {
+            let f = &self.folders[at as usize];
+            parts.push(f.name.clone());
+            at = f.parent;
         }
         parts.reverse();
         ItemPath::new(parts).map_err(|_| bad("a path that breaks the rules"))
@@ -787,3 +1019,75 @@ codes!(
         LeftOutReason::System = 5,
     ]
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::size_of;
+
+    /// The fixed costs cover what this build really holds: an item and its ID in a set (a set
+    /// keeps at most about twice its entries' room), a path part, and a folder with its key.
+    #[test]
+    fn the_fixed_costs_cover_the_real_sizes() {
+        assert!(size_of::<Item>() + 2 * size_of::<ItemId>() <= ITEM_COST as usize);
+        assert!(size_of::<ItemName>() <= NAME_COST as usize);
+        assert!(
+            size_of::<Folder>() + 2 * (size_of::<(u32, Vec<u8>)>() + 1) <= FOLDER_COST as usize
+        );
+    }
+
+    /// Each limit is met on its own: a page past its share, and pages each within theirs that
+    /// add up past the whole.
+    #[test]
+    fn what_is_held_is_refused_past_either_limit() {
+        let (mut page, mut whole) = (0, 0);
+        hold(&mut page, &mut whole, MAX_PAGE_HELD).unwrap();
+        assert!(hold(&mut page, &mut whole, 1).is_err());
+        let mut whole = 0;
+        let mut refused = None;
+        for n in 0..=MAX_HELD / MAX_PAGE_HELD {
+            let mut page = 0;
+            if hold(&mut page, &mut whole, MAX_PAGE_HELD).is_err() {
+                refused = Some(n);
+                break;
+            }
+        }
+        assert_eq!(refused, Some(MAX_HELD / MAX_PAGE_HELD));
+    }
+
+    /// The writer refuses, before sending anything, an inventory the reader would refuse.
+    #[test]
+    fn the_writer_stops_where_the_reader_would() {
+        let laptop = LaptopId([7; 16]);
+        let owner = Owner::Shared;
+        let place = Place {
+            role: FolderRole::Documents,
+            storage: Storage::SystemDrive,
+        };
+        let path = ItemPath::new(vec![ItemName::from_text("a"), ItemName::from_text("b")]).unwrap();
+        let item = Item {
+            id: ItemId::derive(&laptop, &owner, &place, &path),
+            kind: ItemKind::File,
+            owner,
+            place,
+            path,
+            size_bytes: 1,
+            portability: Portability::Portable,
+            managed_by: ManagedBy::Personal,
+            download_bytes: None,
+            inclusion: Inclusion::Included,
+        };
+        // One folder "a" and the item: what the reader would hold for them.
+        let cost = folder_held(&ItemName::from_text("a"), 6)
+            + item_held(0, 0, 2, 1, &ItemName::from_text("b"));
+        for (before, fits) in [(MAX_HELD - cost, true), (MAX_HELD - cost + 1, false)] {
+            let mut known = Folders {
+                index: HashMap::new(),
+                count: 0,
+                held: before,
+            };
+            let got = encode_page(0, std::slice::from_ref(&item), &[0], &[0], &mut known);
+            assert_eq!(got.is_ok(), fits, "{got:?}");
+        }
+    }
+}
