@@ -18,6 +18,12 @@ ignore = [
   # proc-macro-error is unmaintained (no known vulnerability). Build-time only, via the same
   # GTK 3 macros; it is not part of the shipped app.
   { id = "RUSTSEC-2024-0370", reason = "Unmaintained build-time macro crate from Tauri GTK 3 stack" },
+  # zvariant, zvariant_derive and zbus_names are unmaintained (no known vulnerability): merged
+  # into zbus 6. They come with zbus 5 through keepawake and tauri-plugin-opener (Linux D-Bus),
+  # which we cannot move to zbus 6 ourselves.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener" },
 ]
 
 [licenses]
