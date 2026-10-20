@@ -26,10 +26,6 @@ use crate::{DriveCheck, NameRules, Naming, Platform};
 /// The largest file a FAT drive (FAT12, FAT16, FAT32) holds: 4 GiB less one byte.
 pub const FAT_LARGEST_FILE: u64 = (1 << 32) - 1;
 
-/// What the time-step test's probe file holds.
-pub(crate) const TIME_PROBE: &[u8] = b"PCTwin drive test: file t. Safe to delete.
-";
-
 /// The last-access time the time test sets: 3 July 2001, 12:34:56 UTC. FAT keeps a file's
 /// last-access time as a date alone (local midnight), exFAT and NTFS keep the time of day too (a
 /// Windows exFAT drive keeps modified times in two-second steps like FAT, so only this tells them
@@ -71,33 +67,46 @@ fn two_agree(
 /// same date alone; `None` otherwise (or if the test could not run: a folder PCTwin may not write
 /// to, say; nothing is then assumed).
 pub(crate) fn kind_by_time_step(dir: &Dir) -> Option<DriveKind> {
+    kind_by_time_step_with(dir, &mut |_| {})
+}
+
+/// The time test, with `before_removal` run on each probe's name just before it is removed (for
+/// tests: another program acting then). Leftover probe files of every test in the folder are
+/// cleared first, by the probes module's rules.
+pub(crate) fn kind_by_time_step_with(
+    dir: &Dir,
+    before_removal: &mut dyn FnMut(&str),
+) -> Option<DriveKind> {
+    use crate::probes::Probe;
+    let _ = crate::probes::sweep(dir);
     let set = std::time::UNIX_EPOCH + TIME_PROBE_AT;
-    let a = kept_access_time(dir, "t", set);
-    let b = kept_access_time(dir, "u", set);
+    let tag = crate::probes::new_tag();
+    let a = kept_access_time(dir, &Probe::TimeT.name(tag), set, before_removal);
+    let b = kept_access_time(dir, &Probe::TimeU.name(tag), set, before_removal);
     two_agree(set, a, b).then_some(DriveKind::Fat)
 }
 
-/// The last-access time a probe file named for `which` keeps once it is set to `set`.
+/// The last-access time the probe file `name` keeps once it is set to `set`. The file is made
+/// only if the name is free, and removed only if it is still a probe file holding the time
+/// probe's bytes.
 fn kept_access_time(
     dir: &Dir,
-    which: &str,
+    name: &str,
     set: std::time::SystemTime,
+    before_removal: &mut dyn FnMut(&str),
 ) -> Option<std::time::SystemTime> {
-    use std::hash::{BuildHasher, RandomState};
     use std::io::Write;
-    let tag = RandomState::new().hash_one(std::process::id());
-    let name = format!(".pctwin-probe-{tag:016x}-{which}");
     let mut options = cap_std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     let kept = (|| {
-        let mut f = dir.open_with(&name, &options).ok()?.into_std();
-        f.write_all(TIME_PROBE).ok()?;
+        let mut f = dir.open_with(name, &options).ok()?.into_std();
+        f.write_all(crate::probes::TIME).ok()?;
         f.sync_all().ok()?;
         f.set_times(std::fs::FileTimes::new().set_accessed(set))
             .ok()?;
         f.sync_all().ok()?;
         drop(f);
-        dir.open(&name)
+        dir.open(name)
             .ok()?
             .into_std()
             .metadata()
@@ -105,7 +114,10 @@ fn kept_access_time(
             .accessed()
             .ok()
     })();
-    let _ = dir.remove_file(&name);
+    if dir.symlink_metadata(name).is_ok() {
+        before_removal(name);
+    }
+    let _ = crate::probes::remove_if_probe(dir, name, false);
     kept
 }
 
@@ -418,7 +430,13 @@ impl DriveProfile {
     /// is asked how it keeps time (FAT is found that way); otherwise it is unknown, and gets the
     /// strictest rules.
     pub(crate) fn read(dir: &Dir) -> Self {
-        let kind = match read_kind(dir).unwrap_or(DriveKind::Unknown) {
+        Self::judge(dir, read_kind(dir).unwrap_or(DriveKind::Unknown))
+    }
+
+    /// The profile of the drive the open folder `dir` is on, given the kind its type was read as
+    /// (`Unknown` where it could not be read, which is then asked how it keeps time).
+    pub(crate) fn judge(dir: &Dir, read: DriveKind) -> Self {
+        let kind = match read {
             DriveKind::Unknown => kind_by_time_step(dir).unwrap_or(DriveKind::Unknown),
             kind => kind,
         };

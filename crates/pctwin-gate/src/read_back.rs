@@ -32,9 +32,6 @@ use cap_std::fs::{Dir, OpenOptions};
 pub(crate) const ALIGN: usize = 64 * 1024;
 /// Most bytes asked of the drive in one read.
 const MOST_AT_ONCE: usize = 4 * 1024 * 1024;
-/// Size of the probe file each drive is tested with: two aligned chunks.
-const PROBE_BYTES: usize = 2 * ALIGN;
-
 pctwin_types::listed_enum! {
     /// Where the bytes of a read-back came from.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,9 +459,12 @@ pub(crate) fn this_file_from_drive(_file: &std::fs::File) -> Result<(), WhyMemor
 }
 
 /// Tests once whether files in `dir` can be read back past this laptop's cache, with a small
-/// probe file written there, read back and removed.
-pub(crate) fn probe(dir: &Dir, name: &str, refused: bool) -> CheckedFrom {
-    let pattern: Vec<u8> = (0..PROBE_BYTES).map(|i| (i % 251) as u8 ^ 0x5A).collect();
+/// probe file written there, read back and removed (only if it still holds the probe's bytes).
+/// Leftover probe files of every test in the folder are cleared first.
+pub(crate) fn probe(dir: &Dir, refused: bool) -> CheckedFrom {
+    let _ = crate::probes::sweep(dir);
+    let name = &crate::probes::Probe::ReadBack.name(crate::probes::new_tag());
+    let pattern = crate::probes::read_back_bytes();
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     let written = dir.open_with(name, &options).and_then(|file| {
@@ -477,7 +477,7 @@ pub(crate) fn probe(dir: &Dir, name: &str, refused: bool) -> CheckedFrom {
         Ok(()) => probe_file(dir, name, &pattern, refused),
         Err(_) => CheckedFrom::Memory(WhyMemory::CannotSkipCache),
     };
-    let _ = dir.remove_file(name);
+    let _ = crate::probes::remove_if_probe(dir, name, false);
     found
 }
 

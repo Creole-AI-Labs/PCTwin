@@ -15,3 +15,18 @@ reason = "Same glib advisory as RUSTSEC-2024-0429"
 id = "RUSTSEC-2024-0370"
 ignoreUntil = 2027-01-06
 reason = "proc-macro-error unmaintained; build-time only via Tauri's GTK 3 macros"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+ignoreUntil = 2027-01-06
+reason = "zvariant unmaintained, merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+ignoreUntil = 2027-01-06
+reason = "zbus_names unmaintained, merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+ignoreUntil = 2027-01-06
+reason = "zvariant_derive unmaintained, merged into zbus 6; zbus 5 comes via keepawake and tauri-plugin-opener"
