@@ -1008,6 +1008,12 @@ evidence-read-back = ड्राइव से वापस पढ़कर ज�
 evidence-memory = इस लैपटॉप की मेमोरी से जाँचा गया, ड्राइव से नहीं।
 evidence-memory-explain = कॉपी को वापस पढ़ा गया और वह मेल खाई, लेकिन इस लैपटॉप की मेमोरी के ज़रिए, इसलिए हो सकता है कि जो पढ़ा गया वह ड्राइव के बजाय मेमोरी से आया हो। ड्राइव में ही कोई ख़राबी हो तो वह यहाँ शायद न दिखे, इसलिए फ़ाइल को एक बार खोलकर देखना अच्छी जाँच है।
 evidence-not-checked = जाँचा नहीं गया, क्योंकि यह पूरा नहीं हुआ।
+# Machine-translated 16 October 2026.
+why-memory-cannot-skip-cache = इस ड्राइव ने PCTwin को इसे सीधे पढ़ने नहीं दिया, इसलिए जाँच इस लैपटॉप की मेमोरी के ज़रिए हुई। कुछ नेटवर्क ड्राइव और USB स्टिक ऐसे ही काम करती हैं।
+why-memory-not-shown = यह ड्राइव यह नहीं दिखा सकी कि PCTwin का पढ़ना सच में उस तक पहुँचा, इसलिए इस जाँच को इस लैपटॉप की मेमोरी से हुई जाँच माना गया।
+why-memory-no-way = इस लैपटॉप के सिस्टम के पास इस ड्राइव को सीधे पढ़ने का कोई तरीका नहीं है, इसलिए जाँच उसकी मेमोरी के ज़रिए हुई।
+why-memory-stored-specially = यह फ़ाइल ख़ास तरीके से रखी गई है, जैसे कंप्रेस या एन्क्रिप्ट करके, इसलिए सिस्टम इसे मेमोरी के ज़रिए पढ़ता है।
+why-memory-too-small = यह फ़ाइल बहुत छोटी है, इसलिए ड्राइव इसे अपने ही रिकॉर्ड के साथ रखती है और सिस्टम इसे मेमोरी के ज़रिए पढ़ता है।
 
 # Reasons: why an item did not finish. Each says what happened, then what to do.
 reason-not-enough-space = नए लैपटॉप पर स्टोरेज ख़त्म हो गया। उस पर स्टोरेज खाली करें, फिर इस आइटम को शामिल करके नया स्थानांतरण शुरू करें।
@@ -1039,6 +1045,12 @@ status-failed = विफल
 
 # $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
 progress-minutes = { $low } से { $high } मिनट
+# Machine-translated 16 October 2026.
+progress-minutes-one =
+    { NUMBER($minutes) ->
+        [one] { $minutes } मिनट
+       *[other] { $minutes } मिनट
+    }
 # $low and $high are numbers and $unit is already formatted, for example "MB/s". The result fills "{ $speed }, measured".
 progress-speed-range = { $low } से { $high } { $unit }
 progress-count-failed =

@@ -1,0 +1,25 @@
+[
+  {
+    "kind": "paired"
+  },
+  {
+    "kind": "problem",
+    "problem": {
+      "key": "pairing-code-wrong",
+      "networks": []
+    }
+  },
+  {
+    "kind": "lost"
+  },
+  {
+    "kind": "problem",
+    "problem": {
+      "key": "pairing-choose-network",
+      "networks": [
+        "Ethernet",
+        "Wi-Fi"
+      ]
+    }
+  }
+]

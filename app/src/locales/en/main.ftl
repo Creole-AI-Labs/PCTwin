@@ -882,6 +882,12 @@ evidence-read-back = Checked by reading it back from the drive.
 evidence-memory = Checked from this laptop’s memory, not the drive.
 evidence-memory-explain = The copy was read back and matched, but through this laptop’s memory, so what was read may have come from memory rather than the drive. A fault in the drive itself might not show here, so opening the file once is a good check.
 evidence-not-checked = Not checked, because it did not finish.
+# Why a copied file was checked from memory, one line under the explanation above (the gate's WhyMemory).
+why-memory-cannot-skip-cache = This drive would not let PCTwin read it directly, so the check went through this laptop’s memory. Some network drives and USB sticks work this way.
+why-memory-not-shown = This drive could not show that PCTwin’s read really reached it, so the check counts as one from this laptop’s memory.
+why-memory-no-way = This laptop’s system has no way to read this drive directly, so the check went through its memory.
+why-memory-stored-specially = This file is stored in a special way, such as compressed or encrypted, so the system reads it through memory.
+why-memory-too-small = This file is very small, so the drive keeps it with its own records and the system reads it through memory.
 
 # Reasons: why an item did not finish. Each says what happened, then what to do.
 reason-not-enough-space = The new laptop ran out of space. Free up space on it, then start a new move that includes this item.
@@ -913,6 +919,12 @@ status-failed = Failed
 
 # $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
 progress-minutes = { $low } to { $high } minutes
+# $minutes is a whole number of minutes, measured, when both ends of the range round to the same number. The result fills "About { $range } left".
+progress-minutes-one =
+    { NUMBER($minutes) ->
+        [one] { $minutes } minute
+       *[other] { $minutes } minutes
+    }
 # $low and $high are numbers and $unit is already formatted, for example "MB/s". The result fills "{ $speed }, measured".
 progress-speed-range = { $low } to { $high } { $unit }
 progress-count-failed =

@@ -26,41 +26,43 @@ use tokio::sync::{mpsc, oneshot};
 /// How often the old laptop's screen is brought up to date (the countdown moves each second).
 const TICK: Duration = Duration::from_millis(200);
 
-/// Why a step of the journey did not go ahead, as the screens tell the person.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Problem {
-    #[error("the code must be six digits")]
-    InvalidCode,
-    #[error("the code was not right")]
-    WrongCode,
-    #[error("the code had changed")]
-    CodeExpired,
-    #[error("the old laptop is pairing with another laptop")]
-    Busy,
-    #[error("wait a moment for a new code")]
-    Wait,
-    #[error("pairing stopped after too many tries")]
-    Locked,
-    #[error("the old laptop could not be reached")]
-    Unreachable,
-    #[error("that number was not the one on the new laptop")]
-    WrongNumber,
-    #[error("the numbers did not match on the old laptop")]
-    NoMatch,
-    #[error("the other laptop did not answer in time")]
-    TimedOut,
-    #[error("the connection to the other laptop was lost")]
-    ConnectionLost,
-    #[error("the other laptop has a different PCTwin")]
-    DifferentVersion,
-    #[error("that name cannot be used")]
-    InvalidName,
-    #[error("this laptop is not on a network it can pair on")]
-    NoNetwork,
-    #[error("choose the network the other laptop is on")]
-    ChooseNetwork(Vec<String>),
-    #[error("pairing did not work")]
-    Failed,
+pctwin_types::listed_enum! {
+    /// Why a step of the journey did not go ahead, as the screens tell the person.
+    #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+    pub enum Problem {
+        #[error("the code must be six digits")]
+        InvalidCode,
+        #[error("the code was not right")]
+        WrongCode,
+        #[error("the code had changed")]
+        CodeExpired,
+        #[error("the old laptop is pairing with another laptop")]
+        Busy,
+        #[error("wait a moment for a new code")]
+        Wait,
+        #[error("pairing stopped after too many tries")]
+        Locked,
+        #[error("the old laptop could not be reached")]
+        Unreachable,
+        #[error("that number was not the one on the new laptop")]
+        WrongNumber,
+        #[error("the numbers did not match on the old laptop")]
+        NoMatch,
+        #[error("the other laptop did not answer in time")]
+        TimedOut,
+        #[error("the connection to the other laptop was lost")]
+        ConnectionLost,
+        #[error("the other laptop has a different PCTwin")]
+        DifferentVersion,
+        #[error("that name cannot be used")]
+        InvalidName,
+        #[error("this laptop is not on a network it can pair on")]
+        NoNetwork,
+        #[error("choose the network the other laptop is on")]
+        ChooseNetwork(Vec<String>),
+        #[error("pairing did not work")]
+        Failed,
+    }
 }
 
 impl Problem {
@@ -86,7 +88,8 @@ impl Problem {
         }
     }
 
-    /// One of each problem (for checking every key has a translation).
+    /// One of each problem, in declared order (for checking every key has a translation). Its test
+    /// checks it against `VARIANTS`, which is made with the enum, so a new problem must be added.
     pub fn all() -> Vec<Problem> {
         vec![
             Self::InvalidCode,
