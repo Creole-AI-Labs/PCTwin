@@ -536,7 +536,9 @@ fn tauri_cannot_take_grants_at_run_time() {
 }
 
 /// The text check above misses `dynamic-acl` turned on another way (a second name for the tauri
-/// package, or a dependency asking for it): this reads the features cargo really resolved.
+/// package, or a dependency asking for it): this reads the features cargo really resolved for
+/// this system (CI runs it on every system; asking for all systems at once needs crates a runner
+/// has not downloaded).
 #[test]
 fn tauri_is_built_without_dynamic_acl() {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -546,8 +548,6 @@ fn tauri_is_built_without_dynamic_acl() {
             "--offline",
             "-p",
             "pctwin-app",
-            "--target",
-            "all",
             "-e",
             "features",
             "-i",
