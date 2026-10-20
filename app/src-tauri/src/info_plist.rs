@@ -1,8 +1,11 @@
 //! The Mac app's Info.plist additions (src-tauri/Info.plist, which `tauri build` merges into the
-//! bundle's own). Since macOS 15 an app must say why it talks to devices on the local network and
-//! name every Bonjour service it announces or looks for; without these keys a Mac cannot find the
-//! other laptop at all, and the permission question is never asked. CI also reads the keys back
-//! from the built PCTwin.app (ci.yml, "The Mac app declares the local network").
+//! bundle's own). Apple's TN3179, "Understanding local network privacy"
+//! (https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy):
+//! `NSLocalNetworkUsageDescription` is the reason the system shows when it asks for local network
+//! access, and `NSBonjourServices` lists each Bonjour service type the app announces or browses
+//! for. Without them the question may come without PCTwin's reason, and browsing for an unlisted
+//! service type can fail, so the laptops may not find each other. CI also reads the keys back from
+//! the built PCTwin.app (ci.yml, "The Mac app declares the local network").
 
 use std::path::PathBuf;
 

@@ -161,6 +161,7 @@ ended-home = 返回首页
 
 pair-back = 返回
 pair-try-again = 重试
+pair-more-details = 更多详情
 pair-heads-up-title = 你的笔记本电脑可能会问你一个问题。
 pair-heads-up-local-network = 你的Mac会询问PCTwin能否查找你本地网络上的设备。请选择“允许”，这样两台笔记本电脑才能找到彼此。
 pair-heads-up-firewall = Windows可能会询问PCTwin能否接受连接。请选择“允许”，这样你的新笔记本电脑才能连接到这台电脑。
@@ -268,7 +269,8 @@ pairing-different-version = 两台笔记本电脑上的PCTwin版本不同。请�
 pairing-name-invalid = 这个名称不能使用。请换一个更短的名称，只用字母和数字。
 pairing-no-network = 这台笔记本电脑没有连接Wi-Fi或有线网络。请连接网络，然后再次尝试。
 pairing-choose-network = 这台笔记本电脑连接了多个网络。请选择你的新笔记本电脑所连接的那个：
-pairing-local-network-refused = 你的Mac没有允许PCTwin查找这个网络上的笔记本电脑。如果Mac刚刚询问过你，请选择“允许”，然后重试。否则，请打开“系统设置”，选择“隐私与安全性”，再选择“本地网络”，打开PCTwin，然后重试。
+pairing-local-network-refused = 你的Mac可能不允许PCTwin查找这个网络上的笔记本电脑。如果Mac刚刚询问过你，请选择“允许”，然后重试。否则，请打开“系统设置”，选择“隐私与安全性”，再选择“本地网络”，打开PCTwin，然后重试。
+pairing-local-network-refused-details = VPN、防火墙或过滤软件也可能让笔记本电脑无法找到彼此。如果有其中之一正在运行，请在配对期间关闭它，然后重试。
 pairing-failed = 这次配对没有成功。没有共享任何内容。请再次尝试。
 
 ## M06 Match people to their profiles (Who’s moving?)

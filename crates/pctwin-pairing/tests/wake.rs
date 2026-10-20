@@ -231,3 +231,29 @@ fn waking_during_a_pause_keeps_the_pause_and_a_fresh_code_follows() {
     let fresh_msg1 = sender.message_1().unwrap().to_vec();
     assert!(attempt(&mut sender, &fresh, &fresh_msg1, until).is_ok());
 }
+
+#[test]
+fn long_awake_then_short_sleep_is_seen() {
+    // Ten minutes awake, looked at every 200 ms as the screen does, then two minutes asleep: the
+    // comparison is between the last two looks, not since the start.
+    let wall = Wall::new();
+    let start = Instant::now();
+    let mut sender = wall.sender(start);
+    let step = Duration::from_millis(200);
+    let mut t = start;
+    for _ in 0..3000 {
+        t += step;
+        wall.forward(step);
+        sender.tick(t).unwrap();
+    }
+    let code = sender.code().unwrap();
+    let msg1 = sender.message_1().unwrap().to_vec();
+
+    wall.forward(Duration::from_secs(120));
+    let woke = t + step;
+    assert!(matches!(
+        attempt(&mut sender, &code, &msg1, woke),
+        Err(PairingError::UnknownSession)
+    ));
+    assert_eq!(sender.failed_attempts(), 0);
+}

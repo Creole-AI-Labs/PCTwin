@@ -8,10 +8,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use pctwin_discovery::{Found, Label};
-use pctwin_doctor::{Cause, Evidence, Role};
+use pctwin_doctor::{Cause, Evidence, Interface, Role};
 use pctwin_journey::{NewJourney, OldJourney, OldUpdate, Problem, Serving, Waiting};
 use pctwin_link::{Link, LinkConfig};
-use pctwin_session::OldLaptop;
+use pctwin_session::{Network, OldLaptop};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Runtime, State};
@@ -462,26 +462,67 @@ pub fn heads_up(role: PairRole, system: System) -> Vec<HeadsUp> {
     }
 }
 
-/// Whether the connection doctor's rules take a refused send to the local-discovery group
-/// (`blocked`) on this system to mean the Mac's Local Network permission is off. A refusal also
-/// shows while the Mac's question is still waiting for an answer, which is why the words say both.
-pub fn local_network_refused(role: Role, blocked: Option<bool>, is_macos: bool) -> bool {
+/// What stops pairing on this laptop's network, by the connection doctor's rules, network first:
+/// not connected to any network wins over everything else, and only when the network itself looks
+/// fine does a refused send to the local-discovery group (`blocked`) on a Mac become the likely
+/// cause "the Mac's Local Network permission is off". A refused send has other causes too (a VPN, a
+/// firewall or filter app, and the Mac's question still waiting for an answer), so the words call it
+/// likely and name the others behind More details. `None` when the interfaces could not be listed:
+/// what could not be seen is never blamed.
+pub fn network_problem(
+    role: Role,
+    interfaces: Option<&[Interface]>,
+    blocked: Option<bool>,
+    is_macos: bool,
+) -> Option<Problem> {
+    let interfaces = interfaces?;
     let evidence = Evidence {
+        interfaces: Some(interfaces.to_vec()),
         multicast_send_blocked: blocked,
         is_macos,
         old_laptops_found: (role == Role::NewLaptop).then_some(0),
         ..Evidence::default()
     };
-    pctwin_doctor::diagnose(&evidence, role)
-        .findings
+    let findings = pctwin_doctor::diagnose(&evidence, role).findings;
+    if findings.iter().any(|f| f.cause == Cause::NotConnected) {
+        Some(Problem::NoNetwork)
+    } else if findings
         .iter()
         .any(|f| f.cause == Cause::MacLocalNetworkDenied)
+    {
+        Some(Problem::LocalNetworkRefused)
+    } else {
+        None
+    }
 }
 
-/// [`local_network_refused`] on this laptop. Only a Mac is asked (elsewhere nothing is sent).
-fn local_network_refused_here(role: Role) -> bool {
-    cfg!(target_os = "macos")
-        && local_network_refused(role, pctwin_doctor::probe::multicast_send_blocked(), true)
+/// [`network_problem`] on this laptop. Only a Mac sends the check (elsewhere nothing is sent).
+fn network_problem_here(role: Role, interfaces: Option<&[Interface]>) -> Option<Problem> {
+    let is_macos = cfg!(target_os = "macos");
+    let blocked = if is_macos {
+        pctwin_doctor::probe::multicast_send_blocked()
+    } else {
+        None
+    };
+    network_problem(role, interfaces, blocked, is_macos)
+}
+
+/// The network the old laptop pairs on: the one the person chose, or the likely Wi-Fi. No network
+/// to pair on is [`Problem::NoNetwork`]; several, none of them clearly the Wi-Fi, is
+/// [`Problem::ChooseNetwork`] listing them.
+fn old_laptop_network(interfaces: &[Interface], chosen: Option<&str>) -> Result<Network, Problem> {
+    if let Some(network) = pctwin_session::pairing_network(interfaces, chosen) {
+        return Ok(network);
+    }
+    if chosen.is_some() {
+        return Err(Problem::NoNetwork);
+    }
+    let candidates = pctwin_session::pairing_candidates(interfaces);
+    Err(if candidates.is_empty() {
+        Problem::NoNetwork
+    } else {
+        Problem::ChooseNetwork(candidates)
+    })
 }
 
 /// Old laptop: starts pairing with a new random label, on `network` (the one the person chose)
@@ -499,21 +540,15 @@ pub async fn pairing_old_start<R: Runtime>(
     state
         .begin_old(
             async {
-                // Without the Mac's Local Network permission, no new laptop could find this one.
-                if local_network_refused_here(Role::OldLaptop) {
-                    return Err(Problem::LocalNetworkRefused);
+                // The network first: not connected, or which network, is said before anything
+                // else. Only then can the Mac's Local Network permission be the likely cause.
+                let interfaces = pctwin_doctor::probe::interfaces().ok_or(Problem::NoNetwork)?;
+                let chosen = old_laptop_network(&interfaces, network.as_deref())?;
+                if let Some(problem) = network_problem_here(Role::OldLaptop, Some(&interfaces)) {
+                    return Err(problem);
                 }
                 let label = Label::random().map_err(|_| Problem::Failed)?;
-                match network {
-                    Some(name) => {
-                        let interfaces =
-                            pctwin_doctor::probe::interfaces().ok_or(Problem::NoNetwork)?;
-                        let chosen = pctwin_session::pairing_network(&interfaces, Some(&name))
-                            .ok_or(Problem::NoNetwork)?;
-                        OldJourney::start_on(label, config(), &chosen).await
-                    }
-                    None => OldJourney::start(label, config()).await,
-                }
+                OldJourney::start_on(label, config(), &chosen).await
             },
             tell,
         )
@@ -588,9 +623,13 @@ pub async fn pairing_new_search(
     state: State<'_, AppPairing>,
 ) -> Result<Vec<NearbyView>, ProblemView> {
     let found = NewJourney::new(config()).search(SEARCH_WAIT).await?;
-    // Finding nothing, on a Mac that refuses local discovery: say why, and where to fix it.
-    if found.is_empty() && local_network_refused_here(Role::NewLaptop) {
-        return Err(Problem::LocalNetworkRefused.into());
+    // Finding nothing: say why when the doctor can tell, network first (not connected), then a
+    // Mac that refuses local discovery (likely its Local Network permission).
+    if found.is_empty() {
+        let interfaces = pctwin_doctor::probe::interfaces();
+        if let Some(problem) = network_problem_here(Role::NewLaptop, interfaces.as_deref()) {
+            return Err(problem.into());
+        }
     }
     let views = nearby_views(&found);
     *state.found.lock().await = found;
@@ -1411,18 +1450,83 @@ mod tests {
         assert!(serde_json::from_value::<PairRole>(serde_json::json!("both")).is_err());
     }
 
+    fn interface(name: &str, ip: &str) -> Interface {
+        Interface::new(name, ip.parse().unwrap())
+    }
+
+    fn home_wifi() -> Vec<Interface> {
+        vec![
+            interface("lo0", "127.0.0.1"),
+            interface("Wi-Fi", "192.168.1.20"),
+        ]
+    }
+
     #[test]
-    fn a_refused_send_on_a_mac_means_the_local_network_permission() {
+    fn not_connected_wins_over_a_refused_send() {
         use pctwin_doctor::Role;
+        let only_loopback = vec![interface("lo0", "127.0.0.1")];
+        let only_vpn = vec![
+            interface("lo0", "127.0.0.1"),
+            interface("utun4", "10.8.0.2"),
+        ];
         for role in [Role::OldLaptop, Role::NewLaptop] {
-            assert!(local_network_refused(role, Some(true), true));
-            // Sending works, or could not be told: never blamed on the permission.
-            assert!(!local_network_refused(role, Some(false), true));
-            assert!(!local_network_refused(role, None, true));
+            for interfaces in [&only_loopback, &only_vpn] {
+                assert_eq!(
+                    network_problem(role, Some(interfaces), Some(true), true),
+                    Some(Problem::NoNetwork),
+                    "{role:?} {interfaces:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn with_a_working_network_a_refused_send_on_a_mac_is_the_local_network_permission() {
+        use pctwin_doctor::Role;
+        let wifi = home_wifi();
+        for role in [Role::OldLaptop, Role::NewLaptop] {
+            assert_eq!(
+                network_problem(role, Some(&wifi), Some(true), true),
+                Some(Problem::LocalNetworkRefused)
+            );
+            // Sending works, or could not be told: nothing is blamed.
+            assert_eq!(network_problem(role, Some(&wifi), Some(false), true), None);
+            assert_eq!(network_problem(role, Some(&wifi), None, true), None);
             // Only a Mac has the permission.
-            assert!(!local_network_refused(role, Some(true), false));
+            assert_eq!(network_problem(role, Some(&wifi), Some(true), false), None);
+            // Interfaces that could not be listed are never blamed on anything.
+            assert_eq!(network_problem(role, None, Some(true), true), None);
         }
         let p = ProblemView::from(Problem::LocalNetworkRefused);
         assert_eq!(p.key, "pairing-local-network-refused");
+    }
+
+    #[test]
+    fn the_old_laptop_names_its_network_before_anything_else() {
+        assert_eq!(
+            old_laptop_network(&home_wifi(), None).unwrap().name,
+            "Wi-Fi"
+        );
+        let none = vec![interface("lo0", "127.0.0.1")];
+        assert_eq!(
+            old_laptop_network(&none, None).unwrap_err(),
+            Problem::NoNetwork
+        );
+        assert_eq!(
+            old_laptop_network(&home_wifi(), Some("Ethernet")).unwrap_err(),
+            Problem::NoNetwork
+        );
+        let two = vec![
+            interface("Ethernet", "192.168.1.21"),
+            interface("Ethernet 2", "192.168.2.21"),
+        ];
+        assert_eq!(
+            old_laptop_network(&two, None).unwrap_err(),
+            Problem::ChooseNetwork(vec!["Ethernet".into(), "Ethernet 2".into()])
+        );
+        assert_eq!(
+            old_laptop_network(&two, Some("Ethernet 2")).unwrap().name,
+            "Ethernet 2"
+        );
     }
 }

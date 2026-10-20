@@ -171,6 +171,7 @@ ended-home = Return home
 
 pair-back = Back
 pair-try-again = Try again
+pair-more-details = More details
 pair-heads-up-title = Your laptop may ask you a question.
 pair-heads-up-local-network = Your Mac will ask whether PCTwin can find devices on your local network. Choose Allow, so your two laptops can find each other.
 pair-heads-up-firewall = Windows may ask whether PCTwin can accept connections. Choose Allow, so your new laptop can reach this one.
@@ -280,7 +281,8 @@ pairing-different-version = The two laptops have different versions of PCTwin. U
 pairing-name-invalid = That name cannot be used. Try a shorter name with letters and numbers.
 pairing-no-network = This laptop is not on a Wi-Fi or wired network. Connect it, then try again.
 pairing-choose-network = This laptop is on more than one network. Choose the one your new laptop is on:
-pairing-local-network-refused = Your Mac is not letting PCTwin find laptops on this network. If your Mac just asked, choose Allow, then try again. If not, open System Settings, choose Privacy & Security, then Local Network, switch on PCTwin, and try again.
+pairing-local-network-refused = Your Mac may be stopping PCTwin from finding laptops on this network. If your Mac just asked, choose Allow, then try again. If not, open System Settings, choose Privacy & Security, then Local Network, switch on PCTwin, and try again.
+pairing-local-network-refused-details = A VPN, or a firewall or filter app, can also stop laptops finding each other. If one is on, turn it off while you pair, then try again.
 pairing-failed = Pairing did not work this time. Nothing was shared. Try again.
 
 ## M06 Match people to their profiles (Who’s moving?)

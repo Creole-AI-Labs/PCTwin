@@ -58,12 +58,22 @@ export function ProblemNotice({ problem }: { problem: Problem }) {
   const { l10n } = useLocalization();
   // A key this version has no words for still says something useful: the generic problem.
   const key = l10n.getBundle(problem.key) ? problem.key : "pairing-failed";
+  // Other possible causes, when a problem has them, wait behind More details.
+  const details = `${key}-details`;
   return (
     <div className="pair-notice">
       <Banner tone="attention">
         <Localized id={key}>
           <p />
         </Localized>
+        {l10n.getBundle(details) && (
+          <details className="pair-more">
+            <summary>{l10n.getString("pair-more-details")}</summary>
+            <Localized id={details}>
+              <p />
+            </Localized>
+          </details>
+        )}
       </Banner>
     </div>
   );

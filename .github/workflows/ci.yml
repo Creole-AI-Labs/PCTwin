@@ -438,7 +438,9 @@ jobs:
           esac
           pnpm tauri build --ci --bundles "$bundles"
       # The Mac app as built must carry the Local Network keys (src-tauri/Info.plist, merged by
-      # `tauri build`): without them macOS 15 lets it find no other laptop and never asks.
+      # `tauri build`). Per Apple TN3179 (developer.apple.com/documentation/technotes/
+      # tn3179-understanding-local-network-privacy), without them the system's question may lack
+      # PCTwin's reason and browsing for an unlisted Bonjour service can fail.
       - name: The Mac app declares the local network
         if: runner.os == 'macOS'
         shell: bash

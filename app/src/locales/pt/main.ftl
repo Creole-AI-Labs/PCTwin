@@ -170,6 +170,7 @@ ended-home = Voltar ao início
 
 pair-back = Voltar
 pair-try-again = Tentar de novo
+pair-more-details = Mais detalhes
 pair-heads-up-title = Seu notebook pode fazer uma pergunta.
 pair-heads-up-local-network = Seu Mac vai perguntar se o PCTwin pode encontrar dispositivos na sua rede local. Escolha Permitir para que os dois notebooks possam se encontrar.
 pair-heads-up-firewall = O Windows pode perguntar se o PCTwin pode aceitar conexões. Escolha Permitir para que o notebook novo consiga chegar a este.
@@ -281,7 +282,8 @@ pairing-different-version = Os dois notebooks têm versões diferentes do PCTwin
 pairing-name-invalid = Esse nome não pode ser usado. Tente um nome mais curto, com letras e números.
 pairing-no-network = Este notebook não está em uma rede Wi-Fi ou com cabo. Conecte o notebook e tente de novo.
 pairing-choose-network = Este notebook está em mais de uma rede. Escolha aquela em que seu notebook novo está:
-pairing-local-network-refused = Seu Mac não está deixando o PCTwin encontrar notebooks nesta rede. Se o Mac acabou de perguntar, escolha Permitir e tente de novo. Se não, abra Ajustes do Sistema, escolha Privacidade e Segurança e depois Rede Local, ative o PCTwin e tente de novo.
+pairing-local-network-refused = Talvez seu Mac esteja impedindo o PCTwin de encontrar notebooks nesta rede. Se o Mac acabou de perguntar, escolha Permitir e tente de novo. Se não, abra Ajustes do Sistema, escolha Privacidade e Segurança e depois Rede Local, ative o PCTwin e tente de novo.
+pairing-local-network-refused-details = Uma VPN, um firewall ou um app de filtro também pode impedir que os notebooks se encontrem. Se algum estiver ligado, desligue-o durante o pareamento e tente de novo.
 pairing-failed = O pareamento não deu certo desta vez. Nada foi compartilhado. Tente de novo.
 
 ## M06 Match people to their profiles (Who’s moving?)

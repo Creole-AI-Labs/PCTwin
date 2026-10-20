@@ -171,6 +171,7 @@ ended-home = Retour à l’accueil
 
 pair-back = Retour
 pair-try-again = Réessayer
+pair-more-details = Plus de détails
 pair-heads-up-title = Votre ordinateur peut vous poser une question.
 pair-heads-up-local-network = Votre Mac va demander si PCTwin peut trouver des appareils sur votre réseau local. Choisissez Autoriser, pour que vos deux ordinateurs portables puissent se trouver.
 pair-heads-up-firewall = Windows peut demander si PCTwin peut accepter des connexions. Choisissez Autoriser, pour que votre nouvel ordinateur portable puisse joindre celui-ci.
@@ -282,7 +283,8 @@ pairing-different-version = Les deux ordinateurs portables n’ont pas la même 
 pairing-name-invalid = Ce nom ne peut pas être utilisé. Essayez un nom plus court, avec des lettres et des chiffres.
 pairing-no-network = Cet ordinateur portable n’est sur aucun réseau Wi-Fi ou filaire. Connectez-le, puis réessayez.
 pairing-choose-network = Cet ordinateur portable est sur plusieurs réseaux. Choisissez celui de votre nouvel ordinateur :
-pairing-local-network-refused = Votre Mac n’autorise pas PCTwin à trouver des ordinateurs portables sur ce réseau. Si votre Mac vient de vous le demander, choisissez Autoriser, puis réessayez. Sinon, ouvrez Réglages Système, choisissez Confidentialité et sécurité, puis Réseau local, activez PCTwin et réessayez.
+pairing-local-network-refused = Votre Mac empêche peut-être PCTwin de trouver des ordinateurs portables sur ce réseau. Si votre Mac vient de vous le demander, choisissez Autoriser, puis réessayez. Sinon, ouvrez Réglages Système, choisissez Confidentialité et sécurité, puis Réseau local, activez PCTwin et réessayez.
+pairing-local-network-refused-details = Un VPN, un pare-feu ou une app de filtrage peut aussi empêcher les ordinateurs portables de se trouver. S’il y en a un d’actif, désactivez-le le temps de l’association, puis réessayez.
 pairing-failed = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Réessayez.
 
 ## M06 Match people to their profiles (Who’s moving?)

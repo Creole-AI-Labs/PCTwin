@@ -895,6 +895,9 @@ describe("someone tried wrong codes, and the system's own questions", () => {
       expect(heading().textContent).toBe(text("pair-new-none-title"));
     });
     expect(screen.getByText(withText(text("pairing-local-network-refused")))).toBeTruthy();
+    // The permission is the likely cause; the other causes wait behind More details.
+    expect(screen.getByText(withText(text("pair-more-details"))).tagName).toBe("SUMMARY");
+    expect(screen.getByText(withText(text("pairing-local-network-refused-details")))).toBeTruthy();
     expect(button("pair-new-search-again")).toBeTruthy();
     expect(await violations()).toEqual([]);
     noMissingText();

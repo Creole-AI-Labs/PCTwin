@@ -27,8 +27,9 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call: the app's twelve commands, listening to its own events, and
-/// opening our own site in the browser. Changing this list is a security decision.
+/// Exactly what the screens may call, 15 names: the app's twelve commands, listening to and
+/// unlistening from its own events (two), and opening our own site in the browser (one). Changing
+/// this list is a security decision.
 const SCREENS_MAY_CALL: [&str; 15] = [
     "set_window_mode",
     "set_tray_labels",
