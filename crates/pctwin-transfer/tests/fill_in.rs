@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use pctwin_gate::{Approved, Destination, Destinations, DriveKind, DriveProfile, Naming};
-use pctwin_journal::{FileId, Journal, JournalError, Landed, Ledger, PlannedWrite, State};
+use pctwin_journal::{FileId, Journal, JournalError, Landed, Ledger, PlannedWrite, Proof, State};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
     Channel, ChannelError, ReceiverSession, SendJob, SenderSession, Tier, TransferError,
@@ -370,7 +370,9 @@ async fn a_journal_that_fails_at_any_step_of_a_fill_is_recovered_whole() {
 /// The laptop stops dead part way through filling a file in (this test runs itself again as a
 /// separate program that is killed mid-copy, so nothing is tidied on the way out, as with a
 /// power cut). Recovery removes PCTwin's own partial copy from the real name and names the
-/// checked file again: the whole file, nothing partial, nothing left.
+/// checked file again: the whole file, nothing partial, nothing left. On Windows, where the tag
+/// that proves the partial copy can be inherited by another program's file, the partial copy is
+/// left and the whole copy lands beside it, with a note.
 #[test]
 fn a_laptop_that_stops_dead_mid_fill_is_recovered_whole() {
     let work = tempfile::tempdir().unwrap();
@@ -407,6 +409,21 @@ fn a_laptop_that_stops_dead_mid_fill_is_recovered_whole() {
         assert!(dest.hidden("c.bin").unwrap(), "a killed fill is visible");
     }
     let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    if cfg!(windows) {
+        // On Windows a tag never removes anything (another program's file at a freed name can
+        // inherit it): the partial copy stays as it is, the whole copy lands beside it, and the
+        // person is told.
+        assert!(r.failed.is_empty() && !r.notes.is_empty(), "{r:?}");
+        assert_eq!(std::fs::metadata(usb.join("c.bin")).unwrap().len(), partial);
+        let all = journal.entries().unwrap();
+        let State::Committed { final_path, .. } = &all[0].state else {
+            panic!("{:?}", all[0].state)
+        };
+        assert_ne!(final_path, "c.bin");
+        assert_eq!(std::fs::read(usb.join(final_path)).unwrap(), data(BIG));
+        let _ = (old, tag);
+        return;
+    }
     assert!(
         r.failed.is_empty() && r.left.is_empty() && r.notes.is_empty(),
         "{r:?}"
@@ -910,6 +927,48 @@ async fn a_show_that_fails_part_way_is_finished_at_the_next_start() {
     assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
 }
 
+/// Moves every creation time of every file in `dir` by `by` seconds, as macOS does to a FAT
+/// drive mounted again under another time zone or summer-time offset.
+#[cfg(windows)]
+fn shift_creation_times(dir: &Path, by: i64) {
+    use std::os::windows::fs::FileTimesExt;
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if !p.is_file() {
+            continue;
+        }
+        let born = std::fs::metadata(&p).unwrap().created().unwrap();
+        let moved = if by >= 0 {
+            born + std::time::Duration::from_secs(by.unsigned_abs())
+        } else {
+            born - std::time::Duration::from_secs(by.unsigned_abs())
+        };
+        let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_created(moved))
+            .unwrap();
+    }
+}
+
+/// A stop after the commit, or after the fill was recorded filled, then the drive mounted again
+/// under another offset (the review's probe: every time on the drive an hour on, or five and a
+/// half). Recovery still knows PCTwin's copy by its shifted tag and its whole bytes: it ends
+/// shown, visible, committed, with nothing left hidden, pending or said.
+#[cfg(windows)]
+#[test]
+fn a_copy_is_still_finished_after_the_drive_s_time_offset_changed() {
+    for (at, by) in [
+        ("journal:committed", 3600),
+        ("journal:filled", 5 * 3600 + 1800),
+    ] {
+        let (_work, usb, journal) = stopped_at(at);
+        shift_creation_times(&usb, by);
+        let table = table_for(Destination::open(&usb).unwrap().with_profile(provable()));
+        let r = pctwin_transfer::recover(&journal, &table).unwrap();
+        assert!(r.notes.is_empty() && r.left.is_empty(), "{at}: {r:?}");
+        assert_landed_whole(&journal, &usb, "c.bin", &data(BIG));
+    }
+}
+
 /// After a stop at Filled, the same bytes and the same tag come back at the name as a new file
 /// record (as a drive that numbers files by where they sit gives after a remount, or a file
 /// whose number changes as it fills): it is PCTwin's copy by its tag and its whole bytes, so
@@ -1036,4 +1095,51 @@ fn a_hidden_file_that_is_not_pctwin_s_is_never_shown_and_is_reported() {
         std::fs::read(usb.join("c.bin")).unwrap(),
         b"their hidden file"
     );
+}
+
+/// Windows hands a file made at a name freed moments before the old file's creation time
+/// ("file-name tunnelling"), so another program's file at the name carries PCTwin's tag. After a
+/// stop mid-fill, another program replaces PCTwin's hidden partial copy with its own file holding
+/// the first bytes of the same data: recovery leaves it as it is, puts the copy beside it, and
+/// says why (found by the fresh review of 20 October 2026).
+#[cfg(windows)]
+#[test]
+fn another_programs_file_with_pctwins_tag_is_never_removed_on_windows() {
+    let work = tempfile::tempdir().unwrap();
+    let (_old, usb, jdir) = dirs(work.path());
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored", "--exact", "stops_dead_mid_fill", "--nocapture"])
+        .env("PCTWIN_KILL_WORK", work.path())
+        .status()
+        .unwrap();
+    assert!(!status.success());
+    let journal = Journal::open(&jdir.join("j.redb")).unwrap();
+    let e = &journal.entries().unwrap()[0];
+    let State::Filling { fill, .. } = &e.state else {
+        panic!("{:?}", e.state)
+    };
+    assert_eq!(fill.proof, Proof::Token);
+    let tag = fill.tag.born.expect("a tag was given");
+    let path = usb.join("c.bin");
+    std::fs::remove_file(&path).unwrap();
+    let theirs = data(BIG)[..5000].to_vec();
+    std::fs::write(&path, &theirs).unwrap();
+    let table = table_for(
+        Destination::open(&usb)
+            .unwrap()
+            .with_profile(no_safe_rename()),
+    );
+    let dest = table.get("usb").unwrap();
+    assert_eq!(
+        dest.born("c.bin").unwrap(),
+        Some(tag),
+        "their file inherited PCTwin's tag, as on a real Windows drive"
+    );
+    let r = pctwin_transfer::recover(&journal, &table).unwrap();
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        theirs,
+        "their file is untouched"
+    );
+    assert!(!r.notes.is_empty(), "the person is told: {r:?}");
 }

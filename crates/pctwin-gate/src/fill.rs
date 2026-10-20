@@ -556,7 +556,10 @@ fn proven_fill(file: &std::fs::File, fill: &Fill) -> io::Result<bool> {
     };
     Ok(match fill.proof {
         Proof::StableId => made == identity(file)?.0,
-        Proof::Token => fill.tag.born.is_some() && born_of(file) == fill.tag.born,
+        Proof::Token => fill
+            .tag
+            .born
+            .is_some_and(|tag| born_of(file).is_some_and(|got| tag.same_tag(got))),
         Proof::SameMountId | Proof::None => false,
     })
 }
@@ -682,7 +685,12 @@ impl crate::Destination {
         // PCTwin's by the file the journal recorded it made (its identity, or its tag), with at
         // least one byte, all of them the start of the checked file. An empty file holds nothing
         // of PCTwin's, and a lookalike could be another program's: never removed.
-        if len == 0 || !proven_fill(&held, fill)? || !same_start_of(&mut held, &mut source, len)? {
+        // A proof another program's file can inherit here never removes anything.
+        if len == 0
+            || !fill.proof.proves_for_removal()
+            || !proven_fill(&held, fill)?
+            || !same_start_of(&mut held, &mut source, len)?
+        {
             return Ok(FillRemoval::NotProven);
         }
         let progress = Progress {

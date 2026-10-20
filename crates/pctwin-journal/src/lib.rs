@@ -194,6 +194,17 @@ pub struct Born {
 }
 
 impl Born {
+    /// Whether a creation time read back now is this tag: the same time to the fraction of a
+    /// second, or that time moved by a whole number of quarter hours, up to a day and two hours
+    /// either way. FAT keeps local time, and macOS converts it with the offset in force when the
+    /// drive was mounted, so a change of time zone or summer time between two mounts moves every
+    /// time on the drive by the difference (every offset is a whole quarter hour). The checks of
+    /// the file's bytes that follow a tag stay exactly as strict.
+    pub fn same_tag(self, got: Born) -> bool {
+        let moved = got.secs - self.secs;
+        got.nanos == self.nanos && moved % 900 == 0 && moved.abs() <= 26 * 3600
+    }
+
     /// A birth time from the system's clock value.
     pub fn of(t: std::time::SystemTime) -> Self {
         match t.duration_since(std::time::UNIX_EPOCH) {
@@ -347,6 +358,21 @@ pub enum Proof {
     SameMountId,
     /// Nothing proves it after a restart: left as it is and reported.
     None,
+}
+
+impl Proof {
+    /// Whether this proof can ever be enough to remove a file after a restart. A creation-time
+    /// tag can be inherited on Windows: a file made at a name freed moments before gets the old
+    /// file's creation time ("file-name tunnelling"), so another program's file there would carry
+    /// PCTwin's tag. There the tag proves a file is PCTwin's only enough to finish it when its
+    /// bytes are the whole checked file, never to remove it. macOS and Linux do not tunnel names.
+    pub const fn proves_for_removal(self) -> bool {
+        match self {
+            Self::StableId => true,
+            Self::Token => !cfg!(windows),
+            Self::SameMountId | Self::None => false,
+        }
+    }
 }
 
 /// The tag given at once to a file being filled in under its real name, chosen and recorded

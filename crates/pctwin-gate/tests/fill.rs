@@ -850,14 +850,22 @@ fn after_a_restart_only_a_file_proven_pctwin_s_is_finished_or_removed() {
         FillRemoval::Removed
     );
     assert!(!root.path().join("ok.bin").exists());
-    // Recorded as made, carrying its tag, the start of the checked file: removed.
+    // Recorded as made, carrying its tag, the start of the checked file: removed, except on
+    // Windows, where another program's file at a freed name can inherit the tag, so a tag never
+    // removes anything there.
     let (id, born) = at("tk.bin", b"abcd");
     if born.is_some() {
         let f = at_name(&fill(Proof::Token, Some(id), born), "tk.bin");
+        let want = if cfg!(windows) {
+            FillRemoval::NotProven
+        } else {
+            FillRemoval::Removed
+        };
         assert_eq!(
             dest.remove_fill("tk.bin", &f, ".pctwin-t.part", 4).unwrap(),
-            FillRemoval::Removed
+            want
         );
+        assert_eq!(root.path().join("tk.bin").exists(), cfg!(windows));
     }
 }
 

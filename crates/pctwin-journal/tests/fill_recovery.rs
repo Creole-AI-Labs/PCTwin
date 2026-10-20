@@ -221,6 +221,17 @@ fn noting(a: &Action) -> bool {
     matches!(a, Action::NameNoting(why) if !why.is_empty())
 }
 
+/// What a partial copy proven only by its tag gets after a restart: removed where names are not
+/// tunnelled; on Windows, where another program's file made at a freed name inherits the old
+/// file's creation time (the tag), left and said, with the copy beside it.
+fn tag_proven_partial(a: &Action) -> bool {
+    if cfg!(windows) {
+        matches!(a, Action::NameNoting(why) if why.contains("another program"))
+    } else {
+        *a == Action::RemoveFillThenName
+    }
+}
+
 /// Each step boundary of a fill, in order, on a drive proven by its tag. The file at the real
 /// name grows through the steps; whatever the step, recovery either goes back to naming the
 /// checked temporary file (removing PCTwin's own partial first) or finishes the whole file.
@@ -251,14 +262,14 @@ fn a_crash_at_every_step_of_a_fill_ends_honestly() {
         filling(token(Some(MADE))),
         &t().at_name(0, MADE, Some(TOKEN))
     )));
-    // 5. Part copied: PCTwin's partial (recorded made, its tag, its bytes), removed.
+    // 5. Part copied: PCTwin's partial (recorded made, its tag, its bytes), removed (left and
+    // said on Windows, where the tag can be inherited).
     for len in [1, 40, SIZE - 1] {
-        assert_eq!(
-            decide(
+        assert!(
+            tag_proven_partial(&decide(
                 filling(token(Some(MADE))),
                 &t().at_name(len, MADE, Some(TOKEN))
-            ),
-            Action::RemoveFillThenName,
+            )),
             "{len}"
         );
     }
@@ -444,10 +455,10 @@ fn the_checked_file_is_proven_by_its_name_and_bytes_where_identities_change() {
             },
         )
         .at_name(40, id(56), Some(TOKEN));
-    assert_eq!(
-        decide(filling(token(Some(MADE))), &moved),
-        Action::RemoveFillThenName
-    );
+    assert!(tag_proven_partial(&decide(
+        filling(token(Some(MADE))),
+        &moved
+    )));
     // On a drive that keeps identities, the same change means it is not the file checked.
     let stable = fill(Proof::StableId, Some(MADE), None);
     let a = decide(filling(stable), &moved.at_name(40, MADE, None));
@@ -506,4 +517,48 @@ fn an_empty_file_at_the_name_is_never_removed_after_a_restart() {
         };
         assert!(why.contains("empty"), "{why}");
     }
+}
+
+/// FAT keeps local time, and macOS converts it with the offset in force when the drive was
+/// mounted, so a tag read back after the drive is mounted again under another offset (a time
+/// zone or summer-time change) is shifted by whole quarter hours. It is still the tag, within a
+/// day either way, to the second; the bytes checks after it stay exactly as strict.
+#[test]
+fn a_tag_shifted_by_a_change_of_time_zone_is_still_the_tag() {
+    let t = || Disk::default().temp();
+    let shifted = |by: i64| Born {
+        secs: TOKEN.secs + by,
+        nanos: TOKEN.nanos,
+    };
+    for by in [3600, -3600, 5 * 3600 + 1800, 45 * 60, -12 * 3600, 26 * 3600] {
+        assert!(TOKEN.same_tag(shifted(by)), "{by}");
+        assert_eq!(
+            decide(
+                filled(token(Some(MADE))),
+                &t().at_name(SIZE, MADE, Some(shifted(by)))
+            ),
+            Action::FinishFill,
+            "{by}"
+        );
+        assert!(
+            tag_proven_partial(&decide(
+                filling(token(Some(MADE))),
+                &t().at_name(40, MADE, Some(shifted(by)))
+            )),
+            "{by}"
+        );
+    }
+    // Not a whole quarter hour, more than a day, or another fraction of a second: not the tag.
+    for by in [1, 3601, 899, 27 * 3600, -27 * 3600] {
+        assert!(!TOKEN.same_tag(shifted(by)), "{by}");
+        assert!(noting(&decide(
+            filling(token(Some(MADE))),
+            &t().at_name(40, MADE, Some(shifted(by)))
+        )));
+    }
+    let other_fraction = Born {
+        secs: TOKEN.secs + 3600,
+        nanos: TOKEN.nanos + 10_000_000,
+    };
+    assert!(!TOKEN.same_tag(other_fraction));
 }

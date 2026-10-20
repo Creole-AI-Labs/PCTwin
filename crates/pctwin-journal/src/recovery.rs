@@ -109,6 +109,7 @@ const LOST: &str = "the copy was interrupted as it finished, and the file was no
 const FILL_LEFT: &str = "the copy was interrupted while it was being written under its name, and PCTwin could not confirm that the file now there is its own unfinished copy, so it left it as it is";
 const FILL_LEFT_EMPTY: &str = "the copy was interrupted just as it began under its name, and the empty file now there holds nothing of it; PCTwin cannot be sure that file is its own, so it left it as it is and put the copy beside it";
 const FILL_LEFT_SAFE: &str = "the copy was interrupted while it was being written under its name, and the original's copy here could not be checked again, so PCTwin left its own unfinished copy as it is; that partly copied file (hidden, on drives that can hide files) is safe to delete";
+const FILL_LEFT_TUNNEL: &str = "the copy was interrupted while it was being written under its name; on this system a file another program makes at that name can look like PCTwin's own, so PCTwin left the file there as it is and put the copy beside it";
 const FILL_CHANGED: &str = "the copy was interrupted while it was being written under its name, and the unfinished copy there changed afterwards, so PCTwin left it as it is";
 
 /// What was left at the real name, for the person: where, and whether it may be deleted.
@@ -328,7 +329,9 @@ fn decide_fill(
         return Action::NameNoting(left_at(&fill.final_path, FILL_LEFT_EMPTY));
     }
     match look.same_start(entry, &fill.final_path, temp, len) {
-        Ok(true) if len <= size => Action::RemoveFillThenName,
+        Ok(true) if len <= size && fill.proof.proves_for_removal() => Action::RemoveFillThenName,
+        // Proven by a tag another program's file can inherit here: never removed.
+        Ok(true) if len <= size => Action::NameNoting(left_at(&fill.final_path, FILL_LEFT_TUNNEL)),
         Ok(_) => Action::NameNoting(left_at(&fill.final_path, FILL_CHANGED)),
         Err(why) => leave(&why),
     }
@@ -358,7 +361,7 @@ fn fill_is_ours(entry: &Entry, look: &impl Look, fill: &Fill) -> Result<bool, Ac
             Ok(look
                 .born(entry, &fill.final_path)
                 .map_err(|why| leave(&why))?
-                == Some(tag))
+                .is_some_and(|got| tag.same_tag(got)))
         }
         Proof::SameMountId | Proof::None => Ok(false),
     }
