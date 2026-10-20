@@ -26,8 +26,9 @@
 //! 1.5 GB at the very most: an honest laptop with about 1.8 million files, or a sender that sends
 //! the largest record allowed. In pages (move protocol 3), the new laptop holds one page's bytes
 //! (at most 8 MB) besides the items read so far, and the reader counts what each page will hold
-//! before copying it, refusing the list past `pctwin_record::MAX_HELD`: at worst 1.35 GB
-//! of process memory (measured 21 October 2026), however many pages a sender announces or sends.
+//! before copying it, refusing the list past `pctwin_record::MAX_HELD` (1.25 GiB), however many
+//! pages a sender announces or sends. The count is an upper bound on what the allocator takes;
+//! CI measures it on Windows, macOS and Linux (`scripts/inventory-memory.py`).
 
 use std::io::Read;
 use std::time::Duration;

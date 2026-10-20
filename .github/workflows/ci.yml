@@ -397,6 +397,14 @@ jobs:
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
         run: cargo test --workspace --locked --no-fail-fast
+      # The scan inventory's memory limit, measured on each system: hostile lists sent in pages
+      # must be refused before the new laptop's process passes MAX_HELD plus a fixed allowance
+      # (peak commit on Windows, largest resident size on macOS and Linux).
+      - name: Inventory memory limit
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then py=python; else py=python3; fi
+          "$py" scripts/inventory-memory.py
       # The desktop app, built and packaged on every system and kept unsigned for two weeks.
       # One package type per system keeps the build free of extra downloads.
       - name: Build the app
