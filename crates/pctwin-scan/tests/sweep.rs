@@ -1299,7 +1299,9 @@ fn volumes_that_share_one_file_systems_space_are_judged_together() {
     write(&lab.d.join("Photos/b.jpg"), 20);
     let gb = 1024 * 1024 * 1024u64;
     let mut f = facts(&lab, false);
-    let used = du(&lab.c) + du(&lab.d) + 6 * gb;
+    // A megabyte of room over the 6 GB: macOS and Linux count whole disk blocks, a little more
+    // than the files' own sizes.
+    let used = du(&lab.c) + du(&lab.d) + 6 * gb + (1 << 20);
     for v in &mut f.volumes {
         v.total_bytes = 1 << 40;
         v.free_bytes = (1 << 40) - used;
@@ -1427,4 +1429,108 @@ fn rename_a_queued_folder(frontier: &[u8], base: &Path, prefix: &str, count: usi
         }
     }
     false
+}
+
+// --- Regressions from the third fresh-context review (17 October 2026) ---------------------
+
+#[test]
+fn a_system_folder_mounted_apart_that_holds_the_homes_still_holds_homes() {
+    // Fedora Silverblue and other image-based systems: /var is its own file system and the homes
+    // live in /var/home.
+    let lab = lab();
+    let system_dir = if cfg!(windows) {
+        "Windows"
+    } else if cfg!(target_os = "macos") {
+        "System"
+    } else {
+        "var"
+    };
+    let mounted = lab.c.join(system_dir);
+    let homes = mounted.join("home");
+    let ada = homes.join("ada");
+    let bea = homes.join("bea");
+    write(&ada.join("code/main.rs"), 7);
+    write(&bea.join("BEA-SECRET/letter.txt"), 9);
+    write(&mounted.join("log/syslog"), 40);
+    let mut f = facts(&lab, true);
+    f.census.profiles_root = Some(homes.clone());
+    f.census.residents = vec![
+        resident(ADA, PersonKind::Me, &ada),
+        resident(BEA, PersonKind::Other, &bea),
+    ];
+    let mut f = sized(f, 0);
+    f.volumes[0].skip.push(mounted.clone());
+    let mut inner = volume(&mounted, false, VolumeKind::Internal, DiskKind::Ssd);
+    inner.total_bytes = 1 << 40;
+    inner.free_bytes = (1 << 40) - du(&mounted);
+    f.volumes.push(inner);
+    let s = run(f, &mut Answers::default());
+    let main = find(&s, FolderRole::Home, "code/main.rs");
+    assert_eq!(main.owner, mover());
+    assert!(!serde_json::to_string(&s).unwrap().contains("BEA-SECRET"));
+    assert!(!s.record.items.iter().any(|i| shown(i).contains("syslog")));
+    assert!(s.places.iter().any(|p| p.placement.whose
+        == Whose::Person {
+            account_id: BEA.into()
+        }
+        && p.bytes == 9));
+}
+
+#[test]
+fn the_movers_own_folder_inside_a_place_two_others_share_is_the_movers() {
+    let lab = lab();
+    write(&lab.d.join("Theirs/AdaCorner/mine.txt"), 3);
+    let sddl = |ids: &[&str]| {
+        let aces: String = ids.iter().map(|id| format!("(A;OICI;FA;;;{id})")).collect();
+        AccessFact::Known(access_from_sddl(&format!("O:{ADA}D:P{aces}")).unwrap())
+    };
+    let mut answers = Answers::default();
+    answers.0.insert("Theirs".into(), sddl(&[BEA, CARL]));
+    answers.0.insert("AdaCorner".into(), sddl(&[ADA]));
+    let s = run(sized(three(&lab), 0), &mut answers);
+    let mine = find(&s, FolderRole::Other, "Theirs/AdaCorner/mine.txt");
+    assert_eq!(mine.owner, mover());
+}
+
+#[test]
+fn a_disk_mounted_inside_a_folder_two_people_share_stays_theirs() {
+    let lab = lab();
+    let disk = lab.d.join("Ours").join("Disk");
+    write(&disk.join("photo.jpg"), 5);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "Ours".into(),
+        AccessFact::Known(
+            access_from_sddl(&format!("O:{ADA}D:P(A;OICI;FA;;;{ADA})(A;OICI;FA;;;{BEA})")).unwrap(),
+        ),
+    );
+    let mut f = sized(facts(&lab, true), 0);
+    f.volumes[1].skip.push(disk.clone());
+    let mut inner = volume(&disk, false, VolumeKind::Internal, DiskKind::Ssd);
+    inner.total_bytes = 1 << 40;
+    inner.free_bytes = (1 << 40) - 5;
+    f.volumes.push(inner);
+    let s = run(f, &mut answers);
+    let photo = s
+        .record
+        .items
+        .iter()
+        .find(|i| shown(i) == "photo.jpg")
+        .expect("listed once, from the disk itself");
+    assert_eq!(
+        s.placement_of(&photo.id).unwrap().whose,
+        Whose::Shared {
+            limited_to: vec![ADA.into(), BEA.into()]
+        }
+    );
+}
+
+#[test]
+fn a_path_with_a_dot_part_is_still_listed() {
+    let lab = lab();
+    write(&lab.d.join("Photos/a.jpg"), 5);
+    let mut f = sized(facts(&lab, false), 0);
+    f.volumes[1].mount = lab.d.join(".");
+    let s = run(f, &mut Answers::default());
+    assert!(s.record.items.iter().any(|i| shown(i).ends_with("a.jpg")));
 }

@@ -104,6 +104,7 @@ linux | sysroot | swap.img | system
 linux | sysroot | sysroot | system
 linux | sysroot | ostree | system
 linux | root | lost+found | system
+linux | sysroot | .snapshots | system
 linux | home | .cache | junk
 linux | home | .config | app-data
 linux | home | .local | app-data

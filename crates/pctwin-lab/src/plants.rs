@@ -825,19 +825,23 @@ pub fn check(
                     Some(a) => id.is_none_or(|id| id == a),
                     None => true,
                 };
-                let counted = sweep
-                    .get("places")
-                    .and_then(Value::as_array)
-                    .is_some_and(|ps| {
-                        ps.iter().any(|pl| {
-                            let placed = pl.get("placement").unwrap_or(&Value::Null);
-                            pl.get("path").is_none_or(Value::is_null)
-                                && matches!(s(placed, "whose"), "person" | "from-old-account")
-                                && norm(s(pl, "volume")) == vol
-                                && is_theirs(placed)
-                                && pl.get("files").and_then(Value::as_u64).unwrap_or(0) > 0
-                        })
-                    });
+                // Only a home is counted without names; another person's folder anywhere else is
+                // never walked, so only a blind spot can stand for it.
+                let in_a_home = matches!(p.spot, Spot::Home { .. });
+                let counted = in_a_home
+                    && sweep
+                        .get("places")
+                        .and_then(Value::as_array)
+                        .is_some_and(|ps| {
+                            ps.iter().any(|pl| {
+                                let placed = pl.get("placement").unwrap_or(&Value::Null);
+                                pl.get("path").is_none_or(Value::is_null)
+                                    && matches!(s(placed, "whose"), "person" | "from-old-account")
+                                    && norm(s(pl, "volume")) == vol
+                                    && is_theirs(placed)
+                                    && pl.get("files").and_then(Value::as_u64).unwrap_or(0) > 0
+                            })
+                        });
                 let spotted = blind.iter().any(|b| {
                     allowed.iter().any(|a| a == s(b, "reason"))
                         && norm(s(b, "volume")) == vol

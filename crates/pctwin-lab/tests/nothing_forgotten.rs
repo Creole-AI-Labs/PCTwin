@@ -420,6 +420,56 @@ fn the_answer_key_catches_every_kind_of_wrong_sweep() {
         }
     });
     assert!(not_named(&check_of(&bad)), "wrong person");
+    // 11. Another person's folder outside the homes dropped without a word, while their home is
+    // still counted: only a blind spot can stand for that folder.
+    let outside = spec
+        .plants
+        .iter()
+        .filter(|p| {
+            matches!(p.expect, Expect::NotNamed { .. })
+                && !matches!(p.spot, pctwin_lab::plants::Spot::Home { .. })
+        })
+        .map(|p| p.token.clone())
+        .collect::<Vec<_>>();
+    let mut bad = good.clone();
+    let spots: Vec<_> = bad["blind_spots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|b| !b["path"].is_null())
+        .cloned()
+        .collect();
+    bad["blind_spots"] = spots.into();
+    // ...even when a nameless count of that owner sits on the same drive: it is not that folder.
+    let other_drive = good["volumes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["is_system"] == false)
+        .map(|v| v["mount"].clone())
+        .unwrap();
+    for p in spec.plants.iter().filter(|p| outside.contains(&p.token)) {
+        bad["places"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "volume": other_drive,
+                "path": null,
+                "placement": {
+                    "whose": "person",
+                    "account_id": roots.ids[&p.by],
+                    "rule": "inside-home",
+                    "kind": null
+                },
+                "fate": "not-yours",
+                "files": 1,
+                "bytes": 1
+            }));
+    }
+    let lines = check_of(&bad);
+    for t in &outside {
+        assert!(lines.iter().any(|l| l.contains(t)), "{t} dropped silently");
+    }
     // 10. Fewer places in a blind spot than rely on it.
     if good["blind_spots"]
         .as_array()

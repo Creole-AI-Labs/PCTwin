@@ -420,6 +420,9 @@ struct Job {
     zone: Zone,
     /// The record item for this folder, to mark it if it can't be read.
     item: Option<usize>,
+    /// How far a nameless count of this place got before a stop (see [`WholeCursor`]).
+    #[serde(default)]
+    whole_at: Option<WholeCursor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -507,64 +510,192 @@ struct Whole {
     owners: BTreeSet<u32>,
 }
 
+/// What a walker is handed: ticket, folder, whether to read file keys, and for a nameless
+/// count, where to go on from.
+type WalkerJob = (usize, PathBuf, bool, Option<Option<WholeCursor>>);
+
+/// The jobs in hand as a save keeps them: a nameless count with how far it has got.
+fn in_hand(
+    in_flight: &BTreeMap<usize, Job>,
+    counting: &Mutex<BTreeMap<usize, WholeCursor>>,
+) -> Vec<Job> {
+    let counting = counting.lock().map(|m| m.clone()).unwrap_or_default();
+    in_flight
+        .iter()
+        .map(|(t, job)| match counting.get(t) {
+            Some(c) => Job {
+                whole_at: Some(c.clone()),
+                ..job.clone()
+            },
+            None => job.clone(),
+        })
+        .collect()
+}
+
 /// What a walker hands back.
 enum Listing {
     Dir(Result<Vec<Entry>, Refusal>),
     Whole(Whole),
+    /// A nameless count stopped partway: where it got to.
+    WholeStopped(WholeCursor),
+}
+
+/// How far a nameless count got: its totals so far, and where it is by position alone. Each
+/// open folder, from the top, is kept as how many folders it holds and how many of them were
+/// begun (taken in name order), so a stopped count resumes without a single name being saved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct WholeCursor {
+    files: u64,
+    bytes: u64,
+    seen: u64,
+    inside_refused: bool,
+    owners: BTreeSet<u32>,
+    at: Vec<(u32, u32)>,
+}
+
+impl WholeCursor {
+    fn finish(self) -> Whole {
+        Whole {
+            files: self.files,
+            bytes: self.bytes,
+            seen: self.seen,
+            root_refused: None,
+            inside_refused: self.inside_refused,
+            owners: self.owners,
+        }
+    }
 }
 
 /// Counts everything below `root` without keeping a name: links are not followed and other
-/// file systems mounted inside are not entered. It always runs to the end, even when the sweep
-/// is asked to stop: a half-done count could only be resumed by keeping the names inside, so a
-/// stop waits for it instead (one home at most per walker).
-fn count_whole(root: &Path) -> Whole {
-    let mut w = Whole::default();
+/// file systems mounted inside are not entered. A stop ends it after the folder in hand and
+/// hands back a [`WholeCursor`]; given that cursor again (`from`), it goes on from there. If the
+/// folders on the way to that position no longer hold the same number of folders, the place
+/// changed, and it is counted again from the start rather than guessed. `report` is told the
+/// cursor after every folder, so a save made while the count runs keeps its progress too.
+fn count_whole(
+    root: &Path,
+    from: Option<WholeCursor>,
+    stop: &AtomicBool,
+    report: &mut dyn FnMut(&WholeCursor),
+) -> Result<Whole, WholeCursor> {
     let root_dev = dev_of(root);
-    let mut pending = vec![for_listing(root)];
-    let mut first = true;
-    while let Some(dir) = pending.pop() {
-        let reader = match std::fs::read_dir(&dir) {
-            Ok(r) => r,
-            Err(e) => {
-                if first {
-                    w.root_refused = Some(Refusal::of(&e));
-                } else {
-                    w.inside_refused = true;
+    let top = for_listing(root);
+    let resumed = from.and_then(|c| reopen_whole(&top, root_dev, c));
+    let (mut c, mut open) = match resumed {
+        Some(r) => r,
+        None => {
+            let mut c = WholeCursor::default();
+            match list_whole(&top, root_dev, Some(&mut c)) {
+                Ok(dirs) => (c, vec![(dirs, 0usize)]),
+                Err(e) => {
+                    return Ok(Whole {
+                        root_refused: Some(Refusal::of(&e)),
+                        ..Whole::default()
+                    });
                 }
-                first = false;
-                continue;
-            }
-        };
-        first = false;
-        for entry in reader {
-            let Ok(entry) = entry else {
-                w.inside_refused = true;
-                break;
-            };
-            let (Ok(kind), Ok(meta)) = (entry.file_type(), entry.metadata()) else {
-                w.inside_refused = true;
-                continue;
-            };
-            let (unix, dev, _) = unix_facts(&meta);
-            if let Some(u) = unix {
-                w.owners.insert(u.uid);
-            }
-            if kind.is_symlink() {
-                continue;
-            }
-            if kind.is_dir() {
-                if dev.is_some() && dev != root_dev {
-                    continue;
-                }
-                pending.push(entry.path());
-            } else if !is_cloud_only(&meta) {
-                w.files += 1;
-                w.bytes += meta.len();
-                w.seen += allocated(&meta).unwrap_or(meta.len());
             }
         }
+    };
+    loop {
+        c.at = open
+            .iter()
+            .map(|(dirs, next)| (count_u32(dirs.len()), count_u32(*next)))
+            .collect();
+        report(&c);
+        let Some((dirs, next)) = open.last_mut() else {
+            break;
+        };
+        if *next >= dirs.len() {
+            open.pop();
+            continue;
+        }
+        if stop.load(Ordering::SeqCst) {
+            return Err(c);
+        }
+        let dir = dirs[*next].clone();
+        *next += 1;
+        match list_whole(&dir, root_dev, Some(&mut c)) {
+            Ok(inner) => open.push((inner, 0)),
+            Err(_) => c.inside_refused = true,
+        }
     }
-    w
+    c.at.clear();
+    Ok(c.finish())
+}
+
+fn count_u32(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// Opens the folders on the way to a saved position again, counting nothing. `None` when any of
+/// them can't be listed or holds a different number of folders than when the count stopped.
+#[allow(clippy::type_complexity)]
+fn reopen_whole(
+    top: &Path,
+    root_dev: Option<u64>,
+    c: WholeCursor,
+) -> Option<(WholeCursor, Vec<(Vec<PathBuf>, usize)>)> {
+    let mut open: Vec<(Vec<PathBuf>, usize)> = Vec::new();
+    for &(held, begun) in &c.at {
+        let dir = match open.last() {
+            None => top.to_path_buf(),
+            Some((dirs, next)) => dirs.get(next.checked_sub(1)?)?.clone(),
+        };
+        let dirs = list_whole(&dir, root_dev, None).ok()?;
+        if count_u32(dirs.len()) != held || begun > held {
+            return None;
+        }
+        open.push((dirs, begun as usize));
+    }
+    if open.is_empty() {
+        return None;
+    }
+    Some((c, open))
+}
+
+/// Lists one folder of a nameless count: the folders inside to count next, in name order. With
+/// `count`, its files go into the totals.
+fn list_whole(
+    dir: &Path,
+    root_dev: Option<u64>,
+    mut count: Option<&mut WholeCursor>,
+) -> std::io::Result<Vec<PathBuf>> {
+    let reader = std::fs::read_dir(dir)?;
+    let mut dirs = Vec::new();
+    for entry in reader {
+        let Ok(entry) = entry else {
+            if let Some(c) = count.as_deref_mut() {
+                c.inside_refused = true;
+            }
+            break;
+        };
+        let (Ok(kind), Ok(meta)) = (entry.file_type(), entry.metadata()) else {
+            if let Some(c) = count.as_deref_mut() {
+                c.inside_refused = true;
+            }
+            continue;
+        };
+        let (unix, dev, _) = unix_facts(&meta);
+        if let (Some(c), Some(u)) = (count.as_deref_mut(), unix) {
+            c.owners.insert(u.uid);
+        }
+        if kind.is_symlink() {
+            continue;
+        }
+        if kind.is_dir() {
+            if dev.is_none() || dev == root_dev {
+                dirs.push(entry.path());
+            }
+        } else if let Some(c) = count.as_deref_mut()
+            && !is_cloud_only(&meta)
+        {
+            c.files += 1;
+            c.bytes += meta.len();
+            c.seen += allocated(&meta).unwrap_or(meta.len());
+        }
+    }
+    dirs.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    Ok(dirs)
 }
 
 #[cfg(unix)]
@@ -892,6 +1023,7 @@ impl Sweeper<'_> {
                     depth: 0,
                     zone,
                     item: None,
+                    whole_at: None,
                 });
                 // macOS: the data volume behind `/`. Most of it is seen through `/` (Users,
                 // Applications, Library); what an administrator made at its root is not, so its
@@ -909,6 +1041,7 @@ impl Sweeper<'_> {
                         depth: 0,
                         zone: Zone::Explore { inside: None },
                         item: None,
+                        whole_at: None,
                     });
                 }
             } else if v.kind == VolumeKind::OtherSystem {
@@ -1065,7 +1198,58 @@ impl Sweeper<'_> {
                 rule: Rule::RulesFile { row: row.label() },
             };
             let p = self.start_place(volume, &v.mount, placement);
+            // A system place that holds homes (`/var` holding `/var/home`, `/sysroot` holding
+            // `/sysroot/home`) is explored like any such place: the homes inside are homes.
+            if self.holds_people(&v.mount) {
+                return Zone::Explore { inside: Some(p) };
+            }
             return Zone::Count { place: p };
+        }
+        // With two or more people, the folders it is mounted under decide too: a disk mounted
+        // inside a folder only two people can open is theirs, never everyone's.
+        if self.several() && parent.keeps_owners() {
+            let me = self.state.census.me.clone();
+            let mut around = Placement::new(
+                Whose::Shared {
+                    limited_to: Vec::new(),
+                },
+                Rule::EveryoneCanRead,
+            );
+            let parts: Vec<_> = inner.iter().collect();
+            let mut path = parent.mount.clone();
+            for part in parts.iter().take(parts.len().saturating_sub(1)) {
+                path.push(part);
+                let unix = std::fs::symlink_metadata(&path)
+                    .ok()
+                    .and_then(|m| unix_facts(&m).0);
+                let fact = self.read_access(&path, unix);
+                let placement = place_by_ladder(
+                    &Facts {
+                        rule: None,
+                        home: None,
+                        access: &fact,
+                        around: None,
+                    },
+                    &Ladder {
+                        census: &self.state.census,
+                    },
+                );
+                if let Some(whose) = narrowed(&placement.whose, &around.whose, &me) {
+                    around = Placement {
+                        whose,
+                        kind: None,
+                        rule: placement.rule,
+                    };
+                }
+            }
+            if !matches!(&around.whose, Whose::Shared { limited_to } if limited_to.is_empty()) {
+                let p = self.start_place(volume, &v.mount, around);
+                if self.state.meta[p].private {
+                    // Someone else's: counted in one go, never by name.
+                    return Zone::Whole { place: p };
+                }
+                return Zone::Itemise { base: 0, place: p };
+            }
         }
         Zone::Explore { inside: None }
     }
@@ -1330,14 +1514,17 @@ impl Sweeper<'_> {
         entries: &mut u64,
     ) -> bool {
         let want_keys = cfg!(windows);
-        let (job_send, job_recv) = channel::<(usize, PathBuf, bool, bool)>();
+        let (job_send, job_recv) = channel::<WalkerJob>();
         let job_recv = Arc::new(Mutex::new(job_recv));
         let (done_send, done_recv) = channel::<(usize, Listing)>();
+        // How far each nameless count in hand has got, by ticket, for the saves made meanwhile.
+        let counting: Arc<Mutex<BTreeMap<usize, WholeCursor>>> = Arc::default();
         let mut stopped = false;
         std::thread::scope(|scope| {
             for _ in 0..walkers {
                 let job_recv = Arc::clone(&job_recv);
                 let done_send = done_send.clone();
+                let counting = Arc::clone(&counting);
                 scope.spawn(move || {
                     loop {
                         let next = match job_recv.lock() {
@@ -1347,8 +1534,16 @@ impl Sweeper<'_> {
                         let Ok((ticket, path, keys, whole)) = next else {
                             break;
                         };
-                        let listed = if whole {
-                            Listing::Whole(count_whole(&path))
+                        let listed = if let Some(from) = whole {
+                            let mut report = |c: &WholeCursor| {
+                                if let Ok(mut m) = counting.lock() {
+                                    m.insert(ticket, c.clone());
+                                }
+                            };
+                            match count_whole(&path, from, stop, &mut report) {
+                                Ok(w) => Listing::Whole(w),
+                                Err(c) => Listing::WholeStopped(c),
+                            }
                         } else {
                             Listing::Dir(list_dir(&path, keys && want_keys))
                         };
@@ -1372,7 +1567,8 @@ impl Sweeper<'_> {
                     };
                     let path = for_listing(&self.abs(job.volume, &job.rel));
                     let keys = matches!(job.zone, Zone::Itemise { .. });
-                    let whole = matches!(job.zone, Zone::Whole { .. });
+                    let whole =
+                        matches!(job.zone, Zone::Whole { .. }).then(|| job.whole_at.clone());
                     ticket += 1;
                     if job_send.send((ticket, path, keys, whole)).is_err() {
                         stopped = true;
@@ -1384,16 +1580,35 @@ impl Sweeper<'_> {
                 if in_flight.is_empty() {
                     break;
                 }
-                let Ok((t, listed)) = done_recv.recv() else {
-                    break;
+                // Waiting for a walker (a long count of another person's home) never holds the
+                // checkpoint back.
+                let (t, listed) = match done_recv.recv_timeout(Duration::from_millis(250)) {
+                    Ok(done) => done,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        if since.elapsed() >= self.limits.checkpoint_every
+                            && since.elapsed() >= self.last_save * 4
+                        {
+                            let view = self.view(in_hand(&in_flight, &counting));
+                            let started = Instant::now();
+                            checkpoint(&view);
+                            self.last_save = started.elapsed();
+                            *entries = 0;
+                            *since = Instant::now();
+                        }
+                        continue;
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 };
+                if let Ok(mut m) = counting.lock() {
+                    m.remove(&t);
+                }
                 let Some(job) = in_flight.remove(&t) else {
                     continue;
                 };
                 match &listed {
                     Listing::Dir(Ok(list)) => *entries += list.len() as u64,
                     Listing::Whole(w) => *entries += w.files,
-                    Listing::Dir(Err(_)) => {}
+                    Listing::Dir(Err(_)) | Listing::WholeStopped(_) => {}
                 }
                 self.process(job, listed);
                 // Every 5 seconds or 10,000 entries, but never more than a fifth of the time:
@@ -1402,7 +1617,7 @@ impl Sweeper<'_> {
                 let due = *entries >= self.limits.checkpoint_entries
                     || since.elapsed() >= self.limits.checkpoint_every;
                 if due && since.elapsed() >= self.last_save * 4 {
-                    let view = self.view(in_flight.values().cloned().collect());
+                    let view = self.view(in_hand(&in_flight, &counting));
                     let started = Instant::now();
                     checkpoint(&view);
                     self.last_save = started.elapsed();
@@ -1453,6 +1668,7 @@ impl Sweeper<'_> {
             depth: job.depth.saturating_add(1),
             zone,
             item,
+            whole_at: None,
         }
     }
 
@@ -1460,6 +1676,14 @@ impl Sweeper<'_> {
         let listed = match listed {
             Listing::Whole(w) => {
                 self.whole(job, w);
+                return;
+            }
+            // Back on the frontier with its place kept: the next sweep goes on from there.
+            Listing::WholeStopped(c) => {
+                self.requeue(Job {
+                    whole_at: Some(c),
+                    ..job
+                });
                 return;
             }
             Listing::Dir(listed) => listed,
@@ -1515,7 +1739,12 @@ impl Sweeper<'_> {
                 account_id: Some(account_id.clone()),
             },
             Whose::FromOldAccount { .. } => BlindReason::FromOldAccount,
-            Whose::Undecided => BlindReason::AccessNotReadable,
+            Whose::Undecided
+                if self.state.places[place].placement.rule == Rule::AccessNotReadable =>
+            {
+                BlindReason::AccessNotReadable
+            }
+            Whose::Undecided => BlindReason::AnotherPerson { account_id: None },
             _ => BlindReason::AnotherPerson { account_id: None },
         }
     }
@@ -2979,7 +3208,10 @@ fn narrowed(child: &Whose, parent: &Whose, me: &str) -> Option<Whose> {
         (Readers::Everyone, Readers::These(c)) => c.clone(),
         (Readers::These(_), Readers::Everyone) => return None,
         (Readers::These(p), Readers::These(c)) => {
-            let both: BTreeSet<String> = p.intersection(c).cloned().collect();
+            // The mover is listing it, so the mover reaches it whatever the place allows.
+            let mut reach = p.clone();
+            reach.insert(me.to_string());
+            let both: BTreeSet<String> = reach.intersection(c).cloned().collect();
             if both == *p {
                 return None;
             }
@@ -3094,7 +3326,12 @@ pub(crate) fn for_listing(path: &Path) -> PathBuf {
     {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};
         // The `\\?\` form takes no `/`: turn them round first (name by name, exactly).
-        let wide: Vec<u16> = path
+        // `\\?\` takes every part as a name, so `.` parts are dropped first.
+        let tidy: PathBuf = path
+            .components()
+            .filter(|c| !matches!(c, std::path::Component::CurDir))
+            .collect();
+        let wide: Vec<u16> = tidy
             .as_os_str()
             .encode_wide()
             .map(|u| {
@@ -3159,5 +3396,121 @@ fn drive_root(path: &Path) -> Option<PathBuf> {
             _ => return None,
         };
         (parts.len() >= take).then(|| parts[..take].iter().collect())
+    }
+}
+
+#[cfg(test)]
+mod whole_count_tests {
+    use super::*;
+
+    /// A home of folders three deep, each holding files, in a fresh folder of its own.
+    fn home(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("pctwin-whole-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for a in ["Alpha", "Beta", "Gamma"] {
+            for b in ["one", "two"] {
+                let dir = root.join(a).join(b).join("deep");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("secret-name.txt"), b"12345").unwrap();
+                std::fs::write(root.join(a).join(b).join("x.bin"), b"123").unwrap();
+            }
+            std::fs::write(root.join(a).join("y.bin"), b"1").unwrap();
+        }
+        std::fs::write(root.join("top.txt"), b"1234567").unwrap();
+        root
+    }
+
+    fn totals(w: &Whole) -> (u64, u64, u64, bool) {
+        (w.files, w.bytes, w.seen, w.inside_refused)
+    }
+
+    fn whole_at_once(root: &Path) -> Whole {
+        count_whole(root, None, &AtomicBool::new(false), &mut |_| {}).unwrap()
+    }
+
+    /// Runs one count that stops after `after` folders; `Err` holds where it got to.
+    fn stopping_after(
+        root: &Path,
+        from: Option<WholeCursor>,
+        after: usize,
+    ) -> Result<Whole, WholeCursor> {
+        let stop = AtomicBool::new(false);
+        let mut seen = 0;
+        count_whole(root, from, &stop, &mut |_| {
+            seen += 1;
+            if seen > after {
+                stop.store(true, Ordering::SeqCst);
+            }
+        })
+    }
+
+    #[test]
+    fn a_count_stopped_anywhere_resumes_to_the_same_totals() {
+        let root = home("anywhere");
+        let once = whole_at_once(&root);
+        assert_eq!(once.files, 1 + 3 + 3 * 2 * 2);
+        for after in 0..40 {
+            let resumed = match stopping_after(&root, None, after) {
+                Ok(w) => w,
+                Err(c) => {
+                    count_whole(&root, Some(c), &AtomicBool::new(false), &mut |_| {}).unwrap()
+                }
+            };
+            assert_eq!(totals(&resumed), totals(&once), "stopped after {after}");
+            assert_eq!(resumed.owners, once.owners);
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_laptop_stopped_again_and_again_still_finishes_the_count() {
+        let root = home("again");
+        let once = whole_at_once(&root);
+        let mut from = None;
+        let mut runs = 0;
+        let done = loop {
+            runs += 1;
+            assert!(runs < 100, "the count never finished");
+            match stopping_after(&root, from.take(), 1) {
+                Ok(w) => break w,
+                Err(c) => from = Some(c),
+            }
+        };
+        assert!(runs > 2, "the count was never stopped partway");
+        assert_eq!(totals(&done), totals(&once));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn where_a_count_stopped_is_kept_without_a_name() {
+        let root = home("names");
+        let c = stopping_after(&root, None, 4).unwrap_err();
+        let saved = serde_json::to_string(&c).unwrap();
+        for name in [
+            "Alpha",
+            "Beta",
+            "Gamma",
+            "one",
+            "two",
+            "deep",
+            "secret",
+            "pctwin-whole",
+        ] {
+            assert!(!saved.contains(name), "{saved}");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_place_changed_since_the_stop_is_counted_again_from_the_start() {
+        let root = home("changed");
+        let c = stopping_after(&root, None, 4).unwrap_err();
+        assert!(c.at.len() > 1, "{c:?}");
+        // A folder made where the count had got to: positions no longer mean the same folders.
+        std::fs::create_dir_all(root.join("Aardvark")).unwrap();
+        std::fs::write(root.join("Aardvark/new.txt"), b"12").unwrap();
+        let resumed = count_whole(&root, Some(c), &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(totals(&resumed), totals(&whole_at_once(&root)));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
