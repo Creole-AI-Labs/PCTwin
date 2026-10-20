@@ -2,7 +2,26 @@
  * The bridge is the only way to the shell, and nothing it has not checked reaches a screen.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { FAILED, listenPairingNew, listenPairingOld, pairingNewConnect, pairingNewSearch, pairingStop, setTrayLabels, setWindowMode, toProblem, type NewEvent, type OldEvent } from "./bridge";
+import calls from "./contract/shell/calls.json";
+import {
+  FAILED,
+  listenPairingNew,
+  listenPairingOld,
+  pairingNewConnect,
+  pairingNewSearch,
+  pairingOldDecline,
+  pairingOldPick,
+  pairingOldRename,
+  pairingOldShuffle,
+  pairingOldStart,
+  pairingOldStartAgain,
+  pairingStop,
+  setTrayLabels,
+  setWindowMode,
+  toProblem,
+  type NewEvent,
+  type OldEvent,
+} from "./bridge";
 
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -107,5 +126,37 @@ describe("nothing unchecked reaches a screen", () => {
     expect(toProblem("pairing_stop not allowed. Command not found")).toEqual(FAILED);
     expect(toProblem(new Error("boom"))).toEqual(FAILED);
     expect(toProblem({ key: "pairing-code-wrong", networks: [], more: "html" })).toEqual(FAILED);
+  });
+});
+
+describe("the engine's names (contract/shell/calls.json, written by the engine)", () => {
+  it("every command is called by its own name with exactly its own arguments", async () => {
+    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "pairing_new_search" ? [] : command === "pairing_new_connect" ? 42 : null));
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    try {
+      await setWindowMode("mini");
+      await setTrayLabels("Show", "Quit");
+      await pairingOldStart(null);
+      await pairingOldPick(1, 42);
+      await pairingOldDecline(1);
+      await pairingOldShuffle();
+      await pairingOldRename("Kitchen laptop");
+      await pairingOldStartAgain();
+      await pairingStop();
+      await pairingNewSearch();
+      await pairingNewConnect(0, "123456");
+    } finally {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    }
+    const sent = tauri.invoke.mock.calls.map(([command, args]) => ({ name: command as string, args: Object.keys((args ?? {}) as object).sort() }));
+    const engine = calls.commands.map((c) => ({ name: c.name, args: c.args.map(([key]) => key as string).sort() }));
+    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+    expect(sent.sort(byName)).toEqual(engine.sort(byName));
+  });
+
+  it("the screens listen to the engine's own events", async () => {
+    await listenPairingOld(() => undefined);
+    await listenPairingNew(() => undefined);
+    expect([...tauri.handlers.keys()].sort()).toEqual([calls.events.old, calls.events.new].sort());
   });
 });

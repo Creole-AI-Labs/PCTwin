@@ -245,3 +245,78 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
         .collect();
     assert_eq!(reasons.len(), WhyMemory::VARIANTS.len());
 }
+
+/// What the screens send with each of the app's commands: every argument's name, in the
+/// command's own order, with one value of the right type; and the names of the app's events.
+/// Written to app/src/contract/shell/calls.json. tests/permissions.rs proves every name on the real
+/// commands, and the screens' bridge test proves bridge.ts calls and listens with exactly these
+/// names, so a renamed command, argument or event on either side fails a test.
+fn calls() -> Value {
+    use crate::pairing::{NEW_EVENT, OLD_EVENT};
+    use serde_json::json;
+    json!({
+        "commands": [
+            { "name": "set_window_mode", "args": [["mode", "mini"]] },
+            { "name": "set_tray_labels", "args": [["show", "Show"], ["quit", "Quit"]] },
+            { "name": "pairing_old_start", "args": [["network", "Wi-Fi"]] },
+            { "name": "pairing_old_pick", "args": [["round", 1], ["number", 42]] },
+            { "name": "pairing_old_decline", "args": [["round", 1]] },
+            { "name": "pairing_old_shuffle", "args": [] },
+            { "name": "pairing_old_rename", "args": [["name", "Kitchen laptop"]] },
+            { "name": "pairing_old_start_again", "args": [] },
+            { "name": "pairing_stop", "args": [] },
+            { "name": "pairing_new_search", "args": [] },
+            { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
+        ],
+        "events": { "old": OLD_EVENT, "new": NEW_EVENT },
+    })
+}
+
+#[test]
+fn the_calls_file_matches_the_engine() {
+    let path = dir().join("shell").join("calls.json");
+    let want = text(&calls());
+    if std::env::var_os("PCTWIN_WRITE_CONTRACT").is_some_and(|v| v == "1") {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &want).unwrap();
+        return;
+    }
+    let have = std::fs::read_to_string(&path).map(|s| s.replace("\r\n", "\n"));
+    assert_eq!(
+        have.ok().as_deref(),
+        Some(want.as_str()),
+        "app/src/contract/shell/calls.json differs from the engine's commands and events. If the \
+         change is intended, run with PCTWIN_WRITE_CONTRACT=1 to update it, then update bridge.ts \
+         so bridge.test.ts passes."
+    );
+}
+
+/// Every colour and animal reaches the screens as a word key they accept (lower-case words joined
+/// by hyphens, bridge.ts `isKey`), not only the one in the examples.
+#[test]
+fn every_label_word_is_a_key_the_screens_accept() {
+    fn is_key(s: &str) -> bool {
+        !s.is_empty()
+            && s.split('-').all(|part| {
+                !part.is_empty()
+                    && part
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            })
+    }
+    let colours = u8::try_from(pctwin_discovery::COLOURS.len()).unwrap();
+    let animals = u8::try_from(pctwin_discovery::ANIMALS.len()).unwrap();
+    for colour in 0..colours {
+        for animal in 0..animals {
+            match LabelView::from(&Label::Picked { colour, animal }) {
+                LabelView::Picked {
+                    colour: c,
+                    animal: a,
+                } => {
+                    assert!(is_key(c) && is_key(a), "{c} / {a}");
+                }
+                other => panic!("colour {colour}, animal {animal} became {other:?}"),
+            }
+        }
+    }
+}

@@ -145,10 +145,13 @@ fn tray_menu<R: Runtime>(app: &AppHandle<R>, show: &str, quit: &str) -> tauri::R
 pub fn allowed_navigation(url: &Url) -> bool {
     match url.scheme() {
         "tauri" => true,
-        "http" | "https" => matches!(
-            (url.host_str(), url.port()),
-            (Some("tauri.localhost"), None) | (Some("localhost"), Some(1420))
-        ),
+        "http" | "https" => match (url.host_str(), url.port()) {
+            (Some("tauri.localhost"), None) => true,
+            // The development server: in development builds only, so a release never shows
+            // whatever another program serves on that port.
+            (Some("localhost"), Some(1420)) => cfg!(debug_assertions),
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -319,7 +322,7 @@ mod tests {
         let ok = |s: &str| allowed_navigation(&Url::parse(s).unwrap());
         assert!(ok("tauri://localhost/index.html"));
         assert!(ok("http://tauri.localhost/"));
-        assert!(ok("http://localhost:1420/"));
+        assert_eq!(ok("http://localhost:1420/"), cfg!(debug_assertions));
         assert!(!ok("https://getpctwin.com/"));
         assert!(!ok("https://evil.example/"));
         assert!(!ok("http://localhost:8080/"));

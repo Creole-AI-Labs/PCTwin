@@ -534,3 +534,69 @@ fn tauri_cannot_take_grants_at_run_time() {
         "Cargo.toml turns on tauri's dynamic-acl"
     );
 }
+
+/// The text check above misses `dynamic-acl` turned on another way (a second name for the tauri
+/// package, or a dependency asking for it): this reads the features cargo really resolved.
+#[test]
+fn tauri_is_built_without_dynamic_acl() {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let out = std::process::Command::new(cargo)
+        .args([
+            "tree",
+            "--offline",
+            "-p",
+            "pctwin-app",
+            "--target",
+            "all",
+            "-e",
+            "features",
+            "-i",
+            "tauri",
+            "--prefix",
+            "none",
+        ])
+        .current_dir(here())
+        .output()
+        .expect("cargo tree runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tree = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        tree.contains("tauri feature"),
+        "cargo tree listed tauri's features: {tree}"
+    );
+    assert!(
+        !tree.contains("feature \"dynamic-acl\""),
+        "tauri is built with dynamic-acl: {tree}"
+    );
+}
+
+/// Tauri's channel-fetch command (`plugin:__TAURI_CHANNEL__|fetch`) is not behind the permission
+/// check. The app sends no data through channels, so it reaches nothing; using `Channel` would
+/// change that, so it needs a security decision first.
+#[test]
+fn the_app_sends_nothing_through_channels() {
+    for entry in std::fs::read_dir(here().join("src")).unwrap() {
+        let path = entry.unwrap().path();
+        // This file names them to look for them.
+        if path.extension().is_some_and(|e| e == "rs") && !path.ends_with("lockdown.rs") {
+            let text = read(&path);
+            let code: String = text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join(
+                    "
+",
+                );
+            assert!(
+                !code.contains("Channel<") && !code.contains("ipc::Channel"),
+                "{} uses a Tauri channel",
+                path.display()
+            );
+        }
+    }
+}

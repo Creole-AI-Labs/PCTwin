@@ -526,3 +526,54 @@ fn the_merged_config_keeps_the_lockdown() {
     assert_eq!(config["build"]["devUrl"], json!("http://localhost:1420/"));
     assert_eq!(config["plugins"], json!({}), "no plugin settings");
 }
+
+/// The argument names the screens send (app/src/contract/shell/calls.json, written by the engine's
+/// contract test) are each command's own, in its own order: given every earlier argument with a
+/// value of the right type, a value of the wrong type under the name is refused as that argument
+/// (a renamed or reordered parameter is refused as a missing one instead). Nothing runs: each call
+/// stops at the wrong type. Then, with every argument right, the call must get past its arguments,
+/// so the command takes nothing the screens do not send; `pairing_old_start` and
+/// `pairing_new_search` are left out of that step because they would pair or search the network.
+#[test]
+fn the_screens_argument_names_are_the_commands_own() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/contract/shell/calls.json");
+    let calls: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let commands = calls["commands"].as_array().unwrap();
+    let names: BTreeSet<&str> = commands
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    let wanted: BTreeSet<&str> = app_commands().into_iter().collect();
+    assert_eq!(names, wanted, "calls.json lists exactly the app's commands");
+    let app = app();
+    let main = window(&app, "main");
+    let args_error = |cmd: &str, error: &str| error.contains(&format!("for command `{cmd}`"));
+    for command in commands {
+        let cmd = command["name"].as_str().unwrap();
+        let args = command["args"].as_array().unwrap();
+        let mut given = serde_json::Map::new();
+        for arg in args {
+            let key = arg[0].as_str().unwrap();
+            let mut body = given.clone();
+            body.insert(key.to_owned(), json!({ "not": "a value" }));
+            let error = call(&main, LOCAL, cmd, Value::Object(body))
+                .expect_err("a value of the wrong type is refused");
+            assert!(
+                error.contains(&format!("invalid args `{key}` for command `{cmd}`"))
+                    && !error.contains("missing required key"),
+                "{cmd} has no argument `{key}` where the screens send it: {error}"
+            );
+            given.insert(key.to_owned(), arg[1].clone());
+        }
+        if cmd == "pairing_old_start" || cmd == "pairing_new_search" {
+            continue;
+        }
+        if let Err(error) = call(&main, LOCAL, cmd, Value::Object(given)) {
+            assert!(
+                !args_error(cmd, &error),
+                "{cmd} takes an argument the screens do not send: {error}"
+            );
+        }
+    }
+}
