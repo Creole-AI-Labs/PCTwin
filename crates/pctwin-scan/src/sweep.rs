@@ -548,7 +548,10 @@ enum Listing {
 /// How far a nameless count got: its totals so far, and where it is by position alone. Each
 /// open folder, from the top, is kept as how many folders it holds, how many of them were begun
 /// (taken in name order) and when it last changed, so a stopped count resumes without a single
-/// name being saved, and a folder renamed, added or removed meanwhile is noticed.
+/// name being saved, and a folder renamed, added or removed meanwhile is noticed. `taken` is when
+/// this position was reached: a drive's clock for folders ticks coarsely (about 15 ms on Windows,
+/// a second on HFS+ and ext3, two on FAT), so a folder that changed within [`CHANGE_TICK`] of it
+/// could change again in the same tick unseen, and is never trusted on resume.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct WholeCursor {
     files: u64,
@@ -557,6 +560,20 @@ struct WholeCursor {
     inside_refused: bool,
     owners: BTreeSet<u32>,
     at: Vec<(u32, u32, u64)>,
+    #[serde(default)]
+    taken: u64,
+}
+
+/// The coarsest tick a drive's folder times move in (FAT keeps two seconds).
+const CHANGE_TICK: u64 = 2_000_000_000;
+
+/// Now, in nanoseconds since 1970, as [`changed`] reads folder times.
+fn now_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u64::try_from(d.as_nanos()).ok())
+        .unwrap_or(0)
 }
 
 impl WholeCursor {
@@ -609,6 +626,7 @@ fn count_whole(
             .iter()
             .map(|(dirs, next, when)| (count_u32(dirs.len()), count_u32(*next), *when))
             .collect();
+        c.taken = now_ns();
         report(&c);
         let Some((dirs, next, _)) = open.last_mut() else {
             break;
@@ -652,7 +670,8 @@ fn changed(dir: &Path) -> u64 {
 }
 
 /// Opens the folders on the way to a saved position again, counting nothing. `None` when any of
-/// them can't be listed, changed since the count stopped, or holds a different number of folders.
+/// them can't be listed, changed since the count stopped (or too close to it to tell), or holds a
+/// different number of folders.
 fn reopen_whole(
     top: &Path,
     root_dev: Option<u64>,
@@ -665,7 +684,9 @@ fn reopen_whole(
             Some((dirs, next, _)) => dirs.get(next.checked_sub(1)?)?.clone(),
         };
         let now = changed(&dir);
-        if now == 0 || now != when {
+        // Unknown, changed since, or changed so close to the stop that a later change could
+        // share its tick: counted again from the start.
+        if now == 0 || now != when || when.saturating_add(CHANGE_TICK) >= c.taken {
             return None;
         }
         let dirs = list_whole(&dir, root_dev, None).ok()?;
@@ -3459,6 +3480,13 @@ mod whole_count_tests {
         count_whole(root, None, &AtomicBool::new(false), &mut |_| {}).unwrap()
     }
 
+    /// The position as if the person came back later: past the tick in which the folders were
+    /// last changed, so a resume is allowed to trust their times.
+    fn later(mut c: WholeCursor) -> WholeCursor {
+        c.taken = c.taken.saturating_add(10 * CHANGE_TICK);
+        c
+    }
+
     /// Runs one count that stops after `after` folders; `Err` holds where it got to.
     fn stopping_after(
         root: &Path,
@@ -3483,9 +3511,8 @@ mod whole_count_tests {
         for after in 0..40 {
             let resumed = match stopping_after(&root, None, after) {
                 Ok(w) => w,
-                Err(c) => {
-                    count_whole(&root, Some(c), &AtomicBool::new(false), &mut |_| {}).unwrap()
-                }
+                Err(c) => count_whole(&root, Some(later(c)), &AtomicBool::new(false), &mut |_| {})
+                    .unwrap(),
             };
             assert_eq!(totals(&resumed), totals(&once), "stopped after {after}");
             assert_eq!(resumed.owners, once.owners);
@@ -3504,7 +3531,7 @@ mod whole_count_tests {
             assert!(runs < 100, "the count never finished");
             match stopping_after(&root, from.take(), 1) {
                 Ok(w) => break w,
-                Err(c) => from = Some(c),
+                Err(c) => from = Some(later(c)),
             }
         };
         assert!(runs > 2, "the count was never stopped partway");
@@ -3547,6 +3574,36 @@ mod whole_count_tests {
                 std::fs::remove_dir_all(&root).unwrap();
                 continue;
             };
+            // Past Windows' folder-time tick (about 15 ms), so the rename moves the time.
+            std::thread::sleep(std::time::Duration::from_millis(40));
+            std::fs::rename(root.join("Alpha"), root.join("Delta")).unwrap();
+            let resumed =
+                count_whole(&root, Some(later(c)), &AtomicBool::new(false), &mut |_| {}).unwrap();
+            assert_eq!(
+                totals(&resumed),
+                totals(&whole_at_once(&root)),
+                "stopped after {after}"
+            );
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+    }
+
+    /// A folder changed in the same tick as the stop may not move its time at all (Windows
+    /// ticks about every 15 ms, FAT every 2 s): a count stopped that close to a change is counted
+    /// again from the start (found on a Windows ARM runner, 20 October 2026).
+    #[test]
+    fn a_change_too_close_to_the_stop_to_see_is_never_trusted() {
+        for after in 0..30 {
+            let root = home("tick");
+            for i in 0..20 {
+                std::fs::write(root.join("Alpha").join(format!("big-{i}.bin")), [7u8; 100])
+                    .unwrap();
+            }
+            let Err(c) = stopping_after(&root, None, after) else {
+                std::fs::remove_dir_all(&root).unwrap();
+                continue;
+            };
+            // At once: possibly in the very tick the stop was taken in.
             std::fs::rename(root.join("Alpha"), root.join("Delta")).unwrap();
             let resumed =
                 count_whole(&root, Some(c), &AtomicBool::new(false), &mut |_| {}).unwrap();
@@ -3567,7 +3624,8 @@ mod whole_count_tests {
         // A folder made where the count had got to: positions no longer mean the same folders.
         std::fs::create_dir_all(root.join("Aardvark")).unwrap();
         std::fs::write(root.join("Aardvark/new.txt"), b"12").unwrap();
-        let resumed = count_whole(&root, Some(c), &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let resumed =
+            count_whole(&root, Some(later(c)), &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(totals(&resumed), totals(&whole_at_once(&root)));
         std::fs::remove_dir_all(&root).unwrap();
     }
