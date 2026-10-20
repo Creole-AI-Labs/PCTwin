@@ -672,7 +672,7 @@ fn a_page_that_would_take_too_much_memory_is_refused_before_it_is_copied() {
 }
 
 /// Pages each within their share still add up: the whole inventory past [`MAX_HELD`] is refused.
-/// (About 87,000 items of 128 parts: 36 seconds in a debug build, so it runs on request with
+/// (About 107,000 items of 128 parts: 40 seconds in a debug build, so it runs on request with
 /// `cargo test --release -- --ignored`; the count itself is checked by a fast test inside the
 /// module.)
 #[test]
@@ -696,7 +696,7 @@ fn an_inventory_that_would_take_too_much_memory_in_all_is_refused() {
             }
         }
     }
-    // About 12 KB an item: the limit is met near 87,000 items, the 44th page.
+    // About 12.6 KB an item: the limit is met near 107,000 items, the 54th page.
     let at = refused_at.expect("the whole inventory was read");
     let per_item = MAX_HELD / (u64::from(at + 1) * 2_000);
     assert!((10_000..=13_000).contains(&per_item), "{at} {per_item}");
