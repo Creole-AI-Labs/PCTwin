@@ -41,11 +41,22 @@ fn parse_dacl(sddl: &str) -> (bool, Vec<[String; 4]>) {
     (flags.contains('P'), aces)
 }
 
+/// The text form names a few well-known accounts by alias: SY is SYSTEM, LA this computer's
+/// built-in Administrator (RID 500, which GitHub's Windows runners run as), LG its Guest.
+fn alias<'a>(who: &'a str, mover: &'a str) -> &'a str {
+    let local = mover.starts_with("S-1-5-21-");
+    match who {
+        "LA" if local && mover.ends_with("-500") => mover,
+        "LG" if local && mover.ends_with("-501") => mover,
+        other => other,
+    }
+}
+
 fn assert_only(server: &PipeServer, mover: &str) {
     let sddl = server.access_list().unwrap();
     let (protected, aces) = parse_dacl(&sddl);
     assert!(protected, "inherited entries could widen it: {sddl}");
-    let mut who: Vec<&str> = aces.iter().map(|a| a[3].as_str()).collect();
+    let mut who: Vec<&str> = aces.iter().map(|a| alias(a[3].as_str(), mover)).collect();
     who.sort();
     let mut want = vec![mover, "SY"];
     want.sort();
@@ -125,6 +136,8 @@ fn a_squatter_with_open_instances_is_refused() {
         name.as_str()
     );
     let mut squatter = Command::new("powershell.exe")
+        // pwsh (CI's shell) sets a module path Windows PowerShell 5.1 cannot load from.
+        .env_remove("PSModulePath")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -251,6 +264,8 @@ exit `$code
     let file = dir.path().join("second-account.ps1");
     std::fs::write(&file, script).unwrap();
     let mut ps = Command::new("powershell.exe")
+        // pwsh (CI's shell) sets a module path Windows PowerShell 5.1 cannot load from.
+        .env_remove("PSModulePath")
         .args([
             "-NoProfile",
             "-NonInteractive",

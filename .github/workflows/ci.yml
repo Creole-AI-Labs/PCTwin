@@ -537,6 +537,14 @@ jobs:
       # throwaway account and checks the helper's pipe refuses it; Linux and macOS check a
       # socket in a private folder refuses `nobody`; Linux runs pkexec with no polkit agent;
       # macOS reads Service Management's state (registering needs a Developer ID signature).
+      # pkexec is not on the Linux runner by default; without it the real prompt test has
+      # nothing to run.
+      - name: pkexec for the helper's prompt test (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y pkexec
       - name: Helper system calls with a second account (pctwin-helper-os)
         env:
           PCTWIN_HELPER_OS_ADMIN_TESTS: "1"

@@ -281,7 +281,13 @@ fn real_pkexec_without_an_agent_is_a_typed_answer() {
         "set PCTWIN_HELPER_OS_ADMIN_TESTS=1 (CI only)"
     );
     match launch_elevated(Path::new("/bin/true"), &[]) {
-        Err(Error::NotSupported(why)) => println!("pkexec is not installed here: {why}"),
+        Err(Error::NotSupported(why)) => {
+            assert!(
+                !Path::new("/usr/bin/pkexec").exists(),
+                "pkexec is here: {why}"
+            );
+            println!("pkexec is not installed here: {why}");
+        }
         Err(e) => panic!("{e}"),
         Ok(Elevation::Refused) => panic!("pkexec never refuses before starting"),
         Ok(Elevation::Started(mut p)) => {
