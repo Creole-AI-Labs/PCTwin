@@ -683,6 +683,7 @@ fn homes_behind_a_link_are_matched_to_their_real_folder() {
             full_name: None,
             home: Some(dir.path().join("home/ada")),
             managed: false,
+            switched_off: false,
         }]),
         profiles_root: Some(root.clone()),
         profile_folders: vec![root.join("ada")],
