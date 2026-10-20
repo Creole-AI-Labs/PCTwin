@@ -1016,3 +1016,80 @@ async fn a_skip_the_new_laptop_cannot_confirm_adds_no_already_there_bytes() {
     assert_eq!(r.files.already_there, 0, "{r:?}");
     assert_eq!(r.bytes_already_there, 0);
 }
+
+// ------------------------------------------------ speed and time left, from a real move
+
+#[tokio::test]
+async fn during_a_real_move_the_time_left_is_never_made_up_and_ends_done_on_both_laptops() {
+    use pctwin_transfer::{TimeLeft, WARM_UP};
+    use std::time::Instant;
+
+    let w = world();
+    let jobs = vec![w.file(1, 3 * 1024 * 1024, "me"), w.file(2, 1000, "shared")];
+    let sizes: u64 = 3 * 1024 * 1024 + 1000;
+    let send_meter = MoveMeter::new();
+    let receive_meter = MoveMeter::new();
+    let mut sender = SenderSession::new(jobs.clone(), 2)
+        .with_in_flight_limit(256 * 1024)
+        .with_meter(send_meter.clone());
+    let mut receiver = ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000")
+        .with_meter(receive_meter.clone());
+    // The screens read once a "second": here each turn of the watcher is one second later.
+    let start = Instant::now();
+    let mut seen = Vec::new();
+    let (mut a, mut b) = mem_pair();
+    let written = receiver.meter();
+    let watch = async {
+        let mut second = 0u64;
+        loop {
+            let at = start + Duration::from_secs(second);
+            let (s, r) = (send_meter.snapshot_at(at), receive_meter.snapshot_at(at));
+            let done = r.reading.files.copied == 2 && s.reading.files.copied == 2;
+            seen.push((second, s, r));
+            if done {
+                return;
+            }
+            second += 1;
+            tokio::task::yield_now().await;
+        }
+    };
+    let ((sent, received), ()) = common::unless_stuck(&written, sizes, async {
+        tokio::join!(
+            async { tokio::join!(sender.run(&mut a), receiver.run(&mut b)) },
+            watch
+        )
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    for (second, s, r) in &seen {
+        // Before the readings cover the warm-up there is no speed and no time.
+        if Duration::from_secs(*second) < WARM_UP {
+            assert_eq!(r.bytes_per_second, None, "at {second}s: {r:?}");
+            assert!(
+                matches!(r.time_left, TimeLeft::NotKnownYet | TimeLeft::Done),
+                "at {second}s: {r:?}"
+            );
+        }
+        // The new laptop knows the plan; the old one never gives a time it cannot know.
+        assert_eq!(r.bytes_left.map(|l| l <= sizes), Some(true), "{r:?}");
+        assert!(
+            matches!(
+                s.time_left,
+                TimeLeft::NotKnownYet | TimeLeft::Waiting | TimeLeft::Done
+            ),
+            "{s:?}"
+        );
+        if let TimeLeft::About { seconds } = r.time_left {
+            let (left, speed) = (r.bytes_left.unwrap(), r.bytes_per_second.unwrap());
+            assert_eq!(seconds, left.div_ceil(speed).max(1), "{r:?}");
+        }
+    }
+    let (_, s, r) = seen.last().unwrap();
+    assert_eq!(r.time_left, TimeLeft::Done);
+    assert_eq!(r.bytes_left, Some(0));
+    assert_eq!(r.reading.bytes_through, sizes);
+    assert_eq!(s.time_left, TimeLeft::Done);
+    // A snapshot's reading is the meter's reading.
+    assert_eq!(receive_meter.snapshot().reading, receive_meter.reading());
+}
