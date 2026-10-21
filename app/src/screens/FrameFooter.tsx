@@ -38,8 +38,8 @@ interface Slot {
 
 const FooterContext = createContext<Slot | null>(null);
 
-/** The usual footer: the free promise and Help. */
-function DefaultFooter() {
+/** The usual footer: the free promise and Help (the app's own help page, or the website without one). */
+function DefaultFooter({ onHelp }: { onHelp?: () => void }) {
   return (
     <>
       <span className="free">
@@ -48,7 +48,11 @@ function DefaultFooter() {
           <span>Free personal moves. No account needed.</span>
         </Localized>
       </span>
-      <button type="button" className="link" onClick={() => void openExternal(HELP_URL)}>
+      <button type="button" className="link" onClick={() => {
+          if (onHelp) onHelp();
+          else void openExternal(HELP_URL);
+        }}
+      >
         <Localized id="footer-help">
           <span>Help</span>
         </Localized>
@@ -58,7 +62,7 @@ function DefaultFooter() {
 }
 
 /** Renders `children` (the window's header and content) and then the footer element, after them. */
-export function FooterProvider({ children }: { children: ReactNode }) {
+export function FooterProvider({ children, onHelp }: { children: ReactNode; onHelp?: () => void }) {
   const [slot] = useState(() => {
     const el = document.createElement("div");
     el.className = "frame-actions";
@@ -77,7 +81,7 @@ export function FooterProvider({ children }: { children: ReactNode }) {
       {children}
       <footer className="app-footer">
         {note === null ? (
-          <DefaultFooter />
+          <DefaultFooter onHelp={onHelp} />
         ) : (
           <>
             {note !== "none" && (

@@ -7,6 +7,7 @@ import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
+import HelpHome from "./screens/HelpHome";
 import MoveHost from "./screens/MoveHost";
 import PickUp from "./screens/PickUp";
 import { FooterProvider } from "./screens/FrameFooter";
@@ -29,6 +30,8 @@ type Screen =
   | { id: "move"; role: Role }
   // A move on this laptop stopped part way (X09): shown at start, before anything else.
   | { id: "pickup"; unfinished: number }
+  // Help (S01), from the footer; Back returns to where it was opened.
+  | { id: "help"; from: Screen }
   | { id: "soon"; which: Soon }
   // Quick Send home. `notice` is set when the person chose something the engine cannot do yet.
   | { id: "quick"; notice: boolean };
@@ -82,7 +85,16 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   return (
     <LocalizationProvider l10n={l10n}>
       <div className="app">
-        <FooterProvider>
+        <FooterProvider
+          // Leaving pairing or a move for the help page would end them, so there Help opens the website.
+          onHelp={
+            screen.id === "pair" || screen.id === "move"
+              ? undefined
+              : () => {
+                  setScreen((s) => (s.id === "help" ? s : { id: "help", from: s }));
+                }
+          }
+        >
           <header className="app-header" hidden={mini && screen.id === "move"}>
             <Localized id="brand-home" attrs={{ "aria-label": true }}>
               <button
@@ -140,6 +152,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "together" && <PutTogether onBack={() => { setScreen({ id: "connect", role: screen.role }); }} onContinue={() => { setScreen({ id: "pair", role: screen.role }); }} />}
             {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "old" }); }} />}
             {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "new" }); }} />}
+            {screen.id === "help" && <HelpHome onBack={() => { setScreen(screen.from); }} />}
             {screen.id === "pickup" && (
               <PickUp
                 unfinished={screen.unfinished}

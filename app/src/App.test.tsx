@@ -139,6 +139,18 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
+  it("Help in the footer opens the help page, whose guides open in place, and Back returns", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    fireEvent.click(within(screen.getByRole("contentinfo")).getByRole("button", { name: l10n.getString("footer-help") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("help-home-title"));
+    fireEvent.click(screen.getByText(l10n.getString("help-guide-find-title")));
+    expect(screen.getByText(l10n.getString("help-guide-find-body"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
   it("with nothing to pick up, the app opens on Welcome", async () => {
     tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
     render(<App initialLanguage="en" />);

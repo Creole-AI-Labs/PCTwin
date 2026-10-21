@@ -387,6 +387,22 @@ help-share-text = My PCTwin problem code is { $code }.
 help-failed = A problem code could not be made. Try again. If it still does not work, describe the problem in your own words instead.
 help-try-again = Try again
 help-copy-failed = The code could not be copied. Select it above and copy it yourself.
+help-home-eyebrow = Help
+help-home-title = Help for the task in front of you.
+help-home-body = Short guides for the things that most often get in the way. They work without the internet.
+help-home-more = More help on getpctwin.com
+help-guide-find-title = The laptops can’t find each other
+help-guide-find-body = Put both laptops on the same Wi-Fi, not a guest network. Turn off any VPN while you pair. If it still does not work, switch on your phone’s hotspot and join both laptops to it.
+help-guide-mac-network-title = Your Mac asks about the local network
+help-guide-mac-network-body = Choose Allow, so PCTwin can find your other laptop. If you chose Don’t Allow, open System Settings, then Privacy & Security, then Local Network, and switch on PCTwin.
+help-guide-firewall-title = Windows asks about the firewall
+help-guide-firewall-body = Allow PCTwin on private networks, such as your home Wi-Fi. PCTwin only talks to your other laptop, on your own network.
+help-guide-stopped-title = A move stopped part way
+help-guide-stopped-body = Nothing copied and checked is lost, and your old laptop was not changed. Pair the laptops again: files already on the new laptop are found and not copied twice.
+help-guide-others-title = Moving other people’s things
+help-guide-others-body = Tick them on Who’s moving? on the old laptop. An administrator approves it once on each laptop. You never see their files. A new account’s temporary password is shown once, in the laptop’s own window; they choose their own at their first sign-in.
+help-guide-code-title = Asking someone for help
+help-guide-code-body = On any problem page, choose Get help. PCTwin makes a short code that says what went wrong, with no names, files or passwords in it, for you to send by WhatsApp or any app.
 
 ## Label words (the name each laptop shows while pairing)
 

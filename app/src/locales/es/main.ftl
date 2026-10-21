@@ -391,6 +391,22 @@ help-share-text = Mi código de problema de PCTwin es { $code }.
 help-failed = No se pudo crear un código de problema. Inténtalo de nuevo. Si sigue sin funcionar, describe el problema con tus propias palabras.
 help-try-again = Intentar de nuevo
 help-copy-failed = No se pudo copiar el código. Selecciónalo arriba y cópialo tú.
+help-home-eyebrow = Ayuda
+help-home-title = Ayuda para lo que estás haciendo.
+help-home-body = Guías breves para lo que más a menudo se interpone. Funcionan sin internet.
+help-home-more = Más ayuda en getpctwin.com
+help-guide-find-title = Los portátiles no se encuentran
+help-guide-find-body = Conecta los dos portátiles a la misma Wi-Fi, no a una red de invitados. Desactiva cualquier VPN mientras los emparejas. Si aún no funciona, activa el punto de acceso del móvil y conecta los dos portátiles a él.
+help-guide-mac-network-title = Tu Mac pregunta por la red local
+help-guide-mac-network-body = Elige Permitir para que PCTwin encuentre tu otro portátil. Si elegiste No permitir, abre Configuración del Sistema, luego Privacidad y seguridad, luego Red local, y activa PCTwin.
+help-guide-firewall-title = Windows pregunta por el firewall
+help-guide-firewall-body = Permite PCTwin en redes privadas, como la Wi-Fi de casa. PCTwin solo se comunica con tu otro portátil, en tu propia red.
+help-guide-stopped-title = Un traslado se detuvo a medias
+help-guide-stopped-body = No se pierde nada de lo copiado y comprobado, y tu portátil antiguo no cambió. Vuelve a emparejar los portátiles: los archivos que ya están en el nuevo se reconocen y no se copian dos veces.
+help-guide-others-title = Mover las cosas de otras personas
+help-guide-others-body = Márcalos en ¿Quién se muda? en el portátil antiguo. Un administrador lo aprueba una vez en cada portátil. Nunca ves sus archivos. La contraseña temporal de una cuenta nueva se muestra una vez en una ventana del propio portátil; la persona elige la suya al iniciar sesión por primera vez.
+help-guide-code-title = Pedir ayuda a alguien
+help-guide-code-body = En cualquier página de problema, elige Obtener ayuda. PCTwin crea un código corto que dice qué falló, sin nombres, archivos ni contraseñas, para que lo envíes por WhatsApp o cualquier app.
 
 ## Label words (the name each laptop shows while pairing)
 

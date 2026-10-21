@@ -370,6 +370,22 @@ help-share-text = 我的PCTwin问题码是{ $code }。
 help-failed = 无法生成问题码。请再次尝试。如果还是不行，请改用你自己的话描述问题。
 help-try-again = 重试
 help-copy-failed = 无法复制问题码。请选中上面的问题码，自己复制。
+help-home-eyebrow = 帮助
+help-home-title = 帮你完成眼前的任务。
+help-home-body = 针对最常见障碍的简短指南，无需联网即可使用。
+help-home-more = 在 getpctwin.com 获取更多帮助
+help-guide-find-title = 两台笔记本电脑找不到对方
+help-guide-find-body = 让两台笔记本电脑连接同一个 Wi-Fi，不要用访客网络。配对时关闭所有 VPN。如果仍然不行，打开手机热点，让两台电脑都连上它。
+help-guide-mac-network-title = Mac 询问本地网络权限
+help-guide-mac-network-body = 选择“允许”，PCTwin 才能找到另一台笔记本电脑。如果选了“不允许”，请打开“系统设置”，再打开“隐私与安全性”，然后打开“本地网络”，并打开 PCTwin。
+help-guide-firewall-title = Windows 询问防火墙权限
+help-guide-firewall-body = 在专用网络（例如家里的 Wi-Fi）上允许 PCTwin。PCTwin 只在你自己的网络上与另一台笔记本电脑通信。
+help-guide-stopped-title = 移动中途停止了
+help-guide-stopped-body = 已复制并检查的内容不会丢失，旧笔记本电脑也没有被更改。重新配对两台电脑即可：新电脑上已有的文件会被识别，不会重复复制。
+help-guide-others-title = 移动其他人的内容
+help-guide-others-body = 在旧笔记本电脑的“谁要搬过去？”中勾选他们。每台电脑上由管理员批准一次。你永远看不到他们的文件。新账户的临时密码只会在电脑自己的窗口中显示一次；他们首次登录时设置自己的密码。
+help-guide-code-title = 向别人求助
+help-guide-code-body = 在任何问题页面上选择“获取帮助”。PCTwin 会生成一个简短代码说明出了什么问题，不含姓名、文件或密码，你可以通过 WhatsApp 或任何应用发送。
 
 ## Label words (the name each laptop shows while pairing)
 
