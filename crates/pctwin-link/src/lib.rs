@@ -840,8 +840,15 @@ impl LaneListener {
             let Some((mut stream, from)) = self.host.accept_local().await else {
                 continue;
             };
-            if penalty_key(from.ip()) != self.peer {
-                // Not the paired laptop: nothing is read or said.
+            let paired = penalty_key(from.ip()) == self.peer;
+            // Lanes come only from the paired laptop. Once resumes are allowed, its reconnection
+            // may come from another local address (a new Wi-Fi lease, Wi-Fi to cable): the resume
+            // keys prove it, not the address. An address that failed lately is not served at
+            // all, so silent connections cannot keep the paired laptop waiting.
+            if !paired && (!resumes || self.resumes.is_none()) {
+                continue;
+            }
+            if !paired && self.host.is_penalised(from.ip()) {
                 continue;
             }
             let wait = self.host.config.step_timeout;
@@ -867,7 +874,19 @@ impl LaneListener {
                 };
                 Ok((kind, accepting.confirm(&msg3, Instant::now())?))
             };
-            if let Ok((kind, transport)) = attempt.await {
+            let attempt = attempt.await;
+            if attempt.is_err() && !paired {
+                self.host.penalise(from.ip());
+            }
+            if let Ok((kind, transport)) = attempt {
+                if kind != KIND_RESUME && !paired {
+                    // Never a lane from another address (unreachable: refused above).
+                    continue;
+                }
+                if !paired {
+                    // The paired laptop is now at this address: its lanes come from here.
+                    self.peer = penalty_key(from.ip());
+                }
                 let link = Link {
                     transport,
                     lanes: None,

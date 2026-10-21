@@ -1602,3 +1602,42 @@ async fn a_new_laptop_that_never_confirms_is_not_paired() {
     assert!(started.elapsed() < Duration::from_secs(5));
     drop(guest);
 }
+
+/// The new laptop reconnects from another address than it paired from (a new Wi-Fi lease, Wi-Fi
+/// to cable): its resume keys prove it, so the resume is taken, and its lanes are accepted from
+/// the new address afterwards. Lanes from another address are still never taken before that.
+#[tokio::test]
+async fn a_resume_from_a_new_address_is_taken_and_lanes_follow_it() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let addr = new.peer_addr();
+    // The listener last knew the paired laptop at another address.
+    let elsewhere: std::net::SocketAddr = "192.168.1.50:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let (arrived, opened) = no_hang(async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_resume(addr, &mut new_resumes, fast())
+        )
+    })
+    .await;
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
+    opened.unwrap();
+    // Its lanes now come from where it is.
+    let (arrived, opened) = no_hang(async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_lane(addr, &mut new_keys, fast())
+        )
+    })
+    .await;
+    assert!(matches!(arrived.unwrap(), Arrival::Lane(_)));
+    opened.unwrap();
+}
