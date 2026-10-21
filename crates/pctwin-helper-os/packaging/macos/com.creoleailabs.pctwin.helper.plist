@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Carried by the app bundle at Contents/Library/LaunchDaemons/. SMAppService registers it when a
+  move needs it (an administrator allows it in System Settings, Login Items). RunAtLoad makes
+  launchd start it once when it is registered, and again at each start-up of the Mac while it
+  stays registered; KeepAlive is off, so it is never restarted after it exits. The helper
+  therefore exits at once unless a move is in progress (its own record says so), and the app
+  unregisters it when the move ends, and on its next launch after a crash or a restart cut a
+  move short. BundleProgram is inside the signed bundle.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.creoleailabs.pctwin.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/pctwin-helper</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.creoleailabs.pctwin</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

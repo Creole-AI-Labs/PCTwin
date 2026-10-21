@@ -23,6 +23,12 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **A fresh code after sleep.** If the old laptop sleeps while showing a code, that code stops working, and a new one shows the moment it wakes.
 - **No surprise questions.** Before pairing starts, PCTwin says what a Mac (finding devices on your network) or Windows Firewall is about to ask, and which answer lets your laptops find each other. If a Mac said no, PCTwin says where to switch it back on.
 
+## 20 October 2026
+
+**In progress**
+
+- **The foundation of the administrator helper.** When one move takes everyone on a laptop, a small helper does the few jobs that need an administrator's approval. Its first piece is ready for review: it asks through the computer's own approval window (on Windows and Linux), or as a background service an administrator switches on in System Settings (on a Mac). It talks to PCTwin over a private channel only the person moving can reach, and on every connection it checks which account is calling. If someone says no to the approval window, PCTwin is told plainly and nothing runs.
+
 ## 16 October 2026
 
 **Done**
