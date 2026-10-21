@@ -50,6 +50,7 @@ pub fn record_of(
             },
             path: ItemPath::new(vec![ItemName::from_text(&format!("file{n}"))]).unwrap(),
             size_bytes: *size,
+            modified_ns: None,
             portability: Portability::Portable,
             managed_by: ManagedBy::Personal,
             download_bytes: None,

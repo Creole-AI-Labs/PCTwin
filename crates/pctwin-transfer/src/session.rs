@@ -460,6 +460,10 @@ pub struct SenderSession {
     skips: Vec<usize>,
     /// Ends to send on the main connection (a file finished, or failed partway).
     ends: Vec<Message>,
+    /// Planned files failed here before the new laptop heard of them, with why (one per job at
+    /// most), and how many of them were said on this connection.
+    not_sent: Vec<(ItemId, Cause)>,
+    not_sent_said: usize,
     opener: Arc<dyn Opener>,
     budget: ReadBudget,
     /// Jobs that could not be read, waiting for one more try after everything else.
@@ -560,6 +564,8 @@ impl SenderSession {
             in_flight_limit: IN_FLIGHT_BYTES,
             skips: Vec::new(),
             ends: Vec::new(),
+            not_sent: Vec::new(),
+            not_sent_said: 0,
             opener: Arc::new(FsOpener),
             budget: ReadBudget::for_plan(ReadPlan::Normal),
             later: Vec::new(),
@@ -870,6 +876,8 @@ impl SenderSession {
 
     /// Reads what the new laptop already has and picks each file up from there.
     async fn resume(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
+        // What was said on the last connection is said again on this one.
+        self.not_sent_said = 0;
         let mut tickets: BTreeMap<usize, ResumeTicket> = BTreeMap::new();
         loop {
             match recv(ch).await? {
@@ -936,6 +944,14 @@ impl SenderSession {
     /// Messages for the main connection: skips, ends, and starts of the files now in flight.
     fn control(&mut self) -> Vec<Message> {
         let mut out = Vec::new();
+        if self.version >= STOP_SINCE {
+            for (item, cause) in &self.not_sent[self.not_sent_said..] {
+                if let Some(cause) = cause.said() {
+                    out.push(Message::NotSent { item: *item, cause });
+                }
+            }
+        }
+        self.not_sent_said = self.not_sent.len();
         for job in std::mem::take(&mut self.skips) {
             out.push(Message::Skip {
                 stream: self.streams[job],
@@ -1073,13 +1089,13 @@ impl SenderSession {
             Err(e) => {
                 let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
                 self.scheduler.finished(j.item);
-                *self.states.slot(job) = if drive && self.read_failed(job) {
+                if drive && self.read_failed(job) {
                     // One more try after everything else.
                     self.later.push(job);
-                    SendState::Waiting
+                    *self.states.slot(job) = SendState::Waiting;
                 } else {
-                    SendState::Done(SendOutcome::Failed(Failure::of(&e, Side::Old)))
-                };
+                    self.fail_unannounced(job, Failure::of(&e, Side::Old));
+                }
             }
         }
     }
@@ -1228,6 +1244,14 @@ impl SenderSession {
         Work::Wait
     }
 
+    /// `job` failed here before the new laptop heard of it: done, and the new laptop is told why
+    /// (protocol 4 and later), so its report gives the true reason.
+    fn fail_unannounced(&mut self, job: usize, failure: Failure) {
+        self.not_sent.push((self.jobs[job].item, failure.cause()));
+        self.dirty = true;
+        *self.states.slot(job) = SendState::Done(SendOutcome::Failed(failure));
+    }
+
     /// `job` stops here, for `why` (`failure` is what this laptop says): the new laptop is told if
     /// it holds the file, and nothing more of it is read.
     fn give_up(&mut self, job: usize, why: GiveUpWhy, failure: Failure) {
@@ -1256,7 +1280,7 @@ impl SenderSession {
                 later: false,
             };
         } else {
-            *self.states.slot(job) = SendState::Done(SendOutcome::Failed(failure));
+            self.fail_unannounced(job, failure);
         }
     }
 
@@ -1702,6 +1726,7 @@ impl SenderSession {
             let mut state = self.states.slot(job);
             match &mut *state {
                 SendState::Waiting => {
+                    self.not_sent.push((self.jobs[job].item, Cause::Unreadable));
                     *state = SendState::Done(SendOutcome::Failed(Failure::new(
                         Cause::Unreadable,
                         STOPPED,
@@ -1726,6 +1751,7 @@ impl SenderSession {
                     };
                 }
                 SendState::Open { .. } => {
+                    self.not_sent.push((self.jobs[job].item, Cause::Unreadable));
                     *state = SendState::Done(SendOutcome::Failed(Failure::new(
                         Cause::Unreadable,
                         STOPPED,
@@ -2010,6 +2036,8 @@ pub struct ReceiverSession<'d> {
     told_hold: bool,
     /// Why a file's start was refused, kept per file (bounded).
     refused: BTreeMap<ItemId, Failure>,
+    /// Planned files whose latest start differed from the scan (size or changed time).
+    changed: HashSet<ItemId>,
     /// A same-size file already here, to fingerprint before answering a start (off the loop).
     to_fingerprint: Option<(u32, std::fs::File)>,
     streams: BTreeMap<u32, Incoming<'d>>,
@@ -2066,6 +2094,7 @@ impl<'d> ReceiverSession<'d> {
             version: crate::MOVE_PROTOCOL.newest(),
             told_hold: false,
             refused: BTreeMap::new(),
+            changed: HashSet::new(),
             to_fingerprint: None,
             streams: BTreeMap::new(),
             restored: BTreeMap::new(),
@@ -2336,6 +2365,12 @@ impl<'d> ReceiverSession<'d> {
             .or_else(|| ended.map(|e| e.outcome.clone()))
     }
 
+    /// Whether `item` was sent as it is now, different from the scan (its size or its changed
+    /// time). Judged at its latest start; for the report's "changed since the scan".
+    pub fn changed_since_scan(&self, item: ItemId) -> bool {
+        self.changed.contains(&item)
+    }
+
     /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
     /// again with a new connection to continue).
     pub async fn run<C: Channel>(&mut self, ch: &mut C) -> Result<(), TransferError> {
@@ -2519,6 +2554,13 @@ impl<'d> ReceiverSession<'d> {
                     self.refuse(item, Failure::from(refusal));
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
+                }
+                // Sent as it is now; its line says when that is not as it was at the scan. Judged
+                // by its latest start, the one that lands.
+                if self.allowance.changed_since_scan(item, header.stamp) {
+                    self.changed.insert(item);
+                } else {
+                    self.changed.remove(&item);
                 }
                 // The copy is marked at least as strictly as the plan requires.
                 let mut header = header;
@@ -2758,6 +2800,20 @@ impl<'d> ReceiverSession<'d> {
             // The old laptop's person stopped the move: a stop, never a lost connection.
             Message::Stopping if self.version >= STOP_SINCE => {
                 return Err(TransferError::StoppedThere);
+            }
+            // A planned file the old laptop will not send, with why: its line says so. Kept only
+            // for a file of the plan that is not open here and has not ended here.
+            Message::NotSent { item, cause } if self.version >= STOP_SINCE => {
+                let failure = Cause::heard(cause)
+                    .ok_or_else(|| protocol("an unknown reason a file was not sent"))?;
+                let open = self.streams.values().any(|s| s.item == item)
+                    || self.restored.contains_key(&item);
+                if self.allowance.destination(item).is_some()
+                    && !open
+                    && !self.ended.contains_key(&item)
+                {
+                    self.refuse(item, failure);
+                }
             }
             _ => return Err(protocol("unexpected message from the old laptop")),
         }

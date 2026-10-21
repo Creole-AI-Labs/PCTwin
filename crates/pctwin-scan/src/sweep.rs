@@ -2190,6 +2190,7 @@ impl Sweeper<'_> {
             place: rplace.clone(),
             path,
             size_bytes: size,
+            modified_ns: None,
             portability: Portability::Portable,
             managed_by: ManagedBy::Personal,
             download_bytes: None,
@@ -2845,9 +2846,12 @@ impl Sweeper<'_> {
             Inclusion::Included
         };
         let size = if stub { 0 } else { entry.len };
-        if let Some(item) = self.make_item(job, name, place, base, ItemKind::File, size, inclusion)
+        if let Some(mut item) =
+            self.make_item(job, name, place, base, ItemKind::File, size, inclusion)
         {
             if let (false, Some(stamp)) = (stub, entry.stamp) {
+                // Carried in the record too, so the move can tell a file changed since the scan.
+                item.modified_ns = stamp.modified_ns;
                 self.state.stamps.push((item.id, stamp));
             }
             self.push_item(item, place);

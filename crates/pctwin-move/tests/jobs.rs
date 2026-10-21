@@ -76,6 +76,7 @@ fn item(role: FolderRole, path: &[&str], kind: ItemKind, size: u64, inclusion: I
         place,
         path,
         size_bytes: size,
+        modified_ns: None,
         portability: Portability::Portable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,

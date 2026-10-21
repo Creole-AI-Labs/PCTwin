@@ -57,6 +57,7 @@ fn item(p: &mut Vec<u8>, seed: u64, owner: u32, folder: u32, name: &dyn Fn(&mut 
     p.extend_from_slice(&folder.to_be_bytes());
     name(p);
     p.extend_from_slice(&5u64.to_be_bytes());
+    p.push(0); // no changed time
     p.extend_from_slice(&[0, 0, 0, 0]);
 }
 
@@ -388,6 +389,7 @@ fn honest(n: u64) -> Vec<pctwin_record::Item> {
                 place: place.clone(),
                 path,
                 size_bytes: 5,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: None,

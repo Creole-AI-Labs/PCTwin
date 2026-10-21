@@ -77,6 +77,7 @@ fn item(role: FolderRole, path: &[&str], kind: ItemKind, size: u64, inclusion: I
         place,
         path,
         size_bytes: size,
+        modified_ns: None,
         portability: Portability::Portable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,
@@ -375,4 +376,50 @@ async fn a_stop_ends_the_move_on_both_with_every_cut_file_failed_as_stopped() {
         let landed = w.new.path().join(folder_name(role)).join(path.join("/"));
         assert!(!landed.exists(), "{landed:?}");
     }
+}
+
+/// A file changed after the scan is sent as it is now, lands, and its line says "changed since
+/// the scan"; files as they were at the scan say nothing of the sort.
+#[tokio::test]
+async fn a_file_changed_since_the_scan_lands_as_it_is_now_and_is_labelled() {
+    let w = world();
+    let letter = w
+        .record
+        .items
+        .iter()
+        .find(|i| i.path.parts().last() == Some(&ItemName::from_text("letter.txt")))
+        .unwrap()
+        .clone();
+    // Edited after the scan: a little longer.
+    write(&source_in(w.old.path(), &letter), b"Dear Ada, again");
+    let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
+    let (mut old, mut new) = mem_pair();
+    let mut steps = person(true);
+    let (quiet_old, quiet_new) = (Live::default(), Live::default());
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send(&mut old, &w.record, plan, &quiet_old),
+            pctwin_move::receive(
+                &mut new, &mut steps, &w.table, &w.journal, "1001", &quiet_new
+            ),
+        )
+    })
+    .await;
+    sent.unwrap();
+    let received = received.unwrap();
+    for line in &received.files {
+        assert!(
+            matches!(line.outcome, Some(ReceiveOutcome::Finished(_))),
+            "{:?}",
+            line.outcome
+        );
+        assert_eq!(
+            line.changed_since_scan,
+            line.item == letter.id,
+            "{:?}",
+            line.item
+        );
+    }
+    let landed = w.new.path().join("Documents").join("letter.txt");
+    assert_eq!(std::fs::read(landed).unwrap(), b"Dear Ada, again");
 }

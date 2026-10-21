@@ -82,9 +82,15 @@ pub enum Refusal {
 #[derive(Debug, Clone)]
 struct Planned {
     size: u64,
+    /// When it was last changed at the scan, in nanoseconds since 1970 ([`UNKNOWN_TIME`]: the
+    /// system did not say). A plain number, not an `Option`, so the entry stays inside its room.
+    modified_ns: i64,
     destination: Arc<str>,
     path: [u8; 32],
 }
+
+/// A planned file whose changed time the scan did not have.
+const UNKNOWN_TIME: i64 = i64::MIN;
 
 /// The digest a planned path is kept as (BLAKE3 in its own named mode).
 fn path_digest(path: &str) -> [u8; 32] {
@@ -157,6 +163,7 @@ impl Allowance {
                 i.id,
                 Planned {
                     size: i.size_bytes,
+                    modified_ns: i.modified_ns.unwrap_or(UNKNOWN_TIME),
                     destination,
                     path,
                 },
@@ -198,6 +205,19 @@ impl Allowance {
 
     /// The destination `item` lands in, if it is in the plan (the path inside it is checked with
     /// [`check_place`](Self::check_place)).
+    /// Whether `item`, started as `now`, has changed since the scan: its size differs, or both the
+    /// scan and the old laptop give its changed time and they differ. Only a planned file can be
+    /// (a file not in the plan is refused anyway).
+    pub fn changed_since_scan(&self, item: ItemId, now: crate::Stamp) -> bool {
+        self.files.get(&item).is_some_and(|f| {
+            let time_differs = match (f.modified_ns, now.modified_ns) {
+                (UNKNOWN_TIME, _) | (_, None) => false,
+                (scan, Some(now)) => scan != now,
+            };
+            f.size != now.size || time_differs
+        })
+    }
+
     pub fn destination(&self, item: ItemId) -> Option<&str> {
         self.files.get(&item).map(|f| &*f.destination)
     }

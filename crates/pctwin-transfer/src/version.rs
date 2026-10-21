@@ -36,8 +36,9 @@ pub const MOVE_PROTOCOL: Versions = Versions {
 /// The first move protocol version with `Hold` (a pause told to the other laptop).
 pub const HOLD_SINCE: u16 = 4;
 
-/// The first move protocol version with `Stopping` (a stop told to the other laptop). Version 4
-/// has not been released, so it carries both.
+/// The first move protocol version with `Stopping` (a stop told to the other laptop) and
+/// `NotSent` (the old laptop says why it did not send a planned file). Version 4 has not been
+/// released, so it carries these with `Hold`.
 pub const STOP_SINCE: u16 = 4;
 
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).

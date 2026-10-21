@@ -23,6 +23,9 @@ pub enum Cause {
     ChangedDuringMove,
     /// The old laptop could not read it.
     Unreadable,
+    /// It was no longer on the old laptop when the move reached it (removed or moved since the
+    /// scan).
+    NoLongerThere,
     /// It is stored online only on the old laptop, and is never downloaded to be moved.
     OnlineOnly,
     /// It could not be checked as a true copy (damaged on the way, or stored wrong).
@@ -103,7 +106,49 @@ impl From<Refusal> for Failure {
     }
 }
 
+/// The old laptop's word for why it did not send a planned file ([`Message::NotSent`]): only
+/// what the old laptop can know, each with the words the new laptop shows.
+const SAID_BY_THE_OLD_LAPTOP: [(Cause, u8, &str); 5] = [
+    (
+        Cause::NoLongerThere,
+        0,
+        "it was no longer on the old laptop when the move reached it",
+    ),
+    (Cause::Unreadable, 1, "the old laptop could not read it"),
+    (
+        Cause::OnlineOnly,
+        2,
+        "it is stored online only on the old laptop, so it was not downloaded to be moved",
+    ),
+    (
+        Cause::ChangedDuringMove,
+        3,
+        "it kept changing on the old laptop, so it was not sent; close the program using it and move it again",
+    ),
+    (
+        Cause::NotVerified,
+        4,
+        "the old laptop could not read it the same way twice, so it was not sent",
+    ),
+];
+
 impl Cause {
+    /// How the old laptop says this cause on the wire, if it is one it can say.
+    pub(crate) fn said(self) -> Option<u8> {
+        SAID_BY_THE_OLD_LAPTOP
+            .iter()
+            .find(|(c, _, _)| *c == self)
+            .map(|(_, code, _)| *code)
+    }
+
+    /// The failure the old laptop said with `code` (`None`: not a code it may say).
+    pub(crate) fn heard(code: u8) -> Option<Failure> {
+        SAID_BY_THE_OLD_LAPTOP
+            .iter()
+            .find(|(_, c, _)| *c == code)
+            .map(|(cause, _, why)| Failure::new(*cause, *why))
+    }
+
     /// The cause of `e` on `side`.
     pub fn of(e: &TransferError, side: Side) -> Self {
         match e {
@@ -181,6 +226,7 @@ impl Cause {
     /// laptop is said so; anything else is a read on the old laptop or a write on the new one.
     pub fn of_io(e: &io::Error, side: Side) -> Self {
         match side {
+            Side::Old if e.kind() == io::ErrorKind::NotFound => Self::NoLongerThere,
             Side::Old => Self::Unreadable,
             Side::New => match e.kind() {
                 io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => Self::NoSpace,

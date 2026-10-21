@@ -39,6 +39,7 @@ fn file(owner: Owner, parts: &[&str]) -> Item {
         place,
         path,
         size_bytes: 10,
+        modified_ns: None,
         portability: Portability::Portable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,

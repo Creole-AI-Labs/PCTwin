@@ -135,6 +135,7 @@ impl Offer {
                 place: place.clone(),
                 path,
                 size_bytes,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: None,

@@ -35,6 +35,7 @@ fn item(owner: Owner, place: Place, parts: Vec<ItemName>, n: u64) -> Item {
         place,
         path,
         size_bytes: n * 1000 + 7,
+        modified_ns: None,
         portability: if n.is_multiple_of(11) {
             Portability::Rebuildable
         } else {
@@ -343,6 +344,7 @@ fn page(number: u32, first_folder: u32, folders: &[(u32, &str)], items: &[[u32; 
         p.extend_from_slice(&folder.to_be_bytes());
         name(&mut p, "f.txt");
         p.extend_from_slice(&5u64.to_be_bytes());
+        p.push(0); // no changed time
         p.extend_from_slice(&[0, 0, 0, 0]); // portable, personal, no download, included
     }
     p
@@ -628,6 +630,7 @@ fn chain_page(number: u32, chain: bool, count: u32, first_id: u64, folder: &str)
         p.extend_from_slice(&126u32.to_be_bytes());
         name(&mut p, "f");
         p.extend_from_slice(&5u64.to_be_bytes());
+        p.push(0); // no changed time
         p.extend_from_slice(&[0, 0, 0, 0]);
     }
     p
@@ -757,6 +760,7 @@ fn a_page_whose_folders_would_take_too_much_memory_is_refused() {
         p.extend_from_slice(&(c * 127 + 126).to_be_bytes());
         name(&mut p, "f");
         p.extend_from_slice(&5u64.to_be_bytes());
+        p.push(0); // no changed time
         p.extend_from_slice(&[0, 0, 0, 0]);
     }
     assert!(p.len() <= MAX_PAGE_BYTES);
@@ -845,6 +849,7 @@ fn a_name_kept_exactly_is_counted_with_its_second_allocation() {
         p.extend_from_slice(&1u32.to_be_bytes());
         p.push(b'f');
         p.extend_from_slice(&5u64.to_be_bytes());
+        p.push(0); // no changed time
         p.extend_from_slice(&[0, 0, 0, 0]);
     }
     let mut reader = InventoryReader::start(&manifest_of(u64::from(count), 1)).unwrap();

@@ -77,6 +77,7 @@ fn record(n: usize) -> Record {
             ])
             .unwrap(),
             size_bytes: 1000 + i as u64,
+            modified_ns: None,
             portability: Portability::Portable,
             managed_by: ManagedBy::Personal,
             download_bytes: None,

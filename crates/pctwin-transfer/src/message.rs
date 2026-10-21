@@ -112,6 +112,11 @@ pub enum Message {
     /// side stopped the move. Said once, as the move ends, so the other laptop reports a stop and
     /// never a lost connection.
     Stopping,
+    /// Sender, on the main connection (move protocol 4 and later): it will not send the planned
+    /// file `item`, which it never started, for `cause` (only causes the old laptop can know, see
+    /// [`Cause`](crate::Cause)). Said again on each new connection, so the new laptop's report gives
+    /// the true reason, never a blank.
+    NotSent { item: ItemId, cause: u8 },
 }
 
 /// Why the old laptop stopped sending a file.
@@ -140,6 +145,7 @@ const SEND_AGAIN: u8 = 14;
 const GIVE_UP: u8 = 15;
 const HOLD: u8 = 16;
 const STOPPING: u8 = 17;
+const NOT_SENT: u8 = 18;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -231,6 +237,12 @@ impl Message {
             Message::Stopping => {
                 w.push(STOPPING);
                 w.extend_from_slice(&0u32.to_be_bytes());
+            }
+            Message::NotSent { item, cause } => {
+                w.push(NOT_SENT);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                w.extend_from_slice(&item_bytes(item));
+                w.push(*cause);
             }
             Message::AllSent => {
                 w.push(ALL_SENT);
@@ -347,6 +359,10 @@ impl Message {
             },
             READY if stream == 0 => Message::Ready,
             STOPPING if stream == 0 => Message::Stopping,
+            NOT_SENT if stream == 0 => Message::NotSent {
+                item: r.item()?,
+                cause: r.u8()?,
+            },
             ALL_SENT if stream == 0 => Message::AllSent,
             HOLD if stream == 0 => Message::Hold { paused: r.flag()? },
             HAVE => Message::Have {

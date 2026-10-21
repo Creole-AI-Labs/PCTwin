@@ -120,6 +120,7 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
                 place: place.clone(),
                 path: item_path.clone(),
                 size_bytes,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: None,
@@ -174,9 +175,12 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
                     Inclusion::Included
                 };
                 let size = if stub { 0 } else { meta.len() };
-                let item = make(ItemKind::File, size, inclusion);
+                let mut item = make(ItemKind::File, size, inclusion);
                 if !stub {
-                    scan.stamps.push((item.id, Stamp::of(&meta)));
+                    let stamp = Stamp::of(&meta);
+                    // Carried in the record too, so the move can tell a file changed since the scan.
+                    item.modified_ns = stamp.modified_ns;
+                    scan.stamps.push((item.id, stamp));
                 }
                 scan.items.push(item);
             }

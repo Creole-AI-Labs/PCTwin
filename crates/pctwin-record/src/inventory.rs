@@ -74,7 +74,7 @@ pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
 /// versions count alike; a test checks they cover the real sizes. These costs, [`alloc_held`]
 /// and the two limits are part of the format: the writer splits pages by them, so changing any
 /// needs a new [`INVENTORY_FORMAT`].
-const ITEM_COST: u64 = 448 + PLAN_ROOM;
+const ITEM_COST: u64 = 464 + PLAN_ROOM;
 /// Room left in each item's cost for its entry in the plan the new laptop makes once the list is
 /// approved (where each file lands: its ID, size, a shared destination and a digest of the path,
 /// in a map made with room for every item at once; a test in pctwin-transfer checks it fits).
@@ -484,6 +484,13 @@ fn encode_page(
         b.u32(parent);
         b.name(name)?;
         b.u64(item.size_bytes);
+        match item.modified_ns {
+            None => b.u8(0),
+            Some(t) => {
+                b.u8(1);
+                b.u64(t as u64);
+            }
+        }
         b.u8(portability_code(item.portability));
         b.u8(managed_code(item.managed_by));
         match item.download_bytes {
@@ -875,6 +882,11 @@ impl InventoryReader {
             let folder = r.u32()?;
             let name = r.name()?;
             let size_bytes = r.u64()?;
+            let modified_ns = match r.u8()? {
+                0 => None,
+                1 => Some(r.u64()? as i64),
+                _ => return Err(bad("an unknown changed-time marker")),
+            };
             let portability = portability_of(r.u8()?)?;
             let managed_by = managed_of(r.u8()?)?;
             let download_bytes = match r.u8()? {
@@ -894,6 +906,7 @@ impl InventoryReader {
                 place,
                 path,
                 size_bytes,
+                modified_ns,
                 portability,
                 managed_by,
                 download_bytes,
@@ -1165,6 +1178,7 @@ mod tests {
                     place: place.clone(),
                     path,
                     size_bytes: 1,
+                    modified_ns: None,
                     portability: Portability::Portable,
                     managed_by: ManagedBy::Personal,
                     download_bytes: None,
@@ -1233,6 +1247,7 @@ mod tests {
                 place,
                 path,
                 size_bytes: 1,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: None,
@@ -1287,7 +1302,7 @@ mod tests {
             item_held(7, 9, 3, 100, &text),
             ITEM_COST + 7 + 9 + alloc_held(3 * NAME_COST) + 100 + name_heap(&text)
         );
-        assert_eq!(ITEM_COST, 640);
+        assert_eq!(ITEM_COST, 656);
     }
 
     /// Each limit is met on its own: a page past its share, and pages each within theirs that
@@ -1326,6 +1341,7 @@ mod tests {
             place,
             path,
             size_bytes: 1,
+            modified_ns: None,
             portability: Portability::Portable,
             managed_by: ManagedBy::Personal,
             download_bytes: None,

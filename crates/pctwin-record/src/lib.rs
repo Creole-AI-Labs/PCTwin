@@ -488,6 +488,10 @@ pub struct Item {
     pub place: Place,
     pub path: ItemPath,
     pub size_bytes: u64,
+    /// When it was last changed at the scan, in nanoseconds since 1970, when the system gives it.
+    /// With its size, what the move compares to tell a file changed since the scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ns: Option<i64>,
     pub portability: Portability,
     pub managed_by: ManagedBy,
     /// How much a rebuild downloads, when known.
@@ -725,6 +729,7 @@ mod name_room {
                 place,
                 path,
                 size_bytes: 7,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: Some(3),

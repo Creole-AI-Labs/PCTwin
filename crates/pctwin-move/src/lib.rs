@@ -272,6 +272,9 @@ pub struct ApprovedPlan {
 pub struct ReceivedFile {
     pub item: ItemId,
     pub outcome: Option<ReceiveOutcome>,
+    /// It was sent as it was when it was sent, not as it was at the scan (its size or its changed
+    /// time differed): the report labels it "changed since the scan".
+    pub changed_since_scan: bool,
 }
 
 /// What the new laptop's side of a move came to: the plan as approved, and one line per included
@@ -348,6 +351,7 @@ impl ApprovedPlan {
             .filter(|i| i.kind == ItemKind::File && i.inclusion == Inclusion::Included)
             .map(|i| ReceivedFile {
                 item: i.id,
+                changed_since_scan: receiver.changed_since_scan(i.id),
                 // A file the stop cut off failed; it is never reported copied.
                 outcome: receiver.outcome(i.id).or_else(|| {
                     stopped.then(|| ReceiveOutcome::Failed(Failure::new(Cause::Stopped, STOPPED)))
