@@ -22,11 +22,14 @@ export default function DriveProblem({
   place,
   onCarryOn,
   onStop,
+  onHelp,
 }: {
   progress: MoveProgress;
   place: GroupName;
   onCarryOn: () => void;
   onStop: () => void;
+  /** Open Get help (S11) for this problem. */
+  onHelp: () => void;
 }) {
   const { l10n } = useLocalization();
   const where = placeName(l10n, place);
@@ -49,6 +52,11 @@ export default function DriveProblem({
       </RowList>
       <div className="mv-note">
         <Banner tone="attention">{l10n.getString("drive-problem-fix")}</Banner>
+      </div>
+      <div className="mv-actions">
+        <Button variant="quiet" onClick={onHelp}>
+          {l10n.getString("move-get-help")}
+        </Button>
       </div>
       <FrameFooter>
         <Button variant="quiet" onClick={onStop}>

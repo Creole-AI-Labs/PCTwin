@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "move_resume",
     "move_stop",
     "move_report",
+    "help_code",
 ];
 
 fn main() {

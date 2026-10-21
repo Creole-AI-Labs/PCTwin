@@ -510,6 +510,23 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
   };
 }
 
+/* ---------- Get help (src-tauri/src/help.rs) ---------- */
+
+/** The kinds of problem a help code can name (`HelpTopic`), in the engine's order. */
+export const HELP_TOPICS = ["pairing-failed", "search-failed", "connection-lost", "not-approved", "move-failed", "move-refused", "drive-problem", "low-battery"] as const;
+export type HelpTopic = (typeof HELP_TOPICS)[number];
+
+/** How far the task got (`HelpStep`). */
+export const HELP_STEPS = ["pairing", "finding", "approving", "moving", "finished"] as const;
+export type HelpStep = (typeof HELP_STEPS)[number];
+
+/** A problem code as the engine makes it: three groups of four from Crockford's Base32. */
+export function parseHelpCode(value: unknown): string | null {
+  return typeof value === "string" && /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/.test(value) ? value : null;
+}
+
+export const helpCode = (topic: HelpTopic, step: HelpStep) => ask("help_code", parseHelpCode, { topic, step });
+
 /* ---------- The window and the tray: only inside the app ---------- */
 
 /**

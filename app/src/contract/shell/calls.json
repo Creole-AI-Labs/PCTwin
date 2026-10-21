@@ -142,6 +142,19 @@
     {
       "args": [],
       "name": "move_report"
+    },
+    {
+      "args": [
+        [
+          "topic",
+          "connection-lost"
+        ],
+        [
+          "step",
+          "moving"
+        ]
+      ],
+      "name": "help_code"
     }
   ],
   "events": {
@@ -152,5 +165,22 @@
     "moveStage": "move-stage",
     "new": "pairing-new",
     "old": "pairing-old"
-  }
+  },
+  "helpSteps": [
+    "pairing",
+    "finding",
+    "approving",
+    "moving",
+    "finished"
+  ],
+  "helpTopics": [
+    "pairing-failed",
+    "search-failed",
+    "connection-lost",
+    "not-approved",
+    "move-failed",
+    "move-refused",
+    "drive-problem",
+    "low-battery"
+  ]
 }

@@ -28,10 +28,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 21 names: the app's eighteen commands, listening to and
+/// Exactly what the screens may call, 22 names: the app's nineteen commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 21] = [
+const SCREENS_MAY_CALL: [&str; 22] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -50,6 +50,7 @@ const SCREENS_MAY_CALL: [&str; 21] = [
     "move_resume",
     "move_stop",
     "move_report",
+    "help_code",
     "plugin:event|listen",
     "plugin:event|unlisten",
     "plugin:opener|open_url",
@@ -212,6 +213,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
         "move_begin" => json!({ "fallback": 1 }),
         "move_approve" => json!({ "plan": 1, "approve": "x" }),
+        "help_code" => json!({ "topic": 1, "step": 2 }),
         "plugin:event|listen" | "plugin:event|unlisten" => json!({ "event": 1 }),
         _ => json!({}),
     }

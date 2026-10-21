@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import calls from "./contract/shell/calls.json";
 import {
   FAILED,
+  HELP_STEPS,
+  HELP_TOPICS,
+  helpCode,
   listenMove,
   listenPairingNew,
   listenPairingOld,
@@ -150,7 +153,15 @@ describe("nothing unchecked reaches a screen", () => {
 describe("the engine's names (contract/shell/calls.json, written by the engine)", () => {
   it("every command is called by its own name with exactly its own arguments", async () => {
     tauri.invoke.mockImplementation((command: string) =>
-      Promise.resolve(command === "pairing_new_search" || command === "pairing_heads_up" || command === "move_report" ? [] : command === "pairing_new_connect" ? 42 : null),
+      Promise.resolve(
+        command === "pairing_new_search" || command === "pairing_heads_up" || command === "move_report"
+          ? []
+          : command === "pairing_new_connect"
+            ? 42
+            : command === "help_code"
+              ? "K3QD-8XWA-2M7P"
+              : null,
+      ),
     );
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     try {
@@ -172,6 +183,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await moveResume();
       await moveStop();
       await moveReport();
+      await helpCode("connection-lost", "moving");
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
@@ -179,6 +191,11 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     const engine = calls.commands.map((c) => ({ name: c.name, args: c.args.map(([key]) => key as string).sort() }));
     const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
     expect(sent.sort(byName)).toEqual(engine.sort(byName));
+  });
+
+  it("the screens name help topics and steps from the engine's own lists", () => {
+    expect([...HELP_TOPICS]).toEqual(calls.helpTopics);
+    expect([...HELP_STEPS]).toEqual(calls.helpSteps);
   });
 
   it("the screens listen to the engine's own events", async () => {

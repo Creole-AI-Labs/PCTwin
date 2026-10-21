@@ -503,6 +503,7 @@ fn calls() -> Value {
             { "name": "move_resume", "args": [] },
             { "name": "move_stop", "args": [] },
             { "name": "move_report", "args": [] },
+            { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -513,6 +514,9 @@ fn calls() -> Value {
             "moveFinished": FINISHED_EVENT,
             "moveProblem": PROBLEM_EVENT,
         },
+        // What the screens may name when they ask for a help code: the engine's closed lists.
+        "helpTopics": crate::help::HelpTopic::ALL,
+        "helpSteps": crate::help::HelpStep::ALL,
     })
 }
 

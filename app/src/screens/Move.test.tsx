@@ -264,6 +264,40 @@ describe("the move's error pages", () => {
   });
 });
 
+describe("get help", () => {
+  it("an error page opens a problem code for that problem and how far the move got, to copy (no share sheet on a laptop)", async () => {
+    replies.help_code = () => "K3QD-8XWA-2M7P";
+    await host(false);
+    send("move-plan", plan);
+    send("move-problem", linkLost);
+    fireEvent.click(screen.getByRole("button", { name: text("move-get-help") }));
+    await waitFor(() => {
+      expect(screen.getByText("K3QD-8XWA-2M7P")).toBeTruthy();
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("help_code", { topic: "connection-lost", step: "approving" });
+    expect(screen.queryByRole("button", { name: text("help-share") })).toBeNull();
+    expect(screen.getByText(text("help-never-names"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-lost-title"));
+  });
+
+  it("a code that cannot be made says so and can be tried again; a reply that is not a code is not shown", async () => {
+    replies.help_code = () => "<b>not a code</b>";
+    await host(true);
+    send("move-progress", running);
+    fireEvent.click(screen.getByRole("button", { name: text("move-get-help") }));
+    await waitFor(() => {
+      expect(screen.getByText(text("help-failed"))).toBeTruthy();
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("help_code", { topic: "drive-problem", step: "moving" });
+    replies.help_code = () => "K3QD-8XWA-2M7P";
+    fireEvent.click(screen.getByRole("button", { name: text("help-try-again") }));
+    await waitFor(() => {
+      expect(screen.getByText("K3QD-8XWA-2M7P")).toBeTruthy();
+    });
+  });
+});
+
 describe("where events take the page", () => {
   const wait = { kind: "wait", stage: "waiting" } as const;
   it("an end stays an end, and a plan never goes back to waiting", () => {

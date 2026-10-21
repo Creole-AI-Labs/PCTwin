@@ -9,6 +9,7 @@
 
 #[cfg(test)]
 mod contract;
+mod help;
 #[cfg(test)]
 mod info_plist;
 #[cfg(test)]
@@ -187,6 +188,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         moving::move_resume,
         moving::move_stop,
         moving::move_report,
+        help::help_code,
     ]
 }
 

@@ -30,7 +30,20 @@ function wordsFor(end: MoveEnd, old: boolean): { title: string; body: string; co
  * laptop is never changed by a move, and the page says so. The engine's own words, when there are
  * any, are under "More details" only.
  */
-export default function MoveEnded({ end, old, onPairAgain, onHome }: { end: MoveEnd; old: boolean; onPairAgain: () => void; onHome: () => void }) {
+export default function MoveEnded({
+  end,
+  old,
+  onPairAgain,
+  onHome,
+  onHelp,
+}: {
+  end: MoveEnd;
+  old: boolean;
+  onPairAgain: () => void;
+  onHome: () => void;
+  /** Open Get help (S11) for this problem. */
+  onHelp: () => void;
+}) {
   const { l10n } = useLocalization();
   const words = wordsFor(end, old);
   const detail = end.kind === "ended" && "detail" in end.why ? end.why.detail : "";
@@ -51,6 +64,11 @@ export default function MoveEnded({ end, old, onPairAgain, onHome }: { end: Move
       </RowList>
       <div className="mv-note">
         <Banner tone="info">{l10n.getString("move-ended-next")}</Banner>
+      </div>
+      <div className="mv-actions">
+        <Button variant="quiet" onClick={onHelp}>
+          {l10n.getString("move-get-help")}
+        </Button>
       </div>
       {detail && (
         <details className="mv-details">

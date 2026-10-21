@@ -1,6 +1,8 @@
 import { useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
-import { listenMove, moveApprove, moveBegin, movePause, moveReport, moveResume, moveStop, toMoveProblem, type MoveEvent, type MoveStage } from "../bridge";
+import { helpCode, listenMove, moveApprove, moveBegin, movePause, moveReport, moveResume, moveStop, toMoveProblem, type HelpStep, type HelpTopic, type MoveEvent, type MoveStage } from "../bridge";
+import type { HelpCode } from "../people";
+import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
 import { setWindowMode } from "../native";
 import type { Approval, FolderRole, PlanView } from "../plan";
@@ -25,6 +27,38 @@ type View =
 
 /** The folders a new laptop may lack: each gets a folder in the home, named in the person's language. */
 const MAY_LACK: readonly FolderRole[] = ["desktop", "documents", "downloads", "pictures", "music", "videos"];
+
+/** The help topic for an end, and for a drive problem. */
+function topicOf(end: MoveEnd): HelpTopic {
+  if (end.kind === "refused") return "move-refused";
+  switch (end.why.kind) {
+    case "link-lost":
+      return "connection-lost";
+    case "not-approved":
+      return "not-approved";
+    case "failed":
+      return "move-failed";
+  }
+}
+
+/** How far the move got, for a help code, by what the page showed last. */
+export function stepOf(view: View, old: boolean): HelpStep {
+  switch (view.kind) {
+    case "wait":
+      if (view.stage === "scanning") return "finding";
+      if (view.stage === "moving") return "moving";
+      return old ? "approving" : "finding";
+    case "plan":
+      return "approving";
+    case "progress":
+      return "moving";
+    case "outcome":
+    case "report":
+      return "finished";
+    case "end":
+      return "finding";
+  }
+}
 
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
@@ -59,6 +93,24 @@ export default function MoveHost({ old, onPairAgain, onHome }: { old: boolean; o
   const [expanded, setExpanded] = useState(false);
   const [stopping, setStopping] = useState(false);
   const started = useRef(false);
+  // How far the move got before it ended, for a help code.
+  const step = useRef<HelpStep>("finding");
+  useEffect(() => {
+    if (view.kind !== "end") step.current = stepOf(view, old);
+  }, [view, old]);
+  // Get help, when open: for which problem, and the code as far as it has come.
+  const [help, setHelp] = useState<{ topic: HelpTopic; code: HelpCode } | null>(null);
+  const openHelp = (topic: HelpTopic) => {
+    setHelp({ topic, code: { status: "making" } });
+    helpCode(topic, step.current).then(
+      (code) => {
+        setHelp({ topic, code: { status: "ready", code, included: ["problem", "step", "versions"] } });
+      },
+      () => {
+        setHelp({ topic, code: { status: "failed" } });
+      },
+    );
+  };
 
   useEffect(() => {
     let live = true;
@@ -90,6 +142,22 @@ export default function MoveHost({ old, onPairAgain, onHome }: { old: boolean; o
   const stopNow = () => {
     void moveStop().catch(() => undefined);
   };
+
+  if (help) {
+    return (
+      <GetHelp
+        help={help.code}
+        canShare={false}
+        onBack={() => {
+          setHelp(null);
+        }}
+        onShare={() => undefined}
+        onRetry={() => {
+          openHelp(help.topic);
+        }}
+      />
+    );
+  }
 
   switch (view.kind) {
     case "wait":
@@ -123,7 +191,13 @@ export default function MoveHost({ old, onPairAgain, onHome }: { old: boolean; o
       if (progress.notice?.kind === "drive-problem") {
         return (
           <>
-            <DriveProblem progress={progress} place={progress.notice.place} onCarryOn={() => void moveResume().catch(() => undefined)} onStop={() => { setStopping(true); }} />
+            <DriveProblem
+              progress={progress}
+              place={progress.notice.place}
+              onCarryOn={() => void moveResume().catch(() => undefined)}
+              onStop={() => { setStopping(true); }}
+              onHelp={() => { openHelp("drive-problem"); }}
+            />
             {stop}
           </>
         );
@@ -163,6 +237,6 @@ export default function MoveHost({ old, onPairAgain, onHome }: { old: boolean; o
     case "report":
       return <Report items={view.items} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
     case "end":
-      return <MoveEnded end={view.end} old={old} onPairAgain={onPairAgain} onHome={onHome} />;
+      return <MoveEnded end={view.end} old={old} onPairAgain={onPairAgain} onHome={onHome} onHelp={() => { openHelp(topicOf(view.end)); }} />;
   }
 }

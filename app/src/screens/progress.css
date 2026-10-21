@@ -83,6 +83,13 @@
   margin-top: var(--space-3);
 }
 
+/* A quiet way on from a problem page (Get help), under its note */
+.mv-actions {
+  margin-top: var(--space-3);
+  display: flex;
+  justify-content: flex-start;
+}
+
 /* The "I understand" box sits in its own bordered card */
 .mv-confirm {
   margin-top: var(--space-3);
