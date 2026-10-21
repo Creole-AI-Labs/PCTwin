@@ -107,6 +107,12 @@
           {
             "music": "From your old laptop/Music"
           }
+        ],
+        [
+          "others",
+          [
+            "1001"
+          ]
         ]
       ],
       "name": "move_begin"
@@ -142,6 +148,10 @@
     {
       "args": [],
       "name": "move_report"
+    },
+    {
+      "args": [],
+      "name": "move_people_here"
     },
     {
       "args": [

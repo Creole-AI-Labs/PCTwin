@@ -3366,6 +3366,8 @@ dependencies = [
  "pctwin-discovery",
  "pctwin-doctor",
  "pctwin-gate",
+ "pctwin-helper",
+ "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-journey",
  "pctwin-link",

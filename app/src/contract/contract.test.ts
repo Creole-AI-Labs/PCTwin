@@ -20,6 +20,7 @@ import {
   parseNearbyView,
   parseNewView,
   parseOldView,
+  parsePeopleHere,
   parsePlanView,
   parseProblemView,
   parseReportItem,
@@ -45,6 +46,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "move-outcome": parseMoveOutcome,
   "report-item": parseReportItem,
   interrupted: parseInterrupted,
+  "people-here": parsePeopleHere,
   tidied: parseTidied,
 };
 

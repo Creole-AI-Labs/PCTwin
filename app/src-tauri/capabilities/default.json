@@ -22,6 +22,7 @@
     "allow-move-resume",
     "allow-move-stop",
     "allow-move-report",
+    "allow-move-people-here",
     "allow-help-code",
     "allow-recovery-check",
     "allow-recovery-run",

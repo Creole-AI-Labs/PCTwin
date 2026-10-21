@@ -15,6 +15,7 @@ import {
   listenPairingOld,
   moveApprove,
   moveBegin,
+  movePeopleHere,
   movePause,
   moveReport,
   moveResume,
@@ -183,7 +184,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingStop();
       await pairingNewSearch();
       await pairingNewConnect(0, "123456");
-      await moveBegin({ music: "From your old laptop/Music" });
+      await moveBegin({ music: "From your old laptop/Music" }, ["1001"]);
+      await movePeopleHere().catch(() => undefined);
       await moveApprove({ revision: 2, fingerprint: "9f" }, true);
       await movePause();
       await moveResume();

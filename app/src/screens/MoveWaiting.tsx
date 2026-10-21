@@ -1,15 +1,15 @@
 import { useLocalization } from "@fluent/react";
 import { Banner, Button } from "../components/kit";
-import type { MoveStage } from "../bridge";
+import type { WaitStage } from "../bridge";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 import "./progress.css";
 
 /** The words for each wait, by which laptop this is. */
-const WORDS: Record<"old" | "new", Record<MoveStage["kind"], string>> = {
-  old: { scanning: "move-wait-scanning", waiting: "move-wait-approval", moving: "move-wait-starting" },
-  new: { scanning: "move-wait-list", waiting: "move-wait-list", moving: "move-wait-starting" },
+const WORDS: Record<"old" | "new", Record<WaitStage, string>> = {
+  old: { scanning: "move-wait-scanning", waiting: "move-wait-approval", moving: "move-wait-starting", administrator: "move-wait-admin" },
+  new: { scanning: "move-wait-list", waiting: "move-wait-list", moving: "move-wait-starting", administrator: "move-wait-admin" },
 };
 
 /**
@@ -17,7 +17,7 @@ const WORDS: Record<"old" | "new", Record<MoveStage["kind"], string>> = {
  * list): what is happening now, that the old laptop is only read, and a way to stop. Nothing is
  * counted here that the engine has not measured, so there is no bar.
  */
-export default function MoveWaiting({ stage, old, onStop }: { stage: MoveStage["kind"]; old: boolean; onStop: () => void }) {
+export default function MoveWaiting({ stage, old, note, onStop }: { stage: WaitStage; old: boolean; note?: string; onStop: () => void }) {
   const { l10n } = useLocalization();
   const key = WORDS[old ? "old" : "new"][stage];
   return (
@@ -28,6 +28,7 @@ export default function MoveWaiting({ stage, old, onStop }: { stage: MoveStage["
         {l10n.getString(`${key}-body`)}
       </p>
       <div className="mv-note">
+        {note && <Banner tone="attention">{note}</Banner>}
         <Banner tone="info">{l10n.getString("progress-old-safe")}</Banner>
       </div>
       <FrameFooter>

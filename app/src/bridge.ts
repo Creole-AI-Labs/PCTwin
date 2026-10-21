@@ -248,8 +248,17 @@ export const listenPairingNew = (handler: (event: NewEvent) => void): Promise<Un
 export const MOVE_PROBLEMS = ["not-paired", "busy", "not-moving", "plan-changed", "failed"] as const;
 export type MoveProblem = { kind: (typeof MOVE_PROBLEMS)[number] };
 
-/** What the move is at before files move (`Stage`). */
-export type MoveStage = { kind: "scanning" | "waiting" | "moving" };
+/** What the move is at before files move (`Stage`): `administrator` while the system's approval prompt is up (M25). */
+export type WaitStage = "scanning" | "waiting" | "moving" | "administrator";
+
+/** Why the other people ticked were not moved this time (`OthersWhy`). */
+export const OTHERS_WHY = ["not-approved", "failed", "not-here"] as const;
+export type OthersWhy = (typeof OTHERS_WHY)[number];
+
+export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
+
+/** The people on the old laptop (M06), and whether others can be moved from this system. */
+export type PeopleHere = { people: { id: string; name: string; isYou: boolean }[]; canMoveOthers: boolean };
 
 /** Why a move ended before it finished (`EndedEarly`). `detail` is the engine's words, for "more details" only. */
 export type EndedEarly = { kind: "link-lost"; detail: string } | { kind: "not-approved" } | { kind: "failed"; detail: string };
@@ -307,7 +316,24 @@ export function toMoveProblem(error: unknown): MoveProblem {
 }
 
 export function parseMoveStage(value: unknown): MoveStage | null {
-  return parseKindOnly(value, ["scanning", "waiting", "moving"] as const);
+  const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
+  if (kind === "others-not-moved") {
+    const f = exactly(value, ["kind", "why"]);
+    return f && oneOf(f.why, OTHERS_WHY) ? { kind, why: f.why } : null;
+  }
+  return parseKindOnly(value, ["scanning", "waiting", "moving", "administrator"] as const);
+}
+
+export function parsePeopleHere(value: unknown): PeopleHere | null {
+  const f = exactly(value, ["people", "canMoveOthers"]);
+  if (!f || typeof f.canMoveOthers !== "boolean") return null;
+  const people = listOf(f.people, (v) => {
+    const p = exactly(v, ["id", "name", "isYou"]);
+    return p && typeof p.id === "string" && typeof p.name === "string" && typeof p.isYou === "boolean" ? { id: p.id, name: p.name, isYou: p.isYou } : null;
+  });
+  // Exactly one person is the mover.
+  if (!people || people.filter((p) => p.isYou).length !== 1) return null;
+  return { people, canMoveOthers: f.canMoveOthers };
 }
 
 export function parseEndedEarly(value: unknown): EndedEarly | null {
@@ -475,7 +501,8 @@ export function parseReportItem(value: unknown): ReportItem | null {
   return { ...line, ...result } as ReportItem;
 }
 
-export const moveBegin = (fallback: Partial<Record<FolderRole, string>>) => run("move_begin", { fallback });
+export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[]) => run("move_begin", { fallback, others });
+export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
 export const moveApprove = (plan: PlanKey, approve: boolean) => run("move_approve", { plan, approve });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");

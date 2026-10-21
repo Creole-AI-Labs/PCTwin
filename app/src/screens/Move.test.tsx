@@ -65,6 +65,9 @@ function inApp(ui: ReactNode) {
 /** What a rejected move command carries from the engine: a plain object, as the shell sends it. */
 const refusal = (kind: string) => ({ kind }) as unknown as Error;
 
+/** The people the move was started with, once it was. */
+const beganWith = () => (tauri.invoke.mock.calls.find(([c]) => c === "move_begin")?.[1] as { others: string[] } | undefined)?.others;
+
 /** The engine sends one event. */
 function send(event: string, payload: unknown) {
   act(() => {
@@ -205,6 +208,53 @@ describe("the move, once paired", () => {
       expect(tauri.invoke).toHaveBeenCalledWith("move_report");
     });
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-title"));
+  });
+});
+
+describe("who's moving, on the old laptop", () => {
+  const here = (canMoveOthers: boolean) => ({
+    people: [
+      { id: "S-1", name: "Ada", isYou: true },
+      { id: "S-2", name: "Bea", isYou: false },
+    ],
+    canMoveOthers,
+  });
+
+  it("lists the people here; ticking someone starts the move with them, then says while the administrator is asked, and why they were not moved if not", async () => {
+    replies.move_people_here = () => here(true);
+    inApp(<MoveHost old={true} onPairAgain={vi.fn()} onHome={vi.fn()} />);
+    expect(await screen.findByText(text("who-here-title"))).toBeTruthy();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("move_begin", expect.anything());
+    expect(screen.getByText(text("who-here-approval"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Bea" }));
+    fireEvent.click(screen.getByRole("button", { name: text("pair-done-continue") }));
+    await waitFor(() => {
+      expect(beganWith()).toEqual(["S-2"]);
+    });
+    send("move-stage", { kind: "administrator" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-admin-title"));
+    send("move-stage", { kind: "others-not-moved", why: "not-approved" });
+    send("move-stage", { kind: "waiting" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-approval-title"));
+    expect(screen.getByText(text("move-others-not-approved"))).toBeTruthy();
+  });
+
+  it("where other people cannot be moved yet, they are listed without a tick and the page says so", async () => {
+    replies.move_people_here = () => here(false);
+    inApp(<MoveHost old={true} onPairAgain={vi.fn()} onHome={vi.fn()} />);
+    expect(await screen.findByText(text("who-here-not-here"))).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByText("Bea")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("pair-done-continue") }));
+    await waitFor(() => {
+      expect(beganWith()).toEqual([]);
+    });
+  });
+
+  it("the mover alone goes straight on", async () => {
+    replies.move_people_here = () => ({ people: [{ id: "S-1", name: "Ada", isYou: true }], canMoveOthers: true });
+    await host(true);
+    expect(screen.queryByText(text("who-here-title"))).toBeNull();
   });
 });
 

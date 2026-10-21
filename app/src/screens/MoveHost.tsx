@@ -1,6 +1,24 @@
 import { useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
-import { helpCode, listenMove, moveApprove, moveBegin, movePause, moveReport, moveResume, moveStop, toMoveProblem, type HelpStep, type HelpTopic, type MoveEvent, type MoveStage } from "../bridge";
+import {
+  helpCode,
+  listenMove,
+  moveApprove,
+  moveBegin,
+  movePause,
+  movePeopleHere,
+  moveReport,
+  moveResume,
+  moveStop,
+  toMoveProblem,
+  type HelpStep,
+  type HelpTopic,
+  type MoveEvent,
+  type OthersWhy,
+  type PeopleHere,
+  type WaitStage,
+} from "../bridge";
+import WhoHere from "./WhoHere";
 import type { HelpCode } from "../people";
 import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
@@ -19,7 +37,9 @@ import StopMove from "./StopMove";
 
 /** What the move page shows now. */
 type View =
-  | { kind: "wait"; stage: MoveStage["kind"] }
+  /** The old laptop: who lives here, before the move starts (M06). */
+  | { kind: "who"; here: PeopleHere }
+  | { kind: "wait"; stage: WaitStage }
   | { kind: "plan"; plan: PlanView }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "outcome"; outcome: MoveOutcome }
@@ -45,8 +65,10 @@ function topicOf(end: MoveEnd): HelpTopic {
 /** How far the move got, for a help code, by what the page showed last. */
 export function stepOf(view: View, old: boolean): HelpStep {
   switch (view.kind) {
+    case "who":
+      return "finding";
     case "wait":
-      if (view.stage === "scanning") return "finding";
+      if (view.stage === "scanning" || view.stage === "administrator") return "finding";
       if (view.stage === "moving") return "moving";
       return old ? "approving" : "finding";
     case "plan":
@@ -66,6 +88,8 @@ export function next(view: View, event: MoveEvent): View {
   if (view.kind === "end" || view.kind === "outcome" || view.kind === "report") return view;
   switch (event.kind) {
     case "stage":
+      // Others not moved is a note, not a page of its own.
+      if (event.stage.kind === "others-not-moved") return view;
       return view.kind === "wait" ? { kind: "wait", stage: event.stage.kind } : view;
     case "plan":
       return { kind: "plan", plan: event.plan };
@@ -109,6 +133,8 @@ export default function MoveHost({
   const [view, setView] = useState<View>({ kind: "wait", stage: old ? "scanning" : "waiting" });
   const [approval, setApproval] = useState<Approval | null>(null);
   const [planChanged, setPlanChanged] = useState(false);
+  // Why the other people ticked were not moved, when they were not: said until the move ends.
+  const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [mini, setMini] = useState(false);
   const mode = windowFor(view, expanded, mini);
@@ -118,6 +144,13 @@ export default function MoveHost({
   }, [mode, onWindow]);
   const [stopping, setStopping] = useState(false);
   const started = useRef(false);
+  // Starts this laptop's side, with the other people the mover ticked (the old laptop only).
+  const begin = useRef((others: string[]) => {
+    const fallback = Object.fromEntries(MAY_LACK.map((role) => [role, `${l10n.getString("move-fallback-folder")}/${l10n.getString(`plan-role-${role}`)}`]));
+    moveBegin(fallback, others).catch((error: unknown) => {
+      setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
+    });
+  });
   // How far the move got before it ended, for a help code.
   const step = useRef<HelpStep>("finding");
   useEffect(() => {
@@ -141,7 +174,9 @@ export default function MoveHost({
     let live = true;
     let unlisten: (() => void) | null = null;
     void listenMove((event) => {
-      if (live) setView((v) => next(v, event));
+      if (!live) return;
+      if (event.kind === "stage" && event.stage.kind === "others-not-moved") setOthersWhy(event.stage.why);
+      setView((v) => next(v, event));
     }).then((stop) => {
       if (!live) {
         stop();
@@ -151,10 +186,21 @@ export default function MoveHost({
       // Started once, after the page listens, so no word from the engine is missed.
       if (started.current) return;
       started.current = true;
-      const fallback = Object.fromEntries(MAY_LACK.map((role) => [role, `${l10n.getString("move-fallback-folder")}/${l10n.getString(`plan-role-${role}`)}`]));
-      moveBegin(fallback).catch((error: unknown) => {
-        if (live) setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
-      });
+      if (!old) {
+        begin.current([]);
+        return;
+      }
+      // The old laptop asks who is moving first, unless the mover is the only person here.
+      movePeopleHere().then(
+        (here) => {
+          if (!live) return;
+          if (here.people.some((p) => !p.isYou)) setView({ kind: "who", here });
+          else begin.current([]);
+        },
+        () => {
+          if (live) begin.current([]);
+        },
+      );
     });
     return () => {
       live = false;
@@ -184,9 +230,21 @@ export default function MoveHost({
     );
   }
 
+  const othersNote = othersWhy ? l10n.getString(`move-others-${othersWhy}`) : undefined;
+
   switch (view.kind) {
+    case "who":
+      return (
+        <WhoHere
+          here={view.here}
+          onContinue={(others) => {
+            setView({ kind: "wait", stage: "scanning" });
+            begin.current(others);
+          }}
+        />
+      );
     case "wait":
-      return <MoveWaiting stage={view.stage} old={old} onStop={stopNow} />;
+      return <MoveWaiting stage={view.stage} old={old} note={othersNote} onStop={stopNow} />;
     case "plan":
       return (
         <PlanReview

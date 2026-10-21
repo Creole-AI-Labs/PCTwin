@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "move_resume",
     "move_stop",
     "move_report",
+    "move_people_here",
     "help_code",
     "recovery_check",
     "recovery_run",

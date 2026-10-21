@@ -15,6 +15,7 @@ mod info_plist;
 #[cfg(test)]
 mod lockdown;
 mod moving;
+mod others;
 mod pairing;
 mod recovery;
 
@@ -189,6 +190,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         moving::move_resume,
         moving::move_stop,
         moving::move_report,
+        others::move_people_here,
         help::help_code,
         recovery::recovery_check,
         recovery::recovery_run,

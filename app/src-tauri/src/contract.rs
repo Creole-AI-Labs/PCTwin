@@ -24,8 +24,8 @@ use pctwin_types::{ItemStatus, Reason};
 
 use crate::moving::{
     ByStatus, Bytes, Counts, Current, EndedEarly, Evidence, GroupName, Laptops, LeftOut, MoveGroup,
-    MoveOutcome, MoveProblem, MoveProgress, Notice, PlanGroup, PlanView, PreviewView, Range,
-    ReportItem, RunState, Size, Stage,
+    MoveOutcome, MoveProblem, MoveProgress, Notice, OthersWhy, PlanGroup, PlanView, PreviewView,
+    Range, ReportItem, RunState, Size, Stage,
 };
 use crate::pairing::{HeadsUp, LabelView, NearbyView, NewView, OldView, ProblemView};
 
@@ -134,7 +134,21 @@ fn move_problems() -> Vec<MoveProblem> {
 }
 
 fn stages() -> Vec<Stage> {
-    vec![Stage::Scanning, Stage::Waiting, Stage::Moving]
+    vec![
+        Stage::Scanning,
+        Stage::Waiting,
+        Stage::Moving,
+        Stage::Administrator,
+        Stage::OthersNotMoved {
+            why: OthersWhy::NotApproved,
+        },
+        Stage::OthersNotMoved {
+            why: OthersWhy::Failed,
+        },
+        Stage::OthersNotMoved {
+            why: OthersWhy::NotHere,
+        },
+    ]
 }
 
 fn endings() -> Vec<EndedEarly> {
@@ -326,6 +340,24 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
         (
+            "people-here",
+            json([crate::others::PeopleHere {
+                people: vec![
+                    crate::others::PersonHere {
+                        id: "S-1-5-21-1-2-3-1001".into(),
+                        name: "Ada".into(),
+                        is_you: true,
+                    },
+                    crate::others::PersonHere {
+                        id: "S-1-5-21-1-2-3-1002".into(),
+                        name: "Bea".into(),
+                        is_you: false,
+                    },
+                ],
+                can_move_others: true,
+            }]),
+        ),
+        (
             "interrupted",
             json([crate::recovery::Interrupted { unfinished: 3 }]),
         ),
@@ -510,12 +542,13 @@ fn calls() -> Value {
             { "name": "pairing_stop", "args": [] },
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
-            { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }]] },
+            { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]]] },
             { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true]] },
             { "name": "move_pause", "args": [] },
             { "name": "move_resume", "args": [] },
             { "name": "move_stop", "args": [] },
             { "name": "move_report", "args": [] },
+            { "name": "move_people_here", "args": [] },
             { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
             { "name": "recovery_check", "args": [] },
             { "name": "recovery_run", "args": [] },

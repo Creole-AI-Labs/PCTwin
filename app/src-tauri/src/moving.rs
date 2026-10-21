@@ -202,7 +202,25 @@ pctwin_types::listed_enum! {
         Waiting,
         /// Files are moving.
         Moving,
+        /// The old laptop is asking for an administrator's approval to move the other people
+        /// ticked (M25): the system's own prompt is up.
+        Administrator,
+        /// The other people ticked are not moved this time, and why; the mover's things still
+        /// move.
+        OthersNotMoved { why: OthersWhy },
     }
+}
+
+/// Why the other people ticked were not moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OthersWhy {
+    /// The administrator said no at the system's prompt.
+    NotApproved,
+    /// The helper could not be started or reached.
+    Failed,
+    /// This system cannot move other people in this version (a Mac).
+    NotHere,
 }
 
 pctwin_types::listed_enum! {
@@ -765,8 +783,14 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
 
 /// The old laptop's outcome: what it sent and how the new laptop answered. The new laptop's
 /// report is the one that counts; this one never says more than was confirmed.
-fn sent_outcome(sent: &Sent, record: &Record) -> (MoveOutcome, Vec<ReportItem>) {
-    let items: HashMap<ItemId, &Item> = record.items.iter().map(|i| (i.id, i)).collect();
+fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<ReportItem>) {
+    // Another person's files are neither named nor counted for the mover.
+    let items: HashMap<ItemId, &Item> = record
+        .items
+        .iter()
+        .filter(|i| shown_to_mover(i, mover))
+        .map(|i| (i.id, i))
+        .collect();
     let stopped = sent.ended != Ended::Finished;
     let mut outcome = MoveOutcome {
         stopped,
@@ -948,10 +972,13 @@ async fn run_old<R: Runtime>(
     mut link: pctwin_link::Link,
     live: &Live,
     scan_stop: &AtomicBool,
+    others: Vec<String>,
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
     let sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut |_| {}, None);
+    let others = crate::others::checked_others(&sweep.census, &others)
+        .map_err(|_| TransferError::Protocol("someone ticked is not on this laptop".into()))?;
     if scan_stop.load(Ordering::Acquire) {
         return Err(Stop::Cancelled.into());
     }
@@ -960,24 +987,86 @@ async fn run_old<R: Runtime>(
         .iter()
         .filter_map(|(id, place)| sweep.item_roots.get(place).map(|r| (*id, r.clone())))
         .collect();
-    let _ = app.emit(STAGE_EVENT, Stage::Waiting);
-    let (sent, _rules) = pctwin_move::send_by_rules(
-        &mut link,
-        &sweep.record,
-        &sweep.census.me,
-        &[],
-        |item| {
-            let mut path = roots.get(&item.id)?.clone();
-            for part in item.path.parts() {
-                path.push(part.on_disk());
+    let mover = sweep.census.me.clone();
+    let mut record = sweep.record.clone();
+    let mut handles = HashMap::new();
+    let mut named = Vec::new();
+    let mut helper = None;
+    let mut opener: Arc<dyn pctwin_transfer::Opener> = Arc::new(FsOpener);
+    if !others.is_empty() {
+        let not_moved = |why| {
+            let _ = app.emit(STAGE_EVENT, Stage::OthersNotMoved { why });
+        };
+        if !crate::others::CAN_MOVE_OTHERS {
+            not_moved(OthersWhy::NotHere);
+        } else if pctwin_helper::harden_engine().is_err() {
+            // Other people's things are carried only by a hardened engine.
+            not_moved(OthersWhy::Failed);
+        } else {
+            let _ = app.emit(STAGE_EVENT, Stage::Administrator);
+            match crate::others::ask_for(&mover, &others, laptop) {
+                Ok(crate::others::Asked::Approved(client, scanned)) => {
+                    let people: Vec<pctwin_helper::Scanned> =
+                        scanned.iter().map(|(_, s)| s.clone()).collect();
+                    handles = pctwin_move::people::add_people(&mut record, &people);
+                    named = scanned
+                        .iter()
+                        .filter_map(|(id, _)| {
+                            let r = sweep.census.by_account(id)?;
+                            Some(pctwin_move::landing::NamedPerson {
+                                account_id: id.clone(),
+                                name: r.suggested_name.clone(),
+                            })
+                        })
+                        .collect();
+                    opener = Arc::new(pctwin_move::people::HelperOpener::new(
+                        Arc::clone(&client),
+                        &people,
+                    ));
+                    helper = Some(client);
+                }
+                Ok(crate::others::Asked::NotApproved) => not_moved(OthersWhy::NotApproved),
+                Err(_) => not_moved(OthersWhy::Failed),
             }
-            Some(path)
+        }
+    }
+    let _ = app.emit(STAGE_EVENT, Stage::Waiting);
+    let sent = pctwin_move::send_by_rules(
+        &mut link,
+        &record,
+        &mover,
+        &named,
+        |item| match handles.get(&item.id) {
+            Some(h) => Some(pctwin_move::people::helper_source(*h)),
+            None => {
+                let mut path = roots.get(&item.id)?.clone();
+                for part in item.path.parts() {
+                    path.push(part.on_disk());
+                }
+                Some(path)
+            }
         },
         live,
-        Arc::new(FsOpener),
+        opener,
     )
-    .await?;
-    Ok(sent_outcome(&sent, &sweep.record))
+    .await;
+    // The helper's session ends with the move, whatever became of it.
+    if let Some(client) = helper.and_then(|h| Arc::try_unwrap(h).ok())
+        && let Ok(client) = client.into_inner()
+    {
+        let _ = client.bye();
+    }
+    let (sent, _rules) = sent?;
+    Ok(sent_outcome(&sent, &record, &mover))
+}
+
+/// Which laptop this is in the move, with what that side starts from.
+enum ThisSide {
+    /// The old laptop, with the other people the mover ticked (M06).
+    Old {
+        others: Vec<String>,
+    },
+    New(NewSide),
 }
 
 /// What the new laptop needs before it can take a move: its places approved, the rules, the
@@ -1099,7 +1188,7 @@ fn spawn_run<R: Runtime>(
     moving: AppMoving,
     link: pctwin_link::Link,
     paired: PairedWith,
-    setup: Option<NewSide>,
+    side: ThisSide,
     live: Live,
     scan_stop: Arc<AtomicBool>,
 ) -> Result<(), MoveProblem> {
@@ -1127,9 +1216,13 @@ fn spawn_run<R: Runtime>(
                 pctwin_power::power_now().on_battery,
             );
             let ran = runtime.block_on(async {
-                match setup {
-                    Some(setup) => run_new(&app, moving.clone(), link, &live, setup, names).await,
-                    None => run_old(&app, link, &live, &scan_stop).await,
+                match side {
+                    ThisSide::New(setup) => {
+                        run_new(&app, moving.clone(), link, &live, setup, names).await
+                    }
+                    ThisSide::Old { others } => {
+                        run_old(&app, link, &live, &scan_stop, others).await
+                    }
                 }
             });
             done.store(true, Ordering::Release);
@@ -1169,18 +1262,23 @@ pub async fn move_begin<R: Runtime>(
     pairing: State<'_, AppPairing>,
     moving: State<'_, AppMoving>,
     fallback: BTreeMap<FolderRole, String>,
+    others: Vec<String>,
 ) -> Result<(), MoveProblem> {
     check_fallback(&fallback)?;
+    if others.len() > pctwin_move::landing::MAX_PEOPLE {
+        return Err(MoveProblem::Failed);
+    }
     let (live, scan_stop) = moving.begin()?;
     let Some((link, paired)) = pairing.take_link().await else {
         moving.finish(Vec::new());
         return Err(MoveProblem::NotPaired);
     };
-    let setup = if paired.old {
-        None
+    // The new laptop has no one to tick: its people come from the old laptop.
+    let side = if paired.old {
+        ThisSide::Old { others }
     } else {
         match new_places(fallback) {
-            Ok(setup) => Some(setup),
+            Ok(setup) => ThisSide::New(setup),
             Err(p) => {
                 moving.finish(Vec::new());
                 return Err(p);
@@ -1188,7 +1286,7 @@ pub async fn move_begin<R: Runtime>(
         }
     };
     let moving = Arc::clone(&moving);
-    spawn_run(app, moving, link, paired, setup, live, scan_stop)
+    spawn_run(app, moving, link, paired, side, live, scan_stop)
 }
 
 /// The person's answer to the plan on screen (M23), for exactly that revision.
@@ -1317,6 +1415,33 @@ mod tests {
         assert_eq!(report[1].evidence, Some(Evidence::AlreadyThere));
         assert_eq!(report[0].source, "documents/a.txt");
         assert_eq!(report[0].name, "a.txt");
+    }
+
+    #[test]
+    fn the_old_laptops_report_names_only_the_movers_and_shared_files() {
+        let mine = item(person("1000"), FolderRole::Documents, &["a.txt"], 10);
+        let bea = item(person("1001"), FolderRole::Pictures, &["secret.jpg"], 7);
+        let mut record = Record::new(laptop());
+        record.items = vec![mine.clone(), bea.clone()];
+        let sent = Sent {
+            files: vec![
+                pctwin_move::SentFile {
+                    item: mine.id,
+                    outcome: Some(SendOutcome::Arrived),
+                },
+                pctwin_move::SentFile {
+                    item: bea.id,
+                    outcome: Some(SendOutcome::Arrived),
+                },
+            ],
+            not_sent: Vec::new(),
+            ended: Ended::Finished,
+        };
+        let (outcome, report) = sent_outcome(&sent, &record, "1000");
+        assert_eq!(outcome.by_status.copied, 1);
+        assert_eq!(outcome.bytes_checked, 10);
+        assert_eq!(report.len(), 1);
+        assert!(!serde_json::to_string(&report).unwrap().contains("secret"));
     }
 
     #[test]
