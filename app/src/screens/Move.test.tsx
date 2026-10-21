@@ -110,6 +110,16 @@ describe("the move, once paired", () => {
     expect(screen.getByText((t) => plain(t) === plain(text("move-found", { size: "2.5 MB" })))).toBeTruthy();
     send("move-stage", { kind: "waiting" });
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-approval-title"));
+    // While it waits, the old laptop offers the checklist; ticks are the person's own and stay.
+    fireEvent.click(screen.getByRole("button", { name: text("move-before-open") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("before-title"));
+    const tick = screen.getAllByRole("checkbox")[0] as HTMLInputElement;
+    fireEvent.click(tick);
+    fireEvent.click(screen.getByRole("button", { name: text("before-continue") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-approval-title"));
+    fireEvent.click(screen.getByRole("button", { name: text("move-before-open") }));
+    expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: text("before-continue") }));
     fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
     expect(tauri.invoke).toHaveBeenCalledWith("move_stop");
   });

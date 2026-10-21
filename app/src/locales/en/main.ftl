@@ -936,6 +936,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = They are in place when { $name } next signs in on this laptop.
 move-fallback-folder = From your old laptop
 move-stop = Stop the move
+move-before-open = While you wait: before you leave this laptop
 move-get-help = Get help
 pickup-eyebrow = Your move
 pickup-title = Pick up safely.

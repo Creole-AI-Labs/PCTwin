@@ -23,6 +23,7 @@ export default function MoveWaiting({
   old,
   note,
   found = null,
+  onBefore,
   onStop,
 }: {
   stage: WaitStage;
@@ -30,6 +31,8 @@ export default function MoveWaiting({
   note?: string;
   /** While scanning: bytes of the mover's own things found so far (only ever grows). */
   found?: number | null;
+  /** The old laptop, while it waits: open "Before you leave this laptop" (M10/M13). */
+  onBefore?: () => void;
   onStop: () => void;
 }) {
   const { l10n } = useLocalization();
@@ -50,6 +53,13 @@ export default function MoveWaiting({
         {note && <Banner tone="attention">{note}</Banner>}
         <Banner tone="info">{l10n.getString("progress-old-safe")}</Banner>
       </div>
+      {onBefore && (
+        <div className="mv-actions">
+          <Button variant="quiet" onClick={onBefore}>
+            {l10n.getString("move-before-open")}
+          </Button>
+        </div>
+      )}
       <FrameFooter>
         <Button variant="quiet" onClick={onStop}>
           {l10n.getString("move-stop")}

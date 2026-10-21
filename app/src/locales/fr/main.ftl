@@ -1094,6 +1094,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = Elles seront en place à la prochaine connexion de { $name } sur ce portable.
 move-fallback-folder = De votre ancien portable
 move-stop = Arrêter le transfert
+move-before-open = En attendant : avant de quitter ce portable
 move-get-help = Obtenir de l’aide
 pickup-eyebrow = Votre transfert
 pickup-title = Reprenez en toute sécurité.

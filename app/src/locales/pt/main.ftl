@@ -1089,6 +1089,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = Estarão no lugar quando { $name } entrar neste notebook da próxima vez.
 move-fallback-folder = Do seu notebook antigo
 move-stop = Parar a transferência
+move-before-open = Enquanto espera: antes de deixar este notebook
 move-get-help = Obter ajuda
 pickup-eyebrow = Sua transferência
 pickup-title = Retome com segurança.

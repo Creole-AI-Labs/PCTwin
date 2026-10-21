@@ -1085,6 +1085,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = Estarán en su sitio cuando { $name } inicie sesión en este portátil la próxima vez.
 move-fallback-folder = De tu portátil antiguo
 move-stop = Detener el traslado
+move-before-open = Mientras esperas: antes de dejar este portátil
 move-get-help = Obtener ayuda
 pickup-eyebrow = Tu traslado
 pickup-title = Retoma con seguridad.

@@ -22,7 +22,9 @@ import {
   type PeopleToPlace,
   type WaitStage,
 } from "../bridge";
+import BeforeYouStart from "./BeforeYouStart";
 import FullDiskAccess from "./FullDiskAccess";
+import type { BeforeItem } from "../people";
 import PlaceOthers from "./PlaceOthers";
 import WhoHere from "./WhoHere";
 import type { HelpCode } from "../people";
@@ -158,6 +160,11 @@ export default function MoveHost({
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   // How much of the mover's own things the scan has found so far (M02).
   const [found, setFound] = useState<number | null>(null);
+  // "Before you leave this laptop": open or not, and the person's own ticks (their word only).
+  const [before, setBefore] = useState(false);
+  const [beforeItems, setBeforeItems] = useState<BeforeItem[]>(() =>
+    (["licences", "passwords", "codes", "online"] as const).map((kind) => ({ id: kind, kind, done: false })),
+  );
   const [expanded, setExpanded] = useState(false);
   const [mini, setMini] = useState(false);
   const mode = windowFor(view, expanded, mini);
@@ -268,7 +275,38 @@ export default function MoveHost({
         />
       );
     case "wait":
-      return <MoveWaiting stage={view.stage} old={old} note={othersNote} found={view.stage === "scanning" ? found : null} onStop={stopNow} />;
+      if (before && old) {
+        return (
+          <BeforeYouStart
+            items={beforeItems}
+            onBack={() => {
+              setBefore(false);
+            }}
+            onToggle={(id, done) => {
+              setBeforeItems((items) => items.map((i) => (i.id === id ? { ...i, done } : i)));
+            }}
+            onContinue={() => {
+              setBefore(false);
+            }}
+          />
+        );
+      }
+      return (
+        <MoveWaiting
+          stage={view.stage}
+          old={old}
+          note={othersNote}
+          found={view.stage === "scanning" ? found : null}
+          onBefore={
+            old && view.stage === "waiting"
+              ? () => {
+                  setBefore(true);
+                }
+              : undefined
+          }
+          onStop={stopNow}
+        />
+      );
     case "privacy":
       return (
         <FullDiskAccess

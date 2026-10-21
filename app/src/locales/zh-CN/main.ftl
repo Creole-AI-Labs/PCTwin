@@ -873,6 +873,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = { $name } 下次登录这台笔记本电脑时，这些内容就会放好。
 move-fallback-folder = 来自旧笔记本电脑
 move-stop = 停止移动
+move-before-open = 等待时：离开这台笔记本电脑之前
 move-get-help = 获取帮助
 pickup-eyebrow = 你的移动
 pickup-title = 安全地继续。

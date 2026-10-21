@@ -1197,6 +1197,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = ستكون في مكانها عندما يسجّل { $name } الدخول إلى هذا الحاسوب في المرة القادمة.
 move-fallback-folder = من حاسوبك القديم
 move-stop = إيقاف النقل
+move-before-open = أثناء الانتظار: قبل أن تترك هذا الحاسوب
 move-get-help = الحصول على مساعدة
 pickup-eyebrow = عملية النقل
 pickup-title = تابع بأمان.

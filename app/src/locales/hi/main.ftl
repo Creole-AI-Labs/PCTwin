@@ -1062,6 +1062,7 @@ outcome-person-not-done =
 outcome-person-at-sign-in = जब { $name } अगली बार इस लैपटॉप पर साइन इन करेंगे, तब ये अपनी जगह होंगी।
 move-fallback-folder = पुराने लैपटॉप से
 move-stop = स्थानांतरण रोकें
+move-before-open = इंतज़ार के दौरान: यह लैपटॉप छोड़ने से पहले
 move-get-help = मदद लें
 pickup-eyebrow = आपका स्थानांतरण
 pickup-title = सुरक्षित रूप से आगे बढ़ें।
