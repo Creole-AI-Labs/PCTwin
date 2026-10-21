@@ -157,12 +157,14 @@ async fn send_blob(ch: &mut impl Channel, index: u32, bytes: &[u8]) -> Result<()
 
 /// New laptop: the manifest or page `index`, at most `max` bytes, checked piece by piece: the
 /// header names exactly this index and a length within `max`, every piece but the last is full,
-/// and nothing past the length arrives.
+/// and nothing past the length arrives. It is read into `bytes`, which is reused from page to
+/// page, so no page buffer is made and let go each time.
 async fn receive_blob(
     ch: &mut impl Channel,
     index: u32,
     max: usize,
-) -> Result<Vec<u8>, TransferError> {
+    bytes: &mut Vec<u8>,
+) -> Result<(), TransferError> {
     let head = recv_in_time(ch).await?;
     let [PAGED, a, b, c, d, e, f, g, h] = *head.as_slice() else {
         return Err(refused("a page did not begin with its size"));
@@ -174,10 +176,11 @@ async fn receive_blob(
     if len == 0 || len > max {
         return Err(refused("a page is empty or larger than PCTwin accepts"));
     }
-    // Room for exactly the length, at most a page (already allowed for), and each piece read in
-    // place: nothing grows or is copied and let go while a page arrives, so no gaps are left
-    // between the blocks the reader keeps.
-    let mut bytes = Vec::with_capacity(len);
+    // Room for the length, at most a page (already allowed for), and each piece read in place:
+    // nothing grows or is copied and let go while a page arrives, so no gaps are left between
+    // the blocks the reader keeps.
+    bytes.clear();
+    bytes.reserve_exact(len);
     while bytes.len() < len {
         let frame = recv_in_time(ch).await?;
         let piece = match frame.split_first() {
@@ -194,23 +197,28 @@ async fn receive_blob(
         }
         bytes.extend_from_slice(piece);
     }
-    Ok(bytes)
+    Ok(())
 }
 
 /// New laptop, move protocol 3 and later: the paged inventory, read as from a stranger page by
 /// page ([`InventoryReader`]), each page refused the moment it breaks a rule.
 async fn receive_paged(ch: &mut impl Channel) -> Result<Record, TransferError> {
-    let manifest = receive_blob(ch, MANIFEST, MAX_MANIFEST_BYTES).await?;
-    let mut reader = InventoryReader::start(&manifest).map_err(|e| refused(&e.to_string()))?;
+    // One buffer for the manifest and every page, and one list for every item.
+    let mut bytes = Vec::new();
+    receive_blob(ch, MANIFEST, MAX_MANIFEST_BYTES, &mut bytes).await?;
+    let mut reader = InventoryReader::start(&bytes).map_err(|e| refused(&e.to_string()))?;
     if reader.item_count() == 0 {
         return Err(refused("it was empty"));
     }
     let announced = usize::try_from(reader.item_count()).unwrap_or(usize::MAX);
     let mut items = Vec::with_capacity(announced.min(100_000));
     for n in 0..reader.page_count() {
-        let page = receive_blob(ch, n, MAX_PAGE_BYTES).await?;
-        items.extend(reader.page(&page).map_err(|e| refused(&e.to_string()))?);
+        receive_blob(ch, n, MAX_PAGE_BYTES, &mut bytes).await?;
+        reader
+            .page_into(&bytes, &mut items)
+            .map_err(|e| refused(&e.to_string()))?;
     }
+    drop(bytes);
     let laptop = reader.laptop();
     reader.finish().map_err(|e| refused(&e.to_string()))?;
     let mut record = Record::new(laptop);

@@ -56,37 +56,34 @@ fn item(p: &mut Vec<u8>, seed: u64, owner: u32, folder: u32, name: &dyn Fn(&mut 
 /// items after the header, and how many of each).
 struct Shape {
     owners: u32,
-    page: fn(u32) -> (u32, u32, u32, Vec<u8>),
+    page: fn(u32, &mut Vec<u8>) -> (u32, u32, u32),
 }
 
-fn root_items(n: u32, per: u32, name: &dyn Fn(&mut Vec<u8>)) -> (u32, u32, u32, Vec<u8>) {
-    let mut p = Vec::new();
+fn root_items(n: u32, per: u32, name: &dyn Fn(&mut Vec<u8>), p: &mut Vec<u8>) -> (u32, u32, u32) {
     for k in 0..per {
-        item(&mut p, u64::from(n) << 32 | u64::from(k), 0, ROOT, name);
+        item(p, u64::from(n) << 32 | u64::from(k), 0, ROOT, name);
     }
-    (0, 0, per, p)
+    (0, 0, per)
 }
 
 /// Items at the bottom of a chain of 127 folders called `d`, defined on page 0.
-fn deep_items(n: u32, per: u32) -> (u32, u32, u32, Vec<u8>) {
-    let mut p = Vec::new();
+fn deep_items(n: u32, per: u32, p: &mut Vec<u8>) -> (u32, u32, u32) {
     let defined = if n == 0 { 127 } else { 0 };
     for i in 0..defined {
         p.extend_from_slice(&(if i == 0 { ROOT } else { i - 1 }).to_be_bytes());
-        text(&mut p, "d");
+        text(p, "d");
     }
     for k in 0..per {
-        item(&mut p, u64::from(n) << 32 | u64::from(k), 0, 126, &|p| {
+        item(p, u64::from(n) << 32 | u64::from(k), 0, 126, &|p| {
             text(p, "f")
         });
     }
-    (if n == 0 { 0 } else { 127 }, defined, per, p)
+    (if n == 0 { 0 } else { 127 }, defined, per)
 }
 
 /// Each item at the bottom of its own chain of 127 folders.
-fn folder_chains(n: u32, chains: u32) -> (u32, u32, u32, Vec<u8>) {
+fn folder_chains(n: u32, chains: u32, p: &mut Vec<u8>) -> (u32, u32, u32) {
     let first = n * chains * 127;
-    let mut p = Vec::new();
     for c in 0..chains {
         for i in 0..127u32 {
             let parent = if i == 0 {
@@ -95,40 +92,39 @@ fn folder_chains(n: u32, chains: u32) -> (u32, u32, u32, Vec<u8>) {
                 first + c * 127 + i - 1
             };
             p.extend_from_slice(&parent.to_be_bytes());
-            text(&mut p, &format!("c{n}-{c}"));
+            text(p, &format!("c{n}-{c}"));
         }
     }
     for c in 0..chains {
         let seed = u64::from(n) << 32 | u64::from(c);
-        item(&mut p, seed, 0, first + c * 127 + 126, &|p| text(p, "f"));
+        item(p, seed, 0, first + c * 127 + 126, &|p| text(p, "f"));
     }
-    (first, chains * 127, chains, p)
+    (first, chains * 127, chains)
 }
 
 fn shape(name: &str) -> Shape {
-    let page: fn(u32) -> (u32, u32, u32, Vec<u8>) = match name {
+    let page: fn(u32, &mut Vec<u8>) -> (u32, u32, u32) = match name {
         // The longest exact Windows names, at the root.
-        "rootwin" => |n| root_items(n, 3_000, &|p| wide(p, 1365)),
+        "rootwin" => |n, page| root_items(n, 3_000, &|p| wide(p, 1365), page),
         // The longest Mac or Linux names that are not text, at the root.
-        "rootunix" => |n| root_items(n, 4_000, &|p| unix(p, 1365)),
+        "rootunix" => |n, page| root_items(n, 4_000, &|p| unix(p, 1365), page),
         // Windows names of 4,000 units, the first a lone surrogate: blocks of 8 KB, where the
         // Windows heap keeps the most beyond what is asked.
-        "wide4000" => |n| root_items(n, 1_000, &|p| wide(p, 4000)),
+        "wide4000" => |n, page| root_items(n, 1_000, &|p| wide(p, 4000), page),
         // The cheapest items there are.
-        "cheapest" => |n| root_items(n, 10_000, &|p| text(p, "f")),
+        "cheapest" => |n, page| root_items(n, 10_000, &|p| text(p, "f"), page),
         // Items 128 parts deep in one-byte folders.
-        "deep1" => |n| deep_items(n, 1_800),
+        "deep1" => |n, page| deep_items(n, 1_800, page),
         // Folder chains, each with one item.
-        "folders" => |n| folder_chains(n, 300),
+        "folders" => |n, page| folder_chains(n, 300, page),
         // 65,536 owners, each item a different one.
-        "owners" => |n| {
-            let mut p = Vec::new();
+        "owners" => |n, p| {
             for k in 0..10_000u32 {
                 let seed = u64::from(n) << 32 | u64::from(k);
                 let owner = ((u64::from(n) * 10_000 + u64::from(k)) % 65_536) as u32;
-                item(&mut p, seed, owner, ROOT, &|p| text(p, "f"));
+                item(p, seed, owner, ROOT, &|p| text(p, "f"));
             }
-            (0, 0, 10_000, p)
+            (0, 0, 10_000)
         },
         other => panic!("unknown shape {other}"),
     };
@@ -138,23 +134,25 @@ fn shape(name: &str) -> Shape {
     }
 }
 
-/// A sender that makes each page only when the last one has been read, so the test itself
-/// holds one page at a time.
+/// A sender that makes each page only when the last one has been read, into one buffer it keeps,
+/// so the test itself holds one page at a time and makes no page buffer to let go each time.
 struct Hostile {
     frames: VecDeque<Vec<u8>>,
+    page: Vec<u8>,
     next: i64,
     pages: u32,
     shape: Shape,
 }
 
 impl Hostile {
-    fn blob(&mut self, index: u32, bytes: Vec<u8>) {
+    fn blob(&mut self, index: u32) {
         let mut head = vec![35u8];
         head.extend_from_slice(&index.to_be_bytes());
-        head.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+        head.extend_from_slice(&(self.page.len() as u32).to_be_bytes());
         self.frames.push_back(head);
-        for piece in bytes.chunks(PIECE) {
-            let mut f = vec![33u8];
+        for piece in self.page.chunks(PIECE) {
+            let mut f = Vec::with_capacity(1 + piece.len());
+            f.push(33u8);
             f.extend_from_slice(piece);
             self.frames.push_back(f);
         }
@@ -180,17 +178,19 @@ impl Hostile {
             }
             m.extend_from_slice(&1u32.to_be_bytes());
             m.extend_from_slice(&[2, 0]); // Documents, on the system drive
-            self.blob(u32::MAX, m);
+            self.page = m;
+            self.blob(u32::MAX);
         } else {
             let n = self.next as u32;
-            let (first, defined, count, body) = (self.shape.page)(n);
-            let mut p = Vec::with_capacity(16 + body.len());
-            for v in [n, first, defined, count] {
-                p.extend_from_slice(&v.to_be_bytes());
+            self.page.clear();
+            for v in [n, 0, 0, 0] {
+                self.page.extend_from_slice(&v.to_be_bytes());
             }
-            p.extend_from_slice(&body);
-            drop(body);
-            self.blob(n, p);
+            let (first, defined, count) = (self.shape.page)(n, &mut self.page);
+            for (at, v) in [(4, first), (8, defined), (12, count)] {
+                self.page[at..at + 4].copy_from_slice(&v.to_be_bytes());
+            }
+            self.blob(n);
         }
         self.next += 1;
     }
@@ -218,6 +218,7 @@ async fn the_new_laptop_holds_no_more_than_its_count() {
     }
     let mut sender = Hostile {
         frames: VecDeque::new(),
+        page: Vec::with_capacity(pctwin_record::MAX_PAGE_BYTES),
         next: -1,
         pages: 100_000,
         shape: shape(&name),
