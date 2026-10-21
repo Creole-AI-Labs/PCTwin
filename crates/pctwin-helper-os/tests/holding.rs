@@ -44,9 +44,13 @@ fn a_holding_area_is_the_mover_s_alone_and_inside_an_administrators_folder() {
                 .unwrap() as u32,
         )
     };
-    let first = pctwin_helper_os::holding::create_holding_area(&mover).unwrap();
-    let second = pctwin_helper_os::holding::create_holding_area(&mover).unwrap();
-    assert_ne!(first, second, "a fresh one each move");
+    let area = pctwin_helper_os::holding::create_holding_area(&mover).unwrap();
+    let other_area = pctwin_helper_os::holding::create_holding_area(&mover).unwrap();
+    assert_ne!(area, other_area, "a fresh one each move");
+    let first = pctwin_helper_os::holding::person_folder(&area, "bea", &mover).unwrap();
+    // Never one that exists, and never a key that is not plain.
+    assert!(pctwin_helper_os::holding::person_folder(&area, "bea", &mover).is_err());
+    assert!(pctwin_helper_os::holding::person_folder(&area, "../x", &mover).is_err());
     let check = || {
         #[cfg(windows)]
         {
@@ -73,13 +77,21 @@ fn a_holding_area_is_the_mover_s_alone_and_inside_an_administrators_folder() {
             };
             assert_eq!(meta.uid(), uid);
             assert_eq!(meta.mode() & 0o777, 0o700);
-            let parent = std::fs::metadata(first.parent().unwrap()).unwrap();
+            let parent = std::fs::metadata(&area).unwrap();
             assert_eq!(parent.uid(), 0);
             assert_eq!(parent.mode() & 0o777, 0o711);
+            // Given to the person at the hand-over, by handle.
+            std::fs::write(first.join("probe.txt"), b"x").unwrap();
+            pctwin_helper_os::holding::give_to(&first, 4242, 4242).unwrap();
+            assert_eq!(std::fs::metadata(&first).unwrap().uid(), 4242);
+            assert_eq!(
+                std::fs::metadata(first.join("probe.txt")).unwrap().uid(),
+                4242
+            );
         }
     };
     let result = std::panic::catch_unwind(check);
-    let _ = std::fs::remove_dir_all(&first);
-    let _ = std::fs::remove_dir_all(&second);
+    let _ = std::fs::remove_dir_all(&area);
+    let _ = std::fs::remove_dir_all(&other_area);
     result.unwrap();
 }

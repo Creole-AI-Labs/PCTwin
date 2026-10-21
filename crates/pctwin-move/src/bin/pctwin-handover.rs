@@ -1,7 +1,8 @@
 //! Hands another person's files over from the holding area into their own folders (see
 //! `pctwin_move::handover`). Started by the administrator helper:
 //!
-//! `pctwin-handover --holding <folder> --account <id> --journal <file> --into <label>=<folder>...`
+//! `pctwin-handover --holding <folder> --home <folder> --account <id> --journal <file>
+//!  --into <label>=<folder name>...`
 //!
 //! On Mac and Linux it runs as the person themselves. It prints one line per file (`landed`,
 //! `kept` or `failed`, then the held path) and ends with 0 only if every file landed.
@@ -15,28 +16,38 @@ use pctwin_transfer::ReceiveOutcome;
 
 struct Args {
     holding: PathBuf,
+    home: PathBuf,
     account: String,
     journal: PathBuf,
-    places: BTreeMap<String, PathBuf>,
+    places: BTreeMap<String, String>,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
-    let (mut holding, mut account, mut journal) = (None, None, None);
+    let (mut holding, mut home, mut account, mut journal) = (None, None, None, None);
     let mut places = BTreeMap::new();
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(format!("{flag} needs a value"))?;
         match flag.as_str() {
             "--holding" if holding.is_none() => holding = Some(PathBuf::from(value)),
+            "--home" if home.is_none() => home = Some(PathBuf::from(value)),
             "--account" if account.is_none() => account = Some(value),
             "--journal" if journal.is_none() => journal = Some(PathBuf::from(value)),
             "--into" => {
                 let (label, folder) = value
                     .split_once('=')
-                    .ok_or("--into takes <label>=<folder>")?;
+                    .ok_or("--into takes <label>=<folder name>")?;
+                // One plain folder name inside the home, never a path.
+                if folder.is_empty()
+                    || folder == "."
+                    || folder == ".."
+                    || folder.contains(['/', '\\', '\0'])
+                {
+                    return Err(format!("--into {label}: {folder} is not one folder name"));
+                }
                 if label.is_empty()
                     || !label.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
                     || places
-                        .insert(label.to_string(), PathBuf::from(folder))
+                        .insert(label.to_string(), folder.to_string())
                         .is_some()
                 {
                     return Err(format!(
@@ -52,6 +63,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     Ok(Args {
         holding: holding.ok_or("--holding is needed")?,
+        home: home.ok_or("--home is needed")?,
         account: account.ok_or("--account is needed")?,
         journal: journal.ok_or("--journal is needed")?,
         places,
@@ -85,6 +97,7 @@ fn main() -> ExitCode {
     };
     let done = match runtime.block_on(pctwin_move::handover::hand_over(
         &args.holding,
+        &args.home,
         &args.places,
         &journal,
         &args.account,
@@ -125,65 +138,52 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
+    fn a(v: &[&str]) -> Result<Args, String> {
+        parse(v.iter().map(|s| s.to_string()))
+    }
+
+    const BASE: [&str; 8] = [
+        "--holding",
+        "h",
+        "--home",
+        "m",
+        "--account",
+        "1001",
+        "--journal",
+        "j",
+    ];
+
+    fn with(extra: &[&str]) -> Vec<&'static str> {
+        let mut v: Vec<&str> = BASE.to_vec();
+        v.extend(
+            extra
+                .iter()
+                .map(|s| -> &'static str { Box::leak(s.to_string().into_boxed_str()) }),
+        );
+        v
+    }
+
     #[test]
     fn the_command_line_is_read_strictly() {
-        let a = |v: &[&str]| parse(v.iter().map(|s| s.to_string()));
+        assert!(a(&with(&["--into", "documents=Documents"])).is_ok());
+        // A place is needed, and each part once.
+        assert!(a(&BASE).is_err());
+        assert!(a(&with(&["--into", "documents=Documents", "--home", "n"])).is_err());
         assert!(
-            a(&[
-                "--holding",
-                "h",
-                "--account",
-                "1001",
-                "--journal",
-                "j",
+            a(&with(&[
                 "--into",
-                "documents=d"
-            ])
-            .is_ok()
-        );
-        assert!(a(&["--holding", "h", "--account", "1001", "--journal", "j"]).is_err());
-        assert!(
-            a(&[
-                "--holding",
-                "h",
-                "--account",
-                "1",
-                "--journal",
-                "j",
+                "documents=Documents",
                 "--into",
-                "../x=d"
-            ])
+                "documents=Docs"
+            ]))
             .is_err()
         );
-        assert!(
-            a(&[
-                "--holding",
-                "h",
-                "--holding",
-                "h2",
-                "--account",
-                "1",
-                "--journal",
-                "j",
-                "--into",
-                "documents=d"
-            ])
-            .is_err()
-        );
-        assert!(
-            a(&[
-                "--holding",
-                "h",
-                "--account",
-                "1",
-                "--journal",
-                "j",
-                "--into",
-                "documents=d",
-                "--into",
-                "documents=e"
-            ])
-            .is_err()
-        );
+        // A label is plain; a folder is one name inside the home, never a path.
+        assert!(a(&with(&["--into", "../x=Documents"])).is_err());
+        for folder in ["../etc", "a/b", "a\\b", ".", "..", ""] {
+            let value = format!("documents={folder}");
+            assert!(a(&with(&["--into", &value])).is_err(), "{folder}");
+        }
+        assert!(a(&with(&["--into", "documents=Documents", "--run", "x"])).is_err());
     }
 }

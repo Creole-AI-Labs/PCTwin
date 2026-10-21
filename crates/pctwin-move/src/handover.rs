@@ -5,7 +5,7 @@
 //! followed, and every file is read back before it is called landed.
 //!
 //! The holding area has one folder per place (`<holding>/<place label>/...`); `places` says
-//! which folder of the person's each label lands in. On Mac and Linux the administrator helper
+//! which folder of the person's home each label lands in (made by the safety gate if missing). On Mac and Linux the administrator helper
 //! runs this as the person themselves, so it writes with their rights only; on Windows the
 //! helper runs it with its own.
 
@@ -23,6 +23,9 @@ use pctwin_transfer::{
     SenderSession, Tier, TransferError, shown_path,
 };
 use tokio::sync::mpsc;
+
+/// The one approved place of a hand-over: the person's home.
+const HOME: &str = "home";
 
 /// How one held file ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,11 +99,13 @@ fn walk(
     Ok(())
 }
 
-/// Hands over everything in `holding` into `places` (place label → the person's folder), as the
-/// signed-in `account`, recording every write in `journal`.
+/// Hands over everything in `holding` into the person's `home`, each place label's files into
+/// the folder of `home` that `places` names for it, as the signed-in `account`, recording every
+/// write in `journal`.
 pub async fn hand_over(
     holding: &Path,
-    places: &BTreeMap<String, PathBuf>,
+    home: &Path,
+    places: &BTreeMap<String, String>,
     journal: &dyn Ledger,
     account: &str,
 ) -> Result<HandOver, TransferError> {
@@ -114,17 +119,17 @@ pub async fn hand_over(
         storage: Storage::SystemDrive,
     };
     let mut table = Destinations::new();
+    table
+        .approve(HOME, Approved::MyFolders, home)
+        .map_err(TransferError::Gate)?;
     let mut found = Vec::new();
     let mut not_plain = Vec::new();
-    for (label, into) in places {
+    for (label, folder) in places {
         let held = holding.join(label);
         if !held.is_dir() {
             continue;
         }
-        table
-            .approve(label, Approved::MyFolders, into)
-            .map_err(TransferError::Gate)?;
-        let mut parts = vec![ItemName::from_text(label)];
+        let mut parts = vec![ItemName::from_text(folder)];
         walk(&held, &mut parts, &mut found, &mut not_plain)?;
     }
     let mut record = Record::new(laptop);
@@ -150,12 +155,9 @@ pub async fn hand_over(
             inclusion: Inclusion::Included,
         });
     }
-    // Each item's first part is its place's label; the rest is where it lands inside it.
-    let landing = |i: &Item| -> Option<LandingPlace> {
-        let (label, rest) = i.path.parts().split_first()?;
-        let rest = ItemPath::new(rest.to_vec()).ok()?;
-        Some(LandingPlace::new(label.display(), shown_path(&rest)))
-    };
+    // Each item's path starts with its place's folder in the home: the gate makes it if missing.
+    let landing =
+        |i: &Item| -> Option<LandingPlace> { Some(LandingPlace::new(HOME, shown_path(&i.path))) };
     // Every file is this person's, landing in their own account.
     record.mapping.people.insert(
         account.to_string(),

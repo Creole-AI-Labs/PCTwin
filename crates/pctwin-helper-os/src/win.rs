@@ -542,6 +542,73 @@ fn os_create_dir_with_sddl(path: &[u16], sddl: &[u16]) -> Result<(), HRESULT> {
     r
 }
 
+/// The home folder of the account `sid` (named `name`): made now if the person has never
+/// signed in (`CreateProfile`), else the one the system's profile list names.
+pub(crate) fn profile_folder(sid: &str, name: &str) -> Result<std::path::PathBuf, Error> {
+    let mut path = vec![0u16; 1024];
+    match os_create_profile(&wide(OsStr::new(sid)), &wide(OsStr::new(name)), &mut path) {
+        Ok(()) => {
+            let len = path.iter().position(|c| *c == 0).unwrap_or(path.len());
+            Ok(std::path::PathBuf::from(String::from_utf16_lossy(
+                &path[..len],
+            )))
+        }
+        // ERROR_ALREADY_EXISTS: the person has signed in before.
+        Err(code) if code.0 as u32 == 0x8007_00B7 => listed_profile(sid),
+        Err(code) => Err(Error::Os {
+            call: "CreateProfile",
+            code: i64::from(code.0),
+        }),
+    }
+}
+
+/// The profile folder the system's profile list names for `sid`, read with the system's own
+/// `reg` tool (read only).
+fn listed_profile(sid: &str) -> Result<std::path::PathBuf, Error> {
+    Sid::parse(sid)?;
+    let key = format!(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");
+    let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let reg = std::path::Path::new(&system)
+        .join("System32")
+        .join("reg.exe");
+    let out = std::process::Command::new(reg)
+        .args(["query", &key, "/v", "ProfileImagePath"])
+        .output()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let value = text
+        .lines()
+        .find_map(|l| {
+            let l = l.trim();
+            l.strip_prefix("ProfileImagePath")
+                .and_then(|r| {
+                    r.trim_start()
+                        .split_once("REG_EXPAND_SZ")
+                        .or_else(|| r.trim_start().split_once("REG_SZ"))
+                })
+                .map(|(_, v)| v.trim().to_string())
+        })
+        .ok_or(Error::NotSupported("no profile listed for that account"))?;
+    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    Ok(std::path::PathBuf::from(
+        value.replace("%SystemDrive%", &drive),
+    ))
+}
+
+/// `CreateProfile`: the profile folder of a person who has never signed in.
+fn os_create_profile(sid: &[u16], name: &[u16], path: &mut [u16]) -> Result<(), HRESULT> {
+    assert!(
+        sid.ends_with(&[0]) && name.ends_with(&[0]),
+        "NUL-terminated"
+    );
+    // SAFETY: both strings are NUL-terminated (checked above) and only read; the binding passes
+    // the path buffer's true length, so the system cannot overrun it.
+    #[expect(unsafe_code, reason = "CreateProfile has no safe binding")]
+    let r = unsafe {
+        windows::Win32::UI::Shell::CreateProfile(PCWSTR(sid.as_ptr()), PCWSTR(name.as_ptr()), path)
+    };
+    r.map_err(|e| e.code())
+}
+
 /// The machine's own architecture (`IMAGE_FILE_MACHINE_*`), whatever this process runs as.
 pub(crate) fn native_machine() -> Result<u16, HRESULT> {
     os_native_machine()

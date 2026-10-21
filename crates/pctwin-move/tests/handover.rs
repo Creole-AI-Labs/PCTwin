@@ -24,15 +24,15 @@ async fn held_files_land_in_the_person_s_folders_and_nothing_is_replaced() {
     // Already in Bea's Documents: never replaced.
     let docs = home.path().join("Documents");
     let pics = home.path().join("Pictures");
+    // Documents exists already; Pictures does not, and is made.
     std::fs::create_dir_all(&docs).unwrap();
-    std::fs::create_dir_all(&pics).unwrap();
     std::fs::write(docs.join("letter.txt"), b"Bea's own, newer").unwrap();
     let places = BTreeMap::from([
-        ("documents".to_string(), docs.clone()),
-        ("pictures".to_string(), pics.clone()),
+        ("documents".to_string(), "Documents".to_string()),
+        ("pictures".to_string(), "Pictures".to_string()),
     ]);
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
-    let done = hand_over(holding.path(), &places, &journal, "1001")
+    let done = hand_over(holding.path(), home.path(), &places, &journal, "1001")
         .await
         .unwrap();
     assert_eq!(done.files.len(), 3);
@@ -57,9 +57,11 @@ async fn held_files_land_in_the_person_s_folders_and_nothing_is_replaced() {
             _ => None,
         })
         .unwrap();
-    assert_ne!(landed_letter, "letter.txt");
+    // Inside the home: Documents/<another name>.
+    assert_ne!(landed_letter, "Documents/letter.txt");
+    assert!(landed_letter.starts_with("Documents/"), "{landed_letter}");
     assert_eq!(
-        std::fs::read(docs.join(&landed_letter)).unwrap(),
+        std::fs::read(home.path().join(&landed_letter)).unwrap(),
         b"Dear Bea"
     );
     assert_eq!(
@@ -87,9 +89,9 @@ async fn a_link_in_the_holding_area_is_never_followed() {
     .unwrap();
     let docs = home.path().join("Documents");
     std::fs::create_dir_all(&docs).unwrap();
-    let places = BTreeMap::from([("documents".to_string(), docs.clone())]);
+    let places = BTreeMap::from([("documents".to_string(), "Documents".to_string())]);
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
-    let done = hand_over(holding.path(), &places, &journal, "1001")
+    let done = hand_over(holding.path(), home.path(), &places, &journal, "1001")
         .await
         .unwrap();
     assert!(done.files.is_empty());
