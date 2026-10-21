@@ -42,7 +42,8 @@ pub fn worth(item: &Item, kind: Option<Kind>, what: Option<What>) -> Worth {
         Some(Kind::AppData | Kind::KeepWhole) | None => {}
     }
     match what {
-        Some(What::InstalledGames) => Worth::Redownloadable,
+        // Installed games download again; Outlook's offline mail comes back from the server.
+        Some(What::InstalledGames | What::EmailCache) => Worth::Redownloadable,
         _ => Worth::Irreplaceable,
     }
 }
@@ -206,6 +207,14 @@ mod tests {
             worth(&mine, None, Some(What::InstalledGames)),
             Worth::Redownloadable
         );
+        // Outlook's offline mail comes back from the server; an archive and a vault do not.
+        assert_eq!(
+            worth(&mine, None, Some(What::EmailCache)),
+            Worth::Redownloadable
+        );
+        for own in [What::EmailArchive, What::PasswordVault, What::CodeProject] {
+            assert_eq!(worth(&mine, None, Some(own)), Worth::Irreplaceable);
+        }
         // An old backup is still the person's own.
         assert_eq!(
             worth(&mine, None, Some(What::TimeMachine)),

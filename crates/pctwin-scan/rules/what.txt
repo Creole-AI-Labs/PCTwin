@@ -10,27 +10,39 @@
 #           folder-suffix  a folder whose name ends with this (a package, such as .photoslibrary)
 #           holds          a folder that directly holds a file or folder with this name
 #           file-suffix    a file whose name ends with this
-#   what    camera-photos, photos-library, lightroom-catalog, music-library, phone-backup,
-#           time-machine, file-history, windows-image-backup, old-windows, virtual-machine-disk,
-#           linux-on-windows, game-saves, installed-games, containers
+#   what    camera-photos, screenshots, photos-library, lightroom-catalog, music-library,
+#           phone-backup, time-machine, file-history, windows-image-backup, disk-image-backup,
+#           old-windows, virtual-machine-disk, disc-image, linux-on-windows, game-saves,
+#           installed-games, containers, email-archive, email-cache, password-vault,
+#           money-records, code-project, notes-vault, video-project, music-project, design-file,
+#           ebook-library
 # Names are compared ignoring case. Lines starting with # are notes. The first row that matches
 # names the place.
 
 # Photos straight from a camera or phone (the DCF standard's folder).
 any | folder | DCIM | camera-photos
+windows | folder | Camera Roll | camera-photos
+any | folder | Screenshots | screenshots
 # Photo libraries.
 mac | folder-suffix | .photoslibrary | photos-library
 mac | folder-suffix | .photolibrary | photos-library
 any | file-suffix | .lrcat | lightroom-catalog
 any | folder-suffix | .lrdata | lightroom-catalog
+# Capture One and Picasa keep their own catalogue beside the photos.
+any | folder-suffix | .cocatalog | photos-library
+any | folder-suffix | .cosessiondb | photos-library
+any | holds | .picasa.ini | photos-library
 # Music libraries: the library file is what holds the playlists and ratings.
 any | holds | iTunes Library.itl | music-library
 mac | folder-suffix | .musiclibrary | music-library
 any | holds | iTunes Music Library.xml | music-library
+any | holds | MusicBeeLibrary.mbl | music-library
 # iPhone and iPad backups made by iTunes or Finder: a folder per device with these files.
 any | holds | Manifest.db | phone-backup
 any | holds | Manifest.mbdb | phone-backup
 any | folder | MobileSync | phone-backup
+# Android phones backed up by Samsung Smart Switch.
+any | folder | Smart Switch | phone-backup
 # Whole-laptop backups.
 mac | folder | Backups.backupdb | time-machine
 mac | folder-suffix | .backupbundle | time-machine
@@ -38,6 +50,10 @@ mac | folder-suffix | .sparsebundle | time-machine
 windows | folder | FileHistory | file-history
 windows | folder | WindowsImageBackup | windows-image-backup
 windows | folder | Windows.old | old-windows
+# Disk images made by backup programs (Macrium Reflect, Acronis).
+any | file-suffix | .mrimg | disk-image-backup
+any | file-suffix | .tib | disk-image-backup
+any | file-suffix | .tibx | disk-image-backup
 # Virtual machine and container disks: big, and a copy of another computer.
 any | file-suffix | .vhdx | virtual-machine-disk
 any | file-suffix | .vhd | virtual-machine-disk
@@ -46,6 +62,13 @@ any | file-suffix | .vdi | virtual-machine-disk
 any | file-suffix | .qcow2 | virtual-machine-disk
 mac | folder-suffix | .utm | virtual-machine-disk
 mac | folder-suffix | .pvm | virtual-machine-disk
+any | folder | Virtual Machines | virtual-machine-disk
+any | folder | VirtualBox VMs | virtual-machine-disk
+any | file-suffix | .ova | virtual-machine-disk
+any | file-suffix | .vmx | virtual-machine-disk
+# Installer and disc images.
+any | file-suffix | .iso | disc-image
+mac | file-suffix | .dmg | disc-image
 windows | holds | ext4.vhdx | linux-on-windows
 any | folder | docker | containers
 any | holds | Docker.raw | containers
@@ -54,3 +77,52 @@ windows | folder | Saved Games | game-saves
 any | folder | steamapps | installed-games
 any | holds | steam_appid.txt | installed-games
 any | folder | Epic Games | installed-games
+windows | folder | My Games | game-saves
+any | holds | level.dat | game-saves
+any | folder | SteamLibrary | installed-games
+any | folder | GOG Games | installed-games
+any | folder | Ubisoft Game Launcher | installed-games
+any | folder | EA Games | installed-games
+# Mail kept on the laptop: an archive is the person's own; Outlook's offline copy comes back from
+# the server.
+any | file-suffix | .pst | email-archive
+any | file-suffix | .olm | email-archive
+any | folder-suffix | .mbox | email-archive
+any | folder | Thunderbird | email-archive
+any | file-suffix | .ost | email-cache
+# Password vaults: the person's own, and sensitive.
+any | file-suffix | .kdbx | password-vault
+any | file-suffix | .kdb | password-vault
+any | folder-suffix | .opvault | password-vault
+# Money records (Quicken, QuickBooks, GnuCash, Microsoft Money).
+any | file-suffix | .qdf | money-records
+any | file-suffix | .qbw | money-records
+any | file-suffix | .qbb | money-records
+any | file-suffix | .gnucash | money-records
+any | file-suffix | .mny | money-records
+# A person's own work, kept in a project folder.
+any | holds | .git | code-project
+any | holds | .obsidian | notes-vault
+any | file-suffix | .one | notes-vault
+# Video, music and design projects.
+any | file-suffix | .prproj | video-project
+any | file-suffix | .aep | video-project
+any | file-suffix | .drp | video-project
+any | file-suffix | .veg | video-project
+mac | folder-suffix | .fcpbundle | video-project
+mac | folder-suffix | .imovielibrary | video-project
+any | file-suffix | .als | music-project
+any | file-suffix | .flp | music-project
+any | file-suffix | .cpr | music-project
+any | file-suffix | .ptx | music-project
+mac | folder-suffix | .logicx | music-project
+mac | folder-suffix | .band | music-project
+any | file-suffix | .psd | design-file
+any | file-suffix | .ai | design-file
+any | file-suffix | .indd | design-file
+any | file-suffix | .sketch | design-file
+any | file-suffix | .afdesign | design-file
+any | file-suffix | .afphoto | design-file
+# Books.
+any | folder | Calibre Library | ebook-library
+windows | folder | My Kindle Content | ebook-library

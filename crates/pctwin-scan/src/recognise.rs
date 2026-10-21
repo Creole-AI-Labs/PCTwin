@@ -32,6 +32,23 @@ pub enum What {
     Containers,
     GameSaves,
     InstalledGames,
+    Screenshots,
+    /// A backup program's image of a whole drive.
+    DiskImageBackup,
+    /// An installer or disc image.
+    DiscImage,
+    /// Mail kept on the laptop, the person's own.
+    EmailArchive,
+    /// Outlook's offline copy of mail kept on a server: it comes back by itself.
+    EmailCache,
+    PasswordVault,
+    MoneyRecords,
+    CodeProject,
+    NotesVault,
+    VideoProject,
+    MusicProject,
+    DesignFile,
+    EbookLibrary,
 }
 
 impl What {
@@ -51,6 +68,19 @@ impl What {
             "containers" => Self::Containers,
             "game-saves" => Self::GameSaves,
             "installed-games" => Self::InstalledGames,
+            "screenshots" => Self::Screenshots,
+            "disk-image-backup" => Self::DiskImageBackup,
+            "disc-image" => Self::DiscImage,
+            "email-archive" => Self::EmailArchive,
+            "email-cache" => Self::EmailCache,
+            "password-vault" => Self::PasswordVault,
+            "money-records" => Self::MoneyRecords,
+            "code-project" => Self::CodeProject,
+            "notes-vault" => Self::NotesVault,
+            "video-project" => Self::VideoProject,
+            "music-project" => Self::MusicProject,
+            "design-file" => Self::DesignFile,
+            "ebook-library" => Self::EbookLibrary,
             _ => return None,
         })
     }
@@ -299,6 +329,50 @@ mod tests {
             mac.folder("Pictures.photoslibrary", []).map(|w| w.0),
             Some(What::PhotosLibrary)
         );
+    }
+
+    #[test]
+    fn the_person_s_own_work_and_records_are_named() {
+        let r = Recogniser::parse(TABLE, System::Windows).unwrap();
+        for (file, what) in [
+            ("Passwords.kdbx", What::PasswordVault),
+            ("archive 2019.PST", What::EmailArchive),
+            ("ada@example.com.ost", What::EmailCache),
+            ("Household.QDF", What::MoneyRecords),
+            ("wedding.prproj", What::VideoProject),
+            ("track.als", What::MusicProject),
+            ("poster.psd", What::DesignFile),
+            ("Win11.iso", What::DiscImage),
+            ("C-drive.mrimg", What::DiskImageBackup),
+        ] {
+            assert_eq!(r.file(file).map(|w| w.0), Some(what), "{file}");
+        }
+        assert_eq!(r.file("phone.txt"), None);
+        assert_eq!(
+            r.folder("website", ["index.html", ".git"]).map(|w| w.0),
+            Some(What::CodeProject)
+        );
+        assert_eq!(
+            r.folder("Notes", [".obsidian", "today.md"]).map(|w| w.0),
+            Some(What::NotesVault)
+        );
+        assert_eq!(
+            r.folder("New World", ["level.dat", "region"]).map(|w| w.0),
+            Some(What::GameSaves)
+        );
+        assert_eq!(r.folder("My Games", []).map(|w| w.0), Some(What::GameSaves));
+        assert_eq!(
+            r.folder("Calibre Library", []).map(|w| w.0),
+            Some(What::EbookLibrary)
+        );
+        // Mac-only rows stay on the Mac.
+        assert_eq!(r.file("Installer.dmg"), None);
+        let mac = Recogniser::parse(TABLE, System::Mac).unwrap();
+        assert_eq!(
+            mac.folder("Song.logicx", []).map(|w| w.0),
+            Some(What::MusicProject)
+        );
+        assert_eq!(mac.folder("My Games", []), None);
     }
 
     #[test]
