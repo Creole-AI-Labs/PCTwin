@@ -252,13 +252,16 @@ try { `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$theirs', [Sy
 try { `$q = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$mine', [System.IO.Pipes.PipeAccessRights]0x12008B, 'None', 'Identification', 'None'); `$q.Connect(3000); `$q.Dispose(); `$code += 2 } catch { [Console]::Error.WriteLine("the mover's pipe: `$_") }
 exit `$code
 "@
-  $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($client))
   $cred = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$u", $secure)
   # Its output goes to a folder both accounts may write, as the lab's run.ps1 does.
   $logs = Join-Path $env:SystemDrive ("pctwin-helper-test-" + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory $logs | Out-Null
   icacls $logs /grant '*S-1-1-0:(OI)(CI)M' | Out-Null
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $enc" -Credential $cred -LoadUserProfile -WorkingDirectory $env:SystemRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logs 'out.txt') -RedirectStandardError (Join-Path $logs 'err.txt')
+  # A script file, not -EncodedCommand: a command line started under another account's
+  # credentials may hold at most 1024 characters.
+  $clientFile = Join-Path $logs 'client.ps1'
+  Set-Content -Path $clientFile -Value $client -Encoding UTF8
+  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$clientFile`"" -Credential $cred -LoadUserProfile -WorkingDirectory $env:SystemRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logs 'out.txt') -RedirectStandardError (Join-Path $logs 'err.txt')
   if ($p.WaitForExit(120000)) {
     [Console]::Out.WriteLine("exit=$($p.ExitCode)")
   } else {
