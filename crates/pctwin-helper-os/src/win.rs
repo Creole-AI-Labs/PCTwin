@@ -25,8 +25,8 @@ use windows::Win32::Security::{
     SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW, PIPE_ACCESS_DUPLEX,
-    SECURITY_IDENTIFICATION,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW, GetVolumePathNameW,
+    PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
@@ -371,13 +371,24 @@ fn os_token_user(token: BorrowedHandle<'_>) -> Result<String, HRESULT> {
     r
 }
 
-/// The kind of drive whose root is `root` (for example `C:\`): 3 is a fixed drive.
-fn os_drive_type(root: &[u16]) -> u32 {
-    assert!(root.ends_with(&[0]), "NUL-terminated");
-    // SAFETY: `root` is NUL-terminated (checked above) and lives for the call.
-    #[expect(unsafe_code, reason = "GetDriveTypeW has no safe binding")]
-    let r = unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) };
-    r
+/// The kind of drive (as `GetDriveTypeW` numbers it; 3 is fixed) of the volume that holds
+/// `file`: its mount point is found first (`GetVolumePathNameW`), so a volume mounted in a
+/// folder is asked about itself, not about the drive letter it hangs from.
+fn os_volume_drive_type(file: &[u16]) -> Result<u32, HRESULT> {
+    assert!(file.ends_with(&[0]), "NUL-terminated");
+    let mut root = vec![0u16; 32_768];
+    // SAFETY: `file` is NUL-terminated (checked above); the binding passes the root buffer's
+    // true length, so the system cannot overrun it, and on success the buffer holds a
+    // NUL-terminated mount point, which GetDriveTypeW reads while the buffer lives.
+    #[expect(
+        unsafe_code,
+        reason = "GetVolumePathNameW and GetDriveTypeW have no safe binding"
+    )]
+    let r = unsafe {
+        GetVolumePathNameW(PCWSTR(file.as_ptr()), &mut root)
+            .map(|()| GetDriveTypeW(PCWSTR(root.as_ptr())))
+    };
+    r.map_err(|e| e.code())
 }
 
 /// The full path of the program the process runs.
@@ -423,15 +434,19 @@ pub(crate) fn current_sid() -> Result<Sid, Error> {
 /// A fixed drive's kind, as `GetDriveTypeW` numbers it.
 pub(crate) const DRIVE_FIXED: u32 = 3;
 
-/// The drive path a resolved program path names, if it is on this computer's fixed drives:
-/// `\\?\C:\...` becomes `C:\...`; a network (`\\?\UNC\...`), device or volume path, a data
-/// stream, or a removable, optical, network or RAM drive is refused.
+/// The drive path a resolved program path names, if Windows classes the volume holding it as a
+/// fixed drive: `\\?\C:\...` becomes `C:\...`. Refused: a network (`\\?\UNC\...`), device or
+/// volume path, a data stream, and any file on a volume Windows does not report as fixed
+/// (removable, optical, network, RAM disk). This is Windows' own classification of the volume
+/// the file is on (found through its mount point): a USB disk that reports itself as fixed
+/// passes.
 pub(crate) fn local_fixed_drive_path(resolved: &std::path::Path) -> Result<PathBuf, Error> {
-    let letter = drive_letter_of_resolved(resolved).ok_or(Error::BadInput(
+    drive_letter_of_resolved(resolved).ok_or(Error::BadInput(
         "the program is not on a drive of this computer",
     ))?;
-    let root = wide(OsStr::new(&format!("{letter}:\\")));
-    if !drive_kind_allowed(os_drive_type(&root)) {
+    let kind = os_volume_drive_type(&wide(resolved.as_os_str()))
+        .map_err(|c| os_err("GetVolumePathNameW", c))?;
+    if !drive_kind_allowed(kind) {
         return Err(Error::BadInput(
             "the program is not on a fixed drive of this computer",
         ));
@@ -542,8 +557,7 @@ impl PipeServer {
     }
 }
 
-/// Who is on the other end of the helper's pipe. Call it after reading the client's first
-/// message (Windows lets a server see its client's token only after it has read from the pipe).
+/// Who is on the other end of the helper's pipe, as soon as the client has connected.
 ///
 /// Only [`Caller::account`] is authoritative: it comes from the token the client connected
 /// with, which the system holds for this connection, not from a lookup by process ID.

@@ -52,6 +52,17 @@ One workspace (`Cargo.toml`), the app in `app/src-tauri`, and one crate per job 
   ID exists; on Linux, a process handle for the peer (`SO_PEERPIDFD`, kernel 6.5 and later), so
   the program is read from the very process that connected.
 
+- **A gap against the Security Design, stated plainly.** The Security Design (part C) says
+  the helper confirms which local process is calling and ties the elevated launch to the
+  session that approved it. The code does not do that yet: it authorises on the account and
+  the private channel only. A request is not yet bound to the approving app's process or to
+  the elevated launch; that binding waits for the later route above. Until then, any program
+  running as the mover's account can talk to the helper during a move.
+- On macOS and Linux the helper's socket folder belongs to root, mode 0711: only root can add,
+  remove or rename anything in it, so the helper never changes anything by name in a place a
+  less-privileged account can write. Only the socket entry is handed to the mover (0600). The
+  app checks the socket is served by root before it sends anything.
+
 ## Consequences
 
 - More crates to version together; they share one workspace version.

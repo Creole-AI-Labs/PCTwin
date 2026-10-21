@@ -13,8 +13,11 @@
 //! 2. **A private channel only the mover can reach.** Windows: a named pipe with a random name,
 //!    made first (`FILE_FLAG_FIRST_PIPE_INSTANCE`), refusing other computers
 //!    (`PIPE_REJECT_REMOTE_CLIENTS`), whose access list admits exactly the mover's account and
-//!    SYSTEM (`PipeServer`). macOS and Linux: a Unix socket inside a folder only the mover's
-//!    account can enter, mode 0700 (`PrivateDir`, `SocketServer`).
+//!    SYSTEM (`PipeServer`). macOS and Linux: a socket only the mover's account can connect to
+//!    (mode 0600, owned by the mover), inside a folder only the helper's own account (root) can
+//!    write (mode 0711), so nothing in it can be swapped under the helper (`ChannelDir`,
+//!    `SocketServer`); the mover's end checks the socket is served by root before it sends
+//!    anything (`connect`).
 //! 3. **Who is calling, on every connection** ([`Caller`]): the account, which is
 //!    authoritative, and the process ID and program path, which are a hint for the record.
 //!    Windows: `GetNamedPipeClientProcessId`, the process token's user and
@@ -44,7 +47,7 @@
 //! - Windows (`src/win.rs`): `os_shell_execute_runas`, `os_wait`, `os_create_pipe`,
 //!   `os_access_list`, `os_accept`, `os_client_process_id`, `os_server_process_id`,
 //!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
-//!   `os_image_path`, `os_drive_type`.
+//!   `os_image_path`, `os_volume_drive_type`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -67,7 +70,7 @@ pub use win::{PipeClient, PipeName, PipeServer, caller_of};
 #[cfg(unix)]
 mod unix;
 #[cfg(unix)]
-pub use unix::{PrivateDir, SocketServer, caller_of, socket_name};
+pub use unix::{ChannelDir, SocketServer, caller_of, connect, socket_name};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -93,8 +96,11 @@ pub enum Error {
     NameTaken,
     /// The calling process ended before it could be checked.
     CallerGone,
-    /// The folder meant for the private channel is not private: what is wrong with it.
+    /// The channel's folder is not as it must be: what is wrong with it.
     NotPrivate(String),
+    /// The other end of the channel is not the account it must be (a socket or pipe planted by
+    /// someone else). Nothing was sent.
+    UnexpectedPeer,
 }
 
 impl fmt::Display for Error {
@@ -106,7 +112,8 @@ impl fmt::Display for Error {
             Error::Io(e) => write!(f, "{e}"),
             Error::NameTaken => f.write_str("the channel's name is already taken"),
             Error::CallerGone => f.write_str("the caller ended before it could be checked"),
-            Error::NotPrivate(why) => write!(f, "the channel's folder is not private: {why}"),
+            Error::NotPrivate(why) => write!(f, "the channel's folder is not safe: {why}"),
+            Error::UnexpectedPeer => f.write_str("the other end of the channel is not the helper"),
         }
     }
 }
