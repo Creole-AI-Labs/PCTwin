@@ -237,6 +237,15 @@ fn place_heap(p: &Place) -> u64 {
     }
 }
 
+/// The bytes `n` takes as written: its kind, its length, then its bytes or units.
+fn written_len(n: &ItemName) -> usize {
+    5 + match n.exact() {
+        None => n.display().len(),
+        Some(RawName::Unix(b)) => b.len(),
+        Some(RawName::Windows(w)) => 2 * w.len(),
+    }
+}
+
 /// What a folder takes in the reader: itself, its name, and its key (the name as written).
 fn folder_held(name: &ItemName, written: usize) -> u64 {
     FOLDER_COST + name_heap(name) + alloc_held(written as u64)
@@ -542,9 +551,13 @@ impl<'a> Reader<'a> {
             .map(str::to_string)
             .map_err(|_| bad("a text is not valid UTF-8"))
     }
+    /// A name, made with nothing let go along the way: each of its allocations is one it keeps.
     fn name(&mut self) -> Result<ItemName, RecordError> {
         let name = match self.u8()? {
-            0 => ItemName::from_text(&self.text(MAX_NAME_LEN)?),
+            0 => ItemName::from_text(
+                std::str::from_utf8(self.bytes(MAX_NAME_LEN)?)
+                    .map_err(|_| bad("a text is not valid UTF-8"))?,
+            ),
             1 => {
                 let raw = self.bytes(MAX_NAME_LEN)?;
                 let n = ItemName::from_unix_bytes(raw);
@@ -560,13 +573,9 @@ impl<'a> Reader<'a> {
                     return Err(bad("a name is too long"));
                 }
                 let b = self.take(len * 2)?;
-                let wide: Vec<u16> = b
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|c| u16::from_be_bytes(*c))
-                    .collect();
-                let n = ItemName::from_windows_wide(&wide);
+                let mut wide = Vec::with_capacity(len);
+                wide.extend(b.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)));
+                let n = ItemName::from_windows_units(wide);
                 if n.exact().is_none() {
                     return Err(bad("an exact name that is valid text"));
                 }
@@ -575,8 +584,9 @@ impl<'a> Reader<'a> {
             _ => return Err(bad("an unknown kind of name")),
         };
         // The same rules as a path's parts.
-        ItemPath::new(vec![name.clone()])
-            .map_err(|_| bad("a name is empty, `.`, `..`, or holds `/` or a NUL"))?;
+        if crate::breaks_part_rules(name.display()) {
+            return Err(bad("a name is empty, `.`, `..`, or holds `/` or a NUL"));
+        }
         Ok(name)
     }
     fn owner(&mut self) -> Result<Owner, RecordError> {
@@ -785,7 +795,8 @@ impl InventoryReader {
             if depth >= MAX_PATH_DEPTH || bytes >= MAX_PATH_BYTES {
                 return Err(bad("a folder deeper or longer than a path may be"));
             }
-            let mut key = Writer(Vec::new());
+            // Made at exactly its size, as it is counted.
+            let mut key = Writer(Vec::with_capacity(written_len(&name)));
             key.name(&name)?;
             hold(
                 &mut page_held,
@@ -1074,6 +1085,67 @@ mod tests {
             assert!(got > n * 117 / 100 && got >= 32, "{n}");
             if n > 1008 {
                 assert!(got >= n.div_ceil(512) * 512, "{n}");
+            }
+        }
+    }
+
+    /// A folder's key is made at exactly the size it is counted at.
+    #[test]
+    fn a_name_as_written_is_as_long_as_counted() {
+        for n in [
+            ItemName::from_text("report.docx"),
+            ItemName::from_unix_bytes(&[b'a', 0xFF]),
+            ItemName::from_windows_wide(&[0xD800, 0x61, 0x62]),
+        ] {
+            let mut w = Writer(Vec::with_capacity(written_len(&n)));
+            w.name(&n).unwrap();
+            assert_eq!(w.0.len(), written_len(&n));
+            assert_eq!(w.0.capacity(), w.0.len());
+        }
+    }
+
+    /// The reader keeps every folder's key at exactly the size it counts, and every name at
+    /// exactly its length.
+    #[test]
+    fn what_the_reader_keeps_is_exactly_the_size_it_counts() {
+        let laptop = LaptopId([7; 16]);
+        let place = Place {
+            role: FolderRole::Documents,
+            storage: Storage::SystemDrive,
+        };
+        let items: Vec<Item> = (0..3u8)
+            .map(|i| {
+                let path = ItemPath::new(vec![
+                    ItemName::from_text("Projects and plans"),
+                    ItemName::from_unix_bytes(&[b'x', 0xFF, b'a' + i]),
+                    ItemName::from_windows_wide(&[0xD800, 0x61 + u16::from(i)]),
+                    ItemName::from_text(&format!("file {i}.txt")),
+                ])
+                .unwrap();
+                Item {
+                    id: ItemId::derive(&laptop, &Owner::Shared, &place, &path),
+                    kind: ItemKind::File,
+                    owner: Owner::Shared,
+                    place: place.clone(),
+                    path,
+                    size_bytes: 1,
+                    portability: Portability::Portable,
+                    managed_by: ManagedBy::Personal,
+                    download_bytes: None,
+                    inclusion: Inclusion::Included,
+                }
+            })
+            .collect();
+        let enc = encode_inventory(&laptop, &items).unwrap();
+        let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+        let read = reader.page(&enc.pages[0]).unwrap();
+        assert!(reader.folder_keys.len() >= 5);
+        for (_, key) in &reader.folder_keys {
+            assert_eq!(key.capacity(), key.len());
+        }
+        for item in &read {
+            for part in item.path.parts() {
+                assert_eq!(part.text.capacity(), part.text.len());
             }
         }
     }

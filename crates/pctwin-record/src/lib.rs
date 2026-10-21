@@ -154,21 +154,42 @@ pub enum RawName {
 }
 
 impl RawName {
-    /// The text shown, holding exactly its length: a lossy conversion may keep up to a third
-    /// more room, and the scan inventory counts what a name holds by its length.
+    /// The text shown (what `String::from_utf8_lossy` or `from_utf16_lossy` gives), made in one
+    /// allocation of exactly its length: no growing, no copy, nothing let go along the way. The
+    /// scan inventory counts what a name holds by its length, and blocks let go between the ones
+    /// kept leave gaps an allocator may never give back (measured on macOS, 21 October 2026).
     fn lossy(&self) -> String {
-        let mut text = match self {
-            Self::Unix(b) => String::from_utf8_lossy(b).into_owned(),
-            Self::Windows(w) => String::from_utf16_lossy(w),
-        };
-        text.shrink_to_fit();
-        text
+        const SHOWN: char = char::REPLACEMENT_CHARACTER;
+        match self {
+            Self::Unix(b) => {
+                let len: usize = b
+                    .utf8_chunks()
+                    .map(|c| c.valid().len() + if c.invalid().is_empty() { 0 } else { 3 })
+                    .sum();
+                let mut text = String::with_capacity(len);
+                for c in b.utf8_chunks() {
+                    text.push_str(c.valid());
+                    if !c.invalid().is_empty() {
+                        text.push(SHOWN);
+                    }
+                }
+                text
+            }
+            Self::Windows(w) => {
+                let units = || char::decode_utf16(w.iter().copied());
+                let len: usize = units().map(|c| c.map_or(3, char::len_utf8)).sum();
+                let mut text = String::with_capacity(len);
+                text.extend(units().map(|c| c.unwrap_or(SHOWN)));
+                text
+            }
+        }
     }
 
+    /// Whether the exact form is valid text, checked without making the text.
     fn is_valid_text(&self) -> bool {
         match self {
             Self::Unix(b) => std::str::from_utf8(b).is_ok(),
-            Self::Windows(w) => String::from_utf16(w).is_ok(),
+            Self::Windows(w) => char::decode_utf16(w.iter().copied()).all(|c| c.is_ok()),
         }
     }
 }
@@ -203,6 +224,11 @@ impl ItemName {
 
     pub fn from_windows_wide(wide: &[u16]) -> Self {
         Self::from_raw(RawName::Windows(wide.to_vec()))
+    }
+
+    /// A name from exact Windows units, kept as they are given (no copy).
+    pub(crate) fn from_windows_units(wide: Vec<u16>) -> Self {
+        Self::from_raw(RawName::Windows(wide))
     }
 
     fn from_raw(raw: RawName) -> Self {
@@ -267,6 +293,11 @@ impl From<ItemName> for NameWire {
     }
 }
 
+/// Whether `t` cannot be one part of a path: empty, `.`, `..`, or holding `/` or a NUL.
+pub(crate) fn breaks_part_rules(t: &str) -> bool {
+    t.is_empty() || t == "." || t == ".." || t.contains(['/', '\0'])
+}
+
 /// Where an item sits inside its [`Place`], one name per folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "Vec<ItemName>", into = "Vec<ItemName>")]
@@ -275,11 +306,7 @@ pub struct ItemPath(Vec<ItemName>);
 impl ItemPath {
     /// Refuses an empty path and any part that is empty, `.`, `..`, or holds `/` or a NUL.
     pub fn new(parts: Vec<ItemName>) -> Result<Self, RecordError> {
-        let bad = |n: &ItemName| {
-            let t = n.display();
-            t.is_empty() || t == "." || t == ".." || t.contains(['/', '\0'])
-        };
-        if parts.is_empty() || parts.iter().any(bad) {
+        if parts.is_empty() || parts.iter().any(|n| breaks_part_rules(n.display())) {
             return Err(RecordError::BadName);
         }
         Ok(Self(parts))
@@ -610,8 +637,8 @@ impl Record {
 mod name_room {
     use super::*;
 
-    /// The text shown for a name that is not valid text holds exactly its length (a lossy
-    /// conversion may keep a third more room), as the scan inventory counts it.
+    /// The text of a name that is not valid text holds exactly its length, as the scan
+    /// inventory counts it, and reads as the standard lossy conversion does.
     #[test]
     fn the_text_of_a_name_kept_exactly_holds_only_its_length() {
         let mut bytes = vec![0xFF];
@@ -624,6 +651,19 @@ mod name_room {
         ] {
             assert!(name.exact().is_some());
             assert_eq!(name.text.capacity(), name.text.len());
+        }
+        let odd: [&[u8]; 4] = [b"a\xFF\xFEb", b"\xE2\x82", b"ok\xF0\x9F\x98", b"\xC3"];
+        for b in odd {
+            let name = ItemName::from_unix_bytes(b);
+            assert_eq!(name.display(), String::from_utf8_lossy(b));
+            assert_eq!(name.text.capacity(), name.text.len());
+        }
+        let units: [&[u16]; 3] = [&[0xD800, 0x61], &[0x61, 0xDC00, 0xD83D, 0xDE00], &[0xDBFF]];
+        for w in units {
+            let name = ItemName::from_windows_wide(w);
+            assert_eq!(name.display(), String::from_utf16_lossy(w));
+            assert_eq!(name.text.capacity(), name.text.len());
+            assert_eq!(name.exact().is_some(), String::from_utf16(w).is_err());
         }
     }
 }
