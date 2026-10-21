@@ -1,0 +1,56 @@
+# What each place is (Engineering Plan 9.16, "What each place is"): markers and folder shapes
+# that name a place, run over the mover's own record after the sweep. A label names a place for
+# the screens and orders and weighs it; it never changes what is included, whose it is or where
+# it lands. Compiled into the app, so it is covered by the app's own signature; a test pins its
+# fingerprint, so a change to it is a change to the app.
+#
+# Each row: system | shape | marker | what
+#   system  windows, mac, linux or any
+#   shape   folder         a folder with this name
+#           folder-suffix  a folder whose name ends with this (a package, such as .photoslibrary)
+#           holds          a folder that directly holds a file or folder with this name
+#           file-suffix    a file whose name ends with this
+#   what    camera-photos, photos-library, lightroom-catalog, music-library, phone-backup,
+#           time-machine, file-history, windows-image-backup, old-windows, virtual-machine-disk,
+#           linux-on-windows, game-saves, installed-games, containers
+# Names are compared ignoring case. Lines starting with # are notes. The first row that matches
+# names the place.
+
+# Photos straight from a camera or phone (the DCF standard's folder).
+any | folder | DCIM | camera-photos
+# Photo libraries.
+mac | folder-suffix | .photoslibrary | photos-library
+mac | folder-suffix | .photolibrary | photos-library
+any | file-suffix | .lrcat | lightroom-catalog
+any | folder-suffix | .lrdata | lightroom-catalog
+# Music libraries: the library file is what holds the playlists and ratings.
+any | holds | iTunes Library.itl | music-library
+mac | folder-suffix | .musiclibrary | music-library
+any | holds | iTunes Music Library.xml | music-library
+# iPhone and iPad backups made by iTunes or Finder: a folder per device with these files.
+any | holds | Manifest.db | phone-backup
+any | holds | Manifest.mbdb | phone-backup
+any | folder | MobileSync | phone-backup
+# Whole-laptop backups.
+mac | folder | Backups.backupdb | time-machine
+mac | folder-suffix | .backupbundle | time-machine
+mac | folder-suffix | .sparsebundle | time-machine
+windows | folder | FileHistory | file-history
+windows | folder | WindowsImageBackup | windows-image-backup
+windows | folder | Windows.old | old-windows
+# Virtual machine and container disks: big, and a copy of another computer.
+any | file-suffix | .vhdx | virtual-machine-disk
+any | file-suffix | .vhd | virtual-machine-disk
+any | file-suffix | .vmdk | virtual-machine-disk
+any | file-suffix | .vdi | virtual-machine-disk
+any | file-suffix | .qcow2 | virtual-machine-disk
+mac | folder-suffix | .utm | virtual-machine-disk
+mac | folder-suffix | .pvm | virtual-machine-disk
+windows | holds | ext4.vhdx | linux-on-windows
+any | folder | docker | containers
+any | holds | Docker.raw | containers
+# Games: saves are the person's own; installed games download again.
+windows | folder | Saved Games | game-saves
+any | folder | steamapps | installed-games
+any | holds | steam_appid.txt | installed-games
+any | folder | Epic Games | installed-games

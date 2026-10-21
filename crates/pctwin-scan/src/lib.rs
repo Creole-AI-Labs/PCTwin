@@ -41,6 +41,7 @@ mod health;
 mod laptop;
 mod measure;
 mod people;
+mod recognise;
 mod rules;
 mod scan;
 mod state;
@@ -48,6 +49,7 @@ mod sweep;
 mod usage;
 mod volumes;
 mod whose;
+mod worth;
 
 pub use access::{Access, AccessFact, UnixGroups, access_from_mode, access_from_sddl};
 pub use acl::{AccessReader, UnixMode, mac_groups_from_dscl, system_reader};
@@ -76,6 +78,7 @@ pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
+pub use recognise::{Recognised, Recogniser, TableError, What};
 pub use rules::{Kind, Row, Rules, RulesError, System, Where};
 pub use scan::{Counts, Scan, Stamp, scan_folder, scan_managed_folder};
 pub use state::{
@@ -93,3 +96,4 @@ pub use usage::{
 };
 pub use volumes::{DiskKind, Volume, VolumeKind, logical_disks, volume_kind, volumes_this_laptop};
 pub use whose::{Facts as PlaceFacts, HomeOf, People, Placement, Rule, Whose, place};
+pub use worth::{COPY_MIN_FILES, Worth, look_like_copies, worth};

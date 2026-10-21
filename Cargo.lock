@@ -3449,6 +3449,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
  "pctwin-record",
+ "pctwin-types",
  "redb",
  "serde",
  "serde_json",
@@ -3599,6 +3600,7 @@ dependencies = [
 name = "pctwin-scan"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "cfb 0.15.0",
  "dirs",
  "lnk",

@@ -1652,3 +1652,71 @@ fn who_is_moving_lists_everyone_with_a_size_only_where_it_was_counted() {
     assert_eq!(people[1].account_id.as_deref(), Some(BEA));
     assert_eq!(people[1].bytes, None, "{people:?}");
 }
+
+/// What each place is, from the mover's own record: a camera folder is named, and a phone
+/// backup is named once as a whole (the photos inside it are the backup's); nothing about what
+/// is included changes.
+#[test]
+fn the_table_names_places_in_the_record_and_changes_nothing() {
+    let lab = lab();
+    write(
+        &lab.ada.join("Documents/Phone/DCIM/100APPLE/IMG_0001.JPG"),
+        10,
+    );
+    write(&lab.ada.join("Documents/Backup/00008030/Manifest.db"), 10);
+    write(&lab.ada.join("Documents/Backup/00008030/DCIM/a.jpg"), 10);
+    write(&lab.ada.join("Documents/disk.vhdx"), 10);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let before = s.record.clone();
+    let named = pctwin_scan::Recogniser::shipped().record(&s.record);
+    assert_eq!(s.record, before);
+    let what_of = |end: &str| {
+        named
+            .iter()
+            .filter(|r| {
+                let item = s.record.items.iter().find(|i| i.id == r.item).unwrap();
+                shown(item).ends_with(end)
+            })
+            .map(|r| r.what)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(what_of("Phone/DCIM"), [pctwin_scan::What::CameraPhotos]);
+    assert_eq!(what_of("Backup/00008030"), [pctwin_scan::What::PhoneBackup]);
+    // Inside the backup: the backup's, never named again.
+    assert!(what_of("00008030/DCIM").is_empty());
+    assert_eq!(
+        what_of("disk.vhdx"),
+        [pctwin_scan::What::VirtualMachineDisk]
+    );
+}
+
+/// Folders with the same names and sizes all the way down look like copies (one group, not one
+/// for each folder inside them); a folder with one file of another size does not.
+#[test]
+fn folders_with_the_same_names_and_sizes_look_like_copies() {
+    let lab = lab();
+    for top in ["Photos", "Photos copy", "Photos other"] {
+        for (n, name) in ["a.jpg", "b.jpg", "c.jpg"].iter().enumerate() {
+            let size = if top == "Photos other" && n == 2 {
+                99
+            } else {
+                10 + n
+            };
+            write(&lab.ada.join(format!("Documents/{top}/{name}")), size);
+            write(&lab.ada.join(format!("Documents/{top}/Trip/{name}")), size);
+        }
+    }
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let groups = pctwin_scan::look_like_copies(&s.record);
+    let named =
+        |id: &pctwin_record::ItemId| shown(s.record.items.iter().find(|i| i.id == *id).unwrap());
+    let shown_groups: Vec<Vec<String>> = groups
+        .iter()
+        .map(|g| g.iter().map(named).collect())
+        .collect();
+    assert_eq!(shown_groups.len(), 1, "{shown_groups:?}");
+    let mut g = shown_groups[0].clone();
+    g.sort();
+    // Paths are inside the Documents place.
+    assert_eq!(g, ["Photos", "Photos copy"]);
+}
