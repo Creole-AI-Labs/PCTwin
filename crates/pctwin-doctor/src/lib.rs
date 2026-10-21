@@ -55,6 +55,9 @@ pub struct Interface {
     pub point_to_point: bool,
     /// Whether the connection is running (`false` only when the system says it is down).
     pub up: bool,
+    /// Whether the system says this connection is Wi-Fi (by the adapter's kind, never its name),
+    /// or `None` when it could not be asked.
+    pub wifi: Option<bool>,
 }
 
 impl Interface {
@@ -73,6 +76,7 @@ impl Interface {
             prefix_len: None,
             point_to_point: false,
             up: true,
+            wifi: None,
         }
     }
 
@@ -345,11 +349,14 @@ pub mod probe {
     /// Longest wait for the Windows profile check.
     pub const WINDOWS_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
-    /// This laptop's interface addresses, or `None` if they could not be listed.
+    /// This laptop's interface addresses, or `None` if they could not be listed. Each says
+    /// whether it is Wi-Fi when the system can tell ([`wifi_adapters`]).
     pub fn interfaces() -> Option<Vec<Interface>> {
+        let wifi = wifi_adapters();
         if_addrs::get_if_addrs().ok().map(|list| {
             list.iter()
                 .map(|i| Interface {
+                    wifi: wifi.as_ref().map(|names| names.contains(&i.name)),
                     index: i.index,
                     prefix_len: Some(match &i.addr {
                         if_addrs::IfAddr::V4(a) => a.prefixlen,
@@ -437,6 +444,60 @@ pub mod probe {
         }
     }
 
+    /// The names of this laptop's Wi-Fi adapters, as the system names its connections, judged by
+    /// the kind of adapter the system reports and never by its name: Windows' physical medium
+    /// (`MSFT_NetAdapter.NdisPhysicalMedium` 9, native 802.11, the same in every display
+    /// language); a Mac's hardware ports (`networksetup -listallhardwareports`: the port called
+    /// Wi-Fi, or AirPort on older systems, and its device such as `en0`); Linux's
+    /// `/sys/class/net/<name>/wireless`. `None` when the system could not be asked.
+    pub fn wifi_adapters() -> Option<Vec<String>> {
+        if cfg!(windows) {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(windows::wifi_adapters());
+            });
+            rx.recv_timeout(WINDOWS_PROBE_TIMEOUT).ok().flatten()
+        } else if cfg!(target_os = "macos") {
+            let out = std::process::Command::new("/usr/sbin/networksetup")
+                .arg("-listallhardwareports")
+                .output()
+                .ok()?;
+            out.status
+                .success()
+                .then(|| wifi_from_hardware_ports(&String::from_utf8_lossy(&out.stdout)))
+        } else {
+            let entries = std::fs::read_dir("/sys/class/net").ok()?;
+            Some(
+                entries
+                    .flatten()
+                    .filter(|e| e.path().join("wireless").exists())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect(),
+            )
+        }
+    }
+
+    /// The Wi-Fi devices in `networksetup -listallhardwareports` output: blocks of
+    /// `Hardware Port: <port>` then `Device: <device>`.
+    pub fn wifi_from_hardware_ports(output: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut port: Option<&str> = None;
+        for line in output.lines().map(str::trim) {
+            if let Some(p) = line.strip_prefix("Hardware Port:") {
+                port = Some(p.trim());
+            } else if let Some(d) = line.strip_prefix("Device:") {
+                if matches!(port, Some("Wi-Fi" | "AirPort")) && !d.trim().is_empty() {
+                    found.push(d.trim().to_string());
+                }
+                port = None;
+            }
+        }
+        found
+    }
+
+    /// Windows' physical medium number for native 802.11 (Wi-Fi).
+    pub const NDIS_MEDIUM_WIFI: u32 = 9;
+
     /// Windows process flag that stops a system check opening a console window.
     pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -473,6 +534,27 @@ pub mod probe {
             network_category: u32,
         }
 
+        #[derive(Deserialize)]
+        #[serde(rename = "MSFT_NetAdapter")]
+        #[serde(rename_all = "PascalCase")]
+        struct Adapter {
+            name: String,
+            ndis_physical_medium: u32,
+        }
+
+        /// The connection names (the same names the address list gives) of every Wi-Fi adapter.
+        pub fn wifi_adapters() -> Option<Vec<String>> {
+            let wmi = wmi::WMIConnection::with_namespace_path("ROOT\\StandardCimv2").ok()?;
+            let found: Vec<Adapter> = wmi.query().ok()?;
+            Some(
+                found
+                    .into_iter()
+                    .filter(|a| a.ndis_physical_medium == super::NDIS_MEDIUM_WIFI)
+                    .map(|a| a.name)
+                    .collect(),
+            )
+        }
+
         pub fn profiles() -> Option<Vec<(String, NetworkProfile)>> {
             let wmi = wmi::WMIConnection::with_namespace_path("ROOT\\StandardCimv2").ok()?;
             let found: Vec<ConnectionProfile> = wmi.query().ok()?;
@@ -494,6 +576,10 @@ pub mod probe {
     #[cfg(not(windows))]
     mod windows {
         pub fn profiles() -> Option<Vec<(String, crate::NetworkProfile)>> {
+            None
+        }
+
+        pub fn wifi_adapters() -> Option<Vec<String>> {
             None
         }
     }
