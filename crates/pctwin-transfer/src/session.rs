@@ -2090,6 +2090,8 @@ struct Incoming<'d> {
     copy_of: Option<CopyOf>,
     /// This laptop's own fingerprint of that file, once worked out.
     own_print: Option<[u8; 32]>,
+    /// Blocks that arrived damaged (their own fingerprint did not match), over its attempt.
+    damaged: u32,
     /// Times its blocks were asked for again (see [`SEND_AGAIN_ROUNDS`]).
     rounds: u8,
 }
@@ -2228,6 +2230,9 @@ pub struct ReceiverSession<'d> {
     same_secret: [u8; 32],
     /// A skipped start to make here from a copy already here (off the loop).
     to_copy: Option<u32>,
+    /// Per approved place, whether each of its last checked files was stored correctly (newest
+    /// last, at most [`BRAKE_WINDOW`]).
+    stored_lately: HashMap<String, VecDeque<bool>>,
     /// Files received in this move that later ones may be made from, by size.
     copies: HashMap<u64, Vec<ItemId>>,
     copy_sources: usize,
@@ -2295,6 +2300,7 @@ impl<'d> ReceiverSession<'d> {
                 secret
             },
             to_copy: None,
+            stored_lately: HashMap::new(),
             copies: HashMap::new(),
             copy_sources: 0,
             streams: BTreeMap::new(),
@@ -2506,6 +2512,7 @@ impl<'d> ReceiverSession<'d> {
                             same: None,
                             copy_of: None,
                             own_print: None,
+                            damaged: 0,
                             rounds: 0,
                         },
                     );
@@ -2930,6 +2937,7 @@ impl<'d> ReceiverSession<'d> {
                         same: stored,
                         copy_of,
                         own_print: None,
+                        damaged: 0,
                         rounds: 0,
                     },
                 );
@@ -3038,7 +3046,7 @@ impl<'d> ReceiverSession<'d> {
             return Ok(Message::FileDone { stream, ok: false });
         };
         let outcome = match (s.assembly, s.failure) {
-            (Some(a), None) => {
+            (Some(mut a), None) => {
                 let dest = self
                     .table
                     .get(&s.destination)
@@ -3046,7 +3054,37 @@ impl<'d> ReceiverSession<'d> {
                 // Read back and checked now, before it gets its name.
                 self.step(s.item, Step::Checking);
                 self.meter.checking(Some(s.item));
-                let landed = land(self.journal, dest, a, trailer, s.entry);
+                // Out of rounds and still not right though it never changed on the old laptop:
+                // what is said depends on whose fault it is (Quarantine Design, step 3).
+                let unchanged = !trailer.changed && trailer.stamp_after == a.header().stamp;
+                let incomplete = a.blocks_done() < a.header().block_count;
+                if unchanged
+                    && a.read_differently()
+                    && (incomplete || !matches!(a.check_stored(), Ok(StoredCheck::Matched)))
+                {
+                    self.meter.checking(None);
+                    return self.set_aside(stream, s.item, s.entry, a);
+                }
+                let landed = if unchanged && incomplete && s.damaged >= 2 {
+                    drop(a);
+                    let why = Failure::new(Cause::NotVerified, SENT_DAMAGED);
+                    let _ = self.journal.failed(s.entry, &why);
+                    Ok(ReceiveOutcome::Failed(why))
+                } else {
+                    land(self.journal, dest, a, trailer, s.entry).map(|out| match out {
+                        // Stored wrong again on this laptop, though the old laptop sent the
+                        // same bytes each time.
+                        ReceiveOutcome::Failed(f)
+                            if unchanged && !incomplete && f.cause() == Cause::NotVerified =>
+                        {
+                            ReceiveOutcome::Failed(Failure::new(
+                                Cause::CouldNotWrite,
+                                NOT_STORED_HERE,
+                            ))
+                        }
+                        out => out,
+                    })
+                };
                 self.meter.checking(None);
                 landed?
             }
@@ -3061,6 +3099,7 @@ impl<'d> ReceiverSession<'d> {
                 ReceiveOutcome::Failed(why)
             }
         };
+        self.note_stored(&s.destination, &outcome);
         // Landed (kept on this laptop, never sent again), even when it still needs action.
         let ok = matches!(
             outcome,
@@ -3159,6 +3198,9 @@ impl<'d> ReceiverSession<'d> {
                 Some((receipt.block, true))
             }
             Err(TransferError::Damaged(_)) => {
+                if let Some(s) = self.streams.get_mut(&stream) {
+                    s.damaged = s.damaged.saturating_add(1);
+                }
                 Some((Block::number_in(whole).unwrap_or(u64::MAX), false))
             }
             Err(e) => {
@@ -3339,6 +3381,68 @@ impl<'d> ReceiverSession<'d> {
         }
         replies.push(Message::FileDone { stream, ok: there });
         Ok((replies, false))
+    }
+
+    /// Counts a checked file towards its place's brake: a drive that could not store 3 of its
+    /// last 20 checked files pauses the move (Quarantine Design, step 4). Other endings (a file
+    /// that changed, a drive that went away) are not the drive's fault and are not counted.
+    fn note_stored(&mut self, destination: &str, outcome: &ReceiveOutcome) {
+        let stored = match outcome {
+            ReceiveOutcome::Finished(_) => true,
+            ReceiveOutcome::Failed(f) if f.why() == NOT_STORED_HERE => false,
+            _ => return,
+        };
+        let lately = self
+            .stored_lately
+            .entry(destination.to_string())
+            .or_default();
+        lately.push_back(stored);
+        while lately.len() > BRAKE_WINDOW {
+            lately.pop_front();
+        }
+        if lately.iter().filter(|s| !**s).count() >= BRAKE_AFTER {
+            lately.clear();
+            self.control.brake(destination);
+        }
+    }
+
+    /// Keeps what arrived for `item` beside its real name as a damaged copy, the old laptop's
+    /// drive having read it differently each time: needs action, with where it is; the old laptop
+    /// is told it did not arrive. Where the drive cannot keep it safely it fails, said plainly.
+    fn set_aside(
+        &mut self,
+        stream: u32,
+        item: ItemId,
+        entry: u64,
+        a: Assembly<'d>,
+    ) -> Result<Message, TransferError> {
+        let outcome = match a.set_aside() {
+            Ok(kept) => {
+                let why = format!("{READ_DIFFERENTLY} What arrived is kept as {kept}.");
+                let _ = self
+                    .journal
+                    .failed(entry, &Failure::new(Cause::NotVerified, &why));
+                ReceiveOutcome::NeedsAction {
+                    finished: Finished {
+                        final_path: kept.clone(),
+                        sent_path: kept,
+                        changes: Vec::new(),
+                        mark_not_kept: None,
+                        checked_from: None,
+                    },
+                    why,
+                }
+            }
+            Err(_) => {
+                let why = Failure::new(Cause::NotVerified, READ_DIFFERENTLY);
+                let _ = self.journal.failed(entry, &why);
+                ReceiveOutcome::Failed(why)
+            }
+        };
+        // Spent: the same unsteady bytes are not asked for again in this move.
+        self.allowance.ended(item, true);
+        self.end(item, stream, outcome, None);
+        Ok(Message::FileDone { stream, ok: false })
     }
 
     /// The old laptop's file on `stream` is not identical to what is here after all: its partial
@@ -3609,6 +3713,17 @@ fn answered_cap(size: u64) -> u64 {
 }
 
 /// Said of a file whose blocks were asked for again more often than one attempt allows.
+/// Quarantine Design, step 4: this many of a place's last [`BRAKE_WINDOW`] checked files not
+/// stored correctly pause the move.
+const BRAKE_AFTER: usize = 3;
+const BRAKE_WINDOW: usize = 20;
+
+/// Quarantine Design, step 3: the words for a file that would not come right.
+const READ_DIFFERENTLY: &str = "This file read differently each time on your old laptop, so its drive may be failing. Your original is untouched.";
+const NOT_STORED_HERE: &str =
+    "This laptop could not store this file correctly. Your original is untouched.";
+const SENT_DAMAGED: &str = "The old laptop sent it damaged each time. Your original is untouched.";
+
 const GAVE_UP: &str = "parts of it kept arriving damaged or being stored wrong, so it was not finished. Your original is untouched";
 
 /// How many times a file's missing or wrongly stored blocks are asked for again before it fails.

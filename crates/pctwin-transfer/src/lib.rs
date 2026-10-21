@@ -684,6 +684,12 @@ pub struct Assembly<'d> {
     done: BlockMap,
     /// Each written block's fingerprint, for the whole file's.
     hashes: std::collections::BTreeMap<u64, [u8; 32]>,
+    /// Each block's fingerprint the first time it arrived whole, kept when the block is taken
+    /// back, to tell whose fault a file that will not come right is (Quarantine Design 3).
+    first: std::collections::BTreeMap<u64, [u8; 32]>,
+    /// A block sent again arrived with other bytes than the first time, though the file did not
+    /// change: the old laptop's drive read it differently.
+    read_differently: bool,
     /// The whole file was read back and matched, and nothing was written since.
     checked: bool,
 }
@@ -742,6 +748,8 @@ impl<'d> Assembly<'d> {
             header,
             done,
             hashes: std::collections::BTreeMap::new(),
+            first: std::collections::BTreeMap::new(),
+            read_differently: false,
             checked: false,
         })
     }
@@ -791,7 +799,9 @@ impl<'d> Assembly<'d> {
             file,
             header,
             done,
+            first: hashes.clone(),
             hashes,
+            read_differently: false,
             checked: false,
         })
     }
@@ -832,6 +842,13 @@ impl<'d> Assembly<'d> {
         self.checked = false;
         // In range and not yet done (both checked above), so this always marks it.
         let _ = self.done.insert(block.index);
+        match self.first.get(&block.index) {
+            Some(first) if *first != block.hash => self.read_differently = true,
+            Some(_) => {}
+            None => {
+                self.first.insert(block.index, block.hash);
+            }
+        }
         self.hashes.insert(block.index, block.hash);
         Ok(Receipt { block: block.index })
     }
@@ -859,6 +876,17 @@ impl<'d> Assembly<'d> {
 
     pub fn blocks_done(&self) -> u64 {
         self.done.done_count()
+    }
+
+    /// Whether a block sent again arrived with other bytes than the first time.
+    pub fn read_differently(&self) -> bool {
+        self.read_differently
+    }
+
+    /// Keeps what arrived beside the real name as a damaged copy (see
+    /// [`IncomingFile::set_aside`]): the stored path it is kept at.
+    pub fn set_aside(self) -> Result<String, TransferError> {
+        Ok(self.file.set_aside()?)
     }
 
     /// Gives the file its real name, only if every block arrived and the file did not change while

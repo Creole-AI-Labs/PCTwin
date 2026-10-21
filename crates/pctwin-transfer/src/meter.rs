@@ -506,6 +506,8 @@ struct ControlInner {
     /// pause and a carrying on (back to back) still sees that something changed.
     changes: AtomicU64,
     wake: Notify,
+    /// The approved place whose drive is not keeping files correctly, when that paused the move.
+    braked: std::sync::Mutex<Option<String>>,
 }
 
 /// The person's stop and pause for a running move (see the module docs). Cheap to clone; set it
@@ -538,10 +540,29 @@ impl MoveControl {
         self.changed();
     }
 
-    /// Ends this laptop's pause (the other laptop's own pause, if it made one, still holds).
+    /// Ends this laptop's pause (the other laptop's own pause, if it made one, still holds), and
+    /// any brake: the person has chosen to carry on.
     pub fn carry_on(&self) {
+        if let Ok(mut b) = self.0.braked.lock() {
+            *b = None;
+        }
         self.0.pause.store(false, Ordering::Release);
         self.changed();
+    }
+
+    /// Pauses the move because the drive of the approved place `destination` is not keeping
+    /// files correctly (Quarantine Design, step 4); the screen says so and offers another place
+    /// or stopping (X07). Files already checked are fine.
+    pub(crate) fn brake(&self, destination: &str) {
+        if let Ok(mut b) = self.0.braked.lock() {
+            *b = Some(destination.to_string());
+        }
+        self.pause();
+    }
+
+    /// The approved place whose drive paused the move, if one did.
+    pub fn braked(&self) -> Option<String> {
+        self.0.braked.lock().ok().and_then(|b| b.clone())
     }
 
     /// Counts the change, then wakes every waiter (after the count, so none misses it).

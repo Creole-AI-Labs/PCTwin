@@ -770,23 +770,52 @@ async fn many_files_each_asked_again_never_crowd_out_the_rest() {
     }
 }
 
+/// The person, each time a failing drive pauses the move: carries on (here, to see every file's
+/// own ending), until `done`. How many times the move paused.
+async fn carry_on_whenever_braked(
+    control: &pctwin_transfer::MoveControl,
+    done: &std::cell::Cell<bool>,
+) -> usize {
+    let mut brakes = 0;
+    while !done.get() {
+        if control.braked().is_some() {
+            brakes += 1;
+            control.carry_on();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    }
+    brakes
+}
+
 #[tokio::test]
 async fn on_a_drive_that_reads_every_file_back_wrong_each_file_fails_for_that_reason() {
     const FILES: usize = 80;
     let l = laptops(&vec![10_000usize; FILES]);
     let table = table(&l, Some(Flip::OnRead { at: 0 }));
+    let control = pctwin_transfer::MoveControl::new();
     let mut sender = SenderSession::new(jobs(&l), 1);
-    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
-    let (s, r) = {
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+        .with_control(control.clone());
+    let done = std::cell::Cell::new(false);
+    let ((s, r), brakes) = {
         let (mut a, mut b) = mem_pair();
         tokio::time::timeout(std::time::Duration::from_secs(120), async {
-            tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+            tokio::join!(
+                async {
+                    let ran = tokio::join!(sender.run(&mut a), receiver.run(&mut b));
+                    done.set(true);
+                    ran
+                },
+                carry_on_whenever_braked(&control, &done)
+            )
         })
         .await
         .expect("hung")
     };
     s.unwrap();
     r.unwrap();
+    // The failing drive paused the move again and again (the person carried on each time).
+    assert!(brakes >= 1, "the drive never paused the move");
     for n in 0..FILES {
         match receiver.outcome(id(n as u8)) {
             Some(ReceiveOutcome::Failed(why)) => {
@@ -2483,7 +2512,9 @@ async fn crowd(
     let l = laptops(&vec![10_000usize; files]);
     let table = table(&l, flip);
     let mut sender = SenderSession::new(jobs_with(&l, mixed), capacity);
-    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let control = pctwin_transfer::MoveControl::new();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+        .with_control(control.clone());
     let seen = Arc::new(Mutex::new(HashSet::new()));
     let damage = flip.is_none();
     let (a, b) = mem_pair();
@@ -2509,10 +2540,18 @@ async fn crowd(
         });
         new_lanes.push(b);
     }
-    let (s, r) = tokio::time::timeout(Duration::from_secs(240), async {
+    let done = std::cell::Cell::new(false);
+    let ((s, r), _) = tokio::time::timeout(Duration::from_secs(240), async {
         tokio::join!(
-            sender.run_lanes(&mut old_main, old_lanes),
-            receiver.run_lanes(&mut new_main, new_lanes)
+            async {
+                let ran = tokio::join!(
+                    sender.run_lanes(&mut old_main, old_lanes),
+                    receiver.run_lanes(&mut new_main, new_lanes)
+                );
+                done.set(true);
+                ran
+            },
+            carry_on_whenever_braked(&control, &done)
         )
     })
     .await
@@ -4538,4 +4577,120 @@ async fn blocks_still_on_a_lane_from_an_ended_attempt_cannot_land_in_its_retry()
     assert_eq!(on_the_lane, BTreeSet::from([first]));
     assert_eq!(resumed_done, 0, "the retry starts again whole");
     assert_ne!(again, first, "the retry has a new stream");
+}
+
+/// An old laptop whose drive reads the file differently each time it is opened (its stamp never
+/// changes): the first byte comes back different on every open.
+struct Unsteady(std::sync::Arc<std::sync::atomic::AtomicU8>);
+
+struct UnsteadyFile {
+    file: std::fs::File,
+    flip: u8,
+    at: u64,
+}
+
+impl std::io::Read for UnsteadyFile {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.file.read(buf)?;
+        if self.at == 0 && n > 0 {
+            buf[0] ^= self.flip;
+        }
+        self.at += n as u64;
+        Ok(n)
+    }
+}
+
+impl std::io::Seek for UnsteadyFile {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.at = self.file.seek(pos)?;
+        Ok(self.at)
+    }
+}
+
+impl pctwin_transfer::Source for UnsteadyFile {
+    fn stamp(&mut self) -> std::io::Result<pctwin_transfer::Stamp> {
+        self.file.stamp()
+    }
+}
+
+impl pctwin_transfer::Opener for Unsteady {
+    fn open(&self, path: &std::path::Path) -> std::io::Result<Box<dyn pctwin_transfer::Source>> {
+        let flip = self
+            .0
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1);
+        Ok(Box::new(UnsteadyFile {
+            file: std::fs::File::open(path)?,
+            flip,
+            at: 0,
+        }))
+    }
+}
+
+/// Quarantine Design, step 3: the old laptop's drive reads the file differently each time and
+/// this laptop's drive keeps the block wrong, so it never comes right. What arrived is kept
+/// beside the real name as a damaged copy, never under it, and the file needs action, saying the
+/// old drive may be failing.
+#[tokio::test]
+async fn a_file_the_old_drive_reads_differently_is_set_aside_as_a_damaged_copy() {
+    let l = laptops(&[70_000]);
+    let table = table(&l, Some(Flip::OnEveryWrite));
+    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(Unsteady(
+        std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+    )));
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    assert_eq!(move_all(&mut sender, &mut receiver).await, (true, true));
+    assert!(matches!(
+        sender.outcome(id(0)),
+        Some(SendOutcome::Failed(_))
+    ));
+    let Some(ReceiveOutcome::NeedsAction { finished, why }) = receiver.outcome(id(0)) else {
+        panic!(
+            "expected a damaged copy kept, got {:?}",
+            receiver.outcome(id(0))
+        );
+    };
+    assert!(why.contains("read differently"), "{why}");
+    assert_eq!(
+        finished.final_path,
+        "Documents/f0.bin (damaged copy).pctwin-damaged"
+    );
+    assert!(l.new.path().join(&finished.final_path).exists());
+    assert!(!landed(&l, 0).exists(), "never under the real name");
+}
+
+/// Quarantine Design, step 4: a drive that could not store 3 of its last checked files pauses the
+/// move and names the place, so the person can choose another or stop; it never runs on through
+/// every file.
+#[tokio::test]
+async fn a_drive_that_keeps_failing_pauses_the_move_and_says_which() {
+    let l = laptops(&[70_000; 6]);
+    let table = table(&l, Some(Flip::OnEveryWrite));
+    let control = pctwin_transfer::MoveControl::new();
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+        .with_control(control.clone());
+    let (mut a, mut b) = mem_pair();
+    let person = async {
+        while control.braked().is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        // The person reads why it paused, and stops.
+        control.stop();
+    };
+    let (_, received, ()) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b), person)
+    })
+    .await
+    .expect("the move hung");
+    // Ended by the person's stop.
+    assert!(received.is_err());
+    assert_eq!(control.braked().as_deref(), Some("me"));
+    let failed = (0..6u8)
+        .filter(|n| matches!(receiver.outcome(id(*n)), Some(ReceiveOutcome::Failed(why)) if why.contains("could not store")))
+        .count();
+    assert_eq!(
+        failed, 3,
+        "paused at the third, never ran on through every file"
+    );
 }

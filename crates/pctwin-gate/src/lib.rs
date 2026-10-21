@@ -2607,6 +2607,35 @@ pub struct IncomingFile<'d> {
 }
 
 impl<'d> IncomingFile<'d> {
+    /// Keeps what arrived when it cannot be proven the old laptop's file (its drive read it
+    /// differently each time it was sent): never under the real name, but beside it as
+    /// `<name> (damaged copy).pctwin-damaged` (numbered if that is taken), so the person can look
+    /// at it; the original on the old laptop is untouched. Only where the drive names files
+    /// safely; elsewhere (`Err`) it is removed like any unfinished file. The stored path it is
+    /// kept at.
+    pub fn set_aside(mut self) -> Result<String, GateError> {
+        let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
+        // Closed first: Windows renames no open file.
+        drop(self.file.take());
+        let wanted = format!("{} (damaged copy).pctwin-damaged", self.name);
+        let (name, _) = self
+            .destination
+            .free_name(&self.dir, &self.folder, &wanted)?;
+        let check = self.destination.check_for(&self.dir, &self.folder)?;
+        let folder_path = || self.destination.folder_path(&self.dir, &self.folder);
+        match claim(&self.dir, &name, &temp, &folder_path, &check)? {
+            Some(linked) => {
+                if linked == Linked::Hard {
+                    let _ = self.dir.remove_file(&temp);
+                }
+                self.temp_name = None;
+                flush_name(&self.dir, &name);
+                Ok(stored_path(&self.folder, &name))
+            }
+            None => Err(GateError::Conflict),
+        }
+    }
+
     /// Reserves disk space for the whole announced size now, so a full disk shows at the start
     /// rather than partway through (the approach rclone takes). Returns `false` when this drive
     /// cannot reserve space (some USB and network drives); the file can still be written.
