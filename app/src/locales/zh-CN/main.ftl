@@ -848,6 +848,30 @@ outcome-home = 返回首页
 move-fallback-folder = 来自旧笔记本电脑
 move-stop = 停止移动
 move-get-help = 获取帮助
+pickup-eyebrow = 你的移动
+pickup-title = 安全地继续。
+pickup-body = 这台笔记本电脑上的一次移动中途停止了，可能是因为它重启或断电。请先整理，然后重新配对两台笔记本电脑以继续。
+pickup-unfinished-title = 未完成的复制
+pickup-unfinished-body =
+    { NUMBER($count) ->
+       *[other] 移动停止时，有 { $count } 个文件正在复制。
+    }
+pickup-unfinished-badge = 待整理
+pickup-tidy = 整理
+pickup-tidying = 正在整理。已完成的副本会经过检查并放到位；你的任何内容都不会被更改。
+pickup-done = 整理完毕。重新配对两台笔记本电脑以继续：这里已有的内容会被识别，不会重复复制。
+pickup-failed = 这次整理没有成功。你的任何内容都没有被更改。请重试，或先在这台笔记本电脑上关闭 PCTwin 再重新打开。
+pickup-put-in-place = 已放到位
+pickup-kept = 保留以继续
+pickup-not-finished =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件无法完成。下次移动会重新复制。
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件位于当前未连接的硬盘上。请连接该硬盘后再整理一次。
+    }
+pickup-later = 以后再说
 move-status-kept = 已保留
 move-wait-eyebrow = 你的移动
 move-wait-scanning-title = 正在查找你的文件。

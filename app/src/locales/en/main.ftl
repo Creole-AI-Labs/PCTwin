@@ -909,6 +909,33 @@ outcome-home = Return home
 move-fallback-folder = From your old laptop
 move-stop = Stop the move
 move-get-help = Get help
+pickup-eyebrow = Your move
+pickup-title = Pick up safely.
+pickup-body = A move on this laptop stopped part way, perhaps because the laptop restarted or lost power. Tidy up first, then pair the laptops again to carry on.
+pickup-unfinished-title = Unfinished copies
+pickup-unfinished-body =
+    { NUMBER($count) ->
+        [one] { $count } file was being copied when the move stopped.
+       *[other] { $count } files were being copied when the move stopped.
+    }
+pickup-unfinished-badge = To tidy
+pickup-tidy = Tidy up
+pickup-tidying = Tidying up. Finished copies are checked and put in place; nothing of yours is changed.
+pickup-done = All tidy. Pair the laptops again to carry on: what is already here is found and not copied twice.
+pickup-failed = Tidying up did not work this time. Nothing of yours was changed. Try again, or close PCTwin on this laptop and open it again first.
+pickup-put-in-place = put in place
+pickup-kept = kept to carry on
+pickup-not-finished =
+    { NUMBER($count) ->
+        [one] { $count } file could not be finished. The next move copies it again.
+       *[other] { $count } files could not be finished. The next move copies them again.
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+        [one] { $count } file is on a drive that is not connected now. Connect it and tidy up again.
+       *[other] { $count } files are on a drive that is not connected now. Connect it and tidy up again.
+    }
+pickup-later = Not now
 move-status-kept = Kept
 move-wait-eyebrow = Your move
 move-wait-scanning-title = Finding your files.

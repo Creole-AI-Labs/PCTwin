@@ -21,6 +21,8 @@ const COMMANDS: &[&str] = &[
     "move_stop",
     "move_report",
     "help_code",
+    "recovery_check",
+    "recovery_run",
 ];
 
 fn main() {

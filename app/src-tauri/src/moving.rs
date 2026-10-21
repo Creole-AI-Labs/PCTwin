@@ -995,9 +995,7 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
         .find(|p| p.is_me)
         .map(|p| p.account_id)
         .ok_or(MoveProblem::Failed)?;
-    let found = pctwin_scan::find_special_folders();
-    let mut table = Destinations::new();
-    pctwin_transfer::approve_new_places(&mut table, &found).map_err(|_| MoveProblem::Failed)?;
+    let (table, found) = this_laptops_places()?;
     let roles: BTreeMap<FolderRole, Storage> = found
         .iter()
         .filter_map(|f| match f {
@@ -1028,6 +1026,23 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
     })
 }
 
+/// This laptop's special folders, each approved as a destination by its role: the only places
+/// a move (or tidying up after one) may write.
+pub(crate) fn this_laptops_places() -> Result<(Destinations, Vec<FolderLookup>), MoveProblem> {
+    let found = pctwin_scan::find_special_folders();
+    let mut table = Destinations::new();
+    pctwin_transfer::approve_new_places(&mut table, &found).map_err(|_| MoveProblem::Failed)?;
+    Ok((table, found))
+}
+
+/// Where this laptop's journal of writes is kept (`None`: the app has no data folder).
+pub(crate) fn journal_path<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .map(|dir| dir.join("journal"))
+}
+
 /// The new laptop's side: show the plan, wait for the approval, receive.
 async fn run_new<R: Runtime>(
     app: &AppHandle<R>,
@@ -1044,12 +1059,16 @@ async fn run_new<R: Runtime>(
         me,
         shown,
     } = setup;
-    let journal_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| TransferError::Protocol(e.to_string()))?;
-    std::fs::create_dir_all(&journal_dir).map_err(|e| TransferError::Protocol(e.to_string()))?;
-    let journal = pctwin_journal::Journal::open(&journal_dir.join("journal"))
+    let path = journal_path(app)
+        .ok_or_else(|| TransferError::Protocol("this laptop has no data folder".into()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| TransferError::Protocol(e.to_string()))?;
+    }
+    let journal =
+        pctwin_journal::Journal::open(&path).map_err(|e| TransferError::Protocol(e.to_string()))?;
+    // Anything a move left part way is tidied up first (as the engine requires, before anything
+    // is received): a finished copy is put in place, a part-copied one kept to carry on.
+    pctwin_transfer::recover(&journal, &table)
         .map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut steps = AppSteps {
         app: app.clone(),

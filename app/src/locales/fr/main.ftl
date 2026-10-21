@@ -1065,6 +1065,36 @@ outcome-home = Retour à l’accueil
 move-fallback-folder = De votre ancien portable
 move-stop = Arrêter le transfert
 move-get-help = Obtenir de l’aide
+pickup-eyebrow = Votre transfert
+pickup-title = Reprenez en toute sécurité.
+pickup-body = Un transfert sur ce portable s’est arrêté en cours de route, peut-être après un redémarrage ou une coupure de courant. Faites d’abord le tri, puis associez à nouveau les portables pour continuer.
+pickup-unfinished-title = Copies inachevées
+pickup-unfinished-body =
+    { NUMBER($count) ->
+        [one] { $count } fichier était en cours de copie quand le transfert s’est arrêté.
+        [many] { $count } de fichiers étaient en cours de copie quand le transfert s’est arrêté.
+       *[other] { $count } fichiers étaient en cours de copie quand le transfert s’est arrêté.
+    }
+pickup-unfinished-badge = À trier
+pickup-tidy = Faire le tri
+pickup-tidying = Tri en cours. Les copies terminées sont vérifiées et mises en place ; rien de ce qui est à vous n’est modifié.
+pickup-done = Tout est en ordre. Associez à nouveau les portables pour continuer : ce qui est déjà ici est reconnu et n’est pas copié deux fois.
+pickup-failed = Le tri n’a pas fonctionné cette fois. Rien de ce qui est à vous n’a changé. Réessayez, ou fermez d’abord PCTwin sur ce portable puis rouvrez-le.
+pickup-put-in-place = mis en place
+pickup-kept = gardés pour continuer
+pickup-not-finished =
+    { NUMBER($count) ->
+        [one] { $count } fichier n’a pas pu être terminé. Le prochain transfert le recopiera.
+        [many] { $count } de fichiers n’ont pas pu être terminés. Le prochain transfert les recopiera.
+       *[other] { $count } fichiers n’ont pas pu être terminés. Le prochain transfert les recopiera.
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+        [one] { $count } fichier est sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
+        [many] { $count } de fichiers sont sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
+       *[other] { $count } fichiers sont sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
+    }
+pickup-later = Pas maintenant
 move-status-kept = Conservé
 move-wait-eyebrow = Votre transfert
 move-wait-scanning-title = Recherche de vos fichiers.

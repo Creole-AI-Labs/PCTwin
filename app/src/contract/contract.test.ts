@@ -11,6 +11,7 @@ import {
   parseEndedEarly,
   parseEvidence,
   parseHeadsUp,
+  parseInterrupted,
   parseLabelView,
   parseMoveOutcome,
   parseMoveProblem,
@@ -22,6 +23,7 @@ import {
   parsePlanView,
   parseProblemView,
   parseReportItem,
+  parseTidied,
 } from "../bridge";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
@@ -42,6 +44,8 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "move-progress": parseMoveProgress,
   "move-outcome": parseMoveOutcome,
   "report-item": parseReportItem,
+  interrupted: parseInterrupted,
+  tidied: parseTidied,
 };
 
 const families = Object.entries(FILES).map(([path, examples]) => [path.replace(/^\.\/|\.json$/g, ""), examples] as const);

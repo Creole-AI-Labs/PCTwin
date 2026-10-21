@@ -16,6 +16,7 @@ mod info_plist;
 mod lockdown;
 mod moving;
 mod pairing;
+mod recovery;
 
 use serde::Deserialize;
 use tauri::ipc::Invoke;
@@ -189,6 +190,8 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         moving::move_stop,
         moving::move_report,
         help::help_code,
+        recovery::recovery_check,
+        recovery::recovery_run,
     ]
 }
 

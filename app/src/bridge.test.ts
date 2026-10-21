@@ -9,6 +9,8 @@ import {
   HELP_TOPICS,
   helpCode,
   listenMove,
+  recoveryCheck,
+  recoveryRun,
   listenPairingNew,
   listenPairingOld,
   moveApprove,
@@ -160,7 +162,11 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : null,
+              : command === "recovery_check"
+                ? { unfinished: 0 }
+                : command === "recovery_run"
+                  ? { putInPlace: 0, keptToContinue: 0, notFinished: 0, leftForLater: 0 }
+                  : null,
       ),
     );
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
@@ -184,6 +190,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await moveStop();
       await moveReport();
       await helpCode("connection-lost", "moving");
+      await recoveryCheck();
+      await recoveryRun();
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }

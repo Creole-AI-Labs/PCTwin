@@ -325,6 +325,19 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-progress", json(progress())),
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
+        (
+            "interrupted",
+            json([crate::recovery::Interrupted { unfinished: 3 }]),
+        ),
+        (
+            "tidied",
+            json([crate::recovery::Tidied {
+                put_in_place: 2,
+                kept_to_continue: 1,
+                not_finished: 0,
+                left_for_later: 1,
+            }]),
+        ),
     ]
 }
 
@@ -504,6 +517,8 @@ fn calls() -> Value {
             { "name": "move_stop", "args": [] },
             { "name": "move_report", "args": [] },
             { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
+            { "name": "recovery_check", "args": [] },
+            { "name": "recovery_run", "args": [] },
         ],
         "events": {
             "old": OLD_EVENT,

@@ -2,11 +2,13 @@ import { LocalizationProvider, Localized } from "@fluent/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
+import { recoveryCheck, recoveryRun } from "./bridge";
 import { setTrayLabels } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
 import MoveHost from "./screens/MoveHost";
+import PickUp from "./screens/PickUp";
 import { FooterProvider } from "./screens/FrameFooter";
 import PairNew from "./screens/PairNew";
 import PairOld from "./screens/PairOld";
@@ -25,6 +27,8 @@ type Screen =
   | { id: "pair"; role: Role }
   // The move, from paired to its outcome. Left only by its own buttons, so a running move always has a screen.
   | { id: "move"; role: Role }
+  // A move on this laptop stopped part way (X09): shown at start, before anything else.
+  | { id: "pickup"; unfinished: number }
   | { id: "soon"; which: Soon }
   // Quick Send home. `notice` is set when the person chose something the engine cannot do yet.
   | { id: "quick"; notice: boolean };
@@ -35,6 +39,21 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   const [screen, setScreen] = useState<Screen>({ id: "welcome" });
   const l10n = useMemo(() => localization(language), [language]);
   const main = useRef<HTMLElement>(null);
+
+  // At start: a move that stopped part way on this laptop is picked up first. Asked once; a laptop
+  // with nothing to pick up (or outside the app) stays on Welcome.
+  useEffect(() => {
+    let live = true;
+    recoveryCheck().then(
+      ({ unfinished }) => {
+        if (live && unfinished > 0) setScreen((s) => (s.id === "welcome" ? { id: "pickup", unfinished } : s));
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.lang = language;
@@ -116,6 +135,14 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "together" && <PutTogether onBack={() => { setScreen({ id: "connect", role: screen.role }); }} onContinue={() => { setScreen({ id: "pair", role: screen.role }); }} />}
             {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "old" }); }} />}
             {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "new" }); }} />}
+            {screen.id === "pickup" && (
+              <PickUp
+                unfinished={screen.unfinished}
+                onTidy={recoveryRun}
+                onPairAgain={() => { setScreen({ id: "pair", role: "new" }); }}
+                onLater={() => { setScreen({ id: "welcome" }); }}
+              />
+            )}
             {screen.id === "move" && (
               <MoveHost
                 old={screen.role === "old"}

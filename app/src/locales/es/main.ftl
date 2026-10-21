@@ -1056,6 +1056,36 @@ outcome-home = Volver al inicio
 move-fallback-folder = De tu portátil antiguo
 move-stop = Detener el traslado
 move-get-help = Obtener ayuda
+pickup-eyebrow = Tu traslado
+pickup-title = Retoma con seguridad.
+pickup-body = Un traslado en este portátil se detuvo a medias, quizá porque se reinició o se quedó sin energía. Primero ordena lo pendiente y luego vuelve a emparejar los portátiles para seguir.
+pickup-unfinished-title = Copias sin terminar
+pickup-unfinished-body =
+    { NUMBER($count) ->
+        [one] Se estaba copiando { $count } archivo cuando el traslado se detuvo.
+        [many] Se estaban copiando { $count } de archivos cuando el traslado se detuvo.
+       *[other] Se estaban copiando { $count } archivos cuando el traslado se detuvo.
+    }
+pickup-unfinished-badge = Por ordenar
+pickup-tidy = Ordenar
+pickup-tidying = Ordenando. Las copias terminadas se comprueban y se colocan en su sitio; no se cambia nada tuyo.
+pickup-done = Todo en orden. Vuelve a emparejar los portátiles para seguir: lo que ya está aquí se reconoce y no se copia dos veces.
+pickup-failed = Ordenar no funcionó esta vez. No se cambió nada tuyo. Inténtalo de nuevo, o primero cierra PCTwin en este portátil y vuelve a abrirlo.
+pickup-put-in-place = colocados
+pickup-kept = guardados para seguir
+pickup-not-finished =
+    { NUMBER($count) ->
+        [one] No se pudo terminar { $count } archivo. El próximo traslado lo vuelve a copiar.
+        [many] No se pudieron terminar { $count } de archivos. El próximo traslado los vuelve a copiar.
+       *[other] No se pudieron terminar { $count } archivos. El próximo traslado los vuelve a copiar.
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+        [one] { $count } archivo está en un disco que ahora no está conectado. Conéctalo y vuelve a ordenar.
+        [many] { $count } de archivos están en un disco que ahora no está conectado. Conéctalo y vuelve a ordenar.
+       *[other] { $count } archivos están en un disco que ahora no está conectado. Conéctalo y vuelve a ordenar.
+    }
+pickup-later = Ahora no
 move-status-kept = Guardado
 move-wait-eyebrow = Tu traslado
 move-wait-scanning-title = Buscando tus archivos.

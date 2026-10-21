@@ -1060,6 +1060,36 @@ outcome-home = Voltar ao início
 move-fallback-folder = Do seu notebook antigo
 move-stop = Parar a transferência
 move-get-help = Obter ajuda
+pickup-eyebrow = Sua transferência
+pickup-title = Retome com segurança.
+pickup-body = Uma transferência neste notebook parou no meio, talvez porque ele reiniciou ou ficou sem energia. Organize primeiro e depois pareie os notebooks de novo para continuar.
+pickup-unfinished-title = Cópias não terminadas
+pickup-unfinished-body =
+    { NUMBER($count) ->
+        [one] { $count } arquivo estava sendo copiado quando a transferência parou.
+        [many] { $count } de arquivos estavam sendo copiados quando a transferência parou.
+       *[other] { $count } arquivos estavam sendo copiados quando a transferência parou.
+    }
+pickup-unfinished-badge = A organizar
+pickup-tidy = Organizar
+pickup-tidying = Organizando. As cópias terminadas são verificadas e colocadas no lugar; nada seu é alterado.
+pickup-done = Tudo organizado. Pareie os notebooks de novo para continuar: o que já está aqui é reconhecido e não é copiado duas vezes.
+pickup-failed = A organização não funcionou desta vez. Nada seu foi alterado. Tente de novo, ou feche o PCTwin neste notebook e abra-o de novo antes.
+pickup-put-in-place = colocados no lugar
+pickup-kept = mantidos para continuar
+pickup-not-finished =
+    { NUMBER($count) ->
+        [one] { $count } arquivo não pôde ser terminado. A próxima transferência o copia de novo.
+        [many] { $count } de arquivos não puderam ser terminados. A próxima transferência os copia de novo.
+       *[other] { $count } arquivos não puderam ser terminados. A próxima transferência os copia de novo.
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+        [one] { $count } arquivo está em um disco que não está conectado agora. Conecte-o e organize de novo.
+        [many] { $count } de arquivos estão em um disco que não está conectado agora. Conecte-o e organize de novo.
+       *[other] { $count } arquivos estão em um disco que não está conectado agora. Conecte-o e organize de novo.
+    }
+pickup-later = Agora não
 move-status-kept = Mantido
 move-wait-eyebrow = Sua transferência
 move-wait-scanning-title = Procurando seus arquivos.

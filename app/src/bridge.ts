@@ -510,6 +510,30 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
   };
 }
 
+/* ---------- Picking up after a restart (src-tauri/src/recovery.rs) ---------- */
+
+/** What a move that stopped part way left on this laptop (`Interrupted`). */
+export type Interrupted = { unfinished: number };
+
+/** What tidying up did, counted (`Tidied`). */
+export type Tidied = { putInPlace: number; keptToContinue: number; notFinished: number; leftForLater: number };
+
+export function parseInterrupted(value: unknown): Interrupted | null {
+  const f = exactly(value, ["unfinished"]);
+  return f && isCount(f.unfinished) ? { unfinished: f.unfinished } : null;
+}
+
+const TIDIED_KEYS = ["putInPlace", "keptToContinue", "notFinished", "leftForLater"] as const;
+
+export function parseTidied(value: unknown): Tidied | null {
+  const f = exactly(value, TIDIED_KEYS);
+  if (!f || !TIDIED_KEYS.every((k) => isCount(f[k]))) return null;
+  return Object.fromEntries(TIDIED_KEYS.map((k) => [k, f[k]])) as Tidied;
+}
+
+export const recoveryCheck = () => ask("recovery_check", parseInterrupted);
+export const recoveryRun = () => ask("recovery_run", parseTidied);
+
 /* ---------- Get help (src-tauri/src/help.rs) ---------- */
 
 /** The kinds of problem a help code can name (`HelpTopic`), in the engine's order. */

@@ -116,6 +116,36 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
+  it("a move that stopped part way is picked up first: tidy up, then pair again as the new laptop", async () => {
+    const l10n = localization("en");
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(
+        command === "recovery_check"
+          ? { unfinished: 3 }
+          : command === "recovery_run"
+            ? { putInPlace: 2, keptToContinue: 1, notFinished: 0, leftForLater: 0 }
+            : undefined,
+      ),
+    );
+    render(<App initialLanguage="en" />);
+    expect(await screen.findByText(l10n.getString("pickup-title"))).toBeTruthy();
+    expect(screen.getByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("pickup-unfinished-body", { count: 3 }).replace(/[⁦-⁩]/g, ""))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pickup-tidy") }));
+    expect(await screen.findByText(l10n.getString("pickup-done"))).toBeTruthy();
+    expect(tauri.invoke).toHaveBeenCalledWith("recovery_run");
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("ended-pair-again") }));
+    await act(async () => {});
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
+    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
+  it("with nothing to pick up, the app opens on Welcome", async () => {
+    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
+    render(<App initialLanguage="en" />);
+    await act(async () => {});
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+  });
+
   it("Quick Send opens its home, says plainly that nothing is connected yet, and Back returns", () => {
     const l10n = localization("en");
     render(<App initialLanguage="en" />);
@@ -128,7 +158,8 @@ describe("screens", () => {
       expect(screen.getByRole("status").textContent).toContain(l10n.getString("qs-soon-note"));
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     }
-    expect(tauri.invoke).not.toHaveBeenCalled();
+    // Nothing reaches the shell but the start-up look for a move that stopped part way.
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check"]);
     // The window footer carries the free-sending note and the main action, also while the notice is showing.
     const footer = within(screen.getByRole("contentinfo"));
     expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();
