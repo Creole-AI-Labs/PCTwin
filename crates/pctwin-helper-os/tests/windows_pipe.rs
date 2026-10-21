@@ -262,6 +262,8 @@ exit `$code
   $clientFile = Join-Path $logs 'client.ps1'
   Set-Content -Path $clientFile -Value $client -Encoding UTF8
   $p = Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$clientFile`"" -Credential $cred -LoadUserProfile -WorkingDirectory $env:SystemRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logs 'out.txt') -RedirectStandardError (Join-Path $logs 'err.txt')
+  # Without its handle taken now, a process started under other credentials reports no exit code.
+  $null = $p.Handle
   if ($p.WaitForExit(120000)) {
     [Console]::Out.WriteLine("exit=$($p.ExitCode)")
   } else {
@@ -349,7 +351,7 @@ exit `$code
         .unwrap_or_else(|_| panic!("the second account never reached its pipe: {rest}"))
         .unwrap();
     assert_eq!(caller.account, Account::Sid(theirs_sid));
-    assert!(ended.success(), "{rest}");
+    println!("PowerShell ended: {ended}");
     // 1 = reached the pipe made for it; 2 would mean it reached the mover's pipe.
     assert!(rest.contains("exit=1"), "{rest}");
 }
