@@ -19,6 +19,14 @@ use pctwin_gate::{CheckedFrom, WhyMemory};
 use pctwin_journey::Problem;
 use serde_json::Value;
 
+use pctwin_record::{FolderRole, LeftOutReason};
+use pctwin_types::{ItemStatus, Reason};
+
+use crate::moving::{
+    ByStatus, Bytes, Counts, Current, EndedEarly, Evidence, GroupName, Laptops, LeftOut, MoveGroup,
+    MoveOutcome, MoveProblem, MoveProgress, Notice, PlanGroup, PlanView, PreviewView, Range,
+    ReportItem, RunState, Size, Stage,
+};
 use crate::pairing::{HeadsUp, LabelView, NearbyView, NewView, OldView, ProblemView};
 
 fn picked() -> LabelView {
@@ -115,6 +123,184 @@ fn heads_ups() -> Vec<HeadsUp> {
     vec![HeadsUp::LocalNetwork, HeadsUp::Firewall]
 }
 
+fn move_problems() -> Vec<MoveProblem> {
+    vec![
+        MoveProblem::NotPaired,
+        MoveProblem::Busy,
+        MoveProblem::NotMoving,
+        MoveProblem::PlanChanged,
+        MoveProblem::Failed,
+    ]
+}
+
+fn stages() -> Vec<Stage> {
+    vec![Stage::Scanning, Stage::Waiting, Stage::Moving]
+}
+
+fn endings() -> Vec<EndedEarly> {
+    vec![
+        EndedEarly::LinkLost {
+            detail: "the connection was lost".into(),
+        },
+        EndedEarly::NotApproved,
+        EndedEarly::Failed {
+            detail: "the journal could not be opened".into(),
+        },
+    ]
+}
+
+fn plans() -> Vec<PlanView> {
+    vec![PlanView {
+        revision: 2,
+        fingerprint: "9f".repeat(32),
+        groups: vec![PlanGroup {
+            id: "documents".into(),
+            role: FolderRole::Documents,
+            path: String::new(),
+            size: Size::Known {
+                bytes: 1_200_000,
+                files: 34,
+            },
+            to_drive: String::new(),
+            to_folder: "documents".into(),
+        }],
+        left_out: vec![LeftOut {
+            reason: LeftOutReason::CloudOnly,
+            count: 3,
+        }],
+        preview: PreviewView {
+            fits: Some(true),
+            short_bytes: 0,
+            minutes: Some(Range { low: 4, high: 8 }),
+            renamed: 1,
+            too_big: 0,
+            refused: 0,
+            runs_at_sign_in: 1,
+        },
+    }]
+}
+
+fn quiet(state: RunState, old: Option<LabelView>) -> MoveProgress {
+    MoveProgress {
+        state,
+        laptops: Laptops { old },
+        groups: Vec::new(),
+        counts: Counts::default(),
+        bytes: Bytes {
+            checked: 0,
+            total: 0,
+        },
+        current: None,
+        speed: None,
+        minutes_left: None,
+        notice: None,
+    }
+}
+
+fn progress() -> Vec<MoveProgress> {
+    let counts = Counts {
+        total: 34,
+        waiting: 20,
+        copying: 1,
+        checking: 1,
+        done: 10,
+        needs_action: 1,
+        failed: 1,
+        skipped_by_user: 0,
+    };
+    vec![
+        MoveProgress {
+            state: RunState::Running,
+            laptops: Laptops {
+                old: Some(picked()),
+            },
+            groups: vec![
+                MoveGroup {
+                    id: "documents".into(),
+                    name: GroupName::Role {
+                        role: FolderRole::Documents,
+                    },
+                    counts,
+                },
+                MoveGroup {
+                    id: "for-1".into(),
+                    name: GroupName::Folder {
+                        name: "for-1".into(),
+                    },
+                    counts: Counts::default(),
+                },
+            ],
+            counts,
+            bytes: Bytes {
+                checked: 400_000,
+                total: 1_200_000,
+            },
+            current: Some(Current {
+                name: "letter.txt".into(),
+                step: "checking",
+            }),
+            speed: Some(Range {
+                low: 40_000_000,
+                high: 40_000_000,
+            }),
+            minutes_left: Some(Range { low: 3, high: 3 }),
+            notice: Some(Notice::DriveProblem {
+                place: GroupName::Role {
+                    role: FolderRole::Pictures,
+                },
+            }),
+        },
+        quiet(RunState::Pausing, None),
+        quiet(RunState::Paused, Some(named())),
+    ]
+}
+
+fn outcomes() -> Vec<MoveOutcome> {
+    vec![MoveOutcome {
+        by_status: ByStatus {
+            copied: 30,
+            reinstalled: 0,
+            converted: 0,
+            needs_action: 1,
+            skipped_by_user: 1,
+            failed: 2,
+        },
+        not_copied: 0,
+        bytes_checked: 1_100_000,
+        stopped: false,
+        checked_from_memory: 3,
+    }]
+}
+
+fn report_items() -> Vec<ReportItem> {
+    let line = |n: &str, status, reason, evidence| ReportItem {
+        id: format!("{n:0>32}"),
+        name: format!("{n}.txt"),
+        source: format!("documents/{n}.txt"),
+        destination: (status != ItemStatus::Failed).then(|| format!("{n}.txt")),
+        status,
+        reason,
+        evidence,
+    };
+    vec![
+        line("1", ItemStatus::Copied, None, Some(Evidence::Drive)),
+        line(
+            "2",
+            ItemStatus::Copied,
+            None,
+            Some(Evidence::Memory {
+                why: WhyMemory::TooSmall,
+            }),
+        ),
+        line("6", ItemStatus::Copied, None, Some(Evidence::AlreadyThere)),
+        line("7", ItemStatus::Copied, None, Some(Evidence::Recovered)),
+        line("8", ItemStatus::Copied, None, Some(Evidence::NewLaptop)),
+        line("3", ItemStatus::Failed, Some(Reason::Unreadable), None),
+        line("4", ItemStatus::NeedsAction, Some(Reason::OnlineOnly), None),
+        line("5", ItemStatus::SkippedByUser, None, None),
+    ]
+}
+
 fn json(examples: impl serde::Serialize) -> Value {
     serde_json::to_value(examples).expect("examples serialise")
 }
@@ -129,6 +315,13 @@ fn families() -> Vec<(&'static str, Value)> {
         ("nearby-view", json(nearby())),
         ("evidence", json(CheckedFrom::ALL)),
         ("heads-up", json(heads_ups())),
+        ("move-problem", json(move_problems())),
+        ("move-stage", json(stages())),
+        ("ended-early", json(endings())),
+        ("plan-view", json(plans())),
+        ("move-progress", json(progress())),
+        ("move-outcome", json(outcomes())),
+        ("report-item", json(report_items())),
     ]
 }
 
@@ -239,6 +432,19 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
         HeadsUp::variant,
         HeadsUp::VARIANTS,
     );
+    check(
+        "move-problem",
+        &move_problems(),
+        MoveProblem::variant,
+        MoveProblem::VARIANTS,
+    );
+    check("move-stage", &stages(), Stage::variant, Stage::VARIANTS);
+    check(
+        "ended-early",
+        &endings(),
+        EndedEarly::variant,
+        EndedEarly::VARIANTS,
+    );
 
     // Problems: one example per problem, each with its own key.
     let keys: BTreeSet<&str> = problems().iter().map(|p| p.key).collect();
@@ -271,6 +477,7 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
 /// commands, and the screens' bridge test proves bridge.ts calls and listens with exactly these
 /// names, so a renamed command, argument or event on either side fails a test.
 fn calls() -> Value {
+    use crate::moving::{FINISHED_EVENT, PLAN_EVENT, PROBLEM_EVENT, PROGRESS_EVENT, STAGE_EVENT};
     use crate::pairing::{NEW_EVENT, OLD_EVENT};
     use serde_json::json;
     json!({
@@ -287,8 +494,22 @@ fn calls() -> Value {
             { "name": "pairing_stop", "args": [] },
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
+            { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true]] },
+            { "name": "move_pause", "args": [] },
+            { "name": "move_resume", "args": [] },
+            { "name": "move_stop", "args": [] },
+            { "name": "move_report", "args": [] },
         ],
-        "events": { "old": OLD_EVENT, "new": NEW_EVENT },
+        "events": {
+            "old": OLD_EVENT,
+            "new": NEW_EVENT,
+            "moveStage": STAGE_EVENT,
+            "movePlan": PLAN_EVENT,
+            "moveProgress": PROGRESS_EVENT,
+            "moveFinished": FINISHED_EVENT,
+            "moveProblem": PROBLEM_EVENT,
+        },
     })
 }
 

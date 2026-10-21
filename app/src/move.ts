@@ -1,23 +1,28 @@
 /**
  * The move in progress and its results, as the screens see them (X01, X02, F09, X05, X10, R01, R02).
  *
- * Every screen here is a view model: props in, events out. The move's commands and events are not
- * in the bridge (bridge.ts) yet, so nothing here calls the engine. What the shell must provide:
+ * Every screen here is a view model: props in, events out. The shell's commands and events, called
+ * and parsed in bridge.ts (src-tauri/src/moving.rs):
  *
  * Commands (Tauri `invoke`):
+ * - `move_begin(fallback)`: start this laptop's side with the paired link; `fallback` names, in the
+ *   person's language, the folder in the home that stands for one the new laptop lacks.
+ * - `move_approve(plan, approve)`: the person's answer to exactly the plan revision on screen (M23).
  * - `move_pause()`: ask the move to pause at a safe point, which is a block boundary, not the end
  *   of a file: only what is already on its way finishes first (at most 32 MiB, the transfer's
  *   in-flight limit, IN_FLIGHT_BYTES in crates/pctwin-transfer); the file being written does not.
  *   Replies at once; the state then reads "pausing" until `move-state` says "paused".
  * - `move_resume()`: continue a paused move, or withdraw a pause that has not completed.
  * - `move_stop()`: stop the rest of the move. What is already copied and checked stays. Not undo.
- * - `move_report(filter?)`: the finished move's items, as `ReportItem[]` (paged by the shell for big moves).
+ * - `move_report()`: the finished move's items, as `ReportItem[]` (the screen shows a page at a time).
  * - `set_window_mode("mini" | "everyday" | "expanded")`: exists already (native.ts).
  *
  * Events (Tauri `listen`):
- * - `move-progress`: a `MoveProgress` (the pairing labels, each group's measured counts, the totals), whenever a measured number changes (a few times a second at most).
- * - `move-state`: `{ state: RunState }` when the run state changes.
+ * - `move-stage`: what the move is at before files move (scanning, waiting for the other laptop, moving).
+ * - `move-plan`: the plan for the person to approve (`PlanView`, new laptop only).
+ * - `move-progress`: a `MoveProgress` (the old laptop's label, each group's measured counts, the totals, the run state), whenever a measured number changes (a few times a second at most).
  * - `move-finished`: `MoveOutcome` once nothing is waiting, copying or checking.
+ * - `move-problem`: the move could not go on (the connection was lost, the plan was not approved, or something else).
  *
  * Mirrors: `ItemStatus` and `Reason` in crates/pctwin-types (result.rs), the write steps in
  * crates/pctwin-journal (State), and `CheckedFrom` / `WhyMemory` in the gate's read-back
@@ -106,10 +111,17 @@ export function whyMemoryKey(why: WhyMemory): string {
 }
 
 /**
- * Where the bytes of a check came from (the gate's `CheckedFrom`). Both are real checks; they are
- * never shown as the same line. A file checked through the cache says so, and why.
+ * How a copied file is known to be a true copy. Read back from the drive, or through this laptop's
+ * memory (the gate's `CheckedFrom`, and why); an identical file already on the new laptop; checked
+ * before a restart and proven again after; or, on the old laptop, checked by the new laptop. Each is
+ * its own line; none is shown as another.
  */
-export type Evidence = { from: "drive" } | { from: "memory"; why: WhyMemory };
+export type Evidence =
+  | { from: "drive" }
+  | { from: "memory"; why: WhyMemory }
+  | { from: "already-there" }
+  | { from: "recovered" }
+  | { from: "new-laptop" };
 
 /**
  * A finished item and how it was checked. Only a copied file carries evidence: it was read back,
@@ -176,8 +188,8 @@ export function groupState(c: Counts): GroupState {
 
 export type MoveProgress = {
   state: RunState;
-  /** The two laptops, as pairing labelled them. */
-  laptops: { old: Label; new: Label };
+  /** The old laptop's label as pairing showed it (the new laptop has none of its own); null when not known. */
+  laptops: { old: Label | null };
   /** The groups of the plan, each with its own measured counts. */
   groups: MoveGroup[];
   counts: Counts;
@@ -190,7 +202,7 @@ export type MoveProgress = {
   /** Whole minutes left as a range; absent until it can be measured. Never a promise. */
   minutesLeft?: Range;
   /** Something the person may need to act on. `label` is the laptop that is low on battery. */
-  notice?: { kind: "low-battery"; label: string } | { kind: "link-lost" };
+  notice?: { kind: "low-battery"; label: string } | { kind: "link-lost" } | { kind: "drive-problem"; place: GroupName };
 };
 
 /** A count of zero for every status, to fill in. */

@@ -1,0 +1,17 @@
+[
+  {
+    "kind": "not-paired"
+  },
+  {
+    "kind": "busy"
+  },
+  {
+    "kind": "not-moving"
+  },
+  {
+    "kind": "plan-changed"
+  },
+  {
+    "kind": "failed"
+  }
+]

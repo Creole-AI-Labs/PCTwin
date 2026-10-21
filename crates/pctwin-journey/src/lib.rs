@@ -326,6 +326,11 @@ impl<S: Serving> OldJourney<S> {
         }
     }
 
+    /// The label this laptop is showing now (`None` once it stopped serving).
+    pub fn label(&self) -> Option<Label> {
+        self.serving_now().ok().map(|s| s.label())
+    }
+
     /// Shows a new random colour and animal (Shuffle).
     pub fn shuffle(&self) -> Result<(), Problem> {
         let current = self.serving_now()?.label();

@@ -832,6 +832,9 @@ report-more-details = 更多详情
 
 evidence-read-back = 已从硬盘读回进行检查。
 evidence-memory = 通过这台笔记本电脑的内存检查，而不是硬盘。
+evidence-already-there = 新笔记本电脑上已有：同一个文件已经在那里，所以没有再次复制。
+evidence-recovered = 在笔记本电脑重启前检查过，重启后又检查了一次。
+evidence-new-laptop = 已由新笔记本电脑检查。
 evidence-memory-explain = 副本已读回并且一致，但读取经过了这台笔记本电脑的内存，所以读到的内容可能来自内存而不是硬盘。硬盘本身的故障可能不会在这里显示，所以打开一次文件是个不错的检查方法。
 evidence-not-checked = 未检查，因为没有完成。
 # Machine-translated 16 October 2026.

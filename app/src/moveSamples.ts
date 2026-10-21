@@ -15,8 +15,7 @@ export function counts(partial: Partial<Counts>): Counts {
 }
 
 const old: Label = { kind: "named", name: "Ada’s old laptop" };
-const next: Label = { kind: "picked", colour: "blue", animal: "fox" };
-const laptops = { old, new: next };
+const laptops = { old };
 
 /** Copying, mid-move: some done, some being checked, some waiting. */
 export const running: MoveProgress = {

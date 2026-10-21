@@ -44,10 +44,12 @@ import type { WindowMode } from "./native";
 /* ---------- Names shared with the engine ---------- */
 
 /** What a folder is for (`FolderRole`, kebab-case on the wire). */
-export type FolderRole = "home" | "desktop" | "documents" | "downloads" | "pictures" | "music" | "videos" | "public" | "app-data" | "other";
+export const FOLDER_ROLES = ["home", "desktop", "documents", "downloads", "pictures", "music", "videos", "public", "app-data", "other"] as const;
+export type FolderRole = (typeof FOLDER_ROLES)[number];
 
 /** Why an item is left out (`LeftOutReason`). */
-export type LeftOutReason = "chosen-by-user" | "work-managed" | "device-bound" | "unreadable" | "cloud-only" | "system";
+export const LEFT_OUT_REASONS = ["chosen-by-user", "work-managed", "device-bound", "unreadable", "cloud-only", "system"] as const;
+export type LeftOutReason = (typeof LEFT_OUT_REASONS)[number];
 
 export type CloudProvider = "one-drive" | "i-cloud" | "dropbox" | "google-drive" | "other";
 
@@ -324,6 +326,25 @@ export interface LeftOut {
 /** Why the plan cannot be approved yet (the errors of `Record::approve`). */
 export type PlanBlock = "someone-unmapped" | "account-used-twice" | "invalid";
 
+/**
+ * What the new laptop worked out before anything moves (the engine's `Preview`): whether it fits
+ * (null: the free space could not be read), about how long in whole minutes (null: the link was not
+ * measured), and how many files will not go as they are.
+ */
+export interface PlanPreview {
+  fits: boolean | null;
+  shortBytes: number;
+  minutes: { low: number; high: number } | null;
+  /** Land under a name changed to fit the drive. */
+  renamed: number;
+  /** Bigger than the drive holds in one file: not copied there. */
+  tooBig: number;
+  /** Paths the new laptop refuses: not copied. */
+  refused: number;
+  /** Would land where the new laptop starts programs by itself at sign-in. */
+  runsAtSignIn: number;
+}
+
 /** One revision of the plan, exactly as it will run. Anything that changes it is a new revision and a new fingerprint. */
 export interface PlanView {
   revision: number;
@@ -333,6 +354,8 @@ export interface PlanView {
   leftOut: LeftOut[];
   /** Set when `Record::approve` would refuse. */
   blocked?: PlanBlock;
+  /** Sent by the engine with every plan; absent only in the screens' own samples. */
+  preview?: PlanPreview;
 }
 
 /** Whether the approval the person gave is for exactly this revision, unchanged. */

@@ -1,0 +1,75 @@
+[
+  {
+    "destination": "1.txt",
+    "evidence": {
+      "from": "drive"
+    },
+    "id": "00000000000000000000000000000001",
+    "name": "1.txt",
+    "source": "documents/1.txt",
+    "status": "copied"
+  },
+  {
+    "destination": "2.txt",
+    "evidence": {
+      "from": "memory",
+      "why": "too-small"
+    },
+    "id": "00000000000000000000000000000002",
+    "name": "2.txt",
+    "source": "documents/2.txt",
+    "status": "copied"
+  },
+  {
+    "destination": "6.txt",
+    "evidence": {
+      "from": "already-there"
+    },
+    "id": "00000000000000000000000000000006",
+    "name": "6.txt",
+    "source": "documents/6.txt",
+    "status": "copied"
+  },
+  {
+    "destination": "7.txt",
+    "evidence": {
+      "from": "recovered"
+    },
+    "id": "00000000000000000000000000000007",
+    "name": "7.txt",
+    "source": "documents/7.txt",
+    "status": "copied"
+  },
+  {
+    "destination": "8.txt",
+    "evidence": {
+      "from": "new-laptop"
+    },
+    "id": "00000000000000000000000000000008",
+    "name": "8.txt",
+    "source": "documents/8.txt",
+    "status": "copied"
+  },
+  {
+    "id": "00000000000000000000000000000003",
+    "name": "3.txt",
+    "reason": "unreadable",
+    "source": "documents/3.txt",
+    "status": "failed"
+  },
+  {
+    "destination": "4.txt",
+    "id": "00000000000000000000000000000004",
+    "name": "4.txt",
+    "reason": "online-only",
+    "source": "documents/4.txt",
+    "status": "needs-action"
+  },
+  {
+    "destination": "5.txt",
+    "id": "00000000000000000000000000000005",
+    "name": "5.txt",
+    "source": "documents/5.txt",
+    "status": "skipped-by-user"
+  }
+]

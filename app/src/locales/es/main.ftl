@@ -1031,6 +1031,9 @@ report-more-details = Más detalles
 # Evidence: how a copied item was checked.
 evidence-read-back = Comprobado volviendo a leerlo del disco.
 evidence-memory = Comprobado con la memoria de este portátil, no con el disco.
+evidence-already-there = Ya estaba en el portátil nuevo: el mismo archivo ya estaba allí, así que no se volvió a copiar.
+evidence-recovered = Comprobado antes de que el portátil se reiniciara, y otra vez después.
+evidence-new-laptop = Comprobado por el portátil nuevo.
 evidence-memory-explain = La copia se volvió a leer y coincidía, pero a través de la memoria de este portátil, así que lo leído puede venir de la memoria y no del disco. Un fallo del propio disco podría no verse aquí, así que abrir el archivo una vez es una buena comprobación.
 evidence-not-checked = Sin comprobar, porque no terminó.
 # Machine-translated 16 October 2026.

@@ -99,9 +99,57 @@
         ]
       ],
       "name": "pairing_new_connect"
+    },
+    {
+      "args": [
+        [
+          "fallback",
+          {
+            "music": "From your old laptop/Music"
+          }
+        ]
+      ],
+      "name": "move_begin"
+    },
+    {
+      "args": [
+        [
+          "plan",
+          {
+            "fingerprint": "9f",
+            "revision": 2
+          }
+        ],
+        [
+          "approve",
+          true
+        ]
+      ],
+      "name": "move_approve"
+    },
+    {
+      "args": [],
+      "name": "move_pause"
+    },
+    {
+      "args": [],
+      "name": "move_resume"
+    },
+    {
+      "args": [],
+      "name": "move_stop"
+    },
+    {
+      "args": [],
+      "name": "move_report"
     }
   ],
   "events": {
+    "moveFinished": "move-finished",
+    "movePlan": "move-plan",
+    "moveProblem": "move-problem",
+    "moveProgress": "move-progress",
+    "moveStage": "move-stage",
     "new": "pairing-new",
     "old": "pairing-old"
   }

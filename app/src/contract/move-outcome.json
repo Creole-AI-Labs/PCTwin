@@ -1,0 +1,16 @@
+[
+  {
+    "byStatus": {
+      "converted": 0,
+      "copied": 30,
+      "failed": 2,
+      "needs-action": 1,
+      "reinstalled": 0,
+      "skipped-by-user": 1
+    },
+    "bytesChecked": 1100000,
+    "checkedFromMemory": 3,
+    "notCopied": 0,
+    "stopped": false
+  }
+]

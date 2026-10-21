@@ -13,6 +13,7 @@ mod contract;
 mod info_plist;
 #[cfg(test)]
 mod lockdown;
+mod moving;
 mod pairing;
 
 use serde::Deserialize;
@@ -180,6 +181,12 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         pairing::pairing_stop,
         pairing::pairing_new_search,
         pairing::pairing_new_connect,
+        moving::move_begin,
+        moving::move_approve,
+        moving::move_pause,
+        moving::move_resume,
+        moving::move_stop,
+        moving::move_report,
     ]
 }
 
@@ -208,6 +215,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(pairing::new_state())
+        .manage(moving::new_state())
         .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens

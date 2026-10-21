@@ -130,25 +130,29 @@ export function GroupRows({ groups }: { groups: MoveGroup[] }) {
   );
 }
 
-/** "Old laptop → New laptop": the two names pairing gave them, each in its own direction. */
+/**
+ * "Old laptop → New laptop": the old laptop by the label pairing showed (in its own direction), when
+ * known. The new laptop has no label of its own, so it is named by its part in the move.
+ */
 export function RouteStrip({ laptops }: { laptops: MoveProgress["laptops"] }) {
   const { l10n } = useLocalization();
   return (
     <div className="mv-route">
       <span className="mv-laptop">
         <Laptop className="mv-icon" />
-        <span>
-          <bdi dir="auto">{labelText(l10n, laptops.old)}</bdi>
-          <small>{l10n.getString("progress-route-old")}</small>
-        </span>
+        {laptops.old ? (
+          <span>
+            <bdi dir="auto">{labelText(l10n, laptops.old)}</bdi>
+            <small>{l10n.getString("progress-route-old")}</small>
+          </span>
+        ) : (
+          <span>{l10n.getString("progress-route-old")}</span>
+        )}
       </span>
       <ArrowForward className="mv-icon mv-arrow" />
       <span className="mv-laptop">
         <Laptop className="mv-icon" />
-        <span>
-          <bdi dir="auto">{labelText(l10n, laptops.new)}</bdi>
-          <small>{l10n.getString("progress-route-new")}</small>
-        </span>
+        <span>{l10n.getString("progress-route-new")}</span>
       </span>
       <Badge tone="good" icon={<Lock className="mv-icon" />}>
         {l10n.getString("progress-paired")}
@@ -247,7 +251,16 @@ export function ReasonText({ reason }: { reason: Reason }) {
   );
 }
 
-/** How a copied file was checked: read back from the drive, or from this laptop's memory. Two different lines. */
+/** Each way a copy is known to be true has its own words. */
+const EVIDENCE_KEY: Record<Evidence["from"], string> = {
+  drive: "evidence-read-back",
+  memory: "evidence-memory",
+  "already-there": "evidence-already-there",
+  recovered: "evidence-recovered",
+  "new-laptop": "evidence-new-laptop",
+};
+
+/** How a copied file was checked: read back from the drive, or from this laptop's memory, and so on. Each a different line. */
 export function EvidenceLine({ outcome }: { outcome: Outcome }) {
   if (outcome.status === "failed") {
     return (
@@ -257,10 +270,11 @@ export function EvidenceLine({ outcome }: { outcome: Outcome }) {
     );
   }
   if (outcome.status !== "copied") return null;
-  const memory = outcome.evidence.from === "memory";
+  const from = outcome.evidence.from;
+  const memory = from === "memory";
   return (
-    <Localized id={memory ? "evidence-memory" : "evidence-read-back"}>
-      <p className={memory ? "mv-evidence mv-evidence-memory" : "mv-evidence"} data-evidence={outcome.evidence.from} />
+    <Localized id={EVIDENCE_KEY[from]}>
+      <p className={memory ? "mv-evidence mv-evidence-memory" : "mv-evidence"} data-evidence={from} />
     </Localized>
   );
 }

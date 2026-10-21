@@ -889,6 +889,9 @@ report-more-details = More details
 # Evidence: how a copied item was checked.
 evidence-read-back = Checked by reading it back from the drive.
 evidence-memory = Checked from this laptop’s memory, not the drive.
+evidence-already-there = Already on the new laptop: the same file was there, so it was not copied again.
+evidence-recovered = Checked before the laptop restarted, and checked again after.
+evidence-new-laptop = Checked by the new laptop.
 evidence-memory-explain = The copy was read back and matched, but through this laptop’s memory, so what was read may have come from memory rather than the drive. A fault in the drive itself might not show here, so opening the file once is a good check.
 evidence-not-checked = Not checked, because it did not finish.
 # Why a copied file was checked from memory, one line under the explanation above (the gate's WhyMemory).

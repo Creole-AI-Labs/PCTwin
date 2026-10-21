@@ -5,8 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import calls from "./contract/shell/calls.json";
 import {
   FAILED,
+  listenMove,
   listenPairingNew,
   listenPairingOld,
+  moveApprove,
+  moveBegin,
+  movePause,
+  moveReport,
+  moveResume,
+  moveStop,
   pairingHeadsUp,
   pairingNewConnect,
   pairingNewSearch,
@@ -142,7 +149,9 @@ describe("nothing unchecked reaches a screen", () => {
 
 describe("the engine's names (contract/shell/calls.json, written by the engine)", () => {
   it("every command is called by its own name with exactly its own arguments", async () => {
-    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "pairing_new_search" || command === "pairing_heads_up" ? [] : command === "pairing_new_connect" ? 42 : null));
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "pairing_new_search" || command === "pairing_heads_up" || command === "move_report" ? [] : command === "pairing_new_connect" ? 42 : null),
+    );
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     try {
       await setWindowMode("mini");
@@ -157,6 +166,12 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingStop();
       await pairingNewSearch();
       await pairingNewConnect(0, "123456");
+      await moveBegin({ music: "From your old laptop/Music" });
+      await moveApprove({ revision: 2, fingerprint: "9f" }, true);
+      await movePause();
+      await moveResume();
+      await moveStop();
+      await moveReport();
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
@@ -169,6 +184,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
   it("the screens listen to the engine's own events", async () => {
     await listenPairingOld(() => undefined);
     await listenPairingNew(() => undefined);
-    expect([...tauri.handlers.keys()].sort()).toEqual([calls.events.old, calls.events.new].sort());
+    await listenMove(() => undefined);
+    expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
   });
 });

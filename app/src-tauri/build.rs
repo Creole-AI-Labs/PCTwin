@@ -14,6 +14,12 @@ const COMMANDS: &[&str] = &[
     "pairing_stop",
     "pairing_new_search",
     "pairing_new_connect",
+    "move_begin",
+    "move_approve",
+    "move_pause",
+    "move_resume",
+    "move_stop",
+    "move_report",
 ];
 
 fn main() {

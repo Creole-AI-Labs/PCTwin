@@ -1035,6 +1035,9 @@ report-more-details = Mais detalhes
 # Evidence: how a copied item was checked.
 evidence-read-back = Verificado lendo a cópia de volta do disco.
 evidence-memory = Verificado pela memória deste notebook, não pelo disco.
+evidence-already-there = Já estava no notebook novo: o mesmo arquivo já estava lá, então não foi copiado de novo.
+evidence-recovered = Verificado antes de o notebook reiniciar, e verificado de novo depois.
+evidence-new-laptop = Verificado pelo notebook novo.
 evidence-memory-explain = A cópia foi lida de volta e era igual, mas pela memória deste notebook, então o que foi lido pode ter vindo da memória e não do disco. Um defeito no próprio disco pode não aparecer aqui, então abrir o arquivo uma vez é uma boa verificação.
 evidence-not-checked = Não verificado, porque não terminou.
 # Machine-translated 16 October 2026.

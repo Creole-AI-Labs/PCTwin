@@ -239,10 +239,11 @@ describe("X01 Move progress, compact", () => {
     const bar = screen.getByRole("progressbar", { name: attribute("progress-percent", "aria-label") });
     expect(bar.getAttribute("aria-valuenow")).toBe("68"); // 81.6 of 120 GB
     expect(screen.getByText(hasText("81.6 GB of 120 GB"))).toBeTruthy();
-    // The route: both laptops by the names pairing gave them, then each group with its own state.
+    // The route: the old laptop by the name pairing gave it, the new one by its part (it has no
+    // label of its own), then each group with its own state.
     expect(screen.getByText("Ada’s old laptop")).toBeTruthy();
-    expect(screen.getByText(withText(text("label-picked", { colour: text("label-colour-blue"), animal: text("label-animal-fox") })))).toBeTruthy();
     expect(screen.getByText(text("progress-route-old"))).toBeTruthy();
+    expect(screen.getByText(text("progress-route-new"))).toBeTruthy();
     expect(screen.getByText(text("progress-paired"))).toBeTruthy();
     expect(within(groupRow("Documents")).getByText(text("progress-state-verified"))).toBeTruthy();
     expect(within(groupRow("Pictures")).getByText(text("progress-state-checking"))).toBeTruthy();

@@ -39,10 +39,18 @@ enum Side<S: Serving> {
     New(JoinHandle<()>),
     /// Paired: the link for the move, and the watch that lets it go if it dies before then.
     Paired {
-        #[expect(dead_code, reason = "kept for the move, which takes it when it starts")]
         link: Box<Link>,
         watch: JoinHandle<()>,
+        paired: PairedWith,
     },
+}
+
+/// Which laptop this one is in the move, and the old laptop's label as pairing showed it (on
+/// both laptops: the new laptop has no label of its own).
+#[derive(Debug, Clone)]
+pub struct PairedWith {
+    pub old: bool,
+    pub label: Option<Label>,
 }
 
 struct Inner<S: Serving> {
@@ -158,11 +166,13 @@ impl<S: Serving> Pairing<S> {
                 _ => return Err(Problem::Failed),
             }
         };
+        let label = journey.label();
         let link = journey.pick(round, number).await?;
         let paired = tell.clone();
         self.keep(
             epoch,
             link,
+            PairedWith { old: true, label },
             move || paired(OldView::Paired),
             move || tell(OldView::Lost),
         )
@@ -177,6 +187,7 @@ impl<S: Serving> Pairing<S> {
         self: &Arc<Self>,
         epoch: u64,
         link: Link,
+        with: PairedWith,
         paired: impl FnOnce(),
         lost: impl FnOnce() + Send + 'static,
     ) -> Result<(), Problem> {
@@ -203,9 +214,31 @@ impl<S: Serving> Pairing<S> {
         inner.side = Side::Paired {
             link: Box::new(link),
             watch,
+            paired: with,
         };
         paired();
         Ok(())
+    }
+
+    /// The paired link, taken by the move (once): its watch ends, and pairing is left, so a later
+    /// pairing starts afresh. `None` when this laptop is not paired.
+    pub async fn take_link(&self) -> Option<(Link, PairedWith)> {
+        let mut inner = self.inner.lock().await;
+        if !matches!(inner.side, Side::Paired { .. }) {
+            return None;
+        }
+        inner.epoch += 1;
+        match std::mem::replace(&mut inner.side, Side::Idle) {
+            Side::Paired {
+                link,
+                watch,
+                paired,
+            } => {
+                watch.abort();
+                Some((*link, paired))
+            }
+            _ => None,
+        }
     }
 
     /// Leaves pairing: the old laptop stops listening and announcing, the new laptop stops
@@ -228,12 +261,24 @@ impl<S: Serving> Pairing<S> {
         matches!(self.inner.lock().await.side, Side::Paired { .. })
     }
 
-    /// The new laptop connects with `connect` and returns the number to show; the approval (or
-    /// the attempt's end, or later the link dying before the move) goes to `tell`. Only when
-    /// this laptop is doing nothing in pairing.
+    /// [`begin_new_to`](Self::begin_new_to), with no label for the old laptop.
+    #[cfg(test)]
     async fn begin_new(
         self: &Arc<Self>,
         connect: impl Future<Output = Result<Waiting, Problem>>,
+        tell: Tell<NewView>,
+    ) -> Result<u8, Problem> {
+        self.begin_new_to(connect, None, tell).await
+    }
+
+    /// The new laptop connects with `connect` and returns the number to show; the approval (or
+    /// the attempt's end, or later the link dying before the move) goes to `tell`. Only when
+    /// this laptop is doing nothing in pairing. `old_label` is
+    /// the old laptop's label, kept for the move's screens.
+    async fn begin_new_to(
+        self: &Arc<Self>,
+        connect: impl Future<Output = Result<Waiting, Problem>>,
+        old_label: Option<Label>,
         tell: Tell<NewView>,
     ) -> Result<u8, Problem> {
         let epoch = self.reserve().await?;
@@ -258,6 +303,10 @@ impl<S: Serving> Pairing<S> {
                         .keep(
                             epoch,
                             link,
+                            PairedWith {
+                                old: false,
+                                label: old_label,
+                            },
                             move || paired(NewView::Paired),
                             move || lost(NewView::Lost),
                         )
@@ -674,8 +723,9 @@ pub async fn pairing_new_connect<R: Runtime>(
         let _ = app.emit(NEW_EVENT, view);
     });
     let number = state
-        .begin_new(
+        .begin_new_to(
             async { NewJourney::new(config()).connect(&old, &code).await },
+            Some(old.label.clone()),
             tell,
         )
         .await?;

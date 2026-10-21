@@ -1040,6 +1040,9 @@ report-more-details = Plus de détails
 # Evidence: how a copied item was checked.
 evidence-read-back = Vérifié en le relisant depuis le disque.
 evidence-memory = Vérifié depuis la mémoire de cet ordinateur portable, pas depuis le disque.
+evidence-already-there = Déjà sur le nouvel ordinateur portable : le même fichier y était, il n’a donc pas été recopié.
+evidence-recovered = Vérifié avant le redémarrage de l’ordinateur portable, puis de nouveau après.
+evidence-new-laptop = Vérifié par le nouvel ordinateur portable.
 evidence-memory-explain = La copie a été relue et correspondait, mais via la mémoire de cet ordinateur portable : ce qui a été lu venait peut-être de la mémoire plutôt que du disque. Un défaut du disque lui-même pourrait ne pas se voir ici, alors ouvrir le fichier une fois est une bonne vérification.
 evidence-not-checked = Non vérifié, car il n’a pas été terminé.
 # Machine-translated 16 October 2026.

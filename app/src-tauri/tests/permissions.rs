@@ -16,7 +16,8 @@
 //! granted one is sent arguments of the wrong type, so it stops before doing anything. Two granted
 //! commands are checked differently: `set_window_mode` really runs (it resizes the mock window),
 //! and `pairing_new_search`, which takes no arguments and would search the network, is checked on
-//! the resolved permissions only.
+//! the resolved permissions only. The move's commands that take no arguments (pause, resume, stop,
+//! report) do run, and find no move to act on.
 
 use std::collections::BTreeSet;
 
@@ -27,10 +28,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 15 names: the app's twelve commands, listening to and
+/// Exactly what the screens may call, 21 names: the app's eighteen commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 15] = [
+const SCREENS_MAY_CALL: [&str; 21] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -43,6 +44,12 @@ const SCREENS_MAY_CALL: [&str; 15] = [
     "pairing_stop",
     "pairing_new_search",
     "pairing_new_connect",
+    "move_begin",
+    "move_approve",
+    "move_pause",
+    "move_resume",
+    "move_stop",
+    "move_report",
     "plugin:event|listen",
     "plugin:event|unlisten",
     "plugin:opener|open_url",
@@ -203,6 +210,8 @@ fn wrong_arguments(cmd: &str) -> Value {
         "pairing_old_decline" => json!({ "round": "x" }),
         "pairing_old_rename" => json!({ "name": 7 }),
         "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
+        "move_begin" => json!({ "fallback": 1 }),
+        "move_approve" => json!({ "plan": 1, "approve": "x" }),
         "plugin:event|listen" | "plugin:event|unlisten" => json!({ "event": 1 }),
         _ => json!({}),
     }

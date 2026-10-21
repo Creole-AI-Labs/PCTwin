@@ -1,0 +1,11 @@
+[
+  {
+    "kind": "scanning"
+  },
+  {
+    "kind": "waiting"
+  },
+  {
+    "kind": "moving"
+  }
+]

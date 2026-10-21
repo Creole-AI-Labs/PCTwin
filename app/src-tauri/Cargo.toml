@@ -27,16 +27,20 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 pctwin-discovery = { path = "../../crates/pctwin-discovery" }
 pctwin-doctor = { path = "../../crates/pctwin-doctor" }
+pctwin-gate = { path = "../../crates/pctwin-gate" }
+pctwin-journal = { path = "../../crates/pctwin-journal" }
 pctwin-journey = { path = "../../crates/pctwin-journey" }
 pctwin-link = { path = "../../crates/pctwin-link" }
+pctwin-move = { path = "../../crates/pctwin-move" }
+pctwin-record = { path = "../../crates/pctwin-record" }
+pctwin-scan = { path = "../../crates/pctwin-scan" }
 pctwin-session = { path = "../../crates/pctwin-session" }
 # `listed_enum!`: the views the screens are sent, declared with the list of their variants.
+pctwin-transfer = { path = "../../crates/pctwin-transfer" }
 pctwin-types = { path = "../../crates/pctwin-types" }
-tokio = { version = "1.53.2", features = ["sync"] }
+tokio = { version = "1.53.2", features = ["rt", "sync", "time"] }
 
 [dev-dependencies]
-# The evidence shape the screens are tested against (src/contract.rs).
-pctwin-gate = { path = "../../crates/pctwin-gate" }
 pctwin-pairing = { path = "../../crates/pctwin-pairing" }
 # The real permission check on a mock runtime (tests/permissions.rs). Tests only; no new crate.
 tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon", "test"] }
