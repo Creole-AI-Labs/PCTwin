@@ -75,6 +75,14 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // One move at a time: held until this program ends.
+    let _lock = match pctwin_helper::lock::one_helper(&pctwin_helper::lock::lock_path()) {
+        Ok(l) => l,
+        Err(why) => {
+            eprintln!("pctwin-helper: {why}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {

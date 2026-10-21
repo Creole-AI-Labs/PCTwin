@@ -147,6 +147,9 @@ pub enum TransferError {
     /// The file is stored online only on the old laptop; reading it would download it.
     #[error("it is stored online only on the old laptop, so it was not downloaded to be moved")]
     OnlineOnly,
+    /// Another program has the file open for writing on the old laptop, so it was not read.
+    #[error("another program has it open on the old laptop, so it was not read")]
+    InUse,
     #[error("a block was damaged: {0}")]
     Damaged(String),
     #[error("expected block {expected}, got block {got}")]
@@ -479,6 +482,12 @@ impl Opener for FsOpener {
 #[error("it is stored online only, so it was not opened")]
 pub struct OnlineOnly;
 
+/// What an [`Opener`] says (as the error inside an `io::Error`) for a file another program has
+/// open for writing, which it did not read, so no copy is torn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("another program has it open, so it was not read")]
+pub struct InUse;
+
 /// Reads one file once, in order, as blocks, skipping blocks the receiver already has.
 pub struct FileSender {
     file: Box<dyn Source>,
@@ -512,6 +521,8 @@ impl FileSender {
         let mut file = opener.open(path).map_err(|e| {
             if e.get_ref().is_some_and(|inner| inner.is::<OnlineOnly>()) {
                 TransferError::OnlineOnly
+            } else if e.get_ref().is_some_and(|inner| inner.is::<InUse>()) {
+                TransferError::InUse
             } else {
                 TransferError::Io(e)
             }

@@ -12,6 +12,7 @@
 //! `pctwin-helper-os`; everything here is safe Rust.
 
 pub mod client;
+pub mod lock;
 pub mod person;
 pub mod protocol;
 pub mod read;

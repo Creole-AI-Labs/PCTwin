@@ -26,6 +26,9 @@ pub enum Cause {
     /// It was no longer on the old laptop when the move reached it (removed or moved since the
     /// scan).
     NoLongerThere,
+    /// Another program had it open for writing, so it was not read (never a torn copy); it can
+    /// be moved again once that program closes it.
+    InUse,
     /// It is stored online only on the old laptop, and is never downloaded to be moved.
     OnlineOnly,
     /// It could not be checked as a true copy (damaged on the way, or stored wrong).
@@ -108,7 +111,7 @@ impl From<Refusal> for Failure {
 
 /// The old laptop's word for why it did not send a planned file ([`Message::NotSent`]): only
 /// what the old laptop can know, each with the words the new laptop shows.
-const SAID_BY_THE_OLD_LAPTOP: [(Cause, u8, &str); 5] = [
+const SAID_BY_THE_OLD_LAPTOP: [(Cause, u8, &str); 6] = [
     (
         Cause::NoLongerThere,
         0,
@@ -129,6 +132,11 @@ const SAID_BY_THE_OLD_LAPTOP: [(Cause, u8, &str); 5] = [
         Cause::NotVerified,
         4,
         "the old laptop could not read it the same way twice, so it was not sent",
+    ),
+    (
+        Cause::InUse,
+        5,
+        "another program had it open on the old laptop, so it was not sent; move it again once it is closed",
     ),
 ];
 
@@ -154,6 +162,7 @@ impl Cause {
         match e {
             TransferError::Io(io) => Self::of_io(io, side),
             TransferError::OnlineOnly => Self::OnlineOnly,
+            TransferError::InUse => Self::InUse,
             TransferError::Damaged(_)
             | TransferError::OutOfOrder { .. }
             | TransferError::Incomplete { .. }

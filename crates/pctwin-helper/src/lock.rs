@@ -1,0 +1,55 @@
+//! One helper per laptop: one mover's move at a time (Security Design part C, "serve a second
+//! session"). The helper holds an exclusive lock on one file for as long as it runs; a second
+//! helper finds it held and ends before it makes a channel. The system lets the lock go when the
+//! helper ends, however it ends.
+
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+
+/// Where the lock is: a folder only the system and administrators write in normal use.
+pub fn lock_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        let data = std::env::var_os("ProgramData").unwrap_or_else(|| r"C:\ProgramData".into());
+        PathBuf::from(data).join("PCTwin").join("helper.lock")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/run/pctwin-helper.lock")
+    }
+}
+
+/// Takes the lock at `path` (its folder made if missing), or says another helper holds it.
+pub fn one_helper(path: &Path) -> Result<File, String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("the lock's folder: {e}"))?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("the lock: {e}"))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            Err("another PCTwin move is already using the helper on this laptop".into())
+        }
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("the lock: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_helper_finds_the_lock_held_until_the_first_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.lock");
+        let first = one_helper(&path).unwrap();
+        assert!(one_helper(&path).is_err());
+        drop(first);
+        assert!(one_helper(&path).is_ok());
+    }
+}

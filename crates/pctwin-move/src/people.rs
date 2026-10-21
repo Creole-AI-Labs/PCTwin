@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use pctwin_helper::protocol::MAX_READ;
 use pctwin_helper::{Client, ClientError, Refusal, Scanned};
 use pctwin_record::{ItemId, Record};
-use pctwin_transfer::{FsOpener, OnlineOnly, Opener, Source, Stamp};
+use pctwin_transfer::{FsOpener, InUse, OnlineOnly, Opener, Source, Stamp};
 
 /// The start of a source that names a helper handle. It is not a path any system makes (a
 /// relative name with a colon, which Windows refuses and no scan produces), and only the
@@ -102,6 +102,7 @@ struct HelperFile<S: Read + Write + Send> {
 fn as_io(e: ClientError) -> io::Error {
     match e {
         ClientError::Refused(Refusal::OnlineOnly) => io::Error::other(OnlineOnly),
+        ClientError::Refused(Refusal::InUse) => io::Error::other(InUse),
         ClientError::Refused(Refusal::Gone) => {
             io::Error::new(io::ErrorKind::NotFound, Refusal::Gone.to_string())
         }
