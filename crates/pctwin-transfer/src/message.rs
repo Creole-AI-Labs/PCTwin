@@ -136,6 +136,9 @@ pub enum GiveUpWhy {
     AskedAgainTooOften,
     /// It was read as many times as any file may be in one move.
     ReadTooOften,
+    /// The old laptop could not read the rest of it (move protocol 4 and later; before, it said
+    /// the file changed).
+    Unreadable,
 }
 
 const START: u8 = 1;
@@ -230,6 +233,7 @@ impl Message {
                 w.push(match why {
                     GiveUpWhy::AskedAgainTooOften => 0,
                     GiveUpWhy::ReadTooOften => 1,
+                    GiveUpWhy::Unreadable => 2,
                 });
             }
             Message::Hold { paused } => {
@@ -373,6 +377,7 @@ impl Message {
                 why: match r.u8()? {
                     0 => GiveUpWhy::AskedAgainTooOften,
                     1 => GiveUpWhy::ReadTooOften,
+                    2 => GiveUpWhy::Unreadable,
                     _ => return Err(damaged("unknown reason for stopping")),
                 },
             },

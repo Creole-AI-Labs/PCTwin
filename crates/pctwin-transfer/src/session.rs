@@ -1214,10 +1214,18 @@ impl SenderSession {
                     failure: Some(Failure::of(&e, Side::Old)),
                     later: false,
                 };
-                Message::EndFile {
-                    stream,
-                    stamp_after: stamp,
-                    changed: true,
+                if self.version >= KEYED_SINCE {
+                    // Said as it is: it could not be read, never "it changed".
+                    Message::GiveUp {
+                        stream,
+                        why: GiveUpWhy::Unreadable,
+                    }
+                } else {
+                    Message::EndFile {
+                        stream,
+                        stamp_after: stamp,
+                        changed: true,
+                    }
                 }
             }
         }
@@ -1372,14 +1380,6 @@ impl SenderSession {
         let stamp = reader.header().stamp;
         let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
         let retry = matches!(e, TransferError::ChangedWhileRead) && self.budget.try_again_later();
-        self.push_end(
-            job,
-            Message::EndFile {
-                stream: self.streams[job],
-                stamp_after: stamp,
-                changed: true,
-            },
-        );
         self.scheduler.finished(self.jobs[job].item);
         // Ended first, so stopping reading (if this was one error too many) leaves it be.
         *self.states.slot(job) = SendState::Ended {
@@ -1388,9 +1388,31 @@ impl SenderSession {
             later: false,
         };
         let later = drive && self.read_failed(job);
+        let failure = (!retry && !later).then(|| Failure::of(&e, Side::Old));
+        let stream = self.streams[job];
+        // A file that could not be read ends as that (move protocol 4), never as "it changed";
+        // one tried again later, or that really changed, ends as changed and starts afresh.
+        let unreadable = self.version >= KEYED_SINCE
+            && failure.is_some()
+            && !matches!(e, TransferError::ChangedWhileRead);
+        self.push_end(
+            job,
+            if unreadable {
+                Message::GiveUp {
+                    stream,
+                    why: GiveUpWhy::Unreadable,
+                }
+            } else {
+                Message::EndFile {
+                    stream,
+                    stamp_after: stamp,
+                    changed: true,
+                }
+            },
+        );
         *self.states.slot(job) = SendState::Ended {
             retry,
-            failure: (!retry && !later).then(|| Failure::of(&e, Side::Old)),
+            failure,
             later,
         };
     }
@@ -3054,9 +3076,10 @@ impl<'d> ReceiverSession<'d> {
             Message::Skip { stream } => return self.skipped(stream, replies),
             Message::GiveUp { stream, why } => {
                 // The old laptop stopped sending this file: it fails, with the true reason.
-                let why = match why {
-                    GiveUpWhy::AskedAgainTooOften => GAVE_UP,
-                    GiveUpWhy::ReadTooOften => READ_TOO_OFTEN,
+                let (cause, why) = match why {
+                    GiveUpWhy::AskedAgainTooOften => (Cause::NotVerified, GAVE_UP),
+                    GiveUpWhy::ReadTooOften => (Cause::NotVerified, READ_TOO_OFTEN),
+                    GiveUpWhy::Unreadable => (Cause::Unreadable, UNREADABLE_THERE),
                 };
                 if let Some(s) = self.streams.remove(&stream) {
                     drop(s.assembly);
@@ -3065,7 +3088,7 @@ impl<'d> ReceiverSession<'d> {
                     self.end(
                         s.item,
                         stream,
-                        ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, why)),
+                        ReceiveOutcome::Failed(Failure::new(cause, why)),
                         None,
                     );
                 }
@@ -3792,6 +3815,7 @@ const NOT_STORED_HERE: &str =
     "This laptop could not store this file correctly. Your original is untouched.";
 const SENT_DAMAGED: &str = "The old laptop sent it damaged each time. Your original is untouched.";
 
+const UNREADABLE_THERE: &str = "the old laptop could not read the rest of it, so it was not copied. Your original is untouched";
 const GAVE_UP: &str = "parts of it kept arriving damaged or being stored wrong, so it was not finished. Your original is untouched";
 
 /// How many times a file's missing or wrongly stored blocks are asked for again before it fails.
