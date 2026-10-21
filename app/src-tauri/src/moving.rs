@@ -45,6 +45,8 @@ pub const PROBLEM_EVENT: &str = "move-problem";
 
 /// How often the screens are sent the progress.
 const TICK: Duration = Duration::from_millis(400);
+/// How often the battery is read during a move.
+const POWER_EVERY: Duration = Duration::from_secs(15);
 /// The longest name (in bytes) for the folder that stands for one the new laptop lacks.
 const MAX_FALLBACK: usize = 255;
 
@@ -469,6 +471,9 @@ pub struct Current {
 pub enum Notice {
     /// The drive of this place is not keeping files correctly: the move is held (X07).
     DriveProblem { place: GroupName },
+    /// This laptop is low on battery; at the safe limit the move was paused for it (the person
+    /// carries on once it is plugged in).
+    LowBattery { paused: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -512,10 +517,20 @@ fn group_name(label: &str) -> GroupName {
     }
 }
 
+/// What this laptop's battery means for the move: nothing, a warning, or a safe pause.
+fn battery_notice(advice: pctwin_power::BatteryAdvice) -> Option<Notice> {
+    match advice {
+        pctwin_power::BatteryAdvice::PlugIn => Some(Notice::LowBattery { paused: false }),
+        pctwin_power::BatteryAdvice::PauseNow => Some(Notice::LowBattery { paused: true }),
+        pctwin_power::BatteryAdvice::Fine | pctwin_power::BatteryAdvice::OnBattery => None,
+    }
+}
+
 fn progress_view(
     snap: &pctwin_transfer::MeterSnapshot,
     paused_asked: bool,
     braked: Option<String>,
+    battery: Option<Notice>,
     laptops: &Laptops,
     names: &HashMap<ItemId, String>,
 ) -> MoveProgress {
@@ -557,9 +572,12 @@ fn progress_view(
             TimeLeft::About { seconds } => Some(one(seconds.div_ceil(60))),
             _ => None,
         },
-        notice: braked.map(|place| Notice::DriveProblem {
-            place: group_name(&place),
-        }),
+        // A drive that is not keeping files is the more urgent of the two.
+        notice: braked
+            .map(|place| Notice::DriveProblem {
+                place: group_name(&place),
+            })
+            .or(battery),
     }
 }
 
@@ -889,11 +907,29 @@ fn tick<R: Runtime>(
 ) {
     tauri::async_runtime::spawn(async move {
         let mut last = None;
+        let mut battery = None;
+        let mut power_read: Option<std::time::Instant> = None;
+        let mut paused_for_power = false;
         while !done.load(Ordering::Acquire) {
+            if power_read.is_none_or(|t| t.elapsed() >= POWER_EVERY) {
+                power_read = Some(std::time::Instant::now());
+                if let Ok(power) =
+                    tauri::async_runtime::spawn_blocking(pctwin_power::power_now).await
+                {
+                    let advice = pctwin_power::advise(&power);
+                    // At the safe limit the move pauses once; carrying on is the person's choice.
+                    if advice == pctwin_power::BatteryAdvice::PauseNow && !paused_for_power {
+                        live.control.pause();
+                        paused_for_power = true;
+                    }
+                    battery = battery_notice(advice);
+                }
+            }
             let view = progress_view(
                 &live.meter.snapshot(),
                 live.control.paused(),
                 live.control.braked(),
+                battery.clone(),
                 &laptops,
                 &lock(&names),
             );
@@ -1063,6 +1099,13 @@ fn spawn_run<R: Runtime>(
     std::thread::Builder::new()
         .name("pctwin-move".into())
         .spawn(move || {
+            // Held for the whole move: the laptop does not sleep while idle (the person's own
+            // sleep, closing the lid, is never blocked). On battery the screen stays on too, or
+            // some laptops stop honouring the request.
+            let _awake = pctwin_power::stay_awake(
+                "Moving files with PCTwin",
+                pctwin_power::power_now().on_battery,
+            );
             let ran = runtime.block_on(async {
                 match setup {
                     Some(setup) => run_new(&app, moving.clone(), link, &live, setup, names).await,
@@ -1386,7 +1429,7 @@ mod tests {
         let names = HashMap::new();
         let mut snap = pctwin_transfer::MoveMeter::default().snapshot();
         let state = |s: &pctwin_transfer::MeterSnapshot, asked| {
-            progress_view(s, asked, None, &laptops, &names).state
+            progress_view(s, asked, None, None, &laptops, &names).state
         };
         assert_eq!(state(&snap, false), RunState::Running);
         assert_eq!(state(&snap, true), RunState::Pausing);
@@ -1395,7 +1438,14 @@ mod tests {
         snap.reading.paused_here = false;
         snap.reading.paused_there = true;
         assert_eq!(state(&snap, false), RunState::Paused);
-        let braked = progress_view(&snap, false, Some("pictures".into()), &laptops, &names);
+        let braked = progress_view(
+            &snap,
+            false,
+            Some("pictures".into()),
+            Some(Notice::LowBattery { paused: false }),
+            &laptops,
+            &names,
+        );
         assert_eq!(
             braked.notice,
             Some(Notice::DriveProblem {
@@ -1487,6 +1537,26 @@ mod tests {
             }]
         );
         assert!(!serde_json::to_string(&view).unwrap().contains("secret"));
+    }
+
+    #[test]
+    fn a_low_battery_warns_then_pauses_and_a_drive_problem_comes_first() {
+        use pctwin_power::BatteryAdvice;
+        assert_eq!(battery_notice(BatteryAdvice::Fine), None);
+        assert_eq!(battery_notice(BatteryAdvice::OnBattery), None);
+        assert_eq!(
+            battery_notice(BatteryAdvice::PlugIn),
+            Some(Notice::LowBattery { paused: false })
+        );
+        assert_eq!(
+            battery_notice(BatteryAdvice::PauseNow),
+            Some(Notice::LowBattery { paused: true })
+        );
+        let snap = pctwin_transfer::MoveMeter::default().snapshot();
+        let laptops = Laptops { old: None };
+        let low = Some(Notice::LowBattery { paused: false });
+        let view = progress_view(&snap, false, None, low.clone(), &laptops, &HashMap::new());
+        assert_eq!(view.notice, low);
     }
 
     #[test]

@@ -973,7 +973,8 @@ progress-needs-action =
     }
 progress-see-needs-action = Voir les actions à faire
 progress-interrupted = La connexion avec l’autre ordinateur portable a été coupée. PCTwin essaie de se reconnecter. Rien de ce qui a été copié et vérifié n’est perdu.
-progress-low-battery = La batterie de { $label } est faible. Branchez-le pour que le transfert ne soit pas interrompu.
+progress-low-battery = La batterie de ce portable est faible. Branchez-le pour que le transfert ne s’interrompe pas.
+progress-battery-paused = La batterie de ce portable est presque vide : le transfert est en pause, en toute sécurité. Branchez-le, puis continuez. Rien n’est perdu.
 progress-old-safe = Votre ancien ordinateur portable reste inchangé.
 progress-pause = Mettre en pause
 progress-compact = Vue compacte

@@ -759,7 +759,8 @@ progress-needs-action =
     }
 progress-see-needs-action = 查看需要你处理的项目
 progress-interrupted = 与另一台笔记本电脑的连接已断开。PCTwin正在尝试重新连接。已复制并检查的内容都不会丢失。
-progress-low-battery = { $label }的电池电量不足。请插上电源，以免迁移被打断。
+progress-low-battery = 这台笔记本电脑电量不足。请接上电源，以免移动中断。
+progress-battery-paused = 这台笔记本电脑电量快用完了，所以移动已安全暂停。接上电源后继续即可。不会丢失任何内容。
 progress-old-safe = 你的旧笔记本电脑保持原样。
 progress-pause = 暂停迁移
 progress-compact = 精简显示

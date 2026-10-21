@@ -968,7 +968,8 @@ progress-needs-action =
     }
 progress-see-needs-action = Ver o que precisa de você
 progress-interrupted = A conexão com o outro notebook caiu. O PCTwin está tentando reconectar. Nada do que foi copiado e verificado se perde.
-progress-low-battery = { $label } está com pouca bateria. Ligue o notebook na tomada para que a mudança não seja interrompida.
+progress-low-battery = A bateria deste notebook está fraca. Ligue-o na tomada para a transferência não parar.
+progress-battery-paused = A bateria deste notebook está quase acabando, então a transferência foi pausada com segurança. Ligue-o na tomada e depois continue. Nada se perde.
 progress-old-safe = Seu notebook antigo continua como está.
 progress-pause = Pausar mudança
 progress-compact = Manter compacto

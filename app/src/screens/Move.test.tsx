@@ -158,6 +158,8 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("button", { name: text("progress-pause") }));
     expect(tauri.invoke).toHaveBeenCalledWith("move_pause");
     send("move-progress", pausing);
+    // The engine's example pause came from the battery's safe limit, and the page says so.
+    expect(screen.getByText(text("progress-battery-paused"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
     // The stop dialog (X10) asks first; nothing is stopped yet.
     expect(tauri.invoke).not.toHaveBeenCalledWith("move_stop");

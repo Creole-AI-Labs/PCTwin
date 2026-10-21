@@ -1067,7 +1067,8 @@ progress-needs-action =
     }
 progress-see-needs-action = عرض ما يحتاج إليك
 progress-interrupted = انقطع الاتصال بالحاسوب المحمول الآخر. يحاول PCTwin إعادة الاتصال. لم يضِع أي شيء نُسخ وتم التحقق منه.
-progress-low-battery = بطارية { $label } منخفضة. وصّله بالكهرباء حتى لا يتوقف النقل.
+progress-low-battery = بطارية هذا الحاسوب منخفضة. وصّله بالكهرباء حتى لا يتوقف النقل.
+progress-battery-paused = بطارية هذا الحاسوب على وشك النفاد، لذلك توقف النقل مؤقتًا بأمان. وصّله بالكهرباء ثم تابع. لم يضِع أي شيء.
 progress-old-safe = يبقى حاسوبك المحمول القديم كما هو.
 progress-pause = إيقاف النقل مؤقتًا
 progress-compact = عرض مختصر

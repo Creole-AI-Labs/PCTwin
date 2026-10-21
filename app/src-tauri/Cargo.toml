@@ -32,6 +32,7 @@ pctwin-journal = { path = "../../crates/pctwin-journal" }
 pctwin-journey = { path = "../../crates/pctwin-journey" }
 pctwin-link = { path = "../../crates/pctwin-link" }
 pctwin-move = { path = "../../crates/pctwin-move" }
+pctwin-power = { path = "../../crates/pctwin-power" }
 pctwin-record = { path = "../../crates/pctwin-record" }
 pctwin-scan = { path = "../../crates/pctwin-scan" }
 pctwin-session = { path = "../../crates/pctwin-session" }

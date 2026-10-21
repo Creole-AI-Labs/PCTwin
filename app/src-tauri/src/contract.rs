@@ -250,7 +250,10 @@ fn progress() -> Vec<MoveProgress> {
                 },
             }),
         },
-        quiet(RunState::Pausing, None),
+        MoveProgress {
+            notice: Some(Notice::LowBattery { paused: true }),
+            ..quiet(RunState::Pausing, None)
+        },
         quiet(RunState::Paused, Some(named())),
     ]
 }

@@ -97,6 +97,10 @@
     "laptops": {
       "old": null
     },
+    "notice": {
+      "kind": "low-battery",
+      "paused": true
+    },
     "state": "pausing"
   },
   {

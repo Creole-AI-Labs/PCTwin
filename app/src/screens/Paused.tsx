@@ -37,6 +37,11 @@ export default function Paused({ progress, onResume, onStop }: { progress: MoveP
         />
         {counts.needsAction > 0 && <Row title={l10n.getString("progress-count-needs-action", { count: counts.needsAction })} end={<ResultChip result="needs-action" />} />}
       </RowList>
+      {progress.notice?.kind === "low-battery" && (
+        <div className="mv-note">
+          <Banner tone="attention">{l10n.getString(progress.notice.paused ? "progress-battery-paused" : "progress-low-battery")}</Banner>
+        </div>
+      )}
       <div className="mv-note">
         <Banner tone="info">{l10n.getString("pause-note")}</Banner>
       </div>

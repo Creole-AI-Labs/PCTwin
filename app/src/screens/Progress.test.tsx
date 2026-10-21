@@ -340,7 +340,7 @@ describe("X01 Move progress, compact", () => {
     expect(screen.getByText(text("progress-interrupted"))).toBeTruthy();
     unmount();
     inApp(<ProgressCompact progress={sample.lowBattery} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
-    expect(screen.getByText(withText(text("progress-low-battery", { label: "Blue Fox" })))).toBeTruthy();
+    expect(screen.getByText(text("progress-low-battery"))).toBeTruthy();
   });
 
   it("its footer, as in the mockup, holds Pause move and Keep compact and nothing else is a button", () => {

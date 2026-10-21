@@ -818,7 +818,8 @@ progress-needs-action =
     }
 progress-see-needs-action = See what needs you
 progress-interrupted = The connection to the other laptop dropped. PCTwin is trying to reconnect. Nothing copied and checked is lost.
-progress-low-battery = { $label } is low on battery. Plug it in so the move is not interrupted.
+progress-low-battery = This laptop is low on battery. Plug it in so the move is not interrupted.
+progress-battery-paused = This laptop’s battery is almost empty, so the move is paused safely. Plug it in, then carry on. Nothing is lost.
 progress-old-safe = Your old laptop stays unchanged.
 progress-pause = Pause move
 progress-compact = Keep it compact

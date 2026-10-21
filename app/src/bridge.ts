@@ -392,6 +392,21 @@ function parseMoveGroup(value: unknown): MoveGroup | null {
   return name && counts ? { id: f.id, name, counts } : null;
 }
 
+/** Something the person may need to act on during the move (`Notice`). */
+function parseNotice(value: unknown): MoveProgress["notice"] | null {
+  const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
+  if (kind === "drive-problem") {
+    const n = exactly(value, ["kind", "place"]);
+    const place = n && parseGroupName(n.place);
+    return place ? { kind, place } : null;
+  }
+  if (kind === "low-battery") {
+    const n = exactly(value, ["kind", "paused"]);
+    return n && typeof n.paused === "boolean" ? { kind, paused: n.paused } : null;
+  }
+  return null;
+}
+
 /** The measured progress (`MoveProgress`, event `move-progress`). */
 export function parseMoveProgress(value: unknown): MoveProgress | null {
   const f = shaped(value, ["state", "laptops", "groups", "counts", "bytes"], OPTIONAL_KEYS["move-progress"] ?? []);
@@ -417,10 +432,9 @@ export function parseMoveProgress(value: unknown): MoveProgress | null {
     progress[key] = range;
   }
   if ("notice" in f) {
-    const n = exactly(f.notice, ["kind", "place"]);
-    const place = n?.kind === "drive-problem" ? parseGroupName(n.place) : null;
-    if (!place) return null;
-    progress.notice = { kind: "drive-problem", place };
+    const notice = parseNotice(f.notice);
+    if (!notice) return null;
+    progress.notice = notice;
   }
   return progress;
 }

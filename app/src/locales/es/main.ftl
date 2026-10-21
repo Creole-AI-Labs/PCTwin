@@ -964,7 +964,8 @@ progress-needs-action =
     }
 progress-see-needs-action = Ver lo que necesita tu ayuda
 progress-interrupted = Se cortó la conexión con el otro portátil. PCTwin está intentando reconectar. No se pierde nada de lo copiado y comprobado.
-progress-low-battery = A { $label } le queda poca batería. Enchúfalo para que el traslado no se interrumpa.
+progress-low-battery = A este portátil le queda poca batería. Conéctalo para que el traslado no se interrumpa.
+progress-battery-paused = La batería de este portátil está casi vacía, así que el traslado se ha pausado con seguridad. Conéctalo y luego continúa. No se pierde nada.
 progress-old-safe = Tu portátil antiguo no cambia.
 progress-pause = Pausar el traslado
 progress-compact = Vista reducida

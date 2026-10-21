@@ -201,8 +201,11 @@ export type MoveProgress = {
   speed?: Range;
   /** Whole minutes left as a range; absent until it can be measured. Never a promise. */
   minutesLeft?: Range;
-  /** Something the person may need to act on. `label` is the laptop that is low on battery. */
-  notice?: { kind: "low-battery"; label: string } | { kind: "link-lost" } | { kind: "drive-problem"; place: GroupName };
+  /**
+   * Something the person may need to act on: this laptop is low on battery (`paused`: at the safe
+   * limit, so the move was paused for it), the connection dropped, or a drive is not keeping files.
+   */
+  notice?: { kind: "low-battery"; paused: boolean } | { kind: "link-lost" } | { kind: "drive-problem"; place: GroupName };
 };
 
 /** A count of zero for every status, to fill in. */
