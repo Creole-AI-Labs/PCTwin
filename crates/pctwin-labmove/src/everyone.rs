@@ -55,6 +55,9 @@ pub struct Everyone {
     pub journal: PathBuf,
     /// New accounts are named this, then a number.
     pub new_names: String,
+    /// A hostile mover: links to the system's own files planted in each holding folder before
+    /// the hand-over, which must never follow them.
+    pub hostile: bool,
 }
 
 /// What the run came to: the mover's report, and the lab's evidence.
@@ -86,6 +89,59 @@ impl Channel for Mem {
 }
 
 type Helper = Arc<Mutex<Client<pctwin_helper::client::Channel>>>;
+
+/// Links in `holding` to the system's own folder and files, as a hostile mover would plant them:
+/// where each was planted.
+fn plant_links(holding: &std::path::Path) -> Result<Vec<String>, String> {
+    let mut planted = Vec::new();
+    #[cfg(unix)]
+    for (target, link) in [
+        ("/etc", "Documents/etc-link"),
+        ("/etc/passwd", "passwd-link"),
+    ] {
+        let at = holding.join(link);
+        if let Some(parent) = at.parent() {
+            std::fs::create_dir_all(parent).map_err(err)?;
+        }
+        std::os::unix::fs::symlink(target, &at).map_err(err)?;
+        planted.push(at.to_string_lossy().into_owned());
+    }
+    #[cfg(windows)]
+    {
+        // A junction needs no special right, so any mover can make one.
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let target = std::path::Path::new(&root).join(r"System32\drivers\etc");
+        let documents = holding.join("Documents");
+        std::fs::create_dir_all(&documents).map_err(err)?;
+        let at = documents.join("etc-junction");
+        let made = std::process::Command::new("cmd")
+            .arg("/c")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&at)
+            .arg(&target)
+            .output()
+            .map_err(err)?;
+        if !made.status.success() {
+            return Err(format!(
+                "mklink: {}",
+                String::from_utf8_lossy(&made.stderr).trim()
+            ));
+        }
+        planted.push(at.to_string_lossy().into_owned());
+    }
+    Ok(planted)
+}
+
+/// Calls the helper and says goodbye, nothing more: whether it served this account.
+pub fn hello(token: &str, channel: &str, dir: Option<&std::path::Path>) -> Result<(), String> {
+    let h = HelperChannel {
+        session: token.to_string(),
+        channel: channel.to_string(),
+        dir: dir.map(PathBuf::from),
+    };
+    connect(&h)?.bye().map_err(err)
+}
 
 fn connect(h: &HelperChannel) -> Result<Client<pctwin_helper::client::Channel>, String> {
     let started = Instant::now();
@@ -346,6 +402,17 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     );
     let (sent, received) = (sent.map_err(err)?, received.map_err(err)?);
 
+    let mut planted_links = Vec::new();
+    if args.hostile {
+        for m in &made {
+            let holding = PathBuf::from(m["holding"].as_str().unwrap_or_default());
+            planted_links.extend(plant_links(&holding)?);
+        }
+        if planted_links.is_empty() && !made.is_empty() {
+            return Err("no link could be planted: the hostile check would prove nothing".into());
+        }
+    }
+
     // The hand-over, now, as the administrator (the CI runner has no one to sign in).
     let mut hand_over = Vec::new();
     if let Some(helper) = &helper {
@@ -405,6 +472,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         "received": outcomes,
         "sent": sent.files.iter().map(|f| format!("{:?}", f.outcome)).collect::<Vec<_>>(),
         "not_sent": sent.not_sent.len(),
+        "planted_links": planted_links,
     });
     Ok(Ran { report, evidence })
 }
@@ -447,6 +515,7 @@ pub fn parse(args: &[String]) -> Result<Everyone, String> {
             "--new-home",
             "--journal",
             "--new-names",
+            "--hostile",
             "--session",
             "--channel",
             "--dir",
@@ -462,6 +531,7 @@ pub fn parse(args: &[String]) -> Result<Everyone, String> {
         new_home: PathBuf::from(need("--new-home")?),
         journal: PathBuf::from(need("--journal")?),
         new_names: need("--new-names")?.to_string(),
+        hostile: map.get("--hostile") == Some(&"yes"),
     })
 }
 

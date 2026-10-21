@@ -526,7 +526,9 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # Everyone in one move sweeps the whole runner several times (the mover, each approved
+    # person through the helper, and again with no administrator).
+    timeout-minutes: 90
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
@@ -605,6 +607,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./fixtures/two-accounts/run.ps1 -Bin "$PWD\target\debug" -Work 'C:\pctwin-two-accounts'
+      # Phase 1's gate for moving everyone (Engineering Plan 5.1): several people in one move and
+      # nothing forgotten, with real accounts, the real helper and a hostile mover. The script is
+      # the administrator and answers the system's prompt from outside the product.
+      - name: Build the helper for everyone in one move
+        run: cargo build --locked -p pctwin-helper -p pctwin-labmove
+      - name: Everyone in one move (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: bash fixtures/everyone/run.sh "$PWD/target/debug" /tmp/pctwin-everyone
+      - name: Everyone in one move (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./fixtures/everyone/run.ps1 -Bin "$PWD\target\debug" -Work 'C:\pctwin-everyone'
       # The evidence sits outside the workspace (the test accounts cannot enter the runner's
       # folders), so it is copied in before it is kept.
       - name: Gather the evidence
@@ -612,6 +626,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p lab-evidence
+          for d in /tmp/pctwin-everyone/admin /c/pctwin-everyone/admin; do
+            if [ -d "$d" ]; then
+              cp -r "$d" lab-evidence/everyone 2>/dev/null || sudo cp -r "$d" lab-evidence/everyone || true
+            fi
+          done
           for base in /tmp/pctwin-two-accounts /c/pctwin-two-accounts; do
           for d in "$base/report" "$base/profile/report" "$base/bad/report"; do
             if [ -d "$d" ]; then

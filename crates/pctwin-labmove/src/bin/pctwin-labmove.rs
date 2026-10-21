@@ -10,6 +10,8 @@
 //!     pctwin-labmove send <handoff> <report.json> --package <package folder>
 //!     pctwin-labmove everyone <report.json> --laptop <id> --new-home <folder> --journal <file>
 //!         --new-names <prefix> [--session <token> --channel <name> [--dir <folder>]]
+//!     pctwin-labmove everyone ... [--hostile yes]
+//!     pctwin-labmove hello <token> <channel> [folder]
 //!     pctwin-labmove check-everyone <key.json> <evidence.json> <what the mover can read>...
 //!
 //! `fill-profile` builds a lab laptop into the signed-in person's real special folders, wherever
@@ -167,6 +169,15 @@ async fn run(args: &[String]) -> Result<bool, String> {
                 "{}",
                 serde_json::to_string_pretty(&ran.evidence).map_err(|e| e.to_string())?
             );
+            Ok(true)
+        }
+        [side, token, channel, rest @ ..] if side == "hello" => {
+            let dir = match rest {
+                [] => None,
+                [dir] => Some(std::path::Path::new(dir)),
+                _ => return Err("hello <token> <channel> [folder]".into()),
+            };
+            pctwin_labmove::everyone::hello(token, channel, dir)?;
             Ok(true)
         }
         [side, key, evidence, visible @ ..] if side == "check-everyone" => {
