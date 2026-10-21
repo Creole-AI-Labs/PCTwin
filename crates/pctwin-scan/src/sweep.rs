@@ -515,6 +515,35 @@ struct Whole {
     owners: BTreeSet<u32>,
 }
 
+/// Lowers this walker thread's disk priority, so a sweep leaves the laptop usable while it runs
+/// (Engineering Plan 9.16, "background I/O priority"). Windows: background mode, which lowers the
+/// thread's disk and memory priority as well as its processor priority. Linux: the idle
+/// scheduling class, which the kernel's disk schedulers (BFQ, and CFQ before it) also treat as
+/// idle disk use when no disk priority was set. macOS: left as it is (a Mac's own drive is an SSD,
+/// where reading does not slow the rest of the laptop the way a hard disk's head does). A refusal
+/// leaves the thread at its normal priority, which is how the sweep ran before.
+fn walk_quietly() {
+    #[cfg(windows)]
+    {
+        use thread_priority::{ThreadPriority, WinAPIThreadPriority, set_current_thread_priority};
+        let _ = set_current_thread_priority(ThreadPriority::Os(
+            WinAPIThreadPriority::BackgroundModeBegin.into(),
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use thread_priority::unix::{
+            NormalThreadSchedulePolicy, ThreadSchedulePolicy, set_thread_priority_and_policy,
+            thread_native_id,
+        };
+        let _ = set_thread_priority_and_policy(
+            thread_native_id(),
+            thread_priority::ThreadPriority::Min,
+            ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Idle),
+        );
+    }
+}
+
 /// What a walker is handed: ticket, folder, whether to read file keys, and for a nameless
 /// count, where to go on from.
 type WalkerJob = (usize, PathBuf, bool, Option<Option<WholeCursor>>);
@@ -1575,6 +1604,7 @@ impl Sweeper<'_> {
                 let done_send = done_send.clone();
                 let counting = Arc::clone(&counting);
                 scope.spawn(move || {
+                    walk_quietly();
                     loop {
                         let next = match job_recv.lock() {
                             Ok(r) => r.recv(),
@@ -3628,5 +3658,54 @@ mod whole_count_tests {
             count_whole(&root, Some(later(c)), &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(totals(&resumed), totals(&whole_at_once(&root)));
         std::fs::remove_dir_all(&root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod quiet_tests {
+    /// A walker thread really runs at background priority (Windows) or in the idle class (Linux).
+    #[test]
+    fn a_walker_thread_runs_at_low_priority() {
+        #[cfg(windows)]
+        std::thread::spawn(|| {
+            // The check below tells the two apart: a thread not lowered reads as Normal.
+            let normal = thread_priority::ThreadPriority::Os(
+                thread_priority::WinAPIThreadPriority::Normal.into(),
+            );
+            assert_eq!(
+                thread_priority::get_current_thread_priority().unwrap(),
+                normal
+            );
+        })
+        .join()
+        .unwrap();
+        std::thread::spawn(|| {
+            super::walk_quietly();
+            #[cfg(windows)]
+            {
+                // Background mode reports a priority outside the usual ones (the library cannot
+                // name it); a thread left at its normal priority reports Normal.
+                let now = thread_priority::get_current_thread_priority();
+                println!("walker priority on Windows: {now:?}");
+                let normal = thread_priority::ThreadPriority::Os(
+                    thread_priority::WinAPIThreadPriority::Normal.into(),
+                );
+                assert!(!matches!(now, Ok(p) if p == normal));
+            }
+            #[cfg(target_os = "linux")]
+            {
+                use thread_priority::unix::{
+                    NormalThreadSchedulePolicy, ThreadSchedulePolicy, thread_native_id,
+                    thread_schedule_policy_param,
+                };
+                let (policy, _) = thread_schedule_policy_param(thread_native_id()).unwrap();
+                assert_eq!(
+                    policy,
+                    ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Idle)
+                );
+            }
+        })
+        .join()
+        .unwrap();
     }
 }
