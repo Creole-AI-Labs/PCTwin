@@ -15,10 +15,10 @@ pctwin-journal = { path = "../pctwin-journal" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-transfer = { path = "../pctwin-transfer" }
 thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
 [lints]
 workspace = true

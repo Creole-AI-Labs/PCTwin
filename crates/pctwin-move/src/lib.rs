@@ -21,6 +21,7 @@
 // pctwin-transfer. Tests make files to test on, so they are exempt.
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
+pub mod handover;
 pub mod people;
 
 use std::collections::{BTreeMap, BTreeSet};
