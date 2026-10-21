@@ -283,7 +283,7 @@ impl Steps for LabSteps {
         })
     }
 
-    async fn approve(&mut self, _: &Record) -> Result<(), Stop> {
+    async fn approve(&mut self, _: &Record, _: &pctwin_move::Preview) -> Result<(), Stop> {
         Ok(())
     }
 
@@ -355,6 +355,7 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         &mut LabSteps {
             account: account.clone(),
         },
+        &table,
     )
     .await
     .map_err(err)?;

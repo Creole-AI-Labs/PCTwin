@@ -29,7 +29,7 @@ bad() { echo "UNSAFE FENCE: $*" >&2; fail=1; }
 exception_fns() {
   case "$1" in
     pctwin-lease) echo "fcntl_int" ;;
-    pctwin-helper-os) echo "os_shell_execute_runas os_wait os_create_pipe os_access_list os_accept os_client_process_id os_server_process_id os_open_process os_process_token os_client_token os_token_user os_image_path os_volume_drive_type os_daemon_register os_daemon_unregister os_daemon_status os_open_login_items" ;;
+    pctwin-helper-os) echo "os_shell_execute_runas os_wait os_create_pipe os_access_list os_accept os_client_process_id os_server_process_id os_open_process os_process_token os_client_token os_token_user os_image_path os_volume_drive_type os_native_machine os_daemon_register os_daemon_unregister os_daemon_status os_open_login_items" ;;
     *) echo "" ;;
   esac
 }

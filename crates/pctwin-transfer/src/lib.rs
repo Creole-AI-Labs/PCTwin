@@ -49,6 +49,7 @@
 mod allowance;
 mod blockmap;
 mod cause;
+mod fit;
 mod inventory;
 mod landing;
 mod lanedriver;
@@ -60,6 +61,7 @@ mod netlanes;
 mod original;
 mod pace;
 mod partials;
+mod probe;
 mod queue;
 mod reading;
 mod recovery;
@@ -72,6 +74,7 @@ mod version;
 pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use cause::{Cause, Failure, Side};
+pub use fit::{Fit, KEEP_FREE, PlaceFit, TimeRange};
 pub use inventory::{
     INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, PAGED_FROM, receive_inventory,
     send_inventory,
@@ -93,6 +96,7 @@ pub use partials::{
     KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,
     expire_partials, partials,
 };
+pub use probe::{PROBE_BYTES, PROBE_SINCE, answer_link_test, measure_link};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use recovery::{Recovered, recover, recover_with};

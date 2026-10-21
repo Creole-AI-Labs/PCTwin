@@ -592,6 +592,22 @@ impl ClashHints {
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl Destination {
+    /// The space free for this person on the drive it is on, as the system reports it (`None`:
+    /// it was opened through the administrator helper, by handle only, or the system would not
+    /// say). Read only: nothing is reserved.
+    pub fn available_bytes(&self) -> Option<u64> {
+        let path = self.root_path.as_ref()?;
+        fs4::available_space(path).ok()
+    }
+
+    /// Whether this place and `other` are on the same drive, so they share its free space
+    /// (`None`: a drive could not be told).
+    pub fn same_drive_as(&self, other: &Destination) -> Option<bool> {
+        let a = drive::volume_key(&self.root).ok()?;
+        let b = drive::volume_key(&other.root).ok()?;
+        Some(a == b)
+    }
+
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut dest = Self::from_dir(Dir::open_ambient_dir(path, ambient_authority())?);

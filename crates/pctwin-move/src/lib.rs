@@ -31,9 +31,10 @@ use pctwin_record::{
     Inclusion, Item, ItemId, ItemKind, LeftOutReason, Owner, PersonTarget, Record, RecordError,
 };
 use pctwin_transfer::{
-    Allowance, Cause, Channel, Failure, LandingPlace, MOVE_PROTOCOL, MoveControl, MoveMeter,
-    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier, TransferError,
-    agree_version, plan_order, receive_inventory, send_inventory,
+    Allowance, Cause, Channel, Failure, Fit, LandingPlace, MOVE_PROTOCOL, MoveControl, MoveMeter,
+    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier, TimeRange,
+    TransferError, agree_version, answer_link_test, measure_link, plan_order, receive_inventory,
+    send_inventory,
 };
 
 /// Files a move sends at once.
@@ -204,6 +205,7 @@ pub async fn send<C: Channel>(
 ) -> Result<Sent, MoveError> {
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record, version).await?;
+    answer_link_test(link, version).await?;
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
     let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT)
         .with_protocol(version)
@@ -250,13 +252,57 @@ pub trait Steps {
         account_id: &str,
     ) -> impl Future<Output = Result<PersonTarget, Stop>>;
 
-    /// The person approves `record`, the plan as it will run, with every person placed. Only the
-    /// new laptop ever approves.
-    fn approve(&mut self, record: &Record) -> impl Future<Output = Result<(), Stop>>;
+    /// The person approves `record`, the plan as it will run, with every person placed, seeing
+    /// `preview`: whether it fits and about how long it takes. Only the new laptop ever approves.
+    fn approve(
+        &mut self,
+        record: &Record,
+        preview: &Preview,
+    ) -> impl Future<Output = Result<(), Stop>>;
 
     /// Where `item` lands on this laptop (`None`: it is not received). It must be the very
     /// function the old laptop sends with, so the old laptop never chooses a place.
     fn landing(&self, item: &Item) -> Option<LandingPlace>;
+}
+
+/// What the person sees before approving: whether the plan fits on this laptop, and about how
+/// long it takes, both from what was measured (see [`Fit`] and [`TimeRange`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preview {
+    pub fit: Fit,
+    /// Every file the plan receives, at its size from the scan.
+    pub bytes: u64,
+    /// The link speed the test after pairing measured (`None`: the other laptop's version has
+    /// no link test).
+    pub bytes_per_second: Option<u64>,
+    pub time: TimeRange,
+}
+
+/// The preview of `record` on this laptop: what each place receives (only included files this
+/// laptop places), against `table`'s free space, at the measured `bytes_per_second`.
+pub fn preview(
+    record: &Record,
+    landing: impl Fn(&Item) -> Option<LandingPlace>,
+    table: &Destinations,
+    bytes_per_second: Option<u64>,
+) -> Preview {
+    let mut needed: BTreeMap<String, u64> = BTreeMap::new();
+    for i in &record.items {
+        if i.kind != ItemKind::File || i.inclusion != Inclusion::Included {
+            continue;
+        }
+        if let Some(place) = landing(i) {
+            let n = needed.entry(place.destination).or_default();
+            *n = n.saturating_add(i.size_bytes);
+        }
+    }
+    let bytes = needed.values().fold(0u64, |t, n| t.saturating_add(*n));
+    Preview {
+        fit: Fit::check(&needed, table),
+        bytes,
+        bytes_per_second,
+        time: TimeRange::of(bytes, bytes_per_second),
+    }
 }
 
 /// A plan the person approved on the new laptop, ready to receive.
@@ -287,14 +333,17 @@ pub struct Received {
 }
 
 /// The new laptop, over `link` (already paired): agrees the version, receives the old laptop's
-/// record, asks `steps` where each person goes and for the person's approval, and holds the
+/// record, times the link, asks `steps` where each person goes and for the person's approval
+/// (showing whether it fits in `table`'s places and about how long it takes), and holds the
 /// approved plan. Nothing is written.
 pub async fn receive_plan<C: Channel, S: Steps>(
     link: &mut C,
     steps: &mut S,
+    table: &Destinations,
 ) -> Result<ApprovedPlan, MoveError> {
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     let mut record = receive_inventory(link, version).await?;
+    let speed = measure_link(link, version).await?;
     let mut people = BTreeSet::new();
     let owners: Vec<String> = record
         .items
@@ -310,7 +359,8 @@ pub async fn receive_plan<C: Channel, S: Steps>(
         let target = steps.person(&record, &account_id).await?;
         record.mapping.people.insert(account_id, target);
     }
-    steps.approve(&record).await?;
+    let shown = preview(&record, |i| steps.landing(i), table, speed);
+    steps.approve(&record, &shown).await?;
     let approval = record.approve()?;
     let allowance = Allowance::from_record(&record, &approval, |i| steps.landing(i))?;
     Ok(ApprovedPlan {
@@ -375,7 +425,7 @@ pub async fn receive<C: Channel, S: Steps>(
     account: &str,
     live: &Live,
 ) -> Result<Received, MoveError> {
-    receive_plan(link, steps)
+    receive_plan(link, steps, table)
         .await?
         .receive(link, table, journal, account, live)
         .await

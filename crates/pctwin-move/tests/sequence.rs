@@ -10,13 +10,14 @@ use std::time::Duration;
 
 use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::Journal;
-use pctwin_move::{Ended, Live, MoveError, NotSentWhy, STOPPED, Steps, Stop, send_plan};
+use pctwin_move::{Ended, Live, MoveError, NotSentWhy, Preview, STOPPED, Steps, Stop, send_plan};
 use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
     ManagedBy, Owner, PersonTarget, Place, Portability, Record, Storage,
 };
 use pctwin_transfer::{
-    Cause, Channel, ChannelError, LandingPlace, ReceiveOutcome, SendOutcome, role_label, shown_path,
+    Cause, Channel, ChannelError, LandingPlace, ReceiveOutcome, SendOutcome, TimeRange, role_label,
+    shown_path,
 };
 use tokio::sync::mpsc;
 
@@ -186,6 +187,7 @@ struct Person {
     approves: bool,
     asked_about: Vec<String>,
     shown_plan: Option<Record>,
+    preview: Option<Preview>,
 }
 
 impl Steps for Person {
@@ -196,8 +198,9 @@ impl Steps for Person {
         })
     }
 
-    async fn approve(&mut self, record: &Record) -> Result<(), Stop> {
+    async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
         self.shown_plan = Some(record.clone());
+        self.preview = Some(preview.clone());
         if self.approves {
             Ok(())
         } else {
@@ -215,6 +218,7 @@ fn person(approves: bool) -> Person {
         approves,
         asked_about: Vec::new(),
         shown_plan: None,
+        preview: None,
     }
 }
 
@@ -267,6 +271,24 @@ async fn a_whole_move_lands_every_file() {
     // the plan they approved.
     assert_eq!(steps.asked_about, ["1000"]);
     let shown = steps.shown_plan.unwrap();
+    // Before approving, the person saw whether it fits and about how long: from the plan's
+    // size, the places' free space, and the link speed the test after pairing measured.
+    let preview = steps.preview.unwrap();
+    let total: u64 = FILES.iter().map(|(_, _, b)| b.len() as u64).sum();
+    assert_eq!(preview.bytes, total);
+    assert!(
+        preview.bytes_per_second.is_some_and(|s| s > 0),
+        "{preview:?}"
+    );
+    assert!(
+        matches!(preview.time, TimeRange::Between { fastest, slowest } if fastest <= slowest),
+        "{preview:?}"
+    );
+    assert_eq!(preview.fit.places.len(), ROLES.len());
+    assert!(
+        preview.fit.places.iter().all(|p| p.free.is_some()),
+        "{preview:?}"
+    );
     assert_eq!(
         shown.mapping.people.get("1000"),
         Some(&PersonTarget::ExistingAccount {

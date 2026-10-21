@@ -47,7 +47,7 @@
 //! - Windows (`src/win.rs`): `os_shell_execute_runas`, `os_wait`, `os_create_pipe`,
 //!   `os_access_list`, `os_accept`, `os_client_process_id`, `os_server_process_id`,
 //!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
-//!   `os_image_path`, `os_volume_drive_type`.
+//!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -60,6 +60,7 @@ use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+pub mod chip;
 pub mod daemon;
 
 #[cfg(windows)]

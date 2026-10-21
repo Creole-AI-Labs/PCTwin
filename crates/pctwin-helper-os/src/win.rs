@@ -33,6 +33,8 @@ use windows::Win32::System::Pipes::{
     ImpersonateNamedPipeClient, NAMED_PIPE_MODE, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_BYTE, PIPE_WAIT,
 };
+use windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE;
+use windows::Win32::System::Threading::{GetCurrentProcess, IsWow64Process2};
 use windows::Win32::System::Threading::{
     GetCurrentThread, GetExitCodeProcess, GetProcessId, INFINITE, OpenProcess, OpenProcessToken,
     OpenThreadToken, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
@@ -389,6 +391,25 @@ fn os_volume_drive_type(file: &[u16]) -> Result<u32, HRESULT> {
             .map(|()| GetDriveTypeW(PCWSTR(root.as_ptr())))
     };
     r.map_err(|e| e.code())
+}
+
+/// The machine's own architecture (`IMAGE_FILE_MACHINE_*`), whatever this process runs as.
+pub(crate) fn native_machine() -> Result<u16, HRESULT> {
+    os_native_machine()
+}
+
+/// `IsWow64Process2` for this process: the native machine.
+fn os_native_machine() -> Result<u16, HRESULT> {
+    let mut process = IMAGE_FILE_MACHINE(0);
+    let mut native = IMAGE_FILE_MACHINE(0);
+    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no closing and is valid for
+    // the call; both out-pointers point to live locals of the right type.
+    #[expect(
+        unsafe_code,
+        reason = "GetCurrentProcess and IsWow64Process2 have no safe binding"
+    )]
+    let r = unsafe { IsWow64Process2(GetCurrentProcess(), &mut process, Some(&mut native)) };
+    r.map(|()| native.0).map_err(|e| e.code())
 }
 
 /// The full path of the program the process runs.
