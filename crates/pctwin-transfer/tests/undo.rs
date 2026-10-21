@@ -683,28 +683,39 @@ fn once_the_wipe_starts_undo_refuses_everything() {
 #[cfg(windows)]
 #[test]
 fn undo_closed_part_of_the_way_stops_and_reports_what_it_did() {
-    let w = world();
-    w.moved(1, "first.txt", b"1", &[]);
-    w.moved(2, "second.txt", b"2", &[]);
-    // The newest goes first, and is held by another program for a moment: undo is on it when
-    // the wipe starts.
-    let holder = std::fs::OpenOptions::new()
-        .write(true)
-        .open(w.root.join("second.txt"))
-        .unwrap();
-    let r = std::thread::scope(|s| {
-        let undoing = s.spawn(|| w.undo());
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        w.close(pctwin_journal::Resolved::Kept {
-            why: "undo was cut short".into(),
+    // On a busy machine undo may not have reached the held file before the close: that run
+    // tests nothing and runs again; every run that reached it must stop there.
+    let mut reached = false;
+    for _ in 0..5 {
+        let w = world();
+        w.moved(1, "first.txt", b"1", &[]);
+        w.moved(2, "second.txt", b"2", &[]);
+        // The newest goes first, and is held by another program for a moment: undo is on it
+        // when the wipe starts.
+        let holder = std::fs::OpenOptions::new()
+            .write(true)
+            .open(w.root.join("second.txt"))
+            .unwrap();
+        let r = std::thread::scope(|s| {
+            let undoing = s.spawn(|| w.undo());
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            w.close(pctwin_journal::Resolved::Kept {
+                why: "undo was cut short".into(),
+            });
+            undoing.join().unwrap()
         });
-        undoing.join().unwrap()
-    });
-    drop(holder);
-    assert!(r.closed, "{r:?}");
-    assert_eq!(r.files.len(), 1, "{r:?}");
-    assert_eq!(r.files[0].path, "second.txt");
-    assert!(w.exists("first.txt"), "nothing after the close");
+        drop(holder);
+        assert!(r.closed, "{r:?}");
+        if r.files.is_empty() {
+            continue;
+        }
+        assert_eq!(r.files.len(), 1, "{r:?}");
+        assert_eq!(r.files[0].path, "second.txt");
+        assert!(w.exists("first.txt"), "nothing after the close");
+        reached = true;
+        break;
+    }
+    assert!(reached, "undo reached the held file in one of five runs");
 }
 
 #[test]

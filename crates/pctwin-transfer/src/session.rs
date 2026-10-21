@@ -4173,15 +4173,18 @@ mod originals_limits {
 
     #[tokio::test]
     async fn a_look_that_hung_holds_one_thread_and_no_new_look_starts_until_it_ends() {
-        use std::sync::atomic::AtomicUsize;
-        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        // The slow look hangs until the test lets it go, however fast or busy the machine.
+        static RELEASE: AtomicBool = AtomicBool::new(false);
+        static QUICK_CALLS: AtomicUsize = AtomicUsize::new(0);
         fn slow(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
-            CALLS.fetch_add(1, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_millis(800));
+            while !RELEASE.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
             items.iter().map(|i| (*i, present(1))).collect()
         }
         fn quick(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
-            CALLS.fetch_add(1, Ordering::SeqCst);
+            QUICK_CALLS.fetch_add(1, Ordering::SeqCst);
             items.iter().map(|i| (*i, present(1))).collect()
         }
         let mut b = OriginalsBudget::with_limits(100, 100, Duration::from_millis(50));
@@ -4191,11 +4194,12 @@ mod originals_limits {
         let second = round(&mut b, vec![id(2)], quick).await;
         assert_eq!(second, vec![(id(2), OriginalNow::CannotLook)]);
         assert_eq!(
-            CALLS.load(Ordering::SeqCst),
-            1,
+            QUICK_CALLS.load(Ordering::SeqCst),
+            0,
             "no second look was started"
         );
         // Once the hung look ends, looking works again.
+        RELEASE.store(true, Ordering::SeqCst);
         while b.look_running.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
