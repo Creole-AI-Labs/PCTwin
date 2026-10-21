@@ -1,7 +1,7 @@
 //! The safety gate's path checks (security design notes): every path the old laptop sends is
 //! relative to an approved folder, and anything that could climb out of it is refused.
 
-use pctwin_gate::{IncomingPath, MAX_COMPONENT_BYTES, MAX_DEPTH, MAX_PATH_BYTES, PathError};
+use pctwin_gate::{IncomingPath, MAX_DEPTH, MAX_PATH_BYTES, MAX_SENT_COMPONENT_BYTES, PathError};
 use proptest::prelude::*;
 
 #[test]
@@ -56,7 +56,7 @@ fn anything_that_could_leave_the_approved_folder_is_refused() {
 
 #[test]
 fn paths_have_size_and_depth_limits() {
-    let longest = "a".repeat(MAX_COMPONENT_BYTES);
+    let longest = "a".repeat(MAX_SENT_COMPONENT_BYTES);
     assert!(IncomingPath::parse(&longest).is_ok());
     assert_eq!(
         IncomingPath::parse(&format!("{longest}a")).unwrap_err(),
@@ -94,7 +94,7 @@ proptest! {
                 prop_assert!(!c.is_empty());
                 prop_assert!(c != "." && c != "..");
                 prop_assert!(!c.contains('/') && !c.contains('\0'));
-                prop_assert!(c.len() <= MAX_COMPONENT_BYTES);
+                prop_assert!(c.len() <= MAX_SENT_COMPONENT_BYTES);
             }
             prop_assert!(p.components().len() <= MAX_DEPTH);
         }

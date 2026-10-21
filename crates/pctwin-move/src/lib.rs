@@ -270,12 +270,100 @@ pub trait Steps {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preview {
     pub fit: Fit,
+    /// What the new laptop's drives cannot take as it is, found before anything moves.
+    pub problems: Problems,
     /// Every file the plan receives, at its size from the scan.
     pub bytes: u64,
     /// The link speed the test after pairing measured (`None`: the other laptop's version has
     /// no link test).
     pub bytes_per_second: Option<u64>,
     pub time: TimeRange,
+}
+
+/// How many examples of each problem a preview keeps (the count is always whole).
+pub const EXAMPLES: usize = 20;
+
+/// Space lost to a drive's big blocks is shown from this much on (less is not worth a line).
+pub const LOST_TO_BLOCKS_SHOWN: u64 = 64 * 1024 * 1024;
+
+/// Files of one problem: how many, and the first few.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Counted {
+    pub count: u64,
+    /// At most [`EXAMPLES`], in the record's order.
+    pub examples: Vec<ItemId>,
+}
+
+impl Counted {
+    fn add(&mut self, item: ItemId) {
+        self.count += 1;
+        if self.examples.len() < EXAMPLES {
+            self.examples.push(item);
+        }
+    }
+}
+
+/// Problems found before the move (Product Spec: found at the scan, shown before anything
+/// moves, with what PCTwin will do about each), each predicted by the very rules the write uses
+/// ([`pctwin_gate::Destination::predict`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Problems {
+    /// Names (of the file or a folder above it) the drive cannot hold: they land under a name
+    /// changed to fit, and the report says so.
+    pub renamed: Counted,
+    /// Files bigger than the drive holds (FAT32: 4 GB): not copied there; another place, or a
+    /// drive that holds them, is needed.
+    pub too_big: Counted,
+    /// Paths the new laptop refuses (too long, or not allowed): not copied.
+    pub refused: Counted,
+    /// Per place, the space its drive's big blocks lose (the rest of each file's last block),
+    /// when it is at least [`LOST_TO_BLOCKS_SHOWN`].
+    pub lost_to_blocks: BTreeMap<String, u64>,
+}
+
+/// The problems `record` would meet on this laptop: each included file this laptop places,
+/// predicted in its place in `table`.
+pub fn problems(
+    record: &Record,
+    landing: impl Fn(&Item) -> Option<LandingPlace>,
+    table: &Destinations,
+) -> Problems {
+    let mut found = Problems::default();
+    let mut lost: BTreeMap<String, u64> = BTreeMap::new();
+    for i in &record.items {
+        if i.kind != ItemKind::File || i.inclusion != Inclusion::Included {
+            continue;
+        }
+        let Some(place) = landing(i) else {
+            continue;
+        };
+        let Ok(dest) = table.get(&place.destination) else {
+            continue;
+        };
+        match dest.predict(&place.path, i.size_bytes) {
+            Err(_) => found.refused.add(i.id),
+            Ok(p) => {
+                if p.too_big.is_some() {
+                    found.too_big.add(i.id);
+                    continue;
+                }
+                if !p.changes.is_empty() {
+                    found.renamed.add(i.id);
+                }
+                if let Some(block) = dest.block_bytes() {
+                    let rest = i.size_bytes % block;
+                    let lost_here = if rest == 0 { 0 } else { block - rest };
+                    let n = lost.entry(place.destination).or_default();
+                    *n = n.saturating_add(lost_here);
+                }
+            }
+        }
+    }
+    found.lost_to_blocks = lost
+        .into_iter()
+        .filter(|(_, n)| *n >= LOST_TO_BLOCKS_SHOWN)
+        .collect();
+    found
 }
 
 /// The preview of `record` on this laptop: what each place receives (only included files this
@@ -299,6 +387,7 @@ pub fn preview(
     let bytes = needed.values().fold(0u64, |t, n| t.saturating_add(*n));
     Preview {
         fit: Fit::check(&needed, table),
+        problems: problems(record, &landing, table),
         bytes,
         bytes_per_second,
         time: TimeRange::of(bytes, bytes_per_second),

@@ -450,3 +450,79 @@ async fn a_file_changed_since_the_scan_lands_as_it_is_now_and_is_labelled() {
     let landed = w.new.path().join("Documents").join("letter.txt");
     assert_eq!(std::fs::read(landed).unwrap(), b"Dear Ada, again");
 }
+
+/// Problems found before the move are predicted by the very rules the write uses: every name
+/// the preview says will change lands changed, under exactly the predicted name, and every
+/// other lands as sent. The old laptop's files sit under plain names; what is sent is the
+/// record's name, as from another system.
+#[tokio::test]
+async fn every_predicted_name_is_the_name_it_lands_under() {
+    let w = world();
+    let long = format!("{}.txt", "x".repeat(300));
+    let names = [
+        "plain.txt",
+        "CON.txt",
+        "a:b?.txt",
+        "LONGFO~1.txt",
+        "spaces at the end. ",
+        long.as_str(),
+    ];
+    let mut record = Record::new(laptop());
+    let mut sources = std::collections::BTreeMap::new();
+    for (n, name) in names.iter().enumerate() {
+        let found = item(
+            FolderRole::Documents,
+            &[name],
+            ItemKind::File,
+            5,
+            Inclusion::Included,
+        );
+        let source = w.old.path().join(format!("source-{n}.bin"));
+        write(&source, b"hello");
+        sources.insert(found.id, source);
+        record.items.push(found);
+    }
+    record.validate().unwrap();
+    let plan = send_plan(&record, |i| sources.get(&i.id).cloned(), landing);
+    let (mut old, mut new) = mem_pair();
+    let mut steps = person(true);
+    let (quiet_old, quiet_new) = (Live::default(), Live::default());
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send(&mut old, &record, plan, &quiet_old),
+            pctwin_move::receive(
+                &mut new, &mut steps, &w.table, &w.journal, "1001", &quiet_new
+            ),
+        )
+    })
+    .await;
+    sent.unwrap();
+    let received = received.unwrap();
+    let preview = steps.preview.unwrap();
+    let mut renamed = 0;
+    for line in &received.files {
+        let item = record.items.iter().find(|i| i.id == line.item).unwrap();
+        let place = landing(item);
+        let predicted = w
+            .table
+            .get(&place.destination)
+            .unwrap()
+            .predict(&place.path, item.size_bytes)
+            .unwrap();
+        let Some(ReceiveOutcome::Finished(done)) = &line.outcome else {
+            panic!("{:?} ended {:?}", place.path, line.outcome);
+        };
+        let landed_name = done.final_path.rsplit('/').next().unwrap();
+        assert_eq!(landed_name, predicted.stored_name, "{:?}", place.path);
+        assert_eq!(done.changes, predicted.changes, "{:?}", place.path);
+        if !predicted.changes.is_empty() {
+            renamed += 1;
+            assert!(preview.problems.renamed.examples.contains(&line.item));
+        }
+    }
+    assert_eq!(preview.problems.renamed.count, renamed);
+    // The long name needs shortening on every system.
+    assert!(renamed >= 1);
+    assert_eq!(preview.problems.too_big.count, 0);
+    assert_eq!(preview.problems.refused.count, 0);
+}

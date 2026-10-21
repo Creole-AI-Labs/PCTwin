@@ -100,8 +100,13 @@ pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
 pub use unix_undo::{Check, Checked, Context, Resolution, Step, private_name};
 
-/// Longest single file or folder name, in bytes (the limit on every supported system).
+/// Longest single file or folder name stored, in bytes (the limit on every supported system).
 pub const MAX_COMPONENT_BYTES: usize = 255;
+/// Longest single name accepted as sent, in bytes: a Windows name of 255 characters is up to
+/// 765 bytes of text (each character up to three bytes, a pair of surrogates four), so such a
+/// name arrives whole and is shortened to [`MAX_COMPONENT_BYTES`] when it is stored, never
+/// refused for its length alone.
+pub const MAX_SENT_COMPONENT_BYTES: usize = 1024;
 /// Deepest folder nesting accepted.
 pub const MAX_DEPTH: usize = 128;
 /// Longest whole path accepted, in bytes.
@@ -176,7 +181,7 @@ impl IncomingPath {
                 _ => {}
             }
             let composed: String = part.nfc().collect();
-            if composed.len() > MAX_COMPONENT_BYTES {
+            if composed.len() > MAX_SENT_COMPONENT_BYTES {
                 return Err(PathError::ComponentTooLong);
             }
             components.push(composed);
@@ -260,6 +265,17 @@ pub enum NameChange {
     Shortened,
     /// The name was already taken, so a number was added.
     NameClash,
+}
+
+/// What storing a file would come to (see [`Destination::predict`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Predicted {
+    /// The file's own name as it would be stored.
+    pub stored_name: String,
+    /// Every change to its folders' and its own names.
+    pub changes: Vec<NameChange>,
+    /// The drive's largest file, when this one is bigger (it would be refused).
+    pub too_big: Option<u64>,
 }
 
 /// A name ready to store, and what was changed to get there.
@@ -598,6 +614,32 @@ impl Destination {
     pub fn available_bytes(&self) -> Option<u64> {
         let path = self.root_path.as_ref()?;
         fs4::available_space(path).ok()
+    }
+
+    /// What storing a file sent as `sent` (`/` between folders), `size` bytes, here would come to,
+    /// worked out by the very rules a write uses, before anything is written: the name it gets
+    /// and every change to its folders' and its own names, and whether the drive holds a file
+    /// that big. A path the safety check refuses is refused here too. Nothing is created; a name
+    /// that turns out taken when the file lands gets a number then (not predicted here).
+    pub fn predict(&self, sent: &str, size: u64) -> Result<Predicted, GateError> {
+        let parsed = IncomingPath::parse(sent)?;
+        let (stored_name, changes) = self.converted(&parsed, &self.root)?;
+        let too_big = self
+            .profile_of(&self.root)
+            .largest_file()
+            .filter(|largest| size > *largest);
+        Ok(Predicted {
+            stored_name,
+            changes,
+            too_big,
+        })
+    }
+
+    /// The smallest space a file takes on this place's drive (its allocation unit): a drive with
+    /// big blocks loses the rest of each file's last block (`None`: not known).
+    pub fn block_bytes(&self) -> Option<u64> {
+        let path = self.root_path.as_ref()?;
+        fs4::allocation_granularity(path).ok().filter(|b| *b > 0)
     }
 
     /// Whether this place and `other` are on the same drive, so they share its free space
