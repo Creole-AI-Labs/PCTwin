@@ -248,14 +248,25 @@ try {
   $mine = [Console]::In.ReadLine(); $theirs = [Console]::In.ReadLine()
   $client = @"
 `$code = 0
-try { `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$theirs', [System.IO.Pipes.PipeAccessRights]0x12008B, 'None', 'Identification', 'None'); `$p.Connect(10000); `$p.WriteByte(1); [void]`$p.ReadByte(); `$p.Dispose(); `$code += 1 } catch { }
-try { `$q = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$mine', [System.IO.Pipes.PipeAccessRights]0x12008B, 'None', 'Identification', 'None'); `$q.Connect(3000); `$q.Dispose(); `$code += 2 } catch { }
+try { `$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$theirs', [System.IO.Pipes.PipeAccessRights]0x12008B, 'None', 'Identification', 'None'); `$p.Connect(10000); `$p.WriteByte(1); [void]`$p.ReadByte(); `$p.Dispose(); `$code += 1 } catch { [Console]::Error.WriteLine("its own pipe: `$_") }
+try { `$q = New-Object System.IO.Pipes.NamedPipeClientStream('.', '$mine', [System.IO.Pipes.PipeAccessRights]0x12008B, 'None', 'Identification', 'None'); `$q.Connect(3000); `$q.Dispose(); `$code += 2 } catch { [Console]::Error.WriteLine("the mover's pipe: `$_") }
 exit `$code
 "@
   $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($client))
   $cred = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$u", $secure)
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $enc" -Credential $cred -LoadUserProfile -WorkingDirectory $env:SystemRoot -WindowStyle Hidden -PassThru -Wait
-  [Console]::Out.WriteLine("exit=$($p.ExitCode)"); [Console]::Out.Flush()
+  # Its output goes to a folder both accounts may write, as the lab's run.ps1 does.
+  $logs = Join-Path $env:SystemDrive ("pctwin-helper-test-" + [Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory $logs | Out-Null
+  icacls $logs /grant '*S-1-1-0:(OI)(CI)M' | Out-Null
+  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $enc" -Credential $cred -LoadUserProfile -WorkingDirectory $env:SystemRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $logs 'out.txt') -RedirectStandardError (Join-Path $logs 'err.txt')
+  if ($p.WaitForExit(120000)) {
+    [Console]::Out.WriteLine("exit=$($p.ExitCode)")
+  } else {
+    $p.Kill(); [Console]::Out.WriteLine("exit=timeout")
+  }
+  Get-Content (Join-Path $logs 'err.txt') -ErrorAction SilentlyContinue | ForEach-Object { [Console]::Out.WriteLine("err: $_") }
+  [Console]::Out.Flush()
+  Remove-Item -Recurse -Force $logs -ErrorAction SilentlyContinue
 } finally {
   Remove-LocalUser -Name $u
 }
@@ -291,17 +302,51 @@ exit `$code
     writeln!(stdin, "{}\n{}", mine.as_str(), theirs.as_str()).unwrap();
     drop(stdin);
 
-    theirs_server.accept().unwrap();
-    let mut b = [0u8; 1];
-    theirs_server.stream().read_exact(&mut b).unwrap();
-    let caller = caller_of(&theirs_server).unwrap();
-    theirs_server.stream().write_all(b"k").unwrap();
-    assert_eq!(caller.account, Account::Sid(theirs_sid));
+    // The helper's side runs on its own thread, so a client that never arrives fails the test
+    // with PowerShell's own report instead of waiting for ever.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let r = (|| {
+            theirs_server.accept()?;
+            let mut b = [0u8; 1];
+            theirs_server.stream().read_exact(&mut b)?;
+            let caller = caller_of(&theirs_server)?;
+            theirs_server.stream().write_all(b"k")?;
+            Ok::<_, Error>(caller)
+        })();
+        let _ = tx.send(r);
+    });
 
-    let mut rest = String::new();
-    out.read_to_string(&mut rest).unwrap();
-    assert!(ps.wait().unwrap().success(), "{rest}");
+    // PowerShell's report is read on a thread too, and PowerShell is stopped after four
+    // minutes, so nothing here can wait for ever.
+    let (otx, orx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut rest = String::new();
+        let _ = out.read_to_string(&mut rest);
+        let _ = otx.send(rest);
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(240);
+    let ended = loop {
+        if let Some(status) = ps.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = ps.kill();
+            panic!("PowerShell did not finish in four minutes");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    let rest = orx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_default();
+    println!("{rest}");
     drop(mine_server);
+    let caller = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_else(|_| panic!("the second account never reached its pipe: {rest}"))
+        .unwrap();
+    assert_eq!(caller.account, Account::Sid(theirs_sid));
+    assert!(ended.success(), "{rest}");
     // 1 = reached the pipe made for it; 2 would mean it reached the mover's pipe.
     assert!(rest.contains("exit=1"), "{rest}");
 }
