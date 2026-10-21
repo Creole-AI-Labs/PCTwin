@@ -420,9 +420,13 @@ async fn a_sender_cannot_choose_where_a_file_lands() {
     let (_, receipt) = no_hang(async { tokio::join!(hostile, receiving) }).await;
     assert!(!dest.path().join("AppData").exists());
     assert!(!dest.path().join("letter.txt").exists());
+    // The receipt keeps the typed reason, not only the words.
     assert!(matches!(
         outcome(&receipt, "letter.txt"),
-        Outcome::Failed { .. }
+        Outcome::Failed {
+            cause: pctwin_transfer::Cause::RefusedBySafetyCheck,
+            ..
+        }
     ));
     // The files sent where the offer said still arrive.
     assert!(matches!(
@@ -452,7 +456,7 @@ async fn a_file_that_grew_after_it_was_offered_is_not_copied() {
     let received = received.unwrap();
     assert!(!dest.path().join("letter.txt").exists());
     assert!(
-        matches!(outcome(&received, "letter.txt"), Outcome::Failed { why } if why.contains("changed since it was chosen")),
+        matches!(outcome(&received, "letter.txt"), Outcome::Failed { cause: pctwin_transfer::Cause::ChangedDuringMove, why } if why.contains("changed since it was chosen")),
         "{:?}",
         outcome(&received, "letter.txt")
     );

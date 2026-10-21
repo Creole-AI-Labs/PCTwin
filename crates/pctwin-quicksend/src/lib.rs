@@ -22,8 +22,8 @@ use pctwin_record::{
     ManagedBy, Owner, Place, Portability, Record, RecordError, Storage,
 };
 use pctwin_transfer::{
-    Allowance, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession, SendJob,
-    SendOutcome, SenderSession, SizeRoom, TransferError, agree_version, receive_inventory,
+    Allowance, Cause, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession,
+    SendJob, SendOutcome, SenderSession, SizeRoom, TransferError, agree_version, receive_inventory,
     send_inventory, shown_path,
 };
 
@@ -216,8 +216,12 @@ pub enum Outcome {
     AlreadyThere { landed_as: String },
     /// The receiver did not accept it.
     Declined,
-    /// It did not arrive.
-    Failed { why: String },
+    /// It is on the receiver under `landed_as` but not finished as a visible, proven copy: `why`
+    /// says what happened and what to do next.
+    NeedsAction { landed_as: String, why: String },
+    /// It did not arrive: the typed reason (for "more details" and "Send missing pieces"), and
+    /// the words.
+    Failed { cause: Cause, why: String },
 }
 
 /// One line of a receipt.
@@ -264,9 +268,11 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
                             landed_as: f.path.clone(),
                         },
                         Some(SendOutcome::Failed(why)) => Outcome::Failed {
+                            cause: why.cause(),
                             why: why.to_string(),
                         },
                         None => Outcome::Failed {
+                            cause: Cause::NotAccepted,
                             why: "it was not sent".into(),
                         },
                     }
@@ -371,16 +377,21 @@ impl Incoming {
                                 landed_as: done.final_path.clone(),
                             },
                             // Not finished as a visible, proven copy: never "arrived".
-                            Some(ReceiveOutcome::NeedsAction { why, .. }) => {
-                                Outcome::Failed { why: why.clone() }
+                            Some(ReceiveOutcome::NeedsAction { finished, why }) => {
+                                Outcome::NeedsAction {
+                                    landed_as: finished.final_path.clone(),
+                                    why: why.clone(),
+                                }
                             }
                             Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
                                 landed_as: stored.clone(),
                             },
                             Some(ReceiveOutcome::Failed(why)) => Outcome::Failed {
+                                cause: why.cause(),
                                 why: why.to_string(),
                             },
                             None => Outcome::Failed {
+                                cause: Cause::NotAccepted,
                                 why: "it did not arrive".into(),
                             },
                         }
