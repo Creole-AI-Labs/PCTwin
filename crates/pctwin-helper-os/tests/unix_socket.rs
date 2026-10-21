@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 fn my_uid() -> u32 {
     match current_account().unwrap() {
         Account::Uid(u) => u,
-        other => panic!("{other:?}"),
+        _ => panic!("this system names accounts by user ID"),
     }
 }
 

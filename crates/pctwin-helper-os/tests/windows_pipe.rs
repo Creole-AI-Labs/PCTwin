@@ -15,7 +15,7 @@ const STRANGER: &str = "S-1-5-21-1-2-3-1001";
 fn me() -> Sid {
     match current_account().unwrap() {
         Account::Sid(s) => s,
-        other => panic!("{other:?}"),
+        _ => panic!("this system names accounts by security identifier"),
     }
 }
 
