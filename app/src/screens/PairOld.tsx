@@ -14,14 +14,16 @@ import {
   oldStartAgain,
   stop,
   toProblem,
+  unseenHeadsUp,
+  type HeadsUp,
   type Label,
   type OldEvent,
   type Problem,
 } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
-type Phase = "starting" | "code" | "wait" | "locked" | "choose" | "network" | "error" | "paired";
+type Phase = "starting" | "heads-up" | "code" | "wait" | "locked" | "choose" | "network" | "error" | "paired";
 type Notice = "timed-out" | "declined" | "left";
 
 const NOTICE_TEXT: Record<Notice, string> = {
@@ -34,7 +36,9 @@ const NOTICE_TEXT: Record<Notice, string> = {
  * C03 and C05 on the old laptop. The engine drives it: a label, then a code that changes, then (when a
  * new laptop has the code) three numbers to choose from, then paired.
  * starting -> code | wait | locked -> choose -> (code again | paired); a start that cannot pick the
- * network shows the networks to choose from.
+ * network shows the networks to choose from. Before the first start on a system that will ask a
+ * question (a Mac's local network, Windows Firewall), a note says what it will ask (heads-up).
+ * Locked: someone on this network tried wrong codes; only the person here can start again.
  */
 export default function PairOld({ onBack }: { onBack: () => void }) {
   const { l10n } = useLocalization();
@@ -62,6 +66,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [networks, setNetworks] = useState<string[]>([]);
+  const [notes, setNotes] = useState<HeadsUp[]>([]);
   const renameButton = useRef<HTMLButtonElement>(null);
   const wasRenaming = useRef(false);
   // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it, except
@@ -142,6 +147,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   // Listen first, then start, so no early update is missed. Leaving the screen stops listening.
   useEffect(() => {
     const life = { cancelled: false };
+    const gone = () => life.cancelled;
     let unlisten: (() => void) | undefined;
     void (async () => {
       try {
@@ -154,6 +160,14 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
       } catch {
         setProblem({ key: "pairing-failed", networks: [] });
         setPhase("error");
+        return;
+      }
+      const ahead = await unseenHeadsUp("old");
+      // The screen may have gone while asking (a check the compiler cannot see across the wait).
+      if (gone()) return;
+      if (ahead.length > 0) {
+        setNotes(ahead);
+        setPhase("heads-up");
         return;
       }
       await start(null);
@@ -255,6 +269,16 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
         </>
       )}
 
+      {phase === "heads-up" && (
+        <HeadsUpStep
+          eyebrow="pair-old-eyebrow"
+          notes={notes}
+          onContinue={() => {
+            void start(null);
+          }}
+        />
+      )}
+
       {phase === "network" && (
         <>
           <Heading key="network" id="pair-network-title" />
@@ -314,10 +338,17 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
 
       {phase === "locked" && (
         <>
+          <Eyebrow id="pair-old-eyebrow" />
           <Heading key="locked" id="pair-old-locked-title" />
           <Localized id="pair-old-locked-body">
             <p className="subhead" />
           </Localized>
+          <div className="note">
+            <Wifi />
+            <Localized id="pair-old-locked-hotspot">
+              <p className="note-text" />
+            </Localized>
+          </div>
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button

@@ -161,6 +161,11 @@ ended-home = 返回首页
 
 pair-back = 返回
 pair-try-again = 重试
+pair-more-details = 更多详情
+pair-heads-up-title = 你的笔记本电脑可能会问你一个问题。
+pair-heads-up-local-network = 你的Mac会询问PCTwin能否查找你本地网络上的设备。请选择“允许”，这样两台笔记本电脑才能找到彼此。
+pair-heads-up-firewall = Windows可能会询问PCTwin能否接受连接。请选择“允许”，这样你的新笔记本电脑才能连接到这台电脑。
+pair-heads-up-continue = 继续
 
 ## C03 Old laptop: show the code
 
@@ -192,8 +197,9 @@ pair-old-wait-body =
     { $seconds ->
        *[other] 这次尝试没有成功。{ $seconds }秒后会出现新配对码。
     }
-pair-old-locked-title = 配对已停止。
-pair-old-locked-body = 错误尝试次数过多，为保护这台笔记本电脑的安全，配对已停止。没有共享任何内容。准备好后请重新开始。
+pair-old-locked-title = 这个网络上有人尝试了错误的配对码。
+pair-old-locked-body = 已尝试五次错误的配对码，为保护这台笔记本电脑的安全，配对已停止。没有共享任何内容。如果是你自己，请选择“重新开始”获取新的配对码。
+pair-old-locked-hotspot = 如果不知道是谁，请改为把两台笔记本电脑都连接到你手机的热点，然后选择“重新开始”。
 pair-old-start-again = 重新开始
 pair-old-timed-out = 没有及时选择数字，这是新的配对码。
 pair-old-declined = 数字不匹配，因此没有共享任何内容。这是新的配对码。
@@ -263,6 +269,8 @@ pairing-different-version = 两台笔记本电脑上的PCTwin版本不同。请�
 pairing-name-invalid = 这个名称不能使用。请换一个更短的名称，只用字母和数字。
 pairing-no-network = 这台笔记本电脑没有连接Wi-Fi或有线网络。请连接网络，然后再次尝试。
 pairing-choose-network = 这台笔记本电脑连接了多个网络。请选择你的新笔记本电脑所连接的那个：
+pairing-local-network-refused = 你的Mac可能不允许PCTwin查找这个网络上的笔记本电脑。如果Mac刚刚询问过你，请选择“允许”，然后重试。否则，请打开“系统设置”，选择“隐私与安全性”，再选择“本地网络”，打开PCTwin，然后重试。
+pairing-local-network-refused-details = VPN、防火墙或过滤软件也可能让笔记本电脑无法找到彼此。如果有其中之一正在运行，请在配对期间关闭它，然后重试。
 pairing-failed = 这次配对没有成功。没有共享任何内容。请再次尝试。
 
 ## M06 Match people to their profiles (Who’s moving?)

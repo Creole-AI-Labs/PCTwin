@@ -9,6 +9,7 @@ import {
   FAILED,
   listenPairingNew,
   listenPairingOld,
+  pairingHeadsUp,
   pairingNewConnect,
   pairingNewSearch,
   pairingOldDecline,
@@ -19,15 +20,17 @@ import {
   pairingOldStartAgain,
   pairingStop,
   toProblem,
+  type HeadsUp,
   type Label,
   type Nearby,
   type NewEvent,
   type OldEvent,
+  type PairRole,
   type Problem,
 } from "./bridge";
 
 export { FAILED, toProblem };
-export type { Label, Nearby, NewEvent, OldEvent, Problem };
+export type { HeadsUp, Label, Nearby, NewEvent, OldEvent, PairRole, Problem };
 
 /** What a lost connection shows: the connection dropped, nothing was shared, try again. */
 export const LOST: Problem = { key: "pairing-connection-lost", networks: [] };
@@ -68,3 +71,45 @@ export const newSearch = pairingNewSearch;
 export const newConnect = pairingNewConnect;
 export const listenOld = listenPairingOld;
 export const listenNew = listenPairingNew;
+
+/* ---------- Notes before pairing starts ---------- */
+
+/** What each note says. */
+export const HEADS_UP_TEXT: Record<HeadsUp["kind"], string> = {
+  "local-network": "pair-heads-up-local-network",
+  firewall: "pair-heads-up-firewall",
+};
+
+const SEEN_KEY = "pctwin.headsUpSeen";
+
+/** The notes already shown on this laptop (the system asks its question once). */
+function seenNotes(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(SEEN_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The person read these notes and went on. */
+export function markHeadsUpSeen(notes: HeadsUp[]): void {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...new Set([...seenNotes(), ...notes.map((n) => n.kind)])]));
+  } catch {
+    // Not kept: the note shows again next time, which does no harm.
+  }
+}
+
+/**
+ * The notes to show before pairing starts as `role` that this laptop has not shown before. When
+ * asking fails there are none: the system's own question still says what it is about.
+ */
+export async function unseenHeadsUp(role: PairRole): Promise<HeadsUp[]> {
+  try {
+    const seen = seenNotes();
+    return (await pairingHeadsUp(role)).filter((n) => !seen.includes(n.kind));
+  } catch {
+    return [];
+  }
+}

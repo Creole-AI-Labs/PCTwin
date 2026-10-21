@@ -345,7 +345,7 @@ pub mod probe {
     use super::{Evidence, Interface, NetworkProfile, Role};
 
     /// A service type used only for this check, so other laptops never list it.
-    const CHECK_SERVICE: &str = "_pctwin-check._tcp.local.";
+    pub const CHECK_SERVICE: &str = "_pctwin-check._tcp.local.";
     /// Longest wait for the Windows profile check.
     pub const WINDOWS_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 

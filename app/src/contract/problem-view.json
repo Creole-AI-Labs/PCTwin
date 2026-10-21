@@ -63,6 +63,10 @@
     ]
   },
   {
+    "key": "pairing-local-network-refused",
+    "networks": []
+  },
+  {
     "key": "pairing-failed",
     "networks": []
   }

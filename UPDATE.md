@@ -15,6 +15,14 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Speed and time left, measured, never guessed.** While a move runs, PCTwin works out its speed from what it really moved in about the last 20 seconds, and the time left from that. In the first few seconds, or when it can't know, it says so instead of guessing. When nothing is moving, it says it is waiting rather than showing a time that keeps growing. This is ready for review; the screens will show it once they are connected to the move.
 - **Pause and stop, in the move itself.** Pausing on either laptop now holds the move between two pieces of a file: what is already on its way finishes (never more than 32 MB), the other laptop is told, and nothing is treated as a lost connection. Carrying on picks up exactly where it held. Stopping ends the move at once, even while paused, and a file cut off halfway is never shown as copied. If the connection really is lost during a pause, PCTwin says so. Both laptops need this version of PCTwin for a pause to reach the other laptop. This is ready for review.
 
+## 20 October 2026
+
+**Done**
+
+- **Clearer pairing when someone guesses codes.** After five wrong codes, the old laptop now says plainly that someone on this network tried wrong codes, suggests using your phone's hotspot instead, and waits for you to choose Start again.
+- **A fresh code after sleep.** If the old laptop sleeps while showing a code, that code stops working, and a new one shows the moment it wakes.
+- **No surprise questions.** Before pairing starts, PCTwin says what a Mac (finding devices on your network) or Windows Firewall is about to ask, and which answer lets your laptops find each other. If a Mac said no, PCTwin says where to switch it back on.
+
 ## 16 October 2026
 
 **Done**

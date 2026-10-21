@@ -2,11 +2,11 @@
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
-import { LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
+import { LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
-type Phase = "searching" | "none" | "list" | "code" | "number" | "error" | "paired";
+type Phase = "heads-up" | "searching" | "none" | "list" | "code" | "number" | "error" | "paired";
 
 /** Keep what the person typed, up to a sensible length, with digits from any script as 0-9. The engine checks the code. */
 function cleanCode(text: string): string {
@@ -21,7 +21,9 @@ function cleanCode(text: string): string {
 /**
  * C04 and C05 on the new laptop.
  * searching -> none | list | code (exactly one found skips the list) ; list -> code -> number -> paired.
- * A problem after the number returns to the code field with the problem in words.
+ * A problem after the number returns to the code field with the problem in words. Before the first
+ * search on a Mac, a note says what the Mac will ask (heads-up); a search that found nothing because
+ * the Mac refuses local discovery says so, with where to switch it on.
  */
 export default function PairNew({ onBack }: { onBack: () => void }) {
   const { l10n } = useLocalization();
@@ -33,6 +35,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [number, setNumber] = useState<number | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
+  const [notes, setNotes] = useState<HeadsUp[]>([]);
   const fieldId = useId();
   const wasBusy = useRef(false);
   // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
@@ -60,8 +63,16 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
         setPhase("list");
       }
     } catch (error) {
+      const p = toProblem(error);
+      // Nothing was found, and the Mac says why: no old laptop found, with what to do.
+      if (p.key === "pairing-local-network-refused") {
+        setNearby([]);
+        setProblem(p);
+        setPhase("none");
+        return;
+      }
       // What happened before looking again stays the first thing said.
-      setProblem(notice ?? toProblem(error));
+      setProblem(notice ?? p);
       setPhase("error");
     }
   }, []);
@@ -90,6 +101,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   // Listen first, then search, so the answer to a code is never missed. Leaving the screen stops listening.
   useEffect(() => {
     const life = { cancelled: false };
+    const gone = () => life.cancelled;
     let unlisten: (() => void) | undefined;
     void (async () => {
       try {
@@ -102,6 +114,14 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       } catch {
         setProblem({ key: "pairing-failed", networks: [] });
         setPhase("error");
+        return;
+      }
+      const ahead = await unseenHeadsUp("new");
+      // The screen may have gone while asking (a check the compiler cannot see across the wait).
+      if (gone()) return;
+      if (ahead.length > 0) {
+        setNotes(ahead);
+        setPhase("heads-up");
         return;
       }
       await search();
@@ -149,6 +169,16 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   return (
     <>
       <PairStrip onBack={back} />
+
+      {phase === "heads-up" && (
+        <HeadsUpStep
+          eyebrow="pair-new-eyebrow"
+          notes={notes}
+          onContinue={() => {
+            void search();
+          }}
+        />
+      )}
 
       {phase === "searching" && (
         <>
