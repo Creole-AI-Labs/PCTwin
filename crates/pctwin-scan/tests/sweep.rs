@@ -1334,6 +1334,7 @@ fn volumes_that_share_one_file_systems_space_are_judged_together() {
 
 #[test]
 fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
+    let lab = lab();
     let apps = if cfg!(windows) {
         "Program Files"
     } else if cfg!(target_os = "macos") {
@@ -1341,40 +1342,59 @@ fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
     } else {
         "opt"
     };
-    // The rename has to land while an app folder is still waiting in the sweep's queue; on a fast
-    // machine the queue can drain before the first look, so a sweep that never got the chance is
-    // tried again on a fresh laptop (seen on ubuntu-24.04-arm).
-    let mut swept = None;
-    for _ in 0..20 {
-        let lab = lab();
-        for i in 0..200 {
-            write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
-        }
+    for i in 0..200 {
+        write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
+    }
+    let base = lab.c.join(apps);
+    let limits = SweepLimits {
+        checkpoint_entries: 1,
+        checkpoint_every: std::time::Duration::ZERO,
+        ..SweepLimits::default()
+    };
+    // The sweep stops at its first save and goes on from there, one step at a time, until an
+    // app folder is waiting in the saved queue; that folder is renamed while the sweep is stopped,
+    // so the rename always lands before the folder is listed, however fast the machine (a sweep
+    // left running can list every folder between two saves).
+    let mut resume = None;
+    let mut renamed = false;
+    for _ in 0..50 {
         let stop = AtomicBool::new(false);
-        let mut renamed = false;
-        let base = lab.c.join(apps);
-        let s = sweep(
+        let mut saved = None;
+        let step = sweep(
             sized(facts(&lab, false), 0),
             &mut Answers::default(),
             &stop,
             &mut |view| {
-                if !renamed {
-                    renamed = rename_a_queued_folder(&view.to_json(), &base, "App", 200);
+                if saved.is_none() {
+                    saved = Some(view.to_json());
+                    stop.store(true, Ordering::SeqCst);
                 }
             },
-            &SweepLimits {
-                checkpoint_entries: 1,
-                checkpoint_every: std::time::Duration::ZERO,
-                ..SweepLimits::default()
-            },
-            None,
+            &limits,
+            resume.take(),
         );
+        assert!(
+            !step.finished,
+            "the sweep finished before an app folder was seen waiting"
+        );
+        let saved = saved.expect("a checkpoint");
+        renamed = rename_a_queued_folder(&saved, &base, "App", 200);
+        resume = Some(pctwin_scan::Frontier::from_json(&saved).unwrap());
         if renamed {
-            swept = Some(s);
             break;
         }
     }
-    let s = swept.expect("no sweep in 20 left an app folder queued long enough to rename it");
+    assert!(renamed);
+    let go = AtomicBool::new(false);
+    let s = sweep(
+        sized(facts(&lab, false), 0),
+        &mut Answers::default(),
+        &go,
+        &mut |_| {},
+        &limits,
+        resume,
+    );
+    assert!(s.finished);
     assert!(
         s.blind_spots
             .iter()
