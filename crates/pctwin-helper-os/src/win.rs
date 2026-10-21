@@ -29,8 +29,8 @@ use windows::Win32::Security::{
     SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW, GetVolumePathNameW,
-    PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
+    CreateDirectoryW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW,
+    GetVolumePathNameW, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
@@ -483,6 +483,61 @@ fn os_expire_password(name: &[u16]) -> Result<String, u32> {
         };
         NetApiBufferFree(Some(buffer.cast()));
         sid
+    };
+    r
+}
+
+/// Makes the new folder `path` with exactly the access list `sddl` from its first moment (never
+/// a folder that already exists: that fails, so nothing anyone planted is ever used).
+pub(crate) fn create_folder_with_access(path: &std::path::Path, sddl: &str) -> Result<(), Error> {
+    let path_w = wide(path.as_os_str());
+    let sddl_w = wide(OsStr::new(sddl));
+    os_create_dir_with_sddl(&path_w, &sddl_w).map_err(|code| {
+        // ERROR_ALREADY_EXISTS as an HRESULT
+        if code.0 as u32 == 0x8007_00B7 {
+            Error::NameTaken
+        } else {
+            Error::Os {
+                call: "CreateDirectoryW",
+                code: i64::from(code.0),
+            }
+        }
+    })
+}
+
+/// `CreateDirectoryW` with the security descriptor `sddl` describes.
+fn os_create_dir_with_sddl(path: &[u16], sddl: &[u16]) -> Result<(), HRESULT> {
+    assert!(
+        path.ends_with(&[0]) && sddl.ends_with(&[0]),
+        "NUL-terminated"
+    );
+    // SAFETY: both strings are NUL-terminated (checked above). The security descriptor the
+    // system allocates is used only during CreateDirectoryW and freed once, after it; the error
+    // is read before LocalFree can change it.
+    #[expect(
+        unsafe_code,
+        reason = "making a folder with an access list has no safe binding"
+    )]
+    let r = unsafe {
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        match ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        ) {
+            Err(e) => Err(e.code()),
+            Ok(()) => {
+                let attributes = SECURITY_ATTRIBUTES {
+                    nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                    lpSecurityDescriptor: sd.0,
+                    bInheritHandle: false.into(),
+                };
+                let made = CreateDirectoryW(PCWSTR(path.as_ptr()), Some(&attributes));
+                LocalFree(Some(HLOCAL(sd.0)));
+                made.map_err(|e| e.code())
+            }
+        }
     };
     r
 }
