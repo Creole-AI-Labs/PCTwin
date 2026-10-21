@@ -19,8 +19,8 @@ export const OFFER: OfferedFile[] = [
 ];
 
 export const NEARBY: NearbyLaptop[] = [
-  { index: 0, label: GREEN_OWL, sameLabelNearby: false },
-  { index: 1, label: { kind: "named", name: "Sam’s laptop" }, sameLabelNearby: false },
+  { index: 0, label: GREEN_OWL, sameLabelNearby: false, needsUpdate: false },
+  { index: 1, label: { kind: "named", name: "Sam’s laptop" }, sameLabelNearby: false, needsUpdate: false },
 ];
 
 export const CONFLICTS: Conflict[] = [

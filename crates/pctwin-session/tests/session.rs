@@ -204,6 +204,7 @@ async fn an_old_laptop_with_no_reachable_address_is_reported_unreachable() {
     let (closed_a, _held_a) = closed_port();
     let (closed_b, _held_b) = closed_port();
     let found = Found {
+        pairing_versions: vec![1],
         label: unique("nowhere"),
         addrs: vec![closed_a, closed_b],
         same_label_nearby: false,
@@ -248,6 +249,7 @@ async fn once_an_address_answers_no_other_address_is_ever_tried() {
         });
         let (second_addr, contacted) = counting_listener().await;
         let chosen = Found {
+            pairing_versions: vec![1],
             label: unique("answers"),
             addrs: vec![first_addr, second_addr],
             same_label_nearby: false,

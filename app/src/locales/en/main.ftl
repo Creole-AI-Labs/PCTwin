@@ -240,6 +240,7 @@ pair-new-searching-body = Keep PCTwin open on your old laptop, on the same Wi-Fi
 pair-new-list-title = Which one is your old laptop?
 pair-new-list-body = Choose the name your old laptop shows on its screen.
 pair-new-same-label = Another laptop nearby has this name. Check the old laptop’s screen.
+pair-new-needs-update = This laptop has an older PCTwin. Update PCTwin on it, then search again.
 pair-new-none-title = No old laptop found.
 pair-new-none-body = Check that PCTwin is open on your old laptop and showing a code, and that both laptops are on the same Wi-Fi. Then search again.
 pair-new-search-again = Search again

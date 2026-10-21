@@ -248,6 +248,7 @@ pair-new-searching-body = أبقِ PCTwin مفتوحًا على حاسوبك ا�
 pair-new-list-title = أيها حاسوبك المحمول القديم؟
 pair-new-list-body = اختر الاسم الذي يظهر على شاشة حاسوبك المحمول القديم.
 pair-new-same-label = يحمل حاسوب محمول آخر قريب هذا الاسم. تحقق من شاشة الحاسوب القديم.
+pair-new-needs-update = يعمل على هذا الحاسوب إصدار أقدم من PCTwin. حدِّث PCTwin عليه، ثم ابحث مرة أخرى.
 pair-new-none-title = لا يوجد حاسوب محمول قديم.
 pair-new-none-body = تأكد أن PCTwin مفتوح على حاسوبك المحمول القديم ويعرض رمزًا، وأن الحاسوبين على شبكة Wi-Fi نفسها. ثم ابحث مرة أخرى.
 pair-new-search-again = البحث مرة أخرى

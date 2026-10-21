@@ -102,8 +102,8 @@ describe("nothing unchecked reaches a screen", () => {
   }
 
   it("a search reply that does not parse is the generic problem, and so is a wrong number", async () => {
-    tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false }]);
-    await expect(pairingNewSearch()).resolves.toEqual([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false }]);
+    tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false, needsUpdate: false }]);
+    await expect(pairingNewSearch()).resolves.toEqual([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false, needsUpdate: false }]);
     tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" } }]);
     expect(toProblem(await rejectionOf(pairingNewSearch()))).toEqual(FAILED);
     tauri.invoke.mockResolvedValueOnce(42);

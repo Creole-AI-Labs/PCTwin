@@ -403,6 +403,10 @@ pub struct NearbyView {
     pub label: LabelView,
     #[serde(rename = "sameLabelNearby")]
     pub same_label_nearby: bool,
+    /// It speaks no pairing version this laptop speaks: the screen asks to update PCTwin on the
+    /// older laptop instead of trying to pair.
+    #[serde(rename = "needsUpdate")]
+    pub needs_update: bool,
 }
 
 fn config() -> LinkConfig {
@@ -644,6 +648,7 @@ fn nearby_views(found: &[Found]) -> Vec<NearbyView> {
             index,
             label: (&f.label).into(),
             same_label_nearby: f.same_label_nearby,
+            needs_update: pctwin_discovery::common_pairing_version(&f.pairing_versions).is_none(),
         })
         .collect()
 }
@@ -742,6 +747,7 @@ mod tests {
             .await
             .unwrap();
         let found = Found {
+            pairing_versions: vec![1],
             label: Label::named("Blue Fox").unwrap(),
             addrs: vec![host.local_addr().unwrap()],
             same_label_nearby: false,

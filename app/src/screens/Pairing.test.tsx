@@ -378,8 +378,17 @@ describe("new laptop", () => {
     noMissingText();
   });
 
+  it("an old laptop with an older PCTwin is listed with what to do, and cannot be chosen", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: true }]);
+    expect(await screen.findByText(text("pair-new-needs-update"))).toBeTruthy();
+    const pick = screen.getByRole("button", { name: nameIs(`${foxText()} ${text("pair-new-needs-update")}`) });
+    expect((pick as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(text("pair-new-code-title"))).toBeNull();
+    noMissingText();
+  });
+
   it("with exactly one found, skips the list; the code goes to the engine as typed; the number is shown", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     expect(await screen.findByText(text("pair-new-code-title"))).toBeTruthy();
     expect(screen.queryByRole("button", { name: nameIs(text("pair-new-other-laptop")) })).toBeNull();
     expect(screen.getByText(withText(text("pair-new-code-body", { label: foxText() })))).toBeTruthy();
@@ -406,9 +415,9 @@ describe("new laptop", () => {
 
   it("flags two laptops with the same name, in words, and offers a way back to the list", async () => {
     await renderNew([
-      { index: 0, label: fox, sameLabelNearby: true },
-      { index: 1, label: fox, sameLabelNearby: true },
-      { index: 2, label: { kind: "named", name: "Ada's laptop" }, sameLabelNearby: false },
+      { index: 0, label: fox, sameLabelNearby: true, needsUpdate: false },
+      { index: 1, label: fox, sameLabelNearby: true, needsUpdate: false },
+      { index: 2, label: { kind: "named", name: "Ada's laptop" }, sameLabelNearby: false, needsUpdate: false },
     ]);
     expect(await screen.findByText(text("pair-new-list-title"))).toBeTruthy();
     const flags = screen.getAllByText(text("pair-new-same-label"));
@@ -427,7 +436,7 @@ describe("new laptop", () => {
   });
 
   it("a problem after the number returns to an empty code field with the problem in words", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -443,7 +452,7 @@ describe("new laptop", () => {
   });
 
   it("a rejected connect shows its problem and keeps the person in the code field", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => {
       throw problem("pairing-code-wrong");
@@ -467,8 +476,8 @@ describe("new laptop", () => {
 
   it("has no accessibility problems on the list, code, number and paired states", async () => {
     await renderNew([
-      { index: 0, label: fox, sameLabelNearby: true },
-      { index: 1, label: fox, sameLabelNearby: true },
+      { index: 0, label: fox, sameLabelNearby: true, needsUpdate: false },
+      { index: 1, label: fox, sameLabelNearby: true, needsUpdate: false },
     ]);
     await screen.findByText(text("pair-new-list-title"));
     expect(await violations()).toEqual([]);
@@ -487,7 +496,7 @@ describe("new laptop", () => {
 
 describe("the new laptop once paired", () => {
   it("stays on Paired whatever arrives afterwards", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -500,7 +509,7 @@ describe("the new laptop once paired", () => {
   });
 
   it("leaves Paired only when the paired connection is lost, and says so", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -520,7 +529,7 @@ describe("the new laptop once paired", () => {
   });
 
   it("after a lost connection, says so while it looks for the old laptop again", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -552,7 +561,7 @@ describe("the old laptop once paired", () => {
 
 describe("the new laptop after an attempt ends", () => {
   it("looks for the old laptop again, keeping what happened on screen", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -571,7 +580,7 @@ describe("the new laptop after an attempt ends", () => {
   });
 
   it("ignores a number that arrives after its attempt ended", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     let answer: (n: number) => void = () => undefined;
     replies.pairing_new_connect = () =>
@@ -709,7 +718,7 @@ describe("late replies never move a screen off what it shows", () => {
   });
 
   it("the new laptop stays Paired when Paired arrives before its own reply", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     let answer: (n: number) => void = () => undefined;
     replies.pairing_new_connect = () =>
@@ -728,7 +737,7 @@ describe("late replies never move a screen off what it shows", () => {
   });
 
   it("when looking again fails, what happened is still what is said", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -742,7 +751,7 @@ describe("late replies never move a screen off what it shows", () => {
   });
 
   it("pairs again after a lost connection", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     const connect = async () => {

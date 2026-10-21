@@ -241,6 +241,7 @@ pair-new-searching-body = Mantenha o PCTwin aberto no seu notebook antigo, no me
 pair-new-list-title = Qual é o seu notebook antigo?
 pair-new-list-body = Escolha o nome que seu notebook antigo mostra na tela.
 pair-new-same-label = Outro notebook por perto tem este nome. Confira a tela do notebook antigo.
+pair-new-needs-update = Este notebook tem uma versão mais antiga do PCTwin. Atualize o PCTwin nele e procure de novo.
 pair-new-none-title = Nenhum notebook antigo encontrado.
 pair-new-none-body = Verifique se o PCTwin está aberto no seu notebook antigo mostrando um código e se os dois notebooks estão no mesmo Wi-Fi. Depois procure de novo.
 pair-new-search-again = Procurar de novo

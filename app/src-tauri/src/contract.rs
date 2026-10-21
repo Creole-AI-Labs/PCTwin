@@ -94,11 +94,19 @@ fn nearby() -> Vec<NearbyView> {
             index: 0,
             label: picked(),
             same_label_nearby: false,
+            needs_update: false,
         },
         NearbyView {
             index: 1,
             label: named(),
             same_label_nearby: true,
+            needs_update: false,
+        },
+        NearbyView {
+            index: 2,
+            label: picked(),
+            same_label_nearby: false,
+            needs_update: true,
         },
     ]
 }

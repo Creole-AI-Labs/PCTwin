@@ -242,6 +242,7 @@ pair-new-searching-body = Gardez PCTwin ouvert sur votre ancien ordinateur porta
 pair-new-list-title = Lequel est votre ancien ordinateur portable ?
 pair-new-list-body = Choisissez le nom affiché sur l’écran de votre ancien ordinateur portable.
 pair-new-same-label = Un autre ordinateur portable à proximité porte ce nom. Vérifiez l’écran de l’ancien ordinateur.
+pair-new-needs-update = Cet ordinateur a une version plus ancienne de PCTwin. Mettez PCTwin à jour dessus, puis recherchez à nouveau.
 pair-new-none-title = Ancien ordinateur introuvable.
 pair-new-none-body = Vérifiez que PCTwin est ouvert sur votre ancien ordinateur portable et affiche un code, et que les deux ordinateurs sont sur le même Wi-Fi. Puis relancez la recherche.
 pair-new-search-again = Rechercher à nouveau

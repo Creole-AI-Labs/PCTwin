@@ -45,6 +45,41 @@ const MAX_NAME_BYTES: usize = 240;
 pub const MAX_ADDRS: usize = 8;
 /// Version of the announcement format.
 const FORMAT_VERSION: &str = "1";
+
+/// The pairing protocol versions this release speaks, announced (`pv`, comma-separated) so a new
+/// laptop can tell before connecting whether the two can pair, and say "update PCTwin on the
+/// other laptop" rather than fail a handshake. Each release speaks its own and the one before
+/// (Engineering Plan 9.2); today there is one.
+pub const PAIRING_VERSIONS: &[u8] = &[1];
+
+/// The pairing versions an announcement says it speaks: the `pv` field, or version 1 for one
+/// that says nothing (the first release).
+fn pairing_versions_in(fields: &[(&str, &str)]) -> Option<Vec<u8>> {
+    match fields.iter().find(|(k, _)| *k == "pv") {
+        None => Some(vec![1]),
+        Some((_, v)) => {
+            let list: Option<Vec<u8>> = v.split(',').map(|n| canonical_index(n, 256)).collect();
+            list.filter(|l| !l.is_empty() && l.len() <= 8 && !l.contains(&0))
+        }
+    }
+}
+
+/// The newest pairing version both laptops speak, if any.
+pub fn common_pairing_version(theirs: &[u8]) -> Option<u8> {
+    PAIRING_VERSIONS
+        .iter()
+        .filter(|v| theirs.contains(v))
+        .max()
+        .copied()
+}
+
+/// The announcement's fields: the label's, then the pairing versions.
+fn announced_txt(label: &Label) -> Vec<(&'static str, String)> {
+    let mut txt = label.to_txt();
+    let versions: Vec<String> = PAIRING_VERSIONS.iter().map(u8::to_string).collect();
+    txt.push(("pv", versions.join(",")));
+    txt
+}
 /// Most accent marks allowed on one letter (Burmese and Hindi stack several).
 const MAX_MARKS_IN_A_ROW: usize = 4;
 /// Zero-width non-joiner and joiner: needed inside words in Persian, Sinhala and other scripts,
@@ -314,9 +349,11 @@ impl Label {
             (None, None, Some(n)) if is_acceptable_name(n) => Self::Named(n.to_string()),
             _ => return None,
         };
-        // Nothing else may be present, and no field twice. (The network library already keeps
-        // only the first of any repeated field it receives; this also covers direct callers.)
-        (fields.len() == label.to_txt().len()).then_some(label)
+        // Nothing else may be present but the pairing versions, and no field twice. (The network
+        // library already keeps only the first of any repeated field it receives; this also
+        // covers direct callers.)
+        let pv = usize::from(fields.iter().any(|(k, _)| *k == "pv"));
+        (fields.len() == label.to_txt().len() + pv).then_some(label)
     }
 
     fn from_index(n: usize) -> Self {
@@ -442,6 +479,10 @@ pub struct Found {
     pub addrs: Vec<SocketAddr>,
     /// Another laptop nearby shows the same label: ask the person to check the old laptop's screen.
     pub same_label_nearby: bool,
+    /// The pairing versions it speaks: with no version in common
+    /// ([`common_pairing_version`] is `None`), the screen asks to update PCTwin on the older
+    /// laptop instead of trying to pair.
+    pub pairing_versions: Vec<u8>,
 }
 
 /// Local discovery on this laptop.
@@ -463,7 +504,7 @@ impl Discovery {
         let tag = random_tag()?;
         let instance = format!("pctwin-{tag}");
         let host = format!("pctwin-{tag}.local.");
-        let txt = label.to_txt();
+        let txt = announced_txt(label);
         let props: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &props[..])?
             .enable_addr_auto();
@@ -491,7 +532,7 @@ impl Discovery {
         let tag = random_tag()?;
         let instance = format!("pctwin-{tag}");
         let host = format!("pctwin-{tag}.local.");
-        let txt = label.to_txt();
+        let txt = announced_txt(label);
         let props: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, ips, port, &props[..])?;
         let fullname = info.get_fullname().to_string();
@@ -552,11 +593,13 @@ fn read_announcement(info: &ResolvedService) -> Option<Found> {
         fields.push((prop.key(), value));
     }
     let label = Label::from_txt(&fields)?;
+    let pairing_versions = pairing_versions_in(&fields)?;
     let addrs = usable_addrs(info.get_addresses().iter(), info.get_port());
     (!addrs.is_empty()).then_some(Found {
         label,
         addrs,
         same_label_nearby: false,
+        pairing_versions,
     })
 }
 
@@ -611,6 +654,30 @@ impl Drop for Announcement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pairing_versions_are_announced_and_read_back() {
+        let label = Label::named("Kitchen laptop").unwrap();
+        let txt = announced_txt(&label);
+        let fields: Vec<(&str, &str)> = txt.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        assert_eq!(Label::from_txt(&fields), Some(label.clone()));
+        assert_eq!(
+            pairing_versions_in(&fields),
+            Some(PAIRING_VERSIONS.to_vec())
+        );
+        // The first release said nothing: version 1.
+        let plain = label.to_txt();
+        let plain: Vec<(&str, &str)> = plain.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        assert_eq!(pairing_versions_in(&plain), Some(vec![1]));
+        // Only a short list of plain numbers, never 0.
+        for bad in ["", "0", "1,", "01", "1,x", "1,2,3,4,5,6,7,8,9", "300"] {
+            let mut f = plain.clone();
+            f.push(("pv", bad));
+            assert_eq!(pairing_versions_in(&f), None, "{bad:?}");
+        }
+        assert_eq!(common_pairing_version(&[1, 2]), Some(1));
+        assert_eq!(common_pairing_version(&[7]), None);
+    }
 
     fn v4(s: &str) -> ScopedIp {
         ScopedIp::from(s.parse::<IpAddr>().unwrap())

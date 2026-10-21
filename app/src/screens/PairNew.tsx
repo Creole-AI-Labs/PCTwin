@@ -53,7 +53,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       setNearby(found);
       if (found.length === 0) {
         setPhase("none");
-      } else if (found.length === 1) {
+      } else if (found.length === 1 && !found[0].needsUpdate) {
         setChosen(found[0]);
         setHadList(false);
         setCode("");
@@ -375,8 +375,9 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
       <button
         type="button"
         className="pair-pick"
-        aria-labelledby={nearby.sameLabelNearby ? `${nameId} ${flagId}` : nameId}
+        aria-labelledby={nearby.sameLabelNearby || nearby.needsUpdate ? `${nameId} ${flagId}` : nameId}
         onClick={onChoose}
+        disabled={nearby.needsUpdate}
       >
         <span className="pair-pick-icon">
           <Laptop />
@@ -385,7 +386,16 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
           <span id={nameId} className="pair-pick-name" dir="auto">
             {labelText(l10n, nearby.label)}
           </span>
-          {nearby.sameLabelNearby && (
+          {nearby.needsUpdate && (
+            <span id={flagId} className="pair-flag">
+              <Badge tone="warn" icon={<Attention />}>
+                <Localized id="pair-new-needs-update">
+                  <span />
+                </Localized>
+              </Badge>
+            </span>
+          )}
+          {nearby.sameLabelNearby && !nearby.needsUpdate && (
             <span id={flagId} className="pair-flag">
               <Badge tone="warn" icon={<Attention />}>
                 <Localized id="pair-new-same-label">

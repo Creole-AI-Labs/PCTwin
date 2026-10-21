@@ -287,7 +287,7 @@ describe("Q04 Who should receive it?", () => {
       <QuickWho
         count={1}
         size={10}
-        nearby={[{ ...NEARBY[0], busy: true }, { ...NEARBY[1], sameLabelNearby: true }]}
+        nearby={[{ ...NEARBY[0], busy: true }, { ...NEARBY[1], sameLabelNearby: true, needsUpdate: false }]}
         onChooseNearby={onChooseNearby}
         onUseCode={fn()}
         onBack={fn()}

@@ -242,6 +242,7 @@ pair-new-searching-body = Deja PCTwin abierto en tu portátil antiguo, en la mis
 pair-new-list-title = ¿Cuál es tu portátil antiguo?
 pair-new-list-body = Elige el nombre que muestra la pantalla de tu portátil antiguo.
 pair-new-same-label = Otro portátil cercano tiene este nombre. Mira la pantalla del portátil antiguo.
+pair-new-needs-update = Este portátil tiene una versión más antigua de PCTwin. Actualiza PCTwin en él y vuelve a buscar.
 pair-new-none-title = No aparece tu portátil antiguo.
 pair-new-none-body = Comprueba que PCTwin esté abierto en tu portátil antiguo y muestre un código, y que los dos portátiles estén en la misma Wi-Fi. Luego busca de nuevo.
 pair-new-search-again = Buscar de nuevo

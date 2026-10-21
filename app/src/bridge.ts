@@ -36,7 +36,7 @@ export type Problem = { key: string; networks: string[] };
 
 export type NewEvent = { kind: "paired" } | { kind: "problem"; problem: Problem } | { kind: "lost" };
 
-export type Nearby = { index: number; label: Label; sameLabelNearby: boolean };
+export type Nearby = { index: number; label: Label; sameLabelNearby: boolean; needsUpdate: boolean };
 
 /** A note shown before pairing starts: a question this system is about to ask (`HeadsUp`). */
 export type HeadsUp = { kind: "local-network" } | { kind: "firewall" };
@@ -147,10 +147,10 @@ export function parseNewView(value: unknown): NewEvent | null {
 
 /** An old laptop nearby (`NearbyView`). */
 export function parseNearbyView(value: unknown): Nearby | null {
-  const f = exactly(value, ["index", "label", "sameLabelNearby"]);
-  if (!f || !isCount(f.index) || typeof f.sameLabelNearby !== "boolean") return null;
+  const f = exactly(value, ["index", "label", "sameLabelNearby", "needsUpdate"]);
+  if (!f || !isCount(f.index) || typeof f.sameLabelNearby !== "boolean" || typeof f.needsUpdate !== "boolean") return null;
   const label = parseLabelView(f.label);
-  return label ? { index: f.index, label, sameLabelNearby: f.sameLabelNearby } : null;
+  return label ? { index: f.index, label, sameLabelNearby: f.sameLabelNearby, needsUpdate: f.needsUpdate } : null;
 }
 
 /** The search's reply: every entry must parse, or none is used. */

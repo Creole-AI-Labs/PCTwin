@@ -228,6 +228,7 @@ pair-new-searching-body = 请在旧笔记本电脑上保持PCTwin打开，并与
 pair-new-list-title = 哪一台是你的旧笔记本电脑？
 pair-new-list-body = 选择你的旧笔记本电脑屏幕上显示的名称。
 pair-new-same-label = 附近另一台笔记本电脑也叫这个名称。请查看旧笔记本电脑的屏幕。
+pair-new-needs-update = 这台笔记本电脑上的 PCTwin 版本较旧。请在它上面更新 PCTwin，然后再次搜索。
 pair-new-none-title = 没有找到旧笔记本电脑。
 pair-new-none-body = 请检查旧笔记本电脑上的PCTwin是否已打开并显示配对码，以及两台电脑是否连接同一个Wi-Fi。然后重新搜索。
 pair-new-search-again = 重新搜索
