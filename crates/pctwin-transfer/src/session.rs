@@ -725,8 +725,10 @@ impl SenderSession {
         let alive = Cell::new(0usize);
         let main_loop = async {
             loop {
-                // Registered before looking, so a change made meanwhile is not missed.
+                // Registered before looking, so a change made meanwhile is not missed (by a lane,
+                // or a pause, carrying on or stop, even both of a pause and a carrying on).
                 let wake = changed.notified();
+                let seen = control.changes();
                 // The state is never borrowed across a wait, so every lane can take its turn.
                 let hold = state.borrow_mut().hold_to_say();
                 if let Some(m) = hold {
@@ -782,9 +784,8 @@ impl SenderSession {
                     // here touches no connection, so this side's carrying on (or stop) is seen at
                     // once; between, the new laptop is told it is still held and answers, so a
                     // link that dropped is found and reported as a drop.
-                    let paused = control.paused();
                     let tick = tokio::select! {
-                        () = control.wait_change_from(paused) => false,
+                        () = control.wait_change(seen) => false,
                         () = tokio::time::sleep(HOLD_TICK) => true,
                     };
                     let still = if tick {
@@ -796,12 +797,11 @@ impl SenderSession {
                         send(main, &m).await?;
                     }
                 } else if alive.get() > 0 {
-                    // Other lanes are still at work: wait until one of them changes something
-                    // (or this side pauses).
-                    let paused = control.paused();
+                    // Other lanes are still at work: wait until one of them changes something,
+                    // or this side pauses, carries on or stops.
                     tokio::select! {
                         () = wake => {}
-                        () = control.wait_change_from(paused) => {}
+                        () = control.wait_change(seen) => {}
                     }
                 } else if state.borrow().control.stopped() {
                     // Nothing to send because the move was stopped: that is a stop, never a
@@ -826,7 +826,7 @@ impl SenderSession {
                         Some(ch) => {
                             let lane = state.borrow_mut().add_lane();
                             alive.set(alive.get() + 1);
-                            running.push(send_lane(&state, &changed, &alive, lane, ch));
+                            running.push(send_lane(&state, &changed, &control, &alive, lane, ch));
                             changed.notify_waiters();
                         }
                         None => open = false,
@@ -1723,12 +1723,16 @@ impl SenderSession {
 async fn send_lane<C: Channel>(
     state: &RefCell<&mut SenderSession>,
     changed: &Notify,
+    control: &MoveControl,
     alive: &Cell<usize>,
     lane: usize,
     mut ch: C,
 ) {
     loop {
+        // Both made before looking: a change by another lane, or a pause, carrying on or stop
+        // made after this look, wakes this lane however it was told (or not told) to anyone.
         let wake = changed.notified();
+        let seen = control.changes();
         let work = state.borrow_mut().work(lane);
         if state.borrow_mut().take_dirty() {
             changed.notify_waiters();
@@ -1761,7 +1765,10 @@ async fn send_lane<C: Channel>(
                 }
             }
             Work::Wait => {
-                wake.await;
+                tokio::select! {
+                    () = wake => {}
+                    () = control.wait_change(seen) => {}
+                }
                 true
             }
         };

@@ -496,6 +496,9 @@ impl MoveMeter {
 struct ControlInner {
     stop: AtomicBool,
     pause: AtomicBool,
+    /// Every stop, pause and carrying on counts one more, so a waiter that looked before a
+    /// pause and a carrying on (back to back) still sees that something changed.
+    changes: AtomicU64,
     wake: Notify,
 }
 
@@ -514,7 +517,7 @@ impl MoveControl {
     /// [`TransferError::Stopped`](crate::TransferError::Stopped).
     pub fn stop(&self) {
         self.0.stop.store(true, Ordering::Release);
-        self.0.wake.notify_waiters();
+        self.changed();
     }
 
     pub fn stopped(&self) -> bool {
@@ -526,13 +529,25 @@ impl MoveControl {
     /// [`carry_on`](Self::carry_on) picks up exactly where it held.
     pub fn pause(&self) {
         self.0.pause.store(true, Ordering::Release);
-        self.0.wake.notify_waiters();
+        self.changed();
     }
 
     /// Ends this laptop's pause (the other laptop's own pause, if it made one, still holds).
     pub fn carry_on(&self) {
         self.0.pause.store(false, Ordering::Release);
+        self.changed();
+    }
+
+    /// Counts the change, then wakes every waiter (after the count, so none misses it).
+    fn changed(&self) {
+        self.0.changes.fetch_add(1, Ordering::AcqRel);
         self.0.wake.notify_waiters();
+    }
+
+    /// How many stops, pauses and carryings on there have been: look before deciding to wait,
+    /// then wait with [`wait_change`](Self::wait_change).
+    pub(crate) fn changes(&self) -> u64 {
+        self.0.changes.load(Ordering::Acquire)
     }
 
     /// Whether this laptop's person has paused the move.
@@ -540,12 +555,14 @@ impl MoveControl {
         self.0.pause.load(Ordering::Acquire)
     }
 
-    /// Returns once the move is stopped, or paused is no longer `paused`.
-    pub(crate) async fn wait_change_from(&self, paused: bool) {
+    /// Returns once there was a stop, pause or carrying on after `seen` (from
+    /// [`changes`](Self::changes)): at once if there was one already, even a pause and a
+    /// carrying on that left the move as it was.
+    pub(crate) async fn wait_change(&self, seen: u64) {
         loop {
             // Made before looking, as in `wait_stopped`.
             let woken = self.0.wake.notified();
-            if self.stopped() || self.paused() != paused {
+            if self.changes() != seen {
                 return;
             }
             woken.await;
@@ -776,6 +793,42 @@ mod tests {
             serde_json::to_value(TimeLeft::Paused).unwrap(),
             serde_json::json!({ "kind": "paused" })
         );
+    }
+
+    #[test]
+    fn a_pause_and_a_carrying_on_back_to_back_still_wake_a_waiter_that_looked_before() {
+        use futures_util::FutureExt;
+        let c = MoveControl::new();
+        let seen = c.changes();
+        assert!(
+            c.wait_change(seen).now_or_never().is_none(),
+            "nothing changed yet"
+        );
+        // Paused and carried on before the waiter looks again: the move is as it was, but it
+        // changed, so the waiter is not left asleep.
+        c.pause();
+        c.carry_on();
+        assert!(!c.paused());
+        assert!(c.wait_change(seen).now_or_never().is_some());
+        // A waiter already asleep is woken by each of them, from another thread.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        for act in [MoveControl::pause, MoveControl::carry_on, MoveControl::stop] {
+            let seen = c.changes();
+            let other = c.clone();
+            let t = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(20));
+                act(&other);
+            });
+            // Generous: it is woken within moments; this only turns a missed wake into a failure.
+            let woken = rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(60), c.wait_change(seen)).await
+            });
+            assert!(woken.is_ok(), "a waiter was left asleep");
+            t.join().unwrap();
+        }
     }
 
     #[test]

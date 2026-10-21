@@ -102,7 +102,7 @@ pub enum Message {
     /// Sender: it stops sending this file, for `why` (the file fails, and the new laptop says
     /// why).
     GiveUp { stream: u32, why: GiveUpWhy },
-    /// Either laptop, on the main connection (move protocol 3 and later): whether the person on
+    /// Either laptop, on the main connection (move protocol 4 and later): whether the person on
     /// this side has paused the move. The old laptop says it when its person pauses or carries
     /// on, and again every [`HOLD_TICK`](crate::HOLD_TICK) while the move is held; the new laptop
     /// answers each with its own, and says it unasked, with its next reply, when its person

@@ -521,9 +521,20 @@ async fn a_link_that_drops_during_the_new_laptops_pause_is_a_drop_there_too() {
 }
 
 #[tokio::test]
-async fn with_a_laptop_one_version_back_a_pause_holds_here_and_says_nothing_it_would_not_understand()
+async fn with_a_laptop_on_version_two_a_pause_holds_here_and_says_nothing_it_would_not_understand()
+{
+    older_peer(2).await
+}
+
+#[tokio::test]
+async fn with_a_laptop_on_version_three_a_pause_holds_here_and_says_nothing_it_would_not_understand()
  {
-    let old = HOLD_SINCE - 1;
+    older_peer(3).await
+}
+
+/// Both laptops on protocol `old`, which has no `Hold`.
+async fn older_peer(old: u16) {
+    assert!(old < HOLD_SINCE);
     let w = world();
     let jobs = vec![w.file(1, BIG)];
     let (sm, rm, control, here) = (
@@ -623,4 +634,325 @@ async fn a_move_paused_before_it_starts_opens_and_starts_nothing_until_it_carrie
     received.unwrap();
     assert_eq!(w.landed(1).as_deref(), Some(&bytes(BIG, 1)[..]));
     assert_eq!(w.landed(2).as_deref(), Some(&bytes(1000, 2)[..]));
+}
+
+// ------------------------------------------------ pause with extra lanes (review, 21 October)
+
+/// Extra lanes for both laptops.
+fn lanes(n: usize) -> (Vec<Mem>, Vec<Mem>) {
+    let (mut old, mut new) = (Vec::new(), Vec::new());
+    for _ in 0..n {
+        let (x, y) = mem_pair();
+        old.push(x);
+        new.push(y);
+    }
+    (old, new)
+}
+
+/// Eight rounds of pause, drain, hold, carry on, with three extra lanes, both laptops on protocol
+/// `v`: nothing is sent while held, every carrying on wakes every lane, and both files land.
+async fn lanes_pause(v: u16) {
+    let w = world();
+    let len = 16 * 1024 * 1024;
+    let small = 3 * 1024 * 1024;
+    let jobs = vec![w.file(1, len), w.file(2, small)];
+    let (sm, control) = (MoveMeter::new(), MoveControl::new());
+    let mut sender = SenderSession::new(jobs.clone(), 2)
+        .with_in_flight_limit(LIMIT)
+        .with_meter(sm.clone())
+        .with_control(control.clone())
+        .with_protocol(v);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_protocol(v);
+    let written = receiver.meter();
+    let (mut a, mut b) = mem_pair();
+    let (old_lanes, new_lanes) = lanes(3);
+    let person = async {
+        // Rounds spread over the whole move, so some come after the old laptop's own share of
+        // the big file is sent and only the lanes have blocks left.
+        for round in 0..8u64 {
+            until(|| sm.reading().blocks_sent >= 8 + round * 16).await;
+            control.pause();
+            until(|| drained(&sm)).await;
+            let held = sm.reading().blocks_sent;
+            tokio::time::sleep(HOLD_TICK + Duration::from_millis(300)).await;
+            assert_eq!(
+                sm.reading().blocks_sent,
+                held,
+                "v{v}: a block sent while held"
+            );
+            control.carry_on();
+        }
+    };
+    let ((sent, received), ()) = common::unless_stuck(&written, (len + small) as u64, async {
+        tokio::join!(
+            async {
+                tokio::join!(
+                    sender.run_lanes(&mut a, old_lanes),
+                    receiver.run_lanes(&mut b, new_lanes)
+                )
+            },
+            person
+        )
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    assert_eq!(w.landed(1).as_deref(), Some(&bytes(len, 1)[..]));
+    assert_eq!(w.landed(2).as_deref(), Some(&bytes(small, 2)[..]));
+}
+
+#[tokio::test]
+async fn with_extra_lanes_every_carrying_on_wakes_every_lane_on_version_two() {
+    lanes_pause(2).await
+}
+
+#[tokio::test]
+async fn with_extra_lanes_every_carrying_on_wakes_every_lane_on_version_three() {
+    lanes_pause(3).await
+}
+
+#[tokio::test]
+async fn with_extra_lanes_every_carrying_on_wakes_every_lane_on_this_version() {
+    lanes_pause(HOLD_SINCE).await
+}
+
+/// Many quick pause and carry-on taps (a double-tap: pause, a few turns of the other tasks or
+/// none, carry on) with three extra lanes on protocol `v`: after every tap the move moves again.
+async fn taps(v: u16) {
+    let w = world();
+    let len = 48 * 1024 * 1024;
+    let jobs = vec![w.file(1, len)];
+    let (sm, control) = (MoveMeter::new(), MoveControl::new());
+    let mut sender = SenderSession::new(jobs.clone(), 1)
+        .with_in_flight_limit(LIMIT)
+        .with_meter(sm.clone())
+        .with_control(control.clone())
+        .with_protocol(v);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_protocol(v);
+    let written = receiver.meter();
+    let (mut a, mut b) = mem_pair();
+    let (old_lanes, new_lanes) = lanes(3);
+    let person = async {
+        let mut seed = 12345u64;
+        for _ in 0..300 {
+            let before = sm.reading().blocks_sent;
+            if before >= 380 {
+                break;
+            }
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            control.pause();
+            for _ in 0..(seed >> 33) % 12 {
+                tokio::task::yield_now().await;
+            }
+            control.carry_on();
+            until(|| sm.reading().blocks_sent > before || sm.reading().files.copied == 1).await;
+        }
+    };
+    let ((sent, received), ()) = common::unless_stuck(&written, len as u64, async {
+        tokio::join!(
+            async {
+                tokio::join!(
+                    sender.run_lanes(&mut a, old_lanes),
+                    receiver.run_lanes(&mut b, new_lanes)
+                )
+            },
+            person
+        )
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    assert_eq!(w.landed(1).as_deref(), Some(&bytes(len, 1)[..]));
+}
+
+#[tokio::test]
+async fn quick_pause_and_carry_on_taps_never_leave_a_lane_asleep_on_this_version() {
+    taps(HOLD_SINCE).await
+}
+
+#[tokio::test]
+async fn quick_pause_and_carry_on_taps_never_leave_a_lane_asleep_on_version_two() {
+    taps(2).await
+}
+
+// ------------------------------------------------ a hostile other laptop
+
+/// A new laptop on protocol `v`, given `msgs` by an old laptop right after its hello: how its
+/// run ended, and how many `Hold`s it said.
+async fn new_laptop_given(v: u16, msgs: Vec<Message>) -> (Result<(), TransferError>, usize) {
+    let w = world();
+    let jobs = vec![w.file(1, 1000)];
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_protocol(v);
+    let (mut a, mut b) = mem_pair();
+    let old = async move {
+        while Message::decode(&a.recv().await.unwrap()).unwrap() != Message::Ready {}
+        for m in &msgs {
+            if a.send(&m.encode()).await.is_err() {
+                break;
+            }
+        }
+        // Whatever it says until it ends its run (closing its end).
+        let mut holds = 0;
+        while let Ok(m) = a.recv().await {
+            if matches!(Message::decode(&m), Ok(Message::Hold { .. })) {
+                holds += 1;
+            }
+        }
+        holds
+    };
+    let (ran, holds) = common::no_hang(async {
+        let new = async {
+            let ran = receiver.run(&mut b).await;
+            drop(b);
+            ran
+        };
+        tokio::join!(new, old)
+    })
+    .await;
+    (ran, holds)
+}
+
+#[tokio::test]
+async fn a_hold_to_a_new_laptop_on_an_older_version_is_refused_and_never_answered() {
+    for v in [2, 3] {
+        let (ran, holds) = new_laptop_given(v, vec![Message::Hold { paused: true }]).await;
+        assert!(
+            matches!(ran, Err(TransferError::Protocol(_))),
+            "v{v}: {ran:?}"
+        );
+        assert_eq!(holds, 0, "v{v}");
+    }
+    // On this version it is answered (and the old laptop then ends the move).
+    let (ran, holds) = new_laptop_given(
+        HOLD_SINCE,
+        vec![Message::Hold { paused: true }, Message::AllSent],
+    )
+    .await;
+    assert!(ran.is_ok(), "{ran:?}");
+    assert_eq!(holds, 1);
+}
+
+/// An extra lane of a new laptop that answers its first whole block with a `Hold` instead of a
+/// receipt, then keeps reading and says nothing more.
+async fn lane_that_says_hold(mut lane: Mem) -> bool {
+    let mut said = false;
+    while let Ok(m) = lane.recv().await {
+        if !said && matches!(Message::decode(&m), Ok(Message::Piece { last: true, .. })) {
+            said = true;
+            if lane
+                .send(&Message::Hold { paused: true }.encode())
+                .await
+                .is_err()
+            {
+                return said;
+            }
+        }
+    }
+    said
+}
+
+#[tokio::test]
+async fn a_hold_on_an_extra_lane_is_refused_and_never_pauses_the_old_laptop() {
+    let w = world();
+    // Two files in flight at once, so the extra lane takes one of its own.
+    let len = 8 * 1024 * 1024;
+    let small = 3 * 1024 * 1024;
+    let jobs = vec![w.file(1, len), w.file(2, small)];
+    let sm = MoveMeter::new();
+    let mut sender = SenderSession::new(jobs.clone(), 2)
+        .with_in_flight_limit(LIMIT)
+        .with_meter(sm.clone());
+    let mut receiver = ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000");
+    let written = receiver.meter();
+    let (mut a, mut b) = mem_pair();
+    let (x, y) = mem_pair();
+    let mut seen_paused = false;
+    let watch = async {
+        while sm.reading().files.copied < 2 {
+            seen_paused |= sm.reading().paused_there;
+            tokio::task::yield_now().await;
+        }
+    };
+    let ((sent, received, said), ()) =
+        common::unless_stuck(&written, (len + small) as u64, async {
+            tokio::join!(
+                async {
+                    tokio::join!(
+                        sender.run_lanes(&mut a, vec![x]),
+                        receiver.run(&mut b),
+                        lane_that_says_hold(y)
+                    )
+                },
+                watch
+            )
+        })
+        .await;
+    sent.unwrap();
+    received.unwrap();
+    assert!(said, "the lane was given a block to answer");
+    assert!(
+        !seen_paused,
+        "a Hold on an extra lane paused the old laptop"
+    );
+    assert_eq!(w.landed(1).as_deref(), Some(&bytes(len, 1)[..]));
+    assert_eq!(w.landed(2).as_deref(), Some(&bytes(small, 2)[..]));
+}
+
+/// One double-tap from another thread (pause, a few microseconds, carry on) once `at_block`
+/// blocks are sent, with three extra lanes on protocol `v`; then no more taps: the move ends.
+async fn one_double_tap(v: u16, spin_us: u64, at_block: u64) -> Result<(), TransferError> {
+    let w = world();
+    let len = 6 * 1024 * 1024;
+    let jobs = vec![w.file(1, len)];
+    let (sm, control) = (MoveMeter::new(), MoveControl::new());
+    let mut sender = SenderSession::new(jobs.clone(), 1)
+        .with_in_flight_limit(LIMIT)
+        .with_meter(sm.clone())
+        .with_control(control.clone())
+        .with_protocol(v);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_protocol(v);
+    let written = receiver.meter();
+    let (mut a, mut b) = mem_pair();
+    let (old_lanes, new_lanes) = lanes(3);
+    let (c2, m2) = (control.clone(), sm.clone());
+    let tapper = std::thread::spawn(move || {
+        while m2.reading().blocks_sent < at_block {
+            std::hint::spin_loop();
+        }
+        c2.pause();
+        let t = std::time::Instant::now();
+        while t.elapsed() < Duration::from_micros(spin_us) {
+            std::hint::spin_loop();
+        }
+        c2.carry_on();
+    });
+    let (sent, received) = common::unless_stuck(&written, len as u64, async {
+        tokio::join!(
+            sender.run_lanes(&mut a, old_lanes),
+            receiver.run_lanes(&mut b, new_lanes)
+        )
+    })
+    .await;
+    tapper.join().unwrap();
+    sent?;
+    received?;
+    assert_eq!(w.landed(1).as_deref(), Some(&bytes(len, 1)[..]));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_double_tap_from_another_thread_never_leaves_the_move_asleep() {
+    for v in [2, HOLD_SINCE] {
+        for i in 0..30u64 {
+            one_double_tap(v, (i * 37) % 400, 3 + (i * 7) % 40)
+                .await
+                .unwrap();
+        }
+    }
 }
