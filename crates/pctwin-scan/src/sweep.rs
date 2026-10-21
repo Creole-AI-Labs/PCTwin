@@ -317,7 +317,54 @@ pub struct Sweep {
     pub frontier: Option<Frontier>,
 }
 
+/// One person on "Who's moving?" (M06): who they are, and roughly how much is theirs when it
+/// could be counted. Only names and sizes: nothing of theirs is listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileLine {
+    /// `None` only for files left by an account whose owner could not be read.
+    pub account_id: Option<String>,
+    /// A name to suggest. Only ever a suggestion: people are matched by `account_id`.
+    pub suggested_name: String,
+    pub kind: PersonKind,
+    /// Bytes of theirs the sweep counted (`None`: not looked at, because they were not approved;
+    /// the screen says "size shown after approval").
+    pub bytes: Option<u64>,
+}
+
 impl Sweep {
+    /// Everyone on the old laptop for "Who's moving?": the mover first, then the census's order.
+    /// A person's size is what the sweep counted in places it placed as theirs; a person whose
+    /// things were not looked at has none, never a guess.
+    pub fn who_is_moving(&self) -> Vec<ProfileLine> {
+        self.census
+            .residents
+            .iter()
+            .map(|r| {
+                let theirs = |p: &&FoundPlace| match (&p.placement.whose, r.kind) {
+                    (Whose::Mover, PersonKind::Me) => true,
+                    (Whose::Person { account_id }, _) => r.account_id.as_ref() == Some(account_id),
+                    (Whose::FromOldAccount { account_id }, PersonKind::Leftover) => {
+                        *account_id == r.account_id
+                    }
+                    _ => false,
+                };
+                let counted: Vec<&FoundPlace> = self
+                    .places
+                    .iter()
+                    .filter(theirs)
+                    .filter(|p| p.fate != Fate::NotYours)
+                    .collect();
+                ProfileLine {
+                    account_id: r.account_id.clone(),
+                    suggested_name: r.suggested_name.clone(),
+                    kind: r.kind,
+                    bytes: (r.kind == PersonKind::Me || !counted.is_empty())
+                        .then(|| counted.iter().fold(0u64, |t, p| t.saturating_add(p.bytes))),
+                }
+            })
+            .collect()
+    }
+
     /// The rule that placed an item.
     pub fn placement_of(&self, id: &ItemId) -> Option<&Placement> {
         self.placed_by

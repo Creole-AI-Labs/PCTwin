@@ -78,11 +78,13 @@ pub use people::{
 };
 pub use rules::{Kind, Row, Rules, RulesError, System, Where};
 pub use scan::{Counts, Scan, Stamp, scan_folder, scan_managed_folder};
-pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
+pub use state::{
+    Changes, DoneFolder, NextOwner, STATE_FORMAT, ScanState, StateError, changes_between,
+};
 pub use sweep::{
     BlindReason, BlindSpot, Fate, FoundPlace, Frontier, FrontierView, HARD_LINK_CHECK_MIN,
-    SHALLOW_DEPTH, Space, SpaceLine, Sweep, SweepFacts, SweepLimits, TopLine, UNEXPLAINED_FLOOR,
-    VolumeReport, blind_reason_for, sweep, sweep_this_laptop,
+    ProfileLine, SHALLOW_DEPTH, Space, SpaceLine, Sweep, SweepFacts, SweepLimits, TopLine,
+    UNEXPLAINED_FLOOR, VolumeReport, blind_reason_for, sweep, sweep_this_laptop,
 };
 pub use usage::{
     Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials,

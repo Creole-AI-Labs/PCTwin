@@ -1635,3 +1635,20 @@ fn a_sweep_stopped_again_and_again_during_another_persons_count_finishes_with_th
     assert_eq!(done.volumes, whole.volumes);
     assert_eq!(done.top_line, whole.top_line);
 }
+
+/// "Who's moving?": the mover with what was counted of theirs, another person with no size
+/// (their things are not looked at before they are approved), never a guess.
+#[test]
+fn who_is_moving_lists_everyone_with_a_size_only_where_it_was_counted() {
+    let lab = lab();
+    write(&lab.ada.join("Documents/notes.txt"), 300);
+    write(&lab.bea.join("Documents/secret.txt"), 500);
+    let s = run(sized(facts(&lab, true), 0), &mut Answers::default());
+    let people = s.who_is_moving();
+    assert_eq!(people.len(), 2);
+    assert_eq!(people[0].account_id.as_deref(), Some(ADA));
+    assert_eq!(people[0].kind, PersonKind::Me);
+    assert!(people[0].bytes.is_some_and(|b| b >= 300), "{people:?}");
+    assert_eq!(people[1].account_id.as_deref(), Some(BEA));
+    assert_eq!(people[1].bytes, None, "{people:?}");
+}

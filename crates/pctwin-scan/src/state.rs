@@ -35,6 +35,22 @@ pub struct DoneFolder {
     pub unreadable: Vec<String>,
 }
 
+/// Who gets the old laptop next, asked early (Product Spec: selling, family, keeping): it decides
+/// what PCTwin offers once the move is done (wiping it for a new owner, leaving a family member's
+/// own account, or nothing). Only ever the person's answer, never inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NextOwner {
+    /// Sold or given to someone outside the household.
+    Selling,
+    /// Passed to someone in the family or household.
+    Family,
+    /// The person keeps it.
+    Keeping,
+    /// The person did not say yet.
+    NotSure,
+}
+
 /// The scan as saved: enough to resume after a restart and to tell later what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanState {
@@ -47,6 +63,7 @@ pub struct ScanState {
     pub(crate) done: Vec<DoneFolder>,
     pub(crate) record: Record,
     pub(crate) stamps: BTreeMap<ItemId, Stamp>,
+    pub(crate) next_owner: Option<NextOwner>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,6 +78,9 @@ struct Wire {
     /// The move record in its own format, checked on load like any record.
     record: String,
     stamps: Vec<(ItemId, Stamp)>,
+    /// Missing in a save from before it was asked.
+    #[serde(default)]
+    next_owner: Option<NextOwner>,
 }
 
 /// [`Wire`] as it is saved: the same fields in the same order, borrowed, with the record written
@@ -77,6 +97,7 @@ struct SaveWire<'a> {
     record: &'a Record,
     #[serde(serialize_with = "stamp_pairs")]
     stamps: &'a BTreeMap<ItemId, Stamp>,
+    next_owner: Option<NextOwner>,
 }
 
 fn record_text<S: serde::Serializer>(record: &&Record, s: S) -> Result<S::Ok, S::Error> {
@@ -111,7 +132,18 @@ impl ScanState {
             done: Vec::new(),
             record: Record::new(laptop),
             stamps: BTreeMap::new(),
+            next_owner: None,
         }
+    }
+
+    /// Who gets the old laptop next, as the person said (`None`: not asked yet).
+    pub fn next_owner(&self) -> Option<NextOwner> {
+        self.next_owner
+    }
+
+    /// The person's answer to who gets the old laptop next; kept with the scan when it is saved.
+    pub fn set_next_owner(&mut self, next: NextOwner) {
+        self.next_owner = Some(next);
     }
 
     pub fn record(&self) -> &Record {
@@ -147,6 +179,7 @@ impl ScanState {
             done: &self.done,
             record: &self.record,
             stamps: &self.stamps,
+            next_owner: self.next_owner,
         };
         let name = path
             .file_name()
@@ -193,6 +226,7 @@ impl ScanState {
             done: wire.done,
             record,
             stamps: wire.stamps.into_iter().collect(),
+            next_owner: wire.next_owner,
         })
     }
 }
@@ -331,6 +365,7 @@ mod saved_form {
             done: done.clone(),
             record: String::from_utf8(record.to_json()).unwrap(),
             stamps: stamps.iter().map(|(k, v)| (*k, *v)).collect(),
+            next_owner: None,
         };
         let pieces = SaveWire {
             format: STATE_FORMAT,
@@ -341,6 +376,7 @@ mod saved_form {
             done: &done,
             record: &record,
             stamps: &stamps,
+            next_owner: None,
         };
         assert_eq!(
             serde_json::to_vec(&pieces).unwrap(),
