@@ -4736,3 +4736,27 @@ async fn a_done_before_the_file_was_ended_is_not_taken_as_arrived() {
     .await;
     assert_ne!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
 }
+
+/// A new laptop that misbehaves on purpose (PR 52 residual): on every connection it earns the
+/// window with receipts, then stops answering and drops, over and over, on the main connection
+/// and on lanes alike. Every connection's lost reads stay within the floor and a block per loss
+/// on top of what was written, and the whole move within its answered-reads bound.
+#[tokio::test]
+async fn a_new_laptop_that_earns_the_window_then_drops_it_stays_within_the_bounds() {
+    for sizes in [vec![8 * MIB], vec![4 * MIB; 3]] {
+        let mut f = Flaky::new(
+            &sizes,
+            (Cut::ReceiptsLostAfter(6), Cut::ReceiptsLostAfter(3)),
+        );
+        f.lanes = 2;
+        // Earning a little more each time, so the window is grown before it is dropped.
+        f.cuts = (1..8)
+            .map(|k| (Cut::ReceiptsLostAfter(2 * k), Cut::ReceiptsLostAfter(k)))
+            .collect();
+        let m = flaky(f).await;
+        m.assert_arrived(false);
+        assert!(m.losses() >= 1, "it dropped: {:?}", m.conns);
+        m.assert_lost_reads_bounded(FLOOR, BLOCK, WINDOW);
+        m.assert_reads_bounded(FLOOR, BLOCK, WINDOW);
+    }
+}
