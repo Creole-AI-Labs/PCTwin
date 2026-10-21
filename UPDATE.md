@@ -6,7 +6,20 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Stage:** building the move itself (stage 1 of the plan). The foundations (stage 0) are done.
 - **Ready to use?** Not yet. Please don't move real files with it.
-- **Next:** connecting the screens to the move itself, with clear error pages, then independent reviews and the full test run.
+- **Next:** choosing another drive for a folder, the connection check before a move, then independent reviews, attack tests and the full test run on two machines.
+
+## 22 October 2026
+
+**In progress (the app now does a whole move)**
+
+- **The screens are connected to the move.** Pair the laptops, and the old one finds your files while the new one waits; the new laptop shows the plan (whether it fits, about how long, anything that won't go as it is, and where each folder lands), you can untick a folder to leave it behind, and nothing moves until you approve. Then progress with pause and stop, and at the end what happened to every file.
+- **Clear pages when something goes wrong.** A lost connection, a plan that wasn't approved, a drive that isn't keeping files, a move that couldn't start: each page says what happened, what is kept, that your old laptop wasn't changed, and what to do next. The technical words are only under "More details".
+- **Get help with a short code.** Any problem page can make a 12-character code to send by WhatsApp or any app. It holds only the kind of problem, how far the move got, the PCTwin version and the system, never names, files or passwords.
+- **Picks up safely after a restart.** If a laptop restarts or loses power mid-move, PCTwin opens with "Pick up safely", tidies up, and the next pairing carries on without copying anything twice.
+- **Moving other people, in the app (Windows and Linux).** On the old laptop you tick who else is moving; one administrator approval covers them all. On the new laptop you choose an account for each, or a new one; a new account's temporary password appears once in the laptop's own window. Their things wait in a private place and land in their own folders when they first sign in, where PCTwin greets them with "Your things are ready". On a Mac this part isn't ready yet, and the app says so.
+- **Quick Send works.** Choose files in the system's own picker, pair, and send; the receiver sees what's offered, chooses a folder, and both sides get a receipt.
+- **Help without the internet,** a guide for Mac privacy settings, a checklist for the old laptop while you wait, and the laptop stays awake during a move (with a battery warning, and a safe pause when it's nearly empty).
+- **An independent security review** of the new parts found four things to tighten, and all four are fixed.
 
 ## 21 October 2026
 
