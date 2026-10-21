@@ -22,7 +22,7 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::send_states::States;
-use crate::version::{HOLD_SINCE, STOP_SINCE};
+use crate::version::{COPY_SINCE, HOLD_SINCE, STOP_SINCE};
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
     OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
@@ -470,6 +470,8 @@ pub struct SenderSession {
     later: Vec<usize>,
     /// Jobs already given their second try.
     retried: HashSet<usize>,
+    /// Files whose skip the new laptop did not accept: sent after all, never skipped again.
+    no_skip: HashSet<usize>,
     /// Per lane (0 is the main connection): blocks sent and not yet confirmed, oldest first, as
     /// (stream, block, bytes). Receipts come back in order on the lane that carried the block.
     lanes: Vec<VecDeque<(u32, u32, u64)>>,
@@ -570,6 +572,7 @@ impl SenderSession {
             budget: ReadBudget::for_plan(ReadPlan::Normal),
             later: Vec::new(),
             retried: HashSet::new(),
+            no_skip: HashSet::new(),
             lanes: Vec::new(),
             in_flight: 0,
             dirty: false,
@@ -1435,7 +1438,7 @@ impl SenderSession {
     /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
     fn checked(&mut self, job: usize, identical: bool) {
         if let SendState::Open { cleared, .. } = &mut *self.states.slot(job) {
-            if identical {
+            if identical && !self.no_skip.contains(&job) {
                 self.skips.push(job);
             } else {
                 *cleared = true;
@@ -1774,6 +1777,14 @@ impl SenderSession {
             }
             // Already there only on the new laptop's word.
             (SendState::Skipping, true) => SendState::Done(SendOutcome::AlreadyThere),
+            // Not accepted as already there (the new laptop could not use the copy it has): sent
+            // after all, once.
+            (SendState::Skipping, false)
+                if self.version >= COPY_SINCE && self.no_skip.insert(job) =>
+            {
+                self.scheduler.push(item, tier);
+                SendState::Waiting
+            }
             (SendState::Skipping, false) => SendState::Done(SendOutcome::Failed(Failure::new(
                 Cause::NotAccepted,
                 "the new laptop did not accept it",
@@ -2004,8 +2015,100 @@ struct Incoming<'d> {
     size: u64,
     /// The stored path of a same-size file already there, offered as possibly identical.
     same: Option<String>,
+    /// Or an identical file this laptop already received in this move, to make this one from.
+    copy_of: Option<CopyOf>,
     /// Times its blocks were asked for again (see [`SEND_AGAIN_ROUNDS`]).
     rounds: u8,
+}
+
+/// A file this laptop already received in this move, offered as possibly identical to a file
+/// the old laptop started (copies cross once): where it is, and its fingerprint once worked out.
+struct CopyOf {
+    destination: String,
+    stored: String,
+    fingerprint: Option<[u8; 32]>,
+}
+
+/// A copy to make here, from a file already received, in place of sending it.
+struct LocalCopy {
+    stream: u32,
+    file: Option<std::fs::File>,
+    header: crate::Header,
+    expected: [u8; 32],
+}
+
+/// The smallest file made from a copy already here: smaller ones cost more to compare than to
+/// send.
+const COPY_MIN: u64 = 1024 * 1024;
+/// The most received files remembered as possible copies (each an ID in a list by size).
+const MAX_COPY_SOURCES: usize = 100_000;
+/// The most remembered files of one size looked at for a start.
+const COPY_LOOKS: usize = 4;
+
+/// Whose things a destination holds, for copies: a file is only ever made from one in the same
+/// person's things, never across people. The signed-in person's folders are theirs together;
+/// another account's place is that person's; a shared folder or a drive holds only its own.
+#[derive(Debug, PartialEq, Eq)]
+enum Whose<'a> {
+    Mine,
+    Account(&'a str),
+    Only(&'a str),
+}
+
+fn whose<'a>(table: &'a Destinations, label: &'a str) -> Option<Whose<'a>> {
+    Some(match table.place(label).ok()? {
+        Approved::MyFolders => Whose::Mine,
+        Approved::AnotherAccount { account_id } => Whose::Account(account_id),
+        Approved::SharedFolder | Approved::ChosenDrive | Approved::OffloadDrive => {
+            Whose::Only(label)
+        }
+    })
+}
+
+/// Makes the skipped file of `copy` here from the identical file already received: each block
+/// read on the blocking-thread pool and written through the same checks as a block that arrived,
+/// the whole compared with the fingerprint offered, then ended as a sent file ends. The answer to
+/// send: done, or not accepted (the old laptop then sends it after all).
+async fn copy_here(
+    state: &RefCell<&mut ReceiverSession<'_>>,
+    copy: LocalCopy,
+) -> Result<Message, TransferError> {
+    let LocalCopy {
+        stream,
+        mut file,
+        header,
+        expected,
+    } = copy;
+    let mut hasher = blake3::Hasher::new();
+    let mut whole = file.is_some();
+    for index in 0..header.block_count {
+        let Some(mut f) = file.take() else {
+            whole = false;
+            break;
+        };
+        let len = crate::block_len(&header, index);
+        let read = tokio::task::spawn_blocking(move || {
+            let mut data = vec![0u8; len];
+            let read = f.read_exact(&mut data);
+            (f, read.map(|()| data))
+        })
+        .await;
+        let Ok((f, Ok(data))) = read else {
+            whole = false;
+            break;
+        };
+        file = Some(f);
+        hasher.update(&data);
+        if !state.borrow_mut().copy_block(stream, Block::plain(index, data)) {
+            whole = false;
+            break;
+        }
+    }
+    // Exactly as long as it was, and as a whole what the old laptop has.
+    whole = whole
+        && file.is_some_and(|mut f| matches!(f.read(&mut [0u8; 1]), Ok(0)))
+        && *hasher.finalize().as_bytes() == expected;
+    state.borrow_mut().copied_here(stream, whole, header.stamp)
 }
 
 /// The new laptop's side of a move. A file starts only if the approved plan allows it (see
@@ -2040,6 +2143,11 @@ pub struct ReceiverSession<'d> {
     changed: HashSet<ItemId>,
     /// A same-size file already here, to fingerprint before answering a start (off the loop).
     to_fingerprint: Option<(u32, std::fs::File)>,
+    /// A skipped start to make here from a copy already here (off the loop).
+    to_copy: Option<u32>,
+    /// Files received in this move that later ones may be made from, by size.
+    copies: HashMap<u64, Vec<ItemId>>,
+    copy_sources: usize,
     streams: BTreeMap<u32, Incoming<'d>>,
     /// Files picked up again after the app restarted, waiting for the old laptop to continue them.
     restored: BTreeMap<ItemId, Incoming<'d>>,
@@ -2096,6 +2204,9 @@ impl<'d> ReceiverSession<'d> {
             refused: BTreeMap::new(),
             changed: HashSet::new(),
             to_fingerprint: None,
+            to_copy: None,
+            copies: HashMap::new(),
+            copy_sources: 0,
             streams: BTreeMap::new(),
             restored: BTreeMap::new(),
             ended: BTreeMap::new(),
@@ -2303,6 +2414,7 @@ impl<'d> ReceiverSession<'d> {
                             destination: w.destination.clone(),
                             size: w.size,
                             same: None,
+                            copy_of: None,
                             rounds: 0,
                         },
                     );
@@ -2456,7 +2568,15 @@ impl<'d> ReceiverSession<'d> {
                 let waiting = state.borrow_mut().to_fingerprint.take();
                 if let Some((stream, mut file)) = waiting {
                     let same_size = off_the_loop(move || hash_reader(&mut file)).await;
+                    state.borrow_mut().offered(stream, same_size);
                     send(main, &Message::Have { stream, same_size }).await?;
+                }
+                // A skip of a file made from a copy already here: copied block by block through
+                // the same checks as a sent file, each block read on the blocking-thread pool.
+                let copying = state.borrow_mut().take_copy();
+                if let Some(copy) = copying {
+                    let done = copy_here(&state, copy).await?;
+                    send(main, &done).await?;
                 }
                 if finished {
                     return Ok(());
@@ -2645,6 +2765,17 @@ impl<'d> ReceiverSession<'d> {
                 }
                 let same = self.same_file(&destination, &path, size);
                 let stored = same.as_ref().map(|(stored, _)| stored.clone());
+                // Nothing like it at its place: an identical file this laptop already received in
+                // this move, in the same person's things, may be made into this one here.
+                let (copy_of, copy_file) = match &same {
+                    None if self.version >= COPY_SINCE && size >= COPY_MIN => {
+                        match self.copy_source(&destination, size) {
+                            Some((c, f)) => (Some(c), Some(f)),
+                            None => (None, None),
+                        }
+                    }
+                    _ => (None, None),
+                };
                 let (assembly, entry) = match self.start(item, &destination, &path, header) {
                     Ok(started) => started,
                     Err(Start::Record(e)) => return Err(record(e)),
@@ -2657,8 +2788,8 @@ impl<'d> ReceiverSession<'d> {
                 };
                 // Every start is answered: nothing like it is here, or (once its fingerprint is
                 // worked out off the main loop) the fingerprint of the same-size file that is.
-                match same {
-                    Some((_, file)) => self.to_fingerprint = Some((stream, file)),
+                match same.map(|(_, f)| f).or(copy_file) {
+                    Some(file) => self.to_fingerprint = Some((stream, file)),
                     None => replies.push(Message::Have {
                         stream,
                         same_size: None,
@@ -2677,6 +2808,7 @@ impl<'d> ReceiverSession<'d> {
                         destination,
                         size,
                         same: stored,
+                        copy_of,
                         rounds: 0,
                     },
                 );
@@ -2705,45 +2837,20 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(again);
                     return Ok((replies, false));
                 }
-                let Some(s) = self.streams.remove(&stream) else {
-                    replies.push(Message::FileDone { stream, ok: false });
-                    return Ok((replies, false));
-                };
-                let outcome = match (s.assembly, s.failure) {
-                    (Some(a), None) => {
-                        let dest = self
-                            .table
-                            .get(&s.destination)
-                            .map_err(|e| protocol(&e.to_string()))?;
-                        // Read back and checked now, before it gets its name.
-                        self.step(s.item, Step::Checking);
-                        self.meter.checking(Some(s.item));
-                        let landed = land(self.journal, dest, a, trailer, s.entry);
-                        self.meter.checking(None);
-                        landed?
-                    }
-                    (_, Some(why)) => {
-                        // Recorded when it failed; recorded now if that did not get through.
-                        let _ = self.journal.failed(s.entry, &why);
-                        ReceiveOutcome::Failed(why)
-                    }
-                    (None, None) => {
-                        let why = Failure::new(Cause::NotVerified, "no file open");
-                        let _ = self.journal.failed(s.entry, &why);
-                        ReceiveOutcome::Failed(why)
-                    }
-                };
-                // Landed (kept on this laptop, never sent again), even when it still needs action.
-                let ok = matches!(
-                    outcome,
-                    ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
-                );
-                self.allowance.ended(s.item, ok);
-                let landed = ok.then(|| (s.destination.clone(), s.size));
-                self.end(s.item, stream, outcome, landed);
-                replies.push(Message::FileDone { stream, ok });
+                replies.push(self.finish_stream(stream, trailer)?);
             }
             Message::Skip { stream } => {
+                // Identical to a file already received here: made here from that one (see
+                // `copy_here`), and answered once it is.
+                let from_copy = self.streams.get(&stream).is_some_and(|s| {
+                    s.failure.is_none()
+                        && s.assembly.is_some()
+                        && s.copy_of.as_ref().is_some_and(|c| c.fingerprint.is_some())
+                });
+                if from_copy {
+                    self.to_copy = Some(stream);
+                    return Ok((replies, false));
+                }
                 // Identical to what is here: drop the partial copy and keep the original. Always
                 // answered, so the old laptop records "already there" only on this laptop's word
                 // (a stream not open here is answered no).
@@ -2826,6 +2933,47 @@ impl<'d> ReceiverSession<'d> {
     /// connection: an honest old laptop sends each block's pieces together, so pieces of two
     /// blocks mixed are refused (the connection ends) rather than held. Every block's last piece
     /// is answered, even for a file that is not open, so the old laptop's count stays right.
+    /// Ends the file on `stream` as its last block came in: read back, checked and named through
+    /// the gate (or failed, with why). The answer to send.
+    fn finish_stream(&mut self, stream: u32, trailer: Trailer) -> Result<Message, TransferError> {
+        let Some(s) = self.streams.remove(&stream) else {
+            return Ok(Message::FileDone { stream, ok: false });
+        };
+        let outcome = match (s.assembly, s.failure) {
+            (Some(a), None) => {
+                let dest = self
+                    .table
+                    .get(&s.destination)
+                    .map_err(|e| protocol(&e.to_string()))?;
+                // Read back and checked now, before it gets its name.
+                self.step(s.item, Step::Checking);
+                self.meter.checking(Some(s.item));
+                let landed = land(self.journal, dest, a, trailer, s.entry);
+                self.meter.checking(None);
+                landed?
+            }
+            (_, Some(why)) => {
+                // Recorded when it failed; recorded now if that did not get through.
+                let _ = self.journal.failed(s.entry, &why);
+                ReceiveOutcome::Failed(why)
+            }
+            (None, None) => {
+                let why = Failure::new(Cause::NotVerified, "no file open");
+                let _ = self.journal.failed(s.entry, &why);
+                ReceiveOutcome::Failed(why)
+            }
+        };
+        // Landed (kept on this laptop, never sent again), even when it still needs action.
+        let ok = matches!(
+            outcome,
+            ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
+        );
+        self.allowance.ended(s.item, ok);
+        let landed = ok.then(|| (s.destination.clone(), s.size));
+        self.end(s.item, stream, outcome, landed);
+        Ok(Message::FileDone { stream, ok })
+    }
+
     fn piece(
         &mut self,
         slot: &mut Slot,
@@ -2986,6 +3134,11 @@ impl<'d> ReceiverSession<'d> {
         self.refused.remove(&item);
         if let (ReceiveOutcome::Finished(_), Some((_, size))) = (&outcome, &landed) {
             self.meter.checked_bytes(*size);
+            // A later file of the same size may be made from it.
+            if *size >= COPY_MIN && self.copy_sources < MAX_COPY_SOURCES {
+                self.copies.entry(*size).or_default().push(item);
+                self.copy_sources += 1;
+            }
         }
         self.ended.insert(
             item,
@@ -2997,6 +3150,132 @@ impl<'d> ReceiverSession<'d> {
         );
         self.settle(item);
         true
+    }
+
+    /// The latest file received in this move of exactly `size` bytes, in the same person's things
+    /// as `destination` (see [`Whose`]), still there as it landed: where it is, opened to
+    /// fingerprint.
+    fn copy_source(&self, destination: &str, size: u64) -> Option<(CopyOf, std::fs::File)> {
+        let wanted = whose(self.table, destination)?;
+        for item in self.copies.get(&size)?.iter().rev().take(COPY_LOOKS) {
+            let Some(Ended {
+                outcome: ReceiveOutcome::Finished(finished),
+                landed: Some((from, len)),
+                ..
+            }) = self.ended.get(item)
+            else {
+                continue;
+            };
+            if *len != size || whose(self.table, from).as_ref() != Some(&wanted) {
+                continue;
+            }
+            let Ok(dest) = self.table.get(from) else {
+                continue;
+            };
+            let Some((stored, now)) = IncomingPath::parse(&finished.final_path)
+                .ok()
+                .and_then(|path| dest.find(&path))
+            else {
+                continue;
+            };
+            if now != size {
+                continue;
+            }
+            let Ok(file) = dest.open_read(&stored) else {
+                continue;
+            };
+            return Some((
+                CopyOf {
+                    destination: from.clone(),
+                    stored,
+                    fingerprint: None,
+                },
+                file,
+            ));
+        }
+        None
+    }
+
+    /// The fingerprint offered for the start on `stream`, kept if it is of a copy already here.
+    fn offered(&mut self, stream: u32, fingerprint: Option<[u8; 32]>) {
+        if let Some(c) = self
+            .streams
+            .get_mut(&stream)
+            .and_then(|s| s.copy_of.as_mut())
+        {
+            c.fingerprint = fingerprint;
+        }
+    }
+
+    /// The copy to make here now, if the old laptop skipped a file offered as one already here.
+    fn take_copy(&mut self) -> Option<LocalCopy> {
+        let stream = self.to_copy.take()?;
+        let s = self.streams.get(&stream)?;
+        let c = s.copy_of.as_ref()?;
+        Some(LocalCopy {
+            stream,
+            file: self
+                .table
+                .get(&c.destination)
+                .ok()
+                .and_then(|d| d.open_read(&c.stored).ok()),
+            header: s.assembly.as_ref()?.header().clone(),
+            expected: c.fingerprint?,
+        })
+    }
+
+    /// Writes one block of a copy made here, through the same checks as a block that arrived;
+    /// `false` if it could not be (the file has failed).
+    fn copy_block(&mut self, stream: u32, block: Block) -> bool {
+        let journal = self.journal;
+        let Some(s) = self.streams.get_mut(&stream) else {
+            return false;
+        };
+        let Some(assembly) = s.assembly.as_mut() else {
+            return false;
+        };
+        let (hash, raw) = (block.hash, block.data.len() as u64);
+        match assembly.accept(block) {
+            Ok(receipt) => {
+                if let Some((group, _)) = self.steps.get(&s.item) {
+                    self.meter.written(*group, raw);
+                }
+                s.pending.push((receipt.block, hash));
+                if s.pending.len() >= CHECKPOINT_BLOCKS {
+                    flush_checkpoint(journal, s, false);
+                }
+                true
+            }
+            Err(e) => {
+                self.fail_stream(stream, Failure::of(&e, Side::New));
+                false
+            }
+        }
+    }
+
+    /// The copy on `stream` made here is complete and identical (`whole`): it ends as a sent file
+    /// ends. If not, its partial copy is removed and it is not accepted, so the old laptop sends
+    /// it after all.
+    fn copied_here(
+        &mut self,
+        stream: u32,
+        whole: bool,
+        stamp: crate::Stamp,
+    ) -> Result<Message, TransferError> {
+        if whole {
+            return self.finish_stream(stream, Trailer::new(stamp, false));
+        }
+        if let Some(s) = self.streams.remove(&stream) {
+            drop(s.assembly);
+            let why = Failure::new(
+                Cause::NotVerified,
+                "the copy already on this laptop could not be used",
+            );
+            let _ = self.journal.failed(s.entry, &why);
+            self.allowance.ended(s.item, false);
+            self.settle(s.item);
+        }
+        Ok(Message::FileDone { stream, ok: false })
     }
 
     /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path,

@@ -3581,12 +3581,13 @@ async fn a_fingerprint_is_read_through_the_opener_once_per_version() {
     assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::AlreadyThere));
 }
 
-/// Invariant 9: a skip the new laptop does not accept is never "already there".
+/// Invariant 9: a skip the new laptop does not accept is never "already there" (with a laptop on
+/// version 3, it fails).
 #[tokio::test]
 async fn a_skip_answered_not_accepted_is_not_already_there() {
     let l = laptops(&[300_000]);
     let same = *blake3::hash(&l.files[0].1).as_bytes();
-    let mut sender = SenderSession::new(jobs(&l), 1);
+    let mut sender = SenderSession::new(jobs(&l), 1).with_protocol(3);
     let ((), ok) = connection(&mut sender, async |new: &mut Mem| {
         hello(new, &[]).await;
         let (stream, _) = start_of(&hear(new).await);
@@ -3602,6 +3603,33 @@ async fn a_skip_answered_not_accepted_is_not_already_there() {
         "{:?}",
         sender.outcome(id(0))
     );
+}
+
+/// From version 4 a skip not accepted (the new laptop could not use the copy it has) is sent
+/// after all, once, and never skipped again: it arrives.
+#[tokio::test]
+async fn a_skip_not_accepted_is_sent_after_all_and_never_skipped_again() {
+    let l = laptops(&[300_000]);
+    let same = *blake3::hash(&l.files[0].1).as_bytes();
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let ((), ok) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, Some(same)).await;
+        assert_eq!(hear(new).await, Message::Skip { stream });
+        done(new, stream, false).await;
+        // Started again; offered the same fingerprint, it is sent this time.
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, Some(same)).await;
+        let (blocks, end) = blocks_then(new).await;
+        assert_eq!(blocks, 3);
+        assert!(matches!(end, Message::EndFile { .. }), "{end:?}");
+        done(new, stream, true).await;
+        assert_eq!(hear(new).await, Message::AllSent);
+    })
+    .await;
+    assert!(ok);
+    assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
 }
 
 /// The new laptop answers a skip: already there when it was, and "no" for a stream it does not

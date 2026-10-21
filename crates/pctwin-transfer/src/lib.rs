@@ -116,7 +116,7 @@ pub use undo::{
     undo_preview, undo_with,
 };
 pub use version::{
-    HOLD_SINCE, MOVE_PROTOCOL, STOP_SINCE, VERSION_WAIT, VersionGap, Versions, agree_version,
+    COPY_SINCE, HOLD_SINCE, MOVE_PROTOCOL, STOP_SINCE, VERSION_WAIT, VersionGap, Versions, agree_version,
     choose_version,
 };
 
@@ -356,6 +356,17 @@ pub struct Block {
 impl Block {
     pub fn index(&self) -> u64 {
         self.index
+    }
+
+    /// A block of `data` read on this laptop (a copy made from a file already here).
+    pub(crate) fn plain(index: u64, data: Vec<u8>) -> Self {
+        let hash = *blake3::hash(&data).as_bytes();
+        Self {
+            index,
+            data,
+            hash,
+            packed: None,
+        }
     }
 
     pub fn is_compressed(&self) -> bool {

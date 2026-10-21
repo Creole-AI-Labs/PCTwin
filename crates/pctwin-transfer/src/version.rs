@@ -41,6 +41,12 @@ pub const HOLD_SINCE: u16 = 4;
 /// released, so it carries these with `Hold`.
 pub const STOP_SINCE: u16 = 4;
 
+/// The first move protocol version where copies cross once: the new laptop may answer a start
+/// with the fingerprint of an identical file it already received in this move, in the same
+/// person's things, and make the copy itself; and the old laptop sends a file after all when a
+/// skip is not accepted. Version 4 has not been released, so it carries this too.
+pub const COPY_SINCE: u16 = 4;
+
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).
 const KIND: u8 = 34;
 const LEN: usize = 5;
