@@ -64,8 +64,8 @@ pub const MAX_PAGE_HELD: u64 = 32 * 1024 * 1024;
 /// upper bound on what the allocator takes (see [`alloc_held`]), so the reader never holds more
 /// than this for the items and folders it has read, plus one page's bytes and its own fixed
 /// running room. A CI step measures it on Windows, macOS and Linux
-/// (`scripts/inventory-memory.py`). An honest laptop with files eight folders deep fits 750,000
-/// files (800,000 are refused; measured 21 October 2026). Received pages kept on disk
+/// (`scripts/inventory-memory.py`). An honest laptop with files eight folders deep fits 680,000
+/// files (700,000 are refused; measured 21 October 2026, pinned by a test run in CI). Received pages kept on disk
 /// (Engineering Plan 9.11, step C) will lift the count of files without raising this.
 pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
 /// What an item takes before its names: the item itself, three times over (a list that grows
@@ -74,7 +74,11 @@ pub const MAX_HELD: u64 = 1280 * 1024 * 1024;
 /// versions count alike; a test checks they cover the real sizes. These costs, [`alloc_held`]
 /// and the two limits are part of the format: the writer splits pages by them, so changing any
 /// needs a new [`INVENTORY_FORMAT`].
-const ITEM_COST: u64 = 448;
+const ITEM_COST: u64 = 448 + PLAN_ROOM;
+/// Room left in each item's cost for its entry in the plan the new laptop makes once the list is
+/// approved (where each file lands: its ID, size, a shared destination and a digest of the path,
+/// in a map made with room for every item at once; a test in pctwin-transfer checks it fits).
+pub const PLAN_ROOM: u64 = 192;
 /// What each part of a path takes in the path's list, before its name's bytes.
 const NAME_COST: u64 = 64;
 /// What a folder takes in the reader before its name and key: the folder and its key, three
@@ -1094,7 +1098,9 @@ mod tests {
     /// with its key.
     #[test]
     fn the_fixed_costs_cover_the_real_sizes() {
-        assert!(3 * size_of::<Item>() + 2 * size_of::<ItemId>() <= ITEM_COST as usize);
+        assert!(
+            3 * size_of::<Item>() + 2 * size_of::<ItemId>() <= (ITEM_COST - PLAN_ROOM) as usize
+        );
         assert!(size_of::<ItemName>() <= NAME_COST as usize);
         assert!(3 * (size_of::<Folder>() + size_of::<FolderKey>() + 1) <= FOLDER_COST as usize);
     }
@@ -1281,7 +1287,7 @@ mod tests {
             item_held(7, 9, 3, 100, &text),
             ITEM_COST + 7 + 9 + alloc_held(3 * NAME_COST) + 100 + name_heap(&text)
         );
-        assert_eq!(ITEM_COST, 448);
+        assert_eq!(ITEM_COST, 640);
     }
 
     /// Each limit is met on its own: a page past its share, and pages each within theirs that
