@@ -315,6 +315,12 @@ pub struct Sweep {
     pub top_line: TopLine,
     /// Where to carry on from, when the sweep was stopped.
     pub frontier: Option<Frontier>,
+    /// Per place (by its index in `places`), the folder on the drive its items' paths start from,
+    /// exactly (for the administrator helper, which reads an approved person's files where they
+    /// are). Not saved: a sweep carried on from a saved frontier has it only for places it listed
+    /// items into since.
+    #[serde(skip)]
+    pub item_roots: BTreeMap<usize, PathBuf>,
 }
 
 /// One person on "Who's moving?" (M06): who they are, and roughly how much is theirs when it
@@ -1125,6 +1131,7 @@ pub fn sweep(
         known_paths: Vec::new(),
         devs: Vec::new(),
         last_save: Duration::ZERO,
+        roots: std::cell::RefCell::new(BTreeMap::new()),
     };
     s.prepare();
     let finished = s.run(stop, checkpoint);
@@ -1141,6 +1148,8 @@ struct Sweeper<'a> {
     devs: Vec<Vec<u64>>,
     /// How long the last checkpoint took.
     last_save: Duration,
+    /// Per place, the folder its items' paths start from (see [`Sweep::item_roots`]).
+    roots: std::cell::RefCell<BTreeMap<usize, PathBuf>>,
 }
 
 impl Sweeper<'_> {
@@ -2255,6 +2264,10 @@ impl Sweeper<'_> {
         let (Some(rplace), Some(owner)) = (&meta.record_place, &meta.owner) else {
             return None;
         };
+        self.roots
+            .borrow_mut()
+            .entry(place)
+            .or_insert_with(|| self.abs(job.volume, job.rel.get(..base).unwrap_or(&[])));
         let mut parts: Vec<ItemName> = job.rel.get(base..).unwrap_or(&[]).to_vec();
         parts.push(name.clone());
         let path = ItemPath::new(parts).ok()?;
@@ -3329,6 +3342,7 @@ impl Sweeper<'_> {
             finished,
             top_line,
             frontier,
+            item_roots: self.roots.borrow().clone(),
         }
     }
 }

@@ -60,14 +60,15 @@ deny = [
   { crate = "fs_at", wrappers = ["pctwin-gate"] },
   { crate = "cap-std", wrappers = ["pctwin-gate"] },
   { crate = "cap-primitives", wrappers = ["cap-std"] },
-  { crate = "trash", wrappers = ["pctwin-gate"] },
+  # Undo puts copies in the Trash itself, checked and by handle (21 October 2026), so no crate may.
+  { crate = "trash" },
   # The first crate allowed to use unsafe (approved, October 2026; see scripts/unsafe-fence.sh).
   # Only the gate may use it, and only it may use signal-hook.
   { crate = "pctwin-lease", wrappers = ["pctwin-gate"] },
   { crate = "signal-hook", wrappers = ["pctwin-lease"] },
   # The second and last (approved 20 October 2026): the administrator helper's system calls.
-  # Nothing depends on it yet; when the helper program does, list it here as the only wrapper
-  # (an empty list would ban the crate itself). Only it may use Service Management.
+  # Only the helper program may use it (21 October 2026). Only it may use Service Management.
+  { crate = "pctwin-helper-os", wrappers = ["pctwin-helper"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os"] },
   # macOS: the system's list of programs with a file open, asked only by the gate's undo; and
   # the path of the program on the other end of the helper's socket.
@@ -80,6 +81,8 @@ deny = [
     "pctwin-gate",
     # The helper's private folder and socket peer (SO_PEERCRED), 20 October 2026.
     "pctwin-helper-os",
+    # The helper program opens another person's files without following a link (O_NOFOLLOW).
+    "pctwin-helper",
     # Third-party crates that use rustix themselves (checked 9 October 2026).
     "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
     "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",
