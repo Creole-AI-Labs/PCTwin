@@ -874,3 +874,46 @@ fn the_keep_time_choices_are_exactly_the_ones_offered() {
     assert_eq!(PartialKeep::from_days(10), None);
     assert_eq!(PartialKeep::Days7.duration(), 7 * DAY);
 }
+
+/// A journal edited by hand (or by another program) to point recovery at the person's own files:
+/// a "temporary file" that is really their letter, a real name outside the approved folder. Only
+/// PCTwin's own temporary names are ever removed, nothing is written outside the place, and the
+/// letter is never touched.
+#[test]
+fn a_hand_edited_journal_never_reaches_the_person_s_files() {
+    let w = world();
+    let letter = b"Dear Ada, the person's own words";
+    w.put("Docs/letter.txt", letter);
+    // Its "temporary file" is the letter.
+    let id = w.plan(1, letter.len());
+    w.journal.staged(id, "Docs/letter.txt", &[]).unwrap();
+    // Another, verified, whose real name was edited to leave the approved folder.
+    let bytes = data(300);
+    let other = w.verified(2, &bytes, Some(&bytes));
+    w.journal.applied(other, "../outside.txt").unwrap_or(());
+    for _ in 0..2 {
+        recover(&w.journal, &w.table).unwrap();
+        assert_eq!(w.read("Docs/letter.txt").as_deref(), Some(&letter[..]));
+        assert!(!w.root.parent().unwrap().join("outside.txt").exists());
+    }
+    // Ended as failed with the letter still the person's, never committed as PCTwin's copy.
+    assert!(
+        !matches!(w.state(id), State::Committed { .. }),
+        "{:?}",
+        w.state(id)
+    );
+}
+
+/// A journal file damaged on disk is refused with an error, never half-read.
+#[test]
+fn a_damaged_journal_file_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    drop(Journal::open(&path).unwrap());
+    let mut bytes = std::fs::read(&path).unwrap();
+    for b in bytes.iter_mut().take(4096) {
+        *b ^= 0x5a;
+    }
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(Journal::open(&path).is_err());
+}

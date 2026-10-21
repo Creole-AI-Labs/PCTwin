@@ -312,7 +312,10 @@ impl Incoming {
 
     /// The size of everything offered, in bytes.
     pub fn total_bytes(&self) -> u64 {
-        self.files().iter().map(|f| f.size).sum()
+        // Sizes come from someone else's laptop: added without ever wrapping.
+        self.files()
+            .iter()
+            .fold(0u64, |t, f| t.saturating_add(f.size))
     }
 
     /// Accepts the files `chosen` (all of them with `None`) into the folder `dest` the person
@@ -525,5 +528,42 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod totals {
+    use super::*;
+    use pctwin_record::{
+        FolderRole, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, ManagedBy, Place,
+        Portability, Storage,
+    };
+
+    #[test]
+    fn an_offer_s_total_never_wraps_however_big_its_sizes_say_they_are() {
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut record = Record::new(laptop);
+        for name in ["a.bin", "b.bin"] {
+            let place = Place {
+                role: FolderRole::Other,
+                storage: Storage::SystemDrive,
+            };
+            let path = ItemPath::new(vec![ItemName::from_text(name)]).unwrap();
+            record.items.push(Item {
+                id: ItemId::derive(&laptop, &Owner::Shared, &place, &path),
+                kind: ItemKind::File,
+                owner: Owner::Shared,
+                place,
+                path,
+                size_bytes: u64::MAX,
+                modified_ns: None,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: None,
+                inclusion: Inclusion::Included,
+            });
+        }
+        let incoming = Incoming { record, version: 4 };
+        assert_eq!(incoming.total_bytes(), u64::MAX);
     }
 }

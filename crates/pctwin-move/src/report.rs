@@ -92,7 +92,7 @@ pub fn for_the_mover(received: &Received, mover: &str) -> MoverReport {
                 match result {
                     FileResult::Copied => {
                         line.copied += 1;
-                        line.bytes_copied += item.size_bytes;
+                        line.bytes_copied = line.bytes_copied.saturating_add(item.size_bytes);
                     }
                     FileResult::NeedsAction => line.needs_action += 1,
                     FileResult::Failed => {

@@ -29,7 +29,9 @@ pub fn made_since(approved: &Record, again: &Record) -> MadeSince {
         .collect();
     MadeSince {
         files: items.len() as u64,
-        bytes: items.iter().map(|i| i.size_bytes).sum(),
+        bytes: items
+            .iter()
+            .fold(0u64, |t, i| t.saturating_add(i.size_bytes)),
         items,
     }
 }

@@ -2561,6 +2561,12 @@ impl<'d> ReceiverSession<'d> {
             .or_else(|| ended.map(|e| e.outcome.clone()))
     }
 
+    /// How many refusals are kept (one at most per planned file), for tests.
+    #[doc(hidden)]
+    pub fn refusals_kept(&self) -> usize {
+        self.refused.len()
+    }
+
     /// Whether `item` was sent as it is now, different from the scan (its size or its changed
     /// time). Judged at its latest start; for the report's "changed since the scan".
     pub fn changed_since_scan(&self, item: ItemId) -> bool {
