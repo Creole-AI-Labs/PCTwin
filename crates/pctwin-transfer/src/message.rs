@@ -102,6 +102,12 @@ pub enum Message {
     /// Sender: it stops sending this file, for `why` (the file fails, and the new laptop says
     /// why).
     GiveUp { stream: u32, why: GiveUpWhy },
+    /// Either laptop, on the main connection (move protocol 3 and later): whether the person on
+    /// this side has paused the move. The old laptop says it when its person pauses or carries
+    /// on, and again every [`HOLD_TICK`](crate::HOLD_TICK) while the move is held; the new laptop
+    /// answers each with its own, and says it unasked, with its next reply, when its person
+    /// pauses or carries on. Neither ever takes the quiet of a pause for a dropped link.
+    Hold { paused: bool },
 }
 
 /// Why the old laptop stopped sending a file.
@@ -128,6 +134,7 @@ const CHECK_ORIGINALS: u8 = 12;
 const ORIGINALS: u8 = 13;
 const SEND_AGAIN: u8 = 14;
 const GIVE_UP: u8 = 15;
+const HOLD: u8 = 16;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -201,6 +208,11 @@ impl Message {
                     GiveUpWhy::AskedAgainTooOften => 0,
                     GiveUpWhy::ReadTooOften => 1,
                 });
+            }
+            Message::Hold { paused } => {
+                w.push(HOLD);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                w.push(u8::from(*paused));
             }
             Message::FileDone { stream, ok } => {
                 w.push(DONE);
@@ -326,6 +338,7 @@ impl Message {
             },
             READY if stream == 0 => Message::Ready,
             ALL_SENT if stream == 0 => Message::AllSent,
+            HOLD if stream == 0 => Message::Hold { paused: r.flag()? },
             HAVE => Message::Have {
                 stream,
                 same_size: if r.flag()? {

@@ -166,10 +166,10 @@ pub async fn send<C: Channel>(
     record: &Record,
     plan: SendPlan,
 ) -> Result<Sent, MoveError> {
-    agree_version(link, MOVE_PROTOCOL).await?;
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record).await?;
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
-    let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT);
+    let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT).with_protocol(version);
     sender.run(link).await?;
     Ok(Sent {
         files: items
@@ -219,6 +219,8 @@ pub trait Steps {
 pub struct ApprovedPlan {
     record: Record,
     allowance: Allowance,
+    /// The move protocol version both laptops agreed.
+    version: u16,
 }
 
 /// How one received file ended on the new laptop (`None`: it has no outcome).
@@ -243,7 +245,7 @@ pub async fn receive_plan<C: Channel, S: Steps>(
     link: &mut C,
     steps: &mut S,
 ) -> Result<ApprovedPlan, MoveError> {
-    agree_version(link, MOVE_PROTOCOL).await?;
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
     let mut record = receive_inventory(link).await?;
     let mut people = BTreeSet::new();
     let owners: Vec<String> = record
@@ -263,7 +265,11 @@ pub async fn receive_plan<C: Channel, S: Steps>(
     steps.approve(&record).await?;
     let approval = record.approve()?;
     let allowance = Allowance::from_record(&record, &approval, |i| steps.landing(i))?;
-    Ok(ApprovedPlan { record, allowance })
+    Ok(ApprovedPlan {
+        record,
+        allowance,
+        version,
+    })
 }
 
 impl ApprovedPlan {
@@ -281,7 +287,8 @@ impl ApprovedPlan {
         journal: &dyn Ledger,
         account: &str,
     ) -> Result<Received, MoveError> {
-        let mut receiver = ReceiverSession::new(table, self.allowance, journal, account);
+        let mut receiver = ReceiverSession::new(table, self.allowance, journal, account)
+            .with_protocol(self.version);
         receiver.run(link).await?;
         let files = self
             .record

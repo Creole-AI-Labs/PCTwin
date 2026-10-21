@@ -21,6 +21,7 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::send_states::States;
+use crate::version::HOLD_SINCE;
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
     OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
@@ -39,6 +40,12 @@ const STOPPED: &str =
 /// How much may be sent before the receiver confirms it (as Syncthing does): enough to keep the
 /// connection busy, small enough that memory stays bounded.
 const IN_FLIGHT_BYTES: u64 = 32 * 1024 * 1024;
+
+/// While a move is held by a pause, the old laptop says so this often, and the new laptop
+/// answers: neither takes the quiet for a dropped link, and a link that does drop during a pause
+/// is found within about this long (or the link's own keep-alive, if that is later) and is
+/// reported as a drop.
+pub const HOLD_TICK: Duration = Duration::from_secs(1);
 
 /// Most files the new laptop keeps open (started and not ended) at once. The old laptop keeps far
 /// fewer in flight; the limit stops one that starts files and never finishes them from holding
@@ -489,8 +496,16 @@ pub struct SenderSession {
     resume_from: Vec<Option<ResumeTicket>>,
     /// What the move has counted, readable while it runs.
     meter: MoveMeter,
-    /// The person's stop.
+    /// The person's stop and pause.
     control: MoveControl,
+    /// The move protocol version both laptops agreed.
+    version: u16,
+    /// On this connection: whether the new laptop was last told this side is paused.
+    told_hold: bool,
+    /// On this connection: whether the new laptop's person has paused the move.
+    their_hold: bool,
+    /// `Hold`s said and not yet answered.
+    holds_owed: u32,
 }
 
 impl SenderSession {
@@ -547,7 +562,19 @@ impl SenderSession {
             resume_from: vec![None; jobs_len],
             meter,
             control: MoveControl::new(),
+            version: crate::MOVE_PROTOCOL.newest(),
+            told_hold: false,
+            their_hold: false,
+            holds_owed: 0,
         }
+    }
+
+    /// Speaks move protocol `version`, the one both laptops agreed
+    /// ([`agree_version`](crate::agree_version)); the newest this release speaks unless set.
+    /// Below [`HOLD_SINCE`](crate::HOLD_SINCE) a pause holds this laptop only and is not told.
+    pub fn with_protocol(mut self, version: u16) -> Self {
+        self.version = version;
+        self
     }
 
     /// Counts in `meter` from now on (the move's counts start from this session's files, all
@@ -558,7 +585,7 @@ impl SenderSession {
         self
     }
 
-    /// Stops when `control` says so (see [`MoveControl`]).
+    /// Stops and pauses when `control` says so (see [`MoveControl`]).
     pub fn with_control(mut self, control: MoveControl) -> Self {
         self.control = control;
         self
@@ -685,6 +712,13 @@ impl SenderSession {
         }
         self.lanes = vec![VecDeque::new()];
         self.in_flight = 0;
+        // What either laptop said about a pause was said on the last connection: on this one
+        // this side says its own again, and the new laptop says its own.
+        self.told_hold = false;
+        self.their_hold = false;
+        self.holds_owed = 0;
+        self.meter.paused_there(false);
+        let control = self.control.clone();
         let state = RefCell::new(self);
         let changed = Notify::new();
         // Extra lanes still running.
@@ -694,9 +728,16 @@ impl SenderSession {
                 // Registered before looking, so a change made meanwhile is not missed.
                 let wake = changed.notified();
                 // The state is never borrowed across a wait, so every lane can take its turn.
-                let control = state.borrow_mut().control();
-                if !control.is_empty() {
-                    for m in &control {
+                let hold = state.borrow_mut().hold_to_say();
+                if let Some(m) = hold {
+                    // This side paused or carried on: the new laptop hears it first.
+                    send(main, &m).await?;
+                    changed.notify_waiters();
+                    continue;
+                }
+                let said = state.borrow_mut().control();
+                if !said.is_empty() {
+                    for m in &said {
                         send(main, m).await?;
                     }
                     changed.notify_waiters();
@@ -736,9 +777,32 @@ impl SenderSession {
                     changed.notify_waiters();
                 } else if state.borrow().all_done() {
                     break;
+                } else if state.borrow().held() {
+                    // Paused (here or there), and nothing owed on this connection: hold. Waiting
+                    // here touches no connection, so this side's carrying on (or stop) is seen at
+                    // once; between, the new laptop is told it is still held and answers, so a
+                    // link that dropped is found and reported as a drop.
+                    let paused = control.paused();
+                    let tick = tokio::select! {
+                        () = control.wait_change_from(paused) => false,
+                        () = tokio::time::sleep(HOLD_TICK) => true,
+                    };
+                    let still = if tick {
+                        state.borrow_mut().hold_tick()
+                    } else {
+                        None
+                    };
+                    if let Some(m) = still {
+                        send(main, &m).await?;
+                    }
                 } else if alive.get() > 0 {
-                    // Other lanes are still at work: wait until one of them changes something.
-                    wake.await;
+                    // Other lanes are still at work: wait until one of them changes something
+                    // (or this side pauses).
+                    let paused = control.paused();
+                    tokio::select! {
+                        () = wake => {}
+                        () = control.wait_change_from(paused) => {}
+                    }
                 } else if state.borrow().control.stopped() {
                     // Nothing to send because the move was stopped: that is a stop, never a
                     // move that stopped making progress.
@@ -882,6 +946,10 @@ impl SenderSession {
                 self.scheduler
                     .push(self.jobs[job].item, self.jobs[job].tier);
             }
+        }
+        if self.held() {
+            // Held: nothing new is opened or started until the move carries on.
+            return out;
         }
         // Files that fail to open free their place at once, so keep filling until those in
         // flight are open.
@@ -1088,6 +1156,7 @@ impl SenderSession {
     /// is read), one more block goes.
     fn work(&mut self, lane: usize) -> Work {
         if self.control.stopped()
+            || self.held()
             || self.budget.stopped()
             || self.in_flight >= self.in_flight_limit.min(self.window)
         {
@@ -1243,6 +1312,40 @@ impl SenderSession {
         !self.ends.is_empty() || !self.skips.is_empty()
     }
 
+    /// Whether the other laptop understands `Hold`.
+    fn speaks_hold(&self) -> bool {
+        self.version >= HOLD_SINCE
+    }
+
+    /// Whether the move is held: this side's person paused it, or the new laptop's did.
+    fn held(&self) -> bool {
+        self.control.paused() || self.their_hold
+    }
+
+    /// This side's pause, to tell the new laptop if it changed since it was last told on this
+    /// connection. With a laptop that cannot be told, this side holds itself, untold.
+    fn hold_to_say(&mut self) -> Option<Message> {
+        let paused = self.control.paused();
+        if !self.speaks_hold() {
+            self.meter.paused_here(paused);
+            return None;
+        }
+        (paused != self.told_hold).then(|| self.say_hold(paused))
+    }
+
+    /// Still held: says this side's pause again, to be answered.
+    fn hold_tick(&mut self) -> Option<Message> {
+        let paused = self.control.paused();
+        self.speaks_hold().then(|| self.say_hold(paused))
+    }
+
+    fn say_hold(&mut self, paused: bool) -> Message {
+        self.told_hold = paused;
+        self.holds_owed = self.holds_owed.saturating_add(1);
+        self.meter.paused_here(paused);
+        Message::Hold { paused }
+    }
+
     /// Fingerprint comparisons still to work out: (job, the version, its file, the new laptop's
     /// fingerprint). One already worked out for that version is answered at once, reading
     /// nothing.
@@ -1296,10 +1399,11 @@ impl SenderSession {
         std::mem::take(&mut self.dirty)
     }
 
-    /// Whether a reply is owed on the main connection: an answer to a start or an end, or a
-    /// receipt for a block it carried.
+    /// Whether a reply is owed on the main connection: an answer to a start, an end or a `Hold`,
+    /// or a receipt for a block it carried.
     fn awaiting_main(&self) -> bool {
-        !self.lanes[0].is_empty()
+        self.holds_owed > 0
+            || !self.lanes[0].is_empty()
             || self.states.iter().any(|s| {
                 matches!(
                     s,
@@ -1414,6 +1518,15 @@ impl SenderSession {
                     Some(theirs) => self.checks.push((job, theirs)),
                     None => self.checked(job, false),
                 }
+                Ok(())
+            }
+            Message::Hold { paused } if lane == 0 && self.speaks_hold() => {
+                // An answer to a `Hold` said, or the new laptop's own news: either way it is the
+                // new laptop's pause as it stands.
+                self.holds_owed = self.holds_owed.saturating_sub(1);
+                self.their_hold = paused;
+                self.meter.paused_there(paused);
+                self.dirty = true;
                 Ok(())
             }
             _ => Err(protocol("unexpected message from the new laptop")),
@@ -1814,8 +1927,12 @@ pub struct ReceiverSession<'d> {
     /// step in it.
     meter: MoveMeter,
     steps: HashMap<ItemId, (Group, Step)>,
-    /// The person's stop.
+    /// The person's stop and pause.
     control: MoveControl,
+    /// The move protocol version both laptops agreed.
+    version: u16,
+    /// On this connection: whether the old laptop was last told this side is paused.
+    told_hold: bool,
     /// Why a file's start was refused, kept per file (bounded).
     refused: BTreeMap<ItemId, String>,
     /// A same-size file already here, to fingerprint before answering a start (off the loop).
@@ -1871,6 +1988,8 @@ impl<'d> ReceiverSession<'d> {
             meter,
             steps,
             control: MoveControl::new(),
+            version: crate::MOVE_PROTOCOL.newest(),
+            told_hold: false,
             refused: BTreeMap::new(),
             to_fingerprint: None,
             streams: BTreeMap::new(),
@@ -1893,15 +2012,39 @@ impl<'d> ReceiverSession<'d> {
         self
     }
 
-    /// Stops when `control` says so (see [`MoveControl`]).
+    /// Stops and pauses when `control` says so (see [`MoveControl`]). A pause here is told to
+    /// the old laptop with this side's next reply, and the old laptop holds; blocks already on
+    /// their way are still written.
     pub fn with_control(mut self, control: MoveControl) -> Self {
         self.control = control;
+        self
+    }
+
+    /// Speaks move protocol `version`, the one both laptops agreed
+    /// ([`agree_version`](crate::agree_version)); the newest this release speaks unless set.
+    /// Below [`HOLD_SINCE`](crate::HOLD_SINCE) the old laptop cannot be told of a pause here, so
+    /// a pause here holds nothing and is not shown as held.
+    pub fn with_protocol(mut self, version: u16) -> Self {
+        self.version = version;
         self
     }
 
     /// What this move has counted so far (the same meter the caller may hold).
     pub fn move_meter(&self) -> MoveMeter {
         self.meter.clone()
+    }
+
+    /// This side's pause, to tell the old laptop with the next reply if it changed since it was
+    /// last told on this connection.
+    fn hold_to_say(&mut self) -> Option<Message> {
+        let paused = self.control.paused();
+        (self.version >= HOLD_SINCE && paused != self.told_hold).then(|| self.say_hold(paused))
+    }
+
+    fn say_hold(&mut self, paused: bool) -> Message {
+        self.told_hold = paused;
+        self.meter.paused_here(paused);
+        Message::Hold { paused }
     }
 
     /// `item` (a file of the plan) is now at `step`.
@@ -2162,6 +2305,10 @@ impl<'d> ReceiverSession<'d> {
         main: &mut C,
         joining: &mut UnboundedReceiver<L>,
     ) -> Result<(), TransferError> {
+        // What either laptop said about a pause was said on the last connection.
+        self.told_hold = false;
+        self.meter.paused_here(false);
+        self.meter.paused_there(false);
         let state = RefCell::new(self);
         // Say what is already here, so the old laptop continues from there.
         let hello = state.borrow_mut().hello();
@@ -2181,7 +2328,12 @@ impl<'d> ReceiverSession<'d> {
                     state.borrow_mut().settle_all();
                 }
                 state.borrow().check_steps();
-                let (replies, finished) = handled?;
+                let (mut replies, finished) = handled?;
+                // A pause or carrying on here goes with the reply (the old laptop reads its
+                // replies, so it hears it at once while it sends, and on its next word while it
+                // is held).
+                let hold = state.borrow_mut().hold_to_say();
+                replies.extend(hold);
                 for r in &replies {
                     send(main, r).await?;
                 }
@@ -2507,6 +2659,12 @@ impl<'d> ReceiverSession<'d> {
                 replies.push(Message::FileDone { stream, ok: false });
             }
             Message::AllSent => return Ok((replies, true)),
+            Message::Hold { paused } if self.version >= HOLD_SINCE => {
+                // The old laptop's pause as it stands; every `Hold` is answered with this side's.
+                self.meter.paused_there(paused);
+                let here = self.control.paused();
+                replies.push(self.say_hold(here));
+            }
             _ => return Err(protocol("unexpected message from the old laptop")),
         }
         Ok((replies, false))
