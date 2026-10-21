@@ -68,6 +68,42 @@ fn name_of(sid: &crate::Sid) -> Result<String, Error> {
     Ok(name)
 }
 
+/// Windows: gives `folder` and everything in it to the administrators and takes away the access
+/// `accounts` were given (the mover's, the person's), never through a link, so nothing in it can be
+/// changed or swapped for a link while an elevated hand-over reads it.
+#[cfg(windows)]
+pub fn lock_to_administrators(folder: &Path, accounts: &[&crate::Sid]) -> Result<(), Error> {
+    let icacls = system_tool("icacls.exe");
+    let folder_text = folder.to_string_lossy();
+    run(
+        &icacls,
+        &[
+            &folder_text,
+            "/setowner",
+            "*S-1-5-32-544",
+            "/T",
+            "/L",
+            "/C",
+            "/Q",
+        ],
+    )?;
+    for sid in accounts {
+        run(
+            &icacls,
+            &[
+                &folder_text,
+                "/remove:g",
+                &format!("*{}", sid.as_str()),
+                "/T",
+                "/L",
+                "/C",
+                "/Q",
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn system_tool(name: &str) -> PathBuf {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());

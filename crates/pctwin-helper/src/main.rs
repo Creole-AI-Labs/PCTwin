@@ -92,6 +92,10 @@ fn session_from(value: String, input: impl std::io::BufRead) -> Result<String, S
 }
 
 fn main() -> ExitCode {
+    // Mac and Linux: nothing this helper makes is ever open to others, not even for a moment
+    // before its own mode is set.
+    #[cfg(unix)]
+    rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
     let args = match parse(std::env::args().skip(1)) {
         Ok(a) => a,
         Err(why) => {

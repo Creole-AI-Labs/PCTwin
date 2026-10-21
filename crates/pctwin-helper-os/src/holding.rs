@@ -272,6 +272,16 @@ pub fn passwd_entry(uid: u32) -> Result<(u32, PathBuf), Error> {
     }
 }
 
+/// Whether the open file is a regular file with exactly one name (no hard link elsewhere).
+#[cfg(unix)]
+fn plain_single(file: &rustix::fd::OwnedFd) -> Result<bool, Error> {
+    let st = rustix::fs::fstat(file).map_err(|e| Error::Io(e.into()))?;
+    Ok(
+        rustix::fs::FileType::from_raw_mode(st.st_mode) == rustix::fs::FileType::RegularFile
+            && st.st_nlink == 1,
+    )
+}
+
 /// Mac and Linux: gives everything under `folder` (and it) to `uid` (group `gid`), by handle,
 /// never through a link (a link is left as it is), so the person's own hand-over can read it.
 /// `folder`'s parent must be root's and not writable by anyone else.
@@ -323,17 +333,50 @@ pub fn give_to(folder: &Path, uid: u32, gid: u32) -> Result<(), Error> {
                 .map_err(|e| Error::Io(e.into()))?;
                 walk(&child, uid, gid)?;
             } else if kind == rustix::fs::FileType::RegularFile {
+                // Opened without waiting (a file swapped for a pipe meanwhile cannot hang this).
                 let file = rustix::fs::openat(
                     dir,
                     &n,
-                    OFlags::NOFOLLOW | OFlags::RDONLY | OFlags::CLOEXEC,
+                    OFlags::NOFOLLOW | OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NONBLOCK,
                     Mode::empty(),
                 )
                 .map_err(|e| Error::Io(e.into()))?;
+                // Given only if it is still a plain file with no other name: a hard link to
+                // a file elsewhere (root's own, say) is never given away; it stays as it is,
+                // and the hand-over reports it as not handed over.
+                if !plain_single(&file)? {
+                    continue;
+                }
                 rustix::fs::fchown(&file, u, g).map_err(|e| Error::Io(e.into()))?;
             }
         }
         Ok(())
     }
     walk(&fd, uid, gid)
+}
+
+#[cfg(all(test, unix))]
+mod give_tests {
+    use super::*;
+    use rustix::fs::{Mode, OFlags};
+
+    fn open(path: &Path) -> rustix::fd::OwnedFd {
+        rustix::fs::open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty()).unwrap()
+    }
+
+    #[test]
+    fn a_hard_linked_file_is_never_taken_for_a_plain_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let alone = dir.path().join("alone.txt");
+        std::fs::write(&alone, b"x").unwrap();
+        assert!(plain_single(&open(&alone)).unwrap());
+        let linked = dir.path().join("linked.txt");
+        std::fs::write(&linked, b"y").unwrap();
+        std::fs::hard_link(&linked, dir.path().join("other-name.txt")).unwrap();
+        assert!(!plain_single(&open(&linked)).unwrap());
+        assert!(
+            !plain_single(&open(dir.path())).unwrap(),
+            "a folder is not a plain file"
+        );
+    }
 }

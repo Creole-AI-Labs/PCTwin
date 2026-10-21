@@ -144,6 +144,17 @@ impl NewLaptop for System {
         for (label, into) in places() {
             command.arg("--into").arg(format!("{label}={into}"));
         }
+        // Windows: the hand-over runs with the administrator's rights, so first nobody else may
+        // change the held folder (the mover and the person lose their access to it), and nothing
+        // in it can be swapped for a link while it is read.
+        #[cfg(windows)]
+        {
+            let (Account::Sid(mover), Account::Sid(person)) = (&self.mover, account) else {
+                return Err(Refusal::NoHome);
+            };
+            pctwin_helper_os::signin::lock_to_administrators(folder, &[mover, person])
+                .map_err(|_| Refusal::Unreadable)?;
+        }
         // Mac and Linux: the person's held folder is theirs now, and the hand-over runs as them,
         // writing with their rights only.
         #[cfg(unix)]
