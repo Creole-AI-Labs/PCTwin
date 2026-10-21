@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "help_code",
     "recovery_check",
     "recovery_run",
+    "things_ready",
     "quicksend_pick",
     "quicksend_clear",
     "quicksend_offer",

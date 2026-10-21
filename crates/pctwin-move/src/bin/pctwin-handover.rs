@@ -88,6 +88,71 @@ fn own_home() -> Option<PathBuf> {
     std::env::var_os(var).map(PathBuf::from)
 }
 
+/// A folder named by the environment variable `var`, when it is set.
+fn env_path(var: &str) -> Option<PathBuf> {
+    std::env::var_os(var)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The person's own app data folder, as the system names it.
+fn data_dir() -> Option<PathBuf> {
+    if cfg!(windows) {
+        env_path("APPDATA")
+    } else if cfg!(target_os = "macos") {
+        env_path("HOME").map(|h| h.join("Library").join("Application Support"))
+    } else {
+        env_path("XDG_DATA_HOME")
+            .or_else(|| env_path("HOME").map(|h| h.join(".local").join("share")))
+    }
+}
+
+/// Writes the note for the person, adding to one they have not read yet. The only file this
+/// program writes itself: in the person's own app data folder, as them.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the person's own note, in their own app data folder; not a move write"
+)]
+fn write_note(
+    path: &std::path::Path,
+    note: pctwin_move::handover::ReadyNote,
+) -> std::io::Result<()> {
+    use pctwin_move::handover::ReadyNote;
+    let before = std::fs::read(path)
+        .ok()
+        .and_then(|b| ReadyNote::read(&b))
+        .unwrap_or_default();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let bytes = serde_json::to_vec(&before.and(note)).map_err(std::io::Error::other)?;
+    let tmp = path.with_extension("json.part");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Opens PCTwin, when it is installed beside this program, so the person sees their note.
+fn open_pctwin() {
+    let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(PathBuf::from))
+    else {
+        return;
+    };
+    let names: &[&str] = if cfg!(windows) {
+        &["PCTwin.exe", "pctwin-app.exe"]
+    } else {
+        &["PCTwin", "pctwin", "pctwin-app"]
+    };
+    if let Some(app) = names.iter().map(|n| dir.join(n)).find(|p| p.is_file()) {
+        let _ = std::process::Command::new(app)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+}
+
 fn main() -> ExitCode {
     let args = match parse(std::env::args().skip(1), own_home()) {
         Ok(a) => a,
@@ -131,19 +196,36 @@ fn main() -> ExitCode {
         }
     };
     let mut all = true;
+    let mut note = pctwin_move::handover::ReadyNote::default();
     for f in &done.files {
         let word = match &f.outcome {
-            Some(ReceiveOutcome::Finished(_)) => "landed",
+            Some(ReceiveOutcome::Finished(_)) => {
+                note.landed += 1;
+                "landed"
+            }
             Some(ReceiveOutcome::NeedsAction { .. } | ReceiveOutcome::AlreadyThere(_)) => {
                 all = false;
+                note.kept += 1;
                 "kept"
             }
             _ => {
                 all = false;
+                note.failed += 1;
                 "failed"
             }
         };
         println!("{word}\t{}", f.held.display());
+    }
+    note.failed += u64::try_from(done.not_plain.len()).unwrap_or(u64::MAX);
+    // For the person, once they are signed in: a note PCTwin shows when it opens, and PCTwin
+    // opened for them (only at their own sign-in, never as the administrator).
+    if args.account == "self"
+        && let Some(data) = data_dir()
+    {
+        let path = pctwin_move::handover::ready_note_path(&data);
+        if write_note(&path, note).is_ok() {
+            open_pctwin();
+        }
     }
     for p in &done.not_plain {
         all = false;

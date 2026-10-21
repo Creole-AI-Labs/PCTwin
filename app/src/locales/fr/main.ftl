@@ -1124,6 +1124,25 @@ pickup-left-for-later =
        *[other] { $count } fichiers sont sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
     }
 pickup-later = Pas maintenant
+ready-eyebrow = Bienvenue
+ready-title = Vos affaires sont prêtes.
+ready-body = Vos affaires de l’ancien portable ont été déplacées sur celui-ci et sont maintenant dans vos propres dossiers.
+ready-landed = fichiers dans vos dossiers
+ready-where-title = Où elles sont
+ready-where-body = Dans Documents, Images, Musique, Vidéos et vos autres dossiers habituels, comme sur votre ancien portable.
+ready-kept =
+    { NUMBER($count) ->
+        [one] { $count } fichier a été mis de côté, car un fichier de ce nom était déjà là. Les deux sont gardés.
+        [many] { $count } de fichiers ont été mis de côté, car des fichiers de ces noms étaient déjà là. Tous sont gardés.
+       *[other] { $count } fichiers ont été mis de côté, car des fichiers de ces noms étaient déjà là. Tous sont gardés.
+    }
+ready-failed =
+    { NUMBER($count) ->
+        [one] { $count } fichier n’a pas pu être mis dans vos dossiers. Demandez à la personne qui a fait le transfert de le refaire.
+        [many] { $count } de fichiers n’ont pas pu être mis dans vos dossiers. Demandez à la personne qui a fait le transfert de les refaire passer.
+       *[other] { $count } fichiers n’ont pas pu être mis dans vos dossiers. Demandez à la personne qui a fait le transfert de les refaire passer.
+    }
+ready-done = Terminé
 move-status-kept = Conservé
 move-wait-eyebrow = Votre transfert
 move-wait-scanning-title = Recherche de vos fichiers.

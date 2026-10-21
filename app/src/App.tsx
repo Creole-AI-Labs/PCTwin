@@ -2,7 +2,8 @@ import { LocalizationProvider, Localized } from "@fluent/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
-import { recoveryCheck, recoveryRun } from "./bridge";
+import { recoveryCheck, recoveryRun, thingsReady, type ReadyNote } from "./bridge";
+import ThingsReady from "./screens/ThingsReady";
 import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
@@ -29,6 +30,8 @@ type Screen =
   | { id: "pair"; role: Role }
   // The move, from paired to its outcome. Left only by its own buttons, so a running move always has a screen.
   | { id: "move"; role: Role }
+  // Another person's things were handed over at their sign-in (M32): shown to them once, at start.
+  | { id: "ready"; note: ReadyNote }
   // A move on this laptop stopped part way (X09): shown at start, before anything else.
   | { id: "pickup"; unfinished: number }
   // Quick Send, either way, from its home.
@@ -58,6 +61,12 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     recoveryCheck().then(
       ({ unfinished }) => {
         if (live && unfinished > 0) setScreen((s) => (s.id === "welcome" ? { id: "pickup", unfinished } : s));
+      },
+      () => undefined,
+    );
+    thingsReady().then(
+      (note) => {
+        if (live && !("none" in note)) setScreen((s) => (s.id === "welcome" ? { id: "ready", note } : s));
       },
       () => undefined,
     );
@@ -157,6 +166,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "old" }); }} />}
             {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "new" }); }} />}
             {screen.id === "help" && <HelpHome onBack={() => { setScreen(screen.from); }} />}
+            {screen.id === "ready" && <ThingsReady note={screen.note} onDone={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "pickup" && (
               <PickUp
                 unfinished={screen.unfinished}

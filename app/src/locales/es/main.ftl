@@ -1115,6 +1115,25 @@ pickup-left-for-later =
        *[other] { $count } archivos están en un disco que ahora no está conectado. Conéctalo y vuelve a ordenar.
     }
 pickup-later = Ahora no
+ready-eyebrow = Hola
+ready-title = Tus cosas están listas.
+ready-body = Tus cosas del portátil antiguo se trasladaron a este y ya están en tus propias carpetas.
+ready-landed = archivos en tus carpetas
+ready-where-title = Dónde están
+ready-where-body = En Documentos, Imágenes, Música, Vídeos y tus otras carpetas habituales, como en tu portátil antiguo.
+ready-kept =
+    { NUMBER($count) ->
+        [one] { $count } archivo se guardó aparte porque ya había uno con ese nombre. Se conservan los dos.
+        [many] { $count } de archivos se guardaron aparte porque ya había otros con esos nombres. Se conservan todos.
+       *[other] { $count } archivos se guardaron aparte porque ya había otros con esos nombres. Se conservan todos.
+    }
+ready-failed =
+    { NUMBER($count) ->
+        [one] No se pudo poner { $count } archivo en tus carpetas. Pide a quien hizo el traslado que lo vuelva a mover.
+        [many] No se pudieron poner { $count } de archivos en tus carpetas. Pide a quien hizo el traslado que los vuelva a mover.
+       *[other] No se pudieron poner { $count } archivos en tus carpetas. Pide a quien hizo el traslado que los vuelva a mover.
+    }
+ready-done = Listo
 move-status-kept = Guardado
 move-wait-eyebrow = Tu traslado
 move-wait-scanning-title = Buscando tus archivos.

@@ -198,6 +198,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         help::help_code,
         recovery::recovery_check,
         recovery::recovery_run,
+        recovery::things_ready,
         quicksend::quicksend_pick,
         quicksend::quicksend_clear,
         quicksend::quicksend_offer,

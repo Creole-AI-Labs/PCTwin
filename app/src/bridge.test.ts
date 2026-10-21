@@ -11,6 +11,7 @@ import {
   listenMove,
   recoveryCheck,
   recoveryRun,
+  thingsReady,
   listenPairingNew,
   listenPairingOld,
   moveApprove,
@@ -223,6 +224,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await helpCode("connection-lost", "moving");
       await recoveryCheck();
       await recoveryRun();
+      await thingsReady();
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }

@@ -463,6 +463,14 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
+        (
+            "ready-note",
+            json([pctwin_move::handover::ReadyNote {
+                landed: 120,
+                kept: 2,
+                failed: 1,
+            }]),
+        ),
         ("qs-picked", json(qs_picked())),
         ("qs-offered", json(qs_offered())),
         (
@@ -710,6 +718,7 @@ fn calls() -> Value {
             { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
             { "name": "recovery_check", "args": [] },
             { "name": "recovery_run", "args": [] },
+            { "name": "things_ready", "args": [] },
             { "name": "quicksend_pick", "args": [["folders", false]] },
             { "name": "quicksend_clear", "args": [] },
             { "name": "quicksend_offer", "args": [["ids", ["p1"]]] },

@@ -612,6 +612,17 @@ export function parseTidied(value: unknown): Tidied | null {
 }
 
 export const recoveryCheck = () => ask("recovery_check", parseInterrupted);
+
+/** "Your things are ready" (M32): what a hand-over at this person's sign-in did, counted. */
+export type ReadyNote = { landed: number; kept: number; failed: number };
+
+export function parseReadyNote(value: unknown): ReadyNote | null {
+  const f = exactly(value, ["landed", "kept", "failed"]);
+  return f && isCount(f.landed) && isCount(f.kept) && isCount(f.failed) ? { landed: f.landed, kept: f.kept, failed: f.failed } : null;
+}
+
+/** The note, once (null: there is none). */
+export const thingsReady = () => ask("things_ready", (v) => (v === null ? { none: true as const } : parseReadyNote(v)));
 export const recoveryRun = () => ask("recovery_run", parseTidied);
 
 /* ---------- Quick Send (src-tauri/src/quicksend.rs) ---------- */

@@ -29,6 +29,7 @@
     "allow-help-code",
     "allow-recovery-check",
     "allow-recovery-run",
+    "allow-things-ready",
     "allow-quicksend-pick",
     "allow-quicksend-clear",
     "allow-quicksend-offer",

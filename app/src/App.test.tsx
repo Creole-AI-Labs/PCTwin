@@ -162,6 +162,18 @@ describe("screens", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
   });
 
+  it("a person whose things were handed over at their sign-in sees them counted once, then Welcome", async () => {
+    const l10n = localization("en");
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "things_ready" ? { landed: 120, kept: 2, failed: 0 } : command === "recovery_check" ? { unfinished: 0 } : undefined),
+    );
+    render(<App initialLanguage="en" />);
+    expect(await screen.findByText(l10n.getString("ready-title"))).toBeTruthy();
+    expect(screen.getByText("120")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("ready-done") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+  });
+
   it("with nothing to pick up, the app opens on Welcome", async () => {
     tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
     render(<App initialLanguage="en" />);
@@ -179,8 +191,8 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
     expect(screen.getByRole("status").textContent).toContain(l10n.getString("qs-soon-note"));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
-    // Nothing reaches the shell but the start-up look for a move that stopped part way.
-    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check"]);
+    // Nothing reaches the shell but the start-up looks (a move that stopped part way, a hand-over note).
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check", "things_ready"]);
     // The window footer carries the free-sending note and the main action, also while the notice is showing.
     const footer = within(screen.getByRole("contentinfo"));
     expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();

@@ -1119,6 +1119,25 @@ pickup-left-for-later =
        *[other] { $count } arquivos estão em um disco que não está conectado agora. Conecte-o e organize de novo.
     }
 pickup-later = Agora não
+ready-eyebrow = Boas-vindas
+ready-title = Suas coisas estão prontas.
+ready-body = Suas coisas do notebook antigo foram movidas para este e agora estão nas suas próprias pastas.
+ready-landed = arquivos nas suas pastas
+ready-where-title = Onde estão
+ready-where-body = Em Documentos, Imagens, Músicas, Vídeos e suas outras pastas de sempre, como no notebook antigo.
+ready-kept =
+    { NUMBER($count) ->
+        [one] { $count } arquivo foi guardado à parte, porque já havia um com esse nome. Os dois foram mantidos.
+        [many] { $count } de arquivos foram guardados à parte, porque já havia outros com esses nomes. Todos foram mantidos.
+       *[other] { $count } arquivos foram guardados à parte, porque já havia outros com esses nomes. Todos foram mantidos.
+    }
+ready-failed =
+    { NUMBER($count) ->
+        [one] Não foi possível colocar { $count } arquivo nas suas pastas. Peça a quem fez a transferência para movê-lo de novo.
+        [many] Não foi possível colocar { $count } de arquivos nas suas pastas. Peça a quem fez a transferência para movê-los de novo.
+       *[other] Não foi possível colocar { $count } arquivos nas suas pastas. Peça a quem fez a transferência para movê-los de novo.
+    }
+ready-done = Concluído
 move-status-kept = Mantido
 move-wait-eyebrow = Sua transferência
 move-wait-scanning-title = Procurando seus arquivos.

@@ -84,6 +84,16 @@ pub async fn recovery_run<R: Runtime>(app: AppHandle<R>) -> Result<Tidied, MoveP
     .map_err(|_| MoveProblem::Failed)?
 }
 
+/// "Your things are ready" (M32): the note a hand-over left for the person signed in here, read
+/// once and removed, so it is shown once. `None`: there is none.
+#[tauri::command]
+pub fn things_ready<R: Runtime>(app: AppHandle<R>) -> Option<pctwin_move::handover::ReadyNote> {
+    let path = journal_path(&app)?.with_file_name("things-ready.json");
+    let bytes = std::fs::read(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    pctwin_move::handover::ReadyNote::read(&bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

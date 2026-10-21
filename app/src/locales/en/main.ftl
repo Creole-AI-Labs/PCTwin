@@ -963,6 +963,23 @@ pickup-left-for-later =
        *[other] { $count } files are on a drive that is not connected now. Connect it and tidy up again.
     }
 pickup-later = Not now
+ready-eyebrow = Welcome
+ready-title = Your things are ready.
+ready-body = Your things from your old laptop were moved to this one, and are now in your own folders.
+ready-landed = files in your folders
+ready-where-title = Where they are
+ready-where-body = In Documents, Pictures, Music, Videos and your other usual folders, as on your old laptop.
+ready-kept =
+    { NUMBER($count) ->
+        [one] { $count } file was kept aside, because a file of that name was already here. Both are kept.
+       *[other] { $count } files were kept aside, because files of those names were already here. Both are kept.
+    }
+ready-failed =
+    { NUMBER($count) ->
+        [one] { $count } file could not be put in your folders. Ask the person who did the move to move it again.
+       *[other] { $count } files could not be put in your folders. Ask the person who did the move to move them again.
+    }
+ready-done = Done
 move-status-kept = Kept
 move-wait-eyebrow = Your move
 move-wait-scanning-title = Finding your files.

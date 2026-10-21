@@ -26,6 +26,46 @@ use tokio::sync::mpsc;
 
 /// The usual places a person's files land in inside their home, by the move's place labels:
 /// the system's own folder names, and one folder for everything else.
+/// What a hand-over left for its person to read once ("Your things are ready", M32): counts
+/// only. Kept in the person's own app data folder, where PCTwin finds it when it next opens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadyNote {
+    /// In their own folders now.
+    pub landed: u64,
+    /// Kept aside, because a file of that name was already there (or it needs a step).
+    pub kept: u64,
+    /// Could not be handed over.
+    pub failed: u64,
+}
+
+/// The note's file inside an app data folder (`data_dir`, the person's own): the same folder
+/// the app keeps its data in (`<data>/com.creoleailabs.pctwin`).
+pub fn ready_note_path(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join("com.creoleailabs.pctwin")
+        .join("things-ready.json")
+}
+
+impl ReadyNote {
+    /// A note as PCTwin wrote it, or `None` for anything else (too long, or other fields).
+    pub fn read(bytes: &[u8]) -> Option<ReadyNote> {
+        if bytes.len() > 4096 {
+            return None;
+        }
+        serde_json::from_slice(bytes).ok()
+    }
+
+    /// This note and `more` together (two hand-overs before the person looked).
+    pub fn and(self, more: ReadyNote) -> ReadyNote {
+        ReadyNote {
+            landed: self.landed.saturating_add(more.landed),
+            kept: self.kept.saturating_add(more.kept),
+            failed: self.failed.saturating_add(more.failed),
+        }
+    }
+}
+
 pub fn usual_places() -> BTreeMap<String, String> {
     let videos = if cfg!(target_os = "macos") {
         "Movies"
@@ -230,4 +270,33 @@ pub async fn hand_over(
         })
         .collect();
     Ok(HandOver { files, not_plain })
+}
+
+#[cfg(test)]
+mod ready_tests {
+    use super::*;
+
+    #[test]
+    fn a_note_is_only_what_pctwin_writes_and_two_add_up() {
+        let one = ReadyNote {
+            landed: 3,
+            kept: 1,
+            failed: 0,
+        };
+        let bytes = serde_json::to_vec(&one).unwrap();
+        assert_eq!(ReadyNote::read(&bytes), Some(one));
+        assert_eq!(
+            one.and(one),
+            ReadyNote {
+                landed: 6,
+                kept: 2,
+                failed: 0
+            }
+        );
+        assert_eq!(ReadyNote::read(br#"{"landed":1,"names":["x"]}"#), None);
+        assert_eq!(ReadyNote::read(&vec![b' '; 5000]), None);
+        assert!(
+            ready_note_path(Path::new("/d")).ends_with("com.creoleailabs.pctwin/things-ready.json")
+        );
+    }
 }

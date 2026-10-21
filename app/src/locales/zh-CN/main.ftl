@@ -897,6 +897,21 @@ pickup-left-for-later =
        *[other] 有 { $count } 个文件位于当前未连接的硬盘上。请连接该硬盘后再整理一次。
     }
 pickup-later = 以后再说
+ready-eyebrow = 欢迎
+ready-title = 你的内容已准备好。
+ready-body = 你旧笔记本电脑上的内容已移到这台电脑，现在就在你自己的文件夹里。
+ready-landed = 个文件在你的文件夹中
+ready-where-title = 它们在哪里
+ready-where-body = 在“文档”“图片”“音乐”“视频”等你常用的文件夹中，和旧笔记本电脑上一样。
+ready-kept =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件被单独保存，因为这里已有同名文件。两者都已保留。
+    }
+ready-failed =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件无法放入你的文件夹。请让完成移动的人再移动一次。
+    }
+ready-done = 完成
 move-status-kept = 已保留
 move-wait-eyebrow = 你的移动
 move-wait-scanning-title = 正在查找你的文件。
