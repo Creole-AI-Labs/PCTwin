@@ -314,6 +314,14 @@ pub fn encode_inventory(
     laptop: &LaptopId,
     items: &[Item],
 ) -> Result<EncodedInventory, RecordError> {
+    encode_counted(laptop, items).map(|(encoded, _)| encoded)
+}
+
+/// [`encode_inventory`], with what the reader will hold, in all, after each page.
+fn encode_counted(
+    laptop: &LaptopId,
+    items: &[Item],
+) -> Result<(EncodedInventory, Vec<u64>), RecordError> {
     // Owners and places, each stored once, in the order first met.
     let mut owners: Vec<&Owner> = Vec::new();
     let mut places: Vec<&Place> = Vec::new();
@@ -350,6 +358,7 @@ pub fn encode_inventory(
         held: 0,
     };
     let mut pages: Vec<Vec<u8>> = Vec::new();
+    let mut held_after = Vec::new();
     let mut start = 0;
     while start < items.len() {
         let (page, used) = encode_page(
@@ -360,6 +369,7 @@ pub fn encode_inventory(
             &mut folders,
         )?;
         pages.push(page);
+        held_after.push(folders.held);
         start += used;
     }
 
@@ -380,10 +390,13 @@ pub fn encode_inventory(
     if m.0.len() > MAX_MANIFEST_BYTES {
         return Err(bad("the manifest is too large"));
     }
-    Ok(EncodedInventory {
-        manifest: m.0,
-        pages,
-    })
+    Ok((
+        EncodedInventory {
+            manifest: m.0,
+            pages,
+        },
+        held_after,
+    ))
 }
 
 /// A folder by its parent and its name as written.
@@ -1167,6 +1180,68 @@ mod tests {
         }
     }
 
+    /// The reader counts exactly what the writer counted, page by page, for owners and places
+    /// with long labels, exact Windows and Mac/Linux names and plain names (each past the
+    /// 16-byte quantum), and folders defined on one page and used on later ones.
+    #[test]
+    fn the_reader_counts_exactly_what_the_writer_counted_page_by_page() {
+        let laptop = LaptopId([9; 16]);
+        let mut items = Vec::new();
+        for i in 0..25_000u32 {
+            let owner = if i % 3 == 0 {
+                Owner::Shared
+            } else {
+                Owner::Person {
+                    account_id: format!("S-1-5-21-1004336348-1177238915-{}", i % 7),
+                }
+            };
+            let place = Place {
+                role: FolderRole::Documents,
+                storage: if i % 2 == 0 {
+                    Storage::SystemDrive
+                } else {
+                    Storage::OtherDrive {
+                        drive: format!("removable-drive-serial-{}", i % 5),
+                    }
+                },
+            };
+            let mut wide = vec![0xD800];
+            wide.extend(std::iter::repeat_n(0x61 + (i % 11) as u16, 30));
+            let mut raw = vec![0xFF];
+            raw.extend(std::iter::repeat_n(b'a' + (i % 13) as u8, 40));
+            let folder = match i % 3 {
+                0 => ItemName::from_windows_wide(&wide),
+                1 => ItemName::from_unix_bytes(&raw),
+                _ => ItemName::from_text(&format!("Projects and plans {}", i % 17)),
+            };
+            let path = ItemPath::new(vec![
+                ItemName::from_text(&format!("Folder number {}", i / 500)),
+                folder,
+                ItemName::from_text(&format!("a file with a long name {i}.txt")),
+            ])
+            .unwrap();
+            items.push(Item {
+                id: ItemId::derive(&laptop, &owner, &place, &path),
+                kind: ItemKind::File,
+                owner,
+                place,
+                path,
+                size_bytes: 1,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: None,
+                inclusion: Inclusion::Included,
+            });
+        }
+        let (enc, held_after) = encode_counted(&laptop, &items).unwrap();
+        assert!(enc.pages.len() >= 3);
+        let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+        for (page, written) in enc.pages.iter().zip(&held_after) {
+            drop(reader.page(page).unwrap());
+            assert_eq!(reader.held, *written);
+        }
+    }
+
     /// Every separate allocation is charged, each through the one function.
     #[test]
     fn every_allocation_of_a_name_an_owner_a_place_a_folder_and_a_path_is_charged() {
@@ -1176,6 +1251,16 @@ mod tests {
         assert_eq!(name_heap(&unix), alloc_held(5) + alloc_held(3));
         let wide = ItemName::from_windows_wide(&[0xD800, 0x61]);
         assert_eq!(name_heap(&wide), alloc_held(4) + alloc_held(4));
+        // Past the 16-byte quantum, so a charge of half shows: 40 units are 80 bytes exactly,
+        // and their text 3 + 39 bytes.
+        let mut units = vec![0xD800];
+        units.extend(std::iter::repeat_n(0x61, 39));
+        let long = ItemName::from_windows_wide(&units);
+        assert_eq!(name_heap(&long), alloc_held(42) + alloc_held(80));
+        let mut bytes = vec![0xFF];
+        bytes.extend(std::iter::repeat_n(b'b', 59));
+        let long = ItemName::from_unix_bytes(&bytes);
+        assert_eq!(name_heap(&long), alloc_held(62) + alloc_held(60));
         let person = Owner::Person {
             account_id: "S-1-5-21".into(),
         };

@@ -324,7 +324,9 @@ impl Incoming {
                 .collect(),
             None => offered.iter().map(|f| f.id).collect(),
         };
-        let mut record = self.record.next_revision();
+        // The offered record is not needed afterwards: the next revision is made from it in place,
+        // never as a second copy.
+        let mut record = self.record.into_next_revision();
         for item in &mut record.items {
             if item.kind == ItemKind::File
                 && item.inclusion == Inclusion::Included

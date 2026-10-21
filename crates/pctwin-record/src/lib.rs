@@ -136,6 +136,41 @@ impl ItemId {
     }
 }
 
+/// Feeds what is written to a hash.
+struct HashWriter<'a>(&'a mut Sha256);
+
+impl std::io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A record's JSON, shown a piece at a time (see [`Record::json_text`]).
+pub struct JsonText<'a>(&'a Record);
+
+impl std::fmt::Display for JsonText<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// Passes each piece of JSON on as text: JSON is UTF-8, and the writer splits it only
+        /// between whole characters.
+        struct Text<'a, 'b>(&'a mut std::fmt::Formatter<'b>);
+        impl std::io::Write for Text<'_, '_> {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let text = std::str::from_utf8(buf).map_err(std::io::Error::other)?;
+                self.0.write_str(text).map_err(std::io::Error::other)?;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        serde_json::to_writer(Text(f), self.0).map_err(|_| std::fmt::Error)
+    }
+}
+
 /// The one serialised form everything is hashed and saved in.
 fn canonical<T: Serialize>(value: &T) -> Vec<u8> {
     // Every type here serialises to JSON without failing: no maps with non-text keys, no floats.
@@ -532,8 +567,24 @@ impl Record {
         self.format
     }
 
+    /// The record as JSON, whole, in memory. Only for a record known to be small (a test, or
+    /// move protocol 2, which caps it): a record received in pages can be far larger than any
+    /// one text should be, so it is written with [`write_json`](Self::write_json) and
+    /// fingerprinted by [`fingerprint`](Self::fingerprint), both a piece at a time.
     pub fn to_json(&self) -> Vec<u8> {
         canonical(self)
+    }
+
+    /// Writes the record as JSON to `out` a piece at a time (the same bytes as
+    /// [`to_json`](Self::to_json)), never holding the whole text.
+    pub fn write_json(&self, out: impl std::io::Write) -> std::io::Result<()> {
+        serde_json::to_writer(out, self).map_err(std::io::Error::other)
+    }
+
+    /// The record's JSON as something that can be written into a text (a saved scan holds it as
+    /// one), a piece at a time.
+    pub fn json_text(&self) -> JsonText<'_> {
+        JsonText(self)
     }
 
     /// Loads a saved record. The format is checked first, so a newer record is refused safely even
@@ -549,20 +600,30 @@ impl Record {
         Ok(record)
     }
 
-    /// The fingerprint of this exact revision: every field counts.
+    /// The fingerprint of this exact revision: every field counts. Taken over the same bytes as
+    /// [`to_json`](Self::to_json), fed to the hash as they are made, so the whole text is never
+    /// held.
     pub fn fingerprint(&self) -> Fingerprint {
         let mut h = Sha256::new();
         h.update(b"pctwin/v1/record\0");
-        h.update(self.to_json());
+        // Every type here serialises to JSON without failing (see `canonical`), and the hash
+        // never refuses bytes.
+        serde_json::to_writer(HashWriter(&mut h), self).expect("records always serialise");
         Fingerprint(h.finalize().into())
     }
 
-    /// The next revision, linked to this one. Change it, then approve it again.
+    /// The next revision, linked to this one, as a copy. Change it, then approve it again. A
+    /// received record can be large: when this one is not needed afterwards, use
+    /// [`into_next_revision`](Self::into_next_revision), which makes no copy.
     pub fn next_revision(&self) -> Self {
-        let mut next = self.clone();
-        next.revision = self.revision + 1;
-        next.previous = Some(self.fingerprint());
-        next
+        self.clone().into_next_revision()
+    }
+
+    /// The next revision, linked to this one, made from this one in place (no copy).
+    pub fn into_next_revision(mut self) -> Self {
+        self.previous = Some(self.fingerprint());
+        self.revision += 1;
+        self
     }
 
     /// The rules every record keeps.
@@ -636,6 +697,66 @@ impl Record {
 #[cfg(test)]
 mod name_room {
     use super::*;
+
+    /// A record with names of every kind, an owner and a mapping.
+    fn awkward() -> Record {
+        let laptop = LaptopId([3; 16]);
+        let mut r = Record::new(laptop);
+        for (i, name) in [
+            ItemName::from_text("Résumé \"final\" \\ notes\n.txt"),
+            ItemName::from_unix_bytes(&[b'a', 0xFF, b'b']),
+            ItemName::from_windows_wide(&[0xD800, 0x61, 0x4E2D]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let owner = Owner::Person {
+                account_id: format!("S-1-5-21-{i}"),
+            };
+            let place = Place {
+                role: FolderRole::Documents,
+                storage: Storage::SystemDrive,
+            };
+            let path = ItemPath::new(vec![ItemName::from_text("文件"), name]).unwrap();
+            r.items.push(Item {
+                id: ItemId::derive(&laptop, &owner, &place, &path),
+                kind: ItemKind::File,
+                owner,
+                place,
+                path,
+                size_bytes: 7,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: Some(3),
+                inclusion: Inclusion::Included,
+            });
+        }
+        r.mapping.people.insert(
+            "S-1-5-21-0".into(),
+            PersonTarget::NewAccount { name: "Ada".into() },
+        );
+        r
+    }
+
+    /// The fingerprint, the JSON written a piece at a time, and the JSON shown as text are all
+    /// the very bytes of the whole JSON, so nothing changes for records already saved or approved.
+    #[test]
+    fn written_a_piece_at_a_time_it_is_the_same_bytes_and_the_same_fingerprint() {
+        let r = awkward();
+        let whole = r.to_json();
+        let mut h = Sha256::new();
+        h.update(b"pctwin/v1/record\0");
+        h.update(&whole);
+        assert_eq!(r.fingerprint(), Fingerprint(h.finalize().into()));
+        let mut written = Vec::new();
+        r.write_json(&mut written).unwrap();
+        assert_eq!(written, whole);
+        assert_eq!(r.json_text().to_string().into_bytes(), whole);
+        let next = r.clone().into_next_revision();
+        assert_eq!(next, r.next_revision());
+        assert_eq!(next.previous, Some(r.fingerprint()));
+        assert_eq!(next.revision, r.revision + 1);
+    }
 
     /// The text of a name that is not valid text holds exactly its length, as the scan
     /// inventory counts it, and reads as the standard lossy conversion does.
