@@ -1213,3 +1213,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = 开始新的发送
 history-open-name = { $what }：{ $title }
+
+## R05 撤销：撤销在每个硬盘上会做什么，以及每个副本的结果
+
+undo-here-removes = 撤销会删除 PCTwin 制作、你没有改动过的副本。你改动过的内容都会保留。
+undo-here-to-trash = 撤销会把 PCTwin 制作、你没有改动过的副本移到废纸篓。你改动过的内容都会保留，也不会删除任何东西。
+undo-here-keeps-fat = 撤销会保留 { $drive } 上的每个副本。这个硬盘使用 FAT 或 exFAT，它会重复使用区分文件的编号，所以 PCTwin 无法确定哪些文件是它自己的。你可以自己删除它们。
+undo-here-keeps-other = 撤销会保留 { $drive } 上的每个副本。在这种硬盘上，PCTwin 无法安全地移动或删除文件。你可以自己删除它们。
+undo-here-more = 更多详情
+undo-here-more-trash = Mac 无法让 PCTwin 确认没有其他应用还在写入某个文件，所以 PCTwin 从不删除文件。它会把每个副本移到同一个硬盘上的废纸篓。你可以从废纸篓把它放回原处。
+undo-here-more-fat = 在 FAT 和 exFAT 硬盘上，新文件可能会得到某个已删除文件用过的编号。PCTwin 只处理它能证明属于自己且未改动的文件，所以会保留这些文件。
+undo-done-trashed = 已移到废纸篓，名称为“{ $name }”。你可以从废纸篓把它放回原处。
+undo-kept-fat = 已保留。这个硬盘（FAT 或 exFAT）会重复使用区分文件的编号，所以 PCTwin 无法确定这是它的副本。如果你不需要它，可以自己删除。
+undo-kept-no-trash = 已保留。PCTwin 无法把这个副本移到它所在硬盘上的废纸篓。如果你不需要它，可以自己删除。

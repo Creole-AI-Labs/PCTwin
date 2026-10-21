@@ -1457,3 +1457,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = Lancer un nouvel envoi
 history-open-name = { $what } : { $title }
+
+## R05 Annulation : ce que l’annulation fera sur chaque disque, et ce qu’est devenue chaque copie
+
+undo-here-removes = L’annulation supprime les copies faites par PCTwin que vous n’avez pas modifiées. Tout ce que vous avez modifié est gardé.
+undo-here-to-trash = L’annulation place dans la Corbeille les copies faites par PCTwin que vous n’avez pas modifiées. Tout ce que vous avez modifié est gardé, et rien n’est supprimé.
+undo-here-keeps-fat = L’annulation gardera toutes les copies sur { $drive }. Ce disque utilise FAT ou exFAT, qui réutilise les numéros servant à distinguer les fichiers : PCTwin ne peut donc pas être sûr de savoir quels fichiers sont les siens. Vous pouvez les supprimer vous-même.
+undo-here-keeps-other = L’annulation gardera toutes les copies sur { $drive }. Sur ce type de disque, PCTwin ne peut pas déplacer ni supprimer des fichiers en toute sécurité. Vous pouvez les supprimer vous-même.
+undo-here-more = Plus de détails
+undo-here-more-trash = Un Mac ne permet pas à PCTwin de savoir qu’aucune autre appli n’écrit encore dans un fichier : PCTwin n’en supprime donc jamais. Il place chaque copie dans la Corbeille du même disque. Vous pouvez la remettre en place depuis la Corbeille.
+undo-here-more-fat = Sur les disques FAT et exFAT, un nouveau fichier peut recevoir le numéro d’un fichier supprimé. PCTwin n’agit que sur les fichiers dont il peut prouver qu’ils sont les siens et inchangés : il garde donc ceux-ci.
+undo-done-trashed = Placé dans la Corbeille sous le nom « { $name } ». Vous pouvez le remettre en place depuis la Corbeille.
+undo-kept-fat = Gardé. Ce disque (FAT ou exFAT) réutilise les numéros servant à distinguer les fichiers : PCTwin ne peut donc pas être sûr qu’il s’agit de sa copie. Si vous n’en avez pas besoin, vous pouvez la supprimer vous-même.
+undo-kept-no-trash = Gardé. PCTwin n’a pas pu placer cette copie dans la Corbeille de son disque. Si vous n’en avez pas besoin, vous pouvez la supprimer vous-même.

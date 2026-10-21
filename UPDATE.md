@@ -13,6 +13,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 **In progress**
 
 - **Speed and time left, measured, never guessed.** While a move runs, PCTwin works out its speed from what it really moved in about the last 20 seconds, and the time left from that. In the first few seconds, or when it can't know, it says so instead of guessing. When nothing is moving, it says it is waiting rather than showing a time that keeps growing. This is ready for review; the screens will show it once they are connected to the move.
+- **Undo on a Mac puts copies in the Trash.** Until now, undo on a Mac kept every copy, because a Mac can't prove that no other app is still writing to a file. Now undo moves each copy PCTwin made, and that you haven't changed, into the Trash on the same drive, so nothing is ever deleted and you can put anything back. Before it moves a file, PCTwin first sets the copy aside under a private name and checks that it is the very file it made, still unchanged; if another app swapped in a file of its own, that file goes straight back where it was and never reaches the Trash. A file you edited after the move is always kept. On USB sticks and memory cards (FAT and exFAT drives), undo keeps every copy, because those drives reuse the numbers that tell files apart, and the undo screen will say so before you start. Its tests pass on Mac test machines; it is waiting for an independent review.
 
 ## 16 October 2026
 

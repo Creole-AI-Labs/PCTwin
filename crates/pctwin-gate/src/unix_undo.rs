@@ -1,6 +1,17 @@
 //! Undo's removal of a copy on Linux and macOS: move it aside first, then check (security design notes,
 //! decided 9 October 2026). Only Linux removes, under a write lease; on macOS
-//! the removal steps are not even compiled in, and every copy is kept (13 October 2026).
+//! the removal steps are not even compiled in (13 October 2026): a proven copy goes to the Trash
+//! on its own drive instead (decided 20 October 2026), and nothing is ever deleted.
+//!
+//! macOS, step by step: the Trash on the copy's drive is found first (none: the copy is kept);
+//! the copy's name is moved aside to its private name, never replacing (`renameatx_np` with
+//! `RENAME_EXCL`); what moved is proven to be the held file, unchanged, with one name, or it goes
+//! back; each name tried in the Trash is journaled (`Step::Trashing`), the private name is proven
+//! again right before the move, and the move into the Trash never replaces anything there (a
+//! name taken gets Finder's next number, `report 2.docx`). What lands in the Trash is checked to
+//! be the held file. Because nothing is deleted, no proof that nobody else writes to it is
+//! needed: a program still writing to it writes into the copy in the Trash. FAT and exFAT drives
+//! keep every copy (their file numbers are given again to new files).
 //!
 //! These systems cannot remove a file through an open handle, so a name must be acted on. The
 //! copy is opened and checked through a handle, then its name is moved, never replacing
@@ -38,10 +49,10 @@ use std::io;
 use rustix::fs::{AtFlags, FileType, Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
 
-#[cfg(target_os = "macos")]
-use crate::macos_check;
 use crate::siblings::{MOST_TRIES, sibling_name};
 use crate::{Destination, Dir, FileId, GateError, Removed, birth_hold, identity, sync_folder};
+#[cfg(target_os = "macos")]
+use crate::{mac_trash, macos_check};
 
 impl From<Errno> for GateError {
     fn from(e: Errno) -> Self {
@@ -66,6 +77,13 @@ pub enum Step<'a> {
         temp: &'a str,
         to: &'a str,
         complete: bool,
+    },
+    /// macOS: about to move what is under `private`, proven to be the copy, into the Trash
+    /// folder `trash` (its absolute path) as `to`, never replacing anything there.
+    Trashing {
+        private: &'a str,
+        trash: &'a str,
+        to: &'a str,
     },
 }
 
@@ -172,6 +190,22 @@ impl Acts<'_> {
         rustix::fs::renameat_with(dir, from, dir, to, RenameFlags::NOREPLACE)
     }
 
+    #[cfg(target_os = "macos")]
+    /// Moves `from` in `dir` to `to` under the folder `into` (the Trash), never replacing
+    /// anything (`renameatx_np` with `RENAME_EXCL`).
+    fn rename_into(
+        &self,
+        dir: &Dir,
+        from: &str,
+        into: &impl std::os::fd::AsFd,
+        to: &str,
+    ) -> Result<(), Errno> {
+        if !(self.in_force)() {
+            return Err(Errno::CANCELED);
+        }
+        rustix::fs::renameat_with(dir, from, into, to, RenameFlags::NOREPLACE)
+    }
+
     #[cfg(not(target_os = "macos"))]
     /// Removes the name `name` in `dir` (only ever from [`finish`]).
     fn unlink(&self, dir: &Dir, name: &str) -> Result<(), Errno> {
@@ -226,7 +260,6 @@ impl Look {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
     /// The same contents as `other` as far as size and modified time tell (the change time moves
     /// with PCTwin's own rename and removal, so it is not compared across those).
     fn same_contents(&self, other: &Look) -> bool {
@@ -268,9 +301,21 @@ fn looked_again(
     ))
 }
 
-/// Whether the drive under `file` is one undo removes from: it must keep birth times and
-/// tell files apart reliably (Linux ext4, XFS, btrfs, ZFS, F2FS; macOS APFS, writable).
-fn drive_allowed(file: &std::fs::File) -> io::Result<bool> {
+/// Whether undo may act on a copy on a drive, read from the copy's own handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fit {
+    /// It keeps birth times and tells files apart reliably (Linux ext4, XFS, btrfs, ZFS, F2FS;
+    /// macOS APFS, writable).
+    Allowed,
+    /// FAT or exFAT: file numbers are given again to new files, so the copy is kept.
+    NumbersReused,
+    /// Anything else: kept.
+    No,
+}
+
+/// Whether the drive under `file` is one undo removes from (Linux) or moves to the Trash on
+/// (macOS).
+fn drive_fit(file: &std::fs::File) -> io::Result<Fit> {
     #[cfg(target_os = "linux")]
     {
         const EXT4: u32 = 0xEF53;
@@ -285,7 +330,16 @@ fn drive_allowed(file: &std::fs::File) -> io::Result<bool> {
             reason = "the drive types are 32-bit numbers in a wider field"
         )]
         let kind = st.f_type as u32;
-        Ok(matches!(kind, EXT4 | XFS | BTRFS | ZFS | F2FS))
+        Ok(if matches!(kind, EXT4 | XFS | BTRFS | ZFS | F2FS) {
+            Fit::Allowed
+        } else if matches!(
+            crate::DriveKind::from_linux_magic(u64::from(kind)),
+            crate::DriveKind::Fat | crate::DriveKind::ExFat
+        ) {
+            Fit::NumbersReused
+        } else {
+            Fit::No
+        })
     }
     #[cfg(target_os = "macos")]
     {
@@ -297,12 +351,19 @@ fn drive_allowed(file: &std::fs::File) -> io::Result<bool> {
             .take_while(|c| **c != 0)
             .map(|c| c.to_ne_bytes()[0])
             .collect();
-        Ok(name == b"apfs" && st.f_flags & MNT_RDONLY == 0)
+        let kind = crate::DriveKind::from_macos_type(&String::from_utf8_lossy(&name));
+        Ok(if name == b"apfs" && st.f_flags & MNT_RDONLY == 0 {
+            Fit::Allowed
+        } else if matches!(kind, crate::DriveKind::Fat | crate::DriveKind::ExFat) {
+            Fit::NumbersReused
+        } else {
+            Fit::No
+        })
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = file;
-        Ok(false)
+        Ok(Fit::No)
     }
 }
 
@@ -363,13 +424,21 @@ impl Destination {
         verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
     ) -> Result<Check, GateError> {
         let done = |r| Ok(Check::Done(r));
-        if expect.born.is_none() {
-            return done(Removed::Unsupported);
-        }
         birth_hold::settle();
         let Some((dir, name)) = self.open_stored_folder(stored)? else {
             return done(Removed::Gone);
         };
+        // FAT and exFAT give file numbers again to new files: PCTwin cannot tell its own copy
+        // there, so it is kept (decided 20 October 2026; the undo screen says so first).
+        if matches!(
+            self.profile_of(&dir).kind(),
+            crate::DriveKind::Fat | crate::DriveKind::ExFat
+        ) {
+            return done(Removed::NumbersReused);
+        }
+        if expect.born.is_none() {
+            return done(Removed::Unsupported);
+        }
         if is_private_name(name) || crate::is_temp_name(name) || crate::is_undo_name(name) {
             return Err(GateError::Io(crate::invalid("not a copy undo removes")));
         }
@@ -393,8 +462,10 @@ impl Destination {
         if FileType::from_raw_mode(st.st_mode) != FileType::RegularFile {
             return done(Removed::NotThatFile);
         }
-        if !drive_allowed(&handle)? {
-            return done(Removed::Unsupported);
+        match drive_fit(&handle)? {
+            Fit::Allowed => {}
+            Fit::NumbersReused => return done(Removed::NumbersReused),
+            Fit::No => return done(Removed::Unsupported),
         }
         let (id, names) = identity(&handle)?;
         if id != expect {
@@ -477,20 +548,22 @@ impl Destination {
         let unless_looked_again = |otherwise: Removed| -> Result<Removed, GateError> {
             Ok(looked_again(&dir, &name, &handle, &look0)?.unwrap_or(otherwise))
         };
-        // 5. Nobody else can write to it. Only a Linux write lease proves that. On macOS a list
-        // of programs with the file open is not proof that no program can still write to it
-        // (security design notes, strengthened 13 October 2026), so the copy is kept,
-        // untouched, for the person to review; the list only makes the reason more specific.
+        // 5. Linux: nobody else can write to it, proven by a write lease. macOS: nothing is
+        // deleted, so no such proof is needed (decided 20 October 2026): a proven copy goes to
+        // the Trash. A copy the system's list shows another program has open is left for
+        // another try, so a file the person has open is not taken from under them; the list is
+        // a signal, never a proof, and a list that cannot be read does not stop the move.
         #[cfg(target_os = "macos")]
         {
-            let _ = (private, &acts, &cx, &folder);
-            let Some(path) = self.root_path.as_ref().map(|r| r.join(&folder).join(&name)) else {
-                return unless_looked_again(Removed::CannotCheck);
-            };
-            match macos_check::others_have_it_open(&path) {
-                Ok(true) => unless_looked_again(Removed::InUse),
-                Ok(false) | Err(_) => unless_looked_again(Removed::CannotCheck),
+            if let Some(path) = self.root_path.as_ref().map(|r| r.join(&folder).join(&name))
+                && matches!(macos_check::others_have_it_open(&path), Ok(true))
+            {
+                return unless_looked_again(Removed::InUse);
             }
+            let r = to_trash(&dir, &folder, &name, &handle, look0, private, &acts, cx)?;
+            // On the disk before anyone records it, through the folder it happened in.
+            sync_folder(&dir)?;
+            Ok(r)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -514,6 +587,72 @@ impl Destination {
     }
 }
 
+/// Where steps 6 and 7 left a checked copy.
+enum Aside {
+    /// Under this private name, proven to be the held file, unchanged, with one name; looked at
+    /// (`Look`) after PCTwin's own rename.
+    At(String, Look),
+    /// Not moved, or put back: how it ended.
+    Ended(Removed),
+}
+
+/// Steps 6 and 7: the copy's name moves aside to `private` (or a new private name, journaled,
+/// if that one is taken), never replacing; what moved is proven to be the held file, unchanged,
+/// with one name, or it goes back.
+#[expect(clippy::too_many_arguments, reason = "the parts of one checked copy")]
+fn move_aside(
+    dir: &Dir,
+    folder: &str,
+    name: &str,
+    handle: &std::fs::File,
+    look0: Look,
+    private: &str,
+    acts: &Acts<'_>,
+    cx: &mut Context<'_>,
+) -> Result<Aside, GateError> {
+    let at = |n: &str| crate::stored_path(folder, n);
+    if let Some(kept) = looked_again(dir, name, handle, &look0)? {
+        return Ok(Aside::Ended(kept));
+    }
+    // 6. Moved aside, never replacing.
+    let mut private = private.to_string();
+    let mut tries = 0;
+    loop {
+        match acts.rename(dir, name, private.as_str()) {
+            Ok(()) => break,
+            Err(Errno::NOENT) => return Ok(Aside::Ended(Removed::Gone)),
+            Err(Errno::EXIST) if tries < 8 => {
+                tries += 1;
+                private = private_name()?;
+                (cx.journal)(Step::NewPrivate { private: &private })?;
+            }
+            Err(Errno::INVAL | Errno::NOTSUP | Errno::NOSYS | Errno::PERM) => {
+                return Ok(Aside::Ended(Removed::Unsupported));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    // 7. What moved is the held file, unchanged, with one name; anything else goes back.
+    let held = rustix::fs::fstat(handle)?;
+    let ours = match rustix::fs::statat(dir, private.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(moved) => same_file(&moved, &held),
+        Err(Errno::NOENT) => false,
+        Err(e) => return Err(e.into()),
+    };
+    let now = Look::from(&held);
+    if !ours || now.names != 1 || !now.same_contents(&look0) {
+        return Ok(Aside::Ended(
+            match put_back(dir, &private, name, acts, cx)? {
+                Back::Home if !ours => Removed::NotThatFile,
+                Back::Home if now.names > 1 => Removed::Linked,
+                Back::Home => Removed::Changed,
+                Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
+            },
+        ));
+    }
+    Ok(Aside::At(private, now))
+}
+
 #[cfg(not(target_os = "macos"))]
 /// Steps 6 to 9 (see [`Destination::remove_checked`]); `leased` says a Linux write lease is held
 /// on `handle` (the caller gives it up afterwards).
@@ -530,43 +669,10 @@ fn move_prove_remove(
     cx: &mut Context<'_>,
 ) -> Result<Removed, GateError> {
     let at = |n: &str| crate::stored_path(folder, n);
-    if let Some(kept) = looked_again(dir, name, handle, &look0)? {
-        return Ok(kept);
-    }
-    // 6. Moved aside, never replacing.
-    let mut private = private.to_string();
-    let mut tries = 0;
-    loop {
-        match acts.rename(dir, name, private.as_str()) {
-            Ok(()) => break,
-            Err(Errno::NOENT) => return Ok(Removed::Gone),
-            Err(Errno::EXIST) if tries < 8 => {
-                tries += 1;
-                private = private_name()?;
-                (cx.journal)(Step::NewPrivate { private: &private })?;
-            }
-            Err(Errno::INVAL | Errno::NOTSUP | Errno::NOSYS | Errno::PERM) => {
-                return Ok(Removed::Unsupported);
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-    // 7. What moved is the held file, unchanged, with one name; anything else goes back.
-    let held = rustix::fs::fstat(handle)?;
-    let ours = match rustix::fs::statat(dir, private.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
-        Ok(moved) => same_file(&moved, &held),
-        Err(Errno::NOENT) => false,
-        Err(e) => return Err(e.into()),
+    let (private, now) = match move_aside(dir, folder, name, handle, look0, private, acts, cx)? {
+        Aside::At(private, now) => (private, now),
+        Aside::Ended(r) => return Ok(r),
     };
-    let now = Look::from(&held);
-    if !ours || now.names != 1 || !now.same_contents(&look0) {
-        return Ok(match put_back(dir, &private, name, acts, cx)? {
-            Back::Home if !ours => Removed::NotThatFile,
-            Back::Home if now.names > 1 => Removed::Linked,
-            Back::Home => Removed::Changed,
-            Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
-        });
-    }
     // 8 and 9. `now` was looked at after PCTwin's own rename: from here nothing of PCTwin's
     // touches the file before the removal, so every part of it must still match.
     Ok(
@@ -585,6 +691,133 @@ fn move_prove_remove(
             },
         },
     )
+}
+
+#[cfg(target_os = "macos")]
+/// Steps 6 onwards on macOS (see the module notes): the Trash on the copy's drive is found, the
+/// copy's name moved aside and proven, then the copy moved into the Trash. Nothing is deleted.
+#[expect(clippy::too_many_arguments, reason = "the parts of one checked copy")]
+fn to_trash(
+    dir: &Dir,
+    folder: &str,
+    name: &str,
+    handle: &std::fs::File,
+    look0: Look,
+    private: &str,
+    acts: &Acts<'_>,
+    cx: &mut Context<'_>,
+) -> Result<Removed, GateError> {
+    let at = |n: &str| crate::stored_path(folder, n);
+    if let Some(kept) = looked_again(dir, name, handle, &look0)? {
+        return Ok(kept);
+    }
+    // Where it will go, first: with no Trash on this drive nothing is moved at all.
+    let Some(trash) = mac_trash::find(handle)? else {
+        return Ok(Removed::NoTrash);
+    };
+    let (private, now) = match move_aside(dir, folder, name, handle, look0, private, acts, cx)? {
+        Aside::At(private, now) => (private, now),
+        Aside::Ended(r) => return Ok(r),
+    };
+    let back = |kept: Removed, cx: &mut Context<'_>| -> Result<Removed, GateError> {
+        Ok(match put_back(dir, &private, name, acts, cx)? {
+            Back::Home => kept,
+            Back::Beside(n) => Removed::KeptBeside { at: at(&n) },
+        })
+    };
+    match into_trash(dir, handle, name, &private, now, &trash, acts, cx)? {
+        IntoTrash::Moved(to) => Ok(Removed::Trashed { at: trash.at(&to) }),
+        IntoTrash::Gone => Ok(Removed::Gone),
+        IntoTrash::NotProven(why) => back(why, cx),
+        IntoTrash::Refused => back(Removed::NoTrash, cx),
+    }
+}
+
+#[cfg(target_os = "macos")]
+/// How moving a proven copy from its private name into the Trash ended.
+#[derive(Debug, PartialEq, Eq)]
+enum IntoTrash {
+    /// In the Trash, under this name, checked to be the held file.
+    Moved(String),
+    /// Nothing is under the private name now (moved away by someone else). Nothing was moved.
+    Gone,
+    /// Right before the move it could not be proven again (why: not that file, a second name, or
+    /// changed). Nothing was moved; it is still under the private name.
+    NotProven(Removed),
+    /// The system refused the move into the Trash (another drive, no permission, a drive that
+    /// cannot move without replacing). Nothing was moved.
+    Refused,
+}
+
+#[cfg(target_os = "macos")]
+/// Moves what is under `private` in `dir` into `trash`, if it is the held file looking exactly as
+/// `expect` (taken after PCTwin's own rename, so every part of it must still match, its change
+/// time included). Each name is journaled before it is tried; right before each try the private
+/// name is proven again, and the move never replaces anything in the Trash: a name taken gets
+/// Finder's next number. What lands in the Trash is checked to be the held file; if it is not
+/// (another program swapped the private name in the moment between the proof and the move), it
+/// is an error and nothing more is done: the journal says where to look next time.
+#[expect(clippy::too_many_arguments, reason = "the parts of one proven copy")]
+fn into_trash(
+    dir: &Dir,
+    held: &std::fs::File,
+    name: &str,
+    private: &str,
+    expect: Look,
+    trash: &mac_trash::Trash,
+    acts: &Acts<'_>,
+    cx: &mut Context<'_>,
+) -> Result<IntoTrash, GateError> {
+    for n in 1..=mac_trash::MOST_TRASH_TRIES {
+        let to = mac_trash::trash_name(name, n);
+        (cx.journal)(Step::Trashing {
+            private,
+            trash: &trash.shown,
+            to: &to,
+        })?;
+        let held_now = rustix::fs::fstat(held)?;
+        match rustix::fs::statat(dir, private, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(under) if same_file(&under, &held_now) => {}
+            Ok(_) => return Ok(IntoTrash::NotProven(Removed::NotThatFile)),
+            Err(Errno::NOENT) => return Ok(IntoTrash::Gone),
+            Err(e) => return Err(e.into()),
+        }
+        let now = Look::from(&held_now);
+        if now != expect {
+            return Ok(IntoTrash::NotProven(if now.names > 1 {
+                Removed::Linked
+            } else {
+                Removed::Changed
+            }));
+        }
+        let entry = trash.entry(&to);
+        match acts.rename_into(dir, private, &trash.base, &entry) {
+            Ok(()) => {}
+            Err(Errno::EXIST) => continue,
+            Err(
+                Errno::XDEV
+                | Errno::PERM
+                | Errno::ACCESS
+                | Errno::ROFS
+                | Errno::NOTSUP
+                | Errno::INVAL
+                | Errno::NOSYS,
+            ) => return Ok(IntoTrash::Refused),
+            Err(e) => return Err(e.into()),
+        }
+        match rustix::fs::statat(&trash.base, entry.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(landed) if same_file(&landed, &held_now) => {}
+            _ => {
+                return Err(GateError::Io(io::Error::other(
+                    "what went into the Trash could not be confirmed to be this copy",
+                )));
+            }
+        }
+        // The Trash's list of names on the disk too, where the drive can flush it.
+        let _ = rustix::fs::fsync(&trash.base);
+        return Ok(IntoTrash::Moved(to));
+    }
+    Err(GateError::TooManyClashes)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -878,6 +1111,7 @@ fn changed_lately(look: &Look) -> bool {
     ns(now) - ns(look.changed) < 10_000_000
 }
 
+#[cfg(not(target_os = "macos"))]
 /// Whether anyone else has the held file open.
 enum Openers {
     /// Nobody else has it open, proven by a Linux write lease (never on macOS).
@@ -966,6 +1200,11 @@ pub enum Resolution {
     /// Its folder cannot be found on this drive (unplugged, or moved somewhere undo cannot find
     /// it): not resolved, nothing changed.
     FolderMissing,
+    /// macOS: the copy, proven, is in the Trash at the absolute path `at`.
+    Trashed { at: String },
+    /// macOS: the copy was proven, but there is no Trash on its drive PCTwin may use (or the
+    /// system refused the move): put back under its own name, kept.
+    NoTrash,
 }
 
 /// How many folders the search for a folder moved after a crash looks in, at most.
@@ -1108,8 +1347,19 @@ impl Destination {
     ) -> Result<Resolution, GateError> {
         let before = Look::of(&held)?;
         let (id, names) = identity(&held)?;
+        let proven = id == file && names == 1 && verify(&mut held)? && Look::of(&held)? == before;
+        // macOS: a proven copy goes on to the Trash, as on the way through (nothing is deleted,
+        // so a program that had it open before PCTwin stopped loses nothing).
+        #[cfg(target_os = "macos")]
+        if proven {
+            return trash_proven(dir, folder, name, private, &held, before, acts, cx);
+        }
+        #[cfg(target_os = "macos")]
+        let kept = Resolution::Home;
+        #[cfg(not(target_os = "macos"))]
         let mut kept = Resolution::Home;
-        if id == file && names == 1 && verify(&mut held)? && Look::of(&held)? == before {
+        #[cfg(not(target_os = "macos"))]
+        if proven {
             // A program that had it open before PCTwin stopped may still be writing to it: such
             // a file goes back under its name for another try, as at any other time.
             match self.nobody_else_has(&held, folder, private) {
@@ -1139,30 +1389,65 @@ impl Destination {
         put_back_as(dir, folder, private, name, kept, acts, cx)
     }
 
+    #[cfg(not(target_os = "macos"))]
     /// Whether another program has the held file (under `private` in `folder`) open, for
-    /// finishing a removal after PCTwin stopped. On macOS nothing can prove nobody else can write
-    /// to it, so the answer is never "nobody": the file goes back under its name, kept.
+    /// finishing a removal after PCTwin stopped.
     fn nobody_else_has(&self, held: &std::fs::File, folder: &str, private: &str) -> Openers {
-        #[cfg(target_os = "macos")]
-        {
-            let _ = held;
-            let Some(path) = self
-                .root_path
-                .as_ref()
-                .map(|r| r.join(folder).join(private))
-            else {
-                return Openers::CannotCheck;
-            };
-            match macos_check::others_have_it_open(&path) {
-                Ok(true) => Openers::Some,
-                Ok(false) | Err(_) => Openers::CannotCheck,
-            }
+        let _ = (folder, private);
+        others_have_it_open(held)
+    }
+
+    /// Finishes a recorded `Trashing { private, trash, to }` for the copy `file` at the stored
+    /// path `stored`: if the copy is in the Trash under `to`, that is how it ended; if something
+    /// is still under the private name, it is finished as a removal under way
+    /// ([`resolve_removing`](Self::resolve_removing): proven and moved into the Trash, or put
+    /// back); otherwise it is under its own name ([`Resolution::StillThere`]) or gone.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "exactly the journal's record and the check"
+    )]
+    pub fn resolve_trashing(
+        &self,
+        right: &impl pctwin_journal::UndoRight,
+        stored: &str,
+        file: FileId,
+        dir_id: FileId,
+        private: &str,
+        trash: &str,
+        to: &str,
+        verify: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+        cx: &mut Context<'_>,
+    ) -> Result<Resolution, GateError> {
+        if !is_private_name(private) {
+            return Err(GateError::Io(crate::invalid(
+                "not one of undo's private names",
+            )));
         }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (folder, private);
-            others_have_it_open(held)
+        let in_force = || right.in_force();
+        let acts = Acts {
+            in_force: &in_force,
+        };
+        acts.go()?;
+        if in_trash(trash, to, file) {
+            return Ok(Resolution::Trashed {
+                at: format!("{trash}/{to}"),
+            });
         }
+        let name = stored.rsplit('/').next().unwrap_or(stored);
+        let Some((dir, _)) = self.locate(stored, dir_id, private)? else {
+            return Ok(Resolution::FolderMissing);
+        };
+        if present(&dir, private)? {
+            drop(dir);
+            return self.resolve_removing(right, stored, file, dir_id, private, verify, cx);
+        }
+        let r = if holds_copy(&dir, name, file)? {
+            Resolution::StillThere
+        } else {
+            Resolution::AlreadyGone
+        };
+        sync_folder(&dir)?;
+        Ok(r)
     }
 
     /// Finishes a recorded `Putting { private, to }` for the copy `file`: whatever is under
@@ -1370,6 +1655,50 @@ impl Destination {
             }
         }
         Ok(None)
+    }
+}
+
+/// Whether the copy `file` is in the Trash folder `trash` under `to` (macOS; elsewhere there is
+/// no Trash undo moves into).
+fn in_trash(trash: &str, to: &str, file: FileId) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        mac_trash::holds(trash, to, file)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (trash, to, file);
+        false
+    }
+}
+
+#[cfg(target_os = "macos")]
+/// Finishing a removal after PCTwin stopped, on macOS: the copy under `private` is proven (by the
+/// caller), so it goes into the Trash on its drive; where there is none, or it cannot be proven
+/// again right before the move, it goes back under its name.
+#[expect(clippy::too_many_arguments, reason = "the parts of one proven copy")]
+fn trash_proven(
+    dir: &Dir,
+    folder: &str,
+    name: &str,
+    private: &str,
+    held: &std::fs::File,
+    expect: Look,
+    acts: &Acts<'_>,
+    cx: &mut Context<'_>,
+) -> Result<Resolution, GateError> {
+    let Some(trash) = mac_trash::find(held)? else {
+        return put_back_as(dir, folder, private, name, Resolution::NoTrash, acts, cx);
+    };
+    match into_trash(dir, held, name, private, expect, &trash, acts, cx)? {
+        IntoTrash::Moved(to) => Ok(Resolution::Trashed { at: trash.at(&to) }),
+        IntoTrash::Gone => Ok(Resolution::AlreadyGone),
+        IntoTrash::NotProven(_) => {
+            put_back_as(dir, folder, private, name, Resolution::Home, acts, cx)
+        }
+        IntoTrash::Refused => {
+            put_back_as(dir, folder, private, name, Resolution::NoTrash, acts, cx)
+        }
     }
 }
 

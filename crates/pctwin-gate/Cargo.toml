@@ -39,8 +39,9 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 [target.'cfg(unix)'.dependencies]
 # 128 random bits from the system for undo's private names.
 getrandom = "0.4"
-# renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links.
-rustix = { version = "1.1", features = ["fs"] }
+# renameat2(RENAME_NOREPLACE) and renameatx_np(RENAME_EXCL), for drives without hard links and
+# for undo's moves; the person's user number names their folder in a drive's Trash (macOS).
+rustix = { version = "1.1", features = ["fs", "process"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Whether another program has a file open, through a Linux write lease (decided 9 October 2026).

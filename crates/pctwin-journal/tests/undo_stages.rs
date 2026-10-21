@@ -528,3 +528,155 @@ fn a_lent_right_ends_with_its_lending_and_never_writes_the_journal() {
     assert!(permit.in_force());
     assert_eq!(j.undo_of(a).unwrap(), None);
 }
+
+/// macOS: about to move the proven copy `n` from its private name into the Trash as `to`.
+fn trashing(n: u8, trash: &str, to: &str) -> Undo {
+    Undo::Trashing {
+        file: file(n),
+        dir_id: dir(),
+        private: format!(".pctwin-undo-{n:032x}"),
+        trash: trash.into(),
+        to: to.into(),
+    }
+}
+
+/// macOS (decided 20 October 2026): the move into the Trash is recorded in its exact shape, and
+/// so is how it ended. Nothing is deleted, so it is final and needs nothing of the person.
+#[test]
+fn a_move_into_the_trash_round_trips_and_is_final_without_needing_action() {
+    let stage = trashing(1, "/Users/ada/.Trash", "f1 2.txt");
+    let text = r#"{"step":"trashing","file":{"volume":3,"index":101},"dir_id":{"volume":3,"index":2},"private":".pctwin-undo-00000000000000000000000000000001","trash":"/Users/ada/.Trash","to":"f1 2.txt"}"#;
+    assert_eq!(serde_json::to_string(&stage).unwrap(), text);
+    assert_eq!(serde_json::from_str::<Undo>(text).unwrap(), stage);
+    assert!(!stage.is_done());
+    let done = Undo::Done {
+        outcome: UndoOutcome::Trashed {
+            at: "/Users/ada/.Trash/f1 2.txt".into(),
+        },
+    };
+    let text =
+        r#"{"step":"done","outcome":{"result":"trashed","at":"/Users/ada/.Trash/f1 2.txt"}}"#;
+    assert_eq!(serde_json::to_string(&done).unwrap(), text);
+    assert_eq!(serde_json::from_str::<Undo>(text).unwrap(), done);
+    let trashed = UndoOutcome::Trashed { at: "x".into() };
+    assert!(trashed.is_final());
+    assert!(!trashed.needs_action());
+}
+
+/// The move into the Trash follows only a removal of the same file, from the very private name
+/// it recorded; each name tried in the Trash is recorded again; it ends put back or done, and
+/// never turns into a salvage or a new removal.
+#[test]
+fn a_move_into_the_trash_follows_only_a_removal_of_the_same_file_from_its_private_name() {
+    let (_d, _p, j) = journal();
+    let a = committed(&j, 1);
+    let permit = j.begin_undo().unwrap();
+    let trash = "/Users/ada/.Trash";
+    assert!(matches!(
+        j.record_undo(&permit, a, &trashing(1, trash, "f1.txt")),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    j.record_undo(&permit, a, &removing(1)).unwrap();
+    // Another file's, or from another private name: refused.
+    assert!(matches!(
+        j.record_undo(&permit, a, &trashing(2, trash, "f1.txt")),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    let Undo::Trashing {
+        file, dir_id, to, ..
+    } = trashing(1, trash, "f1.txt")
+    else {
+        unreachable!()
+    };
+    let other_private = Undo::Trashing {
+        file,
+        dir_id,
+        private: format!(".pctwin-undo-{:032x}", 99),
+        trash: trash.into(),
+        to,
+    };
+    assert!(matches!(
+        j.record_undo(&permit, a, &other_private),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    j.record_undo(&permit, a, &trashing(1, trash, "f1.txt"))
+        .unwrap();
+    j.record_undo(&permit, a, &trashing(1, trash, "f1 2.txt"))
+        .unwrap();
+    assert!(matches!(
+        j.record_undo(&permit, a, &salvaging(1, "x")),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    assert!(matches!(
+        j.record_undo(&permit, a, &removing(1)),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    // Put back (it could not go into the Trash after all), then done.
+    j.record_undo(&permit, a, &putting(1, "f1.txt")).unwrap();
+    assert!(matches!(
+        j.record_undo(&permit, a, &trashing(1, trash, "f1.txt")),
+        Err(JournalError::OutOfOrder { .. })
+    ));
+    // A part-way move into the Trash is listed with its hidden name for the close.
+    let b = committed(&j, 2);
+    j.record_undo(&permit, b, &removing(2)).unwrap();
+    j.record_undo(&permit, b, &trashing(2, trash, "f2.txt"))
+        .unwrap();
+    j.record_undo(
+        &permit,
+        b,
+        &Undo::Done {
+            outcome: UndoOutcome::Trashed {
+                at: format!("{trash}/f2.txt"),
+            },
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        j.undo_of(b).unwrap(),
+        Some(Undo::Done {
+            outcome: UndoOutcome::Trashed {
+                at: format!("{trash}/f2.txt")
+            }
+        })
+    );
+}
+
+/// The Trash folder recorded is a Trash folder's absolute path, and the name in it is one plain
+/// name: nothing else is ever recorded as a place undo moves a copy to.
+#[test]
+fn only_a_trash_folder_and_a_plain_name_in_it_are_recorded() {
+    let (_d, _p, j) = journal();
+    let a = committed(&j, 1);
+    let permit = j.begin_undo().unwrap();
+    j.record_undo(&permit, a, &removing(1)).unwrap();
+    for (trash, to) in [
+        ("Users/ada/.Trash", "f1.txt"),
+        ("/Users/ada/Documents", "f1.txt"),
+        ("/Users/ada/../bob/.Trash", "f1.txt"),
+        ("/Volumes/USB/.Trashes/ada", "f1.txt"),
+        ("/Volumes/USB/.Trashes", "f1.txt"),
+        ("/Users//ada/.Trash", "f1.txt"),
+        ("/Users/ada/.Trash", "../f1.txt"),
+        ("/Users/ada/.Trash", "sub/f1.txt"),
+        ("/Users/ada/.Trash", ""),
+    ] {
+        assert!(
+            matches!(
+                j.record_undo(&permit, a, &trashing(1, trash, to)),
+                Err(JournalError::BadName(_))
+            ),
+            "{trash} {to}"
+        );
+    }
+    j.record_undo(
+        &permit,
+        a,
+        &trashing(1, "/Volumes/USB/.Trashes/501", "f1.txt"),
+    )
+    .unwrap();
+    j.record_undo(&permit, a, &trashing(1, "/.Trashes/501", "f1 2.txt"))
+        .unwrap();
+    j.record_undo(&permit, a, &trashing(1, "/Users/ada/.Trash", "f1 3.txt"))
+        .unwrap();
+}
