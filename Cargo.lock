@@ -3371,6 +3371,7 @@ dependencies = [
  "pctwin-link",
  "pctwin-move",
  "pctwin-pairing",
+ "pctwin-power",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-session",
