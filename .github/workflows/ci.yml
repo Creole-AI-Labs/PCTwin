@@ -262,7 +262,17 @@ jobs:
       # about 10 minutes to compile, and the 10-minute limit below is meant to catch a hung test.
       - name: Build the real-drive tests
         shell: bash
-        run: cargo test -p pctwin-gate --test real_fat --locked --no-run
+        run: |
+          cargo test -p pctwin-gate --test real_fat --locked --no-run
+          cargo test -p pctwin-move --test sequence --locked --no-run
+      # Problems found before the move: every predicted name is the name the file lands under, on
+      # each real drive (the runners' own NTFS, APFS and ext4 drives are the Rust job's run).
+      - name: Predicted names on real drives
+        timeout-minutes: 10
+        shell: bash
+        env:
+          PCTWIN_REQUIRE_FAT: "1"
+        run: cargo test -p pctwin-move --test sequence --locked on_real_drives -- --nocapture
       - name: Gate on real drives (before the remount)
         timeout-minutes: 10
         shell: bash

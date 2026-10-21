@@ -458,6 +458,50 @@ async fn a_file_changed_since_the_scan_lands_as_it_is_now_and_is_labelled() {
 #[tokio::test]
 async fn every_predicted_name_is_the_name_it_lands_under() {
     let w = world();
+    predict_then_compare(w.old.path(), &w.table, &w.journal).await;
+}
+
+/// The same on real drives (FAT32 and exFAT, mounted by the real-drives CI job and listed in
+/// PCTWIN_FAT_DIRS as `kind=folder`, separated by `|`); with PCTWIN_REQUIRE_FAT set, a missing
+/// list fails. Drive kinds in PCTWIN_FAT_REFUSES, where the gate refuses to name files for now,
+/// are left to that job's own test. The runners' own drives (NTFS, APFS, ext4) are the test above.
+#[tokio::test]
+async fn every_predicted_name_is_the_name_it_lands_under_on_real_drives() {
+    let Ok(list) = std::env::var("PCTWIN_FAT_DIRS") else {
+        assert!(
+            std::env::var_os("PCTWIN_REQUIRE_FAT").is_none(),
+            "PCTWIN_REQUIRE_FAT is set but PCTWIN_FAT_DIRS is not"
+        );
+        return;
+    };
+    let refuses = std::env::var("PCTWIN_FAT_REFUSES").unwrap_or_default();
+    for entry in list.split('|').filter(|e| !e.is_empty()) {
+        let (kind, folder) = entry.split_once('=').unwrap_or(("unknown", entry));
+        if refuses.split(',').any(|k| k.trim() == kind) {
+            continue;
+        }
+        let place = Path::new(folder).join(format!("predict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&place);
+        std::fs::create_dir_all(place.join("Documents")).unwrap();
+        std::fs::create_dir_all(place.join("Pictures")).unwrap();
+        let mut table = Destinations::new();
+        for (role, name) in ROLES {
+            table
+                .approve(role_label(role), Approved::MyFolders, &place.join(name))
+                .unwrap();
+        }
+        let old = tempfile::tempdir().unwrap();
+        let jdir = tempfile::tempdir().unwrap();
+        let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
+        eprintln!("predict then compare on {kind} at {folder}");
+        predict_then_compare(old.path(), &table, &journal).await;
+        let _ = std::fs::remove_dir_all(&place);
+    }
+}
+
+/// Every name the plan review predicts is the name the file lands under, with the same changes
+/// listed (Engineering Plan 5.1, "Problems found before the move"): a wrong prediction fails.
+async fn predict_then_compare(old_root: &Path, table: &Destinations, journal: &Journal) {
     let long = format!("{}.txt", "x".repeat(300));
     let names = [
         "plain.txt",
@@ -465,6 +509,7 @@ async fn every_predicted_name_is_the_name_it_lands_under() {
         "a:b?.txt",
         "LONGFO~1.txt",
         "spaces at the end. ",
+        "na\u{ef}ve caf\u{e9} \u{2713}.txt",
         long.as_str(),
     ];
     let mut record = Record::new(laptop());
@@ -477,7 +522,7 @@ async fn every_predicted_name_is_the_name_it_lands_under() {
             5,
             Inclusion::Included,
         );
-        let source = w.old.path().join(format!("source-{n}.bin"));
+        let source = old_root.join(format!("source-{n}.bin"));
         write(&source, b"hello");
         sources.insert(found.id, source);
         record.items.push(found);
@@ -490,9 +535,7 @@ async fn every_predicted_name_is_the_name_it_lands_under() {
     let (sent, received) = no_hang(async {
         tokio::join!(
             pctwin_move::send(&mut old, &record, plan, &quiet_old),
-            pctwin_move::receive(
-                &mut new, &mut steps, &w.table, &w.journal, "1001", &quiet_new
-            ),
+            pctwin_move::receive(&mut new, &mut steps, table, journal, "1001", &quiet_new),
         )
     })
     .await;
@@ -503,8 +546,7 @@ async fn every_predicted_name_is_the_name_it_lands_under() {
     for line in &received.files {
         let item = record.items.iter().find(|i| i.id == line.item).unwrap();
         let place = landing(item);
-        let predicted = w
-            .table
+        let predicted = table
             .get(&place.destination)
             .unwrap()
             .predict(&place.path, item.size_bytes)
