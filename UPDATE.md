@@ -6,9 +6,19 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Stage:** building the move itself (stage 1 of the plan). The foundations (stage 0) are done.
 - **Ready to use?** Not yet. Please don't move real files with it.
-- **Next:** saying everything on the screens in plain words, connecting the screens to the move itself, and finishing safe copying onto USB sticks and memory cards (FAT and exFAT drives).
+- **Next:** the remaining fixes from our review list, then connecting the screens to the move itself, with clear error pages, then independent reviews and the full test run.
 
 ## 21 October 2026
+
+**In progress (everyone in one move)**
+
+- **One move can take everyone on a laptop.** With one administrator's approval, PCTwin's helper finds each approved person's files, makes their account on the new laptop, holds their things in a private place during the move, and hands them over into their own folders, as them, the next time they sign in. A person the administrator didn't approve moves nothing.
+- **Other people's files stay private.** The person running the move sees other people as counts only ("12 files copied, 2 in use by Bea"), never their file names, and while those files pass through, PCTwin closes itself so the person's other programs can't look inside it.
+- **A file copied twice crosses once.** If the same photo sits in two of your folders, the new laptop makes the second copy from the first instead of sending it again. This only happens within one person's things.
+- **Try again for files in use.** A file another program had open is never copied half-written; it's listed, and Try again sends just those files.
+- **New files are offered at the end.** Files made on the old laptop after you approved the plan are counted when the move ends and offered as a short extra move.
+- **PCTwin knows more kinds of places:** mail archives, password vaults, money records, photo, video, music and design projects, code projects, notes, books, game saves, disk images and backups. Things kept only on this laptop move before things a cloud also keeps.
+- **A full test of moving everyone** runs on Windows, Mac and Linux test machines with real accounts, about forty files planted in odd places, and a person moving who tries to cheat. It will first run when this stage is finished.
 
 **In progress**
 
