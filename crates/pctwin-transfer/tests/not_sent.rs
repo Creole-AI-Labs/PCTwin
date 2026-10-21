@@ -144,3 +144,42 @@ fn not_sent_is_said_only_on_the_main_connection() {
     longer.push(0);
     assert!(Message::decode(&longer).is_err());
 }
+
+/// Windows: a file marked as stored online only (the offline mark OneDrive's Files On-Demand
+/// uses) since the scan is never opened in a real move, and both laptops say why.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_file_gone_online_only_is_never_opened_and_both_laptops_say_so() {
+    let w = world();
+    let jobs = vec![w.file(1, b"here"), w.file(2, b"only online now")];
+    let sized: Vec<(&SendJob, u64)> = jobs.iter().map(|j| (j, j.size)).collect();
+    let plan = common::approved_jobs(&sized);
+    let marked = std::process::Command::new("attrib")
+        .arg("+O")
+        .arg(&jobs[1].source)
+        .status()
+        .unwrap();
+    assert!(marked.success());
+    let mut sender = SenderSession::new(jobs.clone(), 2).with_protocol(STOP_SINCE);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan, &w.journal, "1000").with_protocol(STOP_SINCE);
+    let (mut a, mut b) = mem_pair();
+    let (sent, received) =
+        common::no_hang(async { tokio::join!(sender.run(&mut a), receiver.run(&mut b)) }).await;
+    sent.unwrap();
+    received.unwrap();
+    assert!(
+        matches!(sender.outcome(id(2)), Some(SendOutcome::Failed(why)) if why.cause() == Cause::OnlineOnly),
+        "{:?}",
+        sender.outcome(id(2))
+    );
+    assert!(
+        matches!(receiver.outcome(id(2)), Some(ReceiveOutcome::Failed(why)) if why.cause() == Cause::OnlineOnly),
+        "{:?}",
+        receiver.outcome(id(2))
+    );
+    let _ = std::process::Command::new("attrib")
+        .arg("-O")
+        .arg(&jobs[1].source)
+        .status();
+}

@@ -465,9 +465,19 @@ pub struct FsOpener;
 
 impl Opener for FsOpener {
     fn open(&self, path: &Path) -> io::Result<Box<dyn Source>> {
+        // A file that went online only since the scan is never opened: opening it downloads it.
+        if std::fs::symlink_metadata(path).is_ok_and(|m| pctwin_scan::is_cloud_only(&m)) {
+            return Err(io::Error::other(OnlineOnly));
+        }
         Ok(Box::new(File::open(path)?))
     }
 }
+
+/// What an [`Opener`] says (as the error inside an `io::Error`) for a file stored online only,
+/// which it did not open; reading it would download it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("it is stored online only, so it was not opened")]
+pub struct OnlineOnly;
 
 /// Reads one file once, in order, as blocks, skipping blocks the receiver already has.
 pub struct FileSender {
@@ -489,10 +499,6 @@ impl FileSender {
         resume: Option<&ResumeTicket>,
         compressible: bool,
     ) -> Result<Self, TransferError> {
-        // A file that went online only since the scan is never opened: opening it downloads it.
-        if std::fs::symlink_metadata(path).is_ok_and(|m| pctwin_scan::is_cloud_only(&m)) {
-            return Err(TransferError::OnlineOnly);
-        }
         Self::open_with(&FsOpener, path, resume, compressible)
     }
 
@@ -503,7 +509,13 @@ impl FileSender {
         resume: Option<&ResumeTicket>,
         compressible: bool,
     ) -> Result<Self, TransferError> {
-        let mut file = opener.open(path)?;
+        let mut file = opener.open(path).map_err(|e| {
+            if e.get_ref().is_some_and(|inner| inner.is::<OnlineOnly>()) {
+                TransferError::OnlineOnly
+            } else {
+                TransferError::Io(e)
+            }
+        })?;
         let stamp = file.stamp()?;
         let source_file = file.identity().ok().flatten();
         // Read only: the marker is looked at, never changed.
