@@ -103,6 +103,7 @@ impl World {
         std::fs::write(&source, &data).unwrap();
         (
             SendJob {
+                size: 0,
                 item: id(n),
                 source,
                 destination: "me".into(),

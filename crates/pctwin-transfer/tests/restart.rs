@@ -152,6 +152,7 @@ fn world() -> World {
 impl World {
     fn job(&self) -> SendJob {
         SendJob {
+            size: 0,
             item: id(1),
             source: self.source.clone(),
             destination: "me".into(),

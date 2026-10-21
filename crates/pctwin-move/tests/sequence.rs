@@ -10,13 +10,13 @@ use std::time::Duration;
 
 use pctwin_gate::{Approved, Destinations};
 use pctwin_journal::Journal;
-use pctwin_move::{MoveError, NotSentWhy, Steps, Stop, send_plan};
+use pctwin_move::{Ended, Live, MoveError, NotSentWhy, STOPPED, Steps, Stop, send_plan};
 use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
     ManagedBy, Owner, PersonTarget, Place, Portability, Record, Storage,
 };
 use pctwin_transfer::{
-    Channel, ChannelError, LandingPlace, ReceiveOutcome, SendOutcome, role_label, shown_path,
+    Cause, Channel, ChannelError, LandingPlace, ReceiveOutcome, SendOutcome, role_label, shown_path,
 };
 use tokio::sync::mpsc;
 
@@ -225,10 +225,12 @@ async fn a_whole_move_lands_every_file() {
     let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
     let (mut old, mut new) = mem_pair();
     let mut steps = person(true);
+    let quiet = Live::default();
+    let quiet_old = Live::default();
     let (sent, received) = no_hang(async {
         tokio::join!(
-            pctwin_move::send(&mut old, &w.record, plan),
-            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001"),
+            pctwin_move::send(&mut old, &w.record, plan, &quiet_old),
+            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &quiet),
         )
     })
     .await;
@@ -294,12 +296,18 @@ async fn a_plan_not_approved_writes_nothing() {
     let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
     let (mut old, new) = mem_pair();
     let mut steps = person(false);
+    let quiet = Live::default();
+    let quiet_old = Live::default();
     let (sent, received) = no_hang(async {
-        tokio::join!(pctwin_move::send(&mut old, &w.record, plan), async {
-            // The new laptop's end closes when it stops, as a real connection does.
-            let mut new = new;
-            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001").await
-        })
+        tokio::join!(
+            pctwin_move::send(&mut old, &w.record, plan, &quiet_old),
+            async {
+                // The new laptop's end closes when it stops, as a real connection does.
+                let mut new = new;
+                pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &quiet)
+                    .await
+            }
+        )
     })
     .await;
     assert!(
@@ -317,5 +325,54 @@ async fn a_plan_not_approved_writes_nothing() {
             .unwrap()
             .collect();
         assert!(landed.is_empty(), "{name}: {landed:?}");
+    }
+}
+
+/// A stop on the old laptop ends the move on both: each side reports how it ended, every file
+/// the stop cut off is "failed: the move was stopped" (never copied), and the new laptop is told
+/// it was a stop, not a lost connection.
+#[tokio::test]
+async fn a_stop_ends_the_move_on_both_with_every_cut_file_failed_as_stopped() {
+    let w = world();
+    let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
+    let (mut old, new) = mem_pair();
+    let mut steps = person(true);
+    let here = Live::default();
+    let quiet = Live::default();
+    // Stopped before the first block: nothing may land.
+    here.control.stop();
+    let (sent, received) = no_hang(async {
+        tokio::join!(pctwin_move::send(&mut old, &w.record, plan, &here), async {
+            let mut new = new;
+            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &quiet).await
+        })
+    })
+    .await;
+    let sent = sent.unwrap();
+    let received = received.unwrap();
+    assert_eq!(sent.ended, Ended::StoppedHere);
+    assert_eq!(received.ended, Ended::StoppedThere);
+    assert_eq!(sent.files.len(), FILES.len());
+    for line in &sent.files {
+        match &line.outcome {
+            Some(SendOutcome::Failed(why)) => {
+                assert_eq!(why.cause(), Cause::Stopped);
+                assert_eq!(why.why(), STOPPED);
+            }
+            other => panic!("{:?} ended {other:?}", line.item),
+        }
+    }
+    assert_eq!(received.files.len(), FILES.len());
+    for line in &received.files {
+        assert!(
+            matches!(&line.outcome, Some(ReceiveOutcome::Failed(why)) if why.cause() == Cause::Stopped),
+            "{:?} ended {:?}",
+            line.item,
+            line.outcome
+        );
+    }
+    for (role, path, _) in FILES {
+        let landed = w.new.path().join(folder_name(role)).join(path.join("/"));
+        assert!(!landed.exists(), "{landed:?}");
     }
 }

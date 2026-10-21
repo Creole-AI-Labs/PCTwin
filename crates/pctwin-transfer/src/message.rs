@@ -108,6 +108,10 @@ pub enum Message {
     /// answers each with its own, and says it unasked, with its next reply, when its person
     /// pauses or carries on. Neither ever takes the quiet of a pause for a dropped link.
     Hold { paused: bool },
+    /// Either laptop, on the main connection (move protocol 4 and later): the person on this
+    /// side stopped the move. Said once, as the move ends, so the other laptop reports a stop and
+    /// never a lost connection.
+    Stopping,
 }
 
 /// Why the old laptop stopped sending a file.
@@ -135,6 +139,7 @@ const ORIGINALS: u8 = 13;
 const SEND_AGAIN: u8 = 14;
 const GIVE_UP: u8 = 15;
 const HOLD: u8 = 16;
+const STOPPING: u8 = 17;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -221,6 +226,10 @@ impl Message {
             }
             Message::Ready => {
                 w.push(READY);
+                w.extend_from_slice(&0u32.to_be_bytes());
+            }
+            Message::Stopping => {
+                w.push(STOPPING);
                 w.extend_from_slice(&0u32.to_be_bytes());
             }
             Message::AllSent => {
@@ -337,6 +346,7 @@ impl Message {
                 ok: r.flag()?,
             },
             READY if stream == 0 => Message::Ready,
+            STOPPING if stream == 0 => Message::Stopping,
             ALL_SENT if stream == 0 => Message::AllSent,
             HOLD if stream == 0 => Message::Hold { paused: r.flag()? },
             HAVE => Message::Have {

@@ -238,7 +238,7 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     let number = String::from_utf8(take(handoff, "number.txt").await?).map_err(err)?;
     let number: u8 = number.trim().parse().map_err(err)?;
     let mut link = pending.choose(number, Instant::now()).await.map_err(err)?;
-    let sent = pctwin_move::send(&mut link, &record, plan)
+    let sent = pctwin_move::send(&mut link, &record, plan, &pctwin_move::Live::default())
         .await
         .map_err(err)?;
 
@@ -361,7 +361,13 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
 
     let journal = Journal::open(journal).map_err(err)?;
     let received = plan
-        .receive(&mut link, &table, &journal, &account)
+        .receive(
+            &mut link,
+            &table,
+            &journal,
+            &account,
+            &pctwin_move::Live::default(),
+        )
         .await
         .map_err(err)?;
 

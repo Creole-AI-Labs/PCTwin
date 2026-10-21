@@ -463,6 +463,12 @@ impl MoveMeter {
     /// attempt).
     pub(crate) fn written(&self, group: Group, bytes: u64) {
         self.0.bytes_written.fetch_add(bytes, Ordering::AcqRel);
+        self.progress(group, bytes);
+    }
+
+    /// `bytes` more of `group`'s file through in this attempt (written on the new laptop,
+    /// confirmed on the old one), so the time left counts down inside a big file.
+    pub(crate) fn progress(&self, group: Group, bytes: u64) {
         let mut files = self.files();
         let was = files.written.get(&group.file).copied().unwrap_or(0);
         let now = was.saturating_add(bytes);

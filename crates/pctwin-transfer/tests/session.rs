@@ -175,6 +175,7 @@ fn table(l: &Laptops) -> Destinations {
 
 fn jobs(l: &Laptops) -> Vec<SendJob> {
     let job = |n: u8, destination: &str, path: &str| SendJob {
+        size: 0,
         item: id(n),
         source: l.files[n as usize].0.clone(),
         destination: destination.into(),

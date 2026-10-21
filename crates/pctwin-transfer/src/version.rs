@@ -25,8 +25,9 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// was written, and `SendAgain`); version 1 was never released, so nothing needs it. Version 3
 /// sends the old laptop's list in pages (the scan inventory version 2), so no laptop is too big
 /// to send; version 2's one JSON document is kept for a laptop one version behind. Version 4
-/// added pausing told to the other laptop ([`HOLD_SINCE`]); with a laptop on version 2 or 3 a
-/// pause holds only the old laptop, and the other is not told.
+/// added pausing and stopping told to the other laptop ([`HOLD_SINCE`], [`STOP_SINCE`]); with a
+/// laptop on version 2 or 3 a pause holds only the old laptop, and a stop looks to the other like
+/// a lost connection.
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 2,
     newest: 4,
@@ -34,6 +35,10 @@ pub const MOVE_PROTOCOL: Versions = Versions {
 
 /// The first move protocol version with `Hold` (a pause told to the other laptop).
 pub const HOLD_SINCE: u16 = 4;
+
+/// The first move protocol version with `Stopping` (a stop told to the other laptop). Version 4
+/// has not been released, so it carries both.
+pub const STOP_SINCE: u16 = 4;
 
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).
 const KIND: u8 = 34;

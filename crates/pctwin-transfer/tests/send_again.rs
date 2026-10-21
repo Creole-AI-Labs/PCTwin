@@ -106,6 +106,7 @@ fn laptops(sizes: &[usize]) -> Laptops {
 fn jobs(l: &Laptops) -> Vec<SendJob> {
     (0..l.files.len())
         .map(|n| SendJob {
+            size: 0,
             item: id(n as u8),
             source: l.files[n].0.clone(),
             destination: "me".into(),
@@ -2006,6 +2007,7 @@ async fn flaky(f: Flaky) -> Moved {
     }
     let jobs: Vec<SendJob> = (0..files.len())
         .map(|n| SendJob {
+            size: 0,
             item: id(n as u8),
             source: old.path().join(format!("f{n}.bin")),
             destination: "me".into(),
@@ -2106,6 +2108,7 @@ async fn the_window_is_whole_until_a_loss_then_earned_from_the_floor() {
     let src = old.path().join("f0.bin");
     std::fs::write(&src, vec![0u8; size]).unwrap();
     let job = SendJob {
+        size: 0,
         item: id(0),
         source: src,
         destination: "me".into(),
@@ -2180,6 +2183,7 @@ async fn a_lane_lost_mid_connection_drops_the_window_to_the_floor() {
     let src = old.path().join("f0.bin");
     std::fs::write(&src, vec![0u8; 72 << 20]).unwrap();
     let job = SendJob {
+        size: 0,
         item: id(0),
         source: src,
         destination: "me".into(),
@@ -4406,6 +4410,7 @@ async fn blocks_still_on_a_lane_from_an_ended_attempt_cannot_land_in_its_retry()
         .header()
         .clone();
     let job = SendJob {
+        size: 0,
         item: id(0),
         source: src.clone(),
         destination: "me".into(),

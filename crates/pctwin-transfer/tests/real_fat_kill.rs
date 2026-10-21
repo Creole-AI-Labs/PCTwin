@@ -268,6 +268,7 @@ async fn a_whole_move_onto_a_real_drive_lands_visible_and_reported_copied() {
         let source = st.join("source.bin");
         std::fs::write(&source, data()).unwrap();
         let job = SendJob {
+            size: 0,
             item: ItemId::from_hex(&format!("02{}", "0".repeat(30))).unwrap(),
             source,
             destination: "usb".into(),
@@ -365,6 +366,7 @@ async fn killed_mid_copy() {
     let source = st.join("source.bin");
     std::fs::write(&source, data()).unwrap();
     let job = SendJob {
+        size: 0,
         item: ItemId::from_hex(&format!("01{}", "0".repeat(30))).unwrap(),
         source,
         destination: "usb".into(),

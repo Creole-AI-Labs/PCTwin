@@ -89,6 +89,7 @@ async fn send_outcome(
     let source = old.join("source.bin");
     std::fs::write(&source, bytes).unwrap();
     let job = SendJob {
+        size: 0,
         item: item(1),
         source,
         destination: "usb".into(),

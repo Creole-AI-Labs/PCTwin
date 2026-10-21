@@ -117,7 +117,7 @@ impl Cause {
                 Self::ChangedDuringMove
             }
             TransferError::Gate(g) => Self::of_gate(g),
-            TransferError::Stopped => Self::Stopped,
+            TransferError::Stopped | TransferError::StoppedThere => Self::Stopped,
             TransferError::ConnectionDropped
             | TransferError::Protocol(_)
             | TransferError::Record(_)

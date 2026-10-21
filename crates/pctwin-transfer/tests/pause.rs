@@ -94,6 +94,7 @@ impl World {
         let source = self.old.path().join(format!("f{n}.bin"));
         std::fs::write(&source, bytes(len, n)).unwrap();
         SendJob {
+            size: len as u64,
             item: id(n),
             source,
             destination: "me".into(),
@@ -315,8 +316,9 @@ async fn a_stop_mid_file_leaves_what_landed_landed_and_the_cut_file_never_done()
     let (sent, received, at_stop) =
         common::no_hang(async { tokio::join!(send_side, receive_side, stopper) }).await;
     assert!(matches!(sent, Err(TransferError::Stopped)), "{sent:?}");
+    // Told it was a stop, never a lost connection.
     assert!(
-        matches!(received, Err(TransferError::ConnectionDropped)),
+        matches!(received, Err(TransferError::StoppedThere)),
         "{received:?}"
     );
     assert_eq!(sm.reading().blocks_sent, at_stop);
@@ -368,8 +370,9 @@ async fn a_stop_during_a_pause_ends_the_run_at_once_and_nothing_more_is_sent() {
     let (sent, received, held) =
         common::no_hang(async { tokio::join!(send_side, receive_side, person) }).await;
     assert!(matches!(sent, Err(TransferError::Stopped)), "{sent:?}");
+    // Told it was a stop, never a lost connection.
     assert!(
-        matches!(received, Err(TransferError::ConnectionDropped)),
+        matches!(received, Err(TransferError::StoppedThere)),
         "{received:?}"
     );
     assert_eq!(sm.reading().blocks_sent, held);
@@ -379,7 +382,7 @@ async fn a_stop_during_a_pause_ends_the_run_at_once_and_nothing_more_is_sent() {
 }
 
 #[tokio::test]
-async fn a_stop_on_the_new_laptop_during_its_pause_is_its_stop_and_the_old_one_sees_a_drop() {
+async fn a_stop_on_the_new_laptop_during_its_pause_is_its_stop_and_the_old_one_is_told() {
     let w = world();
     let jobs = vec![w.file(1, BIG)];
     let (sm, here) = (MoveMeter::new(), MoveControl::new());
@@ -409,12 +412,57 @@ async fn a_stop_on_the_new_laptop_during_its_pause_is_its_stop_and_the_old_one_s
         matches!(received, Err(TransferError::Stopped)),
         "{received:?}"
     );
-    assert!(
-        matches!(sent, Err(TransferError::ConnectionDropped)),
-        "{sent:?}"
-    );
+    assert!(matches!(sent, Err(TransferError::StoppedThere)), "{sent:?}");
     assert_eq!(receiver.outcome(id(1)), None);
     assert_eq!(w.landed(1), None);
+}
+
+/// A laptop one version back is never sent `Stopping`: it sees the connection end, as before.
+#[tokio::test]
+async fn with_a_laptop_on_version_three_a_stop_is_a_drop_there() {
+    let w = world();
+    let jobs = vec![w.file(1, BIG)];
+    let (sm, control) = (MoveMeter::new(), MoveControl::new());
+    let mut sender = SenderSession::new(jobs.clone(), 1)
+        .with_in_flight_limit(LIMIT)
+        .with_meter(sm.clone())
+        .with_control(control.clone())
+        .with_protocol(3);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_protocol(3);
+    let (a, b) = mem_pair();
+    let send_side = async {
+        let mut a = a;
+        sender.run(&mut a).await
+    };
+    let receive_side = async {
+        let mut b = b;
+        receiver.run(&mut b).await
+    };
+    let person = async {
+        until(|| sm.reading().blocks_sent >= 5).await;
+        control.stop();
+    };
+    let (sent, received, ()) =
+        common::no_hang(async { tokio::join!(send_side, receive_side, person) }).await;
+    assert!(matches!(sent, Err(TransferError::Stopped)), "{sent:?}");
+    assert!(
+        matches!(received, Err(TransferError::ConnectionDropped)),
+        "{received:?}"
+    );
+}
+
+#[test]
+fn stopping_is_said_only_on_the_main_connection_with_nothing_more() {
+    let m = Message::Stopping;
+    assert_eq!(Message::decode(&m.encode()).unwrap(), m);
+    let good = m.encode();
+    let mut on_a_stream = good.clone();
+    on_a_stream[4] = 1;
+    assert!(Message::decode(&on_a_stream).is_err());
+    let mut longer = good.clone();
+    longer.push(0);
+    assert!(Message::decode(&longer).is_err());
 }
 
 #[tokio::test]

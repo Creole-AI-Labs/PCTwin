@@ -166,6 +166,7 @@ fn table(l: &Laptops) -> Destinations {
 fn jobs(l: &Laptops) -> Vec<SendJob> {
     (0..l.files.len())
         .map(|n| SendJob {
+            size: 0,
             item: id(n as u8),
             source: l.files[n].0.clone(),
             destination: "me".into(),

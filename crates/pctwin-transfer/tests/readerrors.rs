@@ -147,6 +147,7 @@ fn setup(count: u8) -> (Laptops, Vec<SendJob>) {
             let source = l.old.path().join(format!("f{n}.bin"));
             std::fs::write(&source, vec![n; 200_000]).unwrap();
             SendJob {
+                size: 0,
                 item: id(n),
                 source,
                 destination: "me".into(),

@@ -40,7 +40,10 @@ pub(crate) struct States {
 impl States {
     pub(crate) fn new(jobs: &[SendJob], meter: MoveMeter) -> Self {
         meter.reset();
-        let group = jobs.iter().map(|j| meter.plan(&j.destination, 0)).collect();
+        let group = jobs
+            .iter()
+            .map(|j| meter.plan(&j.destination, j.size))
+            .collect();
         meter.plan_loaded();
         Self {
             v: jobs.iter().map(|_| SendState::Waiting).collect(),
@@ -48,6 +51,11 @@ impl States {
             counted: vec![Step::Waiting; jobs.len()],
             meter,
         }
+    }
+
+    /// `job`'s place in the meter.
+    pub(crate) fn group(&self, job: usize) -> Group {
+        self.group[job]
     }
 
     pub(crate) fn len(&self) -> usize {

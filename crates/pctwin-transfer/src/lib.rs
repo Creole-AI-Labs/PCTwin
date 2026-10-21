@@ -112,7 +112,8 @@ pub use undo::{
     undo_preview, undo_with,
 };
 pub use version::{
-    HOLD_SINCE, MOVE_PROTOCOL, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
+    HOLD_SINCE, MOVE_PROTOCOL, STOP_SINCE, VERSION_WAIT, VersionGap, Versions, agree_version,
+    choose_version,
 };
 
 use std::fs::File;
@@ -176,6 +177,9 @@ pub enum TransferError {
     /// The person stopped the move on this laptop ([`MoveControl::stop`]).
     #[error("the move was stopped on this laptop")]
     Stopped,
+    /// The person on the other laptop stopped the move ([`Message::Stopping`]).
+    #[error("the move was stopped on the other laptop")]
+    StoppedThere,
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the

@@ -22,7 +22,7 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::send_states::States;
-use crate::version::HOLD_SINCE;
+use crate::version::{HOLD_SINCE, STOP_SINCE};
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
     OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
@@ -91,6 +91,24 @@ impl Channel for pctwin_link::Link {
             .map(|m| m.to_vec())
             .map_err(|_| ChannelError)
     }
+}
+
+/// How long a laptop that stops the move waits to tell the other one so.
+const STOP_NOTICE: Duration = Duration::from_secs(2);
+
+/// Tells the other laptop the person stopped the move, then keeps the connection open until the
+/// other laptop lets it go, at most [`STOP_NOTICE`] in all: a laptop that writes before it reads
+/// (a paused old laptop saying it is still held) would otherwise find the connection gone before
+/// it read the notice, and report a lost connection. What arrives meanwhile is let go unread. Best
+/// effort: if the stop cut a message short, the link refuses to send more, and the other laptop
+/// sees the connection end as it would have without the notice.
+async fn tell_stopped(main: &mut impl Channel) {
+    let _ = tokio::time::timeout(STOP_NOTICE, async {
+        if send(main, &Message::Stopping).await.is_ok() {
+            while main.recv().await.is_ok() {}
+        }
+    })
+    .await;
 }
 
 async fn send(ch: &mut impl Channel, m: &Message) -> Result<(), TransferError> {
@@ -365,6 +383,8 @@ pub struct SendJob {
     /// False for formats that are already compressed.
     pub compressible: bool,
     pub tier: Tier,
+    /// Its size at the scan (0: not known). The old laptop's time left counts down from it.
+    pub size: u64,
 }
 
 /// How a sent file ended.
@@ -695,6 +715,9 @@ impl SenderSession {
             () = control.wait_stopped() => Err(TransferError::Stopped),
             ran = self.run_once(main, joining, after_loss) => ran,
         };
+        if matches!(ran, Err(TransferError::Stopped)) && self.version >= STOP_SINCE {
+            tell_stopped(main).await;
+        }
         self.states.check();
         self.ended_well = ran.is_ok();
         ran
@@ -1475,6 +1498,12 @@ impl SenderSession {
                     .ok_or_else(|| protocol("a receipt for nothing sent"))?;
                 self.in_flight -= raw;
                 self.meter.block_confirmed(raw);
+                if let Some(&job) = self.job_of.get(&stream)
+                    && matches!(self.states[job], SendState::Open { .. })
+                {
+                    // A big file counts down on this laptop too, as the new laptop confirms it.
+                    self.meter.progress(self.states.group(job), raw);
+                }
                 // Only the current attempt counts; a receipt for an earlier one frees room only.
                 if let Some(&job) = self.job_of.get(&stream)
                     && let SendState::Open { sections, .. } = &mut *self.states.slot(job)
@@ -1542,6 +1571,10 @@ impl SenderSession {
                 self.meter.paused_there(paused);
                 self.dirty = true;
                 Ok(())
+            }
+            // The new laptop's person stopped the move: a stop, never a lost connection.
+            Message::Stopping if lane == 0 && self.version >= STOP_SINCE => {
+                Err(TransferError::StoppedThere)
             }
             _ => Err(protocol("unexpected message from the new laptop")),
         }
@@ -2335,11 +2368,15 @@ impl<'d> ReceiverSession<'d> {
         // The run is only ever left at a wait, never partway through handling a message, so the
         // session stays as a dropped connection leaves it: drop it to keep partly received files,
         // or `cancel` it.
-        tokio::select! {
+        let ran = tokio::select! {
             biased;
             () = control.wait_stopped() => Err(TransferError::Stopped),
             ran = self.receive_joining(main, joining) => ran,
+        };
+        if matches!(ran, Err(TransferError::Stopped)) && self.version >= STOP_SINCE {
+            tell_stopped(main).await;
         }
+        ran
     }
 
     async fn receive_joining<C: Channel, L: Channel>(
@@ -2717,6 +2754,10 @@ impl<'d> ReceiverSession<'d> {
                 self.meter.paused_there(paused);
                 let here = self.control.paused();
                 replies.push(self.say_hold(here));
+            }
+            // The old laptop's person stopped the move: a stop, never a lost connection.
+            Message::Stopping if self.version >= STOP_SINCE => {
+                return Err(TransferError::StoppedThere);
             }
             _ => return Err(protocol("unexpected message from the old laptop")),
         }

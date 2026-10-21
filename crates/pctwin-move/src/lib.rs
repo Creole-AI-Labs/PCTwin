@@ -31,9 +31,9 @@ use pctwin_record::{
     Inclusion, Item, ItemId, ItemKind, LeftOutReason, Owner, PersonTarget, Record, RecordError,
 };
 use pctwin_transfer::{
-    Allowance, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession, SendJob,
-    SendOutcome, SenderSession, Tier, TransferError, agree_version, plan_order, receive_inventory,
-    send_inventory,
+    Allowance, Cause, Channel, Failure, LandingPlace, MOVE_PROTOCOL, MoveControl, MoveMeter,
+    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier, TransferError,
+    agree_version, plan_order, receive_inventory, send_inventory,
 };
 
 /// Files a move sends at once.
@@ -118,6 +118,7 @@ pub fn send_plan(
                 destination: place.destination,
                 path: place.path,
                 tier: Tier::Rest,
+                size: item.size_bytes,
             },
         );
     }
@@ -144,6 +145,38 @@ pub enum MoveError {
     Stopped(#[from] Stop),
 }
 
+/// What the screens hold while the move runs: the meter they read, and the person's stop and
+/// pause. Cheap to clone; the test lab passes a fresh one it never touches.
+#[derive(Debug, Clone, Default)]
+pub struct Live {
+    pub meter: MoveMeter,
+    pub control: MoveControl,
+}
+
+/// How the move ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ended {
+    /// Every file was sent or received and answered for.
+    Finished,
+    /// The person on this laptop stopped it.
+    StoppedHere,
+    /// The person on the other laptop stopped it.
+    StoppedThere,
+}
+
+/// What a file cut off by a stop is reported as: failed, never copied.
+pub const STOPPED: &str = "the move was stopped";
+
+/// How the run of a session ended: finished, stopped (by either person), or an error.
+fn ended(ran: Result<(), TransferError>) -> Result<Ended, MoveError> {
+    match ran {
+        Ok(()) => Ok(Ended::Finished),
+        Err(TransferError::Stopped) => Ok(Ended::StoppedHere),
+        Err(TransferError::StoppedThere) => Ok(Ended::StoppedThere),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// How one sent file ended on the old laptop (`None`: it has no outcome).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SentFile {
@@ -157,29 +190,40 @@ pub struct SentFile {
 pub struct Sent {
     pub files: Vec<SentFile>,
     pub not_sent: Vec<NotSent>,
+    pub ended: Ended,
 }
 
 /// The old laptop, over `link` (already paired): agrees the version, sends `record`, then sends
-/// the files `plan` holds.
+/// the files `plan` holds, counted in `live`'s meter and held or stopped by its control. A stop,
+/// on either laptop, ends it with the report so far ([`Ended`]).
 pub async fn send<C: Channel>(
     link: &mut C,
     record: &Record,
     plan: SendPlan,
+    live: &Live,
 ) -> Result<Sent, MoveError> {
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record, version).await?;
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
-    let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT).with_protocol(version);
-    sender.run(link).await?;
+    let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT)
+        .with_protocol(version)
+        .with_meter(live.meter.clone())
+        .with_control(live.control.clone());
+    let ended = ended(sender.run(link).await)?;
+    let stopped = ended != Ended::Finished;
     Ok(Sent {
         files: items
             .into_iter()
             .map(|item| SentFile {
                 item,
-                outcome: sender.outcome(item).cloned(),
+                // A file the stop cut off failed; it is never reported copied.
+                outcome: sender.outcome(item).cloned().or_else(|| {
+                    stopped.then(|| SendOutcome::Failed(Failure::new(Cause::Stopped, STOPPED)))
+                }),
             })
             .collect(),
         not_sent: plan.not_sent,
+        ended,
     })
 }
 
@@ -236,6 +280,7 @@ pub struct ReceivedFile {
 pub struct Received {
     pub record: Record,
     pub files: Vec<ReceivedFile>,
+    pub ended: Ended,
 }
 
 /// The new laptop, over `link` (already paired): agrees the version, receives the old laptop's
@@ -279,17 +324,23 @@ impl ApprovedPlan {
     }
 
     /// Receives over `link` into the places in `table`, only what the plan allows, recording every
-    /// write in `journal`; `account` is the signed-in person's account on this laptop.
+    /// write in `journal`; `account` is the signed-in person's account on this laptop. Counted in
+    /// `live`'s meter and held or stopped by its control; a stop, on either laptop, ends it with
+    /// the report so far ([`Ended`]).
     pub async fn receive<C: Channel>(
         self,
         link: &mut C,
         table: &Destinations,
         journal: &dyn Ledger,
         account: &str,
+        live: &Live,
     ) -> Result<Received, MoveError> {
         let mut receiver = ReceiverSession::new(table, self.allowance, journal, account)
-            .with_protocol(self.version);
-        receiver.run(link).await?;
+            .with_protocol(self.version)
+            .with_meter(live.meter.clone())
+            .with_control(live.control.clone());
+        let ended = ended(receiver.run(link).await)?;
+        let stopped = ended != Ended::Finished;
         let files = self
             .record
             .items
@@ -297,12 +348,16 @@ impl ApprovedPlan {
             .filter(|i| i.kind == ItemKind::File && i.inclusion == Inclusion::Included)
             .map(|i| ReceivedFile {
                 item: i.id,
-                outcome: receiver.outcome(i.id),
+                // A file the stop cut off failed; it is never reported copied.
+                outcome: receiver.outcome(i.id).or_else(|| {
+                    stopped.then(|| ReceiveOutcome::Failed(Failure::new(Cause::Stopped, STOPPED)))
+                }),
             })
             .collect();
         Ok(Received {
             record: self.record,
             files,
+            ended,
         })
     }
 }
@@ -314,9 +369,10 @@ pub async fn receive<C: Channel, S: Steps>(
     table: &Destinations,
     journal: &dyn Ledger,
     account: &str,
+    live: &Live,
 ) -> Result<Received, MoveError> {
     receive_plan(link, steps)
         .await?
-        .receive(link, table, journal, account)
+        .receive(link, table, journal, account, live)
         .await
 }

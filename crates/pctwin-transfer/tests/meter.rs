@@ -101,6 +101,7 @@ impl World {
         let source = self.old.path().join(format!("f{n}.bin"));
         std::fs::write(&source, bytes(len, n)).unwrap();
         SendJob {
+            size: len as u64,
             item: id(n),
             source,
             destination: destination.into(),
@@ -250,6 +251,8 @@ async fn both_meters_count_every_file_and_byte_by_destination_and_can_be_read_du
     assert_eq!(before.groups["shared"], counts(1, Step::Waiting));
     assert_eq!(before.bytes_planned, sizes);
     assert_eq!(send_meter.reading().files, counts(3, Step::Waiting));
+    // The old laptop plans each file at its size from the scan.
+    assert_eq!(send_meter.reading().bytes_planned, sizes);
 
     let (mut a, mut b) = mem_pair();
     let written = receiver.meter();
@@ -445,8 +448,9 @@ async fn a_stop_ends_the_old_laptops_run_at_once_and_not_one_block_is_sent_after
     .await
     .expect("a stopped move ends");
     assert!(matches!(sent, Err(TransferError::Stopped)), "{sent:?}");
+    // The new laptop is told it was a stop.
     assert!(
-        matches!(received, Err(TransferError::ConnectionDropped)),
+        matches!(received, Err(TransferError::StoppedThere)),
         "{received:?}"
     );
     assert_eq!(meter.reading().blocks_sent, at_stop);
@@ -1071,20 +1075,32 @@ async fn during_a_real_move_the_time_left_is_never_made_up_and_ends_done_on_both
                 "at {second}s: {r:?}"
             );
         }
-        // The new laptop knows the plan; the old one never gives a time it cannot know.
+        // Both laptops know the plan's size (the old one from its scan), and work the time
+        // out only from what was measured.
         assert_eq!(r.bytes_left.map(|l| l <= sizes), Some(true), "{r:?}");
-        assert!(
-            matches!(
-                s.time_left,
-                TimeLeft::NotKnownYet | TimeLeft::Waiting | TimeLeft::Done
-            ),
-            "{s:?}"
-        );
-        if let TimeLeft::About { seconds } = r.time_left {
-            let (left, speed) = (r.bytes_left.unwrap(), r.bytes_per_second.unwrap());
-            assert_eq!(seconds, left.div_ceil(speed).max(1), "{r:?}");
+        assert_eq!(s.bytes_left.map(|l| l <= sizes), Some(true), "{s:?}");
+        for m in [s, r] {
+            if Duration::from_secs(*second) < WARM_UP {
+                assert_eq!(m.bytes_per_second, None, "at {second}s: {m:?}");
+            }
+            if let TimeLeft::About { seconds } = m.time_left {
+                let (left, speed) = (m.bytes_left.unwrap(), m.bytes_per_second.unwrap());
+                assert_eq!(seconds, left.div_ceil(speed).max(1), "{m:?}");
+            }
         }
     }
+    // The old laptop's time left counts down inside the big file as the new laptop confirms it,
+    // and it gave a time once there was a speed.
+    assert!(
+        seen.iter()
+            .any(|(_, s, _)| s.reading.bytes_in_progress > 0 && s.reading.bytes_through == 0),
+        "the old laptop never counted part of a file"
+    );
+    assert!(
+        seen.iter()
+            .any(|(_, s, _)| matches!(s.time_left, TimeLeft::About { .. })),
+        "the old laptop never gave a time"
+    );
     let (_, s, r) = seen.last().unwrap();
     assert_eq!(r.time_left, TimeLeft::Done);
     assert_eq!(r.bytes_left, Some(0));
