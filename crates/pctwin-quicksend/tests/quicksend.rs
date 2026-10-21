@@ -497,3 +497,43 @@ async fn every_received_file_is_marked_as_from_the_internet() {
         );
     }
 }
+
+/// A send the sender stopped before it began ends with a receipt on both sides: every accepted
+/// file failed, none arrived, and nothing is written as if it had.
+#[tokio::test]
+async fn a_stopped_send_ends_with_a_receipt_and_nothing_is_called_arrived() {
+    let old = tempfile::tempdir().unwrap();
+    let new = tempfile::tempdir().unwrap();
+    let offer = Offer::of(&chosen(old.path())).unwrap();
+    let live = pctwin_move::Live::default();
+    live.control.stop();
+    let (mut a, mut b) = pair();
+    let j = journal(new.path());
+    let (sent, got) = no_hang(async {
+        tokio::join!(
+            async { pctwin_quicksend::send_live(&mut a, offer, &live).await },
+            async {
+                let incoming = receive_offer(&mut b).await.unwrap();
+                incoming.accept(&mut b, new.path(), None, &j, "me").await
+            }
+        )
+    })
+    .await;
+    let sent = sent.unwrap();
+    assert_eq!(sent.lines.len(), 3);
+    for line in &sent.lines {
+        assert!(
+            !matches!(
+                line.outcome,
+                Outcome::Arrived { .. } | Outcome::AlreadyThere { .. }
+            ),
+            "{line:?}"
+        );
+    }
+    if let Ok(got) = got {
+        for line in &got.lines {
+            assert!(!matches!(line.outcome, Outcome::Arrived { .. }), "{line:?}");
+        }
+    }
+    assert!(!new.path().join("letter.txt").exists());
+}

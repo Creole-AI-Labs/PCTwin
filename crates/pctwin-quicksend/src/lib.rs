@@ -240,6 +240,17 @@ pub struct Receipt {
 
 /// Sender: offers `offer` over `ch` (already paired), then sends what the receiver accepts.
 pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickError> {
+    send_live(ch, offer, &pctwin_move::Live::default()).await
+}
+
+/// As [`send`], counted in `live`'s meter and held or stopped by its control (the screens'
+/// progress, pause and stop). A stop, on either laptop, ends it with the receipt so far: a file
+/// it cut off failed, never arrived.
+pub async fn send_live(
+    ch: &mut impl Channel,
+    offer: Offer,
+    live: &pctwin_move::Live,
+) -> Result<Receipt, QuickError> {
     let version = agree_version(ch, MOVE_PROTOCOL).await?;
     send_inventory(ch, &offer.record, version).await?;
     let offered = files_of(&offer.record);
@@ -249,9 +260,12 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
         .into_iter()
         .filter(|j| accepted.contains(&j.item))
         .collect();
-    let mut sender = SenderSession::new(jobs, LANES).with_protocol(version);
+    let mut sender = SenderSession::new(jobs, LANES)
+        .with_protocol(version)
+        .with_meter(live.meter.clone())
+        .with_control(live.control.clone());
     if !accepted.is_empty() {
-        sender.run(ch).await?;
+        stopped_is_fine(sender.run(ch).await)?;
     }
     Ok(Receipt {
         lines: offered
@@ -329,6 +343,28 @@ impl Incoming {
         journal: &dyn Ledger,
         account: &str,
     ) -> Result<Receipt, QuickError> {
+        self.accept_live(
+            ch,
+            dest,
+            chosen,
+            journal,
+            account,
+            &pctwin_move::Live::default(),
+        )
+        .await
+    }
+
+    /// As [`accept`](Self::accept), counted in `live`'s meter and held or stopped by its
+    /// control. A stop ends it with the receipt so far.
+    pub async fn accept_live(
+        self,
+        ch: &mut impl Channel,
+        dest: &Path,
+        chosen: Option<&[ItemId]>,
+        journal: &dyn Ledger,
+        account: &str,
+        live: &pctwin_move::Live,
+    ) -> Result<Receipt, QuickError> {
         let offered = self.files();
         let wanted: BTreeSet<ItemId> = match chosen {
             Some(ids) => ids
@@ -363,10 +399,12 @@ impl Incoming {
             .approve(DESTINATION, Approved::MyFolders, dest)
             .map_err(|e| QuickError::Destination(e.to_string()))?;
         write_accepted(ch, &wanted).await?;
-        let mut receiver =
-            ReceiverSession::new(&table, allowance, journal, account).with_protocol(self.version);
+        let mut receiver = ReceiverSession::new(&table, allowance, journal, account)
+            .with_protocol(self.version)
+            .with_meter(live.meter.clone())
+            .with_control(live.control.clone());
         if !wanted.is_empty() {
-            receiver.run(ch).await?;
+            stopped_is_fine(receiver.run(ch).await)?;
         }
         Ok(Receipt {
             lines: offered
@@ -411,6 +449,17 @@ impl Incoming {
     /// Declines the whole offer: nothing is sent, nothing is written.
     pub async fn decline(self, ch: &mut impl Channel) -> Result<(), QuickError> {
         write_accepted(ch, &BTreeSet::new()).await
+    }
+}
+
+/// A run that a person stopped (on either laptop) is not an error: the receipt says what each
+/// file came to.
+fn stopped_is_fine(ran: Result<(), pctwin_transfer::TransferError>) -> Result<(), QuickError> {
+    match ran {
+        Err(
+            pctwin_transfer::TransferError::Stopped | pctwin_transfer::TransferError::StoppedThere,
+        ) => Ok(()),
+        other => Ok(other?),
     }
 }
 
