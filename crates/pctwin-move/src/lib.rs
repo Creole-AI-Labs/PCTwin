@@ -655,18 +655,20 @@ impl ApprovedPlan {
 /// The new laptop's side with the app: [`receive_plan`] with `steps`, then `rules` (which must
 /// give exactly the places `steps.landing` gives) sent to the old laptop so it announces every
 /// file where this laptop checks it, then [`ApprovedPlan::receive`]. `rules` is asked for after
-/// the approval, since the people's places are decided during it.
+/// the approval, since the people's places are decided during it; it may add places to `table`
+/// then (each other person's holding place, made only once the plan is approved).
 pub async fn receive_by_rules<C: Channel, S: Steps>(
     link: &mut C,
     steps: &mut S,
-    rules: impl FnOnce(&S) -> landing::LandingRules,
-    table: &Destinations,
+    rules: impl FnOnce(&mut S, &mut Destinations) -> landing::LandingRules,
+    table: &mut Destinations,
     journal: &dyn Ledger,
     account: &str,
     live: &Live,
 ) -> Result<Received, MoveError> {
     let approved = receive_plan_told(link, steps, table, true).await?;
-    landing::send_rules(link, &rules(steps)).await?;
+    let rules = rules(steps, table);
+    landing::send_rules(link, &rules).await?;
     approved.receive(link, table, journal, account, live).await
 }
 

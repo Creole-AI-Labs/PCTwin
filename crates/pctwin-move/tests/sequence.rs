@@ -696,7 +696,7 @@ fn a_file_landing_where_programs_start_at_sign_in_is_shown_before_approval() {
 #[tokio::test]
 async fn files_land_where_the_new_laptop_s_rules_put_them() {
     use pctwin_move::landing::LandingRules;
-    let w = world();
+    let mut w = world();
     let rules = LandingRules {
         mover: "1000".into(),
         roles: ROLES
@@ -737,6 +737,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     };
     let (mut old, mut new) = mem_pair();
     let (old_live, new_live) = (Live::default(), Live::default());
+    let mut table = std::mem::take(&mut w.table);
     let bea = [pctwin_move::landing::NamedPerson {
         account_id: "1001".into(),
         name: "Bea".into(),
@@ -755,8 +756,8 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
             pctwin_move::receive_by_rules(
                 &mut new,
                 &mut steps,
-                |s| s.rules.clone(),
-                &w.table,
+                |s, _| s.rules.clone(),
+                &mut table,
                 &w.journal,
                 "1001",
                 &new_live

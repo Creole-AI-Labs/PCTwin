@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use pctwin_helper::{Client, ClientError, Refusal, Scanned};
 use pctwin_record::LaptopId;
 use pctwin_scan::{Census, PersonKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::moving::MoveProblem;
 
@@ -108,11 +108,14 @@ fn hex(bytes: usize) -> Result<String, MoveProblem> {
     Ok(token.chars().take(bytes * 2).collect())
 }
 
-/// Starts the helper for `others` with the system's prompt, connects, and scans each one.
-pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked, MoveProblem> {
-    if !CAN_MOVE_OTHERS || others.is_empty() {
-        return Ok(Asked::NotApproved);
-    }
+/// Starts the helper with the system's prompt for `approve` (old laptop: the other people's
+/// account IDs; new laptop: the names of accounts to make and the accounts to hold for), and
+/// connects to it. `None`: the administrator said no.
+fn launch(
+    mover: &str,
+    approve: &[String],
+    laptop: LaptopId,
+) -> Result<Option<Client<pctwin_helper::client::Channel>>, MoveProblem> {
     let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
     let channel = format!("pctwin-helper-{}", hex(8)?);
     let dir = if cfg!(windows) {
@@ -123,7 +126,7 @@ pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked
             hex(8)?
         )))
     };
-    let approve = others.join(",");
+    let approve = approve.join(",");
     let laptop = laptop.to_hex();
     let mut args = vec![
         "--session",
@@ -151,20 +154,20 @@ pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked
     use pctwin_helper_os::Launcher;
     let mut process = match pctwin_helper_os::SystemLauncher.start(&request) {
         Ok(p) => p,
-        Err(pctwin_helper_os::LaunchError::Cancelled) => return Ok(Asked::NotApproved),
+        Err(pctwin_helper_os::LaunchError::Cancelled) => return Ok(None),
         Err(pctwin_helper_os::LaunchError::Failed(_)) => return Err(MoveProblem::Failed),
     };
     // The prompt may still be open (Linux asks after starting): try the channel until the helper
     // answers, the prompt is refused, or the time is up.
     let until = Instant::now() + HELPER_WAIT;
-    let client = loop {
+    loop {
         match pctwin_helper::connect(&channel, dir.as_deref(), &token) {
-            Ok(c) => break c,
+            Ok(c) => return Ok(Some(c)),
             Err(_) if Instant::now() < until => {
                 if let Ok(Some(ended)) = process.try_wait() {
                     return match ended {
                         pctwin_helper_os::Ended::Refused
-                        | pctwin_helper_os::Ended::NotAuthorized => Ok(Asked::NotApproved),
+                        | pctwin_helper_os::Ended::NotAuthorized => Ok(None),
                         _ => Err(MoveProblem::Failed),
                     };
                 }
@@ -172,8 +175,17 @@ pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked
             }
             Err(_) => return Err(MoveProblem::Failed),
         }
+    }
+}
+
+/// Starts the helper for `others` with the system's prompt, connects, and scans each one.
+pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked, MoveProblem> {
+    if !CAN_MOVE_OTHERS || others.is_empty() {
+        return Ok(Asked::NotApproved);
+    }
+    let Some(mut client) = launch(mover, others, laptop)? else {
+        return Ok(Asked::NotApproved);
     };
-    let mut client = client;
     let mut scanned = Vec::new();
     for person in others {
         match client.scan_person(person) {
@@ -184,6 +196,221 @@ pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked
         }
     }
     Ok(Asked::Approved(Arc::new(Mutex::new(client)), scanned))
+}
+
+/* ---------- The new laptop ---------- */
+
+/// An account already on this laptop that another person's things may go to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AccountHere {
+    pub id: String,
+    pub name: String,
+}
+
+/// The accounts on this laptop other than the signed-in person's.
+pub fn accounts_here() -> Vec<AccountHere> {
+    pctwin_scan::list_people()
+        .into_iter()
+        .filter(|p| !p.is_me)
+        .map(|p| AccountHere {
+            id: p.account_id,
+            name: p.suggested_name,
+        })
+        .collect()
+}
+
+/// Where one other person's things go, as the mover chose.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum PlaceChoice {
+    /// Into an account already on this laptop.
+    Existing {
+        #[serde(rename = "accountId")]
+        account_id: String,
+    },
+    /// Into a new account PCTwin makes, named after them.
+    New,
+    /// Not moved.
+    LeaveOut,
+}
+
+/// One other person's choice, by their account ID on the old laptop.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersonChoice {
+    pub id: String,
+    pub to: PlaceChoice,
+}
+
+/// The words of the system window that shows a new account's temporary password, in the
+/// person's language: `{name}`, `{account}` and `{password}` are filled in.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PasswordWords {
+    pub title: String,
+    pub body: String,
+}
+
+impl PasswordWords {
+    /// Short plain text with each place to fill in exactly once.
+    pub fn fine(&self) -> bool {
+        let plain = |t: &str, max: usize| {
+            !t.is_empty() && t.len() <= max && !t.chars().any(|c| c.is_control() && c != '\n')
+        };
+        plain(&self.title, 200)
+            && plain(&self.body, 1000)
+            && ["{name}", "{account}", "{password}"]
+                .iter()
+                .all(|k| self.body.matches(k).count() == 1)
+    }
+}
+
+/// Checks the mover's choices: exactly one for each person `asked`, an existing account only
+/// from `accounts`, and one account never given to two people.
+pub fn checked_choices(
+    asked: &BTreeSet<String>,
+    accounts: &[AccountHere],
+    choices: &[PersonChoice],
+) -> Result<std::collections::BTreeMap<String, PlaceChoice>, MoveProblem> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut used = BTreeSet::new();
+    for c in choices {
+        if !asked.contains(&c.id) {
+            return Err(MoveProblem::Failed);
+        }
+        if let PlaceChoice::Existing { account_id } = &c.to
+            && (!accounts.iter().any(|a| &a.id == account_id) || !used.insert(account_id.clone()))
+        {
+            return Err(MoveProblem::Failed);
+        }
+        if out.insert(c.id.clone(), c.to.clone()).is_some() {
+            return Err(MoveProblem::Failed);
+        }
+    }
+    if out.len() == asked.len() {
+        Ok(out)
+    } else {
+        Err(MoveProblem::Failed)
+    }
+}
+
+/// A sign-in name for a new account made from `name`: its letters and digits, lower case,
+/// starting with a letter, at most 20, and none of `taken` (a number is added if needed).
+pub fn login_name(name: &str, taken: &BTreeSet<String>) -> String {
+    let mut base: String = name
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .skip_while(char::is_ascii_digit)
+        .take(16)
+        .collect();
+    if base.is_empty() {
+        base = "person".into();
+    }
+    if !taken.contains(&base) {
+        return base;
+    }
+    (2..1000)
+        .map(|n| format!("{base}{n}"))
+        .find(|n| !taken.contains(n))
+        .unwrap_or(base)
+}
+
+/// A name the systems accept to show for an account, from what the old laptop said.
+pub fn full_name(name: &str) -> String {
+    let shown: String = name
+        .chars()
+        .filter(|c| !c.is_control() && *c != ':' && *c != ',')
+        .take(64)
+        .collect();
+    if shown.trim().is_empty() {
+        "PCTwin".into()
+    } else {
+        shown
+    }
+}
+
+/// Shows a new account's temporary password once, in the system's own window (never in the
+/// screens, which are a web page), and forgets it.
+pub fn show_password(words: &PasswordWords, name: &str, account: &str, password: &str) {
+    let body = zeroize::Zeroizing::new(
+        words
+            .body
+            .replace("{name}", name)
+            .replace("{account}", account)
+            .replace("{password}", password),
+    );
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_title(&words.title)
+        .set_description(body.as_str())
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
+/// One other person placed on this laptop: their account here, and the holding place their
+/// things land in until the hand-over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placed {
+    pub old_id: String,
+    pub account: String,
+}
+
+/// The helper on the new laptop, for the people the mover placed.
+pub struct NewHelper {
+    client: Client<pctwin_helper::client::Channel>,
+}
+
+impl NewHelper {
+    /// Starts it with the system's prompt, for the accounts to make (`names`) and the existing
+    /// accounts to hold for (`accounts`). `None`: the administrator said no.
+    pub fn start(
+        me: &str,
+        names: &[String],
+        accounts: &[String],
+    ) -> Result<Option<NewHelper>, MoveProblem> {
+        if !CAN_MOVE_OTHERS {
+            return Ok(None);
+        }
+        let approve: Vec<String> = names.iter().chain(accounts).cloned().collect();
+        let laptop = LaptopId::from_hex(&"0".repeat(32)).map_err(|_| MoveProblem::Failed)?;
+        Ok(launch(me, &approve, laptop)?.map(|client| NewHelper { client }))
+    }
+
+    /// Makes the account `name`, shown as `full`; its temporary password is shown once with
+    /// `words`. Returns the system's ID for it.
+    pub fn make_account(
+        &mut self,
+        name: &str,
+        full: &str,
+        words: &PasswordWords,
+    ) -> Result<String, MoveProblem> {
+        let made = self
+            .client
+            .create_account(name, full)
+            .map_err(|_| MoveProblem::Failed)?;
+        show_password(words, full, name, made.password.as_str());
+        Ok(made.account)
+    }
+
+    /// The folder `account`'s things are held in until the hand-over.
+    pub fn hold_for(&mut self, account: &str) -> Result<std::path::PathBuf, MoveProblem> {
+        self.client
+            .hold_for(account)
+            .map_err(|_| MoveProblem::Failed)
+    }
+
+    /// Hands each placed person's things over at their next sign-in, then ends the helper.
+    /// Returns those it could not set up.
+    pub fn finish(mut self, placed: &[Placed]) -> Vec<String> {
+        let failed = placed
+            .iter()
+            .filter(|p| self.client.hand_over_at_sign_in(&p.account).is_err())
+            .map(|p| p.old_id.clone())
+            .collect();
+        let _ = self.client.bye();
+        failed
+    }
 }
 
 #[cfg(test)]
@@ -220,6 +447,78 @@ mod tests {
         let people = people_in(&census());
         let names: Vec<(&str, bool)> = people.iter().map(|p| (p.name.as_str(), p.is_you)).collect();
         assert_eq!(names, [("Ada", true), ("Bea", false)]);
+    }
+
+    #[test]
+    fn a_new_accounts_sign_in_name_is_plain_and_free() {
+        let taken: BTreeSet<String> = ["bea".to_string(), "bea2".to_string()].into();
+        assert_eq!(login_name("Carl Jones", &taken), "carljones");
+        assert_eq!(login_name("Béa", &taken), "ba");
+        assert_eq!(login_name("Bea", &taken), "bea3");
+        assert_eq!(login_name("42", &taken), "person");
+        assert_eq!(login_name("李明", &taken), "person");
+        for name in [
+            "Carl Jones",
+            "Bea",
+            "42",
+            "李明",
+            "A very long name indeed for anyone",
+        ] {
+            assert!(
+                pctwin_helper_os::is_account_name(&login_name(name, &taken)),
+                "{name}"
+            );
+        }
+        assert!(pctwin_helper_os::is_full_name(&full_name(
+            "Bea, Smith: home"
+        )));
+        assert!(pctwin_helper_os::is_full_name(&full_name("\u{7}")));
+    }
+
+    #[test]
+    fn choices_must_cover_each_person_once_with_accounts_from_here() {
+        let asked: BTreeSet<String> = ["S-2".to_string(), "S-3".to_string()].into();
+        let accounts = vec![AccountHere {
+            id: "N-1".into(),
+            name: "Bea".into(),
+        }];
+        let c = |id: &str, to| PersonChoice { id: id.into(), to };
+        let existing = |id: &str| PlaceChoice::Existing {
+            account_id: id.into(),
+        };
+        assert!(
+            checked_choices(
+                &asked,
+                &accounts,
+                &[c("S-2", existing("N-1")), c("S-3", PlaceChoice::New)]
+            )
+            .is_ok()
+        );
+        for bad in [
+            vec![c("S-2", PlaceChoice::New)],
+            vec![c("S-2", existing("N-9")), c("S-3", PlaceChoice::New)],
+            vec![c("S-2", existing("N-1")), c("S-3", existing("N-1"))],
+            vec![
+                c("S-2", PlaceChoice::New),
+                c("S-2", PlaceChoice::LeaveOut),
+                c("S-3", PlaceChoice::New),
+            ],
+            vec![c("S-2", PlaceChoice::New), c("S-9", PlaceChoice::New)],
+        ] {
+            assert!(checked_choices(&asked, &accounts, &bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_password_window_words_hold_each_place_once() {
+        let w = |body: &str| PasswordWords {
+            title: "New account".into(),
+            body: body.into(),
+        };
+        assert!(w("{name}: sign in as {account} with {password}").fine());
+        assert!(!w("{name} {account}").fine());
+        assert!(!w("{name} {account} {password} {password}").fine());
+        assert!(!w("{name}\u{1b}[2J {account} {password}").fine());
     }
 
     #[test]

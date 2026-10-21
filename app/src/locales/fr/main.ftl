@@ -1062,6 +1062,19 @@ outcome-next-title = Que faire ensuite
 outcome-old-safe = Tout ce qui n’est pas terminé reste listé ici. Rien n’a été retiré de votre ancien ordinateur portable.
 outcome-report = Voir le rapport complet
 outcome-home = Retour à l’accueil
+outcome-person-copied =
+    { NUMBER($count) ->
+        [one] { $count } fichier copié.
+        [many] { $count } de fichiers copiés.
+       *[other] { $count } fichiers copiés.
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+        [one] { $count } n’a pas abouti.
+        [many] { $count } de fichiers n’ont pas abouti.
+       *[other] { $count } n’ont pas abouti.
+    }
+outcome-person-at-sign-in = Elles seront en place à la prochaine connexion de { $name } sur ce portable.
 move-fallback-folder = De votre ancien portable
 move-stop = Arrêter le transfert
 move-get-help = Obtenir de l’aide
@@ -1116,6 +1129,30 @@ who-here-you = { $name } (vous)
 who-here-you-hint = Toujours déplacé
 who-here-approval = Déplacer les affaires de quelqu’un d’autre demande l’accord d’un administrateur, une seule fois pour toutes les personnes cochées. Le portable le demandera dans sa propre fenêtre.
 who-here-not-here = Déplacer les affaires d’autres personnes depuis ce portable n’est pas encore prêt dans cette version. Seules les vôtres sont déplacées.
+place-title = Où vont leurs affaires ?
+place-body = Les affaires d’autres personnes viennent aussi de l’ancien portable. Choisissez pour chacune un compte de ce portable, un nouveau compte, ou laissez-la de côté. Vous ne voyez jamais leurs fichiers.
+place-size =
+    { NUMBER($count) ->
+        [one] { $count } fichier, { $size }
+        [many] { $count } de fichiers, { $size }
+       *[other] { $count } fichiers, { $size }
+    }
+place-select = Où vont les affaires de { $name }
+place-note = Les nouveaux comptes, et la garde de leurs affaires jusqu’à leur connexion, demandent l’accord d’un administrateur une seule fois, après votre accord sur le plan. Le mot de passe temporaire de chaque nouveau compte s’affiche une fois, dans une fenêtre du portable lui-même.
+place-todo =
+    { NUMBER($count) ->
+        [one] Choisissez où vont les affaires de { $count } personne de plus.
+        [many] Choisissez où vont les affaires de { $count } de personnes de plus.
+       *[other] Choisissez où vont les affaires de { $count } personnes de plus.
+    }
+password-title = PCTwin : un nouveau compte
+password-body =
+    { $name } a maintenant un compte sur ce portable.
+    
+    Nom de connexion : { $account }
+    Mot de passe temporaire : { $password }
+    
+    Donnez-les à { $name }. À sa première connexion, la personne choisit son propre mot de passe. Notez-le maintenant : PCTwin ne le garde pas.
 move-ended-eyebrow = Votre transfert
 move-ended-kept-title = Déjà copié
 move-ended-kept-body = Tout ce qui a été copié et vérifié avant cela reste sur le nouveau portable.

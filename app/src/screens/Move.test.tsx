@@ -94,7 +94,7 @@ const plan = plans[0];
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(5);
+    expect(tauri.handlers.size).toBe(6);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };
@@ -255,6 +255,47 @@ describe("who's moving, on the old laptop", () => {
     replies.move_people_here = () => ({ people: [{ id: "S-1", name: "Ada", isYou: true }], canMoveOthers: true });
     await host(true);
     expect(screen.queryByText(text("who-here-title"))).toBeNull();
+  });
+});
+
+describe("other people, on the new laptop", () => {
+  const toPlace = {
+    people: [
+      { id: "S-2", name: "Bea", files: 120, bytes: 3_400_000 },
+      { id: "S-3", name: "Carl", files: 4, bytes: 1_000 },
+    ],
+    accounts: [{ id: "N-1", name: "bea" }],
+    canPlace: true,
+  };
+
+  it("asks where each person's things go, choosing nothing for them, and never gives one account to two people", async () => {
+    await host(false);
+    send("move-people", toPlace);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("place-title"));
+    const go = screen.getByRole("button", { name: text("pair-done-continue") });
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    const bea = screen.getByRole("combobox", { name: (n) => n.includes("Bea") });
+    const carl = screen.getByRole("combobox", { name: (n) => n.includes("Carl") });
+    fireEvent.change(bea, { target: { value: "existing:N-1" } });
+    // Carl cannot be given Bea's account too.
+    const carlsBea = Array.from((carl as HTMLSelectElement).options).find((o) => o.value === "existing:N-1");
+    expect(carlsBea?.disabled).toBe(true);
+    fireEvent.change(carl, { target: { value: "new" } });
+    expect((go as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(go);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_place_people", expect.objectContaining({ choices: [{ id: "S-2", to: { kind: "existing", accountId: "N-1" } }, { id: "S-3", to: { kind: "new" } }] }));
+    });
+    const call = tauri.invoke.mock.calls.find(([c]) => c === "move_place_people")?.[1] as { words: { body: string } };
+    // The places in the password window's words reach the engine as they are, to be filled there.
+    for (const place of ["{name}", "{account}", "{password}"]) expect(call.words.body).toContain(place);
+  });
+
+  it("the outcome gives each other person one line of counts, and when their things will be in place", async () => {
+    await host(false);
+    send("move-finished", outcomes[0]);
+    expect(screen.getByText("Bea")).toBeTruthy();
+    expect(screen.getByText((t) => plain(t).includes(plain(text("outcome-person-at-sign-in", { name: "Bea" }))))).toBeTruthy();
   });
 });
 

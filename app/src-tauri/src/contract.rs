@@ -274,6 +274,13 @@ fn progress() -> Vec<MoveProgress> {
 
 fn outcomes() -> Vec<MoveOutcome> {
     vec![MoveOutcome {
+        people: vec![crate::moving::PersonOutcome {
+            name: "Bea".into(),
+            copied: 120,
+            needs_action: 0,
+            failed: 1,
+            at_sign_in: true,
+        }],
         by_status: ByStatus {
             copied: 30,
             reinstalled: 0,
@@ -339,6 +346,22 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-progress", json(progress())),
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
+        (
+            "people-to-place",
+            json([crate::moving::PeopleToPlace {
+                people: vec![crate::moving::PersonToPlace {
+                    id: "S-1-5-21-1-2-3-1002".into(),
+                    name: "Bea".into(),
+                    files: 120,
+                    bytes: 3_400_000,
+                }],
+                accounts: vec![crate::others::AccountHere {
+                    id: "S-1-5-21-9-9-9-1001".into(),
+                    name: "bea".into(),
+                }],
+                can_place: true,
+            }]),
+        ),
         (
             "people-here",
             json([crate::others::PeopleHere {
@@ -525,7 +548,9 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
 /// commands, and the screens' bridge test proves bridge.ts calls and listens with exactly these
 /// names, so a renamed command, argument or event on either side fails a test.
 fn calls() -> Value {
-    use crate::moving::{FINISHED_EVENT, PLAN_EVENT, PROBLEM_EVENT, PROGRESS_EVENT, STAGE_EVENT};
+    use crate::moving::{
+        FINISHED_EVENT, PEOPLE_EVENT, PLAN_EVENT, PROBLEM_EVENT, PROGRESS_EVENT, STAGE_EVENT,
+    };
     use crate::pairing::{NEW_EVENT, OLD_EVENT};
     use serde_json::json;
     json!({
@@ -544,6 +569,7 @@ fn calls() -> Value {
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]]] },
             { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true]] },
+            { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}" }]] },
             { "name": "move_pause", "args": [] },
             { "name": "move_resume", "args": [] },
             { "name": "move_stop", "args": [] },
@@ -561,6 +587,7 @@ fn calls() -> Value {
             "moveProgress": PROGRESS_EVENT,
             "moveFinished": FINISHED_EVENT,
             "moveProblem": PROBLEM_EVENT,
+            "movePeople": PEOPLE_EVENT,
         },
         // What the screens may name when they ask for a help code: the engine's closed lists.
         "helpTopics": crate::help::HelpTopic::ALL,

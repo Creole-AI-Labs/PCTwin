@@ -906,6 +906,17 @@ outcome-next-title = What to do next
 outcome-old-safe = Anything not finished stays listed here. Nothing was removed from your old laptop.
 outcome-report = View complete report
 outcome-home = Return home
+outcome-person-copied =
+    { NUMBER($count) ->
+        [one] { $count } file copied.
+       *[other] { $count } files copied.
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+        [one] { $count } did not finish.
+       *[other] { $count } did not finish.
+    }
+outcome-person-at-sign-in = They are in place when { $name } next signs in on this laptop.
 move-fallback-folder = From your old laptop
 move-stop = Stop the move
 move-get-help = Get help
@@ -957,6 +968,28 @@ who-here-you = { $name } (you)
 who-here-you-hint = Always moving
 who-here-approval = Moving someone else’s things needs an administrator’s approval, once, for everyone you tick. Your laptop will ask in its own window.
 who-here-not-here = Moving other people’s things from this laptop is not ready yet in this version. Only your things move.
+place-title = Where do their things go?
+place-body = Other people’s things came from the old laptop too. Choose an account on this laptop for each person, a new account for them, or leave them out. You never see their files.
+place-size =
+    { NUMBER($count) ->
+        [one] { $count } file, { $size }
+       *[other] { $count } files, { $size }
+    }
+place-select = Where { $name }’s things go
+place-note = New accounts, and keeping their things safe until they sign in, need an administrator’s approval once, after you approve the plan. Each new account’s temporary password is shown once, in your laptop’s own window.
+place-todo =
+    { NUMBER($count) ->
+        [one] Choose where { $count } more person’s things go.
+       *[other] Choose where { $count } more people’s things go.
+    }
+password-title = PCTwin: a new account
+password-body =
+    { $name } now has an account on this laptop.
+    
+    Sign-in name: { $account }
+    Temporary password: { $password }
+    
+    Give these to { $name }. At their first sign-in they choose their own password. Write it down now: PCTwin does not keep it.
 move-ended-eyebrow = Your move
 move-ended-kept-title = Already copied
 move-ended-kept-body = Everything copied and checked before this happened stays on the new laptop.

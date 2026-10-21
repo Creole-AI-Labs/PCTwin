@@ -1053,6 +1053,19 @@ outcome-next-title = Qué hacer ahora
 outcome-old-safe = Lo que no terminó sigue en esta lista. No se quitó nada de tu portátil antiguo.
 outcome-report = Ver el informe completo
 outcome-home = Volver al inicio
+outcome-person-copied =
+    { NUMBER($count) ->
+        [one] { $count } archivo copiado.
+        [many] { $count } de archivos copiados.
+       *[other] { $count } archivos copiados.
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+        [one] { $count } no terminó.
+        [many] { $count } de ellos no terminaron.
+       *[other] { $count } no terminaron.
+    }
+outcome-person-at-sign-in = Estarán en su sitio cuando { $name } inicie sesión en este portátil la próxima vez.
 move-fallback-folder = De tu portátil antiguo
 move-stop = Detener el traslado
 move-get-help = Obtener ayuda
@@ -1107,6 +1120,30 @@ who-here-you = { $name } (tú)
 who-here-you-hint = Siempre se mueve
 who-here-approval = Mover las cosas de otra persona necesita la aprobación de un administrador, una sola vez, para todas las personas que marques. El portátil la pedirá en su propia ventana.
 who-here-not-here = Mover las cosas de otras personas desde este portátil aún no está listo en esta versión. Solo se mueven las tuyas.
+place-title = ¿Adónde van sus cosas?
+place-body = También llegaron cosas de otras personas desde el portátil antiguo. Elige para cada persona una cuenta de este portátil, una cuenta nueva o déjala fuera. Nunca verás sus archivos.
+place-size =
+    { NUMBER($count) ->
+        [one] { $count } archivo, { $size }
+        [many] { $count } de archivos, { $size }
+       *[other] { $count } archivos, { $size }
+    }
+place-select = Adónde van las cosas de { $name }
+place-note = Las cuentas nuevas, y guardar sus cosas hasta que inicien sesión, necesitan la aprobación de un administrador una sola vez, después de que apruebes el plan. La contraseña temporal de cada cuenta nueva se muestra una vez, en una ventana del propio portátil.
+place-todo =
+    { NUMBER($count) ->
+        [one] Elige adónde van las cosas de { $count } persona más.
+        [many] Elige adónde van las cosas de { $count } de personas más.
+       *[other] Elige adónde van las cosas de { $count } personas más.
+    }
+password-title = PCTwin: una cuenta nueva
+password-body =
+    { $name } ya tiene una cuenta en este portátil.
+    
+    Nombre de inicio de sesión: { $account }
+    Contraseña temporal: { $password }
+    
+    Dáselos a { $name }. La primera vez que inicie sesión elegirá su propia contraseña. Anótala ahora: PCTwin no la guarda.
 move-ended-eyebrow = Tu traslado
 move-ended-kept-title = Ya copiado
 move-ended-kept-body = Todo lo copiado y comprobado antes de esto se queda en el portátil nuevo.

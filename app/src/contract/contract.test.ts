@@ -21,6 +21,7 @@ import {
   parseNewView,
   parseOldView,
   parsePeopleHere,
+  parsePeopleToPlace,
   parsePlanView,
   parseProblemView,
   parseReportItem,
@@ -47,6 +48,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "report-item": parseReportItem,
   interrupted: parseInterrupted,
   "people-here": parsePeopleHere,
+  "people-to-place": parsePeopleToPlace,
   tidied: parseTidied,
 };
 

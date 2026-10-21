@@ -42,6 +42,8 @@ pub const PROGRESS_EVENT: &str = "move-progress";
 pub const FINISHED_EVENT: &str = "move-finished";
 /// The move could not go on (C09, X07, the general error page).
 pub const PROBLEM_EVENT: &str = "move-problem";
+/// The new laptop: the other people in the move, to place (M06).
+pub const PEOPLE_EVENT: &str = "move-people";
 
 /// How often the screens are sent the progress.
 const TICK: Duration = Duration::from_millis(400);
@@ -70,9 +72,26 @@ struct Run {
     scan_stop: Arc<AtomicBool>,
     /// The new laptop: the plan on screen, and where the person's answer goes.
     waiting: Option<(PlanKey, oneshot::Sender<bool>)>,
+    /// The new laptop: the people on screen to place, this laptop's accounts, and where the
+    /// person's choices go.
+    placing: Option<Placing>,
     report: Vec<ReportItem>,
     finished: bool,
 }
+
+/// The people the new laptop asked the mover to place.
+struct Placing {
+    asked: std::collections::BTreeSet<String>,
+    accounts: Vec<crate::others::AccountHere>,
+    answer: oneshot::Sender<Placed>,
+}
+
+/// The mover's answer: where each other person's things go, and the words of the window that
+/// shows a new account's password.
+type Placed = (
+    BTreeMap<String, crate::others::PlaceChoice>,
+    crate::others::PasswordWords,
+);
 
 /// The plan revision the person saw, exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,6 +118,7 @@ impl Moving {
             live: live.clone(),
             scan_stop: scan_stop.clone(),
             waiting: None,
+            placing: None,
             report: Vec::new(),
             finished: false,
         });
@@ -135,6 +155,46 @@ impl Moving {
         })?
     }
 
+    fn wait_for_places(
+        &self,
+        asked: std::collections::BTreeSet<String>,
+        accounts: Vec<crate::others::AccountHere>,
+    ) -> oneshot::Receiver<Placed> {
+        let (tx, rx) = oneshot::channel();
+        if let Some(run) = lock(&self.run).as_mut() {
+            run.placing = Some(Placing {
+                asked,
+                accounts,
+                answer: tx,
+            });
+        }
+        rx
+    }
+
+    /// The mover's places for the other people, checked against exactly who was asked.
+    fn place(
+        &self,
+        choices: &[crate::others::PersonChoice],
+        words: crate::others::PasswordWords,
+    ) -> Result<(), MoveProblem> {
+        if !words.fine() {
+            return Err(MoveProblem::Failed);
+        }
+        self.with_run(|run| {
+            let placing = run.placing.take().ok_or(MoveProblem::PlanChanged)?;
+            match crate::others::checked_choices(&placing.asked, &placing.accounts, choices) {
+                Ok(checked) => {
+                    let _ = placing.answer.send((checked, words));
+                    Ok(())
+                }
+                Err(p) => {
+                    run.placing = Some(placing);
+                    Err(p)
+                }
+            }
+        })?
+    }
+
     fn pause(&self, pause: bool) -> Result<(), MoveProblem> {
         self.with_run(|run| {
             if pause {
@@ -153,6 +213,8 @@ impl Moving {
             if let Some((_, tx)) = run.waiting.take() {
                 let _ = tx.send(false);
             }
+            // Dropping it ends the wait for the people's places: the move stops there.
+            run.placing = None;
             run.live.control.stop();
         })
     }
@@ -162,6 +224,7 @@ impl Moving {
             run.report = report;
             run.finished = true;
             run.waiting = None;
+            run.placing = None;
         }
     }
 
@@ -626,9 +689,23 @@ impl ByStatus {
     }
 }
 
+/// Another person in the move: how their things ended, counted, never named file by file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonOutcome {
+    pub name: String,
+    pub copied: u64,
+    pub needs_action: u64,
+    pub failed: u64,
+    /// Their things are handed over when they next sign in on the new laptop (M32).
+    pub at_sign_in: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoveOutcome {
+    /// The other people in the move, one line each.
+    pub people: Vec<PersonOutcome>,
     pub by_status: ByStatus,
     pub not_copied: u64,
     pub bytes_checked: u64,
@@ -875,16 +952,202 @@ struct AppSteps<R: Runtime> {
     names: Arc<Mutex<HashMap<ItemId, String>>>,
     /// Each destination label's real folder on this laptop, as the person reads it.
     shown: BTreeMap<String, String>,
+    /// The other people, as the old laptop named them.
+    named: Vec<pctwin_move::landing::NamedPerson>,
+    /// Where the mover put each of them (asked once, for all), and the password window's words.
+    placed: Option<Placed>,
+    /// The helper, once started for them, and who was placed.
+    helper: Option<crate::others::NewHelper>,
+    held_for: Vec<crate::others::Placed>,
+}
+
+impl<R: Runtime> AppSteps<R> {
+    /// Asks the mover, once, where each other person's things go (M06 on the new laptop).
+    async fn ask_places(&mut self, record: &Record) -> Result<(), Stop> {
+        let accounts = crate::others::accounts_here();
+        let people: Vec<PersonToPlace> = self
+            .named
+            .iter()
+            .map(|p| {
+                let (files, bytes) = record
+                    .items
+                    .iter()
+                    .filter(|i| matches!(&i.owner, Owner::Person { account_id } if *account_id == p.account_id))
+                    .fold((0u64, 0u64), |(f, b), i| (f + 1, b.saturating_add(i.size_bytes)));
+                PersonToPlace {
+                    id: p.account_id.clone(),
+                    name: p.name.clone(),
+                    files,
+                    bytes,
+                }
+            })
+            .collect();
+        let asked = people.iter().map(|p| p.id.clone()).collect();
+        let answer = self.moving.wait_for_places(asked, accounts.clone());
+        let _ = self.app.emit(
+            PEOPLE_EVENT,
+            PeopleToPlace {
+                people,
+                accounts,
+                can_place: crate::others::CAN_MOVE_OTHERS,
+            },
+        );
+        self.placed = Some(answer.await.map_err(|_| Stop::Cancelled)?);
+        Ok(())
+    }
+
+    /// Once the plan is approved: the helper makes the new accounts and a holding place for
+    /// each person placed, approved in `table`; the rules then land their things there. If the
+    /// administrator says no, or the helper cannot start, they are not moved, and the screens are
+    /// told why.
+    fn place_others(&mut self, table: &mut Destinations) -> LandingRules {
+        let mut rules = self.rules.clone();
+        let Some((choices, words)) = self.placed.clone() else {
+            return rules;
+        };
+        let going: Vec<(
+            &pctwin_move::landing::NamedPerson,
+            &crate::others::PlaceChoice,
+        )> = self
+            .named
+            .iter()
+            .filter_map(|p| Some((p, choices.get(&p.account_id)?)))
+            .filter(|(_, c)| **c != crate::others::PlaceChoice::LeaveOut)
+            .collect();
+        if going.is_empty() {
+            return rules;
+        }
+        let not_moved = |why| {
+            let _ = self.app.emit(STAGE_EVENT, Stage::OthersNotMoved { why });
+        };
+        if !crate::others::CAN_MOVE_OTHERS {
+            not_moved(OthersWhy::NotHere);
+            return rules;
+        }
+        // The sign-in names of the new accounts, none already on this laptop.
+        let mut taken: std::collections::BTreeSet<String> = crate::others::accounts_here()
+            .into_iter()
+            .map(|a| a.name.to_lowercase())
+            .collect();
+        let mut names = BTreeMap::new();
+        let mut existing = Vec::new();
+        for (p, c) in &going {
+            match c {
+                crate::others::PlaceChoice::New => {
+                    let name = crate::others::login_name(&p.name, &taken);
+                    taken.insert(name.clone());
+                    names.insert(p.account_id.clone(), name);
+                }
+                crate::others::PlaceChoice::Existing { account_id } => {
+                    existing.push(account_id.clone());
+                }
+                crate::others::PlaceChoice::LeaveOut => {}
+            }
+        }
+        let _ = self.app.emit(STAGE_EVENT, Stage::Administrator);
+        let new_names: Vec<String> = names.values().cloned().collect();
+        let mut helper = match crate::others::NewHelper::start(&self.me, &new_names, &existing) {
+            Ok(Some(h)) => h,
+            Ok(None) => {
+                not_moved(OthersWhy::NotApproved);
+                return rules;
+            }
+            Err(_) => {
+                not_moved(OthersWhy::Failed);
+                return rules;
+            }
+        };
+        for (n, (p, c)) in going.iter().enumerate() {
+            let account = match c {
+                crate::others::PlaceChoice::Existing { account_id } => Ok(account_id.clone()),
+                crate::others::PlaceChoice::New => match names.get(&p.account_id) {
+                    Some(name) => {
+                        helper.make_account(name, &crate::others::full_name(&p.name), &words)
+                    }
+                    None => Err(MoveProblem::Failed),
+                },
+                crate::others::PlaceChoice::LeaveOut => continue,
+            };
+            let label = format!("for-{}", n + 1);
+            let held = account.and_then(|account| {
+                let place = helper.hold_for(&account)?;
+                table
+                    .approve_holding(&label, &account, &place)
+                    .map_err(|_| MoveProblem::Failed)?;
+                Ok(account)
+            });
+            // A person whose place could not be made is not received: their things are
+            // reported as not sent, never as copied.
+            if let Ok(account) = held {
+                rules.held.insert(p.account_id.clone(), label);
+                self.held_for.push(crate::others::Placed {
+                    old_id: p.account_id.clone(),
+                    account,
+                });
+            }
+        }
+        self.helper = Some(helper);
+        let _ = self.app.emit(STAGE_EVENT, Stage::Moving);
+        rules
+    }
+
+    /// After the move: each placed person's things are handed over at their next sign-in, and
+    /// the helper ends. Returns who it could not be set up for.
+    fn finish_others(&mut self) -> Vec<String> {
+        match self.helper.take() {
+            Some(helper) => helper.finish(&self.held_for),
+            None => Vec::new(),
+        }
+    }
+}
+
+/// Another person to place, as M06 on the new laptop shows them: their name and how much is
+/// theirs, counted (nothing of their files is named).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PersonToPlace {
+    pub id: String,
+    pub name: String,
+    pub files: u64,
+    pub bytes: u64,
+}
+
+/// What M06 on the new laptop shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeopleToPlace {
+    pub people: Vec<PersonToPlace>,
+    pub accounts: Vec<crate::others::AccountHere>,
+    /// False where other people cannot be moved yet (a Mac): they are listed, left out.
+    pub can_place: bool,
 }
 
 impl<R: Runtime> Steps for AppSteps<R> {
-    async fn person(&mut self, _: &Record, account_id: &str) -> Result<PersonTarget, Stop> {
-        Ok(if account_id == self.rules.mover {
-            PersonTarget::ExistingAccount {
+    async fn person(&mut self, record: &Record, account_id: &str) -> Result<PersonTarget, Stop> {
+        if account_id == self.rules.mover {
+            return Ok(PersonTarget::ExistingAccount {
                 account_id: self.me.clone(),
+            });
+        }
+        if self.placed.is_none() && !self.named.is_empty() {
+            self.ask_places(record).await?;
+        }
+        let choice = self
+            .placed
+            .as_ref()
+            .and_then(|(c, _)| c.get(account_id).cloned());
+        Ok(match choice {
+            Some(crate::others::PlaceChoice::Existing { account_id }) => {
+                PersonTarget::ExistingAccount { account_id }
             }
-        } else {
-            PersonTarget::Skip
+            Some(crate::others::PlaceChoice::New) => PersonTarget::NewAccount {
+                name: self
+                    .named
+                    .iter()
+                    .find(|p| p.account_id == account_id)
+                    .map(|p| crate::others::full_name(&p.name))
+                    .unwrap_or_default(),
+            },
+            Some(crate::others::PlaceChoice::LeaveOut) | None => PersonTarget::Skip,
         })
     }
 
@@ -918,6 +1181,10 @@ impl<R: Runtime> Steps for AppSteps<R> {
 
     fn mover(&mut self, account_id: &str) {
         self.rules.mover = account_id.to_string();
+    }
+
+    fn people(&mut self, people: &[pctwin_move::landing::NamedPerson]) {
+        self.named = people.to_vec();
     }
 }
 
@@ -1144,7 +1411,7 @@ async fn run_new<R: Runtime>(
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let NewSide {
-        table,
+        mut table,
         rules,
         me,
         shown,
@@ -1167,18 +1434,52 @@ async fn run_new<R: Runtime>(
         rules,
         names,
         shown,
+        named: Vec::new(),
+        placed: None,
+        helper: None,
+        held_for: Vec::new(),
     };
     let received = pctwin_move::receive_by_rules(
         &mut link,
         &mut steps,
-        |s| s.rules.clone(),
-        &table,
+        |s, table| s.place_others(table),
+        &mut table,
         &journal,
         &me,
         live,
     )
-    .await?;
-    Ok(received_outcome(&received, &steps.rules.mover))
+    .await;
+    // Whatever became of the move, the helper's session ends; those placed get their things at
+    // their next sign-in.
+    let not_handed = steps.finish_others();
+    let received = received?;
+    let (mut outcome, report) = received_outcome(&received, &steps.rules.mover);
+    outcome.people = people_outcome(&received, &steps.rules.mover, &steps.named, &not_handed);
+    Ok((outcome, report))
+}
+
+/// One line per other person in the move: how their things ended, counted, and whether they are
+/// handed over at their next sign-in.
+fn people_outcome(
+    received: &Received,
+    mover: &str,
+    named: &[pctwin_move::landing::NamedPerson],
+    not_handed: &[String],
+) -> Vec<PersonOutcome> {
+    let report = pctwin_move::report::for_the_mover(received, mover);
+    named
+        .iter()
+        .filter_map(|p| {
+            let line = report.people.get(&p.account_id)?;
+            Some(PersonOutcome {
+                name: p.name.clone(),
+                copied: line.copied,
+                needs_action: line.needs_action,
+                failed: line.failed,
+                at_sign_in: line.copied > 0 && !not_handed.contains(&p.account_id),
+            })
+        })
+        .collect()
 }
 
 /// Runs this laptop's side of the move on a thread of its own, then tells the screens how it
@@ -1297,6 +1598,17 @@ pub fn move_approve(
     approve: bool,
 ) -> Result<(), MoveProblem> {
     moving.answer(&plan, approve)
+}
+
+/// The new laptop: where each other person's things go (M06), and the words of the system
+/// window that shows a new account's temporary password.
+#[tauri::command]
+pub fn move_place_people(
+    moving: State<'_, AppMoving>,
+    choices: Vec<crate::others::PersonChoice>,
+    words: crate::others::PasswordWords,
+) -> Result<(), MoveProblem> {
+    moving.place(&choices, words)
 }
 
 /// Pauses at the next safe point (X05).
@@ -1536,6 +1848,100 @@ mod tests {
         assert_eq!(rx.try_recv(), Ok(false));
         assert!(live.control.stopped());
         assert!(scan_stop.load(Ordering::Acquire));
+    }
+
+    fn words() -> crate::others::PasswordWords {
+        crate::others::PasswordWords {
+            title: "New account".into(),
+            body: "{name}: {account} {password}".into(),
+        }
+    }
+
+    #[test]
+    fn places_are_taken_only_for_the_people_asked_and_a_wrong_answer_can_be_given_again() {
+        use crate::others::{PersonChoice, PlaceChoice};
+        let moving = Moving::default();
+        moving.begin().unwrap();
+        let new = |id: &str| PersonChoice {
+            id: id.into(),
+            to: PlaceChoice::New,
+        };
+        // Nothing asked yet.
+        assert_eq!(
+            moving.place(&[new("S-2")], words()),
+            Err(MoveProblem::PlanChanged)
+        );
+        let mut rx = moving.wait_for_places(["S-2".to_string()].into(), Vec::new());
+        assert_eq!(
+            moving.place(&[new("S-9")], words()),
+            Err(MoveProblem::Failed)
+        );
+        let bad = crate::others::PasswordWords {
+            title: "x".into(),
+            body: "no places".into(),
+        };
+        assert_eq!(moving.place(&[new("S-2")], bad), Err(MoveProblem::Failed));
+        assert!(rx.try_recv().is_err(), "still waiting");
+        moving.place(&[new("S-2")], words()).unwrap();
+        let (choices, _) = rx.try_recv().unwrap();
+        assert_eq!(choices.get("S-2"), Some(&PlaceChoice::New));
+    }
+
+    #[test]
+    fn stopping_while_people_are_placed_ends_the_wait() {
+        let moving = Moving::default();
+        moving.begin().unwrap();
+        let mut rx = moving.wait_for_places(["S-2".to_string()].into(), Vec::new());
+        moving.stop().unwrap();
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
+    }
+
+    #[test]
+    fn each_other_person_is_one_line_of_counts() {
+        let bea = item(person("1001"), FolderRole::Pictures, &["a.jpg"], 7);
+        let bea2 = item(person("1001"), FolderRole::Pictures, &["b.jpg"], 7);
+        let carl = item(person("1002"), FolderRole::Pictures, &["c.jpg"], 7);
+        let failed = ReceiveOutcome::Failed(Failure::new(Cause::Unreadable, "x"));
+        let r = received(
+            vec![
+                (bea, Some(finished("a.jpg", CheckedFrom::Drive))),
+                (bea2, Some(failed)),
+                (carl, Some(finished("c.jpg", CheckedFrom::Drive))),
+            ],
+            Ended::Finished,
+        );
+        let named = |id: &str, name: &str| pctwin_move::landing::NamedPerson {
+            account_id: id.into(),
+            name: name.into(),
+        };
+        let lines = people_outcome(
+            &r,
+            "1000",
+            &[named("1001", "Bea"), named("1002", "Carl")],
+            &["1002".to_string()],
+        );
+        assert_eq!(
+            lines,
+            [
+                PersonOutcome {
+                    name: "Bea".into(),
+                    copied: 1,
+                    needs_action: 0,
+                    failed: 1,
+                    at_sign_in: true,
+                },
+                PersonOutcome {
+                    name: "Carl".into(),
+                    copied: 1,
+                    needs_action: 0,
+                    failed: 0,
+                    at_sign_in: false,
+                },
+            ]
+        );
     }
 
     #[test]

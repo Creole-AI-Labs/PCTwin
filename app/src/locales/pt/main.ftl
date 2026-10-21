@@ -1057,6 +1057,19 @@ outcome-next-title = O que fazer agora
 outcome-old-safe = O que não terminou continua listado aqui. Nada foi removido do seu notebook antigo.
 outcome-report = Ver o relatório completo
 outcome-home = Voltar ao início
+outcome-person-copied =
+    { NUMBER($count) ->
+        [one] { $count } arquivo copiado.
+        [many] { $count } de arquivos copiados.
+       *[other] { $count } arquivos copiados.
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+        [one] { $count } não terminou.
+        [many] { $count } de arquivos não terminaram.
+       *[other] { $count } não terminaram.
+    }
+outcome-person-at-sign-in = Estarão no lugar quando { $name } entrar neste notebook da próxima vez.
 move-fallback-folder = Do seu notebook antigo
 move-stop = Parar a transferência
 move-get-help = Obter ajuda
@@ -1111,6 +1124,30 @@ who-here-you = { $name } (você)
 who-here-you-hint = Sempre vai
 who-here-approval = Mover as coisas de outra pessoa precisa da aprovação de um administrador, uma só vez, para todas as pessoas que você marcar. O notebook vai pedir na própria janela.
 who-here-not-here = Mover as coisas de outras pessoas a partir deste notebook ainda não está pronto nesta versão. Só as suas serão movidas.
+place-title = Para onde vão as coisas deles?
+place-body = Também vieram coisas de outras pessoas do notebook antigo. Escolha para cada pessoa uma conta deste notebook, uma conta nova ou deixe-a de fora. Você nunca vê os arquivos delas.
+place-size =
+    { NUMBER($count) ->
+        [one] { $count } arquivo, { $size }
+        [many] { $count } de arquivos, { $size }
+       *[other] { $count } arquivos, { $size }
+    }
+place-select = Para onde vão as coisas de { $name }
+place-note = As contas novas, e guardar as coisas delas até entrarem, precisam da aprovação de um administrador uma só vez, depois que você aprovar o plano. A senha temporária de cada conta nova aparece uma vez, em uma janela do próprio notebook.
+place-todo =
+    { NUMBER($count) ->
+        [one] Escolha para onde vão as coisas de mais { $count } pessoa.
+        [many] Escolha para onde vão as coisas de mais { $count } de pessoas.
+       *[other] Escolha para onde vão as coisas de mais { $count } pessoas.
+    }
+password-title = PCTwin: uma conta nova
+password-body =
+    { $name } agora tem uma conta neste notebook.
+    
+    Nome de acesso: { $account }
+    Senha temporária: { $password }
+    
+    Passe isso para { $name }. No primeiro acesso, a pessoa escolhe a própria senha. Anote agora: o PCTwin não a guarda.
 move-ended-eyebrow = Sua transferência
 move-ended-kept-title = Já copiado
 move-ended-kept-body = Tudo o que foi copiado e verificado antes disso fica no notebook novo.

@@ -18,6 +18,7 @@
     "allow-pairing-new-connect",
     "allow-move-begin",
     "allow-move-approve",
+    "allow-move-place-people",
     "allow-move-pause",
     "allow-move-resume",
     "allow-move-stop",

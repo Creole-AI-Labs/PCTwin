@@ -845,6 +845,15 @@ outcome-next-title = 接下来要做什么
 outcome-old-safe = 未完成的内容会一直列在这里。旧笔记本电脑上没有删除任何东西。
 outcome-report = 查看完整报告
 outcome-home = 返回首页
+outcome-person-copied =
+    { NUMBER($count) ->
+       *[other] 已复制 { $count } 个文件。
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+       *[other] { $count } 个未完成。
+    }
+outcome-person-at-sign-in = { $name } 下次登录这台笔记本电脑时，这些内容就会放好。
 move-fallback-folder = 来自旧笔记本电脑
 move-stop = 停止移动
 move-get-help = 获取帮助
@@ -893,6 +902,26 @@ who-here-you = { $name }（你）
 who-here-you-hint = 始终移动
 who-here-approval = 移动其他人的内容需要管理员批准，你勾选的所有人只需批准一次。电脑会在它自己的窗口中请求。
 who-here-not-here = 此版本暂不支持从这台笔记本电脑移动其他人的内容。只移动你的内容。
+place-title = 他们的内容放到哪里？
+place-body = 旧笔记本电脑上也有其他人的内容。请为每个人选择这台电脑上的一个账户、为其新建账户，或不移动。你永远看不到他们的文件。
+place-size =
+    { NUMBER($count) ->
+       *[other] { $count } 个文件，{ $size }
+    }
+place-select = { $name } 的内容放到哪里
+place-note = 新账户以及在他们登录前保管其内容，需要在你批准计划后由管理员批准一次。每个新账户的临时密码只会在电脑自己的窗口中显示一次。
+place-todo =
+    { NUMBER($count) ->
+       *[other] 还需为 { $count } 个人选择内容放到哪里。
+    }
+password-title = PCTwin：一个新账户
+password-body =
+    { $name } 现在在这台笔记本电脑上有了账户。
+    
+    登录名：{ $account }
+    临时密码：{ $password }
+    
+    请把这些交给 { $name }。首次登录时，他们会设置自己的密码。请现在记下来：PCTwin 不会保存它。
 move-ended-eyebrow = 你的移动
 move-ended-kept-title = 已复制的内容
 move-ended-kept-body = 在此之前已复制并检查的内容都会留在新笔记本电脑上。

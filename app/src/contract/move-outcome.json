@@ -11,6 +11,15 @@
     "bytesChecked": 1100000,
     "checkedFromMemory": 3,
     "notCopied": 0,
+    "people": [
+      {
+        "atSignIn": true,
+        "copied": 120,
+        "failed": 1,
+        "name": "Bea",
+        "needsAction": 0
+      }
+    ],
     "stopped": false
   }
 ]

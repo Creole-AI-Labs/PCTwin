@@ -56,6 +56,23 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           }
         />
       </RowList>
+      {(outcome.people ?? []).length > 0 && (
+        <RowList>
+          {(outcome.people ?? []).map((p) => (
+            <Row
+              key={p.name}
+              title={<bdi dir="auto">{p.name}</bdi>}
+              detail={[
+                l10n.getString("outcome-person-copied", { count: p.copied }),
+                p.failed + p.needsAction > 0 ? l10n.getString("outcome-person-not-done", { count: p.failed + p.needsAction }) : "",
+                p.atSignIn ? l10n.getString("outcome-person-at-sign-in", { name: p.name }) : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            />
+          ))}
+        </RowList>
+      )}
       {!complete && (
         <div className="mv-note">
           <Banner tone="attention">{l10n.getString("outcome-old-safe")}</Banner>

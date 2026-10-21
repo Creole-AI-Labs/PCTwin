@@ -7,6 +7,7 @@ import {
   moveBegin,
   movePause,
   movePeopleHere,
+  movePlacePeople,
   moveReport,
   moveResume,
   moveStop,
@@ -16,8 +17,10 @@ import {
   type MoveEvent,
   type OthersWhy,
   type PeopleHere,
+  type PeopleToPlace,
   type WaitStage,
 } from "../bridge";
+import PlaceOthers from "./PlaceOthers";
 import WhoHere from "./WhoHere";
 import type { HelpCode } from "../people";
 import GetHelp from "./GetHelp";
@@ -41,6 +44,8 @@ type View =
   | { kind: "who"; here: PeopleHere }
   | { kind: "wait"; stage: WaitStage }
   | { kind: "plan"; plan: PlanView }
+  /** The new laptop: where the other people's things go (M06). */
+  | { kind: "people"; toPlace: PeopleToPlace }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "outcome"; outcome: MoveOutcome }
   | { kind: "report"; outcome: MoveOutcome; items: ReportItem[] }
@@ -72,6 +77,7 @@ export function stepOf(view: View, old: boolean): HelpStep {
       if (view.stage === "moving") return "moving";
       return old ? "approving" : "finding";
     case "plan":
+    case "people":
       return "approving";
     case "progress":
       return "moving";
@@ -93,6 +99,8 @@ export function next(view: View, event: MoveEvent): View {
       return view.kind === "wait" ? { kind: "wait", stage: event.stage.kind } : view;
     case "plan":
       return { kind: "plan", plan: event.plan };
+    case "people":
+      return { kind: "people", toPlace: event.toPlace };
     case "progress":
       return { kind: "progress", progress: event.progress };
     case "finished":
@@ -245,6 +253,27 @@ export default function MoveHost({
       );
     case "wait":
       return <MoveWaiting stage={view.stage} old={old} note={othersNote} onStop={stopNow} />;
+    case "people":
+      return (
+        <PlaceOthers
+          toPlace={view.toPlace}
+          onDone={(choices) => {
+            // The places to fill in pass through as they are: the engine fills them in the system's window.
+            const words = {
+              title: l10n.getString("password-title"),
+              body: l10n.getString("password-body", { name: "{name}", account: "{account}", password: "{password}" }),
+            };
+            movePlacePeople(choices, words).then(
+              () => {
+                setView({ kind: "wait", stage: "waiting" });
+              },
+              (error: unknown) => {
+                setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
+              },
+            );
+          }}
+        />
+      );
     case "plan":
       return (
         <PlanReview

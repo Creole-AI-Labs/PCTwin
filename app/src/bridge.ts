@@ -14,7 +14,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ITEM_STATUSES, WHY_MEMORY, parseResult, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
+import { ITEM_STATUSES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
 /* ---------- Shapes ---------- */
@@ -257,6 +257,33 @@ export type OthersWhy = (typeof OTHERS_WHY)[number];
 
 export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
 
+/** Where one other person's things go on the new laptop. */
+export type PlaceChoice = { kind: "existing"; accountId: string } | { kind: "new" } | { kind: "leave-out" };
+
+/** The other people to place on the new laptop (M06): names and counts only, and this laptop's accounts. */
+export type PeopleToPlace = {
+  people: { id: string; name: string; files: number; bytes: number }[];
+  accounts: { id: string; name: string }[];
+  canPlace: boolean;
+};
+
+/** The words of the system window that shows a new account's temporary password: {name}, {account} and {password} are filled in there. */
+export type PasswordWords = { title: string; body: string };
+
+export function parsePeopleToPlace(value: unknown): PeopleToPlace | null {
+  const f = exactly(value, ["people", "accounts", "canPlace"]);
+  if (!f || typeof f.canPlace !== "boolean") return null;
+  const people = listOf(f.people, (v) => {
+    const p = exactly(v, ["id", "name", "files", "bytes"]);
+    return p && typeof p.id === "string" && typeof p.name === "string" && isCount(p.files) && isCount(p.bytes) ? { id: p.id, name: p.name, files: p.files, bytes: p.bytes } : null;
+  });
+  const accounts = listOf(f.accounts, (v) => {
+    const a = exactly(v, ["id", "name"]);
+    return a && typeof a.id === "string" && typeof a.name === "string" ? { id: a.id, name: a.name } : null;
+  });
+  return people && accounts ? { people, accounts, canPlace: f.canPlace } : null;
+}
+
 /** The people on the old laptop (M06), and whether others can be moved from this system. */
 export type PeopleHere = { people: { id: string; name: string; isYou: boolean }[]; canMoveOthers: boolean };
 
@@ -466,13 +493,21 @@ export function parseMoveProgress(value: unknown): MoveProgress | null {
 }
 
 /** How the move ended (`MoveOutcome`, event `move-finished`). */
+function parsePersonOutcome(value: unknown): PersonOutcome | null {
+  const f = exactly(value, ["name", "copied", "needsAction", "failed", "atSignIn"]);
+  if (!f || typeof f.name !== "string" || !isCount(f.copied) || !isCount(f.needsAction) || !isCount(f.failed) || typeof f.atSignIn !== "boolean") return null;
+  return { name: f.name, copied: f.copied, needsAction: f.needsAction, failed: f.failed, atSignIn: f.atSignIn };
+}
+
 export function parseMoveOutcome(value: unknown): MoveOutcome | null {
-  const f = exactly(value, ["byStatus", "notCopied", "bytesChecked", "stopped", "checkedFromMemory"]);
+  const f = exactly(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "checkedFromMemory"]);
   if (!f || !isCount(f.notCopied) || !isCount(f.bytesChecked) || typeof f.stopped !== "boolean" || !isCount(f.checkedFromMemory)) return null;
   const by = exactly(f.byStatus, ITEM_STATUSES);
   if (!by || !ITEM_STATUSES.every((s) => isCount(by[s]))) return null;
   const byStatus = Object.fromEntries(ITEM_STATUSES.map((s) => [s, by[s]])) as MoveOutcome["byStatus"];
-  return { byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, checkedFromMemory: f.checkedFromMemory };
+  const people = listOf(f.people, parsePersonOutcome);
+  if (!people) return null;
+  return { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, checkedFromMemory: f.checkedFromMemory };
 }
 
 /** How a copied line in the report was checked: the gate's two, or one of the move's own. */
@@ -503,6 +538,7 @@ export function parseReportItem(value: unknown): ReportItem | null {
 
 export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[]) => run("move_begin", { fallback, others });
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
+export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
 export const moveApprove = (plan: PlanKey, approve: boolean) => run("move_approve", { plan, approve });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
@@ -513,6 +549,7 @@ export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportI
 export type MoveEvent =
   | { kind: "stage"; stage: MoveStage }
   | { kind: "plan"; plan: PlanView }
+  | { kind: "people"; toPlace: PeopleToPlace }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "finished"; outcome: MoveOutcome }
   | { kind: "problem"; problem: EndedEarly };
@@ -528,6 +565,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
   const all = await Promise.all([
     on("move-stage", parseMoveStage, (stage) => ({ kind: "stage", stage })),
     on("move-plan", parsePlanView, (plan) => ({ kind: "plan", plan })),
+    on("move-people", parsePeopleToPlace, (toPlace) => ({ kind: "people", toPlace })),
     on("move-progress", parseMoveProgress, (progress) => ({ kind: "progress", progress })),
     on("move-finished", parseMoveOutcome, (outcome) => ({ kind: "finished", outcome })),
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),

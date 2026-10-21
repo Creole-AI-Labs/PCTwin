@@ -246,7 +246,12 @@ export const PHASE_STEP: Record<Phase, string> = {
 };
 
 /** What R01 shows when a move ends. `stopped` means the person stopped it early. */
+/** Another person in the move: their things, counted (never named file by file). `atSignIn`: handed over at their next sign-in (M32). */
+export type PersonOutcome = { name: string; copied: number; needsAction: number; failed: number; atSignIn: boolean };
+
 export type MoveOutcome = {
+  /** The other people in the move, one line each (absent in the screens' own samples). */
+  people?: PersonOutcome[];
   /** Items by how they ended: one count for each of the engine's six statuses. */
   byStatus: Record<ItemStatus, number>;
   /** Items that never started or never finished because the move was stopped. Zero unless `stopped`. */

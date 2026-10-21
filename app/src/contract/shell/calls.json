@@ -134,6 +134,29 @@
       "name": "move_approve"
     },
     {
+      "args": [
+        [
+          "choices",
+          [
+            {
+              "id": "S-2",
+              "to": {
+                "kind": "new"
+              }
+            }
+          ]
+        ],
+        [
+          "words",
+          {
+            "body": "{name}: {account} / {password}",
+            "title": "New account"
+          }
+        ]
+      ],
+      "name": "move_place_people"
+    },
+    {
       "args": [],
       "name": "move_pause"
     },
@@ -177,6 +200,7 @@
   ],
   "events": {
     "moveFinished": "move-finished",
+    "movePeople": "move-people",
     "movePlan": "move-plan",
     "moveProblem": "move-problem",
     "moveProgress": "move-progress",
