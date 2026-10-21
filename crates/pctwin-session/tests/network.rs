@@ -238,3 +238,33 @@ fn two_wifi_connections_are_a_question_not_a_guess() {
     assert_eq!(likely_wifi(&v), None);
     assert_eq!(pairing_candidates(&v), ["Wi-Fi", "Wi-Fi 2"]);
 }
+
+/// When the system says which adapter is Wi-Fi, that decides, whatever it is called: a Mac's
+/// `en0`, a German Windows' "WLAN", a Wi-Fi adapter someone renamed "Home". A connection named
+/// "Wi-Fi" that the system says is not Wi-Fi is not taken for it (found by the how-and-why walk,
+/// 20 October 2026: a Mac was always asked, in system names).
+#[test]
+fn the_systems_own_word_on_wifi_decides_over_the_name() {
+    let said = |name: &str, ip: &str, index: u32, wifi: bool| Interface {
+        wifi: Some(wifi),
+        ..iface(name, ip, index)
+    };
+    let mac = vec![
+        said("en0", "192.168.1.9", 6, true),
+        said("en7", "192.168.1.10", 7, false),
+    ];
+    assert_eq!(likely_wifi(&mac).as_deref(), Some("en0"));
+    let renamed = vec![
+        said("Home", "192.168.1.9", 6, true),
+        said("Ethernet", "192.168.1.10", 7, false),
+    ];
+    assert_eq!(likely_wifi(&renamed).as_deref(), Some("Home"));
+    let misnamed = vec![said("Wi-Fi", "192.168.1.9", 6, false)];
+    assert_eq!(likely_wifi(&misnamed), None);
+    // Two Wi-Fi adapters: PCTwin still asks.
+    let two = vec![
+        said("en0", "192.168.1.9", 6, true),
+        said("en1", "192.168.2.9", 8, true),
+    ];
+    assert_eq!(likely_wifi(&two), None);
+}

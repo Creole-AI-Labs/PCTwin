@@ -41,6 +41,7 @@ impl States {
     pub(crate) fn new(jobs: &[SendJob], meter: MoveMeter) -> Self {
         meter.reset();
         let group = jobs.iter().map(|j| meter.plan(&j.destination, 0)).collect();
+        meter.plan_loaded();
         Self {
             v: jobs.iter().map(|_| SendState::Waiting).collect(),
             group,

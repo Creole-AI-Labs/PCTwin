@@ -109,6 +109,12 @@ criteria = "safe-to-deploy"
 delta = "2.12.1 -> 2.12.2"
 notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, tauri-runtime raised to ~2.12.2 and tauri-utils to ~2.10.2. No source change; build.rs unchanged."
 
+[[audits.thread-priority]]
+who = "PCTwin maintainers"
+criteria = "safe-to-deploy"
+version = "3.1.1"
+notes = "Read in full for the code compiled on Windows and Linux, the two systems PCTwin uses it on (20 October 2026). Every unsafe block is a direct system call with arguments the crate owns: Windows SetThreadPriority, GetThreadPriority, GetCurrentThread, SetThreadPriorityBoost, SetThreadIdealProcessor; Linux pthread_setschedparam, pthread_getschedparam, setpriority, sched_get_priority_min/max, the sched_getattr/sched_setattr syscalls with a correctly sized struct, errno through libc's accessor, and a zero-initialised sched_param (plain integers). No pointer arithmetic, no memory outside its own locals, no network, no file access, no build script. Used only to put PCTwin's own sweep threads into background priority."
+
 [[audits.zeroize]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"

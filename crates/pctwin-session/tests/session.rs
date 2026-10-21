@@ -73,11 +73,13 @@ async fn start_old(label: Label) -> OldLaptop {
         .unwrap()
 }
 
-fn closed_port() -> SocketAddr {
-    let spare = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = spare.local_addr().unwrap();
-    drop(spare);
-    addr
+/// An address that refuses connections for as long as the returned socket lives: the port is
+/// bound but never listened on, so no other test can take it in the meantime (a port freed by
+/// dropping a listener can be handed straight to another test running alongside).
+fn closed_port() -> (SocketAddr, tokio::net::TcpSocket) {
+    let held = tokio::net::TcpSocket::new_v4().unwrap();
+    held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    (held.local_addr().unwrap(), held)
 }
 
 #[tokio::test]
@@ -142,7 +144,8 @@ async fn an_unreachable_address_is_skipped_for_the_next_one() {
     let code = shown_code(&sender);
     let found = search(WAIT).await.unwrap();
     let mut chosen = mine(&found, &label)[0].clone();
-    chosen.addrs.insert(0, closed_port()); // the first address does not answer
+    let (closed, _held) = closed_port();
+    chosen.addrs.insert(0, closed); // the first address does not answer
 
     let guest = tokio::spawn(async move { connect_to(&chosen, &code, config()).await });
     let pending_host = within(old.next_peer(&sender)).await.unwrap();
@@ -198,9 +201,11 @@ async fn a_wrong_code_is_never_tried_at_a_second_address() {
 
 #[tokio::test]
 async fn an_old_laptop_with_no_reachable_address_is_reported_unreachable() {
+    let (closed_a, _held_a) = closed_port();
+    let (closed_b, _held_b) = closed_port();
     let found = Found {
         label: unique("nowhere"),
-        addrs: vec![closed_port(), closed_port()],
+        addrs: vec![closed_a, closed_b],
         same_label_nearby: false,
     };
     let code = PairingCode::parse("123456").unwrap();

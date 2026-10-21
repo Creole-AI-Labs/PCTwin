@@ -36,8 +36,9 @@
 //!   per destination, with the file being checked now), readable from any thread while it runs;
 //!   [`MoveControl`] stops it: no block is sent after a stop, and the run ends with
 //!   [`TransferError::Stopped`].
-//! - [`Progress`] gives one progress figure and one time left for the whole move, from every
-//!   lane's receipts, with the speed smoothed over about the last 20 seconds.
+//! - [`MoveMeter::snapshot`] adds the speed, measured over about the last 20 seconds of readings,
+//!   and the [`TimeLeft`] worked out from it, for the whole move however many lanes carry it; it
+//!   says "not known yet" rather than guess, and "waiting" when nothing moves.
 //! - [`BlockMap`] records which blocks of a file are done, as runs joined when they touch, and is
 //!   what a resume message carries.
 
@@ -56,8 +57,8 @@ mod meter;
 mod naming;
 mod netlanes;
 mod original;
+mod pace;
 mod partials;
-mod progress;
 mod queue;
 mod reading;
 mod recovery;
@@ -78,17 +79,17 @@ pub use lanes::{LaneTuner, MAX_LANES};
 pub use message::{
     GiveUpWhy, Message, NONCE_LEN, Nonce, PIECE_MAX, PieceBuffer, split_into_pieces,
 };
-pub use meter::{MeterReading, MoveControl, MoveMeter, Step, StepCounts};
+pub use meter::{MeterReading, MeterSnapshot, MoveControl, MoveMeter, Step, StepCounts, TimeLeft};
 pub use netlanes::{LinkLanes, accept_lanes};
 pub use original::{
     Confirmed, MAX_CONFIRMED_AGE, MAX_ORIGINALS_PER_REQUEST, OriginalNow, OriginalsFault,
     answer_originals, original_unchanged,
 };
+pub use pace::{STALLED, WARM_UP, WINDOW};
 pub use partials::{
     KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,
     expire_partials, partials,
 };
-pub use progress::{Progress, TimeLeft};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use recovery::{Recovered, recover, recover_with};
