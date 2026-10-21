@@ -10,6 +10,7 @@
 #[cfg(test)]
 mod contract;
 mod help;
+mod history;
 #[cfg(test)]
 mod info_plist;
 #[cfg(test)]
@@ -199,6 +200,9 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         recovery::recovery_check,
         recovery::recovery_run,
         recovery::things_ready,
+        history::history_list,
+        history::history_open,
+        history::history_export,
         quicksend::quicksend_pick,
         quicksend::quicksend_clear,
         quicksend::quicksend_offer,

@@ -1626,6 +1626,7 @@ fn spawn_run<R: Runtime>(
     let laptops = Laptops {
         old: paired.label.as_ref().map(LabelView::from),
     };
+    let label = laptops.old.clone();
     let names = Arc::new(Mutex::new(HashMap::new()));
     let done = Arc::new(AtomicBool::new(false));
     tick(
@@ -1658,6 +1659,15 @@ fn spawn_run<R: Runtime>(
             done.store(true, Ordering::Release);
             match ran {
                 Ok((outcome, report)) => {
+                    let (state, left) = crate::history::move_state(&outcome);
+                    crate::history::add(
+                        &app,
+                        "move",
+                        label.as_ref(),
+                        state,
+                        left,
+                        &crate::history::report_kept(&report),
+                    );
                     moving.finish(report);
                     let _ = app.emit(FINISHED_EVENT, outcome);
                 }

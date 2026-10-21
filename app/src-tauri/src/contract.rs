@@ -465,6 +465,27 @@ fn families() -> Vec<(&'static str, Value)> {
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
         ("found", json([crate::moving::Found { bytes: 41_200_000 }])),
         (
+            "history-entry",
+            json([
+                crate::history::Entry {
+                    id: "1792627200000-0".into(),
+                    kind: "move".into(),
+                    when: "2026-10-22T00:00:00Z".into(),
+                    other: Some(json(picked())),
+                    state: "steps-left".into(),
+                    steps_left: 2,
+                },
+                crate::history::Entry {
+                    id: "1792627200000-1".into(),
+                    kind: "send".into(),
+                    when: "2026-10-22T00:05:00Z".into(),
+                    other: None,
+                    state: "finished".into(),
+                    steps_left: 0,
+                },
+            ]),
+        ),
+        (
             "ready-note",
             json([pctwin_move::handover::ReadyNote {
                 landed: 120,
@@ -720,6 +741,9 @@ fn calls() -> Value {
             { "name": "recovery_check", "args": [] },
             { "name": "recovery_run", "args": [] },
             { "name": "things_ready", "args": [] },
+            { "name": "history_list", "args": [] },
+            { "name": "history_open", "args": [["id", "1792627200000-0"]] },
+            { "name": "history_export", "args": [] },
             { "name": "quicksend_pick", "args": [["folders", false]] },
             { "name": "quicksend_clear", "args": [] },
             { "name": "quicksend_offer", "args": [["ids", ["p1"]]] },

@@ -30,6 +30,9 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  historyExport,
+  historyList,
+  historyOpen,
   openPrivacySettings,
   movePause,
   moveReport,
@@ -178,7 +181,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : command === "quicksend_pick" || command === "quicksend_offer"
+              : command === "quicksend_pick" || command === "quicksend_offer" || command === "history_list"
                 ? []
                 : command === "recovery_check"
                 ? { unfinished: 0 }
@@ -215,6 +218,9 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsPause();
       await qsResume();
       await qsStop();
+      await historyList();
+      await historyOpen("1792627200000-0").catch(() => undefined);
+      await historyExport();
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}" });
       await moveApprove({ revision: 2, fingerprint: "9f" }, true, ["music"]);
       await movePause();

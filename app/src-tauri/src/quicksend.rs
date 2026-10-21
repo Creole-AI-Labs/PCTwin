@@ -357,7 +357,16 @@ pub async fn quicksend_send<R: Runtime>(
             match sent {
                 Ok(r) => {
                     let stopped = live.control.stopped();
-                    let _ = app.emit(RECEIPT_EVENT, receipt_view("sender", &r, stopped));
+                    let view = receipt_view("sender", &r, stopped);
+                    crate::history::add(
+                        &app,
+                        "send",
+                        None,
+                        crate::history::send_state(&view),
+                        0,
+                        &crate::history::receipt_kept(&view),
+                    );
+                    let _ = app.emit(RECEIPT_EVENT, view);
                 }
                 Err(e) => {
                     let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
@@ -434,7 +443,16 @@ pub async fn quicksend_receive<R: Runtime>(
             match ran {
                 Ok(Some(r)) => {
                     let stopped = live.control.stopped();
-                    let _ = app.emit(RECEIPT_EVENT, receipt_view("receiver", &r, stopped));
+                    let view = receipt_view("receiver", &r, stopped);
+                    crate::history::add(
+                        &app,
+                        "receive",
+                        None,
+                        crate::history::send_state(&view),
+                        0,
+                        &crate::history::receipt_kept(&view),
+                    );
+                    let _ = app.emit(RECEIPT_EVENT, view);
                 }
                 Ok(None) => {
                     let _ = app.emit(

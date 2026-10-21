@@ -29,10 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 39 names: the app's thirty-six commands, listening to and
+/// Exactly what the screens may call, 42 names: the app's thirty-nine commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 39] = [
+const SCREENS_MAY_CALL: [&str; 42] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -59,6 +59,9 @@ const SCREENS_MAY_CALL: [&str; 39] = [
     "recovery_check",
     "recovery_run",
     "things_ready",
+    "history_list",
+    "history_open",
+    "history_export",
     "quicksend_pick",
     "quicksend_clear",
     "quicksend_offer",
@@ -237,6 +240,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "quicksend_pick" => json!({ "folders": "x" }),
         "quicksend_offer" => json!({ "ids": 1 }),
         "quicksend_answer" => json!({ "answer": 1 }),
+        "history_open" => json!({ "id": 1 }),
         "plugin:event|listen" | "plugin:event|unlisten" => json!({ "event": 1 }),
         _ => json!({}),
     }
@@ -250,7 +254,7 @@ fn from_the_main_windows_own_pages_only_the_closed_list_is_let_through() {
     for cmd in every_known_command() {
         if matches!(
             cmd.as_str(),
-            "pairing_new_search" | "set_window_mode" | "quicksend_choose_folder"
+            "pairing_new_search" | "set_window_mode" | "quicksend_choose_folder" | "history_export"
         ) {
             // Checked below, and in the resolved-permissions test (the folder picker would open
             // the system's window and wait for a person).
@@ -617,6 +621,7 @@ fn the_screens_argument_names_are_the_commands_own() {
                 | "set_tray_labels"
                 | "quicksend_pick"
                 | "quicksend_choose_folder"
+                | "history_export"
         ) {
             continue;
         }

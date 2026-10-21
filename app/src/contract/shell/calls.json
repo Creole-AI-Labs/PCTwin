@@ -221,6 +221,23 @@
       "name": "things_ready"
     },
     {
+      "args": [],
+      "name": "history_list"
+    },
+    {
+      "args": [
+        [
+          "id",
+          "1792627200000-0"
+        ]
+      ],
+      "name": "history_open"
+    },
+    {
+      "args": [],
+      "name": "history_export"
+    },
+    {
       "args": [
         [
           "folders",

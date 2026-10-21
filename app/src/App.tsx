@@ -17,6 +17,7 @@ import PairOld from "./screens/PairOld";
 import PutTogether from "./screens/PutTogether";
 import QuickHome from "./screens/QuickHome";
 import QuickHost from "./screens/QuickHost";
+import HistoryHost from "./screens/HistoryHost";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
@@ -36,6 +37,8 @@ type Screen =
   | { id: "pickup"; unfinished: number }
   // Quick Send, either way, from its home.
   | { id: "qs"; mode: "send" | "receive" }
+  // My PCTwin history (F08), from Quick Send's home.
+  | { id: "history" }
   // Help (S01), from the footer; Back returns to where it was opened.
   | { id: "help"; from: Screen }
   | { id: "soon"; which: Soon }
@@ -154,10 +157,11 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 notice={screen.notice}
                 onSend={() => { setScreen({ id: "qs", mode: "send" }); }}
                 onReceive={() => { setScreen({ id: "qs", mode: "receive" }); }}
-                onHistory={() => { setScreen({ ...screen, notice: true }); }}
+                onHistory={() => { setScreen({ id: "history" }); }}
                 onBack={() => { setScreen({ id: "welcome" }); }}
               />
             )}
+            {screen.id === "history" && <HistoryHost onStart={() => { setScreen({ id: "role" }); }} onBack={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "qs" && <QuickHost mode={screen.mode} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
