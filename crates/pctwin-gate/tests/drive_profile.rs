@@ -409,7 +409,7 @@ proptest! {
                 let rules = DriveProfile::on(kind, system).name_rules();
                 let c = convert_name(&s, rules);
                 prop_assert!(fat_takes(&c.name), "{kind:?} on {system:?}: {:?} -> {:?}", s, c.name);
-                prop_assert!(c.name.len() <= MAX_COMPONENT_BYTES);
+                prop_assert!(pctwin_gate::name_units(&c.name) <= MAX_COMPONENT_BYTES);
             }
         }
     }

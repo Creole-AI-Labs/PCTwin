@@ -100,8 +100,20 @@ pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
 pub use unix_undo::{Check, Checked, Context, Resolution, Step, private_name};
 
-/// Longest single file or folder name stored, in bytes (the limit on every supported system).
+/// Longest single file or folder name stored, in the units the system counts names in
+/// ([`name_units`]): 255 on every supported system.
 pub const MAX_COMPONENT_BYTES: usize = 255;
+
+/// How long a name is as this system counts it: Windows counts UTF-16 units (what NTFS, FAT and
+/// exFAT hold, so "写真" is 2, not 6), Linux and macOS count bytes (their own limit, whatever the
+/// drive). A name never needs shortening only because its letters take more bytes.
+pub fn name_units(name: &str) -> usize {
+    if cfg!(windows) {
+        name.encode_utf16().count()
+    } else {
+        name.len()
+    }
+}
 /// Longest single name accepted as sent, in bytes: a Windows name of 255 characters is up to
 /// 765 bytes of text (each character up to three bytes, a pair of surrogates four), so such a
 /// name arrives whole and is shortened to [`MAX_COMPONENT_BYTES`] when it is stored, never
@@ -310,7 +322,7 @@ pub fn convert_name(name: &str, rules: impl Into<NameRules>) -> Converted {
     // within a few passes.
     for _ in 0..8 {
         let before = name.clone();
-        if name.len() > MAX_COMPONENT_BYTES {
+        if name_units(&name) > MAX_COMPONENT_BYTES {
             name = shorten(&name, MAX_COMPONENT_BYTES);
             note(NameChange::Shortened, &mut changes);
         }
@@ -425,18 +437,27 @@ fn split_extension(name: &str) -> (&str, &str) {
     }
 }
 
-/// Shortens `name` to at most `max` bytes, keeping its extension and whole characters.
+/// Shortens `name` to at most `max` units ([`name_units`]), keeping its extension and whole
+/// characters.
 fn shorten(name: &str, max: usize) -> String {
     let (stem, ext) = split_extension(name);
-    format!("{}{ext}", cut_to(stem, max.saturating_sub(ext.len())))
+    format!("{}{ext}", cut_to(stem, max.saturating_sub(name_units(ext))))
 }
 
+/// The longest start of `s` within `max` units ([`name_units`]), in whole characters.
 fn cut_to(s: &str, max: usize) -> &str {
-    let mut cut = max.min(s.len());
-    while !s.is_char_boundary(cut) {
-        cut -= 1;
+    let mut units = 0;
+    for (at, c) in s.char_indices() {
+        units += if cfg!(windows) {
+            c.len_utf16()
+        } else {
+            c.len_utf8()
+        };
+        if units > max {
+            return &s[..at];
+        }
     }
-    &s[..cut]
+    s
 }
 
 /// Why a file could not be written.
@@ -1623,7 +1644,7 @@ impl Destination {
         // that share that start compete for the same numbers: file the hint under the cut stem.
         let base = cut_to(
             stem,
-            MAX_COMPONENT_BYTES.saturating_sub(ext.len() + MAX_NUMBER_BYTES),
+            MAX_COMPONENT_BYTES.saturating_sub(name_units(ext) + MAX_NUMBER_BYTES),
         );
         let key = hints().key(
             folder,
@@ -1635,7 +1656,10 @@ impl Destination {
             let suffix = format!(" ({attempt}){ext}");
             let candidate = format!(
                 "{}{suffix}",
-                cut_to(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len()))
+                cut_to(
+                    stem,
+                    MAX_COMPONENT_BYTES.saturating_sub(name_units(&suffix))
+                )
             );
             if !name_taken(dir, &candidate)? {
                 hints().remember(key, attempt + 1);
