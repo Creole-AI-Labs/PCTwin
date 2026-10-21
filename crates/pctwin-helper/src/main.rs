@@ -4,6 +4,9 @@
 //! `pctwin-helper --session <token> --mover <account> --approve <account>[,<account>...]
 //!  --channel <name> [--dir <folder>] [--laptop <id>]`
 //!
+//! `--session -` reads the token from the first line of standard input instead, so it is never on
+//! the command line, which other programs can read on Mac and Linux.
+//!
 //! It makes its private channel (Windows: the named pipe `<name>` only the mover's account can
 //! open; Mac and Linux: the socket `<name>` in the folder `<folder>`, which it makes, owned by
 //! the system and readable by no one else), accepts one connection, refuses it unless it comes
@@ -55,7 +58,10 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         return Err("--approve names the other people, never the mover".into());
     }
     Ok(Args {
-        session: session.ok_or("--session is needed")?,
+        session: session_from(
+            session.ok_or("--session is needed")?,
+            std::io::stdin().lock(),
+        )?,
         mover,
         approve,
         channel: channel.ok_or("--channel is needed")?,
@@ -65,6 +71,24 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             None => LaptopId::from_hex(&"0".repeat(32)).map_err(|_| "no laptop ID")?,
         },
     })
+}
+
+/// The session token: as given, or with `-`, the first line of `input` (at most 128 characters).
+fn session_from(value: String, input: impl std::io::BufRead) -> Result<String, String> {
+    use std::io::BufRead;
+    if value != "-" {
+        return Ok(value);
+    }
+    let mut line = String::new();
+    input
+        .take(130)
+        .read_line(&mut line)
+        .map_err(|_| "the session could not be read")?;
+    let token = line.trim_end_matches(['\r', '\n']).to_string();
+    if token.is_empty() || token.len() > 128 || token.chars().any(char::is_control) {
+        return Err("no session was given".into());
+    }
+    Ok(token)
 }
 
 fn main() -> ExitCode {
@@ -154,6 +178,24 @@ mod tests {
 
     fn args(list: &[&str]) -> Result<Args, String> {
         parse(list.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn a_session_given_as_a_dash_is_read_from_the_input_and_never_from_the_command_line() {
+        assert_eq!(session_from("abc".into(), &b""[..]).unwrap(), "abc");
+        assert_eq!(
+            session_from("-".into(), &b"0123abcd\n"[..]).unwrap(),
+            "0123abcd"
+        );
+        assert_eq!(
+            session_from("-".into(), &b"0123abcd"[..]).unwrap(),
+            "0123abcd"
+        );
+        assert!(session_from("-".into(), &b"\n"[..]).is_err());
+        assert!(session_from("-".into(), &b""[..]).is_err());
+        let long = format!("{}\n", "a".repeat(200));
+        assert!(session_from("-".into(), long.as_bytes()).is_err());
+        assert!(session_from("-".into(), &b"ab\x07cd\n"[..]).is_err());
     }
 
     #[test]

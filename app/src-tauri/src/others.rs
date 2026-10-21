@@ -115,6 +115,7 @@ fn launch(
     mover: &str,
     approve: &[String],
     laptop: LaptopId,
+    stopped: &dyn Fn() -> bool,
 ) -> Result<Option<Client<pctwin_helper::client::Channel>>, MoveProblem> {
     let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
     let channel = format!("pctwin-helper-{}", hex(8)?);
@@ -128,9 +129,13 @@ fn launch(
     };
     let approve = approve.join(",");
     let laptop = laptop.to_hex();
+    // Mac and Linux: the token is given on the helper's input, never on its command line (which
+    // other programs can read). Windows: an elevated program's command line cannot be read by a
+    // program that is not, and UAC has no way to pass input.
+    let session_arg = if cfg!(windows) { token.as_str() } else { "-" };
     let mut args = vec![
         "--session",
-        token.as_str(),
+        session_arg,
         "--mover",
         mover,
         "--approve",
@@ -149,8 +154,11 @@ fn launch(
     } else {
         "pctwin-helper"
     };
-    let request = pctwin_helper_os::LaunchRequest::beside_current_exe(program, &args)
+    let mut request = pctwin_helper_os::LaunchRequest::beside_current_exe(program, &args)
         .map_err(|_| MoveProblem::Failed)?;
+    if !cfg!(windows) {
+        request = request.with_input(format!("{token}\n").as_bytes());
+    }
     use pctwin_helper_os::Launcher;
     let mut process = match pctwin_helper_os::SystemLauncher.start(&request) {
         Ok(p) => p,
@@ -163,7 +171,7 @@ fn launch(
     loop {
         match pctwin_helper::connect(&channel, dir.as_deref(), &token) {
             Ok(c) => return Ok(Some(c)),
-            Err(_) if Instant::now() < until => {
+            Err(_) if Instant::now() < until && !stopped() => {
                 if let Ok(Some(ended)) = process.try_wait() {
                     return match ended {
                         pctwin_helper_os::Ended::Refused
@@ -173,21 +181,31 @@ fn launch(
                 }
                 std::thread::sleep(TRY_EVERY);
             }
+            // Out of time, or the person stopped the move: the helper never answered and is no
+            // longer waited for (it ends by itself when nothing connects).
             Err(_) => return Err(MoveProblem::Failed),
         }
     }
 }
 
 /// Starts the helper for `others` with the system's prompt, connects, and scans each one.
-pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked, MoveProblem> {
+pub fn ask_for(
+    mover: &str,
+    others: &[String],
+    laptop: LaptopId,
+    stopped: &dyn Fn() -> bool,
+) -> Result<Asked, MoveProblem> {
     if !CAN_MOVE_OTHERS || others.is_empty() {
         return Ok(Asked::NotApproved);
     }
-    let Some(mut client) = launch(mover, others, laptop)? else {
+    let Some(mut client) = launch(mover, others, laptop, stopped)? else {
         return Ok(Asked::NotApproved);
     };
     let mut scanned = Vec::new();
     for person in others {
+        if stopped() {
+            return Err(MoveProblem::Failed);
+        }
         match client.scan_person(person) {
             Ok(s) => scanned.push((person.clone(), s)),
             // The helper refuses anyone not on its approved list: never expected here.
@@ -196,6 +214,15 @@ pub fn ask_for(mover: &str, others: &[String], laptop: LaptopId) -> Result<Asked
         }
     }
     Ok(Asked::Approved(Arc::new(Mutex::new(client)), scanned))
+}
+
+/// Whether `path` is strictly inside `root`, by its parts (no `..` or `.` anywhere).
+pub fn inside(path: &std::path::Path, root: &std::path::Path) -> bool {
+    use std::path::Component;
+    path.components()
+        .all(|c| !matches!(c, Component::ParentDir | Component::CurDir))
+        && path.starts_with(root)
+        && path != root
 }
 
 /* ---------- The new laptop ---------- */
@@ -368,13 +395,17 @@ impl NewHelper {
         me: &str,
         names: &[String],
         accounts: &[String],
+        stopped: &dyn Fn() -> bool,
     ) -> Result<Option<NewHelper>, MoveProblem> {
         if !CAN_MOVE_OTHERS {
             return Ok(None);
         }
+        // New accounts' passwords and other people's files pass through this process: it is
+        // hardened first, or nothing of theirs is handled.
+        pctwin_helper::harden_engine().map_err(|_| MoveProblem::Failed)?;
         let approve: Vec<String> = names.iter().chain(accounts).cloned().collect();
         let laptop = LaptopId::from_hex(&"0".repeat(32)).map_err(|_| MoveProblem::Failed)?;
-        Ok(launch(me, &approve, laptop)?.map(|client| NewHelper { client }))
+        Ok(launch(me, &approve, laptop, stopped)?.map(|client| NewHelper { client }))
     }
 
     /// Makes the account `name`, shown as `full`; its temporary password is shown once with
@@ -393,11 +424,19 @@ impl NewHelper {
         Ok(made.account)
     }
 
-    /// The folder `account`'s things are held in until the hand-over.
+    /// The folder `account`'s things are held in until the hand-over: only one inside the
+    /// helper's own holding area is taken.
     pub fn hold_for(&mut self, account: &str) -> Result<std::path::PathBuf, MoveProblem> {
-        self.client
+        let place = self
+            .client
             .hold_for(account)
-            .map_err(|_| MoveProblem::Failed)
+            .map_err(|_| MoveProblem::Failed)?;
+        let root = pctwin_helper_os::holding::staging_root().ok_or(MoveProblem::Failed)?;
+        if inside(&place, &root) {
+            Ok(place)
+        } else {
+            Err(MoveProblem::Failed)
+        }
     }
 
     /// Hands each placed person's things over at their next sign-in, then ends the helper.
@@ -447,6 +486,19 @@ mod tests {
         let people = people_in(&census());
         let names: Vec<(&str, bool)> = people.iter().map(|p| (p.name.as_str(), p.is_you)).collect();
         assert_eq!(names, [("Ada", true), ("Bea", false)]);
+    }
+
+    #[test]
+    fn a_holding_place_is_taken_only_inside_the_helpers_area() {
+        let root = std::path::Path::new("/var/lib/pctwin/staging");
+        assert!(inside(&root.join("move-1/for-1"), root));
+        assert!(!inside(root, root));
+        assert!(!inside(std::path::Path::new("/home/bea"), root));
+        assert!(!inside(&root.join("../../../etc"), root));
+        assert!(!inside(
+            std::path::Path::new("/var/lib/pctwin/staging-other/x"),
+            root
+        ));
     }
 
     #[test]

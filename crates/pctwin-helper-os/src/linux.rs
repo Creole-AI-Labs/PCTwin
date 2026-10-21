@@ -10,11 +10,16 @@ use std::process::{Command, Stdio};
 pub(crate) const PKEXEC: &str = "/usr/bin/pkexec";
 
 pub(crate) fn start_pkexec(request: &LaunchRequest) -> Result<Process, LaunchError> {
-    let child = Command::new(PKEXEC)
+    use std::io::Write;
+    let mut child = Command::new(PKEXEC)
         .arg("--disable-internal-agent")
         .arg(request.program())
         .args(request.args())
-        .stdin(Stdio::null())
+        .stdin(if request.input().is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -23,6 +28,13 @@ pub(crate) fn start_pkexec(request: &LaunchRequest) -> Result<Process, LaunchErr
                 LaunchError::Failed(e.into())
             }
         })?;
+    // pkexec hands its standard input to the program it starts once the prompt is answered: the
+    // secret waits in the pipe until then, and the pipe is closed after it.
+    if let (Some(input), Some(mut stdin)) = (request.input(), child.stdin.take()) {
+        stdin
+            .write_all(input)
+            .map_err(|e| LaunchError::Failed(e.into()))?;
+    }
     Ok(Process::from_pkexec(child))
 }
 

@@ -985,6 +985,8 @@ struct AppSteps<R: Runtime> {
     /// The helper, once started for them, and who was placed.
     helper: Option<crate::others::NewHelper>,
     held_for: Vec<crate::others::Placed>,
+    /// The person's stop, so starting the helper does not outlast it.
+    live_control: pctwin_transfer::MoveControl,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -1072,17 +1074,20 @@ impl<R: Runtime> AppSteps<R> {
         }
         let _ = self.app.emit(STAGE_EVENT, Stage::Administrator);
         let new_names: Vec<String> = names.values().cloned().collect();
-        let mut helper = match crate::others::NewHelper::start(&self.me, &new_names, &existing) {
-            Ok(Some(h)) => h,
-            Ok(None) => {
-                not_moved(OthersWhy::NotApproved);
-                return rules;
-            }
-            Err(_) => {
-                not_moved(OthersWhy::Failed);
-                return rules;
-            }
-        };
+        let control = self.live_control.clone();
+        let stopped = move || control.stopped();
+        let mut helper =
+            match crate::others::NewHelper::start(&self.me, &new_names, &existing, &stopped) {
+                Ok(Some(h)) => h,
+                Ok(None) => {
+                    not_moved(OthersWhy::NotApproved);
+                    return rules;
+                }
+                Err(_) => {
+                    not_moved(OthersWhy::Failed);
+                    return rules;
+                }
+            };
         for (n, (p, c)) in going.iter().enumerate() {
             let account = match c {
                 crate::others::PlaceChoice::Existing { account_id } => Ok(account_id.clone()),
@@ -1332,7 +1337,9 @@ async fn run_old<R: Runtime>(
             not_moved(OthersWhy::Failed);
         } else {
             let _ = app.emit(STAGE_EVENT, Stage::Administrator);
-            match crate::others::ask_for(&mover, &others, laptop) {
+            match crate::others::ask_for(&mover, &others, laptop, &|| {
+                scan_stop.load(Ordering::Acquire)
+            }) {
                 Ok(crate::others::Asked::Approved(client, scanned)) => {
                     let people: Vec<pctwin_helper::Scanned> =
                         scanned.iter().map(|(_, s)| s.clone()).collect();
@@ -1499,6 +1506,7 @@ async fn run_new<R: Runtime>(
         placed: None,
         helper: None,
         held_for: Vec::new(),
+        live_control: live.control.clone(),
     };
     let received = pctwin_move::receive_by_rules(
         &mut link,

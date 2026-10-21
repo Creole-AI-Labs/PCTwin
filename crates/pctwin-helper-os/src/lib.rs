@@ -442,10 +442,24 @@ fn exit_code(code: i32, through_pkexec: bool) -> Ended {
 }
 
 /// A checked request to start a program with administrator rights.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct LaunchRequest {
     program: PathBuf,
     args: Vec<String>,
+    /// Given to the program on its standard input (Linux: a secret kept off the command line,
+    /// which other programs can read). Not used on Windows, where an elevated program's command
+    /// line cannot be read by a program that is not.
+    input: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for LaunchRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchRequest")
+            .field("program", &self.program)
+            .field("args", &self.args)
+            .field("input", &self.input.as_ref().map(|_| "(hidden)"))
+            .finish()
+    }
 }
 
 impl LaunchRequest {
@@ -469,7 +483,18 @@ impl LaunchRequest {
         Ok(LaunchRequest {
             program,
             args: args.iter().map(|a| (*a).to_owned()).collect(),
+            input: None,
         })
+    }
+
+    /// The same request, with `input` given on the program's standard input.
+    pub fn with_input(mut self, input: &[u8]) -> LaunchRequest {
+        self.input = Some(input.to_vec());
+        self
+    }
+
+    pub fn input(&self) -> Option<&[u8]> {
+        self.input.as_deref()
     }
 
     /// The program `file_name` in the folder this program was started from (the app's own

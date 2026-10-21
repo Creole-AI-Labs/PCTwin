@@ -56,7 +56,19 @@ pub fn connect(
         let dir = dir.ok_or_else(|| ClientError::Unreachable("no channel folder".into()))?;
         pctwin_helper_os::connect(&dir.join(channel), 0).map_err(unreachable)?
     };
-    Client::open(stream, token)
+    // The helper's first answer comes at once, or never: a channel that does not answer is not
+    // waited on for ever (Mac and Linux; a Windows pipe has no time limit to set).
+    #[cfg(unix)]
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+        .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+    let client = Client::open(stream, token)?;
+    #[cfg(unix)]
+    client
+        .stream
+        .set_read_timeout(None)
+        .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+    Ok(client)
 }
 
 /// An account the helper made on the new laptop.
