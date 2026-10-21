@@ -249,6 +249,7 @@ fn only_an_approved_person_s_account_is_made() {
         Ok(Made {
             account: "S-1-5-21-9".into(),
             password: zeroize::Zeroizing::new("abcd-efgh-jkmn-pqrs".into()),
+            secure_token: true,
         })
     };
     let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
@@ -294,7 +295,8 @@ fn only_an_approved_person_s_account_is_made() {
             FromHelper::Answer(Answer::Refused(Refusal::NotApproved)),
             FromHelper::Answer(Answer::AccountMade {
                 account: "S-1-5-21-9".into(),
-                password: "abcd-efgh-jkmn-pqrs".into()
+                password: "abcd-efgh-jkmn-pqrs".into(),
+                secure_token: true,
             }),
             FromHelper::Answer(Answer::Refused(Refusal::AccountExists)),
         ]
@@ -347,6 +349,7 @@ fn holding_and_handing_over_only_for_approved_people() {
         Ok(Made {
             account: "1005".into(),
             password: zeroize::Zeroizing::new("abcd-efgh-jkmn-pqrs".into()),
+            secure_token: true,
         })
     };
     let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
@@ -410,7 +413,8 @@ fn holding_and_handing_over_only_for_approved_people() {
             FromHelper::Answer(Answer::Refused(Refusal::NothingHeld)),
             FromHelper::Answer(Answer::AccountMade {
                 account: "1005".into(),
-                password: "abcd-efgh-jkmn-pqrs".into()
+                password: "abcd-efgh-jkmn-pqrs".into(),
+                secure_token: true,
             }),
             held("p1"),
             held("p1"),

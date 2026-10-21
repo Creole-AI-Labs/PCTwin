@@ -17,6 +17,9 @@ const ALPHABET: &[u8] = b"abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRTUVWXY346789";
 pub struct Made {
     pub account: String,
     pub password: Zeroizing<String>,
+    /// macOS: whether the account has a Secure Token, so it can unlock FileVault (`false`: the
+    /// administrator turns it on in System Settings, Users & Groups). Always `true` elsewhere.
+    pub secure_token: bool,
 }
 
 /// A temporary password: four groups of four, about 90 bits from the system's random source,
@@ -39,13 +42,18 @@ pub fn temporary_password() -> Result<Zeroizing<String>, Refusal> {
 pub fn create_account(name: &str, full_name: &str) -> Result<Made, Refusal> {
     let password = temporary_password()?;
     match pctwin_helper_os::add_standard_account(name, full_name, &password) {
-        Ok(account) => Ok(Made {
-            account: match account {
-                pctwin_helper_os::Account::Sid(sid) => sid.as_str().to_string(),
-                pctwin_helper_os::Account::Uid(uid) => uid.to_string(),
-            },
-            password,
-        }),
+        Ok(account) => {
+            // While the helper still holds the password, never after: it keeps it nowhere.
+            let secure_token = pctwin_helper_os::secure_token_on(name, &password).unwrap_or(false);
+            Ok(Made {
+                account: match account {
+                    pctwin_helper_os::Account::Sid(sid) => sid.as_str().to_string(),
+                    pctwin_helper_os::Account::Uid(uid) => uid.to_string(),
+                },
+                password,
+                secure_token,
+            })
+        }
         Err(pctwin_helper_os::Error::AlreadyExists) => Err(Refusal::AccountExists),
         Err(_) => Err(Refusal::AccountNotMade),
     }

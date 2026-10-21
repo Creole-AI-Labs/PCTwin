@@ -153,6 +153,7 @@ impl<'s> Session<'s> {
                 Answer::AccountMade {
                     account: made.account,
                     password: made.password.to_string(),
+                    secure_token: made.secure_token,
                 }
             }
             Err(why) => Answer::Refused(why),

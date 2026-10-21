@@ -219,6 +219,45 @@ pub(crate) fn add_standard_account(
     Ok(uid)
 }
 
+const SYSADMINCTL: &str = "/usr/sbin/sysadminctl";
+
+/// Gives the account `name` a Secure Token, so it can unlock FileVault: the administrator
+/// approves in the Mac's own window (`sysadminctl interactive`), and the account's `password`
+/// goes to the tool's own prompt, never on a command line. Then the token is checked: `true` only
+/// if the system says it is on (a prompt answered wrongly is never taken as done).
+pub(crate) fn secure_token_on(name: &str, password: &str) -> Result<bool, Error> {
+    use std::io::Write;
+    let mut child = Command::new(SYSADMINCTL)
+        .args(["interactive", "-secureTokenOn", name, "-password", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let mut line = format!("{password}\n").into_bytes();
+        let written = stdin.write_all(&line);
+        line.iter_mut().for_each(|b| *b = 0);
+        written?;
+    }
+    child.wait()?;
+    secure_token_status(name)
+}
+
+/// Whether the account `name` has a Secure Token, as the system says.
+pub(crate) fn secure_token_status(name: &str) -> Result<bool, Error> {
+    let out = Command::new(SYSADMINCTL)
+        .args(["-secureTokenStatus", name])
+        .stdin(Stdio::null())
+        .output()?;
+    // The tool says it on its error stream: "Secure token is ENABLED for user ...".
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok(said.contains("ENABLED") && !said.contains("DISABLED"))
+}
+
 /// The system's Service Management.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemDaemons;

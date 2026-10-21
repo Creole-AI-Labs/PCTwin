@@ -254,6 +254,23 @@ pub fn add_standard_account(name: &str, full_name: &str, password: &str) -> Resu
     Err(Error::NotSupported("making accounts"))
 }
 
+/// macOS: gives the new account `name` a Secure Token through the administrator's own approval
+/// in the Mac's own window, its `password` given to the tool's prompt, never a command line;
+/// `Ok(true)` only when the system then says the token is on. Elsewhere there is no such token:
+/// `Ok(true)`.
+pub fn secure_token_on(name: &str, password: &str) -> Result<bool, Error> {
+    if !is_account_name(name) {
+        return Err(Error::BadInput("an account name of a-z, 0-9, - and _"));
+    }
+    #[cfg(target_os = "macos")]
+    return mac::secure_token_on(name, password);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = password;
+        Ok(true)
+    }
+}
+
 /// The account this process runs as.
 pub fn current_account() -> Result<Account, Error> {
     #[cfg(windows)]

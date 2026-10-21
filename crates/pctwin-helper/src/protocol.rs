@@ -97,6 +97,9 @@ pub enum Answer {
     AccountMade {
         account: String,
         password: String,
+        /// macOS: whether the account can unlock FileVault (`false`: turn it on in System
+        /// Settings, Users & Groups). Always `true` elsewhere.
+        secure_token: bool,
     },
     /// Where the person's files are put during the move.
     Holding {
