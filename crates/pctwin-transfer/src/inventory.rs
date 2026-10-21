@@ -174,10 +174,16 @@ async fn receive_blob(
     if len == 0 || len > max {
         return Err(refused("a page is empty or larger than PCTwin accepts"));
     }
-    let mut bytes = Vec::with_capacity(len.min(1024 * 1024));
+    // Room for exactly the length, at most a page (already allowed for), and each piece read in
+    // place: nothing grows or is copied and let go while a page arrives, so no gaps are left
+    // between the blocks the reader keeps.
+    let mut bytes = Vec::with_capacity(len);
     while bytes.len() < len {
-        let InventoryFrame::Part(piece) = InventoryFrame::decode(&recv_in_time(ch).await?)? else {
-            return Err(refused("a page started again part way through"));
+        let frame = recv_in_time(ch).await?;
+        let piece = match frame.split_first() {
+            Some((&PART, piece)) => piece,
+            Some((&START, _)) => return Err(refused("a page started again part way through")),
+            _ => return Err(refused("something other than the list arrived")),
         };
         let left = len - bytes.len();
         if piece.is_empty() || piece.len() > PIECE_MAX || piece.len() > left {
@@ -186,7 +192,7 @@ async fn receive_blob(
         if piece.len() < PIECE_MAX && piece.len() < left {
             return Err(refused("a piece before the last was not full"));
         }
-        bytes.extend_from_slice(&piece);
+        bytes.extend_from_slice(piece);
     }
     Ok(bytes)
 }
