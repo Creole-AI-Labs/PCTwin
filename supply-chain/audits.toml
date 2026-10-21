@@ -67,17 +67,47 @@ criteria = "safe-to-deploy"
 delta = "2.12.1 -> 2.12.2"
 notes = "Reviewed 15 Oct 2026. Read the full src/ diff and compared the injected scripts/bundle.global.js (minified: the menu helper was refactored, no new fetch, eval, WebSocket or URL; the only URL string, the mock-IPC localhost form, is unchanged). Changes: Listeners::once no longer panics if a replayed queued emit calls the handler twice; the Menu and Submenu wrappers now keep their own item list instead of re-asking muda; the macOS restart path (process.rs) first runs /usr/bin/open -n on the app bundle with the current arguments, then falls back to spawning the bundle's own executable with null stdio in a new process group. No new dependencies, no new unsafe, build script unchanged, no network access."
 
+[[audits.tauri]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.12.2 -> 2.12.4"
+notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. Read the full diff of src/, build.rs (unchanged), mobile/ and scripts/bundle.global.js. Changes: Cargo.toml version and internal requirements raised (tauri-macros ~2.7.3, tauri-runtime and tauri-runtime-wry ~2.12.2, tauri-utils ~2.10.2, tauri-build 2.7.3, swift-rs 1.0.9 on Apple mobile only). ipc/protocol.rs and protocol/asset.rs: the leading-slash strip now uses strip_prefix instead of slicing [1..], fixing a panic on an empty path (ipc:foo, asset:foo), with new tests. plugin/mobile.rs: a late or duplicate native response is dropped instead of unwrap-panicking inside the extern C handler. protocol/tauri.rs: only the text of an iOS dev-server error message changed. iOS Swift entry points made public. Injected bundle.global.js (minified): the Channel class now calls its onmessage handler inside a try/catch that rethrows via queueMicrotask; no new or removed string literals, only one new property (.add for a WeakSet), the only URL string is unchanged, and there is still no fetch, eval, WebSocket, XMLHttpRequest or Function constructor. No new dependencies, no new unsafe, no process spawning, no network access."
+
 [[audits.tauri-build]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "2.7.1 -> 2.7.2"
 notes = "Reviewed 15 Oct 2026. The only change is Cargo.toml: version number and the tauri-codegen requirement raised to ~2.7.2. No source change."
 
+[[audits.tauri-codegen]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.1 -> 2.7.3"
+notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, base64 requirement raised from 0.22 to 0.23 and tauri-utils to ~2.10.2. No source change, no build script."
+
+[[audits.tauri-macros]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.7.1 -> 2.7.3"
+notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, tauri-codegen raised to ~2.7.3 and tauri-utils to ~2.10.2. No source change."
+
 [[audits.tauri-plugin-opener]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "2.7.0 -> 2.7.1"
 notes = "Reviewed 15 Oct 2026. Only changes: Cargo.toml (version, tauri-plugin build dependency raised to 2.7.1) and the iOS Swift entry point made public (initPlugin). No Rust source change, so the open-path/open-url permission checks are untouched."
+
+[[audits.tauri-runtime]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.12.1 -> 2.12.2"
+notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version and tauri-utils requirement raised to ~2.10.2. No source change; build.rs unchanged."
+
+[[audits.tauri-runtime-wry]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "2.12.1 -> 2.12.2"
+notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, tauri-runtime raised to ~2.12.2 and tauri-utils to ~2.10.2. No source change; build.rs unchanged."
 
 [[audits.thread-priority]]
 who = "PCTwin maintainers"
