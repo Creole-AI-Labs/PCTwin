@@ -1,0 +1,132 @@
+name: Read-back proof
+
+# Shows, with numbers, that the read-back check ("copied" only after the file is read back from the
+# drive) really reaches the drive and not this laptop's cache:
+#   Windows: cached vs uncached read of 1 GiB and 10,000 small files, with the raw physical disk
+#            read counter around each, then exFAT and FAT32 volumes.
+#   Linux:   a byte flipped in the drive image under a cached file; the cache says fine, the
+#            read-back catches it.
+#   macOS:   how much of a file the cache holds, and what the disk driver reports reading.
+# The jobs fail only on things that are definitely wrong (a crash, a clean file reported damaged, a
+# flipped byte not caught, NTFS not read from the drive), never on speeds or byte counts.
+
+on:
+  pull_request:
+    paths:
+      - "crates/pctwin-gate/**"
+      - "scripts/read-back/**"
+      - ".github/workflows/read-back.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: read-back-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows (NTFS benchmark, exFAT and FAT32)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the proof tool
+        run: cargo build --release --locked -p pctwin-gate --example read_back_tool
+      - name: NTFS, cached against uncached read-back (1 GiB and 10,000 small files)
+        shell: pwsh
+        run: >
+          ./scripts/read-back/windows-bench.ps1
+          -Tool "$PWD\target\release\examples\read_back_tool.exe"
+          -Work "$env:RUNNER_TEMP\read-back-ntfs"
+          -Summary $env:GITHUB_STEP_SUMMARY
+      - name: exFAT and FAT32 volumes
+        if: always()
+        shell: pwsh
+        run: >
+          ./scripts/read-back/windows-fat.ps1
+          -Tool "$PWD\target\release\examples\read_back_tool.exe"
+          -Work "$env:RUNNER_TEMP\read-back-fat"
+          -Summary $env:GITHUB_STEP_SUMMARY
+
+  linux:
+    name: Linux (the byte the cache cannot see)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            static.rust-lang.org:443
+            index.crates.io:443
+            static.crates.io:443
+            crates.io:443
+            azure.archive.ubuntu.com:80
+            azure.archive.ubuntu.com:443
+            archive.ubuntu.com:80
+            security.ubuntu.com:80
+            esm.ubuntu.com:443
+            motd.ubuntu.com:443
+            packages.microsoft.com:443
+            ppa.launchpadcontent.net:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the proof tool
+        run: cargo build --release --locked -p pctwin-gate --example read_back_tool
+      - name: Flip a byte under the cache; the ordinary read misses it, the read-back catches it
+        timeout-minutes: 15
+        shell: bash
+        run: >
+          bash scripts/read-back/linux-proof.sh
+          "$PWD/target/release/examples/read_back_tool"
+          "$RUNNER_TEMP/read-back-linux"
+          "$GITHUB_STEP_SUMMARY"
+
+  macos:
+    name: macOS (cache residency and bytes read)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the proof tool
+        run: cargo build --release --locked -p pctwin-gate --example read_back_tool
+      - name: Cache residency and disk reads, APFS and ExFAT and FAT32 images
+        timeout-minutes: 25
+        shell: bash
+        run: >
+          bash scripts/read-back/macos-proof.sh
+          "$PWD/target/release/examples/read_back_tool"
+          "$RUNNER_TEMP/read-back-macos"
+          "$PWD/scripts/read-back/resident.c"
+          "$GITHUB_STEP_SUMMARY"
