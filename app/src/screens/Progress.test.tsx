@@ -13,8 +13,11 @@ import {
   formatBytes,
   groupState,
   measuredPercent,
+  minutesRange,
   parseResult,
   statusOfReason,
+  WHY_MEMORY,
+  whyMemoryKey,
   type Counts,
   type ItemResult,
   type MoveProgress,
@@ -263,10 +266,23 @@ describe("X01 Move progress, compact", () => {
     expect(document.querySelector(".mv-speed")).toBeNull();
   });
 
-  it("a range of one number still reads as a range", () => {
+  it("a measured time is never widened: one number reads as about that many minutes", () => {
     const p: MoveProgress = { ...sample.running, minutesLeft: { low: 7, high: 7 } };
-    inApp(<ProgressCompact progress={p} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
-    expect(screen.getByText(hasText(text("progress-minutes", { low: 7, high: 8 })))).toBeTruthy();
+    const { unmount } = inApp(<ProgressCompact progress={p} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+    const one = text("progress-minutes-one", { minutes: 7 });
+    expect(plain(one)).toBe("7 minutes");
+    expect(screen.getByText(withText(text("progress-time-left", { range: one })))).toBeTruthy();
+    expect(screen.queryByText(hasText(text("progress-minutes", { low: 7, high: 8 })))).toBeNull();
+    unmount();
+    inApp(<ProgressDetail progress={p} onCollapse={noop} onSeeNeedsAction={noop} />);
+    expect(screen.getByText(withText(one))).toBeTruthy();
+  });
+
+  it("minutes are rounded and otherwise left as measured", () => {
+    expect(minutesRange({ low: 6.6, high: 7.4 })).toEqual({ low: 7, high: 7 });
+    expect(minutesRange({ low: 14.6, high: 20.2 })).toEqual({ low: 15, high: 20 });
+    expect(minutesRange({ low: -0.4, high: 0.3 })).toEqual({ low: 0, high: 0 });
+    expect(plain(text("progress-minutes-one", { minutes: 1 }))).toBe("1 minute");
   });
 
   it("never says 100 or done while anything is still being checked", () => {
@@ -782,8 +798,31 @@ describe("R02 Your move, item by item", () => {
     const details = detailsOf(row);
     expect(details.open).toBe(false);
     expect(within(details).getByText(text("evidence-memory-explain"))).toBeTruthy();
+    // Under it, why this file was checked from memory, in plain words.
+    expect(within(details).getByText(text("why-memory-cannot-skip-cache"))).toBeTruthy();
     // The explanation is not the evidence line itself.
     expect(within(row).getAllByText(text("evidence-memory"))).toHaveLength(1);
+    // A file read back from the drive has neither.
+    const drive = detailsOf(rowOf("Invoice March.pdf"));
+    expect(within(drive).queryByText(text("evidence-memory-explain"))).toBeNull();
+    expect(drive.querySelector("[data-why]")).toBeNull();
+  });
+
+  it.each(WHY_MEMORY)("a check from memory because of %s says why in its own words", (why) => {
+    const item: ReportItem = { id: "m", name: "Notes.txt", source: "Notes.txt", status: "copied", evidence: { from: "memory", why } };
+    inApp(<Report items={[item]} onBack={noop} />);
+    const details = detailsOf(rowOf("Notes.txt"));
+    const line = details.querySelector(`[data-why="${why}"]`);
+    expect(line?.textContent).toBe(text(whyMemoryKey(why)));
+  });
+
+  it("every reason a check came from memory has its words, different from the others", () => {
+    const words = WHY_MEMORY.map((why) => {
+      expect(l10n.getBundle(whyMemoryKey(why)), whyMemoryKey(why)).not.toBeNull();
+      return text(whyMemoryKey(why));
+    });
+    expect(new Set(words).size).toBe(WHY_MEMORY.length);
+    expect(WHY_MEMORY).toEqual(["cannot-skip-cache", "not-shown", "no-way", "stored-specially", "too-small"]);
   });
 
   it("shows where it came from and where it went behind More details", () => {

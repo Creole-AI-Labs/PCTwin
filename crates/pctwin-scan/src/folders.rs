@@ -332,7 +332,7 @@ fn dropbox_folders(info: &Path) -> Vec<(String, PathBuf)> {
 
 /// On Mac and Linux, follows links so a folder linked into iCloud is placed by where it really
 /// is. On Windows the known-folder answer is used as given, so a drive letter stays a drive letter.
-fn real(path: &Path) -> PathBuf {
+pub(crate) fn real(path: &Path) -> PathBuf {
     if cfg!(windows) {
         path.to_path_buf()
     } else {

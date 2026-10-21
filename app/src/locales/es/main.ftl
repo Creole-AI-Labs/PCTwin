@@ -1024,6 +1024,12 @@ evidence-read-back = Comprobado volviendo a leerlo del disco.
 evidence-memory = Comprobado con la memoria de este portátil, no con el disco.
 evidence-memory-explain = La copia se volvió a leer y coincidía, pero a través de la memoria de este portátil, así que lo leído puede venir de la memoria y no del disco. Un fallo del propio disco podría no verse aquí, así que abrir el archivo una vez es una buena comprobación.
 evidence-not-checked = Sin comprobar, porque no terminó.
+# Machine-translated 16 October 2026.
+why-memory-cannot-skip-cache = Este disco no dejó que PCTwin lo leyera directamente, así que la comprobación pasó por la memoria de este portátil. Algunos discos de red y memorias USB funcionan así.
+why-memory-not-shown = Este disco no pudo mostrar que la lectura de PCTwin llegó de verdad a él, así que la comprobación cuenta como hecha desde la memoria de este portátil.
+why-memory-no-way = El sistema de este portátil no tiene forma de leer este disco directamente, así que la comprobación pasó por su memoria.
+why-memory-stored-specially = Este archivo está guardado de una forma especial, por ejemplo comprimido o cifrado, así que el sistema lo lee a través de la memoria.
+why-memory-too-small = Este archivo es muy pequeño, así que el disco lo guarda junto con sus propios registros y el sistema lo lee a través de la memoria.
 
 # Reasons: why an item did not finish. Each says what happened, then what to do.
 reason-not-enough-space = El portátil nuevo se quedó sin espacio. Libera espacio en él y empieza un traslado nuevo que incluya este elemento.
@@ -1055,6 +1061,13 @@ status-failed = Falló
 
 # $low and $high are whole minutes, a measured range. The result fills "About { $range } left".
 progress-minutes = { $low } a { $high } minutos
+# Machine-translated 16 October 2026.
+progress-minutes-one =
+    { NUMBER($minutes) ->
+        [one] { $minutes } minuto
+        [many] { $minutes } de minutos
+       *[other] { $minutes } minutos
+    }
 # $low and $high are numbers and $unit is already formatted, for example "MB/s". The result fills "{ $speed }, measured".
 progress-speed-range = { $low } a { $high } { $unit }
 progress-count-failed =

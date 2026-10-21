@@ -8,6 +8,12 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Ready to use?** Not yet. Please don't move real files with it.
 - **Next:** saying everything on the screens in plain words, connecting the screens to the move itself, and finishing safe copying onto USB sticks and memory cards (FAT and exFAT drives).
 
+## 21 October 2026
+
+**In progress**
+
+- **Speed and time left, measured, never guessed.** While a move runs, PCTwin works out its speed from what it really moved in about the last 20 seconds, and the time left from that. In the first few seconds, or when it can't know, it says so instead of guessing. When nothing is moving, it says it is waiting rather than showing a time that keeps growing. This is ready for review; the screens will show it once they are connected to the move.
+
 ## 20 October 2026
 
 **In progress**
@@ -30,6 +36,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **USB sticks and memory cards.** These drives (FAT and exFAT) can't always give a file its name safely in one step. On those drives PCTwin writes the file hidden under its real name, checks it, then shows it, and a copy cut off halfway is cleaned up or finished on the next start. An independent review found problems, which are being fixed and reviewed again.
 - **Plain words on every screen.** Some screen text still uses technical words from our designs. It is being rewritten so anyone can follow it.
+- **Connecting the screens to the move, safely.** The screens are treated as untrusted: they can ask the app for a short, fixed list of things (window size, tray words, pairing), and the app refuses anything else, such as opening files, windows or other programs. Everything the app sends back is checked against the app's own examples before a screen shows it, and automatic tests fail if the two ever stop matching. When a file could only be checked from memory, the report now says why, in plain words, for each of the five reasons. A second independent review found ways round the first checks; the checks now try every request the app knows and fail if anything beyond the list gets through, and they are being reviewed again.
 
 ## 15 October 2026
 

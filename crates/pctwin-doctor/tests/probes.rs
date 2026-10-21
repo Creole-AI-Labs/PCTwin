@@ -122,3 +122,31 @@ fn a_quick_check_returns_what_it_printed() {
     let out = probe::run_check(program, args, Duration::from_secs(10)).unwrap();
     assert_eq!(out.trim(), "Wi-Fi|Private");
 }
+
+/// Every supported system can say which adapters are Wi-Fi (CI runners have none, so the list
+/// may be empty, but the question gets an answer), and the address list carries the answer.
+#[test]
+fn the_system_says_which_adapters_are_wifi() {
+    let wifi = probe::wifi_adapters();
+    assert!(wifi.is_some(), "the system could not be asked");
+    let interfaces = probe::interfaces().expect("interfaces can be listed");
+    assert!(interfaces.iter().all(|i| i.wifi.is_some()));
+    for i in &interfaces {
+        assert_eq!(
+            i.wifi,
+            Some(wifi.as_ref().unwrap().contains(&i.name)),
+            "{}",
+            i.name
+        );
+    }
+}
+
+/// A Mac's hardware ports: the Wi-Fi port's device, whatever it is called, and nothing else.
+#[test]
+fn a_macs_wifi_device_is_read_from_its_hardware_ports() {
+    let out = "\nHardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: 36:aa:aa:aa:aa:00\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: a4:bb:bb:bb:bb:01\n\nHardware Port: Thunderbolt 1\nDevice: en1\n\nHardware Port: USB 10/100/1000 LAN\nDevice: en7\n\nVLAN Configurations\n===================\n";
+    assert_eq!(probe::wifi_from_hardware_ports(out), ["en0"]);
+    let older = "Hardware Port: AirPort\nDevice: en1\n";
+    assert_eq!(probe::wifi_from_hardware_ports(older), ["en1"]);
+    assert!(probe::wifi_from_hardware_ports("Hardware Port: Ethernet\nDevice: en0\n").is_empty());
+}

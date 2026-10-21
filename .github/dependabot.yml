@@ -7,6 +7,11 @@ updates:
     groups:
       rust-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # spake2 0.4 is built on curve25519-dalek 4; moving pctwin-pairing to 5 alone would ship
+      # two copies of the same curve library. Move both together when spake2 takes 5.
+      - dependency-name: curve25519-dalek
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: npm

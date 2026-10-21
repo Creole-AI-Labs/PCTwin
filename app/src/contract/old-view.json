@@ -1,0 +1,50 @@
+[
+  {
+    "kind": "label",
+    "label": {
+      "animal": "ant",
+      "colour": "blue",
+      "kind": "picked"
+    }
+  },
+  {
+    "code": "123456",
+    "kind": "code",
+    "secondsLeft": 42
+  },
+  {
+    "kind": "wait",
+    "secondsLeft": 30
+  },
+  {
+    "kind": "locked"
+  },
+  {
+    "kind": "choose",
+    "numbers": [
+      11,
+      42,
+      87
+    ],
+    "round": 3
+  },
+  {
+    "kind": "paired"
+  },
+  {
+    "kind": "timed-out"
+  },
+  {
+    "kind": "left"
+  },
+  {
+    "kind": "lost"
+  },
+  {
+    "kind": "label",
+    "label": {
+      "kind": "named",
+      "name": "Kitchen laptop"
+    }
+  }
+]

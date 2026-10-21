@@ -1,7 +1,7 @@
 import { useLocalization } from "@fluent/react";
 import { useState } from "react";
 import { Button, ResultChip } from "../components/kit";
-import type { ReportItem } from "../move";
+import { whyMemoryKey, type ReportItem } from "../move";
 import { TopStrip } from "./FrameParts";
 import { Heading, EvidenceLine, ReasonText } from "./ProgressParts";
 
@@ -51,7 +51,12 @@ export default function Report({ items, onBack }: { items: ReportItem[]; onBack:
                       <summary>{l10n.getString("report-more-details")}</summary>
                       <p dir="auto">{l10n.getString("report-from", { path: item.source })}</p>
                       {item.destination && <p dir="auto">{l10n.getString("report-to", { path: item.destination })}</p>}
-                      {item.status === "copied" && item.evidence.from === "memory" && <p>{l10n.getString("evidence-memory-explain")}</p>}
+                      {item.status === "copied" && item.evidence.from === "memory" && (
+                        <>
+                          <p>{l10n.getString("evidence-memory-explain")}</p>
+                          <p data-why={item.evidence.why}>{l10n.getString(whyMemoryKey(item.evidence.why))}</p>
+                        </>
+                      )}
                     </details>
                   </td>
                 </tr>

@@ -1,0 +1,11 @@
+[
+  {
+    "animal": "ant",
+    "colour": "blue",
+    "kind": "picked"
+  },
+  {
+    "kind": "named",
+    "name": "Kitchen laptop"
+  }
+]

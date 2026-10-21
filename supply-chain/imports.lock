@@ -37,8 +37,8 @@ user-login = "hsivonen"
 user-name = "Henri Sivonen"
 
 [[publisher.unicode-normalization]]
-version = "0.1.25"
-when = "2025-10-30"
+version = "0.1.26"
+when = "2026-10-16"
 user-id = 1139
 user-login = "Manishearth"
 user-name = "Manish Goregaokar"
@@ -272,12 +272,6 @@ delta = "0.3.29 -> 0.3.32"
 who = "Chris Fallin <chris@cfallin.org>"
 criteria = "safe-to-deploy"
 version = "1.0.4"
-
-[[audits.bytecode-alliance.audits.rand_xorshift]]
-who = "Alex Crichton <alex@alexcrichton.com>"
-criteria = "safe-to-deploy"
-delta = "0.3.0 -> 0.4.0"
-notes = "Minor updates for a new `rand` crate version, nothing awry."
 
 [[audits.bytecode-alliance.audits.rustc_version]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -595,12 +589,6 @@ For more detailed unsafe review notes please see https://crrev.com/c/6362797
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
-[[audits.google.audits.rand_core]]
-who = "Android Legacy"
-criteria = "safe-to-run"
-version = "0.6.4"
-aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
-
 [[audits.google.audits.strsim]]
 who = "danakj@chromium.org"
 criteria = "safe-to-deploy"
@@ -727,16 +715,6 @@ version = "0.12.1"
 who = "David Cook <dcook@divviup.org>"
 criteria = "safe-to-deploy"
 version = "0.3.0"
-
-[[audits.isrg.audits.rand_core]]
-who = "David Cook <dcook@divviup.org>"
-criteria = "safe-to-deploy"
-delta = "0.6.4 -> 0.9.3"
-
-[[audits.isrg.audits.rand_core]]
-who = "J.C. Jones <jc@divviup.org>"
-criteria = "safe-to-deploy"
-delta = "0.9.3 -> 0.9.5"
 
 [[audits.isrg.audits.sha2]]
 who = "David Cook <dcook@divviup.org>"
@@ -1788,12 +1766,6 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/sup
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.3.1"
-aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
-
-[[audits.zcash.audits.rand_xorshift]]
-who = "Sean Bowe <ewillbefull@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.3.0"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
 [[audits.zcash.audits.time-core]]

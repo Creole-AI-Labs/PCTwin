@@ -2401,6 +2401,10 @@ impl<'d> ReceiverSession<'d> {
                         rounds: 0,
                     },
                 );
+                // A fresh attempt: nothing of an earlier one counts as written.
+                if let Some((group, _)) = self.steps.get(&item) {
+                    self.meter.attempt(*group);
+                }
                 self.settle(item);
             }
             Message::Piece {
@@ -2587,7 +2591,9 @@ impl<'d> ReceiverSession<'d> {
                 self.written
                     .fetch_add(whole.len() as u64, Ordering::Relaxed);
                 if let Some((hash, raw)) = fresh {
-                    self.meter.written_bytes(raw);
+                    if let Some((group, _)) = self.steps.get(&s.item) {
+                        self.meter.written(*group, raw);
+                    }
                     s.pending.push((receipt.block, hash));
                     if s.pending.len() >= CHECKPOINT_BLOCKS {
                         flush_checkpoint(journal, s, false);
@@ -2909,10 +2915,12 @@ const CHECKED_PLAN: usize = 256;
 /// Every file of the approved plan, counted waiting in the group of its destination.
 fn plan_steps(allowance: &Allowance, meter: &MoveMeter) -> HashMap<ItemId, (Group, Step)> {
     meter.reset();
-    allowance
+    let steps = allowance
         .planned()
         .map(|(item, destination, size)| (item, (meter.plan(destination, size), Step::Waiting)))
-        .collect()
+        .collect();
+    meter.plan_loaded();
+    steps
 }
 
 /// Most names tried when other programs keep taking the free one first.

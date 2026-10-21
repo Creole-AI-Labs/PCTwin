@@ -6,8 +6,10 @@
 //!   is. A folder that is not there is reported missing, never guessed.
 //! - [`classify`] says whether a folder is on the system drive, another drive or network share, or
 //!   inside a cloud storage folder.
-//! - [`list_people`] lists everyone with an account on the laptop, by the system's own account ID,
-//!   from the list every system keeps for everyone; nobody's files are opened.
+//! - [`census_this_laptop`] counts everyone on the laptop by the system's own account ID, never by
+//!   path, in five kinds ([`PersonKind`]): the mover, another person, an account never used, a
+//!   leftover from a removed account, and a work or school account. [`list_people`] is everyone
+//!   in it with an account and a home folder. Nobody's files are opened.
 //! - [`measure`] counts what a folder holds from folder listings alone: no file is opened, files
 //!   that are only in the cloud are counted but never downloaded, links are never followed, and
 //!   whatever can't be read is listed. [`Size`] is honest when another person's folder can't be
@@ -30,16 +32,30 @@
 //!   pinned folders) and [`personal_essentials`] matches it to the scanned items, so their own
 //!   essentials move first. Read only on the old laptop, used only for the order, sent nowhere.
 
+mod access;
+mod acl;
+mod census;
 mod drives;
 mod folders;
 mod health;
 mod laptop;
 mod measure;
 mod people;
+mod rules;
 mod scan;
 mod state;
+mod sweep;
 mod usage;
+mod volumes;
+mod whose;
 
+pub use access::{Access, AccessFact, UnixGroups, access_from_mode, access_from_sddl};
+pub use acl::{AccessReader, UnixMode, mac_groups_from_dscl, system_reader};
+pub use census::{
+    Account, Census, CensusFacts, FoundBy, PersonKind, Resident, SystemKind, accounts_from_dscl,
+    accounts_from_get_local_user, accounts_from_passwd, census_from, census_this_laptop,
+    profile_list_from_reg, service_homes_from_dscl, service_homes_from_passwd, sid_from_whoami,
+};
 pub use drives::{
     CaseRule, Drive, FileSystem, Keeps, OtherSystem, is_real_mount, list_drives, other_system,
 };
@@ -60,10 +76,18 @@ pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
+pub use rules::{Kind, Row, Rules, RulesError, System, Where};
 pub use scan::{Counts, Scan, Stamp, scan_folder, scan_managed_folder};
 pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
+pub use sweep::{
+    BlindReason, BlindSpot, Fate, FoundPlace, Frontier, FrontierView, HARD_LINK_CHECK_MIN,
+    SHALLOW_DEPTH, Space, SpaceLine, Sweep, SweepFacts, SweepLimits, TopLine, UNEXPLAINED_FLOOR,
+    VolumeReport, blind_reason_for, sweep, sweep_this_laptop,
+};
 pub use usage::{
     Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials,
     pinned_from_finder_favourites, pinned_from_quick_access, read_usage, recent_from_lnk_dir,
     recent_from_mdfind, recent_from_xbel,
 };
+pub use volumes::{DiskKind, Volume, VolumeKind, logical_disks, volume_kind, volumes_this_laptop};
+pub use whose::{Facts as PlaceFacts, HomeOf, People, Placement, Rule, Whose, place};
