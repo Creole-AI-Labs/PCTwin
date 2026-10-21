@@ -20,7 +20,7 @@ pub mod protocol;
 pub mod read;
 pub mod session;
 
-pub use client::{Client, ClientError, Scanned};
+pub use client::{Client, ClientError, HandedOver, MadeAccount, Scanned, connect};
 pub use protocol::{Answer, FromHelper, Handle, Refusal, Request};
 pub use read::Entry;
 pub use session::Session;

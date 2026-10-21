@@ -1,8 +1,10 @@
 //! The app's side of the conversation with the helper: open the session, scan an approved person,
-//! read their files by handle, say goodbye. Every answer is checked to be the one each request
-//! has; anything else ends the conversation.
+//! read their files by handle; on the new laptop make accounts, hold each person's files and hand
+//! them over; say goodbye. Every answer is checked to be the one each request has; anything else
+//! ends the conversation.
 
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use pctwin_record::Item;
 
@@ -19,6 +21,62 @@ pub enum ClientError {
     Refused(Refusal),
     #[error("the helper answered out of turn")]
     OutOfTurn,
+    #[error("could not reach the helper: {0}")]
+    Unreachable(String),
+}
+
+/// The private channel to the helper: Windows, its named pipe; Mac and Linux, its socket.
+#[cfg(windows)]
+pub type Channel = std::fs::File;
+/// The private channel to the helper: Windows, its named pipe; Mac and Linux, its socket.
+#[cfg(unix)]
+pub type Channel = std::os::unix::net::UnixStream;
+
+/// Connects to the helper started for this move and opens its session with `token`. Windows: the
+/// named pipe `channel` (`dir` unused). Mac and Linux: the socket `channel` in the folder `dir`,
+/// refused unless the system's own account (root) serves it, so a socket planted by anyone else
+/// is never spoken to.
+pub fn connect(
+    channel: &str,
+    dir: Option<&Path>,
+    token: &str,
+) -> Result<Client<Channel>, ClientError> {
+    let unreachable = |e: pctwin_helper_os::Error| ClientError::Unreachable(e.to_string());
+    #[cfg(windows)]
+    let stream = {
+        let _ = dir;
+        let name = pctwin_helper_os::PipeName::parse(channel).map_err(unreachable)?;
+        let pipe = pctwin_helper_os::PipeClient::connect(&name).map_err(unreachable)?;
+        pipe.stream()
+            .try_clone()
+            .map_err(|e| ClientError::Unreachable(e.to_string()))?
+    };
+    #[cfg(unix)]
+    let stream = {
+        let dir = dir.ok_or_else(|| ClientError::Unreachable("no channel folder".into()))?;
+        pctwin_helper_os::connect(&dir.join(channel), 0).map_err(unreachable)?
+    };
+    Client::open(stream, token)
+}
+
+/// An account the helper made on the new laptop.
+pub struct MadeAccount {
+    /// The system's ID for it.
+    pub account: String,
+    /// The temporary password, changed by the person at their first sign-in; shown once, in the
+    /// system's own window, never stored.
+    pub password: zeroize::Zeroizing<String>,
+    /// macOS: whether it can unlock FileVault. Always `true` elsewhere.
+    pub secure_token: bool,
+}
+
+/// What a hand-over came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HandedOver {
+    pub landed: u64,
+    /// Kept aside: a file of that name was already there.
+    pub kept: u64,
+    pub failed: u64,
 }
 
 /// A person the helper scanned: their totals and their files, each with its handle. The items
@@ -112,6 +170,84 @@ impl<S: Read + Write> Client<S> {
             FromHelper::Answer(Answer::Refused(why)) => Err(ClientError::Refused(why)),
             _ => Err(ClientError::OutOfTurn),
         }
+    }
+
+    /// New laptop: makes a standard account `name` (shown as `full_name`) with a temporary
+    /// password.
+    pub fn create_account(
+        &mut self,
+        name: &str,
+        full_name: &str,
+    ) -> Result<MadeAccount, ClientError> {
+        send_request(
+            &mut self.stream,
+            &Request::CreateAccount {
+                name: name.to_string(),
+                full_name: full_name.to_string(),
+            },
+        )?;
+        match self.expect_answer(|a| matches!(a, Answer::AccountMade { .. }))? {
+            Answer::AccountMade {
+                account,
+                password,
+                secure_token,
+            } => Ok(MadeAccount {
+                account,
+                password: zeroize::Zeroizing::new(password),
+                secure_token,
+            }),
+            _ => Err(ClientError::OutOfTurn),
+        }
+    }
+
+    /// New laptop: the folder where the approved person `account`'s files are put during the
+    /// move.
+    pub fn hold_for(&mut self, account: &str) -> Result<PathBuf, ClientError> {
+        send_request(
+            &mut self.stream,
+            &Request::HoldFor {
+                account: account.to_string(),
+            },
+        )?;
+        match self.expect_answer(|a| matches!(a, Answer::Holding { .. }))? {
+            Answer::Holding { path } => Ok(PathBuf::from(path)),
+            _ => Err(ClientError::OutOfTurn),
+        }
+    }
+
+    /// New laptop: hands the approved person `account`'s held files over into their own folders,
+    /// now.
+    pub fn hand_over_now(&mut self, account: &str) -> Result<HandedOver, ClientError> {
+        send_request(
+            &mut self.stream,
+            &Request::HandOverNow {
+                account: account.to_string(),
+            },
+        )?;
+        match self.expect_answer(|a| matches!(a, Answer::HandedOver { .. }))? {
+            Answer::HandedOver {
+                landed,
+                kept,
+                failed,
+            } => Ok(HandedOver {
+                landed,
+                kept,
+                failed,
+            }),
+            _ => Err(ClientError::OutOfTurn),
+        }
+    }
+
+    /// New laptop: hands the approved person `account`'s held files over at their next sign-in.
+    pub fn hand_over_at_sign_in(&mut self, account: &str) -> Result<(), ClientError> {
+        send_request(
+            &mut self.stream,
+            &Request::HandOverAtSignIn {
+                account: account.to_string(),
+            },
+        )?;
+        self.expect_answer(|a| matches!(a, Answer::AtSignIn))?;
+        Ok(())
     }
 
     /// Ends the session: the helper ends with it.
