@@ -22,11 +22,17 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// The move protocol versions this release speaks. Each new version keeps the one before it
 /// (Engineering Plan 9.2: the current protocol and at least one version back), counting from the
 /// first released one. Version 2 added sending damaged blocks again (receipts say whether a block
-/// was written, and `SendAgain`); version 1 was never released, so nothing needs it.
+/// was written, and `SendAgain`); version 1 was never released, so nothing needs it. Version 3
+/// is the old laptop's list sent in pages (its own change; until it lands, 3 adds nothing to 2).
+/// Version 4 added pausing told to the other laptop ([`HOLD_SINCE`]); with a laptop on version 2
+/// or 3 a pause holds only the old laptop, and the other is not told.
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 2,
-    newest: 2,
+    newest: 4,
 };
+
+/// The first move protocol version with `Hold` (a pause told to the other laptop).
+pub const HOLD_SINCE: u16 = 4;
 
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33).
 const KIND: u8 = 34;

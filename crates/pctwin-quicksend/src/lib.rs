@@ -235,7 +235,7 @@ pub struct Receipt {
 
 /// Sender: offers `offer` over `ch` (already paired), then sends what the receiver accepts.
 pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickError> {
-    agree_version(ch, MOVE_PROTOCOL).await?;
+    let version = agree_version(ch, MOVE_PROTOCOL).await?;
     send_inventory(ch, &offer.record).await?;
     let offered = files_of(&offer.record);
     let accepted = read_accepted(ch, &offered).await?;
@@ -244,7 +244,7 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
         .into_iter()
         .filter(|j| accepted.contains(&j.item))
         .collect();
-    let mut sender = SenderSession::new(jobs, LANES);
+    let mut sender = SenderSession::new(jobs, LANES).with_protocol(version);
     if !accepted.is_empty() {
         sender.run(ch).await?;
     }
@@ -280,17 +280,19 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
 /// What a sender offered, for the person to accept or decline.
 pub struct Incoming {
     record: Record,
+    /// The move protocol version both laptops agreed.
+    version: u16,
 }
 
 /// Receiver: the offer from the other laptop over `ch` (already paired): names and sizes only.
 /// Refused unless it is a Quick Send (everything in it shared, nothing about people).
 pub async fn receive_offer(ch: &mut impl Channel) -> Result<Incoming, QuickError> {
-    agree_version(ch, MOVE_PROTOCOL).await?;
+    let version = agree_version(ch, MOVE_PROTOCOL).await?;
     let record = receive_inventory(ch).await?;
     if record.items.iter().any(|i| i.owner != Owner::Shared) {
         return Err(QuickError::NotAQuickSend);
     }
-    Ok(Incoming { record })
+    Ok(Incoming { record, version })
 }
 
 impl Incoming {
@@ -347,7 +349,8 @@ impl Incoming {
             .approve(DESTINATION, Approved::MyFolders, dest)
             .map_err(|e| QuickError::Destination(e.to_string()))?;
         write_accepted(ch, &wanted).await?;
-        let mut receiver = ReceiverSession::new(&table, allowance, journal, account);
+        let mut receiver =
+            ReceiverSession::new(&table, allowance, journal, account).with_protocol(self.version);
         if !wanted.is_empty() {
             receiver.run(ch).await?;
         }

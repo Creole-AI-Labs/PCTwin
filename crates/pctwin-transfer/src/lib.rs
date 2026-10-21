@@ -95,10 +95,10 @@ pub use reading::{ReadBudget, is_drive_error};
 pub use recovery::{Recovered, recover, recover_with};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
-    Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, MAX_ORIGINAL_REQUESTS_PER_SESSION,
-    MAX_ORIGINALS_PER_SESSION, ORIGINALS_REPLY_WAIT, ORIGINALS_REQUEST_TIME, OriginalsBudget,
-    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, check_originals,
-    serve_originals,
+    Channel, ChannelError, HOLD_TICK, LANE_SILENCE, MAX_OPEN_FILES,
+    MAX_ORIGINAL_REQUESTS_PER_SESSION, MAX_ORIGINALS_PER_SESSION, ORIGINALS_REPLY_WAIT,
+    ORIGINALS_REQUEST_TIME, OriginalsBudget, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
+    SenderSession, check_originals, serve_originals,
 };
 pub use undo::{
     APP_KEEPS_OPEN, CANNOT_CHECK, CHANGED_SINCE, CONNECT_OLD_LAPTOP, FOLDER_MISSING, IN_USE,
@@ -108,7 +108,7 @@ pub use undo::{
     UndoReport, Undone, WORK_STOPPED, close_undo, undo, undo_items, undo_with,
 };
 pub use version::{
-    MOVE_PROTOCOL, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
+    HOLD_SINCE, MOVE_PROTOCOL, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
 };
 
 use std::fs::File;
