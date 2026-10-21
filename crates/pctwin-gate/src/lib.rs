@@ -650,6 +650,12 @@ impl Destination {
         Some(a == b)
     }
 
+    /// Where this approved folder is, as it was approved (`None` for one handed over as a
+    /// handle). For telling the person where things land; never used to open anything.
+    pub fn shown_path(&self) -> Option<&Path> {
+        self.root_path.as_deref()
+    }
+
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut dest = Self::from_dir(Dir::open_ambient_dir(path, ambient_authority())?);

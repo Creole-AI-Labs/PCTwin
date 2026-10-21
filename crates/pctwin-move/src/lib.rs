@@ -28,7 +28,7 @@ pub mod since;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pctwin_gate::Destinations;
@@ -354,6 +354,34 @@ pub struct Problems {
     /// Per place, the space its drive's big blocks lose (the rest of each file's last block),
     /// when it is at least [`LOST_TO_BLOCKS_SHOWN`].
     pub lost_to_blocks: BTreeMap<String, u64>,
+    /// Files that would land where the new laptop starts programs by itself when someone signs
+    /// in (a Startup folder, autostart, launch agents): shown before the plan is approved, so
+    /// nothing starts running on the new laptop that the person did not see.
+    pub runs_at_sign_in: Counted,
+}
+
+/// Folders (as the end of a path, `/` between names, compared ignoring case) whose contents the
+/// system starts by itself when someone signs in.
+const SIGN_IN_PLACES: [&str; 6] = [
+    "/start menu/programs/startup/",
+    "/.config/autostart/",
+    "/.config/systemd/user/",
+    "/library/launchagents/",
+    "/library/launchdaemons/",
+    "/library/startupitems/",
+];
+
+/// Whether a file landing at `path` inside the approved folder at `root` would be started by
+/// the system when someone signs in.
+pub fn runs_at_sign_in(root: Option<&Path>, path: &str) -> bool {
+    let whole = format!(
+        "/{}/{}",
+        root.map(|r| r.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default(),
+        path
+    )
+    .to_lowercase();
+    SIGN_IN_PLACES.iter().any(|p| whole.contains(p))
 }
 
 /// The problems `record` would meet on this laptop: each included file this laptop places,
@@ -375,6 +403,9 @@ pub fn problems(
         let Ok(dest) = table.get(&place.destination) else {
             continue;
         };
+        if runs_at_sign_in(dest.shown_path(), &place.path) {
+            found.runs_at_sign_in.add(i.id);
+        }
         match dest.predict(&place.path, i.size_bytes) {
             Err(_) => found.refused.add(i.id),
             Ok(p) => {
@@ -553,4 +584,37 @@ pub async fn receive<C: Channel, S: Steps>(
         .await?
         .receive(link, table, journal, account, live)
         .await
+}
+
+#[cfg(test)]
+mod sign_in {
+    use super::runs_at_sign_in;
+    use std::path::Path;
+
+    #[test]
+    fn places_the_system_starts_at_sign_in_are_named() {
+        let roaming = Path::new(r"C:\Users\ada\AppData\Roaming");
+        assert!(runs_at_sign_in(
+            Some(roaming),
+            "Microsoft/Windows/Start Menu/Programs/Startup/updater.exe"
+        ));
+        assert!(runs_at_sign_in(
+            Some(Path::new("/home/ada")),
+            ".config/autostart/sync.desktop"
+        ));
+        assert!(runs_at_sign_in(
+            Some(Path::new("/Users/ada/Library")),
+            "LaunchAgents/com.example.helper.plist"
+        ));
+        // Ordinary places, and a folder only named like one, are not.
+        assert!(!runs_at_sign_in(
+            Some(roaming),
+            "Microsoft/Windows/Themes/a.jpg"
+        ));
+        assert!(!runs_at_sign_in(
+            Some(Path::new("/home/ada/Documents")),
+            "notes about startup/plan.txt"
+        ));
+        assert!(!runs_at_sign_in(None, "Documents/letter.txt"));
+    }
 }

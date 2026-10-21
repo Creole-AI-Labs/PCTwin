@@ -647,3 +647,36 @@ async fn try_again_brings_a_file_that_was_in_use() {
         b"sand and sea"
     );
 }
+
+/// A file that would land where the system starts programs at sign-in is shown before the plan
+/// is approved (an app-data item named for a Startup folder), with the file as an example.
+#[test]
+fn a_file_landing_where_programs_start_at_sign_in_is_shown_before_approval() {
+    let w = world();
+    let mut record = Record::new(laptop());
+    let startup = item(
+        FolderRole::Documents,
+        &[
+            "Microsoft",
+            "Windows",
+            "Start Menu",
+            "Programs",
+            "Startup",
+            "updater.exe",
+        ],
+        ItemKind::File,
+        10,
+        Inclusion::Included,
+    );
+    let letter = item(
+        FolderRole::Documents,
+        &["letter.txt"],
+        ItemKind::File,
+        10,
+        Inclusion::Included,
+    );
+    record.items = vec![startup.clone(), letter];
+    let found = pctwin_move::problems(&record, |i| Some(landing(i)), &w.table);
+    assert_eq!(found.runs_at_sign_in.count, 1);
+    assert_eq!(found.runs_at_sign_in.examples, vec![startup.id]);
+}
