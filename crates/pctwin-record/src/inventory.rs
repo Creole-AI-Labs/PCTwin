@@ -749,6 +749,23 @@ impl InventoryReader {
 
     /// Reads the next page and returns its items.
     pub fn page(&mut self, bytes: &[u8]) -> Result<Vec<Item>, RecordError> {
+        let mut items = Vec::new();
+        self.page_into(bytes, &mut items)?;
+        Ok(items)
+    }
+
+    /// Reads the next page, adding its items to the end of `items`, so a laptop gathering the
+    /// whole list makes no list per page to let go of (on a refusal, `items` is as it was).
+    pub fn page_into(&mut self, bytes: &[u8], items: &mut Vec<Item>) -> Result<(), RecordError> {
+        let before = items.len();
+        let read = self.read_page(bytes, items);
+        if read.is_err() {
+            items.truncate(before);
+        }
+        read
+    }
+
+    fn read_page(&mut self, bytes: &[u8], items: &mut Vec<Item>) -> Result<(), RecordError> {
         if self.next_page >= self.pages {
             return Err(bad("more pages than announced"));
         }
@@ -818,7 +835,7 @@ impl InventoryReader {
                 used: false,
             });
         }
-        let mut items = Vec::with_capacity(count);
+        items.reserve(count);
         for _ in 0..count {
             let mut id = [0u8; 16];
             id.copy_from_slice(r.take(16)?);
@@ -876,7 +893,7 @@ impl InventoryReader {
         self.hash.page(bytes);
         self.next_page += 1;
         self.items_read += count as u64;
-        Ok(items)
+        Ok(())
     }
 
     /// The fingerprint, once every page was read.

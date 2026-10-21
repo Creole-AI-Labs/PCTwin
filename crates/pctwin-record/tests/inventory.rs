@@ -853,3 +853,26 @@ fn a_name_kept_exactly_is_counted_with_its_second_allocation() {
         "a page that takes more memory than PCTwin allows"
     );
 }
+
+/// Pages read into one list give the same items as reading them one by one, and a page that is
+/// refused leaves the list as it was.
+#[test]
+fn pages_read_into_one_list_give_the_same_items_and_a_refusal_adds_none() {
+    let items = many(25_000);
+    let enc = encode_inventory(&laptop(), &items).unwrap();
+    let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+    let mut all = Vec::new();
+    for page in &enc.pages {
+        reader.page_into(page, &mut all).unwrap();
+    }
+    assert_eq!(all, items);
+    // The second page with its last byte changed, after a good first page.
+    let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+    let mut some = Vec::new();
+    reader.page_into(&enc.pages[0], &mut some).unwrap();
+    let kept = some.clone();
+    let mut bad = enc.pages[1].clone();
+    bad.push(0);
+    assert!(reader.page_into(&bad, &mut some).is_err());
+    assert_eq!(some, kept);
+}
