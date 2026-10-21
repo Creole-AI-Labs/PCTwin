@@ -1,12 +1,15 @@
 //! macOS and Linux: the helper's private channel, a Unix socket in a folder only the mover's
 //! account can enter, and who is calling. No unsafe code here.
+//!
+//! Every step after the parent folder is checked works through open handles (`mkdirat`,
+//! `openat` with `O_NOFOLLOW`, `fchmod`, `fchown`), never by path, so a link or folder swapped
+//! in by name between a check and a change is never followed.
 
 use crate::{Caller, Error};
-use rustix::fs::{Mode, OFlags};
-use std::fs::DirBuilder;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use rustix::fs::{AtFlags, FileType, Mode, OFlags};
+use std::os::fd::OwnedFd;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// Folder mode: the owner may enter, list and write; no one else may do anything.
 pub(crate) const PRIVATE_MODE: u32 = 0o700;
@@ -14,44 +17,88 @@ pub(crate) const PRIVATE_MODE: u32 = 0o700;
 pub(crate) const SOCKET_MODE: u32 = 0o600;
 
 /// A folder only one account (and root) can enter: a real folder, not a link, owned by that
-/// account, mode exactly 0700, inside a parent no other account can rename it out of.
+/// account, mode exactly 0700, inside a parent no other account can rename it out of. It keeps
+/// the folder open; everything made inside it is made through that handle.
 #[derive(Debug)]
 pub struct PrivateDir {
     path: PathBuf,
     owner: u32,
+    fd: OwnedFd,
+}
+
+fn dir_flags() -> OFlags {
+    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+}
+
+fn mode(bits: u32) -> Mode {
+    Mode::from_bits_truncate(bits as _)
+}
+
+/// Splits `path` into its parent, opened (not through a link) and checked first, and its last
+/// name.
+fn checked_parent(path: &Path, owner: u32) -> Result<(OwnedFd, PathBuf), Error> {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(Error::BadInput("the folder's path may not hold \"..\""));
+    }
+    let name = match path.components().next_back() {
+        Some(Component::Normal(n)) => PathBuf::from(n),
+        _ => return Err(Error::BadInput("the folder must end in a plain name")),
+    };
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or(Error::BadInput("the folder must be a full path"))?;
+    let pfd = rustix::fs::open(parent, dir_flags(), Mode::empty()).map_err(|e| {
+        Error::NotPrivate(format!(
+            "cannot open its parent as a folder (not a link): {e}"
+        ))
+    })?;
+    let pst = rustix::fs::fstat(&pfd).map_err(io)?;
+    check_parent(pst.st_uid, bits(pst.st_mode), owner)?;
+    Ok((pfd, name))
 }
 
 impl PrivateDir {
-    /// Makes the folder at `path` (which must not exist yet) for `owner`, then checks it. When
-    /// run as root for another account, the folder is handed to that account.
+    /// Makes the folder at `path` (which must not exist yet) for `owner`. The parent is checked
+    /// before anything is made; the folder is made through the parent's handle, opened without
+    /// following a link, set to mode 0700 and handed to `owner` through its own handle, then
+    /// checked again.
     pub fn create(path: &Path, owner: u32) -> Result<PrivateDir, Error> {
-        DirBuilder::new().mode(PRIVATE_MODE).create(path)?;
-        // The process's umask can only remove bits; set the mode exactly.
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(PRIVATE_MODE))?;
+        let (pfd, name) = checked_parent(path, owner)?;
+        rustix::fs::mkdirat(&pfd, &name, mode(PRIVATE_MODE)).map_err(io)?;
+        let fd = rustix::fs::openat(&pfd, &name, dir_flags(), Mode::empty()).map_err(|e| {
+            Error::NotPrivate(format!(
+                "the new folder was swapped before it was opened: {e}"
+            ))
+        })?;
+        // The process's umask can only remove bits; set the mode exactly, on the handle.
+        rustix::fs::fchmod(&fd, mode(PRIVATE_MODE)).map_err(io)?;
         if rustix::process::geteuid().as_raw() != owner {
-            std::os::unix::fs::lchown(path, Some(owner), None)?;
+            rustix::fs::fchown(&fd, Some(rustix::fs::Uid::from_raw_unchecked(owner)), None)
+                .map_err(io)?;
         }
-        PrivateDir::open(path, owner)
-    }
-
-    /// Checks an existing folder is private to `owner`.
-    pub fn open(path: &Path, owner: u32) -> Result<PrivateDir, Error> {
-        let dir = rustix::fs::open(
-            path,
-            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::empty(),
-        )
-        .map_err(|e| Error::NotPrivate(format!("cannot open it as a folder (not a link): {e}")))?;
-        let st = rustix::fs::fstat(&dir).map_err(io)?;
+        let st = rustix::fs::fstat(&fd).map_err(io)?;
         check_private(st.st_uid, bits(st.st_mode), owner)?;
-        let parent = path
-            .parent()
-            .ok_or_else(|| Error::NotPrivate("it has no parent folder".into()))?;
-        let pst = rustix::fs::stat(parent).map_err(io)?;
-        check_parent(pst.st_uid, bits(pst.st_mode), owner)?;
         Ok(PrivateDir {
             path: path.to_path_buf(),
             owner,
+            fd,
+        })
+    }
+
+    /// Checks an existing folder is private to `owner`: its parent first, then the folder
+    /// itself, opened through the parent's handle without following a link.
+    pub fn open(path: &Path, owner: u32) -> Result<PrivateDir, Error> {
+        let (pfd, name) = checked_parent(path, owner)?;
+        let fd = rustix::fs::openat(&pfd, &name, dir_flags(), Mode::empty()).map_err(|e| {
+            Error::NotPrivate(format!("cannot open it as a folder (not a link): {e}"))
+        })?;
+        let st = rustix::fs::fstat(&fd).map_err(io)?;
+        check_private(st.st_uid, bits(st.st_mode), owner)?;
+        Ok(PrivateDir {
+            path: path.to_path_buf(),
+            owner,
+            fd,
         })
     }
 
@@ -63,6 +110,20 @@ impl PrivateDir {
     /// The one account that may enter it.
     pub fn owner(&self) -> u32 {
         self.owner
+    }
+
+    /// Its path still names the very folder this handle holds (not one swapped in), and that
+    /// folder is still private.
+    fn path_is_still_it(&self) -> Result<(), Error> {
+        let held = rustix::fs::fstat(&self.fd).map_err(io)?;
+        let named = PrivateDir::open(&self.path, self.owner)?;
+        let now = rustix::fs::fstat(&named.fd).map_err(io)?;
+        if (held.st_dev, held.st_ino) != (now.st_dev, now.st_ino) {
+            return Err(Error::NotPrivate(
+                "its path now names a different folder".into(),
+            ));
+        }
+        check_private(held.st_uid, bits(held.st_mode), self.owner)
     }
 }
 
@@ -123,6 +184,10 @@ pub struct SocketServer {
 impl SocketServer {
     /// Makes the socket `name` in `dir`, owned by the folder's owner, mode 0600.
     /// [`Error::NameTaken`] if something of that name is already there: never reused.
+    ///
+    /// Binding takes a path, so the folder's path is checked to name the held folder before and
+    /// after; the entry is then confirmed to be this new socket, and its mode and owner are set
+    /// relative to the folder's handle, never through the folder's path.
     pub fn bind(dir: &PrivateDir, name: &str) -> Result<SocketServer, Error> {
         if name.is_empty()
             || name.len() > 32
@@ -133,8 +198,7 @@ impl SocketServer {
         {
             return Err(Error::BadInput("not a socket name"));
         }
-        // Checked again: the folder must still be private when the socket appears in it.
-        let dir = PrivateDir::open(&dir.path, dir.owner)?;
+        dir.path_is_still_it()?;
         let path = dir.path.join(name);
         let listener = match UnixListener::bind(&path) {
             Ok(l) => l,
@@ -142,9 +206,23 @@ impl SocketServer {
             Err(e) => return Err(e.into()),
         };
         let server = SocketServer { listener, path };
-        std::fs::set_permissions(&server.path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
+        dir.path_is_still_it()?;
+        let st = rustix::fs::statat(&dir.fd, name, AtFlags::SYMLINK_NOFOLLOW).map_err(io)?;
+        if FileType::from_raw_mode(st.st_mode) != FileType::Socket
+            || st.st_uid != rustix::process::geteuid().as_raw()
+        {
+            return Err(Error::NotPrivate("the socket was swapped".into()));
+        }
+        rustix::fs::chmodat(&dir.fd, name, mode(SOCKET_MODE), AtFlags::empty()).map_err(io)?;
         if rustix::process::geteuid().as_raw() != dir.owner {
-            std::os::unix::fs::lchown(&server.path, Some(dir.owner), None)?;
+            rustix::fs::chownat(
+                &dir.fd,
+                name,
+                Some(rustix::fs::Uid::from_raw_unchecked(dir.owner)),
+                None,
+                AtFlags::SYMLINK_NOFOLLOW,
+            )
+            .map_err(io)?;
         }
         Ok(server)
     }
@@ -168,13 +246,14 @@ impl Drop for SocketServer {
     }
 }
 
-/// Who is on the other end of a connected Unix socket: the process ID and account the system
-/// recorded when it connected, and the program that process runs. Works from either end (the
-/// app checks the helper is root and the process it started).
+/// Who is on the other end of a connected Unix socket. Works from either end (the app checks
+/// the helper is root and the process it started).
 ///
-/// Not closed here (for the fresh-context review): the program path is read after the
-/// connection, by process ID; a client that ends at once could have its ID reused before the
-/// path is read. The account is the one recorded at connection time and cannot be swapped.
+/// Only [`Caller::account`] is authoritative: the kernel records it when the connection is made
+/// and it cannot change afterwards. The process ID is the one recorded then, and
+/// [`Caller::program_hint`] is read afterwards by that ID (`/proc/<pid>/exe`, `proc_pidpath`),
+/// so a process that starts another program, or ends and has its ID reused, can change it: it
+/// is for the record and the report, never for deciding what is allowed.
 pub fn caller_of(stream: &UnixStream) -> Result<Caller, Error> {
     #[cfg(target_os = "linux")]
     {

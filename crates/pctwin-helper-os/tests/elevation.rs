@@ -37,12 +37,16 @@ impl<F: Fn(&LaunchRequest) -> Result<Process, LaunchError>> Launcher for StandIn
     }
 }
 
+/// A program that exists: this test program itself.
 fn helper_path() -> PathBuf {
-    if cfg!(windows) {
-        PathBuf::from(r"C:\Program Files\PCTwin\pctwin-helper.exe")
-    } else {
-        PathBuf::from("/usr/lib/pctwin/pctwin-helper")
-    }
+    std::env::current_exe().unwrap()
+}
+
+/// A path as the system resolves it, in the form a launch request keeps (no `\\?\` prefix).
+fn real(p: &Path) -> PathBuf {
+    let c = std::fs::canonicalize(p).unwrap();
+    let text = c.to_string_lossy().into_owned();
+    PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(&text))
 }
 
 #[test]
@@ -52,7 +56,7 @@ fn a_refused_prompt_is_a_typed_answer() {
     assert!(matches!(r, Elevation::Refused), "{r:?}");
     assert_eq!(l.calls.get(), 1);
     let seen = l.seen.borrow().clone().unwrap();
-    assert_eq!(seen.program(), helper_path());
+    assert_eq!(seen.program(), real(&helper_path()));
     assert_eq!(seen.args(), ["--pipe", "pctwin-helper-x"]);
 }
 
@@ -71,30 +75,88 @@ fn a_failed_launch_is_an_error_not_a_refusal() {
 #[test]
 fn only_full_local_paths_and_no_nul_reach_the_launcher() {
     let l = StandIn::new(|_| Err(LaunchError::Cancelled));
-    let mut bad: Vec<(PathBuf, Vec<&str>)> = vec![
+    let exe = helper_path();
+    let folder = exe.parent().unwrap();
+    let exe_name = exe.file_name().unwrap();
+    let folder_name = folder.file_name().unwrap();
+    // Refused as text, before the system is asked anything.
+    let mut text: Vec<(PathBuf, Vec<&str>)> = vec![
         (PathBuf::from("pctwin-helper"), vec![]),
         (PathBuf::from("bin/pctwin-helper"), vec![]),
-        (helper_path(), vec!["a\0b"]),
+        (exe.clone(), vec!["a\0b"]),
+        (folder.join("..").join(folder_name).join(exe_name), vec![]),
+        (folder.join(".").join(exe_name), vec![]),
     ];
     if cfg!(windows) {
         for p in [
             r"\\server\share\pctwin-helper.exe",
+            r"\\localhost\C$\Windows\System32\cmd.exe",
             r"\\?\C:\pctwin-helper.exe",
             r"\\.\C:\pctwin-helper.exe",
             r"C:pctwin-helper.exe",
             r"\pctwin-helper.exe",
         ] {
-            bad.push((PathBuf::from(p), vec![]));
+            text.push((PathBuf::from(p), vec![]));
         }
+        let mut stream = exe.clone().into_os_string();
+        stream.push(":stream");
+        text.push((PathBuf::from(stream), vec![]));
     }
-    for (program, args) in &bad {
+    for (program, args) in &text {
         let r = launch_elevated_with(&l, program, args);
         assert!(
             matches!(r, Err(Error::BadInput(_))),
             "{program:?} {args:?}: {r:?}"
         );
     }
+    // Refused once resolved: not there, or not a file.
+    for program in [folder.join("no-such-helper-program"), folder.to_path_buf()] {
+        let r = launch_elevated_with(&l, &program, &[]);
+        assert!(r.is_err(), "{program:?}: {r:?}");
+    }
     assert_eq!(l.calls.get(), 0, "nothing refused may reach the launcher");
+}
+
+#[test]
+fn the_helper_beside_the_app_is_found_by_plain_name_only() {
+    let exe = helper_path();
+    let name = exe.file_name().unwrap().to_str().unwrap();
+    let r = LaunchRequest::beside_current_exe(name, &["x"]).unwrap();
+    assert_eq!(r.program(), real(&exe));
+    for bad in ["", "..", ".", "../x", "a/b", "a\\b", "x:y", "/abs"] {
+        assert!(
+            LaunchRequest::beside_current_exe(bad, &[]).is_err(),
+            "{bad:?}"
+        );
+    }
+}
+
+/// A link (a Windows junction, a Unix symbolic link) in the path is resolved: the request
+/// names the real file.
+#[test]
+fn links_in_the_path_are_resolved() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("real");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("helper.bin"), b"x").unwrap();
+    let link = dir.path().join("link");
+    #[cfg(windows)]
+    {
+        let ok = std::process::Command::new("cmd.exe")
+            .args(["/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "mklink /J");
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let r = LaunchRequest::new(&link.join("helper.bin"), &[]).unwrap();
+    assert_eq!(r.program(), real(&target.join("helper.bin")));
+    assert!(!r.program().starts_with(&link));
 }
 
 #[cfg(unix)]
@@ -168,7 +230,7 @@ fn windows_arguments_come_back_exactly() {
         vec!["&|<>^%PATH%!", "new\nline", "é ü 字"],
     ];
     for args in cases {
-        let request = LaunchRequest::new(Path::new(r"C:\x.exe"), &args).unwrap();
+        let request = LaunchRequest::new(&helper_path(), &args).unwrap();
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -268,6 +330,39 @@ fn real_runas_starts_and_reports_the_exit_code() {
         }
         Elevation::Refused => panic!("refused with no prompt"),
     }
+}
+
+/// A drive letter mapped to a network share (here this computer's own administrative share)
+/// resolves to the network, so a program on it is refused.
+#[cfg(windows)]
+#[test]
+#[ignore = "needs PCTWIN_HELPER_OS_ADMIN_TESTS=1 and an administrator to map a drive (CI)"]
+fn a_program_on_a_mapped_network_drive_is_refused() {
+    assert!(
+        admin_tests(),
+        "set PCTWIN_HELPER_OS_ADMIN_TESTS=1 (CI only)"
+    );
+    let free = ('M'..='Y')
+        .rev()
+        .find(|d| !Path::new(&format!("{d}:\\")).exists())
+        .expect("a free drive letter");
+    let drive = format!("{free}:");
+    let mapped = std::process::Command::new("net")
+        .args(["use", &drive, r"\\localhost\C$", "/persistent:no"])
+        .output()
+        .unwrap();
+    assert!(mapped.status.success(), "net use: {mapped:?}");
+    let cmd = format!(r"{drive}\Windows\System32\cmd.exe");
+    let seen = Path::new(&cmd).exists();
+    let r = LaunchRequest::new(Path::new(&cmd), &[]);
+    let _ = std::process::Command::new("net")
+        .args(["use", &drive, "/delete", "/y"])
+        .output();
+    assert!(seen, "the mapped drive did not show the file");
+    assert!(
+        matches!(r, Err(Error::BadInput(_))),
+        "a program on a network drive was accepted: {r:?}"
+    );
 }
 
 /// The real pkexec, on a runner with no polkit agent: it cannot ask anyone, so it must end as a

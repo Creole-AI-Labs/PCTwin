@@ -22,7 +22,7 @@ pub(crate) fn peer(stream: &UnixStream) -> Result<Caller, Error> {
     Ok(Caller {
         process_id,
         account: Account::Uid(cred.uid()),
-        program: PathBuf::from(program),
+        program_hint: PathBuf::from(program),
     })
 }
 

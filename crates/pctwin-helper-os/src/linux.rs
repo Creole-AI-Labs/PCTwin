@@ -40,6 +40,6 @@ pub(crate) fn peer(stream: &UnixStream) -> Result<Caller, Error> {
     Ok(Caller {
         process_id,
         account: Account::Uid(cred.uid.as_raw()),
-        program,
+        program_hint: program,
     })
 }

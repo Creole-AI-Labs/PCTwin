@@ -90,9 +90,76 @@ fn a_parent_others_can_write_is_refused() {
         PrivateDir::create(&path, my_uid()),
         Err(Error::NotPrivate(_))
     ));
+    // The parent is checked before anything is made: nothing is left behind.
+    assert!(
+        std::fs::symlink_metadata(&path).is_err(),
+        "a refused parent must be left as it was"
+    );
+    assert_eq!(std::fs::read_dir(&shared).unwrap().count(), 0);
     // Sticky, as /tmp is: others cannot rename it away.
     std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o1777)).unwrap();
+    assert!(PrivateDir::create(&path, my_uid()).is_ok());
     assert!(PrivateDir::open(&path, my_uid()).is_ok());
+}
+
+#[test]
+fn a_parent_that_is_a_link_is_refused_and_left_alone() {
+    let p = parent();
+    let real = p.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let link = p.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    assert!(matches!(
+        PrivateDir::create(&link.join("d"), my_uid()),
+        Err(Error::NotPrivate(_))
+    ));
+    assert_eq!(std::fs::read_dir(&real).unwrap().count(), 0);
+}
+
+#[test]
+fn a_name_already_taken_by_a_link_is_never_made_or_followed() {
+    let p = parent();
+    let elsewhere = p.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let path = p.path().join("d");
+    std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
+    assert!(PrivateDir::create(&path, my_uid()).is_err());
+    let m = std::fs::metadata(&elsewhere).unwrap();
+    assert_ne!(
+        m.mode() & 0o777,
+        0o700,
+        "the link's target must not be changed"
+    );
+}
+
+/// The folder is swapped for a link to another private folder after it was checked: the
+/// socket is never made through the swapped path.
+#[test]
+fn a_folder_swapped_for_a_link_is_refused_at_bind() {
+    let p = parent();
+    let path = p.path().join("d");
+    let dir = PrivateDir::create(&path, my_uid()).unwrap();
+    let other = p.path().join("other");
+    PrivateDir::create(&other, my_uid()).unwrap();
+    std::fs::rename(&path, p.path().join("moved")).unwrap();
+    std::os::unix::fs::symlink(&other, &path).unwrap();
+    let r = SocketServer::bind(&dir, &socket_name().unwrap());
+    assert!(matches!(r, Err(Error::NotPrivate(_))), "{r:?}");
+    assert_eq!(std::fs::read_dir(&other).unwrap().count(), 0);
+}
+
+/// The folder is swapped for another real private folder: still refused (the path no longer
+/// names the folder that was checked).
+#[test]
+fn a_folder_swapped_for_another_folder_is_refused_at_bind() {
+    let p = parent();
+    let path = p.path().join("d");
+    let dir = PrivateDir::create(&path, my_uid()).unwrap();
+    std::fs::rename(&path, p.path().join("moved")).unwrap();
+    PrivateDir::create(&path, my_uid()).unwrap();
+    let r = SocketServer::bind(&dir, &socket_name().unwrap());
+    assert!(matches!(r, Err(Error::NotPrivate(_))), "{r:?}");
+    assert_eq!(std::fs::read_dir(&path).unwrap().count(), 0);
 }
 
 #[test]
@@ -126,7 +193,7 @@ fn a_caller_in_this_process_is_this_process() {
     assert_eq!(caller.process_id, std::process::id());
     assert_eq!(caller.account, Account::Uid(my_uid()));
     assert!(same_file(
-        &caller.program,
+        &caller.program_hint,
         &std::env::current_exe().unwrap()
     ));
     // And from the client's end: the server is this process too.
@@ -156,7 +223,7 @@ fn a_caller_in_another_process_is_that_process() {
     assert_eq!(caller.process_id, child.id());
     assert_eq!(caller.account, Account::Uid(my_uid()));
     assert!(same_file(
-        &caller.program,
+        &caller.program_hint,
         &std::env::current_exe().unwrap()
     ));
 }
@@ -183,7 +250,9 @@ fn another_account_cannot_reach_the_socket() {
         "set PCTWIN_HELPER_OS_ADMIN_TESTS=1 (CI only)"
     );
     // The parent is /tmp itself so that `nobody` can reach the private folder's door.
-    let path = PathBuf::from(format!("/tmp/pctwin-h-{}", &socket_name().unwrap()[2..10]));
+    // /tmp itself is a link on macOS; the folder's parent must be the real folder.
+    let tmp = std::fs::canonicalize("/tmp").unwrap();
+    let path = tmp.join(format!("pctwin-h-{}", &socket_name().unwrap()[2..10]));
     let dir = PrivateDir::create(&path, my_uid()).unwrap();
     let server = SocketServer::bind(&dir, "s.sock").unwrap();
     let as_nobody = |code: &str| {

@@ -12,7 +12,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 **In progress**
 
-- **The foundation of the administrator helper.** When one move takes everyone on a laptop, a small helper does the few jobs that need an administrator's approval. Its first piece is ready for review: it asks through the computer's own approval window (on Windows and Linux), or as a background service an administrator switches on in System Settings (on a Mac). It talks to PCTwin over a private channel only the person moving can reach, and on every connection it checks which program and which account is calling. If someone says no to the approval window, PCTwin is told plainly and nothing runs.
+- **The foundation of the administrator helper.** When one move takes everyone on a laptop, a small helper does the few jobs that need an administrator's approval. Its first piece is ready for review: it asks through the computer's own approval window (on Windows and Linux), or as a background service an administrator switches on in System Settings (on a Mac). It talks to PCTwin over a private channel only the person moving can reach, and on every connection it checks which account is calling. If someone says no to the approval window, PCTwin is told plainly and nothing runs.
 
 ## 16 October 2026
 

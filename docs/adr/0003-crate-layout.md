@@ -38,6 +38,20 @@ One workspace (`Cargo.toml`), the app in `app/src-tauri`, and one crate per job 
 - Dependencies point one way: the safety gate, the journal and the record never depend on the
   transfer or the network crates; the transfer builds on them.
 
+## Who the administrator helper trusts (20 October 2026, after its first review)
+
+- The helper authorises only on two facts: the caller's account, as the system records it when
+  the connection is made (Windows: the token the client connected with, read through the pipe;
+  macOS and Linux: the socket's peer credentials), and the private channel itself (a pipe or a
+  socket folder only the mover's account and SYSTEM or root can reach).
+- The caller's process ID and program path are read afterwards, by process ID, so a caller that
+  starts another program, or ends and has its ID reused, can change them. They are kept as
+  `program_hint`, for the record and the report, never for allowing anything.
+- The later route to tie a request to a signed program, not built yet: on macOS, the peer's
+  audit token (`LOCAL_PEERTOKEN`) checked against a code-signing requirement once the Developer
+  ID exists; on Linux, a process handle for the peer (`SO_PEERPIDFD`, kernel 6.5 and later), so
+  the program is read from the very process that connected.
+
 ## Consequences
 
 - More crates to version together; they share one workspace version.

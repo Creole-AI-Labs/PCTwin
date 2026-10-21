@@ -98,21 +98,62 @@ fn a_caller_in_this_process_is_this_process() {
     let server = PipeServer::create(&name, &me()).unwrap();
     let client = PipeClient::connect(&name).unwrap();
     server.accept().unwrap();
-    let caller = caller_of(&server).unwrap();
-    assert_eq!(caller.process_id, std::process::id());
-    assert_eq!(caller.account, Account::Sid(me()));
-    assert!(same_file(
-        &caller.program,
-        &std::env::current_exe().unwrap()
-    ));
-    assert_eq!(client.server_process_id().unwrap(), std::process::id());
-
+    // The client speaks first; the server reads before it asks who is calling.
     let mut w = client.stream();
     w.write_all(b"hello").unwrap();
     let mut buf = [0u8; 5];
     let mut r = server.stream();
     r.read_exact(&mut buf).unwrap();
     assert_eq!(&buf, b"hello");
+
+    let caller = caller_of(&server).unwrap();
+    assert_eq!(caller.process_id, std::process::id());
+    assert_eq!(caller.account, Account::Sid(me()));
+    assert!(same_file(
+        &caller.program_hint,
+        &std::env::current_exe().unwrap()
+    ));
+    assert_eq!(client.server_process_id().unwrap(), std::process::id());
+}
+
+/// A server that tries to act as the client gets only an identification token: it can see who
+/// the client is, never open anything as the client (`SECURITY_IDENTIFICATION`). The server
+/// here is PowerShell, impersonating the client and reporting the level it was given.
+#[test]
+fn the_server_may_only_identify_the_client_never_act_as_it() {
+    let name = PipeName::random().unwrap();
+    let script = format!(
+        "$s = New-Object System.IO.Pipes.NamedPipeServerStream('{}', 'InOut', 1); \
+         [Console]::Out.WriteLine('ready'); [Console]::Out.Flush(); \
+         $s.WaitForConnection(); [void]$s.ReadByte(); \
+         $level = 'none'; \
+         try {{ $s.RunAsClient({{ $script:level = [Security.Principal.WindowsIdentity]::GetCurrent($true).ImpersonationLevel }}) }} \
+         catch {{ $level = 'error: ' + $_.Exception.InnerException.Message }}; \
+         [Console]::Out.WriteLine('level=' + $level); [Console]::Out.Flush(); $s.Dispose()",
+        name.as_str()
+    );
+    let mut server = Command::new("powershell.exe")
+        // pwsh (CI's shell) sets a module path Windows PowerShell 5.1 cannot load from.
+        .env_remove("PSModulePath")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(server.stdout.take().unwrap());
+    let mut line = String::new();
+    out.read_line(&mut line).unwrap();
+    assert_eq!(line.trim(), "ready");
+    let client = PipeClient::connect(&name).unwrap();
+    client.stream().write_all(b"x").unwrap();
+    let mut rest = String::new();
+    out.read_to_string(&mut rest).unwrap();
+    let _ = server.wait();
+    drop(client);
+    assert!(
+        rest.lines().any(|l| l.trim() == "level=Identification"),
+        "the server was given more than identification: {rest}"
+    );
 }
 
 #[test]
@@ -192,7 +233,7 @@ fn a_caller_in_another_process_is_that_process() {
     assert_ne!(caller.process_id, std::process::id());
     assert_eq!(caller.account, Account::Sid(me()));
     assert!(same_file(
-        &caller.program,
+        &caller.program_hint,
         &std::env::current_exe().unwrap()
     ));
 }
@@ -203,6 +244,8 @@ fn a_caller_that_has_ended_is_not_vouched_for() {
     let server = PipeServer::create(&name, &me()).unwrap();
     let mut child = spawn_child_client(&name, "leave");
     server.accept().unwrap();
+    let mut b = [0u8; 1];
+    server.stream().read_exact(&mut b).unwrap();
     assert!(child.wait().unwrap().success());
     let r = caller_of(&server);
     assert!(matches!(r, Err(Error::CallerGone)), "{r:?}");
@@ -216,8 +259,8 @@ fn child_client() {
     };
     let name = PipeName::parse(name.to_str().unwrap()).unwrap();
     let client = PipeClient::connect(&name).unwrap();
+    client.stream().write_all(b"x").unwrap();
     if std::env::var("PCTWIN_HELPER_OS_CHILD_MODE").as_deref() == Ok("stay") {
-        client.stream().write_all(b"x").unwrap();
         let mut b = [0u8; 1];
         client.stream().read_exact(&mut b).unwrap();
     }

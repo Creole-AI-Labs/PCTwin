@@ -21,21 +21,22 @@ use windows::Win32::Security::Authorization::{
     SE_KERNEL_OBJECT,
 };
 use windows::Win32::Security::{
-    DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
-    TOKEN_QUERY, TOKEN_USER, TokenUser,
+    DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, RevertToSelf,
+    SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
-    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX,
+    FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW, PIPE_ACCESS_DUPLEX,
     SECURITY_IDENTIFICATION,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
-    NAMED_PIPE_MODE, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+    ImpersonateNamedPipeClient, NAMED_PIPE_MODE, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
+    PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 use windows::Win32::System::Threading::{
-    GetExitCodeProcess, GetProcessId, INFINITE, OpenProcess, OpenProcessToken, PROCESS_NAME_WIN32,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, QueryFullProcessImageNameW,
-    WaitForSingleObject,
+    GetCurrentThread, GetExitCodeProcess, GetProcessId, INFINITE, OpenProcess, OpenProcessToken,
+    OpenThreadToken, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    QueryFullProcessImageNameW, WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{
     SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
@@ -294,42 +295,88 @@ fn os_open_process(id: u32) -> Result<OwnedHandle, HRESULT> {
     r.map_err(|e| e.code())
 }
 
-/// The account (its security identifier, as text) the process runs as.
-fn os_token_user(process: BorrowedHandle<'_>) -> Result<String, HRESULT> {
+/// The process's own access token, to read its account.
+fn os_process_token(process: BorrowedHandle<'_>) -> Result<OwnedHandle, HRESULT> {
     let h = raw(process);
+    let mut token = HANDLE::default();
+    // SAFETY: `h` is borrowed for the call; a token handle the call returns is ours alone and
+    // wrapped exactly once.
+    #[expect(unsafe_code, reason = "OpenProcessToken has no safe binding")]
+    let r = unsafe {
+        OpenProcessToken(h, TOKEN_QUERY, &mut token).map(|()| OwnedHandle::from_raw_handle(token.0))
+    };
+    r.map_err(|e| e.code())
+}
+
+/// The token the pipe's client connected with, as the system holds it for this connection
+/// (not looked up by process ID). Taken by impersonating the client on this thread for the
+/// length of one call, at the level the client allowed (identification), and reverted at once.
+fn os_client_token(pipe: BorrowedHandle<'_>) -> Result<OwnedHandle, HRESULT> {
+    let h = raw(pipe);
+    let mut token = HANDLE::default();
+    // SAFETY: `h` is our pipe's server handle, borrowed for the call. While impersonating, the
+    // only call made is OpenThreadToken on this thread's pseudo-handle (opened as self, so the
+    // client's identity-only token never opens anything); a returned handle is wrapped exactly
+    // once. RevertToSelf runs whatever OpenThreadToken returned; if it ever failed, this thread
+    // would go on as the client, so the process stops instead.
+    #[expect(
+        unsafe_code,
+        reason = "ImpersonateNamedPipeClient and OpenThreadToken have no safe binding"
+    )]
+    let r = unsafe {
+        ImpersonateNamedPipeClient(h)
+            .map_err(|e| e.code())
+            .and_then(|()| {
+                let opened = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, true, &mut token);
+                if RevertToSelf().is_err() {
+                    std::process::abort();
+                }
+                opened
+                    .map(|()| OwnedHandle::from_raw_handle(token.0))
+                    .map_err(|e| e.code())
+            })
+    };
+    r
+}
+
+/// The account (its security identifier, as text) a token belongs to.
+fn os_token_user(token: BorrowedHandle<'_>) -> Result<String, HRESULT> {
+    let h = raw(token);
     // Room for TOKEN_USER and the largest identifier (68 bytes), aligned for TOKEN_USER.
     let mut buffer = [0u64; 64];
     let mut needed = 0u32;
-    // SAFETY: the token handle is wrapped (closed once, on drop) as soon as it exists. The
-    // buffer is aligned and its true size is passed, so GetTokenInformation cannot overrun it,
-    // and on success it holds a TOKEN_USER whose identifier points inside the buffer, read while
-    // the buffer lives. The text the system allocates is copied out, then freed once.
-    #[expect(
-        unsafe_code,
-        reason = "reading a process token's user has no safe binding"
-    )]
+    // SAFETY: `h` is a token handle borrowed for the call. The buffer is aligned and its true
+    // size is passed, so GetTokenInformation cannot overrun it, and on success it holds a
+    // TOKEN_USER whose identifier points inside the buffer, read while the buffer lives. The
+    // text the system allocates is copied out, then freed once.
+    #[expect(unsafe_code, reason = "reading a token's user has no safe binding")]
     let r = unsafe {
-        let mut token = HANDLE::default();
-        OpenProcessToken(h, TOKEN_QUERY, &mut token)
-            .map_err(|e| e.code())
-            .and_then(|()| {
-                let token = OwnedHandle::from_raw_handle(token.0);
-                GetTokenInformation(
-                    HANDLE(token.as_raw_handle()),
-                    TokenUser,
-                    Some(buffer.as_mut_ptr().cast()),
-                    std::mem::size_of_val(&buffer) as u32,
-                    &mut needed,
-                )
-                .map_err(|e| e.code())?;
-                let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
-                let mut text = PWSTR::null();
-                ConvertSidToStringSidW(user.User.Sid, &mut text).map_err(|e| e.code())?;
-                let sid = String::from_utf16_lossy(text.as_wide());
-                LocalFree(Some(HLOCAL(text.0.cast())));
-                Ok(sid)
-            })
+        GetTokenInformation(
+            h,
+            TokenUser,
+            Some(buffer.as_mut_ptr().cast()),
+            std::mem::size_of_val(&buffer) as u32,
+            &mut needed,
+        )
+        .map_err(|e| e.code())
+        .and_then(|()| {
+            let user = &*buffer.as_ptr().cast::<TOKEN_USER>();
+            let mut text = PWSTR::null();
+            ConvertSidToStringSidW(user.User.Sid, &mut text).map_err(|e| e.code())?;
+            let sid = String::from_utf16_lossy(text.as_wide());
+            LocalFree(Some(HLOCAL(text.0.cast())));
+            Ok(sid)
+        })
     };
+    r
+}
+
+/// The kind of drive whose root is `root` (for example `C:\`): 3 is a fixed drive.
+fn os_drive_type(root: &[u16]) -> u32 {
+    assert!(root.ends_with(&[0]), "NUL-terminated");
+    // SAFETY: `root` is NUL-terminated (checked above) and lives for the call.
+    #[expect(unsafe_code, reason = "GetDriveTypeW has no safe binding")]
+    let r = unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) };
     r
 }
 
@@ -369,7 +416,56 @@ pub(crate) fn wait(process: &OwnedHandle, millis: Option<u32>) -> Result<Option<
 
 pub(crate) fn current_sid() -> Result<Sid, Error> {
     let me = os_open_process(std::process::id()).map_err(|c| os_err("OpenProcess", c))?;
-    Sid::parse(&os_token_user(me.as_handle()).map_err(|c| os_err("OpenProcessToken", c))?)
+    let token = os_process_token(me.as_handle()).map_err(|c| os_err("OpenProcessToken", c))?;
+    Sid::parse(&os_token_user(token.as_handle()).map_err(|c| os_err("GetTokenInformation", c))?)
+}
+
+/// A fixed drive's kind, as `GetDriveTypeW` numbers it.
+pub(crate) const DRIVE_FIXED: u32 = 3;
+
+/// The drive path a resolved program path names, if it is on this computer's fixed drives:
+/// `\\?\C:\...` becomes `C:\...`; a network (`\\?\UNC\...`), device or volume path, a data
+/// stream, or a removable, optical, network or RAM drive is refused.
+pub(crate) fn local_fixed_drive_path(resolved: &std::path::Path) -> Result<PathBuf, Error> {
+    let letter = drive_letter_of_resolved(resolved).ok_or(Error::BadInput(
+        "the program is not on a drive of this computer",
+    ))?;
+    let root = wide(OsStr::new(&format!("{letter}:\\")));
+    if !drive_kind_allowed(os_drive_type(&root)) {
+        return Err(Error::BadInput(
+            "the program is not on a fixed drive of this computer",
+        ));
+    }
+    let text = resolved.to_string_lossy();
+    Ok(PathBuf::from(&text[4..]))
+}
+
+/// Only a fixed drive.
+pub(crate) fn drive_kind_allowed(kind: u32) -> bool {
+    kind == DRIVE_FIXED
+}
+
+/// The drive letter of a path as the system resolves it (`\\?\C:\...`), with no data stream.
+pub(crate) fn drive_letter_of_resolved(resolved: &std::path::Path) -> Option<char> {
+    use std::path::{Component, Prefix};
+    let mut parts = resolved.components();
+    let letter = match parts.next() {
+        Some(Component::Prefix(p)) => match p.kind() {
+            Prefix::VerbatimDisk(d) => char::from(d),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if !matches!(parts.next(), Some(Component::RootDir)) {
+        return None;
+    }
+    for c in parts {
+        match c {
+            Component::Normal(n) if !n.to_string_lossy().contains(':') => {}
+            _ => return None,
+        }
+    }
+    Some(letter)
 }
 
 /// The name of the helper's pipe: `pctwin-helper-` and 32 random hexadecimal characters.
@@ -446,33 +542,35 @@ impl PipeServer {
     }
 }
 
-/// Who is on the other end of the helper's pipe: process ID, account and program, read from the
-/// system for this connection. Fails with [`Error::CallerGone`] if that process has ended.
+/// Who is on the other end of the helper's pipe. Call it after reading the client's first
+/// message (Windows lets a server see its client's token only after it has read from the pipe).
 ///
-/// Not closed here (for the fresh-context review): a process ID is reused once its process has
-/// ended and every handle to it is closed; this opens the process and then checks it still
-/// runs, which narrows but does not close the gap of a client that ends just before it is
-/// opened, leaving its pipe handle with a child.
+/// Only [`Caller::account`] is authoritative: it comes from the token the client connected
+/// with, which the system holds for this connection, not from a lookup by process ID.
+/// [`Caller::process_id`] is the ID the system recorded at connection, and
+/// [`Caller::program_hint`] is read by that ID afterwards, so it is a hint for the record and
+/// the report, never for allowing anything. Fails with [`Error::CallerGone`] if that process has
+/// ended.
 pub fn caller_of(pipe: &PipeServer) -> Result<Caller, Error> {
     let id = os_client_process_id(pipe.file.as_handle())
         .map_err(|c| os_err("GetNamedPipeClientProcessId", c))?;
+    let token = os_client_token(pipe.file.as_handle());
     let process = os_open_process(id).map_err(|_| Error::CallerGone)?;
-    let sid = os_token_user(process.as_handle());
     let program = os_image_path(process.as_handle());
-    // Asked last, so an answer read from a process that has meanwhile ended is never vouched
-    // for (an ended process also makes the two reads above fail).
+    // Asked last, so a hint read from a process that has meanwhile ended is never reported (an
+    // ended process also makes the reads above fail).
     let running = os_wait(process.as_handle(), 0)
         .map_err(|c| os_err("WaitForSingleObject", c))?
         .is_none();
     if !running {
         return Err(Error::CallerGone);
     }
+    let token = token.map_err(|c| os_err("ImpersonateNamedPipeClient", c))?;
+    let sid = os_token_user(token.as_handle()).map_err(|c| os_err("GetTokenInformation", c))?;
     Ok(Caller {
         process_id: id,
-        account: Account::Sid(Sid::parse(
-            &sid.map_err(|c| os_err("OpenProcessToken", c))?,
-        )?),
-        program: program.map_err(|c| os_err("QueryFullProcessImageNameW", c))?,
+        account: Account::Sid(Sid::parse(&sid)?),
+        program_hint: program.map_err(|c| os_err("QueryFullProcessImageNameW", c))?,
     })
 }
 
@@ -538,6 +636,30 @@ mod tests {
             pipe_security(&mover),
             "D:P(A;;0x12008b;;;S-1-5-21-1-2-3-1001)(A;;0x12008b;;;SY)"
         );
+    }
+
+    #[test]
+    fn only_fixed_drive_paths_as_resolved_are_programs() {
+        use std::path::Path;
+        assert_eq!(
+            drive_letter_of_resolved(Path::new(r"\\?\C:\Program Files\PCTwin\h.exe")),
+            Some('C')
+        );
+        for bad in [
+            r"\\?\UNC\server\share\h.exe",
+            r"\\server\share\h.exe",
+            r"C:\h.exe",
+            r"\\.\C:\h.exe",
+            r"\\?\Volume{0b1e2c3d-0000-0000-0000-100000000000}\h.exe",
+            r"\\?\C:\dir\h.exe:stream",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\h.exe",
+        ] {
+            assert_eq!(drive_letter_of_resolved(Path::new(bad)), None, "{bad}");
+        }
+        assert!(drive_kind_allowed(DRIVE_FIXED));
+        for kind in [0, 1, 2, 4, 5, 6] {
+            assert!(!drive_kind_allowed(kind), "{kind}");
+        }
     }
 
     #[test]

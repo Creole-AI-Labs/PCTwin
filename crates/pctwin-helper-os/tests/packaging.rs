@@ -53,6 +53,13 @@ fn the_launch_daemon_runs_the_bundled_helper_for_this_app() {
         "inside the signed bundle"
     );
     assert!(strings.contains(&app_id), "tied to the app {app_id}");
+    // Started once when registered (and at start-up while registered), never kept alive: the
+    // helper exits unless a move is in progress, and the app unregisters it afterwards.
+    let compact: String = p.split_whitespace().collect();
+    assert!(compact.contains("<key>RunAtLoad</key><true/>"));
+    assert!(compact.contains("<key>KeepAlive</key><false/>"));
+    assert!(p.contains("exits at once unless a move is in progress"));
+    assert!(p.contains("on its next launch after a crash"));
     for k in [
         "Program",
         "ProgramArguments",

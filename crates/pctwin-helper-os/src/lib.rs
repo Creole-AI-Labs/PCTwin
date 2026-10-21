@@ -15,14 +15,21 @@
 //!    (`PIPE_REJECT_REMOTE_CLIENTS`), whose access list admits exactly the mover's account and
 //!    SYSTEM (`PipeServer`). macOS and Linux: a Unix socket inside a folder only the mover's
 //!    account can enter, mode 0700 (`PrivateDir`, `SocketServer`).
-//! 3. **Who is calling, on every connection** ([`Caller`]): the process ID, the account and the
-//!    program's path. Windows: `GetNamedPipeClientProcessId`, the process token's user and
+//! 3. **Who is calling, on every connection** ([`Caller`]): the account, which is
+//!    authoritative, and the process ID and program path, which are a hint for the record.
+//!    Windows: `GetNamedPipeClientProcessId`, the process token's user and
 //!    `QueryFullProcessImageNameW`. Linux: `SO_PEERCRED` and `/proc/<pid>/exe`. macOS:
 //!    `LOCAL_PEERPID`, `LOCAL_PEERCRED` and `proc_pidpath`.
 //!
-//! What is *allowed* (which account is the mover, which program may call, which commands exist)
-//! is decided by the helper, not here: this crate reports facts and refuses only what the system
-//! itself refuses.
+//! **What the helper may decide on.** Only two facts are strong enough to authorise anything:
+//! the caller's account, which the system records when the connection is made and which cannot
+//! change afterwards, and the private channel itself (only the mover's account and SYSTEM or
+//! root can reach it). The program path is read afterwards by process ID, so a caller that
+//! starts another program, or ends and has its ID reused, can change it; it is
+//! [`Caller::program_hint`], kept for the record and the report, never for allowing anything.
+//! Tying a request to a signed program is a later step (ADR 0003: macOS `LOCAL_PEERTOKEN` with
+//! a code-signing requirement, Linux `SO_PEERPIDFD`). Which account is the mover and which
+//! commands exist are decided by the helper, not here.
 //!
 //! # The second and last place PCTwin calls the system unsafely
 //!
@@ -36,7 +43,8 @@
 //!
 //! - Windows (`src/win.rs`): `os_shell_execute_runas`, `os_wait`, `os_create_pipe`,
 //!   `os_access_list`, `os_accept`, `os_client_process_id`, `os_server_process_id`,
-//!   `os_open_process`, `os_token_user`, `os_image_path`.
+//!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
+//!   `os_image_path`, `os_drive_type`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -47,7 +55,7 @@
 
 use std::fmt;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub mod daemon;
 
@@ -170,12 +178,14 @@ pub enum Account {
 /// Who is on the other end of a connection, as the system reports it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Caller {
-    /// The process ID.
+    /// The process ID the system recorded for the connection.
     pub process_id: u32,
-    /// The account the process runs as.
+    /// The account the process ran as when it connected. The only fact here to authorise on.
     pub account: Account,
-    /// The full path of the program the process runs.
-    pub program: PathBuf,
+    /// The program that process ID runs, read after the connection was made. A hint for the
+    /// record and the report only: a process that starts another program, or ends and has its
+    /// ID reused, changes it. Never authorise on it.
+    pub program_hint: PathBuf,
 }
 
 /// The account this process runs as.
@@ -219,8 +229,9 @@ pub enum Ended {
     Killed,
     /// The administrator prompt was dismissed or the password refused (pkexec's exit 126).
     Refused,
-    /// No one could be asked or the account may not do this (pkexec's exit 127: no polkit
-    /// agent, not authorised, or the program not named in the policy).
+    /// pkexec's exit 127: the account is not authorised, or there was no polkit agent to ask.
+    /// (A program the policy does not name is not refused for that: polkit falls back to its
+    /// generic administrator action and still asks.)
     NotAuthorized,
 }
 
@@ -331,24 +342,42 @@ pub struct LaunchRequest {
 }
 
 impl LaunchRequest {
-    /// Checks the program and arguments. The program must be a full path on this computer (on
-    /// Windows a drive path, never a network share or a bare name the system would search
-    /// for); no argument may hold a NUL character.
+    /// Checks the program and arguments.
+    ///
+    /// The path is first checked as text: a full path (on Windows a drive path, never a network
+    /// share, a device path or a bare name the system would search for), with no `.` or `..`
+    /// part and, on Windows, no `:` after the drive (an alternate data stream). It is then
+    /// resolved by the system through an open handle (links, junctions, mapped and substituted
+    /// drives and short 8.3 names all resolved), and the resolved path must be an existing file
+    /// on this computer: on Windows a fixed drive, never a network, removable or optical one.
+    /// The resolved path is the one started. No argument may hold a NUL character.
     pub fn new(program: &Path, args: &[&str]) -> Result<LaunchRequest, Error> {
-        if !is_local_absolute(program) {
-            return Err(Error::BadInput(
-                "the program must be a full path on this computer",
-            ));
-        }
         if program.to_string_lossy().contains('\0') || args.iter().any(|a| a.contains('\0')) {
             return Err(Error::BadInput(
                 "a NUL character in the program or arguments",
             ));
         }
+        check_program_text(program)?;
+        let program = resolve_local_program(program)?;
         Ok(LaunchRequest {
-            program: program.to_path_buf(),
+            program,
             args: args.iter().map(|a| (*a).to_owned()).collect(),
         })
+    }
+
+    /// The program `file_name` in the folder this program was started from (the app's own
+    /// install folder), checked as [`new`](Self::new) checks any path.
+    pub fn beside_current_exe(file_name: &str, args: &[&str]) -> Result<LaunchRequest, Error> {
+        let mut parts = Path::new(file_name).components();
+        let plain = matches!(parts.next(), Some(Component::Normal(_))) && parts.next().is_none();
+        if !plain || file_name.contains(':') {
+            return Err(Error::BadInput("not a plain file name"));
+        }
+        let exe = std::env::current_exe()?;
+        let folder = exe
+            .parent()
+            .ok_or(Error::BadInput("this program has no folder"))?;
+        LaunchRequest::new(&folder.join(file_name), args)
     }
 
     /// The program to start.
@@ -369,9 +398,38 @@ impl LaunchRequest {
     }
 }
 
+/// The text checks, before the system is asked anything.
+fn check_program_text(p: &Path) -> Result<(), Error> {
+    if !is_local_absolute(p) {
+        return Err(Error::BadInput(
+            "the program must be a full path on this computer",
+        ));
+    }
+    // Read from the text itself: `Path::components` quietly drops a `.` in the middle.
+    let text = p.to_string_lossy();
+    let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+    if text
+        .split(separators)
+        .any(|part| part == "." || part == "..")
+    {
+        return Err(Error::BadInput("the program's path may not hold . or .."));
+    }
+    for c in p.components() {
+        match c {
+            Component::Normal(n) if cfg!(windows) && n.to_string_lossy().contains(':') => {
+                return Err(Error::BadInput(
+                    "the program's path may not name a data stream",
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn is_local_absolute(p: &Path) -> bool {
-    use std::path::{Component, Prefix};
+    use std::path::Prefix;
     let mut c = p.components();
     matches!(c.next(), Some(Component::Prefix(pre)) if matches!(pre.kind(), Prefix::Disk(_)))
         && matches!(c.next(), Some(Component::RootDir))
@@ -380,6 +438,29 @@ fn is_local_absolute(p: &Path) -> bool {
 #[cfg(not(windows))]
 fn is_local_absolute(p: &Path) -> bool {
     p.is_absolute()
+}
+
+/// Resolves the path through the system and checks what it really names.
+#[cfg(windows)]
+fn resolve_local_program(p: &Path) -> Result<PathBuf, Error> {
+    let resolved = std::fs::canonicalize(p)?;
+    let local = win::local_fixed_drive_path(&resolved)?;
+    if !std::fs::metadata(&local)?.is_file() {
+        return Err(Error::BadInput("the program is not a file"));
+    }
+    Ok(local)
+}
+
+/// Resolves the path through the system and checks what it really names. (Whether a Unix path
+/// lies on a network file system is not checked here; pkexec starts only the exact path the
+/// polkit policy names, and macOS starts only the program inside the signed app bundle.)
+#[cfg(not(windows))]
+fn resolve_local_program(p: &Path) -> Result<PathBuf, Error> {
+    let resolved = std::fs::canonicalize(p)?;
+    if !std::fs::metadata(&resolved)?.is_file() {
+        return Err(Error::BadInput("the program is not a file"));
+    }
+    Ok(resolved)
 }
 
 /// Quotes one argument for a Windows command line: unchanged when it holds no space, tab, line
