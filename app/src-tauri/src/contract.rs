@@ -325,6 +325,122 @@ fn report_items() -> Vec<ReportItem> {
     ]
 }
 
+fn qs_picked() -> Vec<crate::quicksend::PickedView> {
+    use crate::quicksend::PickedView;
+    vec![
+        PickedView {
+            id: "p1".into(),
+            name: "letter.txt".into(),
+            kind: "file",
+            included: true,
+            bytes: Some(1200),
+            files: Some(1),
+            problem: None,
+        },
+        PickedView {
+            id: "p2".into(),
+            name: "Holiday".into(),
+            kind: "folder",
+            included: true,
+            bytes: None,
+            files: None,
+            problem: None,
+        },
+        PickedView {
+            id: "p3".into(),
+            name: "gone.txt".into(),
+            kind: "file",
+            included: true,
+            bytes: None,
+            files: None,
+            problem: Some("missing"),
+        },
+    ]
+}
+
+fn qs_offered() -> Vec<crate::quicksend::OfferedView> {
+    vec![crate::quicksend::OfferedView {
+        id: "00112233445566778899aabbccddeeff".into(),
+        path: "Holiday/beach.jpg".into(),
+        size: 2_400_000,
+    }]
+}
+
+fn qs_receipts() -> Vec<crate::quicksend::ReceiptView> {
+    use crate::quicksend::{LineView, OutcomeView, ReceiptView};
+    let line = |path: &str, outcome| LineView {
+        path: path.into(),
+        outcome,
+    };
+    vec![ReceiptView {
+        side: "receiver",
+        stopped: false,
+        lines: vec![
+            line(
+                "a.jpg",
+                OutcomeView::Arrived {
+                    landed_as: "a.jpg".into(),
+                },
+            ),
+            line(
+                "b.jpg",
+                OutcomeView::AlreadyThere {
+                    landed_as: "b.jpg".into(),
+                },
+            ),
+            line("c.jpg", OutcomeView::Declined),
+            line(
+                "d.jpg",
+                OutcomeView::NeedsAction {
+                    landed_as: "d.jpg".into(),
+                    why: "open it once to check it".into(),
+                },
+            ),
+            line(
+                "e.jpg",
+                OutcomeView::Failed {
+                    why: "it could not be read".into(),
+                },
+            ),
+        ],
+    }]
+}
+
+fn qs_progress() -> Vec<crate::quicksend::ProgressView> {
+    vec![crate::quicksend::ProgressView {
+        phase: "copying",
+        files_done: 3,
+        files_total: 10,
+        bytes_done: 1_000_000,
+        bytes_total: 4_000_000,
+        current: None,
+        failed: 0,
+        speed: Some(Range {
+            low: 2_000_000,
+            high: 2_000_000,
+        }),
+    }]
+}
+
+fn qs_folders() -> Vec<crate::quicksend::FolderView> {
+    vec![crate::quicksend::FolderView {
+        path: r"C:\Users\Ada\Downloads".into(),
+        free_bytes: Some(80_000_000_000),
+    }]
+}
+
+fn qs_problems() -> Vec<crate::quicksend::QsProblem> {
+    use crate::quicksend::QsProblem;
+    vec![
+        QsProblem::LinkLost {
+            detail: "the connection dropped".into(),
+        },
+        QsProblem::Failed {
+            detail: "the folder cannot be used".into(),
+        },
+    ]
+}
+
 fn json(examples: impl serde::Serialize) -> Value {
     serde_json::to_value(examples).expect("examples serialise")
 }
@@ -347,6 +463,18 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
+        ("qs-picked", json(qs_picked())),
+        ("qs-offered", json(qs_offered())),
+        (
+            "qs-incoming",
+            json([crate::quicksend::IncomingView {
+                files: qs_offered(),
+            }]),
+        ),
+        ("qs-receipt", json(qs_receipts())),
+        ("qs-progress", json(qs_progress())),
+        ("qs-folder", json(qs_folders())),
+        ("qs-problem", json(qs_problems())),
         (
             "people-to-place",
             json([crate::moving::PeopleToPlace {
@@ -582,6 +710,16 @@ fn calls() -> Value {
             { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
             { "name": "recovery_check", "args": [] },
             { "name": "recovery_run", "args": [] },
+            { "name": "quicksend_pick", "args": [["folders", false]] },
+            { "name": "quicksend_clear", "args": [] },
+            { "name": "quicksend_offer", "args": [["ids", ["p1"]]] },
+            { "name": "quicksend_send", "args": [] },
+            { "name": "quicksend_receive", "args": [] },
+            { "name": "quicksend_choose_folder", "args": [] },
+            { "name": "quicksend_answer", "args": [["answer", { "kind": "decline" }]] },
+            { "name": "quicksend_pause", "args": [] },
+            { "name": "quicksend_resume", "args": [] },
+            { "name": "quicksend_stop", "args": [] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -593,6 +731,10 @@ fn calls() -> Value {
             "moveProblem": PROBLEM_EVENT,
             "movePeople": PEOPLE_EVENT,
             "movePrivacy": PRIVACY_EVENT,
+            "qsProgress": crate::quicksend::PROGRESS_EVENT,
+            "qsIncoming": crate::quicksend::INCOMING_EVENT,
+            "qsReceipt": crate::quicksend::RECEIPT_EVENT,
+            "qsProblem": crate::quicksend::PROBLEM_EVENT,
         },
         // What the screens may name when they ask for a help code: the engine's closed lists.
         "helpTopics": crate::help::HelpTopic::ALL,

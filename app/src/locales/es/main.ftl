@@ -1311,6 +1311,14 @@ code-label = Código de seis cifras
 
 qs-eyebrow = Envío rápido
 qs-eyebrow-receiving = Recibiendo en este portátil
+qs-label-this = Este portátil
+qs-label-other = El otro portátil
+qs-wait-title = Esperando los archivos.
+qs-wait-body = Los portátiles están emparejados. Verás lo que se ofrece antes de recibir nada.
+qs-pick-failed = No se pudo abrir el selector. Inténtalo de nuevo.
+qs-problem-lost-title = Se perdió la conexión con el otro portátil.
+qs-problem-failed-title = Esta vez no se pudieron enviar los archivos.
+qs-problem-body = Lo que ya se recibió y comprobó se queda donde está. Vuelve a emparejar los portátiles para intentarlo otra vez.
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = De { $from } a { $to }
@@ -1506,6 +1514,7 @@ qs-receipt-arrived =
 qs-receipt-size = { $size } coinciden con el original
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = No todo el contenido de esta carpeta llegó y se comprobó.
+qs-receipt-needs-action = { $path } está ahí, pero no terminado. Qué hacer está en Más detalles.
 qs-receipt-status-verified = Comprobado
 qs-receipt-status-unfinished = Sin terminar
 qs-receipt-not-completed = No se completó.

@@ -15,6 +15,7 @@ import PairNew from "./screens/PairNew";
 import PairOld from "./screens/PairOld";
 import PutTogether from "./screens/PutTogether";
 import QuickHome from "./screens/QuickHome";
+import QuickHost from "./screens/QuickHost";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
@@ -30,6 +31,8 @@ type Screen =
   | { id: "move"; role: Role }
   // A move on this laptop stopped part way (X09): shown at start, before anything else.
   | { id: "pickup"; unfinished: number }
+  // Quick Send, either way, from its home.
+  | { id: "qs"; mode: "send" | "receive" }
   // Help (S01), from the footer; Back returns to where it was opened.
   | { id: "help"; from: Screen }
   | { id: "soon"; which: Soon }
@@ -88,7 +91,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
         <FooterProvider
           // Leaving pairing or a move for the help page would end them, so there Help opens the website.
           onHelp={
-            screen.id === "pair" || screen.id === "move"
+            screen.id === "pair" || screen.id === "move" || screen.id === "qs"
               ? undefined
               : () => {
                   setScreen((s) => (s.id === "help" ? s : { id: "help", from: s }));
@@ -105,7 +108,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 aria-disabled={screen.id === "move" ? true : undefined}
                 onClick={() => {
                   if (screen.id === "move") return;
-                  if (screen.id === "pair") void stopPairing().catch(() => undefined);
+                  if (screen.id === "pair" || screen.id === "qs") void stopPairing().catch(() => undefined);
                   setScreen({ id: "welcome" });
                 }}
               >
@@ -137,15 +140,16 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 onQuick={() => { setScreen({ id: "quick", notice: false }); }}
               />}
             {screen.id === "quick" && (
-              // Until the bridge exists nothing can be sent or received: each action says so, plainly, and changes nothing.
+              // History is not built yet: it says so, plainly, and changes nothing.
               <QuickHome
                 notice={screen.notice}
-                onSend={() => { setScreen({ ...screen, notice: true }); }}
-                onReceive={() => { setScreen({ ...screen, notice: true }); }}
+                onSend={() => { setScreen({ id: "qs", mode: "send" }); }}
+                onReceive={() => { setScreen({ id: "qs", mode: "receive" }); }}
                 onHistory={() => { setScreen({ ...screen, notice: true }); }}
                 onBack={() => { setScreen({ id: "welcome" }); }}
               />
             )}
+            {screen.id === "qs" && <QuickHost mode={screen.mode} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
             {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}

@@ -209,6 +209,65 @@
     {
       "args": [],
       "name": "recovery_run"
+    },
+    {
+      "args": [
+        [
+          "folders",
+          false
+        ]
+      ],
+      "name": "quicksend_pick"
+    },
+    {
+      "args": [],
+      "name": "quicksend_clear"
+    },
+    {
+      "args": [
+        [
+          "ids",
+          [
+            "p1"
+          ]
+        ]
+      ],
+      "name": "quicksend_offer"
+    },
+    {
+      "args": [],
+      "name": "quicksend_send"
+    },
+    {
+      "args": [],
+      "name": "quicksend_receive"
+    },
+    {
+      "args": [],
+      "name": "quicksend_choose_folder"
+    },
+    {
+      "args": [
+        [
+          "answer",
+          {
+            "kind": "decline"
+          }
+        ]
+      ],
+      "name": "quicksend_answer"
+    },
+    {
+      "args": [],
+      "name": "quicksend_pause"
+    },
+    {
+      "args": [],
+      "name": "quicksend_resume"
+    },
+    {
+      "args": [],
+      "name": "quicksend_stop"
     }
   ],
   "events": {
@@ -220,7 +279,11 @@
     "moveProgress": "move-progress",
     "moveStage": "move-stage",
     "new": "pairing-new",
-    "old": "pairing-old"
+    "old": "pairing-old",
+    "qsIncoming": "quicksend-incoming",
+    "qsProblem": "quicksend-problem",
+    "qsProgress": "quicksend-progress",
+    "qsReceipt": "quicksend-receipt"
   },
   "helpSteps": [
     "pairing",

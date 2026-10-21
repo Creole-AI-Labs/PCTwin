@@ -15,6 +15,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ITEM_STATUSES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
+import type { OfferedFile, Outcome as QsOutcome, PickedItem, Receipt, SendProgress } from "./quicksend";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
 /* ---------- Shapes ---------- */
@@ -311,6 +312,7 @@ export type PlanKey = { revision: number; fingerprint: string };
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
   "report-item": ["destination", "reason", "evidence"],
+  "qs-picked": ["problem"],
 };
 
 /** An object with every key in `required`, any of `optional`, and nothing else; or null. */
@@ -611,6 +613,131 @@ export function parseTidied(value: unknown): Tidied | null {
 
 export const recoveryCheck = () => ask("recovery_check", parseInterrupted);
 export const recoveryRun = () => ask("recovery_run", parseTidied);
+
+/* ---------- Quick Send (src-tauri/src/quicksend.rs) ---------- */
+
+const QS_PROBLEMS = ["missing", "unreadable", "online-only"] as const;
+
+function isCountOrNull(v: unknown): v is number | null {
+  return v === null || isCount(v);
+}
+
+/** One thing chosen in the system's picker (the screens never see its path). */
+export function parsePicked(value: unknown): PickedItem | null {
+  const f = shaped(value, ["id", "name", "kind", "included", "bytes", "files"], ["problem"]);
+  if (!f || typeof f.id !== "string" || typeof f.name !== "string" || !oneOf(f.kind, ["file", "folder"] as const)) return null;
+  if (typeof f.included !== "boolean" || !isCountOrNull(f.bytes) || !isCountOrNull(f.files)) return null;
+  if ("problem" in f && !oneOf(f.problem, QS_PROBLEMS)) return null;
+  const item: PickedItem = { id: f.id, name: f.name, kind: f.kind, included: f.included, bytes: f.bytes, files: f.files };
+  if (oneOf(f.problem, QS_PROBLEMS)) item.problem = f.problem;
+  return item;
+}
+
+export function parseOffered(value: unknown): OfferedFile | null {
+  const f = exactly(value, ["id", "path", "size"]);
+  return f && typeof f.id === "string" && typeof f.path === "string" && isCount(f.size) ? { id: f.id, path: f.path, size: f.size } : null;
+}
+
+export function parseQsIncoming(value: unknown): { files: OfferedFile[] } | null {
+  const f = exactly(value, ["files"]);
+  const files = f && listOf(f.files, parseOffered);
+  return files ? { files } : null;
+}
+
+function parseQsOutcome(value: unknown): QsOutcome | null {
+  const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
+  if (kind === "declined") return exactly(value, ["kind"]) ? { kind } : null;
+  if (kind === "arrived" || kind === "already-there") {
+    const f = exactly(value, ["kind", "landedAs"]);
+    return f && typeof f.landedAs === "string" ? { kind, landedAs: f.landedAs } : null;
+  }
+  if (kind === "needs-action") {
+    const f = exactly(value, ["kind", "landedAs", "why"]);
+    return f && typeof f.landedAs === "string" && typeof f.why === "string" ? { kind, landedAs: f.landedAs, why: f.why } : null;
+  }
+  if (kind === "failed") {
+    const f = exactly(value, ["kind", "why"]);
+    return f && typeof f.why === "string" ? { kind, why: f.why } : null;
+  }
+  return null;
+}
+
+/** How a Quick Send ended, on one side. */
+export type QsReceipt = { side: "sender" | "receiver"; lines: Receipt["lines"]; stopped: boolean };
+
+export function parseQsReceipt(value: unknown): QsReceipt | null {
+  const f = exactly(value, ["side", "lines", "stopped"]);
+  if (!f || !oneOf(f.side, ["sender", "receiver"] as const) || typeof f.stopped !== "boolean") return null;
+  const lines = listOf(f.lines, (v) => {
+    const l = exactly(v, ["path", "outcome"]);
+    const outcome = l && parseQsOutcome(l.outcome);
+    return l && typeof l.path === "string" && outcome ? { path: l.path, outcome } : null;
+  });
+  return lines ? { side: f.side, lines, stopped: f.stopped } : null;
+}
+
+const QS_PHASES = ["copying", "paused", "checking", "needs-action", "lost", "complete"] as const;
+
+export function parseQsProgress(value: unknown): SendProgress | null {
+  const f = exactly(value, ["phase", "filesDone", "filesTotal", "bytesDone", "bytesTotal", "current", "failed", "speed"]);
+  if (!f || !oneOf(f.phase, QS_PHASES)) return null;
+  const { filesDone, filesTotal, bytesDone, bytesTotal, failed } = f;
+  if (!isCount(filesDone) || !isCount(filesTotal) || !isCount(bytesDone) || !isCount(bytesTotal) || !isCount(failed)) return null;
+  if (!(f.current === null || typeof f.current === "string")) return null;
+  const speed = f.speed === null ? null : parseRange(f.speed);
+  if (f.speed !== null && speed === null) return null;
+  return { phase: f.phase, filesDone, filesTotal, bytesDone, bytesTotal, current: f.current, failed, speed };
+}
+
+export type QsFolder = { path: string; freeBytes: number | null };
+
+export function parseQsFolder(value: unknown): QsFolder | null {
+  const f = exactly(value, ["path", "freeBytes"]);
+  return f && typeof f.path === "string" && isCountOrNull(f.freeBytes) ? { path: f.path, freeBytes: f.freeBytes } : null;
+}
+
+export type QsProblem = { kind: "link-lost" | "failed"; detail: string };
+
+export function parseQsProblem(value: unknown): QsProblem | null {
+  const f = exactly(value, ["kind", "detail"]);
+  return f && oneOf(f.kind, ["link-lost", "failed"] as const) && typeof f.detail === "string" ? { kind: f.kind, detail: f.detail } : null;
+}
+
+export const qsPick = (folders: boolean) => ask("quicksend_pick", (v) => listOf(v, parsePicked), { folders });
+export const qsClear = () => run("quicksend_clear");
+export const qsOffer = (ids: string[]) => ask("quicksend_offer", (v) => listOf(v, parseOffered), { ids });
+export const qsSend = () => run("quicksend_send");
+export const qsReceive = () => run("quicksend_receive");
+export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
+export const qsAnswer = (answer: { kind: "accept"; ids: string[] | null } | { kind: "decline" }) => run("quicksend_answer", { answer });
+export const qsPause = () => run("quicksend_pause");
+export const qsResume = () => run("quicksend_resume");
+export const qsStop = () => run("quicksend_stop");
+
+export type QsEvent =
+  | { kind: "progress"; progress: SendProgress }
+  | { kind: "incoming"; files: OfferedFile[] }
+  | { kind: "receipt"; receipt: QsReceipt }
+  | { kind: "problem"; problem: QsProblem };
+
+const QS_UNREADABLE: QsEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
+
+export async function listenQuickSend(handler: (event: QsEvent) => void): Promise<UnlistenFn> {
+  const on = <T,>(name: string, parse: (v: unknown) => T | null, wrap: (v: T) => QsEvent) =>
+    listen<unknown>(name, (e) => {
+      const parsed = parse(e.payload);
+      handler(parsed === null ? QS_UNREADABLE : wrap(parsed));
+    });
+  const all = await Promise.all([
+    on("quicksend-progress", parseQsProgress, (progress) => ({ kind: "progress", progress })),
+    on("quicksend-incoming", parseQsIncoming, (i) => ({ kind: "incoming", files: i.files })),
+    on("quicksend-receipt", parseQsReceipt, (receipt) => ({ kind: "receipt", receipt })),
+    on("quicksend-problem", parseQsProblem, (problem) => ({ kind: "problem", problem })),
+  ]);
+  return () => {
+    for (const stop of all) stop();
+  };
+}
 
 /* ---------- Get help (src-tauri/src/help.rs) ---------- */
 

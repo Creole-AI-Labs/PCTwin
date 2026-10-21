@@ -1,0 +1,10 @@
+[
+  {
+    "detail": "the connection dropped",
+    "kind": "link-lost"
+  },
+  {
+    "detail": "the folder cannot be used",
+    "kind": "failed"
+  }
+]

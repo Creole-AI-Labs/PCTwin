@@ -1279,6 +1279,14 @@ code-label = छह अंकों का कोड
 
 qs-eyebrow = क्विक सेंड
 qs-eyebrow-receiving = इस लैपटॉप पर प्राप्त हो रहा है
+qs-label-this = यह लैपटॉप
+qs-label-other = दूसरा लैपटॉप
+qs-wait-title = फ़ाइलों का इंतज़ार है।
+qs-wait-body = लैपटॉप जुड़ गए हैं। कुछ भी मिलने से पहले आप देखेंगे कि क्या भेजा जा रहा है।
+qs-pick-failed = चुनने वाली विंडो नहीं खुल सकी। फिर से कोशिश करें।
+qs-problem-lost-title = दूसरे लैपटॉप से कनेक्शन टूट गया।
+qs-problem-failed-title = इस बार फ़ाइलें नहीं भेजी जा सकीं।
+qs-problem-body = जो पहले से मिल चुका और जाँचा जा चुका है, वह अपनी जगह रहता है। फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें।
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = { $from } से { $to } तक
@@ -1470,6 +1478,7 @@ qs-receipt-arrived =
 qs-receipt-size = { $size } मूल से मेल खाया
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = इस फ़ोल्डर का कुछ हिस्सा पहुँचा नहीं या जाँचा नहीं गया।
+qs-receipt-needs-action = { $path } वहाँ है, पर पूरा नहीं हुआ। क्या करना है, यह ज़्यादा जानकारी में है।
 qs-receipt-status-verified = जाँचा गया
 qs-receipt-status-unfinished = अधूरा
 qs-receipt-not-completed = पूरा नहीं हुआ।

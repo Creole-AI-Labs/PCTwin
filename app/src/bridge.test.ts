@@ -18,6 +18,17 @@ import {
   movePeopleHere,
   movePlacePeople,
   movePrivacyAnswer,
+  listenQuickSend,
+  qsAnswer,
+  qsChooseFolder,
+  qsClear,
+  qsOffer,
+  qsPause,
+  qsPick,
+  qsReceive,
+  qsResume,
+  qsSend,
+  qsStop,
   openPrivacySettings,
   movePause,
   moveReport,
@@ -166,7 +177,9 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : command === "recovery_check"
+              : command === "quicksend_pick" || command === "quicksend_offer"
+                ? []
+                : command === "recovery_check"
                 ? { unfinished: 0 }
                 : command === "recovery_run"
                   ? { putInPlace: 0, keptToContinue: 0, notFinished: 0, leftForLater: 0 }
@@ -191,6 +204,16 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await movePeopleHere().catch(() => undefined);
       await movePrivacyAnswer(true);
       await openPrivacySettings();
+      await qsPick(false);
+      await qsClear();
+      await qsOffer(["p1"]);
+      await qsSend();
+      await qsReceive();
+      await qsChooseFolder();
+      await qsAnswer({ kind: "decline" });
+      await qsPause();
+      await qsResume();
+      await qsStop();
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}" });
       await moveApprove({ revision: 2, fingerprint: "9f" }, true);
       await movePause();
@@ -218,6 +241,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenPairingOld(() => undefined);
     await listenPairingNew(() => undefined);
     await listenMove(() => undefined);
+    await listenQuickSend(() => undefined);
     expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
   });
 });

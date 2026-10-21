@@ -52,6 +52,8 @@ export type Outcome =
   | { kind: "already-there"; landedAs: string }
   /** The receiver did not accept it. */
   | { kind: "declined" }
+  /** It is in the folder but not finished as a proven copy; `why` says what to do. Never counted as arrived. */
+  | { kind: "needs-action"; landedAs: string; why: string }
   /** It did not arrive; `why` is the engine's own short reason. */
   | { kind: "failed"; why: string };
 

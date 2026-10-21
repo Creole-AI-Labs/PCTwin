@@ -1,0 +1,15 @@
+[
+  {
+    "bytesDone": 1000000,
+    "bytesTotal": 4000000,
+    "current": null,
+    "failed": 0,
+    "filesDone": 3,
+    "filesTotal": 10,
+    "phase": "copying",
+    "speed": {
+      "high": 2000000,
+      "low": 2000000
+    }
+  }
+]

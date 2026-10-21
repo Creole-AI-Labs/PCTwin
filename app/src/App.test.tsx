@@ -151,6 +151,17 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
+  it("Quick Send's Send opens the file choice (nothing is picked by itself), and Back returns to its home", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-send-title")) }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-choose-title"));
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string).filter((c) => c.startsWith("quicksend_pick"))).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
+  });
+
   it("with nothing to pick up, the app opens on Welcome", async () => {
     tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
     render(<App initialLanguage="en" />);
@@ -164,12 +175,10 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     expect(screen.queryByText("Coming soon")).toBeNull();
-    // Send, Receive and history are real cards; until the bridge exists each one says so and changes nothing.
-    for (const id of ["qs-send-title", "qs-receive-title", "qs-history-title"]) {
-      fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString(id)) }));
-      expect(screen.getByRole("status").textContent).toContain(l10n.getString("qs-soon-note"));
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
-    }
+    // History is not built yet: it says so and changes nothing.
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
+    expect(screen.getByRole("status").textContent).toContain(l10n.getString("qs-soon-note"));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     // Nothing reaches the shell but the start-up look for a move that stopped part way.
     expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check"]);
     // The window footer carries the free-sending note and the main action, also while the notice is showing.

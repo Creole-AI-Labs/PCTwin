@@ -17,6 +17,7 @@ mod lockdown;
 mod moving;
 mod others;
 mod pairing;
+mod quicksend;
 mod recovery;
 
 use serde::Deserialize;
@@ -197,6 +198,16 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         help::help_code,
         recovery::recovery_check,
         recovery::recovery_run,
+        quicksend::quicksend_pick,
+        quicksend::quicksend_clear,
+        quicksend::quicksend_offer,
+        quicksend::quicksend_send,
+        quicksend::quicksend_receive,
+        quicksend::quicksend_choose_folder,
+        quicksend::quicksend_answer,
+        quicksend::quicksend_pause,
+        quicksend::quicksend_resume,
+        quicksend::quicksend_stop,
     ]
 }
 
@@ -226,6 +237,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(pairing::new_state())
         .manage(moving::new_state())
+        .manage(quicksend::new_state())
         .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens

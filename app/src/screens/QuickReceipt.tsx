@@ -35,6 +35,8 @@ function LineEnd({ outcome, stopped }: { outcome: Outcome; stopped: boolean }) {
           {l10n.getString(stopped ? "qs-receipt-status-unfinished" : "qs-receipt-chip-declined")}
         </Badge>
       );
+    case "needs-action":
+      return <ResultChip result="needs-action" />;
     case "failed":
       return stopped ? (
         <Badge tone="warn" icon={<Attention />}>
@@ -62,6 +64,18 @@ function LineDetail({ line, side, stopped }: { line: ReceiptLine; side: Side; st
       return <>{l10n.getString("qs-receipt-already", { path: outcome.landedAs })}</>;
     case "declined":
       return <>{l10n.getString(stopped ? "qs-receipt-not-completed" : `qs-receipt-declined-${side}`)}</>;
+    case "needs-action":
+      return (
+        <>
+          {l10n.getString("qs-receipt-needs-action", { path: outcome.landedAs })}
+          <details className="qs-more">
+            <Localized id="qs-receipt-more">
+              <summary />
+            </Localized>
+            <p dir="auto">{outcome.why}</p>
+          </details>
+        </>
+      );
     case "failed":
       return (
         <>

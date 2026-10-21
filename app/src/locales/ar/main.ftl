@@ -1450,6 +1450,14 @@ code-label = رمز من ستة أرقام
 
 qs-eyebrow = الإرسال السريع
 qs-eyebrow-receiving = الاستلام على هذا الحاسوب المحمول
+qs-label-this = هذا الحاسوب
+qs-label-other = الحاسوب الآخر
+qs-wait-title = في انتظار الملفات.
+qs-wait-body = الحاسوبان مقترنان. سترى ما يُعرض قبل استلام أي شيء.
+qs-pick-failed = تعذّر فتح نافذة الاختيار. حاول مرة أخرى.
+qs-problem-lost-title = انقطع الاتصال بالحاسوب الآخر.
+qs-problem-failed-title = تعذّر إرسال الملفات هذه المرة.
+qs-problem-body = يبقى كل ما استُلم وتم التحقق منه في مكانه. اقرن الحاسوبين من جديد للمحاولة مرة أخرى.
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = من { $from } إلى { $to }
@@ -1657,6 +1665,7 @@ qs-receipt-arrived =
 qs-receipt-size = تطابق { $size } مع الأصل
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = لم يصل كل ما في هذا المجلد، أو لم يتم التحقق منه كله.
+qs-receipt-needs-action = { $path } موجود، لكنه لم يكتمل. ما يجب فعله موجود في مزيد من التفاصيل.
 qs-receipt-status-verified = تم التحقق
 qs-receipt-status-unfinished = لم يكتمل
 qs-receipt-not-completed = لم يكتمل.

@@ -27,6 +27,16 @@ const COMMANDS: &[&str] = &[
     "help_code",
     "recovery_check",
     "recovery_run",
+    "quicksend_pick",
+    "quicksend_clear",
+    "quicksend_offer",
+    "quicksend_send",
+    "quicksend_receive",
+    "quicksend_choose_folder",
+    "quicksend_answer",
+    "quicksend_pause",
+    "quicksend_resume",
+    "quicksend_stop",
 ];
 
 fn main() {
