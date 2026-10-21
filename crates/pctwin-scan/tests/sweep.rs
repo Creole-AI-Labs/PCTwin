@@ -1720,3 +1720,36 @@ fn folders_with_the_same_names_and_sizes_look_like_copies() {
     // Paths are inside the Documents place.
     assert_eq!(g, ["Photos", "Photos copy"]);
 }
+
+/// Fast first, then sharper: what the sweep has found only ever grows while it runs, and ends at
+/// what it found in all.
+#[test]
+fn what_is_found_so_far_only_grows() {
+    let lab = lab();
+    for n in 0..40 {
+        write(&lab.ada.join(format!("Documents/f{n}/a.txt")), 100);
+    }
+    let stop = AtomicBool::new(false);
+    let mut seen: Vec<pctwin_scan::FoundSoFar> = Vec::new();
+    let s = sweep(
+        sized(facts(&lab, false), 0),
+        &mut Answers::default(),
+        &stop,
+        &mut |view| seen.push(view.found_so_far()),
+        &SweepLimits {
+            checkpoint_entries: 1,
+            checkpoint_every: std::time::Duration::ZERO,
+            ..SweepLimits::default()
+        },
+        None,
+    );
+    assert!(s.finished);
+    assert!(seen.len() > 2, "{}", seen.len());
+    for w in seen.windows(2) {
+        assert!(w[1].bytes >= w[0].bytes, "{w:?}");
+        assert!(w[1].files >= w[0].files, "{w:?}");
+        assert!(w[1].mover_bytes >= w[0].mover_bytes, "{w:?}");
+    }
+    let last = seen.last().unwrap();
+    assert!(last.mover_bytes >= 40 * 100, "{last:?}");
+}

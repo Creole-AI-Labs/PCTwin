@@ -406,7 +406,35 @@ pub struct FrontierView<'a> {
     in_flight: Vec<Job>,
 }
 
+/// What the sweep has found so far (fast first, then sharper): counts that only ever grow while
+/// it runs, so with each drive's used space the screens can say "at least this much, of about
+/// that" and the figure only ever narrows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FoundSoFar {
+    /// Bytes seen on every drive so far.
+    pub bytes: u64,
+    /// Files counted in the places found so far.
+    pub files: u64,
+    /// Of `bytes`, those in places that are the mover's own.
+    pub mover_bytes: u64,
+}
+
 impl FrontierView<'_> {
+    /// What has been found so far (see [`FoundSoFar`]).
+    pub fn found_so_far(&self) -> FoundSoFar {
+        let mut so_far = FoundSoFar {
+            bytes: self.state.vols.iter().map(|v| v.seen).sum(),
+            ..FoundSoFar::default()
+        };
+        for p in &self.state.places {
+            so_far.files += p.files;
+            if p.placement.whose == Whose::Mover {
+                so_far.mover_bytes += p.bytes;
+            }
+        }
+        so_far
+    }
+
     /// Folders still to list.
     pub fn pending(&self) -> usize {
         pending(self.state) + self.in_flight.len()
