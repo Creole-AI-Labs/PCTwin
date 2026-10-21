@@ -4,7 +4,8 @@
 //! caller's check, read through the handle). On Windows it removes that handle's file; on Linux
 //! and macOS it moves the name aside first and checks again there (decided 9 October 2026; the
 //! steps of that are tested in `unix_undo.rs`). Nothing is acted on by name after a check. These
-//! tests never use the person's real Recycle Bin.
+//! tests never use the person's real Recycle Bin or Trash (on macOS a proven copy goes into a
+//! Trash of the tests' own, `use_trash_home`).
 
 use std::io::Read;
 use std::sync::Arc;
@@ -65,6 +66,12 @@ impl Rm for Destination {
 }
 
 fn setup() -> (tempfile::TempDir, Destination) {
+    #[cfg(target_os = "macos")]
+    {
+        static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let home = HOME.get_or_init(|| tempfile::tempdir().unwrap());
+        pctwin_gate::use_trash_home(home.path().to_path_buf());
+    }
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Docs")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
@@ -93,16 +100,14 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 }
 
 /// Undo removes a copy only where the system proves no other program can still write to it:
-/// Windows (the held handle) and Linux (a write lease). macOS cannot prove it, so a copy there is
-/// always kept for the person to review (security design notes, 13 October 2026).
-const REMOVES: bool = !cfg!(target_os = "macos");
-
-/// What undo says for a copy it may remove: removed, or on macOS kept as "cannot check".
-fn removed_or_kept() -> Removed {
-    if REMOVES {
-        Removed::Removed
+/// Windows (the held handle) and Linux (a write lease). macOS cannot prove it, so a proven copy
+/// there goes into the Trash on its drive instead, and nothing is deleted (decided 20 October
+/// 2026). Either way the copy's name is gone.
+fn undone(r: &Removed) -> bool {
+    if cfg!(target_os = "macos") {
+        matches!(r, Removed::Trashed { .. })
     } else {
-        Removed::CannotCheck
+        *r == Removed::Removed
     }
 }
 
@@ -121,9 +126,8 @@ fn the_very_file_unchanged_is_removed() {
     put(&root, "Docs/a.txt", b"copy");
     let file = id(&dest, "Docs/a.txt");
     let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-    assert_eq!(r, removed_or_kept());
-    let left: &[&str] = if REMOVES { &[] } else { &["a.txt"] };
-    assert_eq!(names(&root.path().join("Docs")), left);
+    assert!(undone(&r), "{r:?}");
+    assert!(names(&root.path().join("Docs")).is_empty());
 }
 
 #[test]
@@ -265,8 +269,8 @@ fn a_read_only_copy_is_removed() {
     std::fs::set_permissions(&p, perms).unwrap();
     let file = id(&dest, "Docs/a.txt");
     let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-    assert_eq!(r, removed_or_kept());
-    assert_eq!(p.exists(), !REMOVES);
+    assert!(undone(&r), "{r:?}");
+    assert!(!p.exists());
 }
 
 #[test]
@@ -276,20 +280,15 @@ fn only_the_one_name_is_touched_and_no_private_name_is_left() {
     put(&root, "Docs/b.txt", b"mine");
     let file = id(&dest, "Docs/a.txt");
     let r = dest.rm("Docs/a.txt", file, bytes_are(b"copy")).unwrap();
-    assert_eq!(r, removed_or_kept());
-    let left: &[&str] = if REMOVES {
-        &["b.txt"]
-    } else {
-        &["a.txt", "b.txt"]
-    };
-    assert_eq!(names(&root.path().join("Docs")), left);
+    assert!(undone(&r), "{r:?}");
+    assert_eq!(names(&root.path().join("Docs")), ["b.txt"]);
 }
 
 /// Several tries at once: each copy removed exactly once, the rest refused, never an error. A
 /// loser finds the file gone (looked at through what it holds, or at its name), or in use by the
 /// winner: Windows refuses to open a file whose removal is under way ("access denied") and a
-/// held one (sharing); Linux refuses an open while another try holds a lease on it. macOS keeps
-/// the copy every time ("cannot check").
+/// held one (sharing); Linux refuses an open while another try holds a lease on it. On macOS one
+/// try moves it into the Trash and the others find its name gone.
 #[test]
 fn removing_the_same_file_twice_at_once_removes_it_once() {
     let (root, dest) = setup();
@@ -305,31 +304,17 @@ fn removing_the_same_file_twice_at_once_removes_it_once() {
             .collect();
         tries.into_iter().map(|t| t.join().unwrap()).collect()
     });
-    let removed = results.iter().filter(|r| **r == Removed::Removed).count();
-    if !REMOVES {
-        // macOS keeps the copy every time, whatever the others do.
-        assert!(
-            results
-                .iter()
-                .all(|r| matches!(r, Removed::CannotCheck | Removed::InUse)),
-            "{results:?}"
-        );
-        assert_eq!(removed, 0);
-        assert_eq!(
-            std::fs::read(root.path().join("Docs/a.txt")).unwrap(),
-            b"copy"
-        );
-        return;
-    }
+    let removed = results.iter().filter(|r| undone(r)).count();
     assert!(
         results
             .iter()
-            .all(|r| matches!(r, Removed::Removed | Removed::Gone | Removed::InUse)),
+            .all(|r| undone(r) || matches!(r, Removed::Gone | Removed::InUse)),
         "{results:?}"
     );
-    // Windows waits out a handle held for a moment, so one try always removes it. On Linux each
-    // try sees the others' handles open, so all may correctly say "in use": then it is all there.
-    if cfg!(windows) || removed > 0 {
+    // Windows waits out a handle held for a moment, and macOS asks no lease, so one try always
+    // removes it there. On Linux each try sees the others' handles open, so all may correctly
+    // say "in use": then it is all there.
+    if cfg!(any(windows, target_os = "macos")) || removed > 0 {
         assert_eq!(removed, 1, "{results:?}");
         assert!(names(&root.path().join("Docs")).is_empty());
     } else {
@@ -761,11 +746,10 @@ fn a_lent_right_that_has_ended_removes_nothing() {
     assert_eq!(names(&root.path().join("Docs")), ["a.txt"]);
 }
 
-/// Windows: on a drive without hard links (FAT and exFAT), a file's number is where its entry
-/// sits in its folder, so a different file made later at that place can carry the number PCTwin
-/// recorded. Undo never removes there: the copy is kept, as on Linux and macOS (decided 15
-/// October 2026).
-#[cfg(windows)]
+/// On a drive without hard links (FAT and exFAT), a file's number is where its entry sits in its
+/// folder, so a different file made later at that place can carry the number PCTwin recorded.
+/// Undo never removes (or, on macOS, moves) there: the copy is kept, unread, with that reason, on
+/// every system (decided 15 and 20 October 2026).
 #[test]
 fn undo_keeps_every_copy_on_a_drive_whose_file_numbers_cannot_be_trusted() {
     use pctwin_gate::{DriveKind, DriveProfile, Naming};
@@ -782,7 +766,7 @@ fn undo_keeps_every_copy_on_a_drive_whose_file_numbers_cannot_be_trusted() {
         checked.store(true, Ordering::SeqCst);
         Ok(true)
     });
-    assert_eq!(r.unwrap(), Removed::Unsupported);
+    assert_eq!(r.unwrap(), Removed::NumbersReused);
     assert!(!checked.load(Ordering::SeqCst), "nothing was read");
     assert_eq!(
         std::fs::read(root.path().join("Docs/a.txt")).unwrap(),

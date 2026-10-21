@@ -14,6 +14,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Speed and time left, measured, never guessed.** While a move runs, PCTwin works out its speed from what it really moved in about the last 20 seconds, and the time left from that. In the first few seconds, or when it can't know, it says so instead of guessing. When nothing is moving, it says it is waiting rather than showing a time that keeps growing. This is ready for review; the screens will show it once they are connected to the move.
 - **Pause and stop, in the move itself.** Pausing on either laptop now holds the move between two pieces of a file: what is already on its way finishes (never more than 32 MB), the other laptop is told, and nothing is treated as a lost connection. Carrying on picks up exactly where it held. Stopping ends the move at once, even while paused, and a file cut off halfway is never shown as copied. If the connection really is lost during a pause, PCTwin says so. Both laptops need this version of PCTwin for a pause to reach the other laptop. This is ready for review.
+- **Undo on a Mac puts copies in the Trash.** Until now, undo on a Mac kept every copy, because a Mac can't prove that no other app is still writing to a file. Now undo moves each copy PCTwin made, and that you haven't changed, into the Trash on the same drive, so nothing is ever deleted and you can put anything back. Before it moves a file, PCTwin first sets the copy aside under a private name and checks that it is the very file it made, still unchanged; if another app swapped in a file of its own, that file goes straight back where it was and never reaches the Trash. A file you edited after the move is always kept. On USB sticks and memory cards (FAT and exFAT drives), undo keeps every copy, because those drives reuse the numbers that tell files apart, and the undo screen will say so before you start. Its tests pass on Mac test machines; it is waiting for an independent review.
 
 ## 20 October 2026
 
@@ -22,8 +23,6 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Clearer pairing when someone guesses codes.** After five wrong codes, the old laptop now says plainly that someone on this network tried wrong codes, suggests using your phone's hotspot instead, and waits for you to choose Start again.
 - **A fresh code after sleep.** If the old laptop sleeps while showing a code, that code stops working, and a new one shows the moment it wakes.
 - **No surprise questions.** Before pairing starts, PCTwin says what a Mac (finding devices on your network) or Windows Firewall is about to ask, and which answer lets your laptops find each other. If a Mac said no, PCTwin says where to switch it back on.
-
-## 20 October 2026
 
 **In progress**
 

@@ -1301,3 +1301,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = Start a new send
 history-open-name = { $what }: { $title }
+
+## R05 Undo: what undo will do on each drive, said before the person starts, and how a copy ended
+
+undo-here-removes = Undo removes the copies PCTwin made that you haven't changed. Anything you changed is kept.
+undo-here-to-trash = Undo moves the copies PCTwin made that you haven't changed to the Trash. Anything you changed is kept, and nothing is deleted.
+undo-here-keeps-fat = Undo will keep every copy on { $drive }. This drive uses FAT or exFAT, which reuses the numbers that tell files apart, so PCTwin can't be sure which files are its own. You can delete them yourself.
+undo-here-keeps-other = Undo will keep every copy on { $drive }. PCTwin can't move or remove files safely on this kind of drive. You can delete them yourself.
+undo-here-more = More details
+undo-here-more-trash = A Mac can't show PCTwin that no other app is still writing to a file, so PCTwin never deletes one. It moves each copy into the Trash on the same drive. You can put it back from the Trash.
+undo-here-more-fat = On FAT and exFAT drives, a new file can get the number a removed file had. PCTwin only acts on files it can prove are its own and unchanged, so it keeps these.
+undo-done-trashed = Moved to the Trash as “{ $name }”. You can put it back from the Trash.
+undo-kept-fat = Kept. This drive (FAT or exFAT) reuses the numbers that tell files apart, so PCTwin can't be sure this is its copy. If you don't need it, you can delete it yourself.
+undo-kept-no-trash = Kept. PCTwin couldn't put this copy in the Trash on its drive. If you don't need it, you can delete it yourself.

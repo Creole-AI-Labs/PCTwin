@@ -41,6 +41,8 @@ mod birth_hold;
 mod drive;
 mod fill;
 #[cfg(target_os = "macos")]
+mod mac_trash;
+#[cfg(target_os = "macos")]
 mod macos_check;
 mod marks;
 mod naming;
@@ -57,6 +59,22 @@ pub use fill::{
 };
 pub use marks::download_mark_of;
 pub use naming::{DriveCheck, Naming};
+
+/// For tests: the folder undo treats as the person's home folder when it looks for the Trash on a
+/// Mac (`<home>/.Trash`), so tests never put anything in the person's real Trash. Set once per
+/// process; a later call changes nothing and returns false. The app never calls it.
+#[doc(hidden)]
+pub fn use_trash_home(home: std::path::PathBuf) -> bool {
+    TRASH_HOME.set(home).is_ok()
+}
+
+static TRASH_HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The person's home folder, where their own Trash is (macOS).
+#[cfg(target_os = "macos")]
+fn trash_home() -> Option<std::path::PathBuf> {
+    TRASH_HOME.get().cloned().or_else(std::env::home_dir)
+}
 
 /// For tests: what the first and second probe files of a drive test hold, so a test can leave
 /// probe files as a crash would.
@@ -655,6 +673,15 @@ impl Destination {
     /// What is known about the drive this place is on, read when it was opened.
     pub fn profile(&self) -> DriveProfile {
         self.profile
+    }
+
+    /// What undo will do with the copies in this place, by the kind of drive it is on, for the
+    /// undo screen to say before the person starts (decided 20 October 2026). A FAT or exFAT
+    /// drive keeps every copy: its file numbers are given again to new files, so PCTwin cannot
+    /// tell its own copy. A copy on another drive mounted inside this place still gets its own
+    /// drive's outcome when it is undone.
+    pub fn undo_here(&self) -> UndoHere {
+        undo_on(self.profile.kind())
     }
 
     /// For tests: asks the drive under this place how it keeps time now, as a drive whose type
@@ -1276,6 +1303,12 @@ impl Destination {
         // folder, so another file made there later can carry the very number recorded: the
         // number proves nothing, and the copy is kept (decided 15 October 2026). A drive that
         // cannot be tested now is not trusted either.
+        if matches!(
+            self.profile_of(&dir).kind(),
+            DriveKind::Fat | DriveKind::ExFat
+        ) {
+            return Ok(Removed::NumbersReused);
+        }
         if !self.check_for(&dir, folder).is_ok_and(|c| c.hard_links) {
             return Ok(Removed::Unsupported);
         }
@@ -1838,6 +1871,43 @@ fn folder_to_flush(dir: &Dir) -> io::Result<std::fs::File> {
 /// What a held file's count of names says before it is removed: none left means another try (or
 /// the person) removed it meanwhile, so it is gone; more than one means another name was made for
 /// it, which stays the person's. `None` is the one name, the only case that may go ahead.
+/// What undo does with copies on a drive of `kind` on this system ([`Destination::undo_here`]):
+/// as [`unix_undo`]'s drive check and Windows' drive test decide for each copy.
+fn undo_on(kind: DriveKind) -> UndoHere {
+    if matches!(kind, DriveKind::Fat | DriveKind::ExFat) {
+        return UndoHere::KeepsFileNumbersReused;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if kind == DriveKind::Apfs {
+            UndoHere::ToTrash
+        } else {
+            UndoHere::KeepsNoSafeWay
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if matches!(
+            kind,
+            DriveKind::Ext4 | DriveKind::Xfs | DriveKind::Btrfs | DriveKind::Zfs | DriveKind::F2fs
+        ) {
+            UndoHere::Removes
+        } else {
+            UndoHere::KeepsNoSafeWay
+        }
+    }
+    // Windows tests each drive for hard links before it removes anything; every drive but FAT
+    // and exFAT is expected to pass.
+    #[cfg(windows)]
+    {
+        UndoHere::Removes
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    {
+        UndoHere::KeepsNoSafeWay
+    }
+}
+
 fn by_names(links: u64) -> Option<Removed> {
     match links {
         0 => Some(Removed::Gone),
@@ -1922,6 +1992,33 @@ pub enum Removed {
     /// Removed, but bytes written to it meanwhile (or a program opening it at that moment) made
     /// PCTwin save it again, under `at` beside its name.
     Salvaged { at: String },
+    /// macOS: the very file, unchanged, is in the Trash on its drive, at the absolute path `at`.
+    /// Nothing is deleted: the person can take it back out.
+    Trashed { at: String },
+    /// The drive is FAT or exFAT, whose file numbers are given again to new files, so PCTwin
+    /// cannot tell its own copy from another file: kept as it is.
+    NumbersReused,
+    /// macOS: there is no Trash on this drive PCTwin may use (or the system refused the move into
+    /// it): kept as it is, under its own name.
+    NoTrash,
+}
+
+/// What undo will do with the copies in an approved place, said before the person starts
+/// ([`Destination::undo_here`]). Each copy still gets its own outcome afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UndoHere {
+    /// Copies proven to be the move's own and unchanged are removed (Windows; Linux on its
+    /// usual drives).
+    Removes,
+    /// macOS: copies proven to be the move's own and unchanged go to the Trash.
+    ToTrash,
+    /// Every copy is kept: the drive is FAT or exFAT, whose file numbers are given again to new
+    /// files.
+    KeepsFileNumbersReused,
+    /// Every copy is kept: on this drive PCTwin cannot move or remove a file without risk to
+    /// another one.
+    KeepsNoSafeWay,
 }
 
 /// Where a copy is whose removal was under way ([`Destination::resume_removal`]).

@@ -1460,3 +1460,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = Começar um novo envio
 history-open-name = { $what }: { $title }
+
+## R05 Desfazer: o que desfazer fará em cada disco, e como cada cópia terminou
+
+undo-here-removes = Desfazer apaga as cópias feitas pelo PCTwin que você não alterou. Tudo o que você alterou é mantido.
+undo-here-to-trash = Desfazer move para o Lixo as cópias feitas pelo PCTwin que você não alterou. Tudo o que você alterou é mantido, e nada é apagado.
+undo-here-keeps-fat = Desfazer vai manter todas as cópias em { $drive }. Este disco usa FAT ou exFAT, que reutiliza os números que diferenciam os arquivos, então o PCTwin não tem como saber ao certo quais arquivos são seus. Você mesmo pode apagá-los.
+undo-here-keeps-other = Desfazer vai manter todas as cópias em { $drive }. Neste tipo de disco, o PCTwin não consegue mover nem apagar arquivos com segurança. Você mesmo pode apagá-los.
+undo-here-more = Mais detalhes
+undo-here-more-trash = Um Mac não deixa o PCTwin ter certeza de que nenhum outro app ainda está gravando em um arquivo, então o PCTwin nunca apaga nenhum. Ele move cada cópia para o Lixo do mesmo disco. Você pode recuperá-la no Lixo.
+undo-here-more-fat = Em discos FAT e exFAT, um arquivo novo pode receber o número que um arquivo apagado tinha. O PCTwin só age sobre arquivos que consegue provar que são seus e que não mudaram, então mantém estes.
+undo-done-trashed = Movido para o Lixo como “{ $name }”. Você pode recuperá-lo no Lixo.
+undo-kept-fat = Mantido. Este disco (FAT ou exFAT) reutiliza os números que diferenciam os arquivos, então o PCTwin não tem como saber ao certo se esta é a cópia dele. Se não precisar dela, você mesmo pode apagá-la.
+undo-kept-no-trash = Mantido. O PCTwin não conseguiu colocar esta cópia no Lixo do disco dela. Se não precisar dela, você mesmo pode apagá-la.

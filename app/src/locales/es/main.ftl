@@ -1456,3 +1456,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = Empezar un envío nuevo
 history-open-name = { $what }: { $title }
+
+## R05 Deshacer: qué hará deshacer en cada disco, y cómo terminó cada copia
+
+undo-here-removes = Deshacer elimina las copias que hizo PCTwin y que no has cambiado. Todo lo que cambiaste se conserva.
+undo-here-to-trash = Deshacer mueve a la Papelera las copias que hizo PCTwin y que no has cambiado. Todo lo que cambiaste se conserva y no se elimina nada.
+undo-here-keeps-fat = Deshacer conservará todas las copias en { $drive }. Este disco usa FAT o exFAT, que reutiliza los números que distinguen los archivos, así que PCTwin no puede estar seguro de cuáles son suyos. Puedes eliminarlos tú.
+undo-here-keeps-other = Deshacer conservará todas las copias en { $drive }. En este tipo de disco, PCTwin no puede mover ni eliminar archivos de forma segura. Puedes eliminarlos tú.
+undo-here-more = Más detalles
+undo-here-more-trash = Un Mac no le permite a PCTwin saber que ninguna otra aplicación sigue escribiendo en un archivo, así que PCTwin nunca elimina ninguno. Mueve cada copia a la Papelera del mismo disco. Puedes recuperarla desde la Papelera.
+undo-here-more-fat = En los discos FAT y exFAT, un archivo nuevo puede recibir el número que tenía un archivo eliminado. PCTwin solo actúa sobre archivos que puede demostrar que son suyos y que no han cambiado, así que conserva estos.
+undo-done-trashed = Movido a la Papelera como «{ $name }». Puedes recuperarlo desde la Papelera.
+undo-kept-fat = Conservado. Este disco (FAT o exFAT) reutiliza los números que distinguen los archivos, así que PCTwin no puede estar seguro de que sea su copia. Si no la necesitas, puedes eliminarla tú.
+undo-kept-no-trash = Conservado. PCTwin no pudo mover esta copia a la Papelera de su disco. Si no la necesitas, puedes eliminarla tú.

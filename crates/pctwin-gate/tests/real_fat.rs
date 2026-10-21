@@ -733,3 +733,70 @@ fn a_fat_drive_whose_type_cannot_be_read_is_found_by_its_time() {
         assert!(probes.is_empty(), "{}: {probes:?}", drive.show());
     });
 }
+
+/// Undo on a real FAT or exFAT drive keeps every copy, without reading or moving it: these
+/// drives give a file's number again to new files, so PCTwin cannot tell its own copy (decided
+/// 15 and 20 October 2026). The undo screen is told so before the person starts. A drive served
+/// through FUSE (Linux exfat-fuse) cannot even be told to be exFAT: it is kept too, as a drive
+/// undo does not act on.
+#[test]
+fn undo_keeps_every_copy_on_the_drive_and_says_so_first() {
+    use pctwin_gate::{Removed, UndoHere};
+    if phase() == Phase::After {
+        return;
+    }
+    each_drive(|drive| {
+        let dir = fresh(&drive.path, "pctwin-fat-undo");
+        std::fs::create_dir(dir.join("Docs")).unwrap();
+        std::fs::write(dir.join("Docs/a.txt"), b"a copy on a fat drive").unwrap();
+        let dest = Destination::open(&dir).unwrap();
+        let file = dest.stat("Docs/a.txt").unwrap().unwrap().id;
+        let fuse = drive.kind.contains("fuse");
+        let (want_here, want) = if fuse {
+            (UndoHere::KeepsNoSafeWay, Removed::Unsupported)
+        } else {
+            (UndoHere::KeepsFileNumbersReused, Removed::NumbersReused)
+        };
+        assert_eq!(dest.undo_here(), want_here, "{}", drive.show());
+        let read = std::cell::Cell::new(false);
+        let verify = |_: &mut std::fs::File| {
+            read.set(true);
+            Ok(true)
+        };
+        let j = journal();
+        let permit = j.begin_undo().unwrap();
+        #[cfg(windows)]
+        let r = dest
+            .remove_if_unchanged(&permit, "Docs/a.txt", file, verify, || Ok(()))
+            .unwrap();
+        #[cfg(unix)]
+        let r = {
+            let _ = &permit;
+            match dest.check_copy("Docs/a.txt", file, verify).unwrap() {
+                pctwin_gate::Check::Done(r) => r,
+                pctwin_gate::Check::Ready(_) => panic!("ready to act on {}", drive.show()),
+            }
+        };
+        assert_eq!(r, want, "{}", drive.show());
+        assert!(!read.get(), "nothing was read on {}", drive.show());
+        assert_eq!(
+            std::fs::read(dir.join("Docs/a.txt")).unwrap(),
+            b"a copy on a fat drive",
+            "{}",
+            drive.show()
+        );
+        assert_eq!(settled_names(&dir), ["Docs/a.txt"], "{}", drive.show());
+    });
+}
+
+/// One undo journal for this run, open: acting on a copy needs one of its permits.
+fn journal() -> &'static pctwin_journal::Journal {
+    static J: std::sync::OnceLock<(tempfile::TempDir, pctwin_journal::Journal)> =
+        std::sync::OnceLock::new();
+    &J.get_or_init(|| {
+        let d = tempfile::tempdir().unwrap();
+        let j = pctwin_journal::Journal::open(&d.path().join("j.redb")).unwrap();
+        (d, j)
+    })
+    .1
+}

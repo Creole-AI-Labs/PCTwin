@@ -16,8 +16,6 @@ use std::path::{Path, PathBuf};
 use pctwin_gate::{Approved, Destinations, temp_name};
 use pctwin_journal::{Actor, FileId, Journal, Landed, Permission, PlannedWrite, Undo, UndoOutcome};
 use pctwin_record::{ItemId, LaptopId};
-#[cfg(target_os = "macos")]
-use pctwin_transfer::CANNOT_CHECK;
 use pctwin_transfer::{
     CHANGED_SINCE, CONNECT_OLD_LAPTOP, Confirmed, KEPT_AT_CLOSE, MOVED_SINCE, ORIGINAL_CHANGED,
     ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, OriginalNow, SECOND_NAME, UndoOptions, UndoReport,
@@ -32,6 +30,13 @@ struct World {
 }
 
 fn world() -> World {
+    // macOS: proven copies go into a Trash of the tests' own, never the person's.
+    #[cfg(target_os = "macos")]
+    {
+        static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        let home = HOME.get_or_init(|| tempfile::tempdir().unwrap());
+        pctwin_gate::use_trash_home(home.path().to_path_buf());
+    }
     let root_dir = tempfile::tempdir().unwrap();
     let jdir = tempfile::tempdir().unwrap();
     let root = root_dir.path().to_path_buf();
@@ -228,15 +233,40 @@ impl World {
     }
 }
 
+/// How undo ended for `path`. On macOS a copy undone is in the Trash, not deleted: that is
+/// checked here (the very bytes are at the path in the Trash) and then read as `Deleted`, so the
+/// expectations shared by every system hold; the macOS tests check `Trashed` itself.
 fn outcome_of(report: &UndoReport, path: &str) -> UndoOutcome {
-    report
+    let outcome = report
         .files
         .iter()
         .chain(&report.folders)
         .find(|u| u.path == path)
         .unwrap_or_else(|| panic!("{path} not in {report:?}"))
         .outcome
-        .clone()
+        .clone();
+    as_undone(outcome)
+}
+
+/// macOS: `Trashed`, once its file is seen in the Trash, read as `Deleted` (see [`outcome_of`]).
+fn as_undone(outcome: UndoOutcome) -> UndoOutcome {
+    match outcome {
+        UndoOutcome::Trashed { at } if cfg!(target_os = "macos") => {
+            assert!(Path::new(&at).is_file(), "not in the Trash: {at}");
+            UndoOutcome::Deleted
+        }
+        other => other,
+    }
+}
+
+/// The journal's last record for an undo, with `Trashed` read as `Deleted` on macOS.
+fn recorded(stage: Option<Undo>) -> Option<Undo> {
+    match stage {
+        Some(Undo::Done { outcome }) => Some(Undo::Done {
+            outcome: as_undone(outcome),
+        }),
+        other => other,
+    }
 }
 
 fn kept(why: &str) -> UndoOutcome {
@@ -253,10 +283,6 @@ fn names_in(dir: &Path) -> Vec<String> {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn files_nobody_changed_are_removed_and_empty_folders_the_move_made_are_removed() {
     let w = world();
     std::fs::create_dir(w.root.join("Documents")).unwrap();
@@ -278,7 +304,7 @@ fn files_nobody_changed_are_removed_and_empty_folders_the_move_made_are_removed(
     // A folder that was already there is the person's own: never touched.
     assert!(w.exists("Documents"));
     assert_eq!(
-        w.journal.undo_of(a).unwrap(),
+        recorded(w.journal.undo_of(a).unwrap()),
         Some(Undo::Done {
             outcome: UndoOutcome::Deleted
         })
@@ -289,10 +315,6 @@ fn files_nobody_changed_are_removed_and_empty_folders_the_move_made_are_removed(
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn without_the_old_laptop_nothing_is_removed() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -318,10 +340,6 @@ fn without_the_old_laptop_nothing_is_removed() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn an_original_the_old_laptop_could_not_confirm_keeps_its_copy() {
     let w = world();
     w.moved(1, "unanswered.txt", b"1", &[]);
@@ -392,10 +410,6 @@ fn a_copy_whose_original_changed_on_the_old_laptop_is_kept() {
 /// One answer "not found" while the old laptop's drive was unplugged for a moment is not the
 /// last word: once it is back, the next undo removes the copy.
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn an_original_not_found_for_a_moment_does_not_keep_the_copy_for_good() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -553,10 +567,6 @@ fn a_file_made_again_under_the_same_name_is_not_the_one_the_move_wrote() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_file_already_gone_is_reported_and_undo_goes_newest_first() {
     let w = world();
     w.moved(1, "first.txt", b"1", &[]);
@@ -581,10 +591,6 @@ fn a_file_moved_to_another_folder_is_kept_and_said_so() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_folder_with_something_in_it_is_kept_and_looked_at_again_next_time() {
     let w = world();
     w.moved(1, "New/a.txt", b"a", &["New"]);
@@ -644,10 +650,6 @@ fn identical_files_that_were_already_there_are_never_touched() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn undoing_twice_is_as_safe_as_once() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -730,10 +732,6 @@ fn an_undo_cut_short_is_not_finished_after_the_wipe_starts() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn undo_cut_short_before_removing_finishes_next_time() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -750,10 +748,6 @@ fn undo_cut_short_before_removing_finishes_next_time() {
 /// under exactly the recorded private name, proves it is the copy, unchanged, and removes it.
 #[cfg(unix)]
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn undo_cut_short_after_moving_aside_is_finished_from_the_disk() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -776,10 +770,6 @@ fn undo_cut_short_after_moving_aside_is_finished_from_the_disk() {
 /// name, and is said to be kept.
 #[cfg(unix)]
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_copy_changed_while_moved_aside_goes_back_under_its_name() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -809,10 +799,6 @@ fn a_copy_changed_while_moved_aside_goes_back_under_its_name() {
 /// aside, so nothing is left under a hidden name once undo is gone.
 #[cfg(unix)]
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn closing_finishes_a_removal_cut_short_after_moving_aside() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -827,7 +813,7 @@ fn closing_finishes_a_removal_cut_short_after_moving_aside() {
     std::fs::rename(w.root.join("a.txt"), w.root.join(private)).unwrap();
     close_undo(&w.journal, &w.table, &UndoOptions::default()).unwrap();
     assert_eq!(
-        w.journal.undo_of(a).unwrap(),
+        recorded(w.journal.undo_of(a).unwrap()),
         Some(Undo::Done {
             outcome: UndoOutcome::Deleted
         })
@@ -935,10 +921,6 @@ fn a_copy_put_back_because_it_was_in_use_is_removed_once_free() {
 /// the copy under its name and looked at again as usual, so it is removed (security review, finding 2).
 #[cfg(unix)]
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_put_back_of_the_copy_cut_short_is_finished_and_the_copy_removed() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -976,10 +958,6 @@ fn a_put_back_of_the_copy_cut_short_is_finished_and_the_copy_removed() {
 /// Every undo on Linux and macOS leaves no name of its own behind.
 #[cfg(unix)]
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn undo_leaves_no_hidden_names() {
     let w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -1003,10 +981,6 @@ fn undo_cut_short_after_removing_says_it_is_gone_and_claims_nothing_more() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_file_is_recorded_as_being_removed_only_when_it_really_is() {
     let w = world();
     let a = w.moved(1, "a.txt", b"a", &[]);
@@ -1031,7 +1005,7 @@ fn a_file_is_recorded_as_being_removed_only_when_it_really_is() {
     let r = w.undo();
     assert_eq!(outcome_of(&r, "a.txt"), UndoOutcome::Deleted);
     assert_eq!(
-        w.journal.undo_of(a).unwrap(),
+        recorded(w.journal.undo_of(a).unwrap()),
         Some(Undo::Done {
             outcome: UndoOutcome::Deleted
         })
@@ -1049,10 +1023,6 @@ fn a_file_with_a_second_name_is_kept_and_said_so() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_place_not_reachable_now_is_tried_again_later() {
     let mut w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -1067,10 +1037,6 @@ fn a_place_not_reachable_now_is_tried_again_later() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_different_folder_under_the_same_label_is_never_undone() {
     let mut w = world();
     w.moved(1, "a.txt", b"a", &[]);
@@ -1092,10 +1058,6 @@ fn a_different_folder_under_the_same_label_is_never_undone() {
 }
 
 #[test]
-#[cfg_attr(
-    target_os = "macos",
-    ignore = "macOS never removes a copy (13 October 2026)"
-)]
 fn a_file_in_a_folder_spelled_otherwise_on_the_disk_is_still_undone() {
     let w = world();
     std::fs::create_dir(w.root.join("Docs")).unwrap();
@@ -1278,16 +1240,201 @@ fn a_file_stored_online_only_is_kept_and_said_so() {
     assert!(w.exists("a.txt"));
 }
 
-/// macOS cannot prove that no other program can still write to a file, so undo keeps every copy
-/// there and says so; the file is untouched (security design notes, 13 October 2026).
+/// macOS: an unchanged copy goes into the Trash on its drive, and the report says where; nothing
+/// is deleted, and the journal records it as done for good (decided 20 October 2026).
 #[cfg(target_os = "macos")]
 #[test]
-fn on_macos_an_unchanged_copy_is_kept_and_said_so() {
+fn on_macos_an_unchanged_copy_goes_to_the_trash_and_is_said_so() {
     let w = world();
-    w.moved(1, "a.txt", b"a", &[]);
+    let a = w.moved(1, "to-the-trash.txt", b"trash me", &[]);
     let r = w.undo();
-    assert_eq!(outcome_of(&r, "a.txt"), kept(CANNOT_CHECK));
-    assert!(w.exists("a.txt"));
-    // Final: undo does not keep asking about it.
+    let file = r
+        .files
+        .iter()
+        .find(|u| u.path == "to-the-trash.txt")
+        .unwrap();
+    let UndoOutcome::Trashed { at } = &file.outcome else {
+        panic!("{r:?}")
+    };
+    assert!(at.contains("/.Trash/to-the-trash"), "{at}");
+    assert_eq!(std::fs::read(at).unwrap(), b"trash me");
+    assert!(!w.exists("to-the-trash.txt"));
+    assert_eq!(r.not_undone().count(), 0);
+    assert!(!file.outcome.needs_action());
+    assert_eq!(
+        w.journal.undo_of(a).unwrap(),
+        Some(Undo::Done {
+            outcome: file.outcome.clone()
+        })
+    );
     assert!(undo_items(&w.journal).unwrap().is_empty());
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+}
+
+/// macOS: a move into the Trash cut short (recorded, not yet done) is finished when undo closes,
+/// so nothing is left under a hidden name and the copy ends in the Trash.
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_closing_finishes_a_move_into_the_trash_cut_short() {
+    let w = world();
+    let a = w.moved(1, "closing.txt", b"closing", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing {
+        file,
+        dir_id,
+        private,
+    } = stage.clone()
+    else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+        w.journal
+            .record_undo(
+                &permit,
+                a,
+                &Undo::Trashing {
+                    file,
+                    dir_id,
+                    private: private.clone(),
+                    trash: "/nowhere/.Trash".into(),
+                    to: "closing.txt".into(),
+                },
+            )
+            .unwrap();
+    }
+    std::fs::rename(w.root.join("closing.txt"), w.root.join(&private)).unwrap();
+    close_undo(&w.journal, &w.table, &UndoOptions::default()).unwrap();
+    let Some(Undo::Done {
+        outcome: UndoOutcome::Trashed { at },
+    }) = w.journal.undo_of(a).unwrap()
+    else {
+        panic!("{:?}", w.journal.undo_of(a))
+    };
+    assert_eq!(std::fs::read(&at).unwrap(), b"closing");
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
+    assert!(!w.exists("closing.txt"));
+}
+
+/// Before the person starts, undo says what it will do in each place the move wrote to: remove
+/// (Windows, Linux), move to the Trash (macOS), or keep every copy on a FAT or exFAT drive,
+/// whose file numbers are given again to new files (decided 20 October 2026).
+#[test]
+fn the_undo_preview_says_what_undo_will_do_in_each_place() {
+    use pctwin_gate::{Destination, DriveKind, DriveProfile, UndoHere};
+    let mut w = world();
+    w.moved(1, "a.txt", b"a", &[]);
+    let usb = tempfile::tempdir().unwrap();
+    let fat = Destination::open(usb.path())
+        .unwrap()
+        .with_profile(DriveProfile::of(DriveKind::ExFat));
+    w.table
+        .approve_opened("usb", Approved::MyFolders, fat)
+        .unwrap();
+    let usb_root = usb.path().to_path_buf();
+    // A file the move wrote to the USB drive, recorded under that place.
+    {
+        let id = w
+            .journal
+            .plan(&PlannedWrite {
+                download_mark: None,
+                item: item(2),
+                source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+                destination: "usb".into(),
+                path: "b.txt".into(),
+                size: 1,
+                actor: Actor {
+                    acting_account: "1001".into(),
+                    for_account: "1001".into(),
+                    permission: Permission::OwnFolders,
+                },
+                block_size: block_size_for(1),
+                source_modified_ns: Some(1),
+                source_file: Some(original(2).0),
+                partial_keep: Default::default(),
+                place: None,
+            })
+            .unwrap();
+        w.journal
+            .staged(id, &temp_name(&w.journal.temp_tag(id)), &[])
+            .unwrap();
+        let fp = fingerprint_reader(&mut &b"b"[..], 1, block_size_for(1))
+            .unwrap()
+            .unwrap();
+        w.journal.verified(id, fp, None).unwrap();
+        w.journal.applied(id, "b.txt").unwrap();
+        std::fs::write(usb_root.join("b.txt"), b"b").unwrap();
+        w.journal
+            .committed(
+                id,
+                Landed {
+                    size: 1,
+                    modified_ns: None,
+                    file: None,
+                },
+            )
+            .unwrap();
+    }
+    let here = if cfg!(target_os = "macos") {
+        UndoHere::ToTrash
+    } else {
+        UndoHere::Removes
+    };
+    let preview = pctwin_transfer::undo_preview(&w.journal, &w.table).unwrap();
+    let me = preview.iter().find(|(l, _)| l == "me").map(|(_, h)| *h);
+    // The test folder may sit on a drive undo keeps copies on (a container's file system).
+    assert!(
+        me == Some(here) || me == Some(UndoHere::KeepsNoSafeWay),
+        "{preview:?}"
+    );
+    assert!(
+        preview.contains(&("usb".to_string(), UndoHere::KeepsFileNumbersReused)),
+        "{preview:?}"
+    );
+    assert_eq!(preview.len(), 2, "{preview:?}");
+}
+
+/// Linux and macOS: a move into the Trash recorded, but the copy is back under its own name
+/// (it was put back, or never moved) is looked at again from the start and undone, never left
+/// stuck behind the record.
+#[cfg(unix)]
+#[test]
+fn a_move_into_the_trash_recorded_with_the_copy_still_home_starts_over() {
+    let w = world();
+    let a = w.moved(1, "home-again.txt", b"home again", &[]);
+    let stage = w.removing(a);
+    let Undo::Removing {
+        file,
+        dir_id,
+        private,
+    } = stage.clone()
+    else {
+        unreachable!()
+    };
+    {
+        let permit = w.journal.begin_undo().unwrap();
+        w.journal.record_undo(&permit, a, &stage).unwrap();
+        w.journal
+            .record_undo(
+                &permit,
+                a,
+                &Undo::Trashing {
+                    file,
+                    dir_id,
+                    private,
+                    trash: "/nowhere/.Trash".into(),
+                    to: "home-again.txt".into(),
+                },
+            )
+            .unwrap();
+    }
+    let r = w.undo();
+    assert_eq!(
+        outcome_of(&r, "home-again.txt"),
+        UndoOutcome::Deleted,
+        "{r:?}"
+    );
+    assert!(!w.exists("home-again.txt"));
+    assert!(w.hidden().is_empty(), "{:?}", w.hidden());
 }

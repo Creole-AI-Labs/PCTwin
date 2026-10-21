@@ -50,7 +50,10 @@ use serde::{Deserialize, Serialize};
 ///   October 2026 without a new number: format 2 had never shipped, so no journal on any laptop
 ///   holds the older shape. Once it ships, any change of shape needs a new number.) The write
 ///   steps `State::Filling` and `State::Filled` (a file filled in under its real name on a drive
-///   with no safe rename) joined it on 15 October 2026, still before it shipped. Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
+///   with no safe rename) joined it on 15 October 2026, still before it shipped. The undo stage
+///   `Undo::Trashing` and the outcome `UndoOutcome::Trashed` (macOS moves a proven copy from its
+///   private name into the Trash on its drive) joined it on 21 October 2026, still before it
+///   shipped (no release of PCTwin has been published). Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
 ///   and could allow undo after the wipe, so it must refuse this journal instead.
 /// - **1**: undo set copies aside or sent them to the Recycle Bin (`Undo::Aside`,
 ///   `UndoOutcome::Trashed`). Opening a format-1 journal that holds no undo record (of a file or
@@ -507,7 +510,9 @@ pub struct Entry {
 /// never paths.
 ///
 /// The stages go in one direction: Removing (again with a new private name, if the first was
-/// taken), then Putting (again for each candidate name) or Salvaging, then Done. A final Done is
+/// taken), then Putting (again for each candidate name) or Salvaging, then Done. On macOS a
+/// proven copy goes from Removing to Trashing (again for each name tried in the Trash), then
+/// Done, or Putting if it cannot go to the Trash after all. A final Done is
 /// never written over; [`UndoOutcome::NotDone`] ("not done this time") may start again with
 /// Removing. Every stage before Done is about the same file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -549,6 +554,18 @@ pub enum Undo {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         complete: bool,
     },
+    /// macOS: about to move what is under `private`, proven to be the copy, into the Trash
+    /// folder `trash` on the same drive (an absolute path: the person's `~/.Trash`, or a drive's
+    /// `.Trashes/<uid>`) as `to`, never replacing anything there. Recorded before each name tried.
+    /// Nothing is deleted: the person can take it back out of the Trash.
+    Trashing {
+        file: FileId,
+        /// The folder of the removal it follows, so it can be found again if moved.
+        dir_id: FileId,
+        private: String,
+        trash: String,
+        to: String,
+    },
     /// Done; never looked at again, unless it could not be done this time.
     Done { outcome: UndoOutcome },
 }
@@ -559,6 +576,7 @@ impl Undo {
             Undo::Removing { .. } => "removing",
             Undo::Putting { .. } => "putting",
             Undo::Salvaging { .. } => "salvaging",
+            Undo::Trashing { .. } => "trashing",
             Undo::Done { .. } => "done",
         }
     }
@@ -573,7 +591,8 @@ impl Undo {
         match self {
             Undo::Removing { file, .. }
             | Undo::Putting { file, .. }
-            | Undo::Salvaging { file, .. } => Some(*file),
+            | Undo::Salvaging { file, .. }
+            | Undo::Trashing { file, .. } => Some(*file),
             Undo::Done { .. } => None,
         }
     }
@@ -583,16 +602,20 @@ impl Undo {
         match self {
             Undo::Removing { dir_id, .. }
             | Undo::Putting { dir_id, .. }
-            | Undo::Salvaging { dir_id, .. } => Some(*dir_id),
+            | Undo::Salvaging { dir_id, .. }
+            | Undo::Trashing { dir_id, .. } => Some(*dir_id),
             Undo::Done { .. } => None,
         }
     }
 
-    /// The names this stage will create or move to, each one plain name in the copy's folder.
+    /// The names this stage will create or move to, each one plain name in the copy's folder
+    /// (for Trashing, `to` is one plain name in the Trash folder).
     fn names(&self) -> Vec<&str> {
         match self {
             Undo::Removing { private, .. } => vec![private],
-            Undo::Putting { private, to, .. } => vec![private, to],
+            Undo::Putting { private, to, .. } | Undo::Trashing { private, to, .. } => {
+                vec![private, to]
+            }
             Undo::Salvaging { temp, to, .. } => vec![temp, to],
             Undo::Done { .. } => vec![],
         }
@@ -601,7 +624,9 @@ impl Undo {
     /// The hidden name in the copy's folder where the file (or what was saved of it) may be.
     fn hidden_name(&self) -> Option<&str> {
         match self {
-            Undo::Removing { private, .. } | Undo::Putting { private, .. } => Some(private),
+            Undo::Removing { private, .. }
+            | Undo::Putting { private, .. }
+            | Undo::Trashing { private, .. } => Some(private),
             Undo::Salvaging { temp, .. } => Some(temp),
             Undo::Done { .. } => None,
         }
@@ -618,6 +643,15 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
             // About the same file, in the same folder, as the removal it follows.
             let same_file = next.file().is_none_or(|f| before.file() == Some(f))
                 && next.dir_id().is_none_or(|d| before.dir_id() == Some(d));
+            // A move into the Trash moves out of the very private name the stage before it
+            // recorded (where recovery looks for the copy).
+            let same_private = match (before, next) {
+                (
+                    Undo::Removing { private: p0, .. } | Undo::Trashing { private: p0, .. },
+                    Undo::Trashing { private, .. },
+                ) => p0 == private,
+                _ => true,
+            };
             // A salvage keeps its one temporary file, and once complete stays complete.
             let same_salvage = match (before, next) {
                 (
@@ -635,6 +669,7 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
                 _ => true,
             };
             same_file
+                && same_private
                 && same_salvage
                 && matches!(
                     (before, next),
@@ -643,7 +678,11 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
                         Undo::Removing { .. }
                             | Undo::Putting { .. }
                             | Undo::Salvaging { .. }
+                            | Undo::Trashing { .. }
                             | Undo::Done { .. }
+                    ) | (
+                        Undo::Trashing { .. },
+                        Undo::Trashing { .. } | Undo::Putting { .. } | Undo::Done { .. }
                     ) | (
                         Undo::Putting { .. },
                         Undo::Putting { .. } | Undo::Done { .. }
@@ -654,6 +693,28 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
                 )
         }
     }
+}
+
+/// An error unless `trash` is a Trash folder's absolute path: `<home>/.Trash` or
+/// `<drive>/.Trashes/<number>`, with no `.` or `..` in it.
+fn trash_folder(trash: &str) -> Result<(), JournalError> {
+    let bad = || Err(JournalError::BadName(trash.into()));
+    if !trash.starts_with('/') || trash.contains(['\\', '\0']) {
+        return bad();
+    }
+    let parts: Vec<&str> = trash[1..].split('/').collect();
+    if parts
+        .iter()
+        .any(|p| p.is_empty() || *p == "." || *p == "..")
+    {
+        return bad();
+    }
+    let ok = match parts.as_slice() {
+        [.., ".Trash"] => true,
+        [.., ".Trashes", uid] => !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()),
+        _ => false,
+    };
+    if ok { Ok(()) } else { bad() }
 }
 
 /// An error unless `name` is one plain name (no folder, not `.` or `..`, nothing hidden in it).
@@ -670,6 +731,10 @@ fn plain_name(name: &str) -> Result<(), JournalError> {
 pub enum UndoOutcome {
     /// Deleted outright (not to the Recycle Bin): the original is still on the old laptop.
     Deleted,
+    /// macOS: the copy, proven to be the one the move wrote and unchanged, was moved into the
+    /// Trash on its drive, at the absolute path `at` (nothing deleted: the person can take it
+    /// back out).
+    Trashed { at: String },
     /// A folder PCTwin made, empty, removed.
     Removed,
     /// It was already gone.
@@ -889,6 +954,9 @@ impl Pending {
 pub enum Resolved {
     /// The copy, proven to be the one checked and unchanged, was removed ([`UndoOutcome::Deleted`]).
     Removed,
+    /// macOS: the copy, proven to be the one checked and unchanged, is in the Trash at `at`
+    /// ([`UndoOutcome::Trashed`]).
+    Trashed { at: String },
     /// Nothing of it is left to remove.
     AlreadyGone,
     /// Kept under its own name, and why.
@@ -904,6 +972,7 @@ impl Resolved {
     fn outcome(self) -> Result<UndoOutcome, String> {
         match self {
             Resolved::Removed => Ok(UndoOutcome::Deleted),
+            Resolved::Trashed { at } => Ok(UndoOutcome::Trashed { at }),
             Resolved::AlreadyGone => Ok(UndoOutcome::AlreadyGone),
             Resolved::Kept { why } => Ok(UndoOutcome::Kept { why }),
             Resolved::KeptAt { at, why } => Ok(UndoOutcome::KeptAt { at, why }),
@@ -2238,6 +2307,9 @@ fn put_undo(
     }
     for name in undo.names() {
         plain_name(name)?;
+    }
+    if let Undo::Trashing { trash, .. } = undo {
+        trash_folder(trash)?;
     }
     let before: Option<Undo> = table
         .get(id)
