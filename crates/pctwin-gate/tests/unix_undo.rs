@@ -1631,3 +1631,52 @@ fn on_macos_a_part_way_removal_goes_to_the_trash_or_back_never_deleted() {
     assert_eq!(std::fs::read(docs.join("b.txt")).unwrap(), b"copy b");
     assert!(!trash_holds(b"copy b"));
 }
+
+/// A file put at the copy's name in the moment undo moves it aside (the copy itself moved to
+/// another name, unchanged, with one name) is found not to be the copy right after the move:
+/// it goes straight back, and on macOS nothing of it is ever recorded as going to the Trash.
+#[test]
+fn a_file_put_at_the_name_while_it_is_moved_aside_goes_straight_back() {
+    let Some((root, dest)) = setup() else { return };
+    let docs = root.path().join("Docs");
+    put(&root, "Docs/aside.txt", b"copy");
+    let file = id(&dest, "Docs/aside.txt");
+    let copy = match dest
+        .check_copy("Docs/aside.txt", file, bytes_are(b"copy"))
+        .unwrap()
+    {
+        Check::Ready(c) => c,
+        Check::Done(r) => panic!("{r:?}"),
+    };
+    // The first private name is taken, so a new one is recorded; at that moment the copy is
+    // renamed away and another file of the same size takes its name.
+    let private = pctwin_gate::private_name().unwrap();
+    std::fs::write(docs.join(&private), b"planted").unwrap();
+    let j = journal();
+    let permit = j.begin_undo().unwrap();
+    let mut steps = Vec::new();
+    let mut journal = |s: Step<'_>| {
+        if matches!(s, Step::NewPrivate { .. }) {
+            std::fs::rename(docs.join("aside.txt"), docs.join("moved away.txt")).unwrap();
+            std::fs::write(docs.join("aside.txt"), b"COPY").unwrap();
+        }
+        steps.push(step_text(&s));
+        Ok(())
+    };
+    let mut cx = Context {
+        kept_words: WORDS,
+        room_for_words: 64,
+        journal: &mut journal,
+    };
+    let r = dest
+        .remove_checked(&permit, *copy, &private, &mut cx)
+        .unwrap();
+    assert_eq!(r, Removed::NotThatFile);
+    assert_eq!(std::fs::read(docs.join("aside.txt")).unwrap(), b"COPY");
+    assert_eq!(std::fs::read(docs.join("moved away.txt")).unwrap(), b"copy");
+    assert!(
+        !steps.iter().any(|s| s.starts_with("Trashing")),
+        "{steps:?}"
+    );
+    assert_eq!(hidden(&docs), [private.as_str()]);
+}
