@@ -99,7 +99,8 @@ impl NewLaptop {
 
     fn table(&self) -> Destinations {
         let mut t = Destinations::new();
-        t.approve("me", Approved::MyFolders, self.me.path()).unwrap();
+        t.approve("me", Approved::MyFolders, self.me.path())
+            .unwrap();
         t.approve("pictures", Approved::MyFolders, self.pictures.path())
             .unwrap();
         t.approve("shared", Approved::SharedFolder, self.shared.path())
@@ -234,7 +235,11 @@ async fn a_copy_in_one_person_s_things_crosses_the_link_once() {
         },
     ]);
     let ran = run(&m, 4, None).await;
-    assert_eq!(ran.blocks_sent, 2 * blocks(BIG), "the copy's blocks never crossed");
+    assert_eq!(
+        ran.blocks_sent,
+        2 * blocks(BIG),
+        "the copy's blocks never crossed"
+    );
     assert_eq!(ran.sent[0], Some(SendOutcome::Arrived));
     assert_eq!(ran.sent[1], Some(SendOutcome::AlreadyThere));
     assert_eq!(ran.sent[2], Some(SendOutcome::Arrived));
@@ -270,11 +275,7 @@ async fn copies_are_never_made_across_people_or_shared_places() {
     ]);
     let ran = run(&m, 4, None).await;
     assert_eq!(ran.blocks_sent, 3 * blocks(BIG));
-    assert!(
-        ran.sent
-            .iter()
-            .all(|o| *o == Some(SendOutcome::Arrived))
-    );
+    assert!(ran.sent.iter().all(|o| *o == Some(SendOutcome::Arrived)));
 }
 
 #[tokio::test]

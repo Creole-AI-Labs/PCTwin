@@ -48,7 +48,8 @@
 //!   `os_access_list`, `os_accept`, `os_client_process_id`, `os_server_process_id`,
 //!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
 //!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`, `os_net_user_add`,
-//!   `os_expire_password`, `os_create_dir_with_sddl`, `os_create_profile`.
+//!   `os_expire_password`, `os_create_dir_with_sddl`, `os_create_profile`,
+//!   `os_set_process_sddl`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`, `os_od_create_user`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -269,6 +270,28 @@ pub fn secure_token_on(name: &str, password: &str) -> Result<bool, Error> {
     {
         let _ = password;
         Ok(true)
+    }
+}
+
+/// Hardens this process against a person with normal rights reading its memory (Security Design
+/// part C: the mover's engine while it carries other people's things in a move of several
+/// people). Linux: not dumpable, so no debugger can attach, `/proc/<pid>/mem` is closed and no
+/// core file is written. Windows: an access list that lets the account only see the process,
+/// wait for it and end it. macOS: the app's hardened runtime without `get-task-allow`, set when
+/// the app is signed, so nothing is done here.
+pub fn harden_this_process() -> Result<(), Error> {
+    #[cfg(windows)]
+    {
+        win::harden_process()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
+            .map_err(|e| Error::Io(e.into()))
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        Ok(())
     }
 }
 

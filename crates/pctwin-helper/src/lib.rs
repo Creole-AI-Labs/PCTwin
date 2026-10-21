@@ -24,3 +24,11 @@ pub use client::{Client, ClientError, HandedOver, MadeAccount, Scanned, connect}
 pub use protocol::{Answer, FromHelper, Handle, Refusal, Request};
 pub use read::Entry;
 pub use session::Session;
+
+/// Hardens the mover's engine (this process) against a person with normal rights reading its
+/// memory, before it carries anyone else's things (Security Design part C): Linux, not dumpable;
+/// Windows, an access list that lets the account only see, wait for and end it; macOS, the app's
+/// hardened runtime, set when it is signed.
+pub fn harden_engine() -> Result<(), String> {
+    pctwin_helper_os::harden_this_process().map_err(|e| e.to_string())
+}

@@ -253,8 +253,14 @@ fn a_holding_folder_is_that_person_s_place() {
     );
     assert!(held.path().join("Documents/d.txt").exists());
     // The same checks on the person and the label as any other.
-    for (id, account) in [("x", ""), ("y", "S-1-5
-21"), ("for-bea", "S-1-5-21-9")] {
+    for (id, account) in [
+        ("x", ""),
+        (
+            "y", "S-1-5
+21",
+        ),
+        ("for-bea", "S-1-5-21-9"),
+    ] {
         assert!(table.approve_holding(id, account, held.path()).is_err());
     }
     assert_eq!(table.ids().count(), 1);

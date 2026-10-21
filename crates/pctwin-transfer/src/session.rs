@@ -2099,7 +2099,10 @@ async fn copy_here(
         };
         file = Some(f);
         hasher.update(&data);
-        if !state.borrow_mut().copy_block(stream, Block::plain(index, data)) {
+        if !state
+            .borrow_mut()
+            .copy_block(stream, Block::plain(index, data))
+        {
             whole = false;
             break;
         }

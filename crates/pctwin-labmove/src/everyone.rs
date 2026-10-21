@@ -261,6 +261,10 @@ fn report_json(sweep: &Sweep, report: &MoverReport, declined: &[String], lines: 
 
 /// Runs the move as the mover.
 pub async fn everyone(args: Everyone) -> Result<Ran, String> {
+    // Carrying other people's things: hardened before anything of theirs is read.
+    if args.helper.is_some() {
+        pctwin_helper::harden_engine()?;
+    }
     let laptop = args.laptop;
     let sweep = tokio::task::spawn_blocking(move || {
         pctwin_scan::sweep_this_laptop(laptop, &AtomicBool::new(false), &mut |_| {}, None)

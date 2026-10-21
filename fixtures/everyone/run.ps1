@@ -123,7 +123,7 @@ $helper = Start-Helper $pipe3 (Join-Path $admin 'helper-3')
 Start-Sleep -Seconds 1
 
 Write-Host '== 3. the mover cannot look into the helper =='
-$probe = 'try { [void](Get-Process -Id ' + $helper.Id + ').Modules.Count; [void](Get-Process -Id ' + $helper.Id + ').Handle; exit 0 } catch { exit 1 }'
+$probe = 'try { if ((Get-Process -Id ' + $helper.Id + ').Modules.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }'
 $look = Start-As $mover 'powershell.exe' @('-NoProfile', '-NonInteractive', '-Command', $probe) (Join-Path $admin 'debugger.out.txt') (Join-Path $admin 'debugger.err.txt')
 if ((Wait-Exit $look 'the mover looking into the helper') -eq 0) { throw "the mover opened the helper's process" }
 
@@ -131,6 +131,12 @@ $newHome = Join-Path $moverDir 'new-home'
 $run = Start-As $mover $labmove @('everyone', (Join-Path $moverDir 'report.json'), '--laptop', $laptop,
     '--new-home', $newHome, '--journal', (Join-Path $moverDir 'journal.redb'), '--new-names', 'pctwinnew',
     '--hostile', 'yes', '--session', $token, '--channel', $pipe3) (Join-Path $admin 'evidence.json') (Join-Path $moverDir 'log.txt')
+# The mover's own engine, while it carries other people's things, is closed to the mover too:
+# reading it lists no modules.
+Start-Sleep -Seconds 5
+$engineProbe = 'try { if ((Get-Process -Id ' + $run.Id + ').Modules.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }'
+$lookEngine = Start-As $mover 'powershell.exe' @('-NoProfile', '-NonInteractive', '-Command', $engineProbe) (Join-Path $admin 'engine-look.out.txt') (Join-Path $admin 'engine-look.err.txt')
+if ((Wait-Exit $lookEngine 'the mover looking into their engine') -eq 0) { throw 'the mover read their own engine while it carried other people''s things' }
 if ((Wait-Exit $run 'the move') -ne 0) {
     Get-Content (Join-Path $moverDir 'log.txt') -ErrorAction SilentlyContinue | Write-Host
     throw 'the move failed'

@@ -135,8 +135,7 @@ if [ -n "$helper_pid" ]; then
       exit 1
     fi
   else
-    if as_user "$mover" dd if="/proc/$helper_pid/mem" of=/dev/null bs=1 count=1 skip=4096 \
-      >"$admin/debugger.txt" 2>&1; then
+    if as_user "$mover" cat "/proc/$helper_pid/environ" >"$admin/debugger.txt" 2>&1; then
       echo "the mover read the helper's memory" >&2
       exit 1
     fi
@@ -149,7 +148,20 @@ fi
 as_user "$mover" bash -c 'exec pctwin-labmove everyone "$0/report.json" "$@" 2>"$0/log.txt"' \
   "$work/mover" --laptop "$laptop" --new-home "$work/mover/new-home" \
   --journal "$work/mover/journal.redb" --new-names pctwinnew --hostile yes \
-  --session "$token" --channel c3 --dir "$channels" >"$admin/evidence.json"
+  --session "$token" --channel c3 --dir "$channels" >"$admin/evidence.json" &
+engine=$!
+# The mover's own engine, while it carries other people's things, is closed to the mover too
+# (Linux: not dumpable, so even its environment is the system's to read).
+if ! $mac; then
+  sleep 5
+  engine_pid="$(pgrep -u "$(uid "$mover")" -f "^pctwin-labmove everyone" | head -n 1 || true)"
+  [ -n "$engine_pid" ] || { echo "the mover's engine was not found" >&2; exit 1; }
+  if as_user "$mover" cat "/proc/$engine_pid/environ" >"$admin/engine-look.txt" 2>&1; then
+    echo "the mover read their own engine while it carried other people's things" >&2
+    exit 1
+  fi
+fi
+wait "$engine"
 wait "$helper"
 
 python3 "$here/plant.py" key "$admin/planted.json" "$mover" "$work/mover/new-home" \

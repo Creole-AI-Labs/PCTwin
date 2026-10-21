@@ -26,7 +26,7 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, RevertToSelf,
-    SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    SECURITY_ATTRIBUTES, SetKernelObjectSecurity, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateDirectoryW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW,
@@ -536,6 +536,56 @@ fn os_create_dir_with_sddl(path: &[u16], sddl: &[u16]) -> Result<(), HRESULT> {
                 let made = CreateDirectoryW(PCWSTR(path.as_ptr()), Some(&attributes));
                 LocalFree(Some(HLOCAL(sd.0)));
                 made.map_err(|e| e.code())
+            }
+        }
+    };
+    r
+}
+
+/// The access list this process gets while it carries other people's things (Security Design
+/// part C): SYSTEM keeps everything; the account it runs as, and the owner's implicit rights
+/// (`OW`, so the owner cannot simply change the list back), may only see that it runs, wait for it
+/// and end it (`PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`): never read
+/// or write its memory, start a thread in it, or copy its handles.
+fn hardened_process_sddl(user: &Sid) -> String {
+    format!(
+        "D:P(A;;GA;;;SY)(A;;0x101001;;;OW)(A;;0x101001;;;{})",
+        user.as_str()
+    )
+}
+
+/// Gives this process [`hardened_process_sddl`]'s access list.
+pub(crate) fn harden_process() -> Result<(), Error> {
+    let me = current_sid()?;
+    let sddl = wide(OsStr::new(&hardened_process_sddl(&me)));
+    os_set_process_sddl(&sddl).map_err(|code| os_err("SetKernelObjectSecurity", code))
+}
+
+/// `SetKernelObjectSecurity` on this process, with the access list `sddl` describes.
+fn os_set_process_sddl(sddl: &[u16]) -> Result<(), HRESULT> {
+    assert!(sddl.ends_with(&[0]), "NUL-terminated");
+    // SAFETY: the string is NUL-terminated (checked above). GetCurrentProcess returns a
+    // pseudo-handle that needs no closing. The security descriptor the system allocates is used
+    // only during SetKernelObjectSecurity and freed once, after it; the result is read before
+    // LocalFree can change the last error.
+    #[expect(
+        unsafe_code,
+        reason = "changing a process's access list has no safe binding"
+    )]
+    let r = unsafe {
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        match ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut sd,
+            None,
+        ) {
+            Err(e) => Err(e.code()),
+            Ok(()) => {
+                let set =
+                    SetKernelObjectSecurity(GetCurrentProcess(), DACL_SECURITY_INFORMATION, sd);
+                LocalFree(Some(HLOCAL(sd.0)));
+                set.map_err(|e| e.code())
             }
         }
     };
