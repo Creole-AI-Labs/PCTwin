@@ -2868,9 +2868,12 @@ async fn reconnects_after_a_file_was_given_up_on_read_none_of_it() {
 /// is fingerprinted once for its version, through the opener.
 #[tokio::test]
 async fn a_flood_of_have_reads_the_file_exactly_once() {
+    // The exchange before move protocol 4: the fingerprint itself, and a bare skip.
     let l = laptops(&[2 << 20]);
     let reads = Reads::default();
-    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let mut sender = SenderSession::new(jobs(&l), 1)
+        .with_protocol(3)
+        .with_opener(Arc::new(reads.clone()));
     let other = [7u8; 32];
     for last in [false, true] {
         let ((), _) = connection(&mut sender, async |new: &mut Mem| {
@@ -3555,10 +3558,13 @@ async fn a_file_that_grew_after_its_start_is_not_identical() {
 /// file is started at that version.
 #[tokio::test]
 async fn a_fingerprint_is_read_through_the_opener_once_per_version() {
+    // The exchange before move protocol 4: the fingerprint itself, and a bare skip.
     let l = laptops(&[2 << 20]);
     let same = *blake3::hash(&l.files[0].1).as_bytes();
     let reads = Reads::default();
-    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let mut sender = SenderSession::new(jobs(&l), 1)
+        .with_protocol(3)
+        .with_opener(Arc::new(reads.clone()));
     // The skip is never answered: the connection goes, three times.
     for _ in 0..3 {
         let (said, _) = connection(&mut sender, async |new: &mut Mem| {
@@ -3626,7 +3632,10 @@ async fn a_skip_not_accepted_is_sent_after_all_and_never_skipped_again() {
         hello(new, &[]).await;
         let (stream, _) = start_of(&hear(new).await);
         answer_start(new, stream, Some(same)).await;
-        assert_eq!(hear(new).await, Message::Skip { stream });
+        assert!(
+            matches!(hear(new).await, Message::Print { stream: s, .. } if s == stream),
+            "offered with its print, never skipped on its own word"
+        );
         done(new, stream, false).await;
         // Started again; offered the same fingerprint, it is sent this time.
         let (stream, _) = start_of(&hear(new).await);
@@ -3646,11 +3655,13 @@ async fn a_skip_not_accepted_is_sent_after_all_and_never_skipped_again() {
 /// hold.
 #[tokio::test]
 async fn the_new_laptop_answers_every_skip() {
+    // The exchange before move protocol 4: the fingerprint itself, and a bare skip.
     let l = laptops(&[300_000]);
     std::fs::create_dir_all(l.new.path().join("Documents")).unwrap();
     std::fs::write(landed(&l, 0), &l.files[0].1).unwrap();
     let table = table(&l, None);
-    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let mut receiver =
+        ReceiverSession::new(&table, plan(&l), common::journal(), "1001").with_protocol(3);
     let header = header_of(&l, 0);
     let (mut old, mut new) = mem_pair();
     let script = async {
@@ -4394,11 +4405,14 @@ async fn the_retry_after_a_read_error_never_reuses_the_ticket() {
 /// the ticket says, and is compared again for free.
 #[tokio::test]
 async fn an_unanswered_skip_ignores_the_ticket() {
+    // The exchange before move protocol 4: the fingerprint itself, and a bare skip.
     let l = laptops(&[600_000]);
     let h = header_of(&l, 0);
     let same = *blake3::hash(&l.files[0].1).as_bytes();
     let reads = Reads::default();
-    let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(reads.clone()));
+    let mut sender = SenderSession::new(jobs(&l), 1)
+        .with_protocol(3)
+        .with_opener(Arc::new(reads.clone()));
     let ((), _) = connection(&mut sender, async |new: &mut Mem| {
         hello(new, &[]).await;
         let (stream, _) = start_of(&hear(new).await);

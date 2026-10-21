@@ -22,7 +22,7 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::send_states::States;
-use crate::version::{COPY_SINCE, HOLD_SINCE, STOP_SINCE};
+use crate::version::{COPY_SINCE, HOLD_SINCE, KEYED_SINCE, STOP_SINCE};
 use crate::{
     Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
     OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
@@ -511,9 +511,12 @@ pub struct SenderSession {
     /// Per job: versions of it (stamps unlike the one before) this laptop opened. Only the first
     /// [`MAX_ATTEMPTS`](crate::MAX_ATTEMPTS) are ever read.
     versions: Vec<u32>,
-    /// Per job: its fingerprint, worked out once for the version it was worked out at (`None`
-    /// when it could not be: then it is "not identical").
-    fingerprint: Vec<Option<(crate::Stamp, Option<[u8; 32]>)>>,
+    /// Per job: its fingerprint, worked out once for the version and the new laptop's key it
+    /// was worked out with (`None` when it could not be: then it is "not identical").
+    fingerprint: Vec<Option<Printed>>,
+    /// Per job being skipped (move protocol 4): its fingerprint under the new laptop's key, sent
+    /// with `Print` for the new laptop to judge.
+    print_of: HashMap<usize, [u8; 32]>,
     /// Per job: the end (or stop) last said for it, said again on each new connection while it
     /// is unanswered.
     last_end: Vec<Option<Message>>,
@@ -588,6 +591,7 @@ impl SenderSession {
             answered: vec![0; jobs_len],
             versions: vec![0; jobs_len],
             fingerprint: vec![None; jobs_len],
+            print_of: HashMap::new(),
             last_end: vec![None; jobs_len],
             resume_from: vec![None; jobs_len],
             meter,
@@ -896,6 +900,11 @@ impl SenderSession {
                         self.done(job, ok);
                     }
                 }
+                Message::ItemDone { item, ok } if self.version >= KEYED_SINCE => {
+                    if let Some(&job) = self.by_item.get(&item) {
+                        self.done(job, ok);
+                    }
+                }
                 Message::Ready => break,
                 _ => return Err(protocol("expected the new laptop's resume list")),
             }
@@ -956,8 +965,13 @@ impl SenderSession {
         }
         self.not_sent_said = self.not_sent.len();
         for job in std::mem::take(&mut self.skips) {
-            out.push(Message::Skip {
-                stream: self.streams[job],
+            let stream = self.streams[job];
+            out.push(match self.print_of.get(&job) {
+                Some(print) if self.version >= KEYED_SINCE => Message::Print {
+                    stream,
+                    print: *print,
+                },
+                _ => Message::Skip { stream },
             });
             self.scheduler.finished(self.jobs[job].item);
             // Already there only once the new laptop says so (see `done`).
@@ -1414,7 +1428,9 @@ impl SenderSession {
                 continue;
             };
             match self.fingerprint[job] {
-                Some((at, mine)) if at == stamp => self.checked(job, mine == Some(theirs)),
+                Some((at, key, mine)) if at == stamp && key == self.key_of(theirs) => {
+                    self.judged(job, mine, theirs);
+                }
                 _ => out.push((job, stamp, self.jobs[job].source.clone(), theirs)),
             }
         }
@@ -1430,9 +1446,35 @@ impl SenderSession {
         mine: Option<[u8; 32]>,
         theirs: [u8; 32],
     ) {
-        self.fingerprint[job] = Some((stamp, mine));
-        let same = self.attempt_stamp[job] == Some(stamp) && mine == Some(theirs);
-        self.checked(job, same);
+        self.fingerprint[job] = Some((stamp, self.key_of(theirs), mine));
+        if self.attempt_stamp[job] == Some(stamp) {
+            self.judged(job, mine, theirs);
+        } else {
+            self.checked(job, false);
+        }
+    }
+
+    /// The key to fingerprint with: from move protocol 4 the new laptop's `Have` holds a key,
+    /// before it the new laptop's own fingerprint (compared as it is).
+    fn key_of(&self, theirs: [u8; 32]) -> Option<[u8; 32]> {
+        (self.version >= KEYED_SINCE).then_some(theirs)
+    }
+
+    /// `job`'s fingerprint (`mine`) against the new laptop's `Have`: before move protocol 4 the
+    /// two are compared here; from 4 an identical file is the new laptop's to judge, so a file
+    /// that could be read is offered with its print (`Print`), and one that could not is sent.
+    fn judged(&mut self, job: usize, mine: Option<[u8; 32]>, theirs: [u8; 32]) {
+        if self.version >= KEYED_SINCE {
+            match mine {
+                Some(print) => {
+                    self.print_of.insert(job, print);
+                    self.checked(job, true);
+                }
+                None => self.checked(job, false),
+            }
+        } else {
+            self.checked(job, mine == Some(theirs));
+        }
     }
 
     /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
@@ -1822,6 +1864,10 @@ impl SenderSession {
     }
 }
 
+/// A job's fingerprint as worked out: the version of the file, the new laptop's key it was worked
+/// out with (move protocol 4), and the fingerprint (`None`: it could not be).
+type Printed = (crate::Stamp, Option<[u8; 32]>, Option<[u8; 32]>);
+
 /// One extra lane of the old laptop: asks the shared plan for blocks and sends them, reads
 /// receipts only when they are owed, and otherwise sleeps until another lane changes something.
 /// If it drops or is answered out of turn, its unconfirmed blocks go back to the others.
@@ -1935,10 +1981,12 @@ async fn compare_fingerprints(state: &RefCell<&mut SenderSession>) {
     let checks = state.borrow_mut().take_checks();
     for (job, stamp, source, theirs) in checks {
         let opener = Arc::clone(&state.borrow().opener);
-        let mine = tokio::task::spawn_blocking(move || fingerprint_at(&*opener, &source, stamp))
-            .await
-            .ok()
-            .flatten();
+        let key = state.borrow().key_of(theirs);
+        let mine =
+            tokio::task::spawn_blocking(move || fingerprint_at(&*opener, &source, stamp, key))
+                .await
+                .ok()
+                .flatten();
         state.borrow_mut().printed(job, stamp, mine, theirs);
     }
 }
@@ -1955,12 +2003,17 @@ async fn off_the_loop(
 /// for one more, its stamp checked before and after. `None` (so "not identical") if it is longer
 /// or shorter, its stamp moved, or it could not be read: never more than `stamp.size + 1` bytes
 /// are read.
-fn fingerprint_at(opener: &dyn Opener, path: &Path, stamp: crate::Stamp) -> Option<[u8; 32]> {
+fn fingerprint_at(
+    opener: &dyn Opener,
+    path: &Path,
+    stamp: crate::Stamp,
+    key: Option<[u8; 32]>,
+) -> Option<[u8; 32]> {
     let mut source = opener.open(path).ok()?;
     if source.stamp().ok()? != stamp {
         return None;
     }
-    let mut hasher = blake3::Hasher::new();
+    let mut hasher = hasher_for(key);
     let read = std::io::copy(&mut Read::take(&mut source, stamp.size), &mut hasher).ok()?;
     if read != stamp.size || source.read(&mut [0u8; 1]).ok()? != 0 {
         return None;
@@ -1971,8 +2024,19 @@ fn fingerprint_at(opener: &dyn Opener, path: &Path, stamp: crate::Stamp) -> Opti
     Some(*hasher.finalize().as_bytes())
 }
 
-fn hash_reader(reader: &mut impl std::io::Read) -> std::io::Result<[u8; 32]> {
-    let mut hasher = blake3::Hasher::new();
+/// BLAKE3, keyed with the new laptop's key from move protocol 4, plain before it.
+fn hasher_for(key: Option<[u8; 32]>) -> blake3::Hasher {
+    match key {
+        Some(key) => blake3::Hasher::new_keyed(&key),
+        None => blake3::Hasher::new(),
+    }
+}
+
+fn hash_reader(
+    reader: &mut impl std::io::Read,
+    key: Option<[u8; 32]>,
+) -> std::io::Result<[u8; 32]> {
+    let mut hasher = hasher_for(key);
     let mut buf = vec![0u8; 1024 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
@@ -2017,6 +2081,8 @@ struct Incoming<'d> {
     same: Option<String>,
     /// Or an identical file this laptop already received in this move, to make this one from.
     copy_of: Option<CopyOf>,
+    /// This laptop's own fingerprint of that file, once worked out.
+    own_print: Option<[u8; 32]>,
     /// Times its blocks were asked for again (see [`SEND_AGAIN_ROUNDS`]).
     rounds: u8,
 }
@@ -2035,6 +2101,8 @@ struct LocalCopy {
     file: Option<std::fs::File>,
     header: crate::Header,
     expected: [u8; 32],
+    /// The key `expected` was worked out with (move protocol 4), or none.
+    key: Option<[u8; 32]>,
 }
 
 /// The smallest file made from a copy already here: smaller ones cost more to compare than to
@@ -2078,8 +2146,9 @@ async fn copy_here(
         mut file,
         header,
         expected,
+        key,
     } = copy;
-    let mut hasher = blake3::Hasher::new();
+    let mut hasher = hasher_for(key);
     let mut whole = file.is_some();
     for index in 0..header.block_count {
         let Some(mut f) = file.take() else {
@@ -2144,8 +2213,12 @@ pub struct ReceiverSession<'d> {
     refused: BTreeMap<ItemId, Failure>,
     /// Planned files whose latest start differed from the scan (size or changed time).
     changed: HashSet<ItemId>,
-    /// A same-size file already here, to fingerprint before answering a start (off the loop).
-    to_fingerprint: Option<(u32, std::fs::File)>,
+    /// A same-size file already here, to fingerprint before answering a start (off the loop),
+    /// with the key to fingerprint it with (move protocol 4).
+    to_fingerprint: Option<(u32, std::fs::File, Option<[u8; 32]>)>,
+    /// This session's own secret, from which each file's key for comparing is made (move
+    /// protocol 4): never sent, so a print the old laptop sends means nothing outside this move.
+    same_secret: [u8; 32],
     /// A skipped start to make here from a copy already here (off the loop).
     to_copy: Option<u32>,
     /// Files received in this move that later ones may be made from, by size.
@@ -2207,6 +2280,13 @@ impl<'d> ReceiverSession<'d> {
             refused: BTreeMap::new(),
             changed: HashSet::new(),
             to_fingerprint: None,
+            same_secret: {
+                let mut secret = [0u8; 32];
+                // Without random numbers nothing is compared: every key is all zeros then, and
+                // still never matched outside this laptop's own judgement.
+                let _ = getrandom::fill(&mut secret);
+                secret
+            },
             to_copy: None,
             copies: HashMap::new(),
             copy_sources: 0,
@@ -2418,6 +2498,7 @@ impl<'d> ReceiverSession<'d> {
                             size: w.size,
                             same: None,
                             copy_of: None,
+                            own_print: None,
                             rounds: 0,
                         },
                     );
@@ -2569,9 +2650,14 @@ impl<'d> ReceiverSession<'d> {
                 // A start waiting on a same-size file's fingerprint: worked out on the
                 // blocking-thread pool, so the lanes keep going meanwhile.
                 let waiting = state.borrow_mut().to_fingerprint.take();
-                if let Some((stream, mut file)) = waiting {
-                    let same_size = off_the_loop(move || hash_reader(&mut file)).await;
-                    state.borrow_mut().offered(stream, same_size);
+                if let Some((stream, mut file, key)) = waiting {
+                    let own = off_the_loop(move || hash_reader(&mut file, key)).await;
+                    state.borrow_mut().offered(stream, own);
+                    // From move protocol 4 the key is sent, never this laptop's fingerprint.
+                    let same_size = match key {
+                        Some(key) => own.map(|_| key),
+                        None => own,
+                    };
                     send(main, &Message::Have { stream, same_size }).await?;
                 }
                 // A skip of a file made from a copy already here: copied block by block through
@@ -2644,10 +2730,18 @@ impl<'d> ReceiverSession<'d> {
                 });
             }
         }
-        for e in self.ended.values() {
-            list.push(Message::FileDone {
-                stream: e.stream,
-                ok: e.spent(),
+        for (item, e) in &self.ended {
+            // By the file from move protocol 4: a stream number may have been reused since.
+            list.push(if self.version >= KEYED_SINCE {
+                Message::ItemDone {
+                    item: *item,
+                    ok: e.spent(),
+                }
+            } else {
+                Message::FileDone {
+                    stream: e.stream,
+                    ok: e.spent(),
+                }
             });
         }
         list.push(Message::Ready);
@@ -2766,12 +2860,20 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 }
-                let same = self.same_file(&destination, &path, size);
+                // Someone else's laptop is never told what is here.
+                let same = if self.allowance.offers_what_is_here() {
+                    self.same_file(&destination, &path, size)
+                } else {
+                    None
+                };
                 let stored = same.as_ref().map(|(stored, _)| stored.clone());
                 // Nothing like it at its place: an identical file this laptop already received in
                 // this move, in the same person's things, may be made into this one here.
                 let (copy_of, copy_file) = match &same {
-                    None if self.version >= COPY_SINCE && size >= COPY_MIN => {
+                    None if self.version >= COPY_SINCE
+                        && size >= COPY_MIN
+                        && self.allowance.offers_what_is_here() =>
+                    {
                         match self.copy_source(&destination, size) {
                             Some((c, f)) => (Some(c), Some(f)),
                             None => (None, None),
@@ -2792,7 +2894,9 @@ impl<'d> ReceiverSession<'d> {
                 // Every start is answered: nothing like it is here, or (once its fingerprint is
                 // worked out off the main loop) the fingerprint of the same-size file that is.
                 match same.map(|(_, f)| f).or(copy_file) {
-                    Some(file) => self.to_fingerprint = Some((stream, file)),
+                    Some(file) => {
+                        self.to_fingerprint = Some((stream, file, self.same_key_for(item)));
+                    }
                     None => replies.push(Message::Have {
                         stream,
                         same_size: None,
@@ -2812,6 +2916,7 @@ impl<'d> ReceiverSession<'d> {
                         size,
                         same: stored,
                         copy_of,
+                        own_print: None,
                         rounds: 0,
                     },
                 );
@@ -2842,45 +2947,22 @@ impl<'d> ReceiverSession<'d> {
                 }
                 replies.push(self.finish_stream(stream, trailer)?);
             }
-            Message::Skip { stream } => {
-                // Identical to a file already received here: made here from that one (see
-                // `copy_here`), and answered once it is.
-                let from_copy = self.streams.get(&stream).is_some_and(|s| {
-                    s.failure.is_none()
-                        && s.assembly.is_some()
-                        && s.copy_of.as_ref().is_some_and(|c| c.fingerprint.is_some())
-                });
-                if from_copy {
-                    self.to_copy = Some(stream);
-                    return Ok((replies, false));
+            // From move protocol 4 this laptop judges: the old laptop's print against its own.
+            Message::Print { stream, print } if self.version >= KEYED_SINCE => {
+                let same = self
+                    .streams
+                    .get(&stream)
+                    .is_some_and(|s| s.own_print == Some(print));
+                if same {
+                    return self.skipped(stream, replies);
                 }
-                // Identical to what is here: drop the partial copy and keep the original. Always
-                // answered, so the old laptop records "already there" only on this laptop's word
-                // (a stream not open here is answered no).
-                let mut there = false;
-                if let Some(s) = self.streams.remove(&stream) {
-                    // Its partial copy is removed first, then recorded.
-                    drop(s.assembly);
-                    let outcome = match s.same {
-                        Some(stored) => {
-                            self.journal.existing(s.entry, &stored).map_err(record)?;
-                            ReceiveOutcome::AlreadyThere(stored)
-                        }
-                        None => {
-                            let why = Failure::new(Cause::RefusedBySafetyCheck, "skipped");
-                            self.journal.failed(s.entry, &why).map_err(record)?;
-                            ReceiveOutcome::Failed(why)
-                        }
-                    };
-                    // Already there: spent, like a file that landed.
-                    there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
-                    self.allowance.ended(s.item, there);
-                    if self.end(s.item, stream, outcome, None) && there {
-                        self.meter.already_there_bytes(s.size);
-                    }
-                }
-                replies.push(Message::FileDone { stream, ok: there });
+                replies.push(self.not_identical(stream));
             }
+            Message::Skip { stream } if self.version >= KEYED_SINCE => {
+                // Only a print is taken as "identical" now: a bare skip is never believed.
+                replies.push(self.not_identical(stream));
+            }
+            Message::Skip { stream } => return self.skipped(stream, replies),
             Message::GiveUp { stream, why } => {
                 // The old laptop stopped sending this file: it fails, with the true reason.
                 let why = match why {
@@ -3199,14 +3281,81 @@ impl<'d> ReceiverSession<'d> {
         None
     }
 
-    /// The fingerprint offered for the start on `stream`, kept if it is of a copy already here.
+    /// The old laptop's file on `stream` is identical to what is here: made here from a copy
+    /// already received (see `copy_here`, answered once it is), or the partial copy dropped and
+    /// the file already there kept. Always answered, so the old laptop records "already there"
+    /// only on this laptop's word (a stream not open here is answered no).
+    fn skipped(
+        &mut self,
+        stream: u32,
+        mut replies: Vec<Message>,
+    ) -> Result<(Vec<Message>, bool), TransferError> {
+        let from_copy = self.streams.get(&stream).is_some_and(|s| {
+            s.failure.is_none()
+                && s.assembly.is_some()
+                && s.copy_of.as_ref().is_some_and(|c| c.fingerprint.is_some())
+        });
+        if from_copy {
+            self.to_copy = Some(stream);
+            return Ok((replies, false));
+        }
+        // Identical to what is here: drop the partial copy and keep the original. Always
+        // answered, so the old laptop records "already there" only on this laptop's word
+        // (a stream not open here is answered no).
+        let mut there = false;
+        if let Some(s) = self.streams.remove(&stream) {
+            // Its partial copy is removed first, then recorded.
+            drop(s.assembly);
+            let outcome = match s.same {
+                Some(stored) => {
+                    self.journal.existing(s.entry, &stored).map_err(record)?;
+                    ReceiveOutcome::AlreadyThere(stored)
+                }
+                None => {
+                    let why = Failure::new(Cause::RefusedBySafetyCheck, "skipped");
+                    self.journal.failed(s.entry, &why).map_err(record)?;
+                    ReceiveOutcome::Failed(why)
+                }
+            };
+            // Already there: spent, like a file that landed.
+            there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
+            self.allowance.ended(s.item, there);
+            if self.end(s.item, stream, outcome, None) && there {
+                self.meter.already_there_bytes(s.size);
+            }
+        }
+        replies.push(Message::FileDone { stream, ok: there });
+        Ok((replies, false))
+    }
+
+    /// The old laptop's file on `stream` is not identical to what is here after all: its partial
+    /// copy goes, nothing is recorded as its end, and the old laptop sends it (answered no).
+    fn not_identical(&mut self, stream: u32) -> Message {
+        if let Some(s) = self.streams.remove(&stream) {
+            drop(s.assembly);
+            let why = Failure::new(Cause::NotVerified, "not identical: it is sent instead");
+            let _ = self.journal.failed(s.entry, &why);
+            self.allowance.ended(s.item, false);
+            self.settle(s.item);
+        }
+        Message::FileDone { stream, ok: false }
+    }
+
+    /// The key a file's fingerprint is compared under (move protocol 4): made from this session's
+    /// secret and the file, so it is the same on every connection of the move and nowhere else.
+    fn same_key_for(&self, item: ItemId) -> Option<[u8; 32]> {
+        (self.version >= KEYED_SINCE)
+            .then(|| *blake3::keyed_hash(&self.same_secret, item.to_hex().as_bytes()).as_bytes())
+    }
+
+    /// This laptop's own fingerprint for the start on `stream` (of the same-size file here, or
+    /// of a copy already received), kept to judge the old laptop's print by.
     fn offered(&mut self, stream: u32, fingerprint: Option<[u8; 32]>) {
-        if let Some(c) = self
-            .streams
-            .get_mut(&stream)
-            .and_then(|s| s.copy_of.as_mut())
-        {
-            c.fingerprint = fingerprint;
+        if let Some(s) = self.streams.get_mut(&stream) {
+            s.own_print = fingerprint;
+            if let Some(c) = s.copy_of.as_mut() {
+                c.fingerprint = fingerprint;
+            }
         }
     }
 
@@ -3224,6 +3373,7 @@ impl<'d> ReceiverSession<'d> {
                 .and_then(|d| d.open_read(&c.stored).ok()),
             header: s.assembly.as_ref()?.header().clone(),
             expected: c.fingerprint?,
+            key: self.same_key_for(s.item),
         })
     }
 
@@ -3878,12 +4028,13 @@ mod outcomes {
                 Failure::new(Cause::NotVerified, "it has already been moved"),
             );
             assert_eq!(r.outcome(id(1)), Some(there));
-            // And the next connection is told it is done, on the stream it ended on.
+            // And the next connection is told it is done, by the file (a stream number may have
+            // been given to another file since).
             assert_eq!(
                 r.hello(),
                 vec![
-                    Message::FileDone {
-                        stream: 0,
+                    Message::ItemDone {
+                        item: id(1),
                         ok: true
                     },
                     Message::Ready

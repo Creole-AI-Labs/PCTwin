@@ -22,7 +22,7 @@ mod common;
 type Hook = Arc<StdMutex<Option<Box<dyn FnOnce() + Send>>>>;
 
 /// One end of an in-memory connection; the old laptop's end can run a hook just before it says
-/// its first `Skip`.
+/// its first `Skip` (or, from move protocol 4, its first `Print`).
 struct Mem {
     tx: mpsc::UnboundedSender<Vec<u8>>,
     rx: mpsc::UnboundedReceiver<Vec<u8>>,
@@ -49,7 +49,7 @@ fn mem_pair(before_skip: Hook) -> (Mem, Mem) {
 impl Channel for Mem {
     async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
         tokio::task::yield_now().await;
-        if let Ok(Message::Skip { .. }) = Message::decode(data)
+        if let Ok(Message::Skip { .. } | Message::Print { .. }) = Message::decode(data)
             && let Some(hook) = self.before_skip.lock().unwrap().take()
         {
             hook();

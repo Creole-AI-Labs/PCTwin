@@ -47,6 +47,14 @@ pub const STOP_SINCE: u16 = 4;
 /// skip is not accepted. Version 4 has not been released, so it carries this too.
 pub const COPY_SINCE: u16 = 4;
 
+/// The first move protocol version where "already there" is judged by the new laptop itself:
+/// it sends a key of its own (never its file's fingerprint), the old laptop answers with its
+/// file's fingerprint under that key (`Print`), and the new laptop compares. Nothing either
+/// laptop says can be matched against anything outside this move (the Engineering Plan's
+/// "keyed per move"). And finished files are told again by the file (`ItemDone`), never by a
+/// stream number another start may have reused. Version 4 has not been released.
+pub const KEYED_SINCE: u16 = 4;
+
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).
 const KIND: u8 = 34;
 const LEN: usize = 5;

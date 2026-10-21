@@ -197,6 +197,13 @@ impl Allowance {
         self
     }
 
+    /// Whether this laptop may say what it already has (a same-size file at a name, a copy
+    /// already received): not to someone else's laptop (files with a marker floor, as in a Quick
+    /// Send from a stranger), who would learn from the answer whether a file exists here.
+    pub fn offers_what_is_here(&self) -> bool {
+        self.mark_floor.is_none()
+    }
+
     /// The marker a file gets that the old laptop described as marked `sent`: the stricter of
     /// that and the floor.
     pub fn mark_for(&self, sent: Option<DownloadMark>) -> Option<DownloadMark> {

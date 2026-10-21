@@ -15,10 +15,5 @@
         "hiddenTitle": true
       }
     ]
-  },
-  "bundle": {
-    "macOS": {
-      "hardenedRuntime": true
-    }
   }
 }

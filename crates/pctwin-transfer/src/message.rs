@@ -76,14 +76,24 @@ pub enum Message {
     /// Sender: every file has been sent and answered for.
     AllSent,
     /// Receiver, answering every `StartFile`: no file of that name and size is here (`None`),
-    /// or one is, with its BLAKE3 fingerprint.
+    /// or one is, with its BLAKE3 fingerprint (from move protocol 4, a key of this laptop's to
+    /// fingerprint the old laptop's file with; see `Print`).
     Have {
         stream: u32,
         same_size: Option<[u8; 32]>,
     },
     /// Sender: the file already there is identical, so it is not sent (answered with
-    /// `FileDone`).
+    /// `FileDone`). Before move protocol 4 only.
     Skip { stream: u32 },
+    /// Sender (move protocol 4 and later), in place of `Skip`: its file's BLAKE3 fingerprint
+    /// under the key the new laptop sent in `Have`. The new laptop compares it with its own file
+    /// and answers with `FileDone`: yes when identical (nothing is sent), no to send it after
+    /// all.
+    Print { stream: u32, print: [u8; 32] },
+    /// Receiver, at the start of each connection (move protocol 4 and later), in place of
+    /// `FileDone` for a file that ended on an earlier connection: by the file, never by a stream
+    /// number either app may since have given to another.
+    ItemDone { item: ItemId, ok: bool },
     /// Receiver, in place of a receipt: that block was not written (the file failed, is not open,
     /// or belongs to an earlier attempt), so its file will not finish.
     Refused { stream: u32 },
@@ -146,6 +156,8 @@ const GIVE_UP: u8 = 15;
 const HOLD: u8 = 16;
 const STOPPING: u8 = 17;
 const NOT_SENT: u8 = 18;
+const PRINT: u8 = 19;
+const ITEM_DONE: u8 = 20;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -263,6 +275,17 @@ impl Message {
                 w.push(SKIP);
                 w.extend_from_slice(&stream.to_be_bytes());
             }
+            Message::Print { stream, print } => {
+                w.push(PRINT);
+                w.extend_from_slice(&stream.to_be_bytes());
+                w.extend_from_slice(print);
+            }
+            Message::ItemDone { item, ok } => {
+                w.push(ITEM_DONE);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                w.extend_from_slice(&item_bytes(item));
+                w.push(u8::from(*ok));
+            }
             Message::Refused { stream } => {
                 w.push(REFUSED);
                 w.extend_from_slice(&stream.to_be_bytes());
@@ -376,6 +399,15 @@ impl Message {
                 },
             },
             SKIP => Message::Skip { stream },
+            PRINT => {
+                let mut print = [0u8; 32];
+                print.copy_from_slice(r.take(32)?);
+                Message::Print { stream, print }
+            }
+            ITEM_DONE if stream == 0 => Message::ItemDone {
+                item: r.item()?,
+                ok: r.flag()?,
+            },
             REFUSED => Message::Refused { stream },
             CHECK_ORIGINALS if stream == 0 => {
                 let nonce = r.nonce()?;

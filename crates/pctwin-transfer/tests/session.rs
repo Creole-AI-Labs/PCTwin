@@ -1519,15 +1519,19 @@ async fn a_file_found_already_there_is_spent_too() {
         assert_eq!(hear(&mut old).await, Message::Ready);
         let (start, _) = small_start(&l, 0);
         say(&mut old, &start).await;
-        assert!(matches!(
-            hear(&mut old).await,
-            Message::Have {
-                same_size: Some(_),
-                ..
-            }
-        ));
-        say(&mut old, &Message::Skip { stream: 0 }).await;
-        // The skip is answered: it is already there.
+        // The new laptop sends a key of its own, never its file's fingerprint; the old laptop
+        // answers with its file's fingerprint under that key.
+        let Message::Have {
+            same_size: Some(key),
+            ..
+        } = hear(&mut old).await
+        else {
+            panic!("a same-size file is here");
+        };
+        assert_ne!(key, *blake3::hash(&l.files[0].1).as_bytes());
+        let print = *blake3::keyed_hash(&key, &l.files[0].1).as_bytes();
+        say(&mut old, &Message::Print { stream: 0, print }).await;
+        // Judged by the new laptop itself: it is already there.
         assert_eq!(
             hear(&mut old).await,
             Message::FileDone {
@@ -1550,6 +1554,49 @@ async fn a_file_found_already_there_is_spent_too() {
     let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert_eq!(files_under(l.new_mine.path()), 1);
+}
+
+/// A print that is not the new laptop's own file's, or a bare skip, is never taken as "already
+/// there": the answer is no, nothing is recorded as the file's end, and it can be sent.
+#[tokio::test]
+async fn a_wrong_print_or_a_bare_skip_is_never_already_there() {
+    let l = laptops();
+    let table = table(&l);
+    let there = l.new_mine.path().join("Documents");
+    std::fs::create_dir_all(&there).unwrap();
+    std::fs::write(there.join("small.bin"), &l.files[0].1).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        for (stream, lie) in [(0, true), (1, false)] {
+            let (start, _) = small_start(&l, stream);
+            say(&mut old, &start).await;
+            assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+            if lie {
+                // The plain fingerprint, as a laptop on an older version would compare it.
+                let print = *blake3::hash(&l.files[0].1).as_bytes();
+                say(&mut old, &Message::Print { stream, print }).await;
+            } else {
+                say(&mut old, &Message::Skip { stream }).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::FileDone { stream, ok: false }
+            );
+        }
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
+    r.unwrap();
+    assert!(
+        !matches!(
+            receiver.outcome(id(0)),
+            Some(ReceiveOutcome::AlreadyThere(_))
+        ),
+        "{:?}",
+        receiver.outcome(id(0))
+    );
 }
 
 #[tokio::test]

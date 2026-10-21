@@ -993,11 +993,20 @@ async fn cancelling_after_an_attempt_failed_here_leaves_it_failed_never_copying(
 
 #[tokio::test]
 async fn a_skip_the_new_laptop_cannot_confirm_adds_no_already_there_bytes() {
+    for version in [3, 4] {
+        a_skip_the_new_laptop_cannot_confirm_on(version).await;
+    }
+}
+
+/// Before move protocol 4 the skip fails the file; from 4 a bare skip is never believed and the
+/// file waits to be sent. Either way nothing is counted already there.
+async fn a_skip_the_new_laptop_cannot_confirm_on(version: u16) {
     let w = world();
     let jobs = vec![w.file(1, 1000, "me")];
     let meter = MoveMeter::new();
-    let mut receiver =
-        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_meter(meter.clone());
+    let mut receiver = ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000")
+        .with_meter(meter.clone())
+        .with_protocol(version);
     // Nothing like file 1 is here, yet the old laptop says to skip it.
     against(&mut receiver, |mut a| async move {
         hello(&mut a).await;
@@ -1016,7 +1025,7 @@ async fn a_skip_the_new_laptop_cannot_confirm_adds_no_already_there_bytes() {
     .await
     .unwrap();
     let r = meter.reading();
-    assert_eq!(r.files.failed, 1, "{r:?}");
+    assert_eq!(r.files.failed, u64::from(version < 4), "{r:?}");
     assert_eq!(r.files.already_there, 0, "{r:?}");
     assert_eq!(r.bytes_already_there, 0);
 }
