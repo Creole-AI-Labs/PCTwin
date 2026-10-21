@@ -262,7 +262,9 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
                         Some(SendOutcome::AlreadyThere) => Outcome::AlreadyThere {
                             landed_as: f.path.clone(),
                         },
-                        Some(SendOutcome::Failed(why)) => Outcome::Failed { why: why.clone() },
+                        Some(SendOutcome::Failed(why)) => Outcome::Failed {
+                            why: why.to_string(),
+                        },
                         None => Outcome::Failed {
                             why: "it was not sent".into(),
                         },
@@ -374,9 +376,9 @@ impl Incoming {
                             Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
                                 landed_as: stored.clone(),
                             },
-                            Some(ReceiveOutcome::Failed(why)) => {
-                                Outcome::Failed { why: why.clone() }
-                            }
+                            Some(ReceiveOutcome::Failed(why)) => Outcome::Failed {
+                                why: why.to_string(),
+                            },
                             None => Outcome::Failed {
                                 why: "it did not arrive".into(),
                             },

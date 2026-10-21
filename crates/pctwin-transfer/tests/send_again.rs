@@ -17,9 +17,10 @@ use pctwin_gate::{Approved, Destinations, FaultPlan, Flip};
 use pctwin_record::ItemId;
 use pctwin_scan::ReadPlan;
 use pctwin_transfer::{
-    BlockMap, Channel, ChannelError, FileSender, FsOpener, GiveUpWhy, Header, MAX_ATTEMPTS,
-    MAX_OPEN_FILES, Message, Opener, ReceiveOutcome, ReceiverSession, ResumeTicket, Scheduler,
-    SendJob, SendOutcome, SenderSession, Source, Stamp, Tier, block_size_for, split_into_pieces,
+    BlockMap, Cause, Channel, ChannelError, Failure, FileSender, FsOpener, GiveUpWhy, Header,
+    MAX_ATTEMPTS, MAX_OPEN_FILES, Message, Opener, ReceiveOutcome, ReceiverSession, ResumeTicket,
+    Scheduler, SendJob, SendOutcome, SenderSession, Source, Stamp, Tier, block_size_for,
+    split_into_pieces,
 };
 use proptest::prelude::*;
 use tokio::sync::mpsc;
@@ -1890,9 +1891,10 @@ impl Moved {
     fn assert_refused_as_new_attempts(&self, n: usize) {
         assert_eq!(
             self.sent[n],
-            Some(SendOutcome::Failed(
-                "the new laptop did not accept it".into()
-            )),
+            Some(SendOutcome::Failed(Failure::new(
+                Cause::NotAccepted,
+                "the new laptop did not accept it"
+            ))),
             "file {n}"
         );
         match &self.got[n] {
@@ -2368,9 +2370,10 @@ async fn a_file_answered_not_accepted_never_starts_a_new_attempt() {
         assert!(reads.blocks() <= 2 * header.size, "{}", reads.blocks());
         assert_eq!(
             sender.outcome(id(0)),
-            Some(&SendOutcome::Failed(
-                "the new laptop did not accept it".into()
-            ))
+            Some(&SendOutcome::Failed(Failure::new(
+                Cause::NotAccepted,
+                "the new laptop did not accept it"
+            )))
         );
     }
 }
@@ -4138,9 +4141,10 @@ async fn receipts_after_a_stop_never_stop_it_again_or_change_why() {
     );
     assert_eq!(
         sender.outcome(id(0)),
-        Some(&SendOutcome::Failed(
-            "the new laptop could not write part of it".into()
-        ))
+        Some(&SendOutcome::Failed(Failure::new(
+            Cause::CouldNotWrite,
+            "the new laptop could not write part of it"
+        )))
     );
 }
 

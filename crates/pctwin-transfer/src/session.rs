@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, IncomingPath};
+use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, GateError, IncomingPath};
 use pctwin_journal::{
     Actor, FileId, Journal, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
 };
 use pctwin_record::ItemId;
 
+use crate::cause::{Cause, Failure, Side};
 use crate::message::{
     BLOCK_WIRE_OVERHEAD, GiveUpWhy, Message, NONCE_LEN, Nonce, split_into_pieces,
 };
@@ -373,7 +374,7 @@ pub enum SendOutcome {
     Arrived,
     /// The new laptop already had an identical file there, so it was not sent.
     AlreadyThere,
-    Failed(String),
+    Failed(Failure),
 }
 
 #[expect(
@@ -398,7 +399,7 @@ pub(crate) enum SendState {
         /// Send the whole file again if the answer is no (it changed while being read).
         retry: bool,
         /// Why it failed on this side, if it did.
-        failure: Option<String>,
+        failure: Option<Failure>,
         /// It could not be read; try it once more after everything else.
         later: bool,
     },
@@ -1054,7 +1055,7 @@ impl SenderSession {
                     self.later.push(job);
                     SendState::Waiting
                 } else {
-                    SendState::Done(SendOutcome::Failed(e.to_string()))
+                    SendState::Done(SendOutcome::Failed(Failure::of(&e, Side::Old)))
                 };
             }
         }
@@ -1126,7 +1127,9 @@ impl SenderSession {
                 let again = changed && self.budget.try_again_later();
                 *self.states.slot(job) = SendState::Ended {
                     retry: again,
-                    failure: (changed && !again).then(|| "it changed while being read".to_string()),
+                    failure: (changed && !again).then(|| {
+                        Failure::new(Cause::ChangedDuringMove, "it changed while being read")
+                    }),
                     later: false,
                 };
                 Message::EndFile {
@@ -1138,7 +1141,7 @@ impl SenderSession {
             Err(e) => {
                 *self.states.slot(job) = SendState::Ended {
                     retry: false,
-                    failure: Some(e.to_string()),
+                    failure: Some(Failure::of(&e, Side::Old)),
                     later: false,
                 };
                 Message::EndFile {
@@ -1202,9 +1205,9 @@ impl SenderSession {
         Work::Wait
     }
 
-    /// `job` stops here, for `why` (`text` is what this laptop says): the new laptop is told if
+    /// `job` stops here, for `why` (`failure` is what this laptop says): the new laptop is told if
     /// it holds the file, and nothing more of it is read.
-    fn give_up(&mut self, job: usize, why: GiveUpWhy, text: &str) {
+    fn give_up(&mut self, job: usize, why: GiveUpWhy, failure: Failure) {
         self.dirty = true;
         self.scheduler.finished(self.jobs[job].item);
         self.checks.retain(|(j, _)| *j != job);
@@ -1226,18 +1229,22 @@ impl SenderSession {
             );
             *self.states.slot(job) = SendState::Ended {
                 retry: false,
-                failure: Some(text.into()),
+                failure: Some(failure),
                 later: false,
             };
         } else {
-            *self.states.slot(job) = SendState::Done(SendOutcome::Failed(text.into()));
+            *self.states.slot(job) = SendState::Done(SendOutcome::Failed(failure));
         }
     }
 
     /// The new laptop was answered for `job` more than any move needs: it stops here, and the new
     /// laptop is told why.
     fn read_too_often(&mut self, job: usize) {
-        self.give_up(job, GiveUpWhy::ReadTooOften, READ_TOO_OFTEN);
+        self.give_up(
+            job,
+            GiveUpWhy::ReadTooOften,
+            Failure::new(Cause::NotVerified, READ_TOO_OFTEN),
+        );
     }
 
     /// A receipt for `raw` bytes of a block of `stream`, `written` or not. Always in this order:
@@ -1288,7 +1295,7 @@ impl SenderSession {
         let later = drive && self.read_failed(job);
         *self.states.slot(job) = SendState::Ended {
             retry,
-            failure: (!retry && !later).then(|| e.to_string()),
+            failure: (!retry && !later).then(|| Failure::of(&e, Side::Old)),
             later,
         };
     }
@@ -1451,7 +1458,10 @@ impl SenderSession {
                     self.scheduler.finished(self.jobs[job].item);
                     *self.states.slot(job) = SendState::Ended {
                         retry: false,
-                        failure: Some("the new laptop could not write part of it".into()),
+                        failure: Some(Failure::new(
+                            Cause::CouldNotWrite,
+                            "the new laptop could not write part of it",
+                        )),
                         later: false,
                     };
                     self.dirty = true;
@@ -1509,7 +1519,11 @@ impl SenderSession {
                 }
                 if self.too_many_versions(job) {
                     // Started only so the new laptop can say it kept changing: never read.
-                    self.give_up(job, GiveUpWhy::ReadTooOften, KEPT_CHANGING);
+                    self.give_up(
+                        job,
+                        GiveUpWhy::ReadTooOften,
+                        Failure::new(Cause::ChangedDuringMove, KEPT_CHANGING),
+                    );
                     return Ok(());
                 }
                 match same_size {
@@ -1559,13 +1573,21 @@ impl SenderSession {
                 && ticket.done.count() == s.size.div_ceil(block_size)
         });
         if !fits {
-            self.give_up(job, GiveUpWhy::AskedAgainTooOften, TICKET_WRONG);
+            self.give_up(
+                job,
+                GiveUpWhy::AskedAgainTooOften,
+                Failure::new(Cause::NotVerified, TICKET_WRONG),
+            );
             return;
         }
         if self.asked_again[job] >= SEND_AGAIN_ROUNDS {
             // Asked more often in this attempt than an honest new laptop asks: this attempt stops
             // here and the file fails, said as it is (never as a file that changed).
-            self.give_up(job, GiveUpWhy::AskedAgainTooOften, GAVE_UP);
+            self.give_up(
+                job,
+                GiveUpWhy::AskedAgainTooOften,
+                Failure::new(Cause::NotVerified, GAVE_UP),
+            );
             return;
         }
         self.asked_again[job] += 1;
@@ -1605,7 +1627,7 @@ impl SenderSession {
                 );
                 *self.states.slot(job) = SendState::Ended {
                     retry,
-                    failure: (!retry).then(|| e.to_string()),
+                    failure: (!retry).then(|| Failure::of(&e, Side::Old)),
                     later: false,
                 };
             }
@@ -1646,7 +1668,12 @@ impl SenderSession {
         for job in 0..self.states.len() {
             let mut state = self.states.slot(job);
             match &mut *state {
-                SendState::Waiting => *state = SendState::Done(SendOutcome::Failed(STOPPED.into())),
+                SendState::Waiting => {
+                    *state = SendState::Done(SendOutcome::Failed(Failure::new(
+                        Cause::Unreadable,
+                        STOPPED,
+                    )))
+                }
                 SendState::Open {
                     announced: true,
                     reader,
@@ -1661,12 +1688,15 @@ impl SenderSession {
                     self.ends.push(end);
                     *state = SendState::Ended {
                         retry: false,
-                        failure: Some(STOPPED.into()),
+                        failure: Some(Failure::new(Cause::Unreadable, STOPPED)),
                         later: false,
                     };
                 }
                 SendState::Open { .. } => {
-                    *state = SendState::Done(SendOutcome::Failed(STOPPED.into()));
+                    *state = SendState::Done(SendOutcome::Failed(Failure::new(
+                        Cause::Unreadable,
+                        STOPPED,
+                    )));
                 }
                 _ => {}
             }
@@ -1685,13 +1715,17 @@ impl SenderSession {
             }
             // Already there only on the new laptop's word.
             (SendState::Skipping, true) => SendState::Done(SendOutcome::AlreadyThere),
-            (SendState::Skipping, false) => SendState::Done(SendOutcome::Failed(
-                "the new laptop did not accept it".into(),
-            )),
+            (SendState::Skipping, false) => SendState::Done(SendOutcome::Failed(Failure::new(
+                Cause::NotAccepted,
+                "the new laptop did not accept it",
+            ))),
             // Started past the versions any file is read in, and refused: it kept changing.
             (SendState::Open { .. }, false) if self.versions[job] > crate::MAX_ATTEMPTS => {
                 self.scheduler.finished(item);
-                SendState::Done(SendOutcome::Failed(KEPT_CHANGING.into()))
+                SendState::Done(SendOutcome::Failed(Failure::new(
+                    Cause::ChangedDuringMove,
+                    KEPT_CHANGING,
+                )))
             }
             (SendState::Ended { failure: None, .. }, true) => SendState::Done(SendOutcome::Arrived),
             (SendState::Ended { retry: true, .. }, false) => {
@@ -1709,9 +1743,10 @@ impl SenderSession {
             (_, true) => SendState::Done(SendOutcome::Arrived),
             (_, false) => {
                 self.scheduler.finished(item);
-                SendState::Done(SendOutcome::Failed(
-                    "the new laptop did not accept it".into(),
-                ))
+                SendState::Done(SendOutcome::Failed(Failure::new(
+                    Cause::NotAccepted,
+                    "the new laptop did not accept it",
+                )))
             }
         };
     }
@@ -1893,7 +1928,7 @@ pub enum ReceiveOutcome {
     },
     /// An identical file was already there (its stored path); nothing was copied.
     AlreadyThere(String),
-    Failed(String),
+    Failed(Failure),
 }
 
 struct Incoming<'d> {
@@ -1905,7 +1940,7 @@ struct Incoming<'d> {
     batches: u32,
     assembly: Option<Assembly<'d>>,
     block_size: u64,
-    failure: Option<String>,
+    failure: Option<Failure>,
     destination: String,
     size: u64,
     /// The stored path of a same-size file already there, offered as possibly identical.
@@ -1941,7 +1976,7 @@ pub struct ReceiverSession<'d> {
     /// On this connection: whether the old laptop was last told this side is paused.
     told_hold: bool,
     /// Why a file's start was refused, kept per file (bounded).
-    refused: BTreeMap<ItemId, String>,
+    refused: BTreeMap<ItemId, Failure>,
     /// A same-size file already here, to fingerprint before answering a start (off the loop).
     to_fingerprint: Option<(u32, std::fs::File)>,
     streams: BTreeMap<u32, Incoming<'d>>,
@@ -2444,7 +2479,7 @@ impl<'d> ReceiverSession<'d> {
                 // Only the approved plan says where a file lands: a start anywhere else is
                 // refused before anything here is touched (nothing created, reserved or ended).
                 if let Err(refusal) = self.allowance.check_place(item, &destination, &path) {
-                    self.refuse(item, refusal.to_string());
+                    self.refuse(item, Failure::from(refusal));
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 }
@@ -2509,13 +2544,19 @@ impl<'d> ReceiverSession<'d> {
                 let size = header.size;
                 // The plan is checked before anything is read, created or reserved here.
                 let admitted = if resumed_done > 0 {
-                    Err("the new laptop has no place to continue from".to_string())
+                    Err(Failure::new(
+                        Cause::RefusedBySafetyCheck,
+                        "the new laptop has no place to continue from",
+                    ))
                 } else if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
-                    Err("the old laptop started too many files at once".to_string())
+                    Err(Failure::new(
+                        Cause::RefusedBySafetyCheck,
+                        "the old laptop started too many files at once",
+                    ))
                 } else {
                     self.allowance
                         .admit(item, &destination, &path, size)
-                        .map_err(|r| r.to_string())
+                        .map_err(Failure::from)
                 };
                 if let Err(why) = admitted {
                     // Kept per file, not per start, so refusals cannot pile up.
@@ -2608,7 +2649,7 @@ impl<'d> ReceiverSession<'d> {
                         ReceiveOutcome::Failed(why)
                     }
                     (None, None) => {
-                        let why = "no file open".to_string();
+                        let why = Failure::new(Cause::NotVerified, "no file open");
                         let _ = self.journal.failed(s.entry, &why);
                         ReceiveOutcome::Failed(why)
                     }
@@ -2637,7 +2678,7 @@ impl<'d> ReceiverSession<'d> {
                             ReceiveOutcome::AlreadyThere(stored)
                         }
                         None => {
-                            let why = "skipped".to_string();
+                            let why = Failure::new(Cause::RefusedBySafetyCheck, "skipped");
                             self.journal.failed(s.entry, &why).map_err(record)?;
                             ReceiveOutcome::Failed(why)
                         }
@@ -2661,7 +2702,12 @@ impl<'d> ReceiverSession<'d> {
                     drop(s.assembly);
                     let _ = self.journal.failed(s.entry, why);
                     self.allowance.ended(s.item, false);
-                    self.end(s.item, stream, ReceiveOutcome::Failed(why.into()), None);
+                    self.end(
+                        s.item,
+                        stream,
+                        ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, why)),
+                        None,
+                    );
                 }
                 replies.push(Message::FileDone { stream, ok: false });
             }
@@ -2711,7 +2757,10 @@ impl<'d> ReceiverSession<'d> {
                 let buffer = &mut slot.get_or_insert_with(|| (stream, Vec::new())).1;
                 if buffer.len().saturating_add(bytes.len()) > limit {
                     *slot = None;
-                    self.fail_stream(stream, "a block grew past its size".into());
+                    self.fail_stream(
+                        stream,
+                        Failure::new(Cause::RefusedBySafetyCheck, "a block grew past its size"),
+                    );
                 } else {
                     buffer.extend_from_slice(bytes);
                     if last {
@@ -2770,7 +2819,7 @@ impl<'d> ReceiverSession<'d> {
                 Some((Block::number_in(whole).unwrap_or(u64::MAX), false))
             }
             Err(e) => {
-                self.fail_stream(stream, e.to_string());
+                self.fail_stream(stream, Failure::of(&e, Side::New));
                 None
             }
         }
@@ -2804,7 +2853,7 @@ impl<'d> ReceiverSession<'d> {
 
     /// The file on `stream` failed: its partial copy is removed (it ends when the old laptop ends
     /// it, and reports why).
-    fn fail_stream(&mut self, stream: u32, why: String) {
+    fn fail_stream(&mut self, stream: u32, why: Failure) {
         if let Some(s) = self.streams.get_mut(&stream) {
             s.assembly = None;
             // If this does not get through, recovery finds its partial file gone and records it.
@@ -2817,7 +2866,7 @@ impl<'d> ReceiverSession<'d> {
 
     /// Records why a start was refused, once per file (and for a bounded number of files not in
     /// the plan), so refusals cannot pile up.
-    fn refuse(&mut self, item: ItemId, why: String) {
+    fn refuse(&mut self, item: ItemId, why: Failure) {
         if self.refused.len() < MAX_REMEMBERED_REFUSALS || self.refused.contains_key(&item) {
             self.refused.insert(item, why);
         }
@@ -2891,10 +2940,10 @@ impl<'d> ReceiverSession<'d> {
                 .and_then(|(dest, path)| dest.find(&path))
                 .is_some_and(|(_, len)| len == *size);
             if !still_there {
-                e.outcome = ReceiveOutcome::Failed(
-                    "it was removed or changed soon after copying, often by security software"
-                        .into(),
-                );
+                e.outcome = ReceiveOutcome::Failed(Failure::new(
+                    Cause::RemovedAfterCopy,
+                    "it was removed or changed soon after copying, often by security software",
+                ));
                 self.meter.unchecked_bytes(*size);
                 gone.push(*item);
             }
@@ -2913,11 +2962,12 @@ impl<'d> ReceiverSession<'d> {
         path: &str,
         header: crate::Header,
     ) -> Result<(Assembly<'d>, u64), Start> {
-        let refused = |e: &dyn std::fmt::Display| Start::Refused(e.to_string());
+        let refused =
+            |e: GateError| Start::Refused(Failure::new(Cause::of_gate(&e), e.to_string()));
         let table: &'d Destinations = self.table;
-        let dest = table.get(destination).map_err(|e| refused(&e))?;
-        let place = table.place(destination).map_err(|e| refused(&e))?;
-        let parsed = IncomingPath::parse(path).map_err(|e| refused(&e))?;
+        let dest = table.get(destination).map_err(refused)?;
+        let place = table.place(destination).map_err(refused)?;
+        let parsed = IncomingPath::parse(path).map_err(|e| refused(GateError::Path(e)))?;
         let (permission, for_account) = match place {
             Approved::MyFolders | Approved::ChosenDrive | Approved::OffloadDrive => {
                 (Permission::OwnFolders, self.account.clone())
@@ -2950,7 +3000,7 @@ impl<'d> ReceiverSession<'d> {
             match Assembly::start_tagged(dest, &parsed, header, &self.journal.temp_tag(entry)) {
                 Ok(a) => a,
                 Err(e) => {
-                    let why = e.to_string();
+                    let why = Failure::of(&e, Side::New);
                     self.journal.failed(entry, &why).map_err(Start::Record)?;
                     return Err(Start::Refused(why));
                 }
@@ -3052,7 +3102,7 @@ const EVERYONE: &str = "everyone";
 /// Why a file did not start: refused (the file fails on its own), or the journal could not be
 /// written (the move stops).
 enum Start {
-    Refused(String),
+    Refused(Failure),
     Record(JournalError),
 }
 
@@ -3102,20 +3152,23 @@ fn land(
     trailer: Trailer,
     entry: u64,
 ) -> Result<ReceiveOutcome, TransferError> {
-    let fail = |why: String| -> Result<ReceiveOutcome, TransferError> {
+    let fail = |why: Failure| -> Result<ReceiveOutcome, TransferError> {
         journal.failed(entry, &why).map_err(record)?;
         Ok(ReceiveOutcome::Failed(why))
     };
     // Checked and on disk: from here only success or recovery ends it, never a throw-away. A
     // file that cannot be named now is kept for recovery to finish at the next start.
-    let later = |sealed: pctwin_gate::Sealed<'_>, why: &dyn std::fmt::Display| {
+    let later = |sealed: pctwin_gate::Sealed<'_>, why: &GateError| {
         sealed.persist();
-        Ok(ReceiveOutcome::Failed(format!("{why}; {FINISHED_LATER}")))
+        Ok(ReceiveOutcome::Failed(Failure::new(
+            Cause::of_gate(why),
+            format!("{why}; {FINISHED_LATER}"),
+        )))
     };
     let (size, block_size) = (assembly.header().size, assembly.header().block_size);
     let (mut sealed, fingerprint) = match assembly.seal(trailer) {
         Ok(sealed) => sealed,
-        Err(e) => return fail(e.to_string()),
+        Err(e) => return fail(Failure::of(&e, Side::New)),
     };
     // Which file it is, so after a crash only this very file is ever taken as it.
     let sealed_as = sealed.identity().ok().map(file_id);
@@ -3129,7 +3182,7 @@ fn land(
     let claimed = loop {
         tries += 1;
         if tries > MAX_NAME_TRIES {
-            return later(sealed, &pctwin_gate::GateError::TooManyClashes);
+            return later(sealed, &GateError::TooManyClashes);
         }
         let name = match sealed.next_name() {
             Ok(name) => name,
@@ -3201,9 +3254,12 @@ fn land(
             Ok(ReceiveOutcome::Finished(claimed.keep()))
         }
         // Gone the moment it got its name: never reported copied.
-        Ok(None) => fail(REMOVED_AT_ONCE.into()),
+        Ok(None) => fail(Failure::new(Cause::RemovedAfterCopy, REMOVED_AT_ONCE)),
         // Could not look just now: recovery finishes it (the journal has its name).
-        Err(e) => Ok(ReceiveOutcome::Failed(format!("{e}; {FINISHED_LATER}"))),
+        Err(e) => Ok(ReceiveOutcome::Failed(Failure::new(
+            Cause::of_io(&e, Side::New),
+            format!("{e}; {FINISHED_LATER}"),
+        ))),
     }
 }
 
@@ -3429,16 +3485,19 @@ mod outcomes {
             r.end(
                 id(1),
                 0,
-                ReceiveOutcome::Failed("it was started again".into()),
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "it was started again")),
                 None,
             );
             r.end(
                 id(1),
                 7,
-                ReceiveOutcome::Failed("it was started again".into()),
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "it was started again")),
                 None,
             );
-            r.refuse(id(1), "it has already been moved".into());
+            r.refuse(
+                id(1),
+                Failure::new(Cause::NotVerified, "it has already been moved"),
+            );
             assert_eq!(r.outcome(id(1)), Some(there));
             // And the next connection is told it is done, on the stream it ended on.
             assert_eq!(
@@ -3457,16 +3516,32 @@ mod outcomes {
     #[test]
     fn a_file_not_on_this_laptop_shows_the_latest_of_its_end_and_its_refusal() {
         with_receiver(|r| {
-            r.end(id(2), 3, ReceiveOutcome::Failed("first".into()), None);
-            r.refuse(id(2), "second".into());
-            assert_eq!(
-                r.outcome(id(2)),
-                Some(ReceiveOutcome::Failed("second".into()))
+            r.end(
+                id(2),
+                3,
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "first")),
+                None,
             );
-            r.end(id(2), 4, ReceiveOutcome::Failed("third".into()), None);
+            r.refuse(id(2), Failure::new(Cause::NotVerified, "second"));
             assert_eq!(
                 r.outcome(id(2)),
-                Some(ReceiveOutcome::Failed("third".into()))
+                Some(ReceiveOutcome::Failed(Failure::new(
+                    Cause::NotVerified,
+                    "second"
+                )))
+            );
+            r.end(
+                id(2),
+                4,
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "third")),
+                None,
+            );
+            assert_eq!(
+                r.outcome(id(2)),
+                Some(ReceiveOutcome::Failed(Failure::new(
+                    Cause::NotVerified,
+                    "third"
+                )))
             );
         });
     }

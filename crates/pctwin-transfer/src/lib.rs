@@ -48,6 +48,7 @@
 
 mod allowance;
 mod blockmap;
+mod cause;
 mod inventory;
 mod landing;
 mod lanedriver;
@@ -70,6 +71,7 @@ mod version;
 
 pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
+pub use cause::{Cause, Failure, Side};
 pub use inventory::{
     INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, PAGED_FROM, receive_inventory,
     send_inventory,
@@ -137,6 +139,9 @@ const BLOCK_HEADER: usize = 1 + 1 + 8 + 4 + 32;
 pub enum TransferError {
     #[error("reading the file failed: {0}")]
     Io(#[from] io::Error),
+    /// The file is stored online only on the old laptop; reading it would download it.
+    #[error("it is stored online only on the old laptop, so it was not downloaded to be moved")]
+    OnlineOnly,
     #[error("a block was damaged: {0}")]
     Damaged(String),
     #[error("expected block {expected}, got block {got}")]
@@ -476,6 +481,10 @@ impl FileSender {
         resume: Option<&ResumeTicket>,
         compressible: bool,
     ) -> Result<Self, TransferError> {
+        // A file that went online only since the scan is never opened: opening it downloads it.
+        if std::fs::symlink_metadata(path).is_ok_and(|m| pctwin_scan::is_cloud_only(&m)) {
+            return Err(TransferError::OnlineOnly);
+        }
         Self::open_with(&FsOpener, path, resume, compressible)
     }
 

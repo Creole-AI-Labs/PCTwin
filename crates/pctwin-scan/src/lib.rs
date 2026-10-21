@@ -70,7 +70,7 @@ pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
 };
 pub use measure::{
-    Measure, Size, cloud_only_mac, cloud_only_windows, is_icloud_stub_name, measure,
+    Measure, Size, cloud_only_mac, cloud_only_windows, is_cloud_only, is_icloud_stub_name, measure,
 };
 pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,

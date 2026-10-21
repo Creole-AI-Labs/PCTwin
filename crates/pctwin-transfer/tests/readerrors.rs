@@ -14,8 +14,8 @@ use pctwin_gate::{Approved, Destinations};
 use pctwin_record::ItemId;
 use pctwin_scan::ReadPlan;
 use pctwin_transfer::{
-    Channel, ChannelError, Opener, ReceiverSession, SendJob, SendOutcome, SenderSession, Source,
-    Stamp, Tier,
+    Cause, Channel, ChannelError, Opener, ReceiverSession, SendJob, SendOutcome, SenderSession,
+    Source, Stamp, Tier,
 };
 use tokio::sync::mpsc;
 
@@ -220,7 +220,9 @@ async fn a_bad_file_fails_on_its_own_and_is_tried_once_more_at_the_end() {
     for n in [0, 2, 3] {
         assert_eq!(s.outcome(id(n)), Some(&SendOutcome::Arrived), "{n}");
     }
-    assert!(matches!(s.outcome(id(1)), Some(SendOutcome::Failed(_))));
+    assert!(
+        matches!(s.outcome(id(1)), Some(SendOutcome::Failed(f)) if f.cause() == Cause::Unreadable)
+    );
     assert_eq!(
         opens_of(&faulty, &path_of(&l, 1)),
         2,
@@ -263,7 +265,9 @@ async fn on_a_weak_drive_a_failed_file_is_never_read_again() {
     faulty.faults.insert(path_of(&l, 1), Fault::FirstTime);
     let faulty = Arc::new(faulty);
     let s = run(&l, jobs, faulty.clone(), careful()).await;
-    assert!(matches!(s.outcome(id(1)), Some(SendOutcome::Failed(_))));
+    assert!(
+        matches!(s.outcome(id(1)), Some(SendOutcome::Failed(f)) if f.cause() == Cause::Unreadable)
+    );
     assert_eq!(opens_of(&faulty, &path_of(&l, 1)), 1);
     assert_eq!(s.outcome(id(2)), Some(&SendOutcome::Arrived));
 }
@@ -285,7 +289,10 @@ async fn errors_in_a_row_stop_reading_to_protect_a_dying_drive() {
             "file {n} was read after the stop"
         );
         match s.outcome(id(n)) {
-            Some(SendOutcome::Failed(why)) => assert!(why.contains("stopped reading"), "{why}"),
+            Some(SendOutcome::Failed(why)) => {
+                assert!(why.contains("stopped reading"), "{why}");
+                assert_eq!(why.cause(), Cause::Unreadable);
+            }
             other => panic!("file {n}: {other:?}"),
         }
     }

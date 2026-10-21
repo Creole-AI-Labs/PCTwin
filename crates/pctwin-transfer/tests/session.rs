@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use pctwin_gate::{Approved, Destinations};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    Block, Channel, ChannelError, FileSender, Header, Message, ReceiveOutcome, ReceiverSession,
-    SendJob, SendOutcome, SenderSession, Tier, block_size_for, split_into_pieces,
+    Block, Cause, Channel, ChannelError, FileSender, Header, Message, ReceiveOutcome,
+    ReceiverSession, SendJob, SendOutcome, SenderSession, Tier, block_size_for, split_into_pieces,
 };
 use tokio::sync::{Mutex, mpsc};
 
@@ -764,10 +764,10 @@ async fn the_new_laptop_starts_only_what_the_approved_plan_allows() {
     // Nothing was created or reserved for either.
     assert!(everything_under(l.new_mine.path()).is_empty());
     assert!(
-        matches!(receiver.outcome(id(2)), Some(ReceiveOutcome::Failed(why)) if why.contains("grew"))
+        matches!(receiver.outcome(id(2)), Some(ReceiveOutcome::Failed(why)) if why.contains("grew") && why.cause() == Cause::ChangedDuringMove)
     );
     assert!(
-        matches!(receiver.outcome(id(9)), Some(ReceiveOutcome::Failed(why)) if why.contains("plan"))
+        matches!(receiver.outcome(id(9)), Some(ReceiveOutcome::Failed(why)) if why.contains("plan") && why.cause() == Cause::RefusedBySafetyCheck)
     );
 }
 
@@ -1303,7 +1303,8 @@ async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
     r.unwrap();
     assert!(matches!(
         receiver.outcome(id(0)),
-        Some(ReceiveOutcome::Failed(why)) if why.contains("kept changing")
+        Some(ReceiveOutcome::Failed(why))
+            if why.contains("kept changing") && why.cause() == Cause::ChangedDuringMove
     ));
 }
 
