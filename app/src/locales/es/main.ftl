@@ -1139,6 +1139,7 @@ move-status-kept = Guardado
 move-wait-eyebrow = Tu traslado
 move-wait-scanning-title = Buscando tus archivos.
 move-wait-scanning-body = Tu portátil antiguo está revisando tus carpetas. Solo las lee: no se abre, cambia ni borra nada.
+move-found = Encontrado hasta ahora: { $size } de tus cosas.
 move-wait-approval-title = Esperando a tu portátil nuevo.
 move-wait-approval-body = Tus archivos están listos. Revisa el plan en el portátil nuevo y apruébalo para empezar.
 move-wait-list-title = Esperando a tu portátil antiguo.

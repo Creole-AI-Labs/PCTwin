@@ -463,6 +463,7 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
+        ("found", json([crate::moving::Found { bytes: 41_200_000 }])),
         (
             "ready-note",
             json([pctwin_move::handover::ReadyNote {
@@ -740,6 +741,7 @@ fn calls() -> Value {
             "moveProblem": PROBLEM_EVENT,
             "movePeople": PEOPLE_EVENT,
             "movePrivacy": PRIVACY_EVENT,
+            "moveFound": crate::moving::FOUND_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

@@ -1,6 +1,7 @@
 import { useLocalization } from "@fluent/react";
 import { Banner, Button } from "../components/kit";
 import type { WaitStage } from "../bridge";
+import { formatBytes, pageLocale } from "../move";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
@@ -17,7 +18,20 @@ const WORDS: Record<"old" | "new", Record<WaitStage, string>> = {
  * list): what is happening now, that the old laptop is only read, and a way to stop. Nothing is
  * counted here that the engine has not measured, so there is no bar.
  */
-export default function MoveWaiting({ stage, old, note, onStop }: { stage: WaitStage; old: boolean; note?: string; onStop: () => void }) {
+export default function MoveWaiting({
+  stage,
+  old,
+  note,
+  found = null,
+  onStop,
+}: {
+  stage: WaitStage;
+  old: boolean;
+  note?: string;
+  /** While scanning: bytes of the mover's own things found so far (only ever grows). */
+  found?: number | null;
+  onStop: () => void;
+}) {
   const { l10n } = useLocalization();
   const key = WORDS[old ? "old" : "new"][stage];
   return (
@@ -27,6 +41,11 @@ export default function MoveWaiting({ stage, old, note, onStop }: { stage: WaitS
       <p className="subhead" role="status">
         {l10n.getString(`${key}-body`)}
       </p>
+      {found !== null && found > 0 && (
+        <p className="mv-found" role="status">
+          {l10n.getString("move-found", { size: formatBytes(found, pageLocale()) })}
+        </p>
+      )}
       <div className="mv-note">
         {note && <Banner tone="attention">{note}</Banner>}
         <Banner tone="info">{l10n.getString("progress-old-safe")}</Banner>

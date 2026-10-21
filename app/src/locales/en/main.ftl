@@ -985,6 +985,7 @@ move-status-kept = Kept
 move-wait-eyebrow = Your move
 move-wait-scanning-title = Finding your files.
 move-wait-scanning-body = Your old laptop is looking through your folders. It only reads them: nothing is opened, changed or removed.
+move-found = Found so far: { $size } of your things.
 move-wait-approval-title = Waiting for your new laptop.
 move-wait-approval-body = Your files are ready to go. Check the plan on your new laptop and approve it to start.
 move-wait-list-title = Waiting for your old laptop.

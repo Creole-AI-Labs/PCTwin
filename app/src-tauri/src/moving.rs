@@ -44,6 +44,16 @@ pub const FINISHED_EVENT: &str = "move-finished";
 pub const PROBLEM_EVENT: &str = "move-problem";
 /// The new laptop: the other people in the move, to place (M06).
 pub const PEOPLE_EVENT: &str = "move-people";
+/// The old laptop: how much of the mover's own things the scan has found so far (M02). Only
+/// ever grows while the scan runs.
+pub const FOUND_EVENT: &str = "move-found";
+
+/// What the scan has found of the mover's own things so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Found {
+    pub bytes: u64,
+}
+
 /// The old laptop (a Mac): some of the mover's places were kept private by the Mac's privacy
 /// settings; the Full Disk Access guide is shown.
 pub const PRIVACY_EVENT: &str = "move-privacy";
@@ -1332,7 +1342,15 @@ async fn run_old<R: Runtime>(
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
-    let mut sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut |_| {}, None);
+    let mut found = |v: &pctwin_scan::FrontierView<'_>| {
+        let _ = app.emit(
+            FOUND_EVENT,
+            Found {
+                bytes: v.found_so_far().mover_bytes,
+            },
+        );
+    };
+    let mut sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut found, None);
     // A Mac kept some of the mover's places private: the guide says how to let PCTwin in, and
     // the person looks again or goes on without them (they are then not in the move at all).
     loop {
@@ -1345,7 +1363,7 @@ async fn run_old<R: Runtime>(
         match answer.await {
             Ok(true) => {
                 let _ = app.emit(STAGE_EVENT, Stage::Scanning);
-                sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut |_| {}, None);
+                sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut found, None);
             }
             Ok(false) => break,
             Err(_) => return Err(Stop::Cancelled.into()),

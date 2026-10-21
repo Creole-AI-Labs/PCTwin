@@ -258,6 +258,12 @@ export type OthersWhy = (typeof OTHERS_WHY)[number];
 
 export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
 
+/** How much of the mover's own things the scan has found so far (only ever grows). */
+export function parseFound(value: unknown): { bytes: number } | null {
+  const f = exactly(value, ["bytes"]);
+  return f && isCount(f.bytes) ? { bytes: f.bytes } : null;
+}
+
 /** A Mac kept this many of the mover's places private (the Full Disk Access guide). */
 export type Privacy = { places: number };
 
@@ -565,6 +571,7 @@ export type MoveEvent =
   | { kind: "plan"; plan: PlanView }
   | { kind: "people"; toPlace: PeopleToPlace }
   | { kind: "privacy"; privacy: Privacy }
+  | { kind: "found"; bytes: number }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "finished"; outcome: MoveOutcome }
   | { kind: "problem"; problem: EndedEarly };
@@ -582,6 +589,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-plan", parsePlanView, (plan) => ({ kind: "plan", plan })),
     on("move-people", parsePeopleToPlace, (toPlace) => ({ kind: "people", toPlace })),
     on("move-privacy", parsePrivacy, (privacy) => ({ kind: "privacy", privacy })),
+    on("move-found", parseFound, (f) => ({ kind: "found", bytes: f.bytes })),
     on("move-progress", parseMoveProgress, (progress) => ({ kind: "progress", progress })),
     on("move-finished", parseMoveOutcome, (outcome) => ({ kind: "finished", outcome })),
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),

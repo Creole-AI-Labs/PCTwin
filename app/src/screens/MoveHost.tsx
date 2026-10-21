@@ -109,6 +109,9 @@ export function next(view: View, event: MoveEvent): View {
       return { kind: "people", toPlace: event.toPlace };
     case "privacy":
       return { kind: "privacy", places: event.privacy.places };
+    case "found":
+      // A count for the waiting page, not a page of its own.
+      return view;
     case "progress":
       return { kind: "progress", progress: event.progress };
     case "finished":
@@ -153,6 +156,8 @@ export default function MoveHost({
   const [leftOut, setLeftOut] = useState<FolderRole[]>([]);
   // Why the other people ticked were not moved, when they were not: said until the move ends.
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
+  // How much of the mover's own things the scan has found so far (M02).
+  const [found, setFound] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [mini, setMini] = useState(false);
   const mode = windowFor(view, expanded, mini);
@@ -194,6 +199,7 @@ export default function MoveHost({
     void listenMove((event) => {
       if (!live) return;
       if (event.kind === "stage" && event.stage.kind === "others-not-moved") setOthersWhy(event.stage.why);
+      if (event.kind === "found") setFound(event.bytes);
       setView((v) => next(v, event));
     }).then((stop) => {
       if (!live) {
@@ -262,7 +268,7 @@ export default function MoveHost({
         />
       );
     case "wait":
-      return <MoveWaiting stage={view.stage} old={old} note={othersNote} onStop={stopNow} />;
+      return <MoveWaiting stage={view.stage} old={old} note={othersNote} found={view.stage === "scanning" ? found : null} onStop={stopNow} />;
     case "privacy":
       return (
         <FullDiskAccess

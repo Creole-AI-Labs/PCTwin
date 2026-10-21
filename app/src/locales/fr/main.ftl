@@ -1148,6 +1148,7 @@ move-status-kept = Conservé
 move-wait-eyebrow = Votre transfert
 move-wait-scanning-title = Recherche de vos fichiers.
 move-wait-scanning-body = Votre ancien portable parcourt vos dossiers. Il les lit seulement : rien n’est ouvert, modifié ou supprimé.
+move-found = Trouvé jusqu’ici : { $size } de vos affaires.
 move-wait-approval-title = En attente du nouveau portable.
 move-wait-approval-body = Vos fichiers sont prêts. Vérifiez le plan sur le nouveau portable et approuvez-le pour commencer.
 move-wait-list-title = En attente de l’ancien portable.

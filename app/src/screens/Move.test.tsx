@@ -94,7 +94,7 @@ const plan = plans[0];
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(7);
+    expect(tauri.handlers.size).toBe(8);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };
@@ -105,6 +105,9 @@ describe("the move, once paired", () => {
   it("old laptop: says it is finding the files, then waiting for the approval; Stop stops", async () => {
     await host(true);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-scanning-title"));
+    // What the scan has found of the mover's own things so far, as it grows.
+    send("move-found", { bytes: 2_500_000 });
+    expect(screen.getByText((t) => plain(t) === plain(text("move-found", { size: "2.5 MB" })))).toBeTruthy();
     send("move-stage", { kind: "waiting" });
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-approval-title"));
     fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));

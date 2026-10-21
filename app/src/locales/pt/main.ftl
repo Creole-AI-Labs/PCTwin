@@ -1143,6 +1143,7 @@ move-status-kept = Mantido
 move-wait-eyebrow = Sua transferência
 move-wait-scanning-title = Procurando seus arquivos.
 move-wait-scanning-body = Seu notebook antigo está olhando suas pastas. Ele só as lê: nada é aberto, alterado ou removido.
+move-found = Encontrado até agora: { $size } das suas coisas.
 move-wait-approval-title = Aguardando o notebook novo.
 move-wait-approval-body = Seus arquivos estão prontos. Confira o plano no notebook novo e aprove-o para começar.
 move-wait-list-title = Aguardando o notebook antigo.

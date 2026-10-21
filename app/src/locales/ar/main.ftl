@@ -1266,6 +1266,7 @@ move-status-kept = محفوظ
 move-wait-eyebrow = عملية النقل
 move-wait-scanning-title = جارٍ البحث عن ملفاتك.
 move-wait-scanning-body = يتصفح حاسوبك القديم مجلداتك. إنه يقرأها فقط: لا يُفتح شيء ولا يُغيَّر ولا يُحذف.
+move-found = ما وُجد حتى الآن: { $size } من أشيائك.
 move-wait-approval-title = في انتظار حاسوبك الجديد.
 move-wait-approval-body = ملفاتك جاهزة. راجع الخطة على حاسوبك الجديد ووافق عليها للبدء.
 move-wait-list-title = في انتظار حاسوبك القديم.

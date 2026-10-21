@@ -1111,6 +1111,7 @@ move-status-kept = सुरक्षित
 move-wait-eyebrow = आपका स्थानांतरण
 move-wait-scanning-title = आपकी फ़ाइलें ढूँढी जा रही हैं।
 move-wait-scanning-body = आपका पुराना लैपटॉप आपके फ़ोल्डर देख रहा है। वह सिर्फ़ उन्हें पढ़ता है: कुछ भी खोला, बदला या हटाया नहीं जाता।
+move-found = अब तक मिला: आपकी चीज़ों में से { $size }।
 move-wait-approval-title = नए लैपटॉप का इंतज़ार है।
 move-wait-approval-body = आपकी फ़ाइलें तैयार हैं। नए लैपटॉप पर योजना देखें और शुरू करने के लिए उसे मंज़ूर करें।
 move-wait-list-title = पुराने लैपटॉप का इंतज़ार है।

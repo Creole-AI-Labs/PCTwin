@@ -917,6 +917,7 @@ move-status-kept = 已保留
 move-wait-eyebrow = 你的移动
 move-wait-scanning-title = 正在查找你的文件。
 move-wait-scanning-body = 旧笔记本电脑正在查看你的文件夹。它只读取：不会打开、更改或删除任何内容。
+move-found = 目前已找到：你的内容 { $size }。
 move-wait-approval-title = 正在等待新笔记本电脑。
 move-wait-approval-body = 你的文件已准备好。在新笔记本电脑上查看计划并批准即可开始。
 move-wait-list-title = 正在等待旧笔记本电脑。
