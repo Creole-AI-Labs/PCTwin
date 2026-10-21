@@ -4720,3 +4720,19 @@ async fn blocks_cut_off_by_a_drop_are_never_read_twice_on_a_weak_drive() {
         "every byte read from the drive once"
     );
 }
+
+/// "Done" from the new laptop for a file still being sent, before its end was said, is not
+/// evidence it arrived: never recorded as arrived.
+#[tokio::test]
+async fn a_done_before_the_file_was_ended_is_not_taken_as_arrived() {
+    let l = laptops(&[300_000]);
+    let mut sender = SenderSession::new(jobs(&l), 1);
+    let ((), _) = connection(&mut sender, async |new: &mut Mem| {
+        hello(new, &[]).await;
+        let (stream, _) = start_of(&hear(new).await);
+        answer_start(new, stream, None).await;
+        done(new, stream, true).await;
+    })
+    .await;
+    assert_ne!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
+}

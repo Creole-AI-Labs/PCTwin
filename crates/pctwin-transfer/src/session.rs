@@ -1938,6 +1938,9 @@ impl SenderSession {
                 _,
             ) => SendState::Done(SendOutcome::Failed(why)),
             (SendState::Done(o), _) => SendState::Done(o),
+            // "Done" for a file still being sent, before its end was said: not evidence that it
+            // arrived, so it is not recorded; its end is said as usual and answered then.
+            (open @ SendState::Open { .. }, true) => open,
             (_, true) => SendState::Done(SendOutcome::Arrived),
             (_, false) => {
                 self.scheduler.finished(item);
