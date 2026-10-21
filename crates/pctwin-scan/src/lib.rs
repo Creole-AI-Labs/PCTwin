@@ -39,6 +39,7 @@ mod drives;
 mod folders;
 mod health;
 mod laptop;
+mod mail;
 mod marks;
 mod measure;
 mod people;
@@ -71,6 +72,10 @@ pub use health::{
 };
 pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
+};
+pub use mail::{
+    MailAccounts, apple_mail_accounts_in, mail_accounts, outlook_accounts_in,
+    thunderbird_accounts_in,
 };
 pub use marks::{MarkSample, has_download_mark, sample_folder};
 pub use measure::{
