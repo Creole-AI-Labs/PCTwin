@@ -4,12 +4,14 @@
 //! session counts as it works, and a reader on any thread takes a [`MeterReading`] at any time.
 //! Every number in it was counted, never estimated. Block and byte counters are atomics; the
 //! files in each step are kept per group (the destination each file lands in, as the approved
-//! plan names it) behind a small lock taken only when a file changes step.
+//! plan names it), with the bytes written of each file not yet through, behind a small lock the
+//! move takes when a file changes step and when the new laptop writes a block.
 //!
 //! A [`MeterSnapshot`] is a reading with what the engine works out from it, and only from it: the
 //! speed, measured over the last readings (see [`WINDOW`](crate::WINDOW)), and the [`TimeLeft`], which
 //! is [`TimeLeft::NotKnownYet`] whenever there is not enough to say. The screens show these
-//! figures; they never make one up.
+//! figures; they never make one up. A time left can be very long (a slow link and a big move):
+//! the screens cap what they show (for example "more than a day") rather than print it whole.
 //!
 //! A [`MoveControl`] is the person's stop. A session checks it before each block it sends and
 //! ends its run with [`TransferError::Stopped`](crate::TransferError::Stopped) as soon as it is
@@ -129,8 +131,12 @@ pub struct MeterReading {
     /// New laptop: the approved plan's size, every file at its approved size.
     pub bytes_planned: u64,
     /// New laptop: the approved size of every file that is through (copied, already there,
-    /// needing the person, or failed). What is left to do is the plan less these.
+    /// needing the person, or failed).
     pub bytes_through: u64,
+    /// New laptop: bytes written of the files not yet through, in their current attempt, each
+    /// counted up to its planned size. What is left to do is the plan less these and the bytes
+    /// through.
+    pub bytes_in_progress: u64,
     /// New laptop: the file being read back and checked right now, if one is.
     pub checking: Option<ItemId>,
 }
@@ -158,8 +164,8 @@ pub struct MeterSnapshot {
     /// Bytes a second, measured over about the last 20 seconds of readings (old laptop: bytes
     /// the new laptop confirmed; new laptop: bytes written). `None` until enough is measured.
     pub bytes_per_second: Option<u64>,
-    /// Bytes of the plan not yet through; `None` where the plan's size is not known (the old
-    /// laptop).
+    /// Bytes of the plan not yet written or through; `None` until the plan is loaded, and where
+    /// its size is not known (the old laptop).
     pub bytes_left: Option<u64>,
     pub time_left: TimeLeft,
 }
@@ -171,6 +177,24 @@ struct Files {
     checking: Option<ItemId>,
     /// See [`MeterReading::bytes_through`].
     bytes_through: u64,
+    /// Per planned file not yet through: bytes written in its current attempt (uncapped).
+    written: HashMap<u32, u64>,
+    /// See [`MeterReading::bytes_in_progress`].
+    bytes_in_progress: u64,
+    /// The next planned file's number.
+    next_file: u32,
+    /// The whole plan is loaded: only then can the move be done.
+    loaded: bool,
+}
+
+impl Files {
+    /// `group`'s file no longer counts what it wrote (a new attempt, or it left copying and
+    /// checking).
+    fn forget_written(&mut self, group: Group) {
+        if let Some(w) = self.written.remove(&group.file) {
+            self.bytes_in_progress = self.bytes_in_progress.saturating_sub(w.min(group.bytes));
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -192,10 +216,11 @@ struct Inner {
 #[derive(Debug, Clone, Default)]
 pub struct MoveMeter(Arc<Inner>);
 
-/// A planned file's place in the meter: its group, and its size in the plan.
+/// A planned file's place in the meter: its group, its own number, and its size in the plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Group {
     index: u32,
+    file: u32,
     bytes: u64,
 }
 
@@ -206,6 +231,11 @@ impl MoveMeter {
 
     /// Everything counted so far.
     pub fn reading(&self) -> MeterReading {
+        self.reading_and_loaded().0
+    }
+
+    /// The reading, and whether the whole plan is loaded.
+    fn reading_and_loaded(&self) -> (MeterReading, bool) {
         let i = &self.0;
         let files = self.files();
         let mut total = StepCounts::default();
@@ -217,7 +247,7 @@ impl MoveMeter {
                 .or_insert_with(StepCounts::default)
                 .add(counts);
         }
-        MeterReading {
+        let reading = MeterReading {
             files: total,
             groups,
             blocks_sent: i.blocks_sent.load(Ordering::Acquire),
@@ -229,8 +259,10 @@ impl MoveMeter {
             bytes_already_there: i.bytes_already_there.load(Ordering::Acquire),
             bytes_planned: i.bytes_planned.load(Ordering::Acquire),
             bytes_through: files.bytes_through,
+            bytes_in_progress: files.bytes_in_progress,
             checking: files.checking,
-        }
+        };
+        (reading, files.loaded)
     }
 
     /// A reading now, with the speed and time left (see [`snapshot_at`](Self::snapshot_at)).
@@ -242,24 +274,29 @@ impl MoveMeter {
     /// snapshot is one; take one every second or so while the move runs) and the time left worked
     /// out from it:
     ///
-    /// - [`TimeLeft::Done`] once every file is through;
+    /// - [`TimeLeft::Done`] once the plan is loaded and every file of it is through;
     /// - [`TimeLeft::Waiting`] when nothing has moved for [`STALLED`](crate::STALLED);
     /// - [`TimeLeft::About`] the bytes left over the measured speed, once there is a speed
     ///   (readings over at least [`WARM_UP`](crate::WARM_UP)) and the plan's size is known;
     /// - else [`TimeLeft::NotKnownYet`].
     ///
-    /// The bytes left are those of files not yet through, whole, so a file part-written counts in
-    /// full until it is through: the figure leans long, never short.
+    /// The bytes left are the plan less the files through and the bytes written of those not
+    /// yet through (each up to its planned size), so a big file counts down as it is written.
+    /// Before the plan is loaded nothing is known, and the move is never done.
     pub fn snapshot_at(&self, now: Instant) -> MeterSnapshot {
-        let reading = self.reading();
+        let (reading, loaded) = self.reading_and_loaded();
         // One meter belongs to one session, so one of the two is always 0.
         let done = reading
             .bytes_confirmed
             .saturating_add(reading.bytes_written);
         let measured = self.pace().measure(now, done);
-        let through = reading.files.left() == 0;
-        let bytes_left = (reading.bytes_planned > 0 || through)
-            .then(|| reading.bytes_planned.saturating_sub(reading.bytes_through));
+        let through = loaded && reading.files.left() == 0;
+        let bytes_left = (loaded && (reading.bytes_planned > 0 || through)).then(|| {
+            reading
+                .bytes_planned
+                .saturating_sub(reading.bytes_through)
+                .saturating_sub(reading.bytes_in_progress)
+        });
         let time_left = if through {
             TimeLeft::Done
         } else if measured.stalled {
@@ -327,7 +364,19 @@ impl MoveMeter {
             c.total += 1;
             c.waiting += 1;
         }
-        Group { index, bytes }
+        let file = files.next_file;
+        files.next_file = files.next_file.saturating_add(1);
+        Group { index, file, bytes }
+    }
+
+    /// Every file of the plan is planned: from now on the move can be done.
+    pub(crate) fn plan_loaded(&self) {
+        self.files().loaded = true;
+    }
+
+    /// A fresh attempt at `group`'s file starts: what an earlier one wrote counts no more.
+    pub(crate) fn attempt(&self, group: Group) {
+        self.files().forget_written(group);
     }
 
     /// A file planned at `group` moved from step `from` to step `to`.
@@ -336,6 +385,9 @@ impl MoveMeter {
             return;
         }
         let mut files = self.files();
+        if !matches!(to, Step::Copying | Step::Checking) {
+            files.forget_written(group);
+        }
         let Some((_, c)) = files.groups.get_mut(group.index as usize) else {
             return;
         };
@@ -372,8 +424,16 @@ impl MoveMeter {
         self.0.blocks_confirmed.load(Ordering::Acquire)
     }
 
-    pub(crate) fn written_bytes(&self, bytes: u64) {
+    /// `bytes` more of `group`'s file written (a block written for the first time in this
+    /// attempt).
+    pub(crate) fn written(&self, group: Group, bytes: u64) {
         self.0.bytes_written.fetch_add(bytes, Ordering::AcqRel);
+        let mut files = self.files();
+        let was = files.written.get(&group.file).copied().unwrap_or(0);
+        let now = was.saturating_add(bytes);
+        files.written.insert(group.file, now);
+        let more = now.min(group.bytes) - was.min(group.bytes);
+        files.bytes_in_progress = files.bytes_in_progress.saturating_add(more);
     }
 
     pub(crate) fn checked_bytes(&self, bytes: u64) {
@@ -446,19 +506,26 @@ mod tests {
 
     const MB: u64 = 1_000_000;
 
-    /// A new laptop's meter planned with `sizes`, each in group "me".
+    /// A new laptop's meter with the plan `sizes` loaded, each in group "me".
     fn planned(sizes: &[u64]) -> (MoveMeter, Vec<Group>) {
         let m = MoveMeter::new();
         let g = sizes.iter().map(|s| m.plan("me", *s)).collect();
+        m.plan_loaded();
         (m, g)
     }
 
-    /// `n` seconds of snapshots from `*at`, `per_second` bytes written in each.
-    fn seconds(m: &MoveMeter, at: &mut Instant, n: u32, per_second: u64) -> MeterSnapshot {
+    /// `n` seconds of snapshots from `*at`, `per_second` bytes of `file` written in each.
+    fn seconds(
+        m: &MoveMeter,
+        file: Group,
+        at: &mut Instant,
+        n: u32,
+        per_second: u64,
+    ) -> MeterSnapshot {
         let mut last = m.snapshot_at(*at);
         for _ in 0..n {
             *at += Duration::from_secs(1);
-            m.written_bytes(per_second);
+            m.written(file, per_second);
             last = m.snapshot_at(*at);
         }
         last
@@ -473,17 +540,78 @@ mod tests {
         assert_eq!(s.bytes_per_second, None);
         assert_eq!(s.bytes_left, Some(150 * MB));
         m.step(g[0], Step::Waiting, Step::Copying);
-        let s = seconds(&m, &mut at, 4, 2 * MB);
+        let s = seconds(&m, g[0], &mut at, 4, 2 * MB);
         assert_eq!(s.time_left, TimeLeft::NotKnownYet, "4 seconds is too few");
-        let s = seconds(&m, &mut at, 1, 2 * MB);
+        let s = seconds(&m, g[0], &mut at, 1, 2 * MB);
         assert_eq!(s.bytes_per_second, Some(2 * MB));
-        // Nothing is through yet: all 150 MB are left, at 2 MB a second.
-        assert_eq!(s.time_left, TimeLeft::About { seconds: 75 });
-        // The first file is through: 50 MB left.
+        // 10 MB of the first file written: 140 MB left, at 2 MB a second.
+        assert_eq!(s.bytes_left, Some(140 * MB));
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 70 });
+        // The first file is through, and 2 MB of the second written: 48 MB left.
         m.step(g[0], Step::Copying, Step::Copied);
-        let s = seconds(&m, &mut at, 1, 2 * MB);
-        assert_eq!(s.bytes_left, Some(50 * MB));
-        assert_eq!(s.time_left, TimeLeft::About { seconds: 25 });
+        m.step(g[1], Step::Waiting, Step::Copying);
+        let s = seconds(&m, g[1], &mut at, 1, 2 * MB);
+        assert_eq!(s.bytes_left, Some(48 * MB));
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 24 });
+    }
+
+    #[test]
+    fn a_big_file_counts_down_while_it_is_written_never_past_its_size() {
+        let (m, g) = planned(&[100 * MB]);
+        m.step(g[0], Step::Waiting, Step::Copying);
+        let mut at = Instant::now();
+        let s = seconds(&m, g[0], &mut at, 5, 2 * MB);
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 45 });
+        let s = seconds(&m, g[0], &mut at, 1, 2 * MB);
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 44 });
+        let s = seconds(&m, g[0], &mut at, 5, 2 * MB);
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 39 });
+        // Blocks written again (or a file that grew) never count past the planned size.
+        m.written(g[0], 500 * MB);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(0));
+        // Being read back and checked still counts what was written.
+        m.step(g[0], Step::Copying, Step::Checking);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(0));
+    }
+
+    #[test]
+    fn a_file_started_again_or_failed_no_longer_counts_what_it_had_written() {
+        let (m, g) = planned(&[10 * MB, 20 * MB]);
+        let at = Instant::now();
+        m.step(g[0], Step::Waiting, Step::Copying);
+        m.written(g[0], 4 * MB);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(26 * MB));
+        // A fresh attempt starts from nothing.
+        m.attempt(g[0]);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(30 * MB));
+        m.written(g[0], 3 * MB);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(27 * MB));
+        // Failed: through, at its planned size; what it wrote counts no more.
+        m.step(g[0], Step::Copying, Step::Failed);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(20 * MB));
+        // Started again from failed: all of it is left again.
+        m.step(g[0], Step::Failed, Step::Copying);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(30 * MB));
+        // Back to waiting (its attempt let go): what it wrote counts no more either.
+        m.written(g[0], 5 * MB);
+        m.step(g[0], Step::Copying, Step::Waiting);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(30 * MB));
+    }
+
+    #[test]
+    fn one_file_written_past_its_size_takes_nothing_off_the_others() {
+        let (m, g) = planned(&[10 * MB, 20 * MB]);
+        let at = Instant::now();
+        m.step(g[0], Step::Waiting, Step::Copying);
+        m.written(g[0], 30 * MB);
+        let s = m.snapshot_at(at);
+        assert_eq!(s.reading.bytes_in_progress, 10 * MB);
+        assert_eq!(s.bytes_left, Some(20 * MB));
+        // And forgetting it takes off only what it counted.
+        m.step(g[1], Step::Waiting, Step::Copying);
+        m.written(g[1], 5 * MB);
+        m.attempt(g[0]);
+        assert_eq!(m.snapshot_at(at).bytes_left, Some(25 * MB));
     }
 
     #[test]
@@ -506,14 +634,47 @@ mod tests {
     }
 
     #[test]
+    fn a_meter_with_no_plan_loaded_never_says_done() {
+        let s = MoveMeter::new().snapshot();
+        assert_eq!(s.time_left, TimeLeft::NotKnownYet, "{s:?}");
+        assert_eq!(s.bytes_left, None);
+        // Files planned, the plan not yet whole: not done either.
+        let m = MoveMeter::new();
+        let g = m.plan("me", 0);
+        m.step(g, Step::Waiting, Step::Copied);
+        assert_eq!(m.snapshot().time_left, TimeLeft::NotKnownYet);
+        // Taken over: nothing is planned again until the new plan is loaded.
+        let (m, g) = planned(&[MB]);
+        m.step(g[0], Step::Waiting, Step::Copied);
+        assert_eq!(m.snapshot().time_left, TimeLeft::Done);
+        m.reset();
+        let s = m.snapshot();
+        assert_eq!(s.time_left, TimeLeft::NotKnownYet, "{s:?}");
+        assert_eq!(s.bytes_left, None);
+    }
+
+    #[test]
+    fn a_plan_with_nothing_in_it_or_only_empty_files_ends_done() {
+        let (m, _) = planned(&[]);
+        assert_eq!(m.snapshot().time_left, TimeLeft::Done);
+        let (m, g) = planned(&[0, 0]);
+        assert_eq!(m.snapshot().time_left, TimeLeft::NotKnownYet);
+        m.step(g[0], Step::Waiting, Step::Copied);
+        m.step(g[1], Step::Waiting, Step::AlreadyThere);
+        let s = m.snapshot();
+        assert_eq!(s.time_left, TimeLeft::Done);
+        assert_eq!(s.bytes_left, Some(0));
+    }
+
+    #[test]
     fn a_move_with_nothing_moving_says_waiting_not_a_time() {
         let (m, g) = planned(&[100 * MB]);
         m.step(g[0], Step::Waiting, Step::Copying);
         let mut at = Instant::now();
-        seconds(&m, &mut at, 10, MB);
-        let s = seconds(&m, &mut at, 10, 0);
+        seconds(&m, g[0], &mut at, 10, MB);
+        let s = seconds(&m, g[0], &mut at, 10, 0);
         assert_eq!(s.time_left, TimeLeft::Waiting);
-        let s = seconds(&m, &mut at, 1, MB);
+        let s = seconds(&m, g[0], &mut at, 1, MB);
         assert!(matches!(s.time_left, TimeLeft::About { .. }), "{s:?}");
     }
 
@@ -539,7 +700,11 @@ mod tests {
         let (m, g) = planned(&[MB]);
         m.step(g[0], Step::Waiting, Step::Copying);
         let mut at = Instant::now();
-        let s = seconds(&m, &mut at, 5, 100 * MB);
+        let s = seconds(&m, g[0], &mut at, 5, MB / 10);
+        assert_eq!(s.bytes_left, Some(MB / 2));
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 5 });
+        let s = seconds(&m, g[0], &mut at, 5, MB / 10);
+        assert_eq!(s.bytes_left, Some(0));
         assert_eq!(s.time_left, TimeLeft::About { seconds: 1 });
     }
 
@@ -548,11 +713,12 @@ mod tests {
         let (m, g) = planned(&[100 * MB]);
         m.step(g[0], Step::Waiting, Step::Copying);
         let mut at = Instant::now();
-        seconds(&m, &mut at, 10, MB);
+        seconds(&m, g[0], &mut at, 10, MB);
         m.reset();
         let g = m.plan("me", 100 * MB);
+        m.plan_loaded();
         m.step(g, Step::Waiting, Step::Copying);
-        let s = seconds(&m, &mut at, 1, MB);
+        let s = seconds(&m, g, &mut at, 1, MB);
         assert_eq!(s.bytes_per_second, None);
         assert_eq!(s.time_left, TimeLeft::NotKnownYet);
     }
@@ -562,14 +728,14 @@ mod tests {
         let (m, g) = planned(&[3 * MB]);
         m.step(g[0], Step::Waiting, Step::Copying);
         let mut at = Instant::now();
-        let s = seconds(&m, &mut at, 5, MB / 2);
+        let s = seconds(&m, g[0], &mut at, 5, MB / 2);
         let json = serde_json::to_value(&s).unwrap();
         assert_eq!(
             json["timeLeft"],
-            serde_json::json!({ "kind": "about", "seconds": 6 })
+            serde_json::json!({ "kind": "about", "seconds": 1 })
         );
         assert_eq!(json["bytesPerSecond"], serde_json::json!(MB / 2));
-        assert_eq!(json["bytesLeft"], serde_json::json!(3 * MB));
+        assert_eq!(json["bytesLeft"], serde_json::json!(MB / 2));
         assert_eq!(json["reading"]["files"]["copying"], serde_json::json!(1));
         assert_eq!(
             json["reading"]["groups"]["me"]["total"],
@@ -604,13 +770,15 @@ mod tests {
                     for i in 0..1000u64 {
                         let snap = m.snapshot_at(start + Duration::from_millis(i));
                         assert!(snap.reading.bytes_written <= 64 * MB);
+                        assert!(snap.bytes_left.is_some_and(|l| l <= 64 * MB));
                     }
                 });
             }
             for _ in 0..64 {
-                m.written_bytes(MB);
+                m.written(g[0], MB);
             }
         });
         assert_eq!(m.reading().bytes_written, 64 * MB);
+        assert_eq!(m.snapshot().bytes_left, Some(0));
     }
 }
