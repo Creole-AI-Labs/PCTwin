@@ -238,6 +238,7 @@ pair-choose-checking = Verificando…
 pair-new-eyebrow = Notebook novo
 pair-new-searching-title = Procurando seu notebook antigo…
 pair-new-searching-body = Mantenha o PCTwin aberto no seu notebook antigo, no mesmo Wi-Fi que este.
+pair-new-search-failed-title = Não foi possível procurar seu notebook antigo.
 pair-new-list-title = Qual é o seu notebook antigo?
 pair-new-list-body = Escolha o nome que seu notebook antigo mostra na tela.
 pair-new-same-label = Outro notebook por perto tem este nome. Confira a tela do notebook antigo.
@@ -287,6 +288,7 @@ pairing-choose-network = Este notebook está em mais de uma rede. Escolha aquela
 pairing-local-network-refused = Talvez seu Mac esteja impedindo o PCTwin de encontrar notebooks nesta rede. Se o Mac acabou de perguntar, escolha Permitir e tente de novo. Se não, abra Ajustes do Sistema, escolha Privacidade e Segurança e depois Rede Local, ative o PCTwin e tente de novo.
 pairing-local-network-refused-details = Uma VPN, um firewall ou um app de filtro também pode impedir que os notebooks se encontrem. Se algum estiver ligado, desligue-o durante o pareamento e tente de novo.
 pairing-failed = O pareamento não deu certo desta vez. Nada foi compartilhado. Tente de novo.
+pairing-failed-new = O pareamento não funcionou desta vez. Nada foi compartilhado. Digite o novo código da tela do notebook antigo.
 
 ## M06 Match people to their profiles (Who’s moving?)
 

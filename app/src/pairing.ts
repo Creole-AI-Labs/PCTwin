@@ -38,6 +38,9 @@ export const LOST: Problem = { key: "pairing-connection-lost", networks: [] };
 /** The same on the new laptop, which looks for the old laptop again by itself (no Try again there). */
 export const LOST_NEW: Problem = { key: "pairing-connection-lost-new", networks: [] };
 
+/** A problem with no words of its own, on the new laptop, which looks again by itself (no Try again there). */
+export const FAILED_NEW: Problem = { key: "pairing-failed-new", networks: [] };
+
 /** A label as words: "Blue Fox" in the chosen language, or the typed name (or "unnamed"). */
 export function labelText(l10n: ReactLocalization, label: Label): string {
   if (label.kind === "picked") {

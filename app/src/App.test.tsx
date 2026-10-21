@@ -69,7 +69,8 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-prep-continue") }));
     await act(async () => {});
-    expect(title()).toBe(l10n.getString("pair-new-searching-title"));
+    // The shell here gives no search reply, so the search fails, and the page says so.
+    expect(title()).toBe(l10n.getString("pair-new-search-failed-title"));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));

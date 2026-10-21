@@ -225,6 +225,7 @@ pair-choose-checking = 正在检查……
 pair-new-eyebrow = 新笔记本电脑
 pair-new-searching-title = 正在搜索你的旧笔记本电脑……
 pair-new-searching-body = 请在旧笔记本电脑上保持PCTwin打开，并与这台电脑连接同一个Wi-Fi。
+pair-new-search-failed-title = 无法查找你的旧笔记本电脑。
 pair-new-list-title = 哪一台是你的旧笔记本电脑？
 pair-new-list-body = 选择你的旧笔记本电脑屏幕上显示的名称。
 pair-new-same-label = 附近另一台笔记本电脑也叫这个名称。请查看旧笔记本电脑的屏幕。
@@ -274,6 +275,7 @@ pairing-choose-network = 这台笔记本电脑连接了多个网络。请选择�
 pairing-local-network-refused = 你的Mac可能不允许PCTwin查找这个网络上的笔记本电脑。如果Mac刚刚询问过你，请选择“允许”，然后重试。否则，请打开“系统设置”，选择“隐私与安全性”，再选择“本地网络”，打开PCTwin，然后重试。
 pairing-local-network-refused-details = VPN、防火墙或过滤软件也可能让笔记本电脑无法找到彼此。如果有其中之一正在运行，请在配对期间关闭它，然后重试。
 pairing-failed = 这次配对没有成功。没有共享任何内容。请再次尝试。
+pairing-failed-new = 这次配对没有成功。没有共享任何内容。请输入旧笔记本电脑屏幕上的新代码。
 
 ## M06 Match people to their profiles (Who’s moving?)
 

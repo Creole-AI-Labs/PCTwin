@@ -63,6 +63,8 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
   const [notice, setNotice] = useState<Notice | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [checking, setChecking] = useState(false);
+  // A "None of these match" on its way: nothing else on the round may be pressed meanwhile.
+  const [declining, setDeclining] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [networks, setNetworks] = useState<string[]>([]);
@@ -215,6 +217,13 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
       if (!stillOn(sent)) return;
       setChecking(false);
       const p = toProblem(error);
+      // The connection dropped while checking (or the paired link could not be kept): this
+      // pairing cannot go on, so the page with a Try again that starts afresh is shown.
+      if (p.key === "pairing-connection-lost") {
+        setProblem(LOST);
+        setPhase("error");
+        return;
+      }
       // A choice that came too late: the timed-out notice already says so, once.
       if (p.key !== "pairing-timed-out") setProblem(p);
       setPhase(code ? "code" : "starting");
@@ -224,13 +233,18 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
   const decline = async () => {
     const sent = roundNow.current;
     setProblem(null);
+    setDeclining(true);
     try {
       await oldDecline(sent);
     } catch (error) {
       if (stillOn(sent)) setProblem(toProblem(error));
       return;
+    } finally {
+      setDeclining(false);
     }
-    if (!stillOn(sent)) return;
+    // The round may have ended some other way while the decline was on its way (the time ran
+    // out): what that said stands, and "did not match" is not said over it.
+    if (!stillOn(sent) || phaseNow.current !== "choose") return;
     setNotice("declined");
     setPhase(code ? "code" : "starting");
   };
@@ -316,7 +330,10 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
               variant="primary"
               className="pair-block"
               onClick={() => {
-                void start(null);
+                // Whatever was left of the last attempt is let go first, so the start is fresh.
+                void stop()
+                  .catch(() => undefined)
+                  .then(() => start(null));
               }}
             >
               <Localized id="pair-try-again">
@@ -534,7 +551,7 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
                   dir="ltr"
                   ref={i === 0 ? firstNumber : undefined}
                   aria-pressed={selected === n}
-                  disabled={checking}
+                  disabled={checking || declining}
                   onClick={() => {
                     setSelected(n);
                   }}
@@ -555,7 +572,7 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
             variant="primary"
             className="pair-block"
             icon={<Check />}
-            disabled={selected === null || checking}
+            disabled={selected === null || checking || declining}
             onClick={() => {
               if (selected !== null) void pick(selected);
             }}
@@ -579,7 +596,7 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
           <Button
             variant="quiet"
             className="pair-block pair-text-btn"
-            disabled={checking}
+            disabled={checking || declining}
             onClick={() => {
               void decline();
             }}

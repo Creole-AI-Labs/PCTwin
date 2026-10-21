@@ -237,6 +237,7 @@ pair-choose-checking = Checking…
 pair-new-eyebrow = New laptop
 pair-new-searching-title = Looking for your old laptop…
 pair-new-searching-body = Keep PCTwin open on your old laptop, on the same Wi-Fi as this one.
+pair-new-search-failed-title = Could not look for your old laptop.
 pair-new-list-title = Which one is your old laptop?
 pair-new-list-body = Choose the name your old laptop shows on its screen.
 pair-new-same-label = Another laptop nearby has this name. Check the old laptop’s screen.
@@ -286,6 +287,7 @@ pairing-choose-network = This laptop is on more than one network. Choose the one
 pairing-local-network-refused = Your Mac may be stopping PCTwin from finding laptops on this network. If your Mac just asked, choose Allow, then try again. If not, open System Settings, choose Privacy & Security, then Local Network, switch on PCTwin, and try again.
 pairing-local-network-refused-details = A VPN, or a firewall or filter app, can also stop laptops finding each other. If one is on, turn it off while you pair, then try again.
 pairing-failed = Pairing did not work this time. Nothing was shared. Try again.
+pairing-failed-new = Pairing did not work this time. Nothing was shared. Type the new code from the old laptop’s screen.
 
 ## M06 Match people to their profiles (Who’s moving?)
 

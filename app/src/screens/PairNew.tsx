@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
-import { LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
+import { FAILED_NEW, LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
 import { Eyebrow, HeadsUpStep, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
@@ -35,6 +35,8 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
   const [busy, setBusy] = useState(false);
   const [number, setNumber] = useState<number | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
+  // What happened before a search that then failed: still said, first.
+  const [earlier, setEarlier] = useState<Problem | null>(null);
   const [notes, setNotes] = useState<HeadsUp[]>([]);
   const fieldId = useId();
   const wasBusy = useRef(false);
@@ -47,6 +49,7 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
   // `notice` is shown while looking again (after a lost connection).
   const search = useCallback(async (notice: Problem | null = null) => {
     setProblem(notice);
+    setEarlier(null);
     setPhase("searching");
     try {
       const found = await newSearch();
@@ -71,8 +74,9 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
         setPhase("none");
         return;
       }
-      // What happened before looking again stays the first thing said.
-      setProblem(notice ?? p);
+      // The search itself failed: said as that, after what happened before looking again.
+      setEarlier(notice);
+      setProblem(p);
       setPhase("error");
     }
   }, []);
@@ -92,9 +96,11 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
       setBusy(false);
       setNumber(null);
       setCode("");
-      // A dropped connection is said in this laptop's words (it has no Try again of its own).
+      // A dropped connection, or a problem with no words of its own, is said in this laptop's
+      // words: it looks again by itself, so there is no Try again to point to.
       const dropped = event.kind === "lost" || event.problem.key === "pairing-connection-lost";
-      void search(dropped ? LOST_NEW : event.problem);
+      const generic = event.kind === "problem" && event.problem.key === "pairing-failed";
+      void search(dropped ? LOST_NEW : generic ? FAILED_NEW : event.problem);
     }
   }, [search]);
 
@@ -194,7 +200,8 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
       {phase === "error" && (
         <>
           <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="error" id="pair-new-searching-title" />
+          <Heading key="error" id="pair-new-search-failed-title" />
+          {earlier && <ProblemNotice problem={earlier} />}
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button

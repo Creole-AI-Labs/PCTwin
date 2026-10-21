@@ -365,9 +365,89 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "paired" });
     expect(await violations()).toEqual([]);
   });
+
+  it("a dropped connection while checking shows the page whose Try again starts afresh", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 3, numbers: [1, 2, 3] });
+    replies.pairing_old_pick = () => {
+      throw problem("pairing-connection-lost");
+    };
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
+    fireEvent.click(button("pair-choose-confirm"));
+    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    // The dead code is not left on screen; the Try again here is real.
+    expect(screen.queryByText("123456")).toBeNull();
+    tauri.invoke.mockClear();
+    fireEvent.click(button("pair-try-again"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    const order = tauri.invoke.mock.calls.map(([c]) => c as string);
+    expect(order.indexOf("pairing_stop")).toBeLessThan(order.indexOf("pairing_old_start"));
+    noMissingText();
+  });
+
+  it("while None of these match is on its way nothing else on the round can be pressed, and a time-out meanwhile is not turned into did not match", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 4, numbers: [1, 2, 3] });
+    let answer: () => void = () => undefined;
+    replies.pairing_old_decline = () =>
+      new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 1 })) }));
+    fireEvent.click(button("pair-choose-none"));
+    await waitFor(() => {
+      expect(button("pair-choose-confirm").hasAttribute("disabled")).toBe(true);
+    });
+    expect(button("pair-choose-none").hasAttribute("disabled")).toBe(true);
+    // The time runs out before the decline's reply.
+    await emit("pairing-old", { kind: "timed-out" });
+    await act(async () => {
+      answer();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(text("pair-old-timed-out"))).toBeTruthy();
+    expect(screen.queryByText(text("pair-old-declined"))).toBeNull();
+    noMissingText();
+  });
 });
 
 describe("new laptop", () => {
+  it("a problem with no words of its own does not point to a Try again that is not there", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-failed", networks: [] } });
+    expect(await screen.findByText(text("pairing-failed-new"))).toBeTruthy();
+    expect(screen.queryByText(text("pairing-failed"))).toBeNull();
+    noMissingText();
+  });
+
+  it("a search that fails after an attempt says it failed, after what happened before", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    replies.pairing_new_search = () => {
+      throw problem("pairing-no-network");
+    };
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-timed-out", networks: [] } });
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-new-search-failed-title"));
+    });
+    expect(screen.getByText(text("pairing-timed-out"))).toBeTruthy();
+    expect(screen.getByText(text("pairing-no-network"))).toBeTruthy();
+    noMissingText();
+  });
+
   it("with nothing found, says so and searches again", async () => {
     await renderNew([]);
     expect(await screen.findByText(text("pair-new-none-title"))).toBeTruthy();

@@ -239,6 +239,7 @@ pair-choose-checking = Vérification…
 pair-new-eyebrow = Nouvel ordinateur portable
 pair-new-searching-title = Recherche de votre ancien ordinateur portable…
 pair-new-searching-body = Gardez PCTwin ouvert sur votre ancien ordinateur portable, sur le même Wi-Fi que celui-ci.
+pair-new-search-failed-title = Impossible de chercher votre ancien portable.
 pair-new-list-title = Lequel est votre ancien ordinateur portable ?
 pair-new-list-body = Choisissez le nom affiché sur l’écran de votre ancien ordinateur portable.
 pair-new-same-label = Un autre ordinateur portable à proximité porte ce nom. Vérifiez l’écran de l’ancien ordinateur.
@@ -288,6 +289,7 @@ pairing-choose-network = Cet ordinateur portable est sur plusieurs réseaux. Cho
 pairing-local-network-refused = Votre Mac empêche peut-être PCTwin de trouver des ordinateurs portables sur ce réseau. Si votre Mac vient de vous le demander, choisissez Autoriser, puis réessayez. Sinon, ouvrez Réglages Système, choisissez Confidentialité et sécurité, puis Réseau local, activez PCTwin et réessayez.
 pairing-local-network-refused-details = Un VPN, un pare-feu ou une app de filtrage peut aussi empêcher les ordinateurs portables de se trouver. S’il y en a un d’actif, désactivez-le le temps de l’association, puis réessayez.
 pairing-failed = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Réessayez.
+pairing-failed-new = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Saisissez le nouveau code affiché sur l’ancien portable.
 
 ## M06 Match people to their profiles (Who’s moving?)
 
