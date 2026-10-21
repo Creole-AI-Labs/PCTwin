@@ -2312,6 +2312,9 @@ pub struct ReceiverSession<'d> {
     same_secret: [u8; 32],
     /// A skipped start to make here from a copy already here (off the loop).
     to_copy: Option<u32>,
+    /// Files this laptop read back wrong at least once in this session, so if the old laptop
+    /// gives up asking, the true reason is said: it could not be stored here.
+    stored_wrong: HashSet<ItemId>,
     /// Per approved place, whether each of its last checked files was stored correctly (newest
     /// last, at most [`BRAKE_WINDOW`]).
     stored_lately: HashMap<String, VecDeque<bool>>,
@@ -2383,6 +2386,7 @@ impl<'d> ReceiverSession<'d> {
             },
             to_copy: None,
             stored_lately: HashMap::new(),
+            stored_wrong: HashSet::new(),
             copies: HashMap::new(),
             copy_sources: 0,
             streams: BTreeMap::new(),
@@ -3079,7 +3083,16 @@ impl<'d> ReceiverSession<'d> {
             Message::Skip { stream } => return self.skipped(stream, replies),
             Message::GiveUp { stream, why } => {
                 // The old laptop stopped sending this file: it fails, with the true reason.
+                let stored_wrong = self
+                    .streams
+                    .get(&stream)
+                    .is_some_and(|s| self.stored_wrong.contains(&s.item));
                 let (cause, why) = match why {
+                    // Asked for again and again because this laptop kept storing it wrong: that
+                    // is the true reason.
+                    GiveUpWhy::AskedAgainTooOften if stored_wrong => {
+                        (Cause::CouldNotWrite, NOT_STORED_HERE)
+                    }
                     GiveUpWhy::AskedAgainTooOften => (Cause::NotVerified, GAVE_UP),
                     GiveUpWhy::ReadTooOften => (Cause::NotVerified, READ_TOO_OFTEN),
                     GiveUpWhy::Unreadable => (Cause::Unreadable, UNREADABLE_THERE),
@@ -3318,8 +3331,12 @@ impl<'d> ReceiverSession<'d> {
         if trailer.changed || trailer.stamp_after != a.header().stamp {
             return None;
         }
-        let fixable = a.blocks_done() < a.header().block_count
-            || matches!(a.check_stored(), Ok(StoredCheck::TakenBack(_)));
+        let stored_wrong = matches!(a.check_stored(), Ok(StoredCheck::TakenBack(_)));
+        let item = s.item;
+        let fixable = a.blocks_done() < a.header().block_count || stored_wrong;
+        if stored_wrong {
+            self.stored_wrong.insert(item);
+        }
         if !fixable {
             return None;
         }

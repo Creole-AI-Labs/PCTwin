@@ -3417,21 +3417,24 @@ async fn a_restart_after_one_or_two_rounds_keeps_the_true_reason() {
         .expect("hung");
         s.unwrap();
         r.unwrap();
-        for why in [
-            match sender.outcome(id(0)) {
-                Some(SendOutcome::Failed(why)) => why.clone(),
-                other => panic!("{other:?}"),
-            },
-            match receiver.outcome(id(0)) {
-                Some(ReceiveOutcome::Failed(why)) => why,
-                other => panic!("{other:?}"),
-            },
-        ] {
-            assert!(
-                why.contains("kept arriving damaged"),
-                "after {after}: {why}"
-            );
-        }
+        // The old laptop says it gave up; the new laptop, which saw its drive store the file
+        // wrong, gives the true reason.
+        let sent = match sender.outcome(id(0)) {
+            Some(SendOutcome::Failed(why)) => why.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert!(
+            sent.contains("kept arriving damaged"),
+            "after {after}: {sent}"
+        );
+        let received = match receiver.outcome(id(0)) {
+            Some(ReceiveOutcome::Failed(why)) => why,
+            other => panic!("{other:?}"),
+        };
+        assert!(
+            received.contains("could not store this file correctly"),
+            "after {after}: {received}"
+        );
         assert!(!landed(&l, 0).exists());
     }
 }
