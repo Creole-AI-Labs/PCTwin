@@ -9,6 +9,7 @@ use std::io::{Cursor, Read, Write};
 
 use pctwin_helper::protocol::{read_from_helper, send_request};
 use pctwin_helper::{Answer, Entry, FromHelper, Handle, Refusal, Request, Session};
+use pctwin_record::Item;
 
 /// The app's requests, read by the helper; the helper's answers, kept for the test to read.
 struct Channel {
@@ -52,8 +53,36 @@ fn session(requests: &[Request]) -> (Vec<FromHelper>, tempfile::TempDir) {
                 .and_then(|d| i64::try_from(d.as_nanos()).ok()),
         }
     };
-    let found = vec![entry(&a), entry(&b)];
-    let mut scanner = move |account: &str| -> Result<Vec<Entry>, Refusal> {
+    let item = |name: &str, size: u64| {
+        let owner = pctwin_record::Owner::Person {
+            account_id: "bea".into(),
+        };
+        let place = pctwin_record::Place {
+            role: pctwin_record::FolderRole::Documents,
+            storage: pctwin_record::Storage::SystemDrive,
+        };
+        let path =
+            pctwin_record::ItemPath::new(vec![pctwin_record::ItemName::from_text(name)]).unwrap();
+        let laptop = pctwin_record::LaptopId::from_hex(&"0".repeat(32)).unwrap();
+        pctwin_record::Item {
+            id: pctwin_record::ItemId::derive(&laptop, &owner, &place, &path),
+            kind: pctwin_record::ItemKind::File,
+            owner,
+            place,
+            path,
+            size_bytes: size,
+            modified_ns: None,
+            portability: pctwin_record::Portability::Portable,
+            managed_by: pctwin_record::ManagedBy::Personal,
+            download_bytes: None,
+            inclusion: pctwin_record::Inclusion::Included,
+        }
+    };
+    let found = vec![
+        (item("bea-private-diary.txt", 10), entry(&a)),
+        (item("bea-tax.pdf", 16), entry(&b)),
+    ];
+    let mut scanner = move |account: &str| -> Result<Vec<(Item, Entry)>, Refusal> {
         assert_eq!(account, "bea");
         Ok(found.clone())
     };
@@ -102,6 +131,16 @@ fn an_approved_person_is_scanned_and_read_only_by_handle() {
         },
         Request::Bye,
     ]);
+    // The items travel in the move record (never shown to the mover): checked on their own.
+    let FromHelper::Items(items) = &out[3] else {
+        panic!("{out:?}");
+    };
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].size_bytes, 10);
+    let out: Vec<FromHelper> = out
+        .into_iter()
+        .filter(|f| !matches!(f, FromHelper::Items(_)))
+        .collect();
     assert_eq!(
         out,
         vec![
@@ -127,7 +166,9 @@ fn an_approved_person_is_scanned_and_read_only_by_handle() {
     );
 }
 
-/// What reaches the app never holds another person's file names or folders.
+/// The totals and handles (what a screen may show) never hold another person's file names, and
+/// no frame ever holds where their files are on the drive: only the record items, which travel in
+/// the move record and are never shown to the mover, carry names.
 #[test]
 fn nothing_the_app_is_told_names_the_person_s_files() {
     let (out, dir) = session(&[
@@ -137,10 +178,16 @@ fn nothing_the_app_is_told_names_the_person_s_files() {
         },
         Request::Bye,
     ]);
-    let told = format!("{out:?}");
+    let all = format!("{out:?}");
+    assert!(!all.contains(&*dir.path().to_string_lossy()), "{all}");
+    let told = format!(
+        "{:?}",
+        out.iter()
+            .filter(|f| !matches!(f, FromHelper::Items(_)))
+            .collect::<Vec<_>>()
+    );
     assert!(!told.contains("diary"), "{told}");
     assert!(!told.contains("tax"), "{told}");
-    assert!(!told.contains(&*dir.path().to_string_lossy()), "{told}");
 }
 
 #[test]

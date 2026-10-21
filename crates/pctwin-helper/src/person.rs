@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
-use pctwin_record::{Inclusion, ItemKind, LaptopId, Owner};
+use pctwin_record::{Inclusion, Item, ItemKind, LaptopId, Owner};
 use pctwin_scan::{Census, PersonKind, Rules, Sweep, SweepFacts, SweepLimits};
 
 use crate::protocol::Refusal;
@@ -27,9 +27,9 @@ pub fn census_as(mut census: Census, account: &str) -> Option<Census> {
     Some(census)
 }
 
-/// The files `sweep` (run as `account`) placed as `account`'s own and includes, each where it is
-/// and as the sweep saw it.
-pub fn entries_of(sweep: &Sweep, account: &str) -> Vec<Entry> {
+/// The files `sweep` (run as `account`) placed as `account`'s own and includes: each as a record
+/// item, and where it is and as the sweep saw it.
+pub fn entries_of(sweep: &Sweep, account: &str) -> Vec<(Item, Entry)> {
     let owner = Owner::Person {
         account_id: account.to_string(),
     };
@@ -46,17 +46,20 @@ pub fn entries_of(sweep: &Sweep, account: &str) -> Vec<Entry> {
             for part in i.path.parts() {
                 path.push(part.on_disk());
             }
-            Some(Entry {
-                path,
-                size: i.size_bytes,
-                modified_ns: i.modified_ns,
-            })
+            Some((
+                i.clone(),
+                Entry {
+                    path,
+                    size: i.size_bytes,
+                    modified_ns: i.modified_ns,
+                },
+            ))
         })
         .collect()
 }
 
 /// Scans `account`'s files on this laptop (the helper runs with an administrator's rights).
-pub fn scan_person(laptop: LaptopId, account: &str) -> Result<Vec<Entry>, Refusal> {
+pub fn scan_person(laptop: LaptopId, account: &str) -> Result<Vec<(Item, Entry)>, Refusal> {
     let census = census_as(pctwin_scan::census_this_laptop(), account).ok_or(Refusal::NoHome)?;
     let facts = SweepFacts {
         laptop,

@@ -19,6 +19,8 @@ pub const MAX_READ: u32 = 16 * 1024 * 1024;
 pub const MAX_HANDLES: usize = 1_000_000;
 /// Longest frame either way: the handles of [`MAX_HANDLES`] files, with room for its header.
 pub const MAX_FRAME: usize = 1 + 4 + MAX_HANDLES * 16;
+/// Items in one frame of a person's items (well inside [`MAX_FRAME`] however long their names).
+pub const ITEMS_PER_FRAME: usize = 1000;
 
 /// What the app asks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +95,7 @@ pub struct Handle {
 const ANSWER: u8 = 1;
 const BLOCKS: u8 = 2;
 const HANDLES: u8 = 3;
+const ITEMS: u8 = 4;
 
 /// A frame read off the channel.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +103,8 @@ pub enum FromHelper {
     Answer(Answer),
     Blocks(Vec<u8>),
     Handles(Vec<Handle>),
+    /// A page of a person's items, in their handles' order.
+    Items(Vec<pctwin_record::Item>),
 }
 
 /// Why a frame could not be read or written.
@@ -176,6 +181,12 @@ pub fn send_handles(w: &mut impl Write, handles: &[Handle]) -> Result<(), FrameE
     write_frame(w, &body)
 }
 
+pub fn send_items(w: &mut impl Write, items: &[&pctwin_record::Item]) -> Result<(), FrameError> {
+    let mut body = vec![ITEMS];
+    serde_json::to_writer(&mut body, items).map_err(|e| FrameError::Bad(e.to_string()))?;
+    write_frame(w, &body)
+}
+
 pub fn read_from_helper(r: &mut impl Read) -> Result<FromHelper, FrameError> {
     let body = read_frame(r, MAX_FRAME)?;
     let (kind, rest) = body
@@ -204,6 +215,9 @@ pub fn read_from_helper(r: &mut impl Read) -> Result<FromHelper, FrameError> {
                     .collect(),
             ))
         }
+        ITEMS => serde_json::from_slice(rest)
+            .map(FromHelper::Items)
+            .map_err(|e| FrameError::Bad(e.to_string())),
         _ => Err(FrameError::Bad("an unknown kind of frame".into())),
     }
 }

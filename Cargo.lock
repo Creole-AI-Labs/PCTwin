@@ -3541,6 +3541,7 @@ name = "pctwin-move"
 version = "0.1.0"
 dependencies = [
  "pctwin-gate",
+ "pctwin-helper",
  "pctwin-journal",
  "pctwin-record",
  "pctwin-transfer",

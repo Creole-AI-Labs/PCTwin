@@ -8,14 +8,16 @@ use std::io::{Read, Write};
 
 use pctwin_gate::FileId;
 
+use pctwin_record::Item;
+
 use crate::protocol::{
-    Answer, FrameError, Handle, MAX_HANDLES, Refusal, Request, read_request, send_answer,
-    send_blocks, send_handles,
+    Answer, FrameError, Handle, ITEMS_PER_FRAME, MAX_HANDLES, Refusal, Request, read_request,
+    send_answer, send_blocks, send_handles, send_items,
 };
 use crate::read::{Entry, read_range};
 
 /// Finds an approved person's files (see [`crate::person::scan_person`]).
-pub type Scanner = dyn FnMut(&str) -> Result<Vec<Entry>, Refusal>;
+pub type Scanner = dyn FnMut(&str) -> Result<Vec<(Item, Entry)>, Refusal>;
 
 /// What the helper was started for.
 pub struct Session<'s> {
@@ -101,11 +103,13 @@ impl<'s> Session<'s> {
             return send_answer(channel, &Answer::Refused(Refusal::TooManyFiles));
         }
         let first = self.plan.len() as u64;
-        let bytes = found.iter().fold(0u64, |t, e| t.saturating_add(e.size));
+        let bytes = found
+            .iter()
+            .fold(0u64, |t, (_, e)| t.saturating_add(e.size));
         let handles: Vec<Handle> = found
             .iter()
             .enumerate()
-            .map(|(n, e)| Handle {
+            .map(|(n, (_, e))| Handle {
                 handle: first + n as u64,
                 size: e.size,
             })
@@ -118,7 +122,13 @@ impl<'s> Session<'s> {
             },
         )?;
         send_handles(channel, &handles)?;
-        self.plan.extend(found.into_iter().map(|e| (e, None)));
+        // Then the items themselves, in the handles' order, a page at a time: they travel in the
+        // move record, never shown to the mover (decided 21 October 2026).
+        let items: Vec<&Item> = found.iter().map(|(i, _)| i).collect();
+        for page in items.chunks(ITEMS_PER_FRAME) {
+            send_items(channel, page)?;
+        }
+        self.plan.extend(found.into_iter().map(|(_, e)| (e, None)));
         Ok(())
     }
 }

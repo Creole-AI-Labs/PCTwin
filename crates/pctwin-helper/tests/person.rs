@@ -93,13 +93,20 @@ fn the_approved_person_s_own_files_are_found_where_they_are() {
     );
     let entries = entries_of(&swept, BEA);
     // Each one is the very file: read whole through the helper's own read.
-    for e in &entries {
+    for (item, e) in &entries {
         let bytes = pctwin_helper::read::read_range(e, &mut None, 0, e.size as u32).unwrap();
         assert_eq!(bytes.len() as u64, e.size);
+        assert_eq!(item.size_bytes, e.size);
+        assert_eq!(
+            item.owner,
+            pctwin_record::Owner::Person {
+                account_id: BEA.into()
+            }
+        );
     }
     let mut found: Vec<(String, u64)> = entries
         .into_iter()
-        .map(|e| {
+        .map(|(_, e)| {
             (
                 e.path
                     .strip_prefix(&bea)

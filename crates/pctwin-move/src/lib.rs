@@ -21,9 +21,12 @@
 // pctwin-transfer. Tests make files to test on, so they are exempt.
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
+pub mod people;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use pctwin_gate::Destinations;
 use pctwin_journal::Ledger;
@@ -31,10 +34,10 @@ use pctwin_record::{
     Inclusion, Item, ItemId, ItemKind, LeftOutReason, Owner, PersonTarget, Record, RecordError,
 };
 use pctwin_transfer::{
-    Allowance, Cause, Channel, Failure, Fit, LandingPlace, MOVE_PROTOCOL, MoveControl, MoveMeter,
-    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier, TimeRange,
-    TransferError, agree_version, answer_link_test, measure_link, plan_order, receive_inventory,
-    send_inventory,
+    Allowance, Cause, Channel, Failure, Fit, FsOpener, LandingPlace, MOVE_PROTOCOL, MoveControl,
+    MoveMeter, Opener, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier,
+    TimeRange, TransferError, agree_version, answer_link_test, measure_link, plan_order,
+    receive_inventory, send_inventory,
 };
 
 /// Files a move sends at once.
@@ -203,11 +206,24 @@ pub async fn send<C: Channel>(
     plan: SendPlan,
     live: &Live,
 ) -> Result<Sent, MoveError> {
+    send_with(link, record, plan, live, Arc::new(FsOpener)).await
+}
+
+/// As [`send`], reading each file through `opener` (a move of several people reads theirs
+/// through the administrator helper: see [`people::HelperOpener`]).
+pub async fn send_with<C: Channel>(
+    link: &mut C,
+    record: &Record,
+    plan: SendPlan,
+    live: &Live,
+    opener: Arc<dyn Opener>,
+) -> Result<Sent, MoveError> {
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record, version).await?;
     answer_link_test(link, version).await?;
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
     let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT)
+        .with_opener(opener)
         .with_protocol(version)
         .with_meter(live.meter.clone())
         .with_control(live.control.clone());
