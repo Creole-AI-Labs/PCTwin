@@ -2844,6 +2844,19 @@ pub struct Sealed<'d> {
 }
 
 impl<'d> Sealed<'d> {
+    /// Where its read-back read from (`None`: checked before a restart and not kept).
+    pub fn checked_from(&self) -> Option<CheckedFrom> {
+        self.checked_from
+    }
+
+    /// A checked copy found again after a restart: how it was checked then, as the journal kept
+    /// it, so its finished line still says so.
+    pub fn keep_checked_from(&mut self, from: Option<CheckedFrom>) {
+        if self.checked_from.is_none() {
+            self.checked_from = from;
+        }
+    }
+
     /// Where the temporary file is: its stored path inside the approved folder.
     pub fn temp_path(&self) -> String {
         stored_path(&self.folder, self.temp.as_deref().unwrap_or_default())

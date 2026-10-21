@@ -3271,7 +3271,7 @@ fn land(
     let sealed_as = sealed.identity().ok().map(file_id);
     // If the journal cannot take it, the checked file is still kept (never thrown away), for
     // recovery to finish once the journal works again.
-    if let Err(e) = journal.verified(entry, fingerprint, sealed_as) {
+    if let Err(e) = journal.verified_as(entry, fingerprint, sealed_as, sealed.checked_from()) {
         sealed.persist();
         return Err(record(e));
     }

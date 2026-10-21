@@ -513,6 +513,8 @@ fn name<'d>(
     };
     // A copy filled in under its name gets the download marker its original had.
     sealed.keep_download_mark(entry.write.download_mark);
+    // And its finished line says how it was checked before the restart.
+    sealed.keep_checked_from(journal.checked_from(entry.id)?);
     // Still the very file it sealed, exactly as checked, read now, before it gets a real name.
     let (recorded, fingerprint) = (source.file, source.fingerprint);
     // A reopened sealed file is kept if dropped, so every early return below keeps it.

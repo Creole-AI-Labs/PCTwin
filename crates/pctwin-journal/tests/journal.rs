@@ -804,3 +804,40 @@ fn the_identity_read_after_a_show_is_the_one_kept() {
     assert_eq!(kept.size, landed().size);
     assert_eq!(kept.modified_ns, landed().modified_ns);
 }
+
+/// How a verified file was checked is kept with its entry, through a restart, for every way it
+/// can be checked; a file verified without saying keeps nothing.
+#[test]
+fn how_a_file_was_checked_is_kept_through_a_restart() {
+    use pctwin_journal::CheckedFrom;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    let ids: Vec<(u64, CheckedFrom)> = {
+        let j = Journal::open(&path).unwrap();
+        CheckedFrom::ALL
+            .iter()
+            .enumerate()
+            .map(|(n, from)| {
+                let id = j.plan(&planned(n as u8 + 1)).unwrap();
+                j.staged(id, &format!(".pctwin-77-{n}.part"), &[]).unwrap();
+                j.verified_as(id, [7; 32], None, Some(*from)).unwrap();
+                (id, *from)
+            })
+            .collect()
+    };
+    let j = Journal::open(&path).unwrap();
+    for (id, from) in &ids {
+        assert_eq!(j.checked_from(*id).unwrap(), Some(*from));
+    }
+    let plain = j.plan(&planned(9)).unwrap();
+    j.staged(plain, ".pctwin-77-9.part", &[]).unwrap();
+    j.verified(plain, [7; 32], None).unwrap();
+    assert_eq!(j.checked_from(plain).unwrap(), None);
+    // A step out of order keeps nothing either.
+    let early = j.plan(&planned(10)).unwrap();
+    assert!(
+        j.verified_as(early, [7; 32], None, Some(CheckedFrom::Drive))
+            .is_err()
+    );
+    assert_eq!(j.checked_from(early).unwrap(), None);
+}

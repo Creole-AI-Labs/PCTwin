@@ -308,7 +308,12 @@ async fn a_whole_move_lands_every_file() {
         let landed = w.new.path().join(folder_name(role)).join(path.join("/"));
         assert_eq!(std::fs::read(landed).unwrap(), bytes);
     }
-    assert!(!w.journal.entries().unwrap().is_empty());
+    let entries = w.journal.entries().unwrap();
+    assert!(!entries.is_empty());
+    // How each file was checked is kept with it, so the report after a restart can say it.
+    for e in &entries {
+        assert!(w.journal.checked_from(e.id).unwrap().is_some(), "{e:?}");
+    }
 }
 
 /// A person who does not approve the plan stops the move before anything is written: no file

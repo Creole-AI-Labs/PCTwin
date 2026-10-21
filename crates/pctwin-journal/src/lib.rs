@@ -28,7 +28,10 @@
 //! in one transaction, so no file is being undone, and none is left under a hidden name, once the
 //! wipe can be sent.
 
+mod checked;
 pub mod recovery;
+
+pub use checked::{CheckedFrom, WhyMemory};
 
 use std::io;
 use std::path::Path;
@@ -72,6 +75,10 @@ const META: TableDefinition<&str, u32> = TableDefinition::new("meta");
 /// The journal's own number, the next entry number, and how far clean-up has looked.
 const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 const ENTRIES: TableDefinition<u64, &[u8]> = TableDefinition::new("entries");
+/// How each verified file's contents were checked (see [`CheckedFrom`]), by entry, written with
+/// its `verified` step: the report after a restart still says it. A journal from before this table
+/// has none, and those files say nothing of how they were checked, as before.
+const CHECKED: TableDefinition<u64, &[u8]> = TableDefinition::new("checked");
 /// Entries not yet finished, so a restart reads only those.
 const UNFINISHED: TableDefinition<u64, ()> = TableDefinition::new("unfinished");
 /// The unfinished entry for each file of each old laptop (`laptop/item` in hex).
@@ -1163,6 +1170,7 @@ impl Journal {
                 counters.insert(NEXT_ID, 1).map_err(storage)?;
             }
             tx.open_table(ENTRIES).map_err(storage)?;
+            tx.open_table(CHECKED).map_err(storage)?;
             tx.open_table(UNFINISHED).map_err(storage)?;
             tx.open_table(OPEN_ITEMS).map_err(storage)?;
             tx.open_table(FOLDERS).map_err(storage)?;
@@ -1330,6 +1338,18 @@ impl Journal {
         fingerprint: [u8; 32],
         file: Option<FileId>,
     ) -> Result<(), JournalError> {
+        self.verified_as(id, fingerprint, file, None)
+    }
+
+    /// As [`verified`](Self::verified), keeping `checked`, how its contents were read back, in the
+    /// same step (see [`checked_from`](Self::checked_from)).
+    pub fn verified_as(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        checked: Option<CheckedFrom>,
+    ) -> Result<(), JournalError> {
         self.step(
             id,
             "verified",
@@ -1341,8 +1361,35 @@ impl Journal {
                 }),
                 _ => None,
             },
-            |_, _| Ok(()),
+            |tx, _| {
+                let Some(checked) = checked else {
+                    return Ok(());
+                };
+                let bytes = serde_json::to_vec(&checked).map_err(storage)?;
+                tx.open_table(CHECKED)
+                    .map_err(storage)?
+                    .insert(id, bytes.as_slice())
+                    .map_err(storage)?;
+                Ok(())
+            },
         )
+    }
+
+    /// How entry `id`'s contents were checked when it was verified (`None`: not said, or a journal
+    /// from before this was kept).
+    pub fn checked_from(&self, id: u64) -> Result<Option<CheckedFrom>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = match tx.open_table(CHECKED) {
+            Ok(t) => t,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(storage(e)),
+        };
+        let Some(v) = table.get(id).map_err(storage)? else {
+            return Ok(None);
+        };
+        serde_json::from_slice(v.value())
+            .map(Some)
+            .map_err(|e| damaged(format!("a check record: {e}")))
     }
 
     /// The real name it is getting, `final_path` inside the destination: recorded before the file
@@ -2184,6 +2231,18 @@ pub trait Ledger {
         fingerprint: [u8; 32],
         file: Option<FileId>,
     ) -> Result<(), JournalError>;
+    /// See [`Journal::verified_as`]. A ledger that keeps no check records says it was verified
+    /// and keeps nothing more.
+    fn verified_as(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        checked: Option<CheckedFrom>,
+    ) -> Result<(), JournalError> {
+        let _ = checked;
+        self.verified(id, fingerprint, file)
+    }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError>;
     /// See [`Journal::filling`].
     fn filling(
@@ -2238,6 +2297,15 @@ impl Ledger for Journal {
         file: Option<FileId>,
     ) -> Result<(), JournalError> {
         Journal::verified(self, id, fingerprint, file)
+    }
+    fn verified_as(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        checked: Option<CheckedFrom>,
+    ) -> Result<(), JournalError> {
+        Journal::verified_as(self, id, fingerprint, file, checked)
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         Journal::applied(self, id, final_path)
