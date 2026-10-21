@@ -92,11 +92,12 @@ def peak_macos(proc, done):
         if libproc.proc_pid_rusage(proc.pid, 4, ctypes.byref(info)) != 0:
             return None
         now, most = info[FOOTPRINT], info[LIFETIME_MAX_FOOTPRINT]
-        # A check that the fields are where they are expected: the largest footprint is at
-        # least the current one, and both are of a believable size.
-        if not 0 < now <= most < 1 << 36:
-            sys.exit(f"unexpected memory counters: footprint {now}, largest {most}")
-        return most
+        # The largest is updated by the system now and then, so the current one can be ahead of
+        # it for a moment: the larger of the two counts. Both must be of a believable size, or
+        # the fields are not where they are expected.
+        if not (0 < now < 1 << 36 and most < 1 << 36):
+            raise RuntimeError(f"unexpected memory counters: footprint {now}, largest {most}")
+        return max(now, most)
 
     # Read while it runs (the lifetime largest only grows) and once its work is done: the test
     # then waits, still running, until its input is closed, so nothing is missed.
@@ -134,16 +135,21 @@ def run(exe, test, shape):
             if line.strip().endswith("memory: done"):
                 done.set()
 
-    reader = threading.Thread(target=read)
+    reader = threading.Thread(target=read, daemon=True)
     reader.start()
-    if os.name == "nt":
-        proc.stdin.close()
-        measured = peak_windows(proc)
-    elif macos:
-        measured = peak_macos(proc, done)
-    else:
-        proc.stdin.close()
-        measured = peak_linux(proc)
+    try:
+        if os.name == "nt":
+            proc.stdin.close()
+            measured = peak_windows(proc)
+        elif macos:
+            measured = peak_macos(proc, done)
+        else:
+            proc.stdin.close()
+            measured = peak_linux(proc)
+    finally:
+        # Whatever went wrong here, the test process is never left waiting.
+        if proc.poll() is None:
+            proc.kill()
     reader.join()
     return measured, "".join(lines)
 
