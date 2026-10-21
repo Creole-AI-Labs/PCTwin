@@ -493,6 +493,13 @@ pub struct SenderSession {
     /// Per job: the file as this laptop read it for the current attempt. Whether it changed is
     /// judged against this, never against what the new laptop says it is.
     attempt_stamp: Vec<Option<crate::Stamp>>,
+    /// Each block on its way and not yet confirmed, as sent (by stream and block), so a drop
+    /// keeps it rather than reading it again.
+    on_the_way: HashMap<(u32, u32), Vec<u8>>,
+    /// Blocks a drop cut off, kept to send again without reading the drive again (a weak drive
+    /// is read once): by job and block, with the version of the file they were read from.
+    spool: HashMap<(usize, u32), (crate::Stamp, Vec<u8>)>,
+    spooled: u64,
     /// The most that may be in flight now, in raw block bytes: the whole limit until a loss, then
     /// the floor, growing by each block receipted written (TCP's slow start with byte counting,
     /// RFC 5681 and RFC 3465). Every block a loss makes this laptop read again was earned by
@@ -584,6 +591,9 @@ impl SenderSession {
             asked_again: vec![0; jobs_len],
             ended_tier: tiers,
             attempt_stamp: vec![None; jobs_len],
+            on_the_way: HashMap::new(),
+            spool: HashMap::new(),
+            spooled: 0,
             window: IN_FLIGHT_BYTES,
             careful: false,
             ran: false,
@@ -742,6 +752,10 @@ impl SenderSession {
         joining: &mut UnboundedReceiver<L>,
         after_loss: bool,
     ) -> Result<(), TransferError> {
+        // What the last connection left unconfirmed is kept to send again.
+        for lane in 0..self.lanes.len() {
+            self.spool_lane(lane);
+        }
         self.resume(main).await?;
         self.states.check();
         if after_loss {
@@ -1243,13 +1257,30 @@ impl SenderSession {
                 let Some(b) = next else {
                     continue;
                 };
-                (b, reader.block_at(u64::from(b)))
+                // Cut off by a drop and kept, from this very version of the file: sent as it
+                // was, without reading the drive again.
+                let kept = self
+                    .spool
+                    .remove(&(job, b))
+                    .filter(|(at, _)| Some(*at) == self.attempt_stamp[job]);
+                match kept {
+                    Some((_, wire)) => {
+                        self.spooled = self.spooled.saturating_sub(wire.len() as u64);
+                        (b, Err(wire))
+                    }
+                    None => (b, Ok(reader.block_at(u64::from(b)))),
+                }
+            };
+            let read = match read {
+                Ok(read) => read.map(|block| (block.data.len() as u64, block.encode(), true)),
+                Err(wire) => Ok((u64::from(Block::length_in(&wire).unwrap_or(0)), wire, false)),
             };
             match read {
-                Ok(block) => {
-                    self.budget.read_ok();
-                    let raw = block.data.len() as u64;
-                    let wire = block.encode();
+                Ok((raw, wire, from_drive)) => {
+                    if from_drive {
+                        self.budget.read_ok();
+                    }
+                    self.on_the_way.insert((stream, b), wire.clone());
                     self.lanes[lane].push_back((stream, b, raw));
                     self.in_flight += raw;
                     self.meter.block_sent(raw);
@@ -1565,6 +1596,7 @@ impl SenderSession {
                 let (stream, block, raw) = self.lanes[lane]
                     .pop_front()
                     .ok_or_else(|| protocol("a receipt for nothing sent"))?;
+                self.on_the_way.remove(&(stream, block));
                 self.in_flight -= raw;
                 self.meter.block_confirmed(raw);
                 if let Some(&job) = self.job_of.get(&stream)
@@ -1747,6 +1779,7 @@ impl SenderSession {
     /// the window starts again from the floor (a loss, as a dropped main connection is).
     fn lane_lost(&mut self, lane: usize) {
         let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
+        self.spool_lane(lane);
         for (_, _, raw) in self.lanes[lane].drain(..) {
             self.in_flight -= raw;
         }
@@ -1754,6 +1787,30 @@ impl SenderSession {
         for job in 0..self.states.len() {
             if let SendState::Open { sections, .. } = &mut *self.states.slot(job) {
                 sections.lane_lost(lane_no);
+            }
+        }
+    }
+
+    /// Keeps `lane`'s unconfirmed blocks to send again without reading the drive again, up to
+    /// the in-flight limit in all (beyond it they are simply read again).
+    fn spool_lane(&mut self, lane: usize) {
+        for &(stream, b, _) in &self.lanes[lane] {
+            let Some(wire) = self.on_the_way.remove(&(stream, b)) else {
+                continue;
+            };
+            let Some(&job) = self.job_of.get(&stream) else {
+                continue;
+            };
+            let Some(stamp) = self.attempt_stamp[job] else {
+                continue;
+            };
+            let len = wire.len() as u64;
+            if self.spooled.saturating_add(len) > self.in_flight_limit {
+                continue;
+            }
+            self.spooled += len;
+            if let Some((_, old)) = self.spool.insert((job, b), (stamp, wire)) {
+                self.spooled = self.spooled.saturating_sub(old.len() as u64);
             }
         }
     }

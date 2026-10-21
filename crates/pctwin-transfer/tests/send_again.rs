@@ -1225,10 +1225,11 @@ async fn reconnecting_without_answering_reads_at_most_the_floor_and_a_block_each
             read <= &(FLOOR + BLOCK),
             "connection {c}: {read} bytes read"
         );
-        assert_eq!(
-            *blocks * BLOCK,
-            *read,
-            "connection {c}: every block read was sent"
+        // Every block read was sent; blocks a drop cut off are sent again from what was kept,
+        // without reading the drive again, so more can be sent than read.
+        assert!(
+            *blocks * BLOCK >= *read,
+            "connection {c}: {read} bytes read, {blocks} blocks sent"
         );
     }
     assert_eq!(
@@ -4692,5 +4693,30 @@ async fn a_drive_that_keeps_failing_pauses_the_move_and_says_which() {
     assert_eq!(
         failed, 3,
         "paused at the third, never ran on through every file"
+    );
+}
+
+/// Blocks a drop cut off are kept and sent again without reading the drive again: on a weak
+/// drive every block is read once, however often the connection drops.
+#[tokio::test]
+async fn blocks_cut_off_by_a_drop_are_never_read_twice_on_a_weak_drive() {
+    let size = 8 * MIB;
+    let mut f = Flaky::new(&[size], (Cut::Clean, Cut::Clean));
+    f.cuts = vec![
+        (Cut::LoseAfter(3), Cut::Clean),
+        (Cut::LoseAfter(2), Cut::Clean),
+    ];
+    f.plan = ReadPlan::Careful {
+        most_important_first: true,
+        read_each_file_once: true,
+        stop_after_read_errors: 5,
+    };
+    let m = flaky(f).await;
+    m.assert_arrived(false);
+    assert!(m.losses() >= 2, "the connection dropped twice");
+    assert_eq!(
+        m.reads.blocks(),
+        size,
+        "every byte read from the drive once"
     );
 }

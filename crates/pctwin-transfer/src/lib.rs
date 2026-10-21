@@ -396,6 +396,12 @@ impl Block {
         out
     }
 
+    /// The length of the contents its header says (before any compression), without checking
+    /// anything else; `None` if even the header is not there.
+    pub(crate) fn length_in(bytes: &[u8]) -> Option<u32> {
+        Some(u32::from_be_bytes(bytes.get(10..14)?.try_into().ok()?))
+    }
+
     /// The block number its header says, without checking anything else (to name a block that
     /// arrived damaged); `None` if even the header is not there.
     pub fn number_in(bytes: &[u8]) -> Option<u64> {
