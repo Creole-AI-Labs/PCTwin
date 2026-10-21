@@ -84,9 +84,10 @@ fn private_folder(st: &rustix::fs::Stat, dev: rustix::fs::Dev, uid: u32) -> bool
         && st.st_mode & 0o022 == 0
 }
 
-/// Opens folder `name` in `dir` (never following a link), making it first if it is missing, with
-/// read, write and search for its owner alone. `None` unless it is a private folder of `uid`'s on
-/// drive `dev`.
+/// Opens folder `name` in `dir` (the last part of `name` never followed if it is a link; a part
+/// before it, `.Trashes`, was seen to be a real folder by the caller), making it first if it is
+/// missing, with read, write and search for its owner alone. `None` unless it is a private
+/// folder of `uid`'s on drive `dev`.
 fn private_folder_in(
     dir: &OwnedFd,
     name: &str,
@@ -198,16 +199,11 @@ fn on_drive(
             if FileType::from_raw_mode(st.st_mode) == FileType::Directory && st.st_dev == dev => {}
         _ => return Ok(None),
     }
-    let Ok(trashes) = rustix::fs::openat(
-        &m,
-        ".Trashes",
-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) else {
-        return Ok(None);
-    };
+    // `.Trashes` cannot be opened (no one may read it), only passed through: the person's folder
+    // in it is reached from the top of the drive. Their folder itself is opened, never followed
+    // if it is a link, and checked to be theirs alone on this very drive.
     let mine = uid.to_string();
-    let Some(fd) = private_folder_in(&trashes, &mine, dev, uid)? else {
+    let Some(fd) = private_folder_in(&m, &format!(".Trashes/{mine}"), dev, uid)? else {
         return Ok(None);
     };
     let top = top.trim_end_matches('/');
