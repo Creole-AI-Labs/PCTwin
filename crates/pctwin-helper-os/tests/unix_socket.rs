@@ -270,3 +270,283 @@ fn another_account_can_neither_connect_nor_write_in_the_folder() {
         "nobody wrote in the folder: {w:?}"
     );
 }
+
+/// Attempts in the race below. The flaw it guards against (the old layout: the folder belonged
+/// to the mover and the socket's mode was changed by name after it was checked) was hit within
+/// about 1,700 attempts on Linux; this runs many times that.
+const RACE_ATTEMPTS: u32 = 20_000;
+
+/// Mode, owner and group of a path, not following a link.
+fn stamp(p: &Path) -> Option<(u32, u32, u32)> {
+    std::fs::symlink_metadata(p)
+        .ok()
+        .map(|m| (m.mode(), m.uid(), m.gid()))
+}
+
+/// Empties `arena` of whatever the racer or an attempt left, but the racer's stop sign.
+fn clear(arena: &Path) {
+    for e in std::fs::read_dir(arena).unwrap().flatten() {
+        if e.file_name() == "stop" {
+            continue;
+        }
+        let p = e.path();
+        match std::fs::symlink_metadata(&p) {
+            Ok(m) if m.is_dir() => {
+                let _ = std::fs::remove_dir_all(&p);
+            }
+            Ok(_) => {
+                let _ = std::fs::remove_file(&p);
+            }
+            Err(_) => {}
+        }
+    }
+}
+
+/// Stops the racer and removes the test's folders however the test ends.
+struct RaceGuard {
+    racer: Option<std::process::Child>,
+    dirs: Vec<PathBuf>,
+    arena: PathBuf,
+}
+
+impl Drop for RaceGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::write(self.arena.join("stop"), b"");
+        if let Some(racer) = &mut self.racer {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while racer.try_wait().ok().flatten().is_none() {
+                if std::time::Instant::now() > deadline {
+                    let _ = racer.kill();
+                    let _ = racer.wait();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+        for d in &self.dirs {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+}
+
+/// The helper (root) makes its folder and binds its socket again and again while another
+/// account (`nobody`, standing in for the mover the socket is handed to) races to swap the
+/// socket entry and the folder: a link to a root-owned file, a hard link to it, the folder
+/// renamed away and replaced by a link to a root-owned folder or by a folder of its own. Nothing
+/// outside the folder may change mode or owner, nothing may appear beside the root-owned file,
+/// and every bind either succeeds on the real folder (its socket answers through its path) or
+/// refuses.
+///
+/// Runs as root: CI's two-accounts job is not root, so the test runs itself again through
+/// password-free sudo.
+#[test]
+#[ignore = "needs PCTWIN_HELPER_OS_ADMIN_TESTS=1 and password-free sudo (CI)"]
+fn a_racing_account_never_changes_anything_outside_the_folder() {
+    assert!(
+        std::env::var("PCTWIN_HELPER_OS_ADMIN_TESTS").as_deref() == Ok("1"),
+        "set PCTWIN_HELPER_OS_ADMIN_TESTS=1 (CI only)"
+    );
+    let exe = std::env::current_exe().unwrap();
+    if my_uid() != 0 {
+        let st = Command::new("sudo")
+            .args(["-n", "env", "PCTWIN_HELPER_OS_ADMIN_TESTS=1"])
+            .arg(&exe)
+            .args([
+                "--exact",
+                "a_racing_account_never_changes_anything_outside_the_folder",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .status()
+            .unwrap();
+        assert!(st.success(), "the race, run as root, failed: {st}");
+        return;
+    }
+    let id = Command::new("id").args(["-u", "nobody"]).output().unwrap();
+    // macOS prints nobody's ID as -2.
+    let nobody = String::from_utf8(id.stdout)
+        .unwrap()
+        .trim()
+        .parse::<i64>()
+        .unwrap() as u32;
+    assert_ne!(nobody, 0);
+
+    // /tmp itself is a link on macOS; the folders' parent must be the real folder.
+    let tmp = std::fs::canonicalize("/tmp").unwrap();
+    let tag = socket_name().unwrap()[2..10].to_owned();
+    let outside = tmp.join(format!("pctwin-race-out-{tag}"));
+    let arena = tmp.join(format!("pctwin-race-{tag}"));
+    let bin = tmp.join(format!("pctwin-race-bin-{tag}"));
+    let set_mode = |p: &Path, m: u32| {
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+    };
+    let mut guard = RaceGuard {
+        racer: None,
+        dirs: vec![outside.clone(), arena.clone(), bin.clone()],
+        arena: arena.clone(),
+    };
+    for d in [&outside, &arena, &bin] {
+        std::fs::create_dir(d).unwrap();
+    }
+    set_mode(&outside, 0o755);
+    set_mode(&bin, 0o755);
+    // Sticky and open to all, as /tmp is: the racer may add its own things beside the folder
+    // but may rename or remove only its own.
+    set_mode(&arena, 0o1777);
+    let victim = outside.join("victim");
+    std::fs::write(&victim, b"root's").unwrap();
+    set_mode(&victim, 0o644);
+    // The racer is this test program, copied where `nobody` may run it.
+    let racer_exe = bin.join("racer");
+    std::fs::copy(&exe, &racer_exe).unwrap();
+    set_mode(&racer_exe, 0o755);
+
+    guard.racer = Some(
+        Command::new("sudo")
+            .args(["-n", "-u", "nobody", "env"])
+            .arg(format!(
+                "PCTWIN_HELPER_OS_RACE={}\n{}",
+                arena.display(),
+                victim.display()
+            ))
+            .arg(&racer_exe)
+            .args(["--exact", "racer", "--nocapture", "--test-threads=1"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !arena.join("ready").exists() {
+        let racer = guard.racer.as_mut().unwrap();
+        assert!(
+            racer.try_wait().unwrap().is_none(),
+            "the racer stopped before it began"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the racer never began"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    let watched = [
+        tmp.clone(),
+        outside.clone(),
+        victim.clone(),
+        arena.clone(),
+        bin.clone(),
+        racer_exe.clone(),
+    ];
+    let before: Vec<_> = watched.iter().map(|p| stamp(p)).collect();
+    let folder = arena.join("d");
+    let (mut bound, mut refused) = (0u32, 0u32);
+    for attempt in 1..=RACE_ATTEMPTS {
+        clear(&arena);
+        let r = ChannelDir::create(&folder)
+            .and_then(|d| SocketServer::bind(&d, "s.sock", nobody).map(|s| (d, s)));
+        match &r {
+            Ok((_, server)) => {
+                // Succeeded on the real folder: its socket answers through its path, served
+                // by this process.
+                assert!(
+                    connect(server.path(), 0).is_ok(),
+                    "attempt {attempt}: bind succeeded but its path does not reach it"
+                );
+                bound += 1;
+            }
+            Err(_) => refused += 1,
+        }
+        drop(r);
+        for (p, was) in watched.iter().zip(&before) {
+            assert_eq!(
+                &stamp(p),
+                was,
+                "attempt {attempt}: {} changed (mode, owner, group)",
+                p.display()
+            );
+        }
+        let beside: Vec<_> = std::fs::read_dir(&outside)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(
+            beside,
+            ["victim"],
+            "attempt {attempt}: something was made outside the folder"
+        );
+    }
+    std::fs::write(arena.join("stop"), b"").unwrap();
+    let out = guard.racer.take().unwrap().wait_with_output().unwrap();
+    let report = String::from_utf8_lossy(&out.stdout);
+    let line = report
+        .lines()
+        .find(|l| l.starts_with("racer "))
+        .unwrap_or_else(|| panic!("no report from the racer: {report}"));
+    println!("{RACE_ATTEMPTS} attempts: {bound} bound, {refused} refused; {line}");
+    let tries: u64 = line
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("tries="))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        tries >= u64::from(RACE_ATTEMPTS),
+        "the racer barely ran: {line}"
+    );
+    assert!(
+        bound >= RACE_ATTEMPTS / 2,
+        "too few binds to prove anything"
+    );
+}
+
+/// Run as `nobody` by the race above; does nothing otherwise. Loops as fast as it can until told
+/// to stop (ten minutes at most) and reports how often it tried and how often a swap took.
+#[test]
+fn racer() {
+    let Some(spec) = std::env::var_os("PCTWIN_HELPER_OS_RACE") else {
+        return;
+    };
+    let spec = spec.into_string().unwrap();
+    let (arena, victim) = spec.split_once('\n').unwrap();
+    let (arena, victim) = (PathBuf::from(arena), PathBuf::from(victim));
+    let outside = victim.parent().unwrap().to_path_buf();
+    let folder = arena.join("d");
+    let sock = folder.join("s.sock");
+    let stop = arena.join("stop");
+    std::fs::write(arena.join("ready"), b"").unwrap();
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    let (mut tries, mut hits) = (0u64, 0u64);
+    loop {
+        tries += 1;
+        if tries % 256 == 0 && (stop.exists() || std::time::Instant::now() > end) {
+            break;
+        }
+        let took = match tries % 8 {
+            // The socket entry swapped for a link to the root-owned file.
+            0..=4 => {
+                let _ = std::fs::remove_file(&sock);
+                std::os::unix::fs::symlink(&victim, &sock).is_ok()
+            }
+            // ... or for a hard link to it.
+            5 => {
+                let _ = std::fs::remove_file(&sock);
+                std::fs::hard_link(&victim, &sock).is_ok()
+            }
+            // The folder renamed away and replaced by a link to a root-owned folder.
+            6 => {
+                std::fs::rename(&folder, arena.join(format!("r{tries}"))).is_ok()
+                    && std::os::unix::fs::symlink(&outside, &folder).is_ok()
+            }
+            // ... or by a folder of its own holding a link to the root-owned file.
+            _ => {
+                std::fs::rename(&folder, arena.join(format!("r{tries}"))).is_ok()
+                    && std::fs::create_dir(&folder).is_ok()
+                    && std::os::unix::fs::symlink(&victim, &sock).is_ok()
+            }
+        };
+        hits += u64::from(took);
+    }
+    println!("racer tries={tries} hits={hits}");
+}

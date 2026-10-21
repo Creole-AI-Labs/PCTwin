@@ -398,3 +398,128 @@ exit `$code
     // 1 = reached the pipe made for it; 2 would mean it reached the mover's pipe.
     assert!(rest.contains("exit=1"), "{rest}");
 }
+
+/// The account a caller connected as is the one on its connection, not the one its process runs
+/// as: a process of this account logs a real second account on and, on one thread acting as
+/// that account, connects to a pipe made for it. The helper must report the second account; a
+/// lookup by process ID would report this one.
+#[test]
+#[ignore = "needs PCTWIN_HELPER_OS_ADMIN_TESTS=1 and administrator rights to make an account (CI)"]
+fn a_caller_is_the_account_it_connected_as_not_its_process() {
+    assert!(
+        std::env::var("PCTWIN_HELPER_OS_ADMIN_TESTS").as_deref() == Ok("1"),
+        "set PCTWIN_HELPER_OS_ADMIN_TESTS=1 (CI only)"
+    );
+    // One PowerShell, running as this account, holds the throwaway account's password from start
+    // to end; it is never printed. It prints the account's SID, waits for the pipe's name, logs
+    // the account on, connects while acting as it, prints which account each side ran as and
+    // removes the account.
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$u = 'pctwin-helper-c'
+$bytes = New-Object byte[] 18
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+$plain = [Convert]::ToBase64String($bytes) + 'a1!'
+$secure = ConvertTo-SecureString $plain -AsPlainText -Force
+if (Get-LocalUser -Name $u -ErrorAction SilentlyContinue) { Remove-LocalUser -Name $u }
+$user = New-LocalUser -Name $u -Password $secure -PasswordNeverExpires -AccountNeverExpires
+try {
+  [Console]::Out.WriteLine($user.SID.Value); [Console]::Out.Flush()
+  $pipe = [Console]::In.ReadLine()
+  Add-Type -Namespace PctwinTest -Name Logon -MemberDefinition '[DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)] public static extern bool LogonUserW(string user, string domain, string password, int type, int provider, out IntPtr token);'
+  $tok = [IntPtr]::Zero
+  # Interactive first; a network logon if this system does not let the account log on here.
+  $ok = [PctwinTest.Logon]::LogonUserW($u, $env:COMPUTERNAME, $plain, 2, 0, [ref]$tok)
+  if (-not $ok) { $ok = [PctwinTest.Logon]::LogonUserW($u, $env:COMPUTERNAME, $plain, 3, 0, [ref]$tok) }
+  if (-not $ok) { throw "LogonUserW failed: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
+  $handle = New-Object Microsoft.Win32.SafeHandles.SafeAccessTokenHandle($tok)
+  $as = [System.Security.Principal.WindowsIdentity]::RunImpersonated($handle, [Func[string]]{
+    $p = New-Object System.IO.Pipes.NamedPipeClientStream('.', $pipe, [System.IO.Pipes.PipeAccessRights]0x12008B, 'None', 'Identification', 'None')
+    $p.Connect(10000); $p.WriteByte(1); [void]$p.ReadByte(); $p.Dispose()
+    [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  })
+  $handle.Dispose()
+  [Console]::Out.WriteLine("thread=$as")
+  [Console]::Out.WriteLine("process=$([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)")
+  [Console]::Out.Flush()
+} finally {
+  Remove-LocalUser -Name $u
+}
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("act-as-second-account.ps1");
+    std::fs::write(&file, script).unwrap();
+    let mut ps = Command::new("powershell.exe")
+        // pwsh (CI's shell) sets a module path Windows PowerShell 5.1 cannot load from.
+        .env_remove("PSModulePath")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&file)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = BufReader::new(ps.stdout.take().unwrap());
+    let mut sid = String::new();
+    out.read_line(&mut sid).unwrap();
+    let theirs_sid = Sid::parse(sid.trim()).unwrap_or_else(|_| panic!("no SID: {sid:?}"));
+    assert_ne!(theirs_sid, me());
+
+    let name = PipeName::random().unwrap();
+    let server = PipeServer::create(&name, &theirs_sid).unwrap();
+    let mut stdin = ps.stdin.take().unwrap();
+    writeln!(stdin, "{}", name.as_str()).unwrap();
+    drop(stdin);
+
+    // As in the test above, nothing here can wait for ever.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let r = (|| {
+            server.accept()?;
+            let mut b = [0u8; 1];
+            server.stream().read_exact(&mut b)?;
+            let caller = caller_of(&server)?;
+            server.stream().write_all(b"k")?;
+            Ok::<_, Error>(caller)
+        })();
+        let _ = tx.send(r);
+    });
+    let (otx, orx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut rest = String::new();
+        let _ = out.read_to_string(&mut rest);
+        let _ = otx.send(rest);
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(240);
+    let child = ps.id();
+    let ended = loop {
+        if let Some(status) = ps.try_wait().unwrap() {
+            break status;
+        }
+        if std::time::Instant::now() > deadline {
+            let _ = ps.kill();
+            panic!("PowerShell did not finish in four minutes");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    let rest = orx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_default();
+    println!("{rest}");
+    println!("PowerShell ended: {ended}");
+    let caller = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap_or_else(|_| panic!("the second account never reached its pipe: {rest}"))
+        .unwrap();
+    // The connection came from PowerShell's own process, which runs as this account ...
+    assert_eq!(caller.process_id, child);
+    assert!(rest.contains(&format!("process={}", me())), "{rest}");
+    assert!(rest.contains(&format!("thread={}", theirs_sid)), "{rest}");
+    // ... and the helper names the account it connected as.
+    assert_eq!(caller.account, Account::Sid(theirs_sid));
+}
