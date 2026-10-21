@@ -22,6 +22,7 @@
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
 pub mod handover;
+pub mod landing;
 pub mod people;
 pub mod reconnect;
 pub mod report;
@@ -70,6 +71,8 @@ pub enum NotSentWhy {
     LeftOut { reason: LeftOutReason },
     /// The old laptop has no folder for its role, so there is nowhere to read it from.
     NoFolderForRole,
+    /// The new laptop has no place for it (another person not approved, the system's own).
+    NoPlaceOnNewLaptop,
 }
 
 /// A file in the record that is not sent.
@@ -112,6 +115,16 @@ pub fn send_plan(
     source: impl Fn(&Item) -> Option<PathBuf>,
     landing: impl Fn(&Item) -> LandingPlace,
 ) -> SendPlan {
+    send_plan_where(record, source, |i| Some(landing(i)))
+}
+
+/// As [`send_plan`], where `landing` may give no place (`None`: the new laptop does not take it,
+/// listed as not sent with [`NotSentWhy::NoPlaceOnNewLaptop`]).
+pub fn send_plan_where(
+    record: &Record,
+    source: impl Fn(&Item) -> Option<PathBuf>,
+    landing: impl Fn(&Item) -> Option<LandingPlace>,
+) -> SendPlan {
     let mut not_sent = Vec::new();
     let mut by_item = BTreeMap::new();
     for item in &record.items {
@@ -132,7 +145,13 @@ pub fn send_plan(
             });
             continue;
         };
-        let place = landing(item);
+        let Some(place) = landing(item) else {
+            not_sent.push(NotSent {
+                item: item.id,
+                why: NotSentWhy::NoPlaceOnNewLaptop,
+            });
+            continue;
+        };
         by_item.insert(
             item.id,
             SendJob {
@@ -241,6 +260,38 @@ pub async fn send_with<C: Channel>(
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record, version).await?;
     answer_link_test(link, version).await?;
+    run_sender(link, version, plan, live, opener).await
+}
+
+/// The old laptop's side of a move with the app: as [`send_with`], except the files to send are
+/// worked out only once the new laptop's person has approved the plan and the new laptop has
+/// sent its [`landing::LandingRules`], so every file is announced exactly where that laptop
+/// checks it. `source` says where each file is read from.
+pub async fn send_by_rules<C: Channel>(
+    link: &mut C,
+    record: &Record,
+    source: impl Fn(&Item) -> Option<PathBuf>,
+    live: &Live,
+    opener: Arc<dyn Opener>,
+) -> Result<(Sent, landing::LandingRules), MoveError> {
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
+    send_inventory(link, record, version).await?;
+    answer_link_test(link, version).await?;
+    let rules = landing::receive_rules(link).await?;
+    let plan = send_plan_where(record, source, |i| rules.landing(i));
+    let sent = run_sender(link, version, plan, live, opener).await?;
+    Ok((sent, rules))
+}
+
+/// Runs the old laptop's sending of `plan` over `link` (the version agreed): one outcome per
+/// file, a stop said as one.
+async fn run_sender<C: Channel>(
+    link: &mut C,
+    version: u16,
+    plan: SendPlan,
+    live: &Live,
+    opener: Arc<dyn Opener>,
+) -> Result<Sent, MoveError> {
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
     let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT)
         .with_opener(opener)
@@ -570,6 +621,24 @@ impl ApprovedPlan {
             ended,
         })
     }
+}
+
+/// The new laptop's side with the app: [`receive_plan`] with `steps`, then `rules` (which must
+/// give exactly the places `steps.landing` gives) sent to the old laptop so it announces every
+/// file where this laptop checks it, then [`ApprovedPlan::receive`]. `rules` is asked for after
+/// the approval, since the people's places are decided during it.
+pub async fn receive_by_rules<C: Channel, S: Steps>(
+    link: &mut C,
+    steps: &mut S,
+    rules: impl FnOnce(&S) -> landing::LandingRules,
+    table: &Destinations,
+    journal: &dyn Ledger,
+    account: &str,
+    live: &Live,
+) -> Result<Received, MoveError> {
+    let approved = receive_plan(link, steps, table).await?;
+    landing::send_rules(link, &rules(steps)).await?;
+    approved.receive(link, table, journal, account, live).await
 }
 
 /// The new laptop's whole side: [`receive_plan`], then [`ApprovedPlan::receive`].

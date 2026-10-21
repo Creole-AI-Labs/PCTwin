@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 use pctwin_gate::{Approved, Destinations};
 use pctwin_helper::{Client, ClientError, Refusal, Scanned};
 use pctwin_journal::Journal;
+use pctwin_move::landing::LandingRules;
 use pctwin_move::people::{HelperOpener, add_people, helper_source};
 use pctwin_move::report::{FileResult, MoverReport, for_the_mover};
 use pctwin_move::{Live, Steps, Stop};
@@ -33,6 +34,20 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::err;
+
+/// The new home's folders, one per role (Public is the shared one).
+const NEW_ROLES: [FolderRole; 10] = [
+    FolderRole::Desktop,
+    FolderRole::Documents,
+    FolderRole::Downloads,
+    FolderRole::Pictures,
+    FolderRole::Music,
+    FolderRole::Videos,
+    FolderRole::Home,
+    FolderRole::AppData,
+    FolderRole::Other,
+    FolderRole::Public,
+];
 
 /// How long the helper may take to make its channel.
 const HELPER_WAIT: Duration = Duration::from_secs(60);
@@ -156,32 +171,11 @@ fn connect(h: &HelperChannel) -> Result<Client<pctwin_helper::client::Channel>, 
     }
 }
 
-/// Where each item lands: the mover's things and the shared ones by their folder's role in the
-/// new home; another person's in the place held for them.
-#[derive(Clone)]
-struct Landing {
-    held: BTreeMap<String, String>,
-}
-
-impl Landing {
-    fn of(&self, item: &Item) -> Option<LandingPlace> {
-        let path = shown_path(&item.path);
-        match &item.owner {
-            Owner::Person { account_id } => match self.held.get(account_id) {
-                Some(label) => Some(LandingPlace::new(label.clone(), path)),
-                None => Some(LandingPlace::new(role_label(item.place.role), path)),
-            },
-            Owner::Shared => Some(LandingPlace::new(role_label(FolderRole::Public), path)),
-            Owner::System => None,
-        }
-    }
-}
-
 /// The new laptop's choices: the mover stays the mover; each approved person goes to the account
 /// made for them; the plan is approved as it is.
 struct EveryoneSteps {
     targets: BTreeMap<String, PersonTarget>,
-    landing: Landing,
+    rules: LandingRules,
 }
 
 impl Steps for EveryoneSteps {
@@ -196,7 +190,7 @@ impl Steps for EveryoneSteps {
         Ok(())
     }
     fn landing(&self, item: &Item) -> Option<LandingPlace> {
-        self.landing.of(item)
+        self.rules.landing(item)
     }
 }
 
@@ -314,17 +308,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     // The new laptop: the mover's new home, and for each approved person an account and the
     // place their things are held in until the hand-over.
     let mut table = Destinations::new();
-    for role in [
-        FolderRole::Desktop,
-        FolderRole::Documents,
-        FolderRole::Downloads,
-        FolderRole::Pictures,
-        FolderRole::Music,
-        FolderRole::Videos,
-        FolderRole::Home,
-        FolderRole::AppData,
-        FolderRole::Other,
-    ] {
+    for role in NEW_ROLES.into_iter().filter(|r| *r != FolderRole::Public) {
         let folder = args.new_home.join(role_label(role));
         std::fs::create_dir_all(&folder).map_err(err)?;
         table
@@ -378,26 +362,34 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
             }));
         }
     }
-    let landing = Landing { held };
-    let plan_landing = landing.clone();
-    let plan = pctwin_move::send_plan(
+    // The very rules the app's new laptop sends the old one: both laptops place every file the
+    // same way, other people's under their holding place by place label, as the hand-over reads.
+    let rules = LandingRules {
+        mover: me.clone(),
+        roles: NEW_ROLES
+            .iter()
+            .map(|r| (*r, pctwin_record::Storage::SystemDrive))
+            .collect(),
+        fallback: BTreeMap::new(),
+        held,
+    };
+    let plan = pctwin_move::send_plan_where(
         &record,
         |i| match handles.get(&i.id) {
             Some(h) => Some(helper_source(*h)),
             None => by_path.get(&i.id).cloned(),
         },
-        |i| {
-            plan_landing
-                .of(i)
-                .unwrap_or_else(|| LandingPlace::new(role_label(FolderRole::Other), ""))
-        },
+        |i| rules.landing(i),
     );
     let opener: Arc<dyn pctwin_transfer::Opener> = match &helper {
         Some(h) => Arc::new(HelperOpener::new(Arc::clone(h), &people)),
         None => Arc::new(pctwin_transfer::FsOpener),
     };
     let journal = Journal::open(&args.journal).map_err(err)?;
-    let mut steps = EveryoneSteps { targets, landing };
+    let mut steps = EveryoneSteps {
+        targets,
+        rules: rules.clone(),
+    };
     let (mut a, mut b) = mem_pair();
     let (here, there) = (Live::default(), Live::default());
     let (sent, received) = tokio::join!(

@@ -689,3 +689,76 @@ fn a_file_landing_where_programs_start_at_sign_in_is_shown_before_approval() {
     assert_eq!(found.runs_at_sign_in.count, 1);
     assert_eq!(found.runs_at_sign_in.examples, vec![startup.id]);
 }
+
+/// The app's way: the old laptop does not choose where files go; the new laptop sends its
+/// landing rules once the plan is approved, and both place every file the same way. Every file
+/// lands where the new laptop's own rules put it.
+#[tokio::test]
+async fn files_land_where_the_new_laptop_s_rules_put_them() {
+    use pctwin_move::landing::LandingRules;
+    let w = world();
+    let rules = LandingRules {
+        mover: "1000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+    };
+    struct ByRules {
+        rules: LandingRules,
+    }
+    impl Steps for ByRules {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+            Ok(())
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    let mut steps = ByRules {
+        rules: rules.clone(),
+    };
+    let (mut old, mut new) = mem_pair();
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send_by_rules(
+                &mut old,
+                &w.record,
+                |i| Some(source_in(w.old.path(), i)),
+                &old_live,
+                std::sync::Arc::new(pctwin_transfer::FsOpener),
+            ),
+            pctwin_move::receive_by_rules(
+                &mut new,
+                &mut steps,
+                |s| s.rules.clone(),
+                &w.table,
+                &w.journal,
+                "1001",
+                &new_live
+            ),
+        )
+    })
+    .await;
+    let (sent, got) = sent.unwrap();
+    assert_eq!(
+        got, rules,
+        "the old laptop placed by the new laptop's rules"
+    );
+    for line in &sent.files {
+        assert_eq!(line.outcome, Some(SendOutcome::Arrived), "{:?}", line.item);
+    }
+    for (line, (role, path, bytes)) in received.unwrap().files.iter().zip(FILES) {
+        assert!(matches!(line.outcome, Some(ReceiveOutcome::Finished(_))));
+        let landed = w.new.path().join(folder_name(role)).join(path.join("/"));
+        assert_eq!(std::fs::read(landed).unwrap(), bytes);
+    }
+}

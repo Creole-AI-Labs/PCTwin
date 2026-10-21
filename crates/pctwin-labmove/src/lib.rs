@@ -262,6 +262,7 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
         let outcome = match not.why {
             NotSentWhy::LeftOut { reason } => format!("left out: {reason:?}"),
             NotSentWhy::NoFolderForRole => "no folder for its role".to_string(),
+            NotSentWhy::NoPlaceOnNewLaptop => "no place for it on the new laptop".to_string(),
         };
         report.not_sent.push(Line {
             item: not.item.to_hex(),
