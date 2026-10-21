@@ -193,6 +193,20 @@ fn after(kind: &str, drive: &Path) {
     );
     let e = &journal.entries().unwrap()[0];
     println!("{kind}: now {:?}", step(&e.state));
+    // Everything recovery judged by, so a failure on a drive says why it could not prove the
+    // file PCTwin's: the recorded fill (its proof, tag and the file it made) and what the drive
+    // says now of the file at that name.
+    println!("{kind}: recorded {:?}", e.state);
+    if let State::Filling { fill, .. } | State::Filled { fill, .. } = &e.state {
+        let dest = Destination::open(&dir).unwrap();
+        println!(
+            "{kind}: at {} now: born {:?}, hidden {:?}, look {:?}",
+            fill.final_path,
+            dest.born(&fill.final_path),
+            dest.hidden(&fill.final_path),
+            dest.look(&fill.final_path)
+        );
+    }
     for (name, bytes) in files_under(&dir) {
         let pctwin_own = name
             .rsplit('/')
