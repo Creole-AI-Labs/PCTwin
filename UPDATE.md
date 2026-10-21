@@ -6,7 +6,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Stage:** building the move itself (stage 1 of the plan). The foundations (stage 0) are done.
 - **Ready to use?** Not yet. Please don't move real files with it.
-- **Next:** the remaining fixes from our review list, then connecting the screens to the move itself, with clear error pages, then independent reviews and the full test run.
+- **Next:** connecting the screens to the move itself, with clear error pages, then independent reviews and the full test run.
 
 ## 21 October 2026
 
@@ -19,6 +19,12 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **New files are offered at the end.** Files made on the old laptop after you approved the plan are counted when the move ends and offered as a short extra move.
 - **PCTwin knows more kinds of places:** mail archives, password vaults, money records, photo, video, music and design projects, code projects, notes, books, game saves, disk images and backups. Things kept only on this laptop move before things a cloud also keeps.
 - **A full test of moving everyone** runs on Windows, Mac and Linux test machines with real accounts, about forty files planted in odd places, and a person moving who tries to cheat. It will first run when this stage is finished.
+- **Damaged files are handled honestly.** If a file still doesn't match after it was sent again, PCTwin says why: if your old laptop's drive read it differently each time, what arrived is kept beside it as a "damaged copy" (never under the real name) and the report says the old drive may be failing; if the new laptop couldn't store it, it says that. If a drive keeps failing, the move pauses and names it, so you can choose another place.
+- **Weak drives are read once.** Pieces cut off by a dropped connection are kept and sent again, not read from the drive again.
+- **Stronger checks of "already there".** The new laptop judges for itself, with a key only it knows, so nothing about your files can be learned from what the laptops say to each other. A laptop sending you files you don't own never learns what you already have.
+- **Older laptops are recognised.** If the other laptop has an older PCTwin that can't pair, the list says to update it, in all seven languages.
+- **Names in every script fit where they can.** On Windows, long names in Chinese, Hindi or Arabic are no longer shortened when they fit.
+- **Work VPNs are recognised** on Windows even when they show up as "Ethernet 3".
 
 **In progress**
 
