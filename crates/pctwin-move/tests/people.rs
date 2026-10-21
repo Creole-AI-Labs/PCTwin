@@ -150,10 +150,11 @@ async fn an_approved_person_s_files_move_through_the_helper() {
     let addr = listener.local_addr().unwrap();
     let helper = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let mut scanner = move |account: &str| -> Result<Vec<(Item, Entry)>, Refusal> {
-            assert_eq!(account, BEA);
-            Ok(found.clone())
-        };
+        let mut scanner =
+            move |account: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
+                assert_eq!(account, BEA);
+                Ok(found.clone().into())
+            };
         Session::new(
             "tok".into(),
             BTreeSet::from([BEA.to_string()]),

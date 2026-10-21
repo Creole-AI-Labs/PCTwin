@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 
 use pctwin_helper::account::Made;
 use pctwin_helper::newlaptop::{Counted, NewLaptop};
-use pctwin_helper::{Client, ClientError, Entry, HandedOver, Refusal, Session};
-use pctwin_record::Item;
+use pctwin_helper::{Client, ClientError, HandedOver, Refusal, Session};
 
 struct Fake;
 
@@ -54,7 +53,13 @@ fn the_new_laptop_s_steps_through_the_client() {
     let addr = listener.local_addr().unwrap();
     let helper = std::thread::spawn(move || {
         let (mut stream, _) = listener.accept().unwrap();
-        let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
+        // A Mac privacy setting kept the helper out of two of Bea's places.
+        let mut scanner = |_: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
+            Ok(pctwin_helper::person::PersonScan {
+                found: Vec::new(),
+                privacy_blocked: 2,
+            })
+        };
         let mut maker = |name: &str, _full: &str| -> Result<Made, Refusal> {
             assert_eq!(name, "bea");
             Ok(Made {
@@ -85,6 +90,9 @@ fn the_new_laptop_s_steps_through_the_client() {
         client.hand_over_now("bea"),
         Err(ClientError::Refused(Refusal::NotApproved))
     ));
+    // The app hears it, to show how to give the helper Full Disk Access.
+    let scanned = client.scan_person("bea").unwrap();
+    assert_eq!((scanned.files, scanned.privacy_blocked), (0, 2));
     let made = client.create_account("bea", "Bea").unwrap();
     assert_eq!(made.account, "1005");
     assert_eq!(made.password.as_str(), "abcd-efgh-jkmn-pqrs");

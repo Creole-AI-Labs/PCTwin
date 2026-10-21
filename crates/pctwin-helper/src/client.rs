@@ -86,6 +86,9 @@ pub struct Scanned {
     pub files: u64,
     pub bytes: u64,
     pub items: Vec<(Item, Handle)>,
+    /// macOS: places of theirs a privacy setting kept the helper out of (the helper needs Full
+    /// Disk Access).
+    pub privacy_blocked: u64,
 }
 
 /// An open session with the helper.
@@ -127,8 +130,11 @@ impl<S: Read + Write> Client<S> {
                 account: account.to_string(),
             },
         )?;
-        let Answer::Scanned { files, bytes } =
-            self.expect_answer(|a| matches!(a, Answer::Scanned { .. }))?
+        let Answer::Scanned {
+            files,
+            bytes,
+            privacy_blocked,
+        } = self.expect_answer(|a| matches!(a, Answer::Scanned { .. }))?
         else {
             return Err(ClientError::OutOfTurn);
         };
@@ -151,6 +157,7 @@ impl<S: Read + Write> Client<S> {
         Ok(Scanned {
             files,
             bytes,
+            privacy_blocked,
             items: items.into_iter().zip(handles).collect(),
         })
     }

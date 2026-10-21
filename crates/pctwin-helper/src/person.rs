@@ -58,8 +58,25 @@ pub fn entries_of(sweep: &Sweep, account: &str) -> Vec<(Item, Entry)> {
         .collect()
 }
 
+/// One person's files as the helper found them, and how many of their places a Mac privacy
+/// setting kept it out of (the helper needs Full Disk Access: the app then shows the steps).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PersonScan {
+    pub found: Vec<(Item, Entry)>,
+    pub privacy_blocked: u64,
+}
+
+impl From<Vec<(Item, Entry)>> for PersonScan {
+    fn from(found: Vec<(Item, Entry)>) -> Self {
+        Self {
+            found,
+            privacy_blocked: 0,
+        }
+    }
+}
+
 /// Scans `account`'s files on this laptop (the helper runs with an administrator's rights).
-pub fn scan_person(laptop: LaptopId, account: &str) -> Result<Vec<(Item, Entry)>, Refusal> {
+pub fn scan_person(laptop: LaptopId, account: &str) -> Result<PersonScan, Refusal> {
     let census = census_as(pctwin_scan::census_this_laptop(), account).ok_or(Refusal::NoHome)?;
     let facts = SweepFacts {
         laptop,
@@ -81,5 +98,14 @@ pub fn scan_person(laptop: LaptopId, account: &str) -> Result<Vec<(Item, Entry)>
         &SweepLimits::default(),
         None,
     );
-    Ok(entries_of(&swept, account))
+    let privacy_blocked = swept
+        .blind_spots
+        .iter()
+        .filter(|b| b.reason == pctwin_scan::BlindReason::MacPrivacy)
+        .map(|b| b.count)
+        .sum();
+    Ok(PersonScan {
+        found: entries_of(&swept, account),
+        privacy_blocked,
+    })
 }

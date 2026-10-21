@@ -443,7 +443,11 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     }
 
     let mover = for_the_mover(&received, &me);
-    let report = report_json(&sweep, &mover, &declined, &hand_over);
+    let mut report = report_json(&sweep, &mover, &declined, &hand_over);
+    // macOS: the helper was kept out of some of someone's places; the app shows how to give it
+    // Full Disk Access, and those places are never counted as moved.
+    report["helper_needs_full_disk_access"] =
+        json!(scanned.iter().any(|(_, s)| s.privacy_blocked > 0));
     let items: BTreeMap<_, _> = received.record.items.iter().map(|i| (i.id, i)).collect();
     let outcomes: Vec<Value> = received
         .files
@@ -466,7 +470,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     let evidence = json!({
         "me": me,
         "others": others,
-        "approved": scanned.iter().map(|(p, s)| json!({"account": p, "files": s.files, "bytes": s.bytes})).collect::<Vec<_>>(),
+        "approved": scanned.iter().map(|(p, s)| json!({"account": p, "files": s.files, "bytes": s.bytes, "privacy_blocked": s.privacy_blocked})).collect::<Vec<_>>(),
         "declined": declined,
         "made": made,
         "places": serde_json::to_value(&sweep.places).map_err(err)?,

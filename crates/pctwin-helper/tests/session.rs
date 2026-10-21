@@ -9,7 +9,6 @@ use std::io::{Cursor, Read, Write};
 
 use pctwin_helper::protocol::{read_from_helper, send_request};
 use pctwin_helper::{Answer, Entry, FromHelper, Handle, Refusal, Request, Session};
-use pctwin_record::Item;
 
 /// The app's requests, read by the helper; the helper's answers, kept for the test to read.
 struct Channel {
@@ -82,9 +81,9 @@ fn session(requests: &[Request]) -> (Vec<FromHelper>, tempfile::TempDir) {
         (item("bea-private-diary.txt", 10), entry(&a)),
         (item("bea-tax.pdf", 16), entry(&b)),
     ];
-    let mut scanner = move |account: &str| -> Result<Vec<(Item, Entry)>, Refusal> {
+    let mut scanner = move |account: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
         assert_eq!(account, "bea");
-        Ok(found.clone())
+        Ok(found.clone().into())
     };
     let mut wire = Vec::new();
     for r in requests {
@@ -147,7 +146,8 @@ fn an_approved_person_is_scanned_and_read_only_by_handle() {
             FromHelper::Answer(Answer::Ready),
             FromHelper::Answer(Answer::Scanned {
                 files: 2,
-                bytes: 26
+                bytes: 26,
+                privacy_blocked: 0
             }),
             FromHelper::Handles(vec![
                 Handle {
@@ -252,7 +252,8 @@ fn only_an_approved_person_s_account_is_made() {
             secure_token: true,
         })
     };
-    let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
+    let mut scanner =
+        |_: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> { Ok(Vec::new().into()) };
     let mut wire = Vec::new();
     for r in [
         hello(),
@@ -373,7 +374,8 @@ fn holding_and_handing_over_only_for_approved_people() {
             secure_token: true,
         })
     };
-    let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
+    let mut scanner =
+        |_: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> { Ok(Vec::new().into()) };
     let mut fake = Fake::default();
     let mut wire = Vec::new();
     for r in [

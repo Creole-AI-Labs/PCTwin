@@ -17,7 +17,7 @@ use crate::protocol::{
 use crate::read::{Entry, read_range};
 
 /// Finds an approved person's files (see [`crate::person::scan_person`]).
-pub type Scanner<'a> = dyn FnMut(&str) -> Result<Vec<(Item, Entry)>, Refusal> + 'a;
+pub type Scanner<'a> = dyn FnMut(&str) -> Result<crate::person::PersonScan, Refusal> + 'a;
 
 /// Makes an approved person's account (see [`crate::account::create_account`]).
 pub type AccountMaker<'a> = dyn FnMut(&str, &str) -> Result<crate::account::Made, Refusal> + 'a;
@@ -264,8 +264,8 @@ impl<'s> Session<'s> {
         if !self.approved.contains(account) {
             return send_answer(channel, &Answer::Refused(Refusal::NotApproved));
         }
-        let found = match (self.scanner)(account) {
-            Ok(found) => found,
+        let (found, privacy_blocked) = match (self.scanner)(account) {
+            Ok(scan) => (scan.found, scan.privacy_blocked),
             Err(why) => return send_answer(channel, &Answer::Refused(why)),
         };
         if self.plan.len() + found.len() > MAX_HANDLES {
@@ -288,6 +288,7 @@ impl<'s> Session<'s> {
             &Answer::Scanned {
                 files: handles.len() as u64,
                 bytes,
+                privacy_blocked,
             },
         )?;
         send_handles(channel, &handles)?;

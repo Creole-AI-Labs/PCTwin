@@ -120,6 +120,10 @@ pub enum Answer {
     Scanned {
         files: u64,
         bytes: u64,
+        /// macOS: places of theirs a privacy setting kept the helper out of; above 0, the app
+        /// shows how to give the helper Full Disk Access, and the move never claims them.
+        #[serde(default)]
+        privacy_blocked: u64,
     },
     Refused(Refusal),
     Goodbye,
