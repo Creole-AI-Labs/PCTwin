@@ -827,6 +827,90 @@ async fn quick_pause_and_carry_on_taps_never_leave_a_lane_asleep_on_version_two(
     taps(2).await
 }
 
+/// The old laptop's main connection, counting each time it says "still paused" twice in a row:
+/// only its one-second tick does that, so between quick taps it means the main loop slept through
+/// a carrying on.
+struct Spy {
+    inner: Mem,
+    last_paused: bool,
+    repeats: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl Channel for Spy {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        if let Ok(Message::Hold { paused }) = Message::decode(data) {
+            if paused && self.last_paused {
+                self.repeats
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            self.last_paused = paused;
+        }
+        self.inner.send(data).await
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+/// With no extra lanes the main loop alone must notice every carrying on at once: it looks at
+/// the pause before it decides to hold, so a carrying on made in between is never slept through
+/// (a mutant that dropped that early look survived the tests with lanes, which hold on their own).
+#[tokio::test]
+async fn quick_taps_never_leave_the_main_connection_asleep() {
+    let w = world();
+    let len = 16 * 1024 * 1024;
+    let jobs = vec![w.file(1, len)];
+    let (sm, control) = (MoveMeter::new(), MoveControl::new());
+    let mut sender = SenderSession::new(jobs.clone(), 1)
+        .with_in_flight_limit(LIMIT)
+        .with_meter(sm.clone())
+        .with_control(control.clone())
+        .with_protocol(HOLD_SINCE);
+    let mut receiver =
+        ReceiverSession::new(&w.table, plan(&jobs), &w.journal, "1000").with_protocol(HOLD_SINCE);
+    let written = receiver.meter();
+    let (a, mut b) = mem_pair();
+    let repeats = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let mut a = Spy {
+        inner: a,
+        last_paused: false,
+        repeats: repeats.clone(),
+    };
+    let person = async {
+        let mut seed = 99u64;
+        for _ in 0..200 {
+            let before = sm.reading().blocks_sent;
+            if sm.reading().files.copied == 1 {
+                break;
+            }
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            control.pause();
+            for _ in 0..(seed >> 33) % 12 {
+                tokio::task::yield_now().await;
+            }
+            control.carry_on();
+            until(|| sm.reading().blocks_sent > before || sm.reading().files.copied == 1).await;
+        }
+    };
+    let ((sent, received), ()) = common::unless_stuck(&written, len as u64, async {
+        tokio::join!(
+            async { tokio::join!(sender.run(&mut a), receiver.run(&mut b)) },
+            person
+        )
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    assert_eq!(w.landed(1).as_deref(), Some(&bytes(len, 1)[..]));
+    assert_eq!(
+        repeats.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the main loop slept through a carrying on until its tick"
+    );
+}
+
 // ------------------------------------------------ a hostile other laptop
 
 /// A new laptop on protocol `v`, given `msgs` by an old laptop right after its hello: how its
