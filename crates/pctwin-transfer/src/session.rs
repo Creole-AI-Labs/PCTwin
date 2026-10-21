@@ -1578,9 +1578,16 @@ impl SenderSession {
                     && let SendState::Open { sections, .. } = &mut *self.states.slot(job)
                 {
                     let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
-                    // In order per lane, as sent; a mismatch can only mean the new laptop
-                    // failed the file, which it reports when the file ends.
-                    let _ = sections.confirmed(lane_no, block);
+                    // In order per lane, as sent: which block a receipt answers is this laptop's
+                    // own record, and an attempt only starts again once all of its blocks are
+                    // answered. A mismatch would leave the file waiting for ever on both laptops,
+                    // so it ends this lane (its blocks go back to the others) or, on the main
+                    // connection, the connection (the move carries on from where it was).
+                    if let Err(e) = sections.confirmed(lane_no, block) {
+                        return Err(protocol(&format!(
+                            "a receipt did not match the block sent on its lane ({e:?})"
+                        )));
+                    }
                 }
                 self.receipted(stream, raw, written);
                 Ok(())
