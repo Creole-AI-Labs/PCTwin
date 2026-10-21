@@ -17,6 +17,8 @@ import {
   moveBegin,
   movePeopleHere,
   movePlacePeople,
+  movePrivacyAnswer,
+  openPrivacySettings,
   movePause,
   moveReport,
   moveResume,
@@ -187,6 +189,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingNewConnect(0, "123456");
       await moveBegin({ music: "From your old laptop/Music" }, ["1001"]);
       await movePeopleHere().catch(() => undefined);
+      await movePrivacyAnswer(true);
+      await openPrivacySettings();
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}" });
       await moveApprove({ revision: 2, fingerprint: "9f" }, true);
       await movePause();

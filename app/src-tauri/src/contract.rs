@@ -346,6 +346,7 @@ fn families() -> Vec<(&'static str, Value)> {
         ("move-progress", json(progress())),
         ("move-outcome", json(outcomes())),
         ("report-item", json(report_items())),
+        ("privacy", json([crate::moving::Privacy { places: 3 }])),
         (
             "people-to-place",
             json([crate::moving::PeopleToPlace {
@@ -549,7 +550,8 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
 /// names, so a renamed command, argument or event on either side fails a test.
 fn calls() -> Value {
     use crate::moving::{
-        FINISHED_EVENT, PEOPLE_EVENT, PLAN_EVENT, PROBLEM_EVENT, PROGRESS_EVENT, STAGE_EVENT,
+        FINISHED_EVENT, PEOPLE_EVENT, PLAN_EVENT, PRIVACY_EVENT, PROBLEM_EVENT, PROGRESS_EVENT,
+        STAGE_EVENT,
     };
     use crate::pairing::{NEW_EVENT, OLD_EVENT};
     use serde_json::json;
@@ -570,6 +572,8 @@ fn calls() -> Value {
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]]] },
             { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}" }]] },
+            { "name": "move_privacy_answer", "args": [["again", true]] },
+            { "name": "open_privacy_settings", "args": [] },
             { "name": "move_pause", "args": [] },
             { "name": "move_resume", "args": [] },
             { "name": "move_stop", "args": [] },
@@ -588,6 +592,7 @@ fn calls() -> Value {
             "moveFinished": FINISHED_EVENT,
             "moveProblem": PROBLEM_EVENT,
             "movePeople": PEOPLE_EVENT,
+            "movePrivacy": PRIVACY_EVENT,
         },
         // What the screens may name when they ask for a help code: the engine's closed lists.
         "helpTopics": crate::help::HelpTopic::ALL,

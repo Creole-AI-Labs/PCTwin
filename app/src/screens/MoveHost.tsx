@@ -8,6 +8,8 @@ import {
   movePause,
   movePeopleHere,
   movePlacePeople,
+  movePrivacyAnswer,
+  openPrivacySettings,
   moveReport,
   moveResume,
   moveStop,
@@ -20,6 +22,7 @@ import {
   type PeopleToPlace,
   type WaitStage,
 } from "../bridge";
+import FullDiskAccess from "./FullDiskAccess";
 import PlaceOthers from "./PlaceOthers";
 import WhoHere from "./WhoHere";
 import type { HelpCode } from "../people";
@@ -46,6 +49,8 @@ type View =
   | { kind: "plan"; plan: PlanView }
   /** The new laptop: where the other people's things go (M06). */
   | { kind: "people"; toPlace: PeopleToPlace }
+  /** The old laptop, a Mac: some of the mover's places were kept private (Full Disk Access). */
+  | { kind: "privacy"; places: number }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "outcome"; outcome: MoveOutcome }
   | { kind: "report"; outcome: MoveOutcome; items: ReportItem[] }
@@ -71,6 +76,7 @@ function topicOf(end: MoveEnd): HelpTopic {
 export function stepOf(view: View, old: boolean): HelpStep {
   switch (view.kind) {
     case "who":
+    case "privacy":
       return "finding";
     case "wait":
       if (view.stage === "scanning" || view.stage === "administrator") return "finding";
@@ -101,6 +107,8 @@ export function next(view: View, event: MoveEvent): View {
       return { kind: "plan", plan: event.plan };
     case "people":
       return { kind: "people", toPlace: event.toPlace };
+    case "privacy":
+      return { kind: "privacy", places: event.privacy.places };
     case "progress":
       return { kind: "progress", progress: event.progress };
     case "finished":
@@ -253,6 +261,21 @@ export default function MoveHost({
       );
     case "wait":
       return <MoveWaiting stage={view.stage} old={old} note={othersNote} onStop={stopNow} />;
+    case "privacy":
+      return (
+        <FullDiskAccess
+          places={view.places}
+          onOpenSettings={() => void openPrivacySettings().catch(() => undefined)}
+          onCheckAgain={() => {
+            setView({ kind: "wait", stage: "scanning" });
+            void movePrivacyAnswer(true).catch(() => undefined);
+          }}
+          onWithout={() => {
+            setView({ kind: "wait", stage: "scanning" });
+            void movePrivacyAnswer(false).catch(() => undefined);
+          }}
+        />
+      );
     case "people":
       return (
         <PlaceOthers

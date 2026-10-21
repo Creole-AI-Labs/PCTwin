@@ -1145,6 +1145,20 @@ place-todo =
         [many] Choisissez où vont les affaires de { $count } de personnes de plus.
        *[other] Choisissez où vont les affaires de { $count } personnes de plus.
     }
+fda-title = Votre Mac garde certains dossiers privés.
+fda-body =
+    { NUMBER($count) ->
+        [one] { $count } de vos emplacements n’a pas pu être examiné, à cause des réglages de confidentialité du Mac. Autorisez PCTwin, puis vérifiez à nouveau, pour ne rien oublier.
+        [many] { $count } de vos emplacements n’ont pas pu être examinés, à cause des réglages de confidentialité du Mac. Autorisez PCTwin, puis vérifiez à nouveau, pour ne rien oublier.
+       *[other] { $count } de vos emplacements n’ont pas pu être examinés, à cause des réglages de confidentialité du Mac. Autorisez PCTwin, puis vérifiez à nouveau, pour ne rien oublier.
+    }
+fda-step-1 = Ouvrez Réglages Système, puis Confidentialité et sécurité.
+fda-step-2 = Choisissez Accès complet au disque.
+fda-step-3 = Activez PCTwin. Le Mac peut demander votre mot de passe.
+fda-open = Ouvrir ces réglages
+fda-note = PCTwin lit seulement vos dossiers pour les copier. Il ne modifie jamais rien sur ce portable.
+fda-again = Vérifier à nouveau
+fda-without = Continuer sans eux
 password-title = PCTwin : un nouveau compte
 password-body =
     { $name } a maintenant un compte sur ce portable.

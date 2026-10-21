@@ -28,10 +28,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 26 names: the app's twenty-three commands, listening to and
+/// Exactly what the screens may call, 28 names: the app's twenty-five commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 26] = [
+const SCREENS_MAY_CALL: [&str; 28] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -47,6 +47,8 @@ const SCREENS_MAY_CALL: [&str; 26] = [
     "move_begin",
     "move_approve",
     "move_place_people",
+    "move_privacy_answer",
+    "open_privacy_settings",
     "move_pause",
     "move_resume",
     "move_stop",
@@ -218,6 +220,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "move_begin" => json!({ "fallback": 1, "others": 2 }),
         "move_approve" => json!({ "plan": 1, "approve": "x" }),
         "move_place_people" => json!({ "choices": 1, "words": 2 }),
+        "move_privacy_answer" => json!({ "again": "x" }),
         "help_code" => json!({ "topic": 1, "step": 2 }),
         "plugin:event|listen" | "plugin:event|unlisten" => json!({ "event": 1 }),
         _ => json!({}),

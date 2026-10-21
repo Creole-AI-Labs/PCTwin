@@ -187,6 +187,8 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         moving::move_begin,
         moving::move_approve,
         moving::move_place_people,
+        moving::move_privacy_answer,
+        moving::open_privacy_settings,
         moving::move_pause,
         moving::move_resume,
         moving::move_stop,

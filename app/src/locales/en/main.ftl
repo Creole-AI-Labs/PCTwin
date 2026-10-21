@@ -982,6 +982,19 @@ place-todo =
         [one] Choose where { $count } more person’s things go.
        *[other] Choose where { $count } more people’s things go.
     }
+fda-title = Your Mac is keeping some folders private.
+fda-body =
+    { NUMBER($count) ->
+        [one] { $count } of your places could not be looked in, because of your Mac’s privacy settings. Let PCTwin in, then check again, so nothing of yours is missed.
+       *[other] { $count } of your places could not be looked in, because of your Mac’s privacy settings. Let PCTwin in, then check again, so nothing of yours is missed.
+    }
+fda-step-1 = Open System Settings, then Privacy & Security.
+fda-step-2 = Choose Full Disk Access.
+fda-step-3 = Switch on PCTwin. Your Mac may ask for your password.
+fda-open = Open these settings
+fda-note = PCTwin only reads your folders to copy them. It never changes anything on this laptop.
+fda-again = Check again
+fda-without = Go on without them
 password-title = PCTwin: a new account
 password-body =
     { $name } now has an account on this laptop.

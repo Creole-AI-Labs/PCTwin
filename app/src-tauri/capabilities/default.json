@@ -19,6 +19,8 @@
     "allow-move-begin",
     "allow-move-approve",
     "allow-move-place-people",
+    "allow-move-privacy-answer",
+    "allow-open-privacy-settings",
     "allow-move-pause",
     "allow-move-resume",
     "allow-move-stop",

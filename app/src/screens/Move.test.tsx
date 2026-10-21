@@ -94,7 +94,7 @@ const plan = plans[0];
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(6);
+    expect(tauri.handlers.size).toBe(7);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };
@@ -255,6 +255,23 @@ describe("who's moving, on the old laptop", () => {
     replies.move_people_here = () => ({ people: [{ id: "S-1", name: "Ada", isYou: true }], canMoveOthers: true });
     await host(true);
     expect(screen.queryByText(text("who-here-title"))).toBeNull();
+  });
+});
+
+describe("the Full Disk Access guide", () => {
+  it("says how many places the Mac kept private, opens the settings, and looks again or goes on without them", async () => {
+    await host(true);
+    send("move-privacy", { places: 2 });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("fda-title"));
+    expect(screen.getByText((t) => plain(t) === plain(text("fda-body", { count: 2 })))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("fda-open") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("open_privacy_settings");
+    fireEvent.click(screen.getByRole("button", { name: text("fda-again") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("move_privacy_answer", { again: true });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-scanning-title"));
+    send("move-privacy", { places: 1 });
+    fireEvent.click(screen.getByRole("button", { name: text("fda-without") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("move_privacy_answer", { again: false });
   });
 });
 

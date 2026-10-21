@@ -44,6 +44,9 @@ pub const FINISHED_EVENT: &str = "move-finished";
 pub const PROBLEM_EVENT: &str = "move-problem";
 /// The new laptop: the other people in the move, to place (M06).
 pub const PEOPLE_EVENT: &str = "move-people";
+/// The old laptop (a Mac): some of the mover's places were kept private by the Mac's privacy
+/// settings; the Full Disk Access guide is shown.
+pub const PRIVACY_EVENT: &str = "move-privacy";
 
 /// How often the screens are sent the progress.
 const TICK: Duration = Duration::from_millis(400);
@@ -75,6 +78,8 @@ struct Run {
     /// The new laptop: the people on screen to place, this laptop's accounts, and where the
     /// person's choices go.
     placing: Option<Placing>,
+    /// The old laptop: the person's answer to the Full Disk Access guide (true: look again).
+    privacy: Option<oneshot::Sender<bool>>,
     report: Vec<ReportItem>,
     finished: bool,
 }
@@ -119,6 +124,7 @@ impl Moving {
             scan_stop: scan_stop.clone(),
             waiting: None,
             placing: None,
+            privacy: None,
             report: Vec::new(),
             finished: false,
         });
@@ -131,6 +137,25 @@ impl Moving {
             .filter(|r| !r.finished)
             .map(f)
             .ok_or(MoveProblem::NotMoving)
+    }
+
+    fn wait_for_privacy(&self) -> oneshot::Receiver<bool> {
+        let (tx, rx) = oneshot::channel();
+        if let Some(run) = lock(&self.run).as_mut() {
+            run.privacy = Some(tx);
+        }
+        rx
+    }
+
+    /// The person's answer to the Full Disk Access guide: look again, or go on without them.
+    fn privacy_answer(&self, again: bool) -> Result<(), MoveProblem> {
+        self.with_run(|run| match run.privacy.take() {
+            Some(tx) => {
+                let _ = tx.send(again);
+                Ok(())
+            }
+            None => Err(MoveProblem::NotMoving),
+        })?
     }
 
     fn wait_for_answer(&self, key: PlanKey) -> oneshot::Receiver<bool> {
@@ -215,6 +240,7 @@ impl Moving {
             }
             // Dropping it ends the wait for the people's places: the move stops there.
             run.placing = None;
+            run.privacy = None;
             run.live.control.stop();
         })
     }
@@ -1234,8 +1260,25 @@ fn tick<R: Runtime>(
 }
 
 /// The old laptop's side: find the person's files, then send them by the new laptop's rules.
+/// The mover's places a Mac's privacy settings kept PCTwin out of.
+fn privacy_blocked(sweep: &pctwin_scan::Sweep) -> u64 {
+    sweep
+        .blind_spots
+        .iter()
+        .filter(|b| matches!(b.reason, pctwin_scan::BlindReason::MacPrivacy))
+        .map(|b| b.count)
+        .sum()
+}
+
+/// What the Full Disk Access guide shows: how many of the mover's places were kept private.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Privacy {
+    pub places: u64,
+}
+
 async fn run_old<R: Runtime>(
     app: &AppHandle<R>,
+    moving: &AppMoving,
     mut link: pctwin_link::Link,
     live: &Live,
     scan_stop: &AtomicBool,
@@ -1243,7 +1286,25 @@ async fn run_old<R: Runtime>(
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
-    let sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut |_| {}, None);
+    let mut sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut |_| {}, None);
+    // A Mac kept some of the mover's places private: the guide says how to let PCTwin in, and
+    // the person looks again or goes on without them (they are then not in the move at all).
+    loop {
+        let places = privacy_blocked(&sweep);
+        if places == 0 || scan_stop.load(Ordering::Acquire) {
+            break;
+        }
+        let answer = moving.wait_for_privacy();
+        let _ = app.emit(PRIVACY_EVENT, Privacy { places });
+        match answer.await {
+            Ok(true) => {
+                let _ = app.emit(STAGE_EVENT, Stage::Scanning);
+                sweep = pctwin_scan::sweep_this_laptop(laptop, scan_stop, &mut |_| {}, None);
+            }
+            Ok(false) => break,
+            Err(_) => return Err(Stop::Cancelled.into()),
+        }
+    }
     let others = crate::others::checked_others(&sweep.census, &others)
         .map_err(|_| TransferError::Protocol("someone ticked is not on this laptop".into()))?;
     if scan_stop.load(Ordering::Acquire) {
@@ -1522,7 +1583,7 @@ fn spawn_run<R: Runtime>(
                         run_new(&app, moving.clone(), link, &live, setup, names).await
                     }
                     ThisSide::Old { others } => {
-                        run_old(&app, link, &live, &scan_stop, others).await
+                        run_old(&app, &moving, link, &live, &scan_stop, others).await
                     }
                 }
             });
@@ -1609,6 +1670,22 @@ pub fn move_place_people(
     words: crate::others::PasswordWords,
 ) -> Result<(), MoveProblem> {
     moving.place(&choices, words)
+}
+
+/// The old laptop: the person's answer to the Full Disk Access guide (`again`: look again).
+#[tauri::command]
+pub fn move_privacy_answer(moving: State<'_, AppMoving>, again: bool) -> Result<(), MoveProblem> {
+    moving.privacy_answer(again)
+}
+
+/// Opens the Mac's Full Disk Access settings, where PCTwin is switched on (nothing elsewhere).
+#[tauri::command]
+pub fn open_privacy_settings() {
+    if cfg!(target_os = "macos") {
+        let _ = std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+            .spawn();
+    }
 }
 
 /// Pauses at the next safe point (X05).
@@ -1885,6 +1962,20 @@ mod tests {
         moving.place(&[new("S-2")], words()).unwrap();
         let (choices, _) = rx.try_recv().unwrap();
         assert_eq!(choices.get("S-2"), Some(&PlaceChoice::New));
+    }
+
+    #[test]
+    fn the_full_disk_access_guide_is_answered_once_and_a_stop_ends_it() {
+        let moving = Moving::default();
+        moving.begin().unwrap();
+        assert_eq!(moving.privacy_answer(true), Err(MoveProblem::NotMoving));
+        let mut rx = moving.wait_for_privacy();
+        moving.privacy_answer(true).unwrap();
+        assert_eq!(rx.try_recv(), Ok(true));
+        assert_eq!(moving.privacy_answer(false), Err(MoveProblem::NotMoving));
+        let mut rx = moving.wait_for_privacy();
+        moving.stop().unwrap();
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

@@ -157,6 +157,19 @@
       "name": "move_place_people"
     },
     {
+      "args": [
+        [
+          "again",
+          true
+        ]
+      ],
+      "name": "move_privacy_answer"
+    },
+    {
+      "args": [],
+      "name": "open_privacy_settings"
+    },
+    {
       "args": [],
       "name": "move_pause"
     },
@@ -202,6 +215,7 @@
     "moveFinished": "move-finished",
     "movePeople": "move-people",
     "movePlan": "move-plan",
+    "movePrivacy": "move-privacy",
     "moveProblem": "move-problem",
     "moveProgress": "move-progress",
     "moveStage": "move-stage",

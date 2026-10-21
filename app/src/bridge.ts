@@ -257,6 +257,17 @@ export type OthersWhy = (typeof OTHERS_WHY)[number];
 
 export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
 
+/** A Mac kept this many of the mover's places private (the Full Disk Access guide). */
+export type Privacy = { places: number };
+
+export function parsePrivacy(value: unknown): Privacy | null {
+  const f = exactly(value, ["places"]);
+  return f && isCount(f.places) && f.places > 0 ? { places: f.places } : null;
+}
+
+export const movePrivacyAnswer = (again: boolean) => run("move_privacy_answer", { again });
+export const openPrivacySettings = () => run("open_privacy_settings");
+
 /** Where one other person's things go on the new laptop. */
 export type PlaceChoice = { kind: "existing"; accountId: string } | { kind: "new" } | { kind: "leave-out" };
 
@@ -550,6 +561,7 @@ export type MoveEvent =
   | { kind: "stage"; stage: MoveStage }
   | { kind: "plan"; plan: PlanView }
   | { kind: "people"; toPlace: PeopleToPlace }
+  | { kind: "privacy"; privacy: Privacy }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "finished"; outcome: MoveOutcome }
   | { kind: "problem"; problem: EndedEarly };
@@ -566,6 +578,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-stage", parseMoveStage, (stage) => ({ kind: "stage", stage })),
     on("move-plan", parsePlanView, (plan) => ({ kind: "plan", plan })),
     on("move-people", parsePeopleToPlace, (toPlace) => ({ kind: "people", toPlace })),
+    on("move-privacy", parsePrivacy, (privacy) => ({ kind: "privacy", privacy })),
     on("move-progress", parseMoveProgress, (progress) => ({ kind: "progress", progress })),
     on("move-finished", parseMoveOutcome, (outcome) => ({ kind: "finished", outcome })),
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),

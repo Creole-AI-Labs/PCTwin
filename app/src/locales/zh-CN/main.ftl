@@ -914,6 +914,18 @@ place-todo =
     { NUMBER($count) ->
        *[other] 还需为 { $count } 个人选择内容放到哪里。
     }
+fda-title = 你的 Mac 正把一些文件夹设为私密。
+fda-body =
+    { NUMBER($count) ->
+       *[other] 由于 Mac 的隐私设置，你有 { $count } 个位置无法查看。请允许 PCTwin 访问，然后再检查一次，以免遗漏你的内容。
+    }
+fda-step-1 = 打开“系统设置”，然后选择“隐私与安全性”。
+fda-step-2 = 选择“完全磁盘访问权限”。
+fda-step-3 = 打开 PCTwin。Mac 可能会要求输入密码。
+fda-open = 打开这些设置
+fda-note = PCTwin 只读取你的文件夹来复制它们，从不更改这台笔记本电脑上的任何内容。
+fda-again = 再检查一次
+fda-without = 不含这些继续
 password-title = PCTwin：一个新账户
 password-body =
     { $name } 现在在这台笔记本电脑上有了账户。

@@ -23,6 +23,7 @@ import {
   parsePeopleHere,
   parsePeopleToPlace,
   parsePlanView,
+  parsePrivacy,
   parseProblemView,
   parseReportItem,
   parseTidied,
@@ -49,6 +50,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   interrupted: parseInterrupted,
   "people-here": parsePeopleHere,
   "people-to-place": parsePeopleToPlace,
+  privacy: parsePrivacy,
   tidied: parseTidied,
 };
 
