@@ -510,6 +510,15 @@ async fn predict_then_compare(old_root: &Path, table: &Destinations, journal: &J
         "LONGFO~1.txt",
         "spaces at the end. ",
         "na\u{ef}ve caf\u{e9} \u{2713}.txt",
+        // Names in other scripts and forms (Language Design follow-up): Arabic, Hebrew,
+        // Devanagari, Chinese, an accent written as two characters, an emoji, direction marks.
+        "\u{62a}\u{642}\u{631}\u{64a}\u{631}.txt",
+        "\u{5d3}\u{5d5}\u{5d7}.txt",
+        "\u{930}\u{93f}\u{92a}\u{94b}\u{930}\u{94d}\u{91f}.txt",
+        "\u{62a5}\u{544a} 2026.txt",
+        "Cafe\u{301} menu.txt",
+        "\u{1f389} party.txt",
+        "\u{200f}right to left\u{200e}.txt",
         long.as_str(),
     ];
     let mut record = Record::new(laptop());
