@@ -17,7 +17,10 @@ use crate::protocol::{
 use crate::read::{Entry, read_range};
 
 /// Finds an approved person's files (see [`crate::person::scan_person`]).
-pub type Scanner = dyn FnMut(&str) -> Result<Vec<(Item, Entry)>, Refusal>;
+pub type Scanner<'a> = dyn FnMut(&str) -> Result<Vec<(Item, Entry)>, Refusal> + 'a;
+
+/// Makes an approved person's account (see [`crate::account::create_account`]).
+pub type AccountMaker<'a> = dyn FnMut(&str, &str) -> Result<crate::account::Made, Refusal> + 'a;
 
 /// What the helper was started for.
 pub struct Session<'s> {
@@ -28,17 +31,42 @@ pub struct Session<'s> {
     opened: bool,
     /// Every file handed out, by handle (its index), with its identity once first read.
     plan: Vec<(Entry, Option<FileId>)>,
-    scanner: &'s mut Scanner,
+    scanner: &'s mut Scanner<'s>,
+    maker: Option<&'s mut AccountMaker<'s>>,
 }
 
 impl<'s> Session<'s> {
-    pub fn new(token: String, approved: BTreeSet<String>, scanner: &'s mut Scanner) -> Self {
+    pub fn new(token: String, approved: BTreeSet<String>, scanner: &'s mut Scanner<'s>) -> Self {
         Self {
             token,
             approved,
             opened: false,
             plan: Vec::new(),
             scanner,
+            maker: None,
+        }
+    }
+
+    /// On the new laptop: the people named in `approved` may have their accounts made, by
+    /// `maker`.
+    pub fn with_account_maker(mut self, maker: &'s mut AccountMaker<'s>) -> Self {
+        self.maker = Some(maker);
+        self
+    }
+
+    fn create(&mut self, name: &str, full_name: &str) -> Answer {
+        if !self.approved.contains(name) {
+            return Answer::Refused(Refusal::NotApproved);
+        }
+        let Some(maker) = self.maker.as_mut() else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        match maker(name, full_name) {
+            Ok(made) => Answer::AccountMade {
+                account: made.account,
+                password: made.password.to_string(),
+            },
+            Err(why) => Answer::Refused(why),
         }
     }
 
@@ -82,6 +110,10 @@ impl<'s> Session<'s> {
                         Ok(bytes) => send_blocks(channel, &bytes)?,
                         Err(why) => send_answer(channel, &Answer::Refused(why))?,
                     }
+                }
+                Request::CreateAccount { name, full_name } => {
+                    let answer = self.create(&name, &full_name);
+                    send_answer(channel, &answer)?;
                 }
                 Request::Bye => {
                     send_answer(channel, &Answer::Goodbye)?;

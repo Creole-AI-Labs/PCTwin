@@ -234,3 +234,71 @@ fn nothing_is_done_before_the_right_session_token() {
         vec![FromHelper::Answer(Answer::Refused(Refusal::WrongSession))]
     );
 }
+
+/// New laptop: only an approved person's account is made; the temporary password is said once,
+/// in the answer, and an existing account is reported, never changed.
+#[test]
+fn only_an_approved_person_s_account_is_made() {
+    use pctwin_helper::account::Made;
+    let mut made: Vec<String> = Vec::new();
+    let mut maker = |name: &str, _full: &str| -> Result<Made, Refusal> {
+        if name == "bea" && made.iter().any(|m| m == name) {
+            return Err(Refusal::AccountExists);
+        }
+        made.push(name.to_string());
+        Ok(Made {
+            account: "S-1-5-21-9".into(),
+            password: zeroize::Zeroizing::new("abcd-efgh-jkmn-pqrs".into()),
+        })
+    };
+    let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
+    let mut wire = Vec::new();
+    for r in [
+        hello(),
+        Request::CreateAccount {
+            name: "carl".into(),
+            full_name: "Carl".into(),
+        },
+        Request::CreateAccount {
+            name: "bea".into(),
+            full_name: "Bea".into(),
+        },
+        Request::CreateAccount {
+            name: "bea".into(),
+            full_name: "Bea".into(),
+        },
+    ] {
+        send_request(&mut wire, &r).unwrap();
+    }
+    let mut channel = Channel {
+        from_app: Cursor::new(wire),
+        to_app: Vec::new(),
+    };
+    Session::new(
+        "token".into(),
+        BTreeSet::from(["bea".to_string()]),
+        &mut scanner,
+    )
+    .with_account_maker(&mut maker)
+    .serve(&mut channel)
+    .unwrap();
+    let mut read = channel.to_app.as_slice();
+    let mut out = Vec::new();
+    while !read.is_empty() {
+        out.push(read_from_helper(&mut read).unwrap());
+    }
+    assert_eq!(
+        out,
+        vec![
+            FromHelper::Answer(Answer::Ready),
+            FromHelper::Answer(Answer::Refused(Refusal::NotApproved)),
+            FromHelper::Answer(Answer::AccountMade {
+                account: "S-1-5-21-9".into(),
+                password: "abcd-efgh-jkmn-pqrs".into()
+            }),
+            FromHelper::Answer(Answer::Refused(Refusal::AccountExists)),
+        ]
+    );
+    drop(maker);
+    assert_eq!(made, ["bea"]);
+}

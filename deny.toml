@@ -70,6 +70,8 @@ deny = [
   # Only the helper program may use it (21 October 2026). Only it may use Service Management.
   { crate = "pctwin-helper-os", wrappers = ["pctwin-helper"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os"] },
+  # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
+  { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },
   # macOS: the system's list of programs with a file open, asked only by the gate's undo; and
   # the path of the program on the other end of the helper's socket.
   { crate = "libproc", wrappers = ["pctwin-gate", "pctwin-helper-os"] },

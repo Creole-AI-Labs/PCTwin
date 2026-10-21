@@ -3160,6 +3160,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-open-directory"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb82bed227edf5201dfedf072bba4015a33d3d4a98519837295a90f0a23f676d"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
+]
+
+[[package]]
 name = "objc2-quartz-core"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3432,6 +3442,7 @@ dependencies = [
 name = "pctwin-helper"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.4.3",
  "pctwin-gate",
  "pctwin-helper-os",
  "pctwin-record",
@@ -3441,6 +3452,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "zeroize",
 ]
 
 [[package]]
@@ -3452,6 +3464,7 @@ dependencies = [
  "nix 0.31.3",
  "objc2",
  "objc2-foundation",
+ "objc2-open-directory",
  "objc2-service-management",
  "rustix",
  "tempfile",

@@ -47,9 +47,10 @@
 //! - Windows (`src/win.rs`): `os_shell_execute_runas`, `os_wait`, `os_create_pipe`,
 //!   `os_access_list`, `os_accept`, `os_client_process_id`, `os_server_process_id`,
 //!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
-//!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`.
+//!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`, `os_net_user_add`,
+//!   `os_expire_password`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
-//!   `os_open_login_items`.
+//!   `os_open_login_items`, `os_od_create_user`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
 //!   through rustix's safe wrapper.
 //!
@@ -102,6 +103,10 @@ pub enum Error {
     /// The other end of the channel is not the account it must be (a socket or pipe planted by
     /// someone else). Nothing was sent.
     UnexpectedPeer,
+    /// An account with that name already exists: it is never changed.
+    AlreadyExists,
+    /// The system refused: not run with an administrator's rights.
+    AccessDenied,
 }
 
 impl fmt::Display for Error {
@@ -115,6 +120,8 @@ impl fmt::Display for Error {
             Error::CallerGone => f.write_str("the caller ended before it could be checked"),
             Error::NotPrivate(why) => write!(f, "the channel's folder is not safe: {why}"),
             Error::UnexpectedPeer => f.write_str("the other end of the channel is not the helper"),
+            Error::AlreadyExists => f.write_str("an account with that name already exists"),
+            Error::AccessDenied => f.write_str("only an administrator can do that"),
         }
     }
 }
@@ -194,6 +201,56 @@ pub struct Caller {
     /// record and the report only: a process that starts another program, or ends and has its
     /// ID reused, changes it. Never authorise on it.
     pub program_hint: PathBuf,
+}
+
+/// Whether `name` may be a new account's name on every supported system: 1 to 20 of `a-z`,
+/// `0-9`, `-` and `_`, starting with a letter (stricter than any one system, so the same name
+/// works on all, and nothing in it can be read as an option or a path).
+pub fn is_account_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && name.len() <= 20
+        && chars.all(|c| matches!(c, 'a'..='z' | '0'..='9' | '-' | '_'))
+}
+
+/// Whether `full_name` may be shown as a new account's name: 1 to 64 characters, none of them a
+/// control character, `:` or `,` (which separate fields in the systems' own account lists).
+pub fn is_full_name(full_name: &str) -> bool {
+    let count = full_name.chars().count();
+    (1..=64).contains(&count)
+        && !full_name.trim().is_empty()
+        && full_name
+            .chars()
+            .all(|c| !c.is_control() && c != ':' && c != ',')
+}
+
+/// Makes a standard (never administrator) account `name`, shown as `full_name`, with the
+/// temporary `password`, which must be changed at its first sign-in (Security Design part C,
+/// `CreateAccount`). The password reaches the system in memory only, never on a command line.
+/// An existing account is never changed ([`Error::AlreadyExists`]). Needs an administrator's
+/// rights.
+pub fn add_standard_account(name: &str, full_name: &str, password: &str) -> Result<Account, Error> {
+    if !is_account_name(name) {
+        return Err(Error::BadInput("an account name of a-z, 0-9, - and _"));
+    }
+    if !is_full_name(full_name) {
+        return Err(Error::BadInput("a shown name of 1 to 64 plain characters"));
+    }
+    if password.len() < 12 || password.chars().any(char::is_control) {
+        return Err(Error::BadInput(
+            "a temporary password of at least 12 characters",
+        ));
+    }
+    #[cfg(windows)]
+    return win::add_standard_account(name, full_name, password)
+        .and_then(|sid| Sid::parse(&sid))
+        .map(Account::Sid);
+    #[cfg(target_os = "linux")]
+    return linux::add_standard_account(name, full_name, password).map(Account::Uid);
+    #[cfg(target_os = "macos")]
+    return mac::add_standard_account(name, full_name, password).map(Account::Uid);
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    Err(Error::NotSupported("making accounts"))
 }
 
 /// The account this process runs as.

@@ -18,10 +18,13 @@ pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+getrandom = "0.4.3"
 thiserror = "2.0.21"
+zeroize = "1.9.0"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 tempfile = "3"
+zeroize = "1.9.0"

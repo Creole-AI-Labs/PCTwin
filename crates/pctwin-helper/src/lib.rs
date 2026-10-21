@@ -11,6 +11,7 @@
 //! one move and ends with it. Its private channel and the check of who is calling are in
 //! `pctwin-helper-os`; everything here is safe Rust.
 
+pub mod account;
 pub mod client;
 pub mod lock;
 pub mod person;

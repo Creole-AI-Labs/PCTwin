@@ -109,7 +109,9 @@ fn run(args: &Args) -> Result<(), String> {
     let laptop = args.laptop;
     let mut scanner = move |account: &str| scan_person(laptop, account);
     let mut stream = pipe.stream();
+    let mut maker = pctwin_helper::account::create_account;
     Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
+        .with_account_maker(&mut maker)
         .serve(&mut stream)
         .map_err(|e| e.to_string())
 }
@@ -127,7 +129,9 @@ fn run(args: &Args) -> Result<(), String> {
     }
     let laptop = args.laptop;
     let mut scanner = move |account: &str| scan_person(laptop, account);
+    let mut maker = pctwin_helper::account::create_account;
     Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
+        .with_account_maker(&mut maker)
         .serve(&mut stream)
         .map_err(|e| e.to_string())
 }

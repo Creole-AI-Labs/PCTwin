@@ -33,6 +33,9 @@ pub enum Request {
     ScanPerson { account: String },
     /// Read `len` bytes from `offset` of the file behind `handle`.
     ReadBlocks { handle: u64, offset: u64, len: u32 },
+    /// New laptop: make the approved person's standard account `name`, shown as `full_name`,
+    /// with a temporary password they must change at their first sign-in.
+    CreateAccount { name: String, full_name: String },
     /// The move is over: the helper ends.
     Bye,
 }
@@ -69,6 +72,10 @@ pub enum Refusal {
     NoHome,
     #[error("too many files to hand out at once")]
     TooManyFiles,
+    #[error("an account with that name already exists, and was left as it is")]
+    AccountExists,
+    #[error("the account could not be made")]
+    AccountNotMade,
 }
 
 /// The helper's JSON answers.
@@ -76,6 +83,13 @@ pub enum Refusal {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Answer {
     Ready,
+    /// The account was made: its ID, and the temporary password, said once and never kept by
+    /// the helper. The app shows it to the approving administrator in a box of the system's own
+    /// (never on PCTwin's screens) and keeps it nowhere.
+    AccountMade {
+        account: String,
+        password: String,
+    },
     /// The person's totals; the handles follow in their own frame.
     Scanned {
         files: u64,

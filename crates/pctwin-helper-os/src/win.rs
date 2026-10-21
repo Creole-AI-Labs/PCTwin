@@ -15,6 +15,10 @@ use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_CANCELLED, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_SUCCESS,
     GetLastError, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
+use windows::Win32::NetworkManagement::NetManagement::{
+    NetApiBufferFree, NetUserAdd, NetUserGetInfo, NetUserSetInfo, UF_NORMAL_ACCOUNT, UF_SCRIPT,
+    USER_ACCOUNT_FLAGS, USER_INFO_1, USER_INFO_4, USER_PRIV_USER,
+};
 use windows::Win32::Security::Authorization::{
     ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
     ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
@@ -391,6 +395,96 @@ fn os_volume_drive_type(file: &[u16]) -> Result<u32, HRESULT> {
             .map(|()| GetDriveTypeW(PCWSTR(root.as_ptr())))
     };
     r.map_err(|e| e.code())
+}
+
+/// Makes the standard (never administrator) local account `name`, shown as `full_name`, with
+/// `password`, which must be changed at its first sign-in; returns its SID. The password is
+/// passed to the system in memory only, never on a command line.
+pub(crate) fn add_standard_account(
+    name: &str,
+    full_name: &str,
+    password: &str,
+) -> Result<String, Error> {
+    let name_w = wide(OsStr::new(name));
+    let mut password_w = wide(OsStr::new(password));
+    let added = os_net_user_add(&name_w, &password_w, &wide(OsStr::new(full_name)));
+    // The password's copy here is cleared whatever happened.
+    password_w.iter_mut().for_each(|c| *c = 0);
+    added.map_err(net_error)?;
+    os_expire_password(&name_w).map_err(net_error)
+}
+
+fn net_error(status: u32) -> Error {
+    match status {
+        // NERR_UserExists, NERR_GroupExists
+        2224 | 2223 => Error::AlreadyExists,
+        // ERROR_ACCESS_DENIED
+        5 => Error::AccessDenied,
+        other => Error::Io(std::io::Error::from_raw_os_error(other as i32)),
+    }
+}
+
+/// `NetUserAdd` at level 1: a normal account with the user privilege (never administrator).
+fn os_net_user_add(name: &[u16], password: &[u16], comment: &[u16]) -> Result<(), u32> {
+    assert!(name.ends_with(&[0]) && password.ends_with(&[0]) && comment.ends_with(&[0]));
+    let info = USER_INFO_1 {
+        usri1_name: PWSTR(name.as_ptr().cast_mut()),
+        usri1_password: PWSTR(password.as_ptr().cast_mut()),
+        usri1_password_age: 0,
+        usri1_priv: USER_PRIV_USER,
+        usri1_home_dir: PWSTR::null(),
+        usri1_comment: PWSTR(comment.as_ptr().cast_mut()),
+        usri1_flags: USER_ACCOUNT_FLAGS(UF_SCRIPT.0 | UF_NORMAL_ACCOUNT),
+        usri1_script_path: PWSTR::null(),
+    };
+    // SAFETY: every string is NUL-terminated (checked above) and outlives the call; the system
+    // only reads them (the binding's PWSTR is not written through by NetUserAdd), and `info` is
+    // a USER_INFO_1 as level 1 requires, passed by address for the call only.
+    #[expect(unsafe_code, reason = "NetUserAdd has no safe binding")]
+    let status = unsafe { NetUserAdd(PCWSTR::null(), 1, std::ptr::from_ref(&info).cast(), None) };
+    if status == 0 { Ok(()) } else { Err(status) }
+}
+
+/// Marks `name`'s password expired (it must be changed at the next sign-in), read back first so
+/// nothing else of the account is reset, and returns its SID as text.
+fn os_expire_password(name: &[u16]) -> Result<String, u32> {
+    assert!(name.ends_with(&[0]));
+    let mut buffer: *mut u8 = std::ptr::null_mut();
+    // SAFETY: `name` is NUL-terminated; NetUserGetInfo allocates a USER_INFO_4 at `buffer`,
+    // which is read and changed only while it lives and freed exactly once below, whatever
+    // happens. Its password field is null as read, so NetUserSetInfo leaves the password as it
+    // is; the SID it holds points inside the same allocation and is turned into text (the
+    // text's own allocation freed once) before the buffer is freed.
+    #[expect(
+        unsafe_code,
+        reason = "NetUserGetInfo, NetUserSetInfo and ConvertSidToStringSidW have no safe binding"
+    )]
+    let r = unsafe {
+        let got = NetUserGetInfo(PCWSTR::null(), PCWSTR(name.as_ptr()), 4, &mut buffer);
+        if got != 0 {
+            return Err(got);
+        }
+        let info = &mut *buffer.cast::<USER_INFO_4>();
+        info.usri4_password_expired = 1;
+        info.usri4_password = PWSTR::null();
+        let set = NetUserSetInfo(PCWSTR::null(), PCWSTR(name.as_ptr()), 4, buffer, None);
+        let mut text = PWSTR::null();
+        let sid = if set == 0 {
+            match ConvertSidToStringSidW(info.usri4_user_sid, &mut text) {
+                Ok(()) => {
+                    let s = String::from_utf16_lossy(text.as_wide());
+                    LocalFree(Some(HLOCAL(text.0.cast())));
+                    Ok(s)
+                }
+                Err(_) => Err(1332), // ERROR_NONE_MAPPED
+            }
+        } else {
+            Err(set)
+        };
+        NetApiBufferFree(Some(buffer.cast()));
+        sid
+    };
+    r
 }
 
 /// The machine's own architecture (`IMAGE_FILE_MACHINE_*`), whatever this process runs as.
