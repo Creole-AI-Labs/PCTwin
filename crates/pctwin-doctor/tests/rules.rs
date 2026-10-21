@@ -97,6 +97,67 @@ fn only_virtual_connections_mean_probably_not_connected() {
 }
 
 #[test]
+fn a_hyper_v_switch_with_any_name_carries_the_real_network() {
+    let mut e = healthy();
+    e.interfaces = Some(vec![
+        iface("Loopback", "127.0.0.1"),
+        iface("vEthernet (Office LAN)", "192.168.1.40"),
+        iface("vEthernet (WSL)", "172.29.48.1"),
+    ]);
+    e.old_laptops_found = Some(0);
+    let found = causes(&e, Role::NewLaptop);
+    assert!(
+        !found.contains(&(Cause::NotConnected, Certainty::Likely)),
+        "{found:?}"
+    );
+    // WSL's and the Default Switch's private networks alone are not a real network.
+    e.interfaces = Some(vec![
+        iface("vEthernet (Default Switch)", "192.168.208.1"),
+        iface("vEthernet (WSL)", "172.29.48.1"),
+    ]);
+    assert_eq!(
+        causes(&e, Role::NewLaptop)[0],
+        (Cause::NotConnected, Certainty::Likely)
+    );
+}
+
+#[test]
+fn a_vpn_called_ethernet_is_known_by_its_adapter_description() {
+    use pctwin_doctor::kind_of;
+    assert_eq!(
+        kind_of(
+            "Ethernet 3",
+            Some(
+                "Cisco AnyConnect Secure Mobility Client Virtual Miniport Adapter for Windows x64"
+            )
+        ),
+        InterfaceKind::Vpn
+    );
+    assert_eq!(
+        kind_of("Ethernet 4", Some("PANGP Virtual Ethernet Adapter")),
+        InterfaceKind::Vpn
+    );
+    assert_eq!(
+        kind_of(
+            "Ethernet 2",
+            Some("Fortinet SSL VPN Virtual Ethernet Adapter")
+        ),
+        InterfaceKind::Vpn
+    );
+    assert_eq!(
+        kind_of("Ethernet", Some("Intel(R) Ethernet Connection I219-V")),
+        InterfaceKind::Network
+    );
+    assert_eq!(
+        kind_of("Ethernet 5", Some("VirtualBox Host-Only Ethernet Adapter")),
+        InterfaceKind::Virtual
+    );
+    // The name decides when it is plain.
+    assert_eq!(kind_of("Wi-Fi", None), InterfaceKind::Network);
+    assert_eq!(kind_of("utun3", Some("anything")), InterfaceKind::Vpn);
+}
+
+#[test]
 fn a_refused_send_on_a_mac_points_at_the_local_network_permission() {
     let mut e = healthy();
     e.is_macos = true;
