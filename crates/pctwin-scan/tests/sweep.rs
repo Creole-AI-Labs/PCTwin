@@ -1345,26 +1345,56 @@ fn a_folder_renamed_inside_an_apps_folder_during_the_sweep_is_a_blind_spot() {
     for i in 0..200 {
         write(&lab.c.join(apps).join(format!("App{i}/app.bin")), 10);
     }
-    let stop = AtomicBool::new(false);
-    let mut renamed = false;
     let base = lab.c.join(apps);
+    let limits = SweepLimits {
+        checkpoint_entries: 1,
+        checkpoint_every: std::time::Duration::ZERO,
+        ..SweepLimits::default()
+    };
+    // The sweep stops at its first save and goes on from there, one step at a time, until an
+    // app folder is waiting in the saved queue; that folder is renamed while the sweep is stopped,
+    // so the rename always lands before the folder is listed, however fast the machine (a sweep
+    // left running can list every folder between two saves).
+    let mut resume = None;
+    let mut renamed = false;
+    for _ in 0..50 {
+        let stop = AtomicBool::new(false);
+        let mut saved = None;
+        let step = sweep(
+            sized(facts(&lab, false), 0),
+            &mut Answers::default(),
+            &stop,
+            &mut |view| {
+                if saved.is_none() {
+                    saved = Some(view.to_json());
+                    stop.store(true, Ordering::SeqCst);
+                }
+            },
+            &limits,
+            resume.take(),
+        );
+        assert!(
+            !step.finished,
+            "the sweep finished before an app folder was seen waiting"
+        );
+        let saved = saved.expect("a checkpoint");
+        renamed = rename_a_queued_folder(&saved, &base, "App", 200);
+        resume = Some(pctwin_scan::Frontier::from_json(&saved).unwrap());
+        if renamed {
+            break;
+        }
+    }
+    assert!(renamed);
+    let go = AtomicBool::new(false);
     let s = sweep(
         sized(facts(&lab, false), 0),
         &mut Answers::default(),
-        &stop,
-        &mut |view| {
-            if !renamed {
-                renamed = rename_a_queued_folder(&view.to_json(), &base, "App", 200);
-            }
-        },
-        &SweepLimits {
-            checkpoint_entries: 1,
-            checkpoint_every: std::time::Duration::ZERO,
-            ..SweepLimits::default()
-        },
-        None,
+        &go,
+        &mut |_| {},
+        &limits,
+        resume,
     );
-    assert!(renamed);
+    assert!(s.finished);
     assert!(
         s.blind_spots
             .iter()

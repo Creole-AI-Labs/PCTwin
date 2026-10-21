@@ -188,8 +188,15 @@ fn when_nothing_explains_it_the_doctor_lists_the_likely_causes_with_a_fix_for_ea
     );
     // Every finding has a plain-language message and a fix to show.
     for f in diagnose(&e, Role::NewLaptop).findings {
-        assert!(f.cause.message_key().starts_with("doctor."));
-        assert!(f.cause.fix_key().starts_with("doctor."));
+        // Keys are the screens' Fluent message ids: letters, digits and hyphens, no dots.
+        for key in [f.cause.message_key(), f.cause.fix_key()] {
+            assert!(key.starts_with("doctor-"), "{key}");
+            assert!(
+                key.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{key} is not a valid Fluent message id"
+            );
+        }
     }
 }
 
@@ -497,4 +504,33 @@ fn the_doctor_is_honest_across_every_combination_of_evidence() {
         }
     }
     assert_eq!(checked, 7 * 3 * 3 * 2 * 3 * 2 * 2);
+}
+
+/// Every cause's keys are Fluent message ids the screens can hold (letters, digits and hyphens;
+/// Fluent refuses a dot), each distinct.
+#[test]
+fn every_cause_has_fluent_keys_of_its_own() {
+    let all = [
+        Cause::NotConnected,
+        Cause::MacLocalNetworkDenied,
+        Cause::DiscoveryBlockedOnThisLaptop,
+        Cause::WindowsPublicNetwork("Wi-Fi".into()),
+        Cause::VpnOn(vec!["Proton".into()]),
+        Cause::OldLaptopNotPairing,
+        Cause::DifferentNetworks,
+        Cause::GuestNetworkHidesDevices,
+    ];
+    let mut seen = std::collections::BTreeSet::new();
+    for cause in &all {
+        for key in [cause.message_key(), cause.fix_key()] {
+            assert!(
+                key.starts_with("doctor-")
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{key} is not a valid Fluent message id"
+            );
+            assert!(seen.insert(key), "{key} is used twice");
+        }
+    }
 }
