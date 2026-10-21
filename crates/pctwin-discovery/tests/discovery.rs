@@ -107,7 +107,12 @@ fn the_announcement_carries_only_the_label_and_the_port() {
                 .map(|p| p.key().to_string())
                 .collect();
             keys.sort();
-            assert_eq!(keys, ["n", "v"], "nothing but the label and the version");
+            assert_eq!(
+                keys,
+                ["n", "pv", "v"],
+                "nothing but the label, the format version and the pairing versions"
+            );
+            assert_eq!(info.get_property_val_str("pv"), Some("1"));
             let host = info.get_hostname().to_lowercase();
             let instance = info.get_fullname().to_lowercase();
             assert!(host.starts_with("pctwin-"), "{host}");
