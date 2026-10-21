@@ -24,6 +24,30 @@ use pctwin_transfer::{
 };
 use tokio::sync::mpsc;
 
+/// The usual places a person's files land in inside their home, by the move's place labels:
+/// the system's own folder names, and one folder for everything else.
+pub fn usual_places() -> BTreeMap<String, String> {
+    let videos = if cfg!(target_os = "macos") {
+        "Movies"
+    } else {
+        "Videos"
+    };
+    [
+        ("desktop", "Desktop"),
+        ("documents", "Documents"),
+        ("downloads", "Downloads"),
+        ("pictures", "Pictures"),
+        ("music", "Music"),
+        ("videos", videos),
+        ("home", "From your old laptop"),
+        ("public", "From your old laptop"),
+        ("other", "From your old laptop"),
+    ]
+    .into_iter()
+    .map(|(l, f)| (l.to_string(), f.to_string()))
+    .collect()
+}
+
 /// The one approved place of a hand-over: the person's home.
 const HOME: &str = "home";
 

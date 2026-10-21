@@ -21,8 +21,23 @@ pub struct Counted {
 pub trait NewLaptop {
     /// This move's holding area, made once.
     fn area(&mut self) -> Result<PathBuf, Refusal>;
-    /// One person's folder in it, named `key`, for the mover to fill.
-    fn person_folder(&mut self, area: &Path, key: &str) -> Result<PathBuf, Refusal>;
+    /// One person's folder in it, named `key`, for the mover to fill (and, on Windows, for
+    /// `person` to read at their sign-in).
+    fn person_folder(
+        &mut self,
+        area: &Path,
+        key: &str,
+        person: &Account,
+    ) -> Result<PathBuf, Refusal>;
+    /// Makes the hand-over of `folder` run at `person`'s next sign-in, as them (`name`: the
+    /// account's name, when the helper made it; `key`: the entry's name).
+    fn hand_over_at_sign_in(
+        &mut self,
+        person: &Account,
+        name: &str,
+        folder: &Path,
+        key: &str,
+    ) -> Result<(), Refusal>;
     /// Hands `folder` over into the home of `account` (named `name`, when the helper made it).
     fn hand_over(
         &mut self,
@@ -56,6 +71,15 @@ pub fn places() -> BTreeMap<String, String> {
     .collect()
 }
 
+/// `pctwin-handover`, beside this program.
+fn handover_program() -> Result<PathBuf, Refusal> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(Path::to_path_buf))
+        .map(|d| d.join(format!("pctwin-handover{}", std::env::consts::EXE_SUFFIX)))
+        .ok_or(Refusal::Unreadable)
+}
+
 /// The real system: the holding area, people's homes, and the hand-over program.
 pub struct System {
     pub mover: Account,
@@ -66,9 +90,32 @@ impl NewLaptop for System {
         pctwin_helper_os::holding::create_holding_area(&self.mover).map_err(|_| Refusal::NoHome)
     }
 
-    fn person_folder(&mut self, area: &Path, key: &str) -> Result<PathBuf, Refusal> {
-        pctwin_helper_os::holding::person_folder(area, key, &self.mover)
+    fn person_folder(
+        &mut self,
+        area: &Path,
+        key: &str,
+        person: &Account,
+    ) -> Result<PathBuf, Refusal> {
+        pctwin_helper_os::holding::person_folder(area, key, &self.mover, Some(person))
             .map_err(|_| Refusal::NoHome)
+    }
+
+    fn hand_over_at_sign_in(
+        &mut self,
+        person: &Account,
+        name: &str,
+        folder: &Path,
+        key: &str,
+    ) -> Result<(), Refusal> {
+        pctwin_helper_os::signin::schedule(
+            person,
+            name,
+            &self.mover,
+            folder,
+            &handover_program()?,
+            key,
+        )
+        .map_err(|_| Refusal::Unreadable)
     }
 
     fn hand_over(
@@ -79,11 +126,7 @@ impl NewLaptop for System {
     ) -> Result<Counted, Refusal> {
         let home =
             pctwin_helper_os::holding::home_folder(account, name).map_err(|_| Refusal::NoHome)?;
-        let program = std::env::current_exe()
-            .ok()
-            .and_then(|e| e.parent().map(Path::to_path_buf))
-            .map(|d| d.join(format!("pctwin-handover{}", std::env::consts::EXE_SUFFIX)))
-            .ok_or(Refusal::Unreadable)?;
+        let program = handover_program()?;
         let account_id = match account {
             Account::Sid(sid) => sid.as_str().to_string(),
             Account::Uid(uid) => uid.to_string(),

@@ -318,14 +318,35 @@ fn holding_and_handing_over_only_for_approved_people() {
     struct Fake {
         areas: u32,
         handed: Vec<(String, String, PathBuf)>,
+        scheduled: Vec<(String, String, PathBuf, String)>,
     }
     impl NewLaptop for Fake {
         fn area(&mut self) -> Result<PathBuf, Refusal> {
             self.areas += 1;
             Ok(PathBuf::from("/area"))
         }
-        fn person_folder(&mut self, area: &Path, key: &str) -> Result<PathBuf, Refusal> {
+        fn person_folder(
+            &mut self,
+            area: &Path,
+            key: &str,
+            _person: &pctwin_helper_os::Account,
+        ) -> Result<PathBuf, Refusal> {
             Ok(area.join(key))
+        }
+        fn hand_over_at_sign_in(
+            &mut self,
+            person: &pctwin_helper_os::Account,
+            name: &str,
+            folder: &Path,
+            key: &str,
+        ) -> Result<(), Refusal> {
+            self.scheduled.push((
+                format!("{person:?}"),
+                name.to_string(),
+                folder.to_path_buf(),
+                key.to_string(),
+            ));
+            Ok(())
         }
         fn hand_over(
             &mut self,
@@ -379,6 +400,12 @@ fn holding_and_handing_over_only_for_approved_people() {
         Request::HandOverNow {
             account: "bea".into(),
         },
+        Request::HandOverAtSignIn {
+            account: "1007".into(),
+        },
+        Request::HandOverAtSignIn {
+            account: "carl".into(),
+        },
     ] {
         send_request(&mut wire, &r).unwrap();
     }
@@ -424,8 +451,14 @@ fn holding_and_handing_over_only_for_approved_people() {
                 kept: 0,
                 failed: 0
             }),
+            FromHelper::Answer(Answer::AtSignIn),
+            FromHelper::Answer(Answer::Refused(Refusal::NotApproved)),
         ]
     );
+    // The approved ID's own held folder, at their sign-in, under an entry named by the helper.
+    assert_eq!(fake.scheduled.len(), 1);
+    assert_eq!(fake.scheduled[0].2, Path::new("/area").join("p2"));
+    assert!(fake.scheduled[0].3.ends_with("p2"));
     // One holding area for the move; Bea's hand-over is into the account the helper made.
     assert_eq!(fake.areas, 1);
     assert_eq!(fake.handed.len(), 1);

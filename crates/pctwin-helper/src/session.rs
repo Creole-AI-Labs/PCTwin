@@ -102,13 +102,48 @@ impl<'s> Session<'s> {
         };
         // Named by the helper, never by the app.
         let key = format!("p{}", self.held.len() + 1);
-        match system.person_folder(&area, &key) {
+        let Some((person, _)) = self.account_of(account) else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        let Some(system) = self.new_laptop.as_mut() else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        match system.person_folder(&area, &key, &person) {
             Ok(path) => {
                 self.held.insert(account.to_string(), path.clone());
                 Answer::Holding {
                     path: path.to_string_lossy().into_owned(),
                 }
             }
+            Err(why) => Answer::Refused(why),
+        }
+    }
+
+    fn hand_over_at_sign_in(&mut self, account: &str) -> Answer {
+        let Some((person, name)) = self.account_of(account) else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        let Some(folder) = self.held.get(account).cloned() else {
+            return Answer::Refused(Refusal::NothingHeld);
+        };
+        let key = folder
+            .file_name()
+            .map(|k| k.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let entry = format!(
+            "{}{}",
+            self.area
+                .as_ref()
+                .and_then(|a| a.file_name())
+                .map(|a| a.to_string_lossy().chars().take(16).collect::<String>())
+                .unwrap_or_default(),
+            key
+        );
+        let Some(system) = self.new_laptop.as_mut() else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        match system.hand_over_at_sign_in(&person, &name, &folder, &entry) {
+            Ok(()) => Answer::AtSignIn,
             Err(why) => Answer::Refused(why),
         }
     }
@@ -211,6 +246,10 @@ impl<'s> Session<'s> {
                 }
                 Request::HandOverNow { account } => {
                     let answer = self.hand_over_now(&account);
+                    send_answer(channel, &answer)?;
+                }
+                Request::HandOverAtSignIn { account } => {
+                    let answer = self.hand_over_at_sign_in(&account);
                     send_answer(channel, &answer)?;
                 }
                 Request::Bye => {

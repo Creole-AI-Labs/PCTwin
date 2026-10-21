@@ -47,10 +47,10 @@ fn a_holding_area_is_the_mover_s_alone_and_inside_an_administrators_folder() {
     let area = pctwin_helper_os::holding::create_holding_area(&mover).unwrap();
     let other_area = pctwin_helper_os::holding::create_holding_area(&mover).unwrap();
     assert_ne!(area, other_area, "a fresh one each move");
-    let first = pctwin_helper_os::holding::person_folder(&area, "bea", &mover).unwrap();
+    let first = pctwin_helper_os::holding::person_folder(&area, "bea", &mover, None).unwrap();
     // Never one that exists, and never a key that is not plain.
-    assert!(pctwin_helper_os::holding::person_folder(&area, "bea", &mover).is_err());
-    assert!(pctwin_helper_os::holding::person_folder(&area, "../x", &mover).is_err());
+    assert!(pctwin_helper_os::holding::person_folder(&area, "bea", &mover, None).is_err());
+    assert!(pctwin_helper_os::holding::person_folder(&area, "../x", &mover, None).is_err());
     let check = || {
         #[cfg(windows)]
         {

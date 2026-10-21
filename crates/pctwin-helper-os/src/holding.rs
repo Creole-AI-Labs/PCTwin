@@ -23,6 +23,19 @@ use crate::{Account, Error};
 #[cfg(unix)]
 use std::path::Path;
 
+/// The folder every move's holding area is made in on this laptop.
+pub fn staging_root() -> Option<PathBuf> {
+    #[cfg(windows)]
+    return std::env::var_os("ProgramFiles")
+        .map(|p| PathBuf::from(p).join("PCTwin").join("staging"));
+    #[cfg(target_os = "macos")]
+    return Some(PathBuf::from("/Library/Application Support/PCTwin/staging"));
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return Some(PathBuf::from("/var/lib/pctwin/staging"));
+    #[cfg(not(any(windows, unix)))]
+    None
+}
+
 /// Makes this move's holding area for the mover's account, and returns where it is. Needs an
 /// administrator's rights. The people's folders inside it are made with [`person_folder`].
 pub fn create_holding_area(mover: &Account) -> Result<PathBuf, Error> {
@@ -85,8 +98,14 @@ fn mover_access(sid: &crate::Sid) -> String {
 }
 
 /// Makes the folder for one person's files, `key` (1 to 64 of `a-z`, `A-Z`, `0-9` and `-`),
-/// inside this move's holding area `area`, for the mover to fill. Never one that exists.
-pub fn person_folder(area: &std::path::Path, key: &str, mover: &Account) -> Result<PathBuf, Error> {
+/// inside this move's holding area `area`, for the mover to fill. Never one that exists. On
+/// Windows the person (`person`, when known) may read it too, for the hand-over at their sign-in.
+pub fn person_folder(
+    area: &std::path::Path,
+    key: &str,
+    mover: &Account,
+    person: Option<&Account>,
+) -> Result<PathBuf, Error> {
     if key.is_empty()
         || key.len() > 64
         || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
@@ -99,7 +118,12 @@ pub fn person_folder(area: &std::path::Path, key: &str, mover: &Account) -> Resu
             return Err(Error::BadInput("a Windows account"));
         };
         let path = area.join(key);
-        crate::win::create_folder_with_access(&path, &mover_access(sid))?;
+        let mut sddl = mover_access(sid);
+        if let Some(Account::Sid(person)) = person {
+            // Read, write and delete: their own files, handed over at their sign-in.
+            sddl.push_str(&format!("(A;OICI;0x1301bf;;;{})", person.as_str()));
+        }
+        crate::win::create_folder_with_access(&path, &sddl)?;
         Ok(path)
     }
     #[cfg(unix)]
@@ -108,6 +132,8 @@ pub fn person_folder(area: &std::path::Path, key: &str, mover: &Account) -> Resu
         let Account::Uid(uid) = mover else {
             return Err(Error::BadInput("a Unix account"));
         };
+        // The person is given the folder at the hand-over (`give_to`), not before.
+        let _ = person;
         let flags = OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::RDONLY | OFlags::CLOEXEC;
         let parent =
             rustix::fs::open(area, flags, Mode::empty()).map_err(|e| Error::Io(e.into()))?;

@@ -83,6 +83,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Sign-in hand-overs that are done (their held folder gone) are cleared away first.
+    if let Some(root) = pctwin_helper_os::holding::staging_root() {
+        pctwin_helper_os::signin::clean(&root);
+    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {

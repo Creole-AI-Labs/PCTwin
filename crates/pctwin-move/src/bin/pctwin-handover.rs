@@ -1,11 +1,15 @@
 //! Hands another person's files over from the holding area into their own folders (see
-//! `pctwin_move::handover`). Started by the administrator helper:
+//! `pctwin_move::handover`). Started by the administrator helper (as the person themselves on Mac
+//! and Linux), or by the person's own sign-in once the move is over:
 //!
-//! `pctwin-handover --holding <folder> --home <folder> --account <id> --journal <file>
-//!  --into <label>=<folder name>...`
+//! `pctwin-handover --holding <folder> [--home <folder>] [--account <id>] [--journal <file>]
+//!  [--into <label>=<folder name>...]`
 //!
-//! On Mac and Linux it runs as the person themselves. It prints one line per file (`landed`,
-//! `kept` or `failed`, then the held path) and ends with 0 only if every file landed.
+//! Without `--home`, the signed-in person's own home; without `--account`, them; without
+//! `--journal`, `handover.journal` in the held folder; without `--into`, the usual places
+//! ([`pctwin_move::handover::usual_places`]). It prints one line per file (`landed`, `kept`,
+//! `failed` or `not-plain`, then the held path) and ends with 0 only if every file landed. Run
+//! again, it hands over only what is still held.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -14,6 +18,7 @@ use std::process::ExitCode;
 use pctwin_journal::Journal;
 use pctwin_transfer::ReceiveOutcome;
 
+#[derive(Debug)]
 struct Args {
     holding: PathBuf,
     home: PathBuf,
@@ -22,7 +27,15 @@ struct Args {
     places: BTreeMap<String, String>,
 }
 
-fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
+/// One plain folder name inside the home, never a path.
+fn is_folder_name(folder: &str) -> bool {
+    !folder.is_empty() && folder != "." && folder != ".." && !folder.contains(['/', '\\', '\0'])
+}
+
+fn parse(
+    mut args: impl Iterator<Item = String>,
+    own_home: Option<PathBuf>,
+) -> Result<Args, String> {
     let (mut holding, mut home, mut account, mut journal) = (None, None, None, None);
     let mut places = BTreeMap::new();
     while let Some(flag) = args.next() {
@@ -36,12 +49,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
                 let (label, folder) = value
                     .split_once('=')
                     .ok_or("--into takes <label>=<folder name>")?;
-                // One plain folder name inside the home, never a path.
-                if folder.is_empty()
-                    || folder == "."
-                    || folder == ".."
-                    || folder.contains(['/', '\\', '\0'])
-                {
+                if !is_folder_name(folder) {
                     return Err(format!("--into {label}: {folder} is not one folder name"));
                 }
                 if label.is_empty()
@@ -58,26 +66,40 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             _ => return Err(format!("unknown or repeated {flag}")),
         }
     }
-    if places.is_empty() {
-        return Err("--into is needed".into());
-    }
+    let holding = holding.ok_or("--holding is needed")?;
     Ok(Args {
-        holding: holding.ok_or("--holding is needed")?,
-        home: home.ok_or("--home is needed")?,
-        account: account.ok_or("--account is needed")?,
-        journal: journal.ok_or("--journal is needed")?,
-        places,
+        journal: journal.unwrap_or_else(|| holding.join("handover.journal")),
+        holding,
+        home: home
+            .or(own_home)
+            .ok_or("--home is needed: the signed-in person's home is not known")?,
+        account: account.unwrap_or_else(|| "self".into()),
+        places: if places.is_empty() {
+            pctwin_move::handover::usual_places()
+        } else {
+            places
+        },
     })
 }
 
+/// The signed-in person's own home, as their session says.
+fn own_home() -> Option<PathBuf> {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(var).map(PathBuf::from)
+}
+
 fn main() -> ExitCode {
-    let args = match parse(std::env::args().skip(1)) {
+    let args = match parse(std::env::args().skip(1), own_home()) {
         Ok(a) => a,
         Err(why) => {
             eprintln!("pctwin-handover: {why}");
             return ExitCode::from(2);
         }
     };
+    if !args.holding.is_dir() {
+        // Handed over already (or never held): nothing to do.
+        return ExitCode::SUCCESS;
+    }
     let journal = match Journal::open(&args.journal) {
         Ok(j) => j,
         Err(e) => {
@@ -139,51 +161,53 @@ mod tests {
     use super::*;
 
     fn a(v: &[&str]) -> Result<Args, String> {
-        parse(v.iter().map(|s| s.to_string()))
-    }
-
-    const BASE: [&str; 8] = [
-        "--holding",
-        "h",
-        "--home",
-        "m",
-        "--account",
-        "1001",
-        "--journal",
-        "j",
-    ];
-
-    fn with(extra: &[&str]) -> Vec<&'static str> {
-        let mut v: Vec<&str> = BASE.to_vec();
-        v.extend(
-            extra
-                .iter()
-                .map(|s| -> &'static str { Box::leak(s.to_string().into_boxed_str()) }),
-        );
-        v
+        parse(v.iter().map(|s| s.to_string()), Some(PathBuf::from("own")))
     }
 
     #[test]
     fn the_command_line_is_read_strictly() {
-        assert!(a(&with(&["--into", "documents=Documents"])).is_ok());
-        // A place is needed, and each part once.
-        assert!(a(&BASE).is_err());
-        assert!(a(&with(&["--into", "documents=Documents", "--home", "n"])).is_err());
+        // Only the held folder is needed; the rest has the signed-in person's defaults.
+        let short = a(&["--holding", "h"]).unwrap();
+        assert_eq!(short.home, PathBuf::from("own"));
+        assert_eq!(short.account, "self");
+        assert_eq!(short.journal, PathBuf::from("h").join("handover.journal"));
+        assert_eq!(short.places, pctwin_move::handover::usual_places());
+        assert!(parse(["--holding", "h"].iter().map(|s| s.to_string()), None).is_err());
+        assert!(a(&[]).is_err());
+        let full = a(&[
+            "--holding",
+            "h",
+            "--home",
+            "m",
+            "--account",
+            "1",
+            "--journal",
+            "j",
+            "--into",
+            "documents=Documents",
+        ])
+        .unwrap();
+        assert_eq!(full.places.len(), 1);
+        assert!(a(&["--holding", "h", "--holding", "h2"]).is_err());
         assert!(
-            a(&with(&[
+            a(&[
+                "--holding",
+                "h",
                 "--into",
-                "documents=Documents",
+                "documents=A",
                 "--into",
-                "documents=Docs"
-            ]))
+                "documents=B"
+            ])
             .is_err()
         );
-        // A label is plain; a folder is one name inside the home, never a path.
-        assert!(a(&with(&["--into", "../x=Documents"])).is_err());
+        assert!(a(&["--holding", "h", "--into", "../x=Documents"]).is_err());
         for folder in ["../etc", "a/b", "a\\b", ".", "..", ""] {
             let value = format!("documents={folder}");
-            assert!(a(&with(&["--into", &value])).is_err(), "{folder}");
+            assert!(
+                a(&["--holding", "h", "--into", &value]).is_err(),
+                "{folder}"
+            );
         }
-        assert!(a(&with(&["--into", "documents=Documents", "--run", "x"])).is_err());
+        assert!(a(&["--holding", "h", "--run", "x"]).is_err());
     }
 }

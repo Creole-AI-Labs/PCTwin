@@ -64,6 +64,7 @@ use std::path::{Component, Path, PathBuf};
 pub mod chip;
 pub mod daemon;
 pub mod holding;
+pub mod signin;
 
 #[cfg(windows)]
 mod win;

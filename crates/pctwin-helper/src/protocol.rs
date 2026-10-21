@@ -40,8 +40,11 @@ pub enum Request {
     /// files are put during the move (made the first time it is asked for).
     HoldFor { account: String },
     /// New laptop: hand the approved person `account`'s held files over into their own folders,
-    /// now.
+    /// now (the administrator's way, at the end of the move).
     HandOverNow { account: String },
+    /// New laptop: hand the approved person `account`'s held files over when they next sign in,
+    /// as them (the usual way once the move is over).
+    HandOverAtSignIn { account: String },
     /// The move is over: the helper ends.
     Bye,
 }
@@ -111,6 +114,8 @@ pub enum Answer {
         kept: u64,
         failed: u64,
     },
+    /// The person's files will be handed over at their next sign-in.
+    AtSignIn,
     /// The person's totals; the handles follow in their own frame.
     Scanned {
         files: u64,
