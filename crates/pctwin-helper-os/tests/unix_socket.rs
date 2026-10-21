@@ -441,6 +441,7 @@ fn a_racing_account_never_changes_anything_outside_the_folder() {
     let before: Vec<_> = watched.iter().map(|p| stamp(p)).collect();
     let folder = arena.join("d");
     let (mut bound, mut refused) = (0u32, 0u32);
+    let mut lost: Option<u32> = None;
     for attempt in 1..=RACE_ATTEMPTS {
         clear(&arena);
         let r = ChannelDir::create(&folder)
@@ -448,11 +449,11 @@ fn a_racing_account_never_changes_anything_outside_the_folder() {
         match &r {
             Ok((_, server)) => {
                 // Succeeded on the real folder: its socket answers through its path, served
-                // by this process.
-                assert!(
-                    connect(server.path(), 0).is_ok(),
-                    "attempt {attempt}: bind succeeded but its path does not reach it"
-                );
+                // by this process. Counted, not stopped at, so a change outside the folder
+                // (checked next, and stopped at) is still found and its attempt reported.
+                if connect(server.path(), 0).is_err() {
+                    lost.get_or_insert(attempt);
+                }
                 bound += 1;
             }
             Err(_) => refused += 1,
@@ -482,7 +483,7 @@ fn a_racing_account_never_changes_anything_outside_the_folder() {
     let report = String::from_utf8_lossy(&out.stdout);
     let line = report
         .lines()
-        .find(|l| l.starts_with("racer "))
+        .find_map(|l| l.find("racer tries=").map(|i| &l[i..]))
         .unwrap_or_else(|| panic!("no report from the racer: {report}"));
     println!("{RACE_ATTEMPTS} attempts: {bound} bound, {refused} refused; {line}");
     let tries: u64 = line
@@ -494,6 +495,10 @@ fn a_racing_account_never_changes_anything_outside_the_folder() {
     assert!(
         tries >= u64::from(RACE_ATTEMPTS),
         "the racer barely ran: {line}"
+    );
+    assert_eq!(
+        lost, None,
+        "from this attempt on, a bind succeeded but its path did not reach it"
     );
     assert!(
         bound >= RACE_ATTEMPTS / 2,
