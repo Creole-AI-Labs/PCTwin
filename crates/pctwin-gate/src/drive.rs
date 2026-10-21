@@ -319,6 +319,24 @@ impl DriveKind {
         )
     }
 
+    /// Whether this file system keeps each file's identity for good, so the identity recorded
+    /// proves which file it is after a restart (FAT and exFAT number files by where their entries
+    /// sit, and Linux renumbers FAT files at every mount).
+    pub(crate) fn keeps_identities(self) -> bool {
+        matches!(
+            self,
+            Self::Ntfs
+                | Self::Apfs
+                | Self::HfsPlus
+                | Self::Ext4
+                | Self::Xfs
+                | Self::Btrfs
+                | Self::Zfs
+                | Self::F2fs
+                | Self::Memory
+        )
+    }
+
     /// Whether this file system tells `a.jpg` and `A.jpg` apart. APFS and HFS+ usually do not;
     /// anything unknown is taken not to.
     fn tells_case_apart(self) -> bool {

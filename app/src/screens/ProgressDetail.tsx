@@ -1,9 +1,9 @@
 import { useLocalization } from "@fluent/react";
 import { Banner, Metrics } from "../components/kit";
-import { formatBytes, groupState, measuredPercent, minutesRange, pageLocale, type MoveProgress } from "../move";
+import { formatBytes, groupState, measuredPercent, pageLocale, type MoveProgress } from "../move";
 import { labelText } from "../pairing";
 import { TopStrip } from "./FrameParts";
-import { GroupBadge, GroupLabel, Heading, Notices } from "./ProgressParts";
+import { GroupBadge, GroupLabel, Heading, Notices, minutesText } from "./ProgressParts";
 
 /**
  * X02 Move progress, expanded (760 x 620): three measured numbers, then one table row for each
@@ -18,7 +18,7 @@ export default function ProgressDetail({
   const { l10n } = useLocalization();
   const paused = progress.state !== "running";
   const pct = measuredPercent(progress);
-  const timeLeft = progress.minutesLeft ? l10n.getString("progress-minutes", minutesRange(progress.minutesLeft)) : "—";
+  const timeLeft = progress.minutesLeft ? minutesText(l10n, progress.minutesLeft) : "—";
   return (
     <>
       <TopStrip onBack={onCollapse} labelId="progress-approved-job" />

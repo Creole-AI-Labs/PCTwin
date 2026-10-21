@@ -32,6 +32,10 @@ pub enum Step {
     Copied,
     /// An identical file was already on the new laptop; nothing was copied.
     AlreadyThere,
+    /// Kept on the new laptop, checked, but not finished under its real name: it needs the
+    /// person (a copy filled in under its name and not yet shown, or one that landed beside a
+    /// file PCTwin could not prove its own). Never counted copied.
+    NeedsAction,
     /// It did not move. Its reason is in the session's outcome for it.
     Failed,
 }
@@ -45,6 +49,7 @@ pub struct StepCounts {
     pub checking: u64,
     pub copied: u64,
     pub already_there: u64,
+    pub needs_action: u64,
     pub failed: u64,
 }
 
@@ -56,6 +61,7 @@ impl StepCounts {
             Step::Checking => &mut self.checking,
             Step::Copied => &mut self.copied,
             Step::AlreadyThere => &mut self.already_there,
+            Step::NeedsAction => &mut self.needs_action,
             Step::Failed => &mut self.failed,
         }
     }
@@ -67,6 +73,7 @@ impl StepCounts {
         self.checking += other.checking;
         self.copied += other.copied;
         self.already_there += other.already_there;
+        self.needs_action += other.needs_action;
         self.failed += other.failed;
     }
 }

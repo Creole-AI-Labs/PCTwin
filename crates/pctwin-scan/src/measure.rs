@@ -56,7 +56,7 @@ pub fn measure(root: &Path) -> Measure {
     let mut m = Measure::default();
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+        let Ok(entries) = std::fs::read_dir(crate::sweep::for_listing(&dir)) else {
             m.unreadable.push(dir);
             continue;
         };
@@ -65,7 +65,7 @@ pub fn measure(root: &Path) -> Measure {
                 m.unreadable.push(dir.clone());
                 continue;
             };
-            let path = entry.path();
+            let path = dir.join(entry.file_name());
             // The kind and details come from the listing itself and never follow a link.
             let (Ok(kind), Ok(meta)) = (entry.file_type(), entry.metadata()) else {
                 m.unreadable.push(path);

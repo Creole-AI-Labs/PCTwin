@@ -95,6 +95,19 @@ setup)
 remount)
   echo "== mount table before"
   mount | grep -F "$root" || true
+  # The drives are mounted again under another time zone (five and a half hours from the
+  # runner's): FAT keeps local time and macOS converts it with the offset in force at mount, so
+  # every time on a FAT drive may move, as after a summer-time change. Recovery must still know
+  # PCTwin's copy. A marker's creation time is printed before and after, as the record.
+  zone_before="$(sudo systemsetup -gettimezone 2>/dev/null | sed 's/^Time Zone: //')"
+  echo "time zone before: $zone_before"
+  while IFS='|' read -r kind img mnt want; do
+    : >"$mnt/.pctwin-tz-marker"
+    echo "$kind marker born before: $(stat -f %B "$mnt/.pctwin-tz-marker")"
+  done <"$list"
+  if [ "$zone_before" = "Asia/Kolkata" ]; then zone=Europe/London; else zone=Asia/Kolkata; fi
+  sudo systemsetup -settimezone "$zone" >/dev/null 2>&1 || echo "::warning::could not set the time zone"
+  echo "time zone now: $(sudo systemsetup -gettimezone 2>/dev/null)"
   while IFS='|' read -r kind img mnt want; do
     echo "kept" >"$mnt/.pctwin-remount-marker"
     detach "$img" "$mnt"
@@ -109,6 +122,8 @@ remount)
       exit 1
     fi
     echo "remounted $kind at $mnt: it was really detached and attached again"
+    echo "$kind marker born after: $(stat -f %B "$mnt/.pctwin-tz-marker")"
+    rm -f "$mnt/.pctwin-tz-marker"
   done <"$list"
   echo "== mount table after"
   mount | grep -F "$root" || true

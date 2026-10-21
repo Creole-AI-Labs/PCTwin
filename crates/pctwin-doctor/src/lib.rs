@@ -203,28 +203,28 @@ impl Cause {
     /// Translation key for what happened.
     pub fn message_key(&self) -> &'static str {
         match self {
-            Self::NotConnected => "doctor.not_connected",
-            Self::MacLocalNetworkDenied => "doctor.mac_local_network_denied",
-            Self::DiscoveryBlockedOnThisLaptop => "doctor.discovery_blocked",
-            Self::WindowsPublicNetwork(_) => "doctor.windows_public_network",
-            Self::VpnOn(_) => "doctor.vpn_on",
-            Self::OldLaptopNotPairing => "doctor.old_laptop_not_pairing",
-            Self::DifferentNetworks => "doctor.different_networks",
-            Self::GuestNetworkHidesDevices => "doctor.guest_network",
+            Self::NotConnected => "doctor-not-connected",
+            Self::MacLocalNetworkDenied => "doctor-mac-local-network-denied",
+            Self::DiscoveryBlockedOnThisLaptop => "doctor-discovery-blocked",
+            Self::WindowsPublicNetwork(_) => "doctor-windows-public-network",
+            Self::VpnOn(_) => "doctor-vpn-on",
+            Self::OldLaptopNotPairing => "doctor-old-laptop-not-pairing",
+            Self::DifferentNetworks => "doctor-different-networks",
+            Self::GuestNetworkHidesDevices => "doctor-guest-network",
         }
     }
 
     /// Translation key for what to do.
     pub fn fix_key(&self) -> &'static str {
         match self {
-            Self::NotConnected => "doctor.not_connected.fix",
-            Self::MacLocalNetworkDenied => "doctor.mac_local_network_denied.fix",
-            Self::DiscoveryBlockedOnThisLaptop => "doctor.discovery_blocked.fix",
-            Self::WindowsPublicNetwork(_) => "doctor.windows_public_network.fix",
-            Self::VpnOn(_) => "doctor.vpn_on.fix",
-            Self::OldLaptopNotPairing => "doctor.old_laptop_not_pairing.fix",
-            Self::DifferentNetworks => "doctor.different_networks.fix",
-            Self::GuestNetworkHidesDevices => "doctor.guest_network.fix",
+            Self::NotConnected => "doctor-not-connected-fix",
+            Self::MacLocalNetworkDenied => "doctor-mac-local-network-denied-fix",
+            Self::DiscoveryBlockedOnThisLaptop => "doctor-discovery-blocked-fix",
+            Self::WindowsPublicNetwork(_) => "doctor-windows-public-network-fix",
+            Self::VpnOn(_) => "doctor-vpn-on-fix",
+            Self::OldLaptopNotPairing => "doctor-old-laptop-not-pairing-fix",
+            Self::DifferentNetworks => "doctor-different-networks-fix",
+            Self::GuestNetworkHidesDevices => "doctor-guest-network-fix",
         }
     }
 }

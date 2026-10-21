@@ -3,6 +3,17 @@
 //!     pctwin-lab make <folder> [seed] [ordinary files] [big file bytes]
 //!     pctwin-lab snapshot <folder> <out.json>
 //!     pctwin-lab compare <before.json> <after.json>
+//!     pctwin-lab plan <seed> <people> <spec.json>
+//!     pctwin-lab plant <spec.json> <roots.json> <person label>
+//!     pctwin-lab unlock <spec.json> <roots.json> <person label>
+//!     pctwin-lab check-sweep <spec.json> <roots.json> <sweep.json> [<observed.json>]
+//!
+//! `plan` writes a seeded lab laptop (people and planted things, with the answer key); `plant`
+//! makes one person's planted things, run as that person so the system records them as the
+//! owner; `unlock` opens that person's refused folders again for clean-up and snapshots;
+//! `check-sweep` checks a `pctwin-sweep` result against the answer key and prints each problem
+//! (exit 1 if any). Run it as an administrator, who may look everywhere for the "no invented
+//! items" check.
 //!
 //! `make` prints what it made and skipped as JSON. `compare` prints each difference and exits 1
 //! if there is any.
@@ -68,8 +79,73 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
                 ExitCode::FAILURE
             })
         }
-        _ => Err("usage: pctwin-lab make|snapshot|compare ...".into()),
+        Some("plan") => {
+            let seed = arg_num(args, 1, 1)?;
+            let people = usize::try_from(arg_num(args, 2, 1)?).map_err(|e| e.to_string())?;
+            let out = args.get(3).ok_or("plan needs an output file")?;
+            let spec = pctwin_lab::plants::plan(seed, people);
+            let json = serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?;
+            std::fs::write(out, json).map_err(s)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(cmd @ ("plant" | "unlock")) => {
+            let spec: pctwin_lab::plants::LaptopSpec = read_json(args.get(1))?;
+            let roots: pctwin_lab::plants::Roots = read_json(args.get(2))?;
+            let who = args.get(3).ok_or("which person?")?;
+            if cmd == "plant" {
+                for made in pctwin_lab::plants::plant(&spec, &roots, Some(who)).map_err(s)? {
+                    println!("{}", made.display());
+                }
+            } else {
+                for p in spec.plants.iter().filter(|p| p.by == *who) {
+                    if let Some(top) = roots.top_of(p) {
+                        pctwin_lab::plants::unlock(&top).map_err(s)?;
+                    }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Some("check-sweep") => {
+            let spec: pctwin_lab::plants::LaptopSpec = read_json(args.get(1))?;
+            let roots: pctwin_lab::plants::Roots = read_json(args.get(2))?;
+            let sweep: serde_json::Value = read_json(args.get(3))?;
+            let observed: pctwin_lab::plants::Observed = match args.get(4) {
+                Some(_) => read_json(args.get(4))?,
+                None => Default::default(),
+            };
+            let exists = |p: &str| {
+                let p = if cfg!(windows) {
+                    p.replace('/', "\\")
+                } else {
+                    p.to_string()
+                };
+                std::fs::symlink_metadata(&p).is_ok()
+            };
+            let problems = pctwin_lab::plants::check(&spec, &roots, &sweep, &observed, &exists);
+            for line in &problems {
+                println!("{line}");
+            }
+            println!(
+                "{} planted things checked, {} problems",
+                spec.plants.len(),
+                problems.len()
+            );
+            Ok(if problems.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        _ => {
+            Err("usage: pctwin-lab make|snapshot|compare|plan|plant|unlock|check-sweep ...".into())
+        }
     }
+}
+
+fn read_json<T: serde::de::DeserializeOwned>(path: Option<&String>) -> Result<T, String> {
+    let path = path.ok_or("a file is missing")?;
+    let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("{path}: {e}"))
 }
 
 fn main() -> ExitCode {
