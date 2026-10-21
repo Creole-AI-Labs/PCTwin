@@ -3453,17 +3453,27 @@ async fn honest_flaky_links_arrive_reading_little_more_than_the_file() {
 #[tokio::test]
 async fn honest_flaky_lanes_arrive_within_the_bounds() {
     for sizes in [vec![8 * MIB; 4], vec![2 * MIB; 8]] {
-        let mut f = Flaky::new(&sizes, (Cut::CloseAfter(12), Cut::LoseAfter(4)));
-        f.lanes = 3;
-        let m = flaky(f).await;
-        m.assert_arrived(false);
-        let conns = m.conns.len() as u64;
+        // Whether a lane carries a block before the main connection is cut depends on how the
+        // runner schedules them: every run must keep the bounds, and the scenario runs again
+        // (a few times at most) until the lanes really dropped too, so it is never passed
+        // without being tried.
+        let mut lanes_dropped = false;
+        for _ in 0..5 {
+            let mut f = Flaky::new(&sizes, (Cut::CloseAfter(12), Cut::LoseAfter(4)));
+            f.lanes = 3;
+            let m = flaky(f).await;
+            m.assert_arrived(false);
+            m.assert_lost_reads_bounded(FLOOR, BLOCK, WINDOW);
+            m.assert_reads_bounded(FLOOR, BLOCK, WINDOW);
+            if m.losses() > m.conns.len() as u64 {
+                lanes_dropped = true;
+                break;
+            }
+        }
         assert!(
-            m.losses() > conns,
-            "lanes dropped as well as the main connection"
+            lanes_dropped,
+            "lanes dropped as well as the main connection, in one of five runs"
         );
-        m.assert_lost_reads_bounded(FLOOR, BLOCK, WINDOW);
-        m.assert_reads_bounded(FLOOR, BLOCK, WINDOW);
     }
 }
 
