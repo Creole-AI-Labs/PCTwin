@@ -1,9 +1,9 @@
 import { LocalizationProvider, Localized } from "@fluent/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { recoveryCheck, recoveryRun } from "./bridge";
-import { setTrayLabels } from "./native";
+import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
@@ -37,6 +37,11 @@ type Screen =
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
   const [language, setLanguage] = useState<LanguageCode>(() => initialLanguage ?? savedLanguage() ?? pickLanguage(navigator.languages));
   const [screen, setScreen] = useState<Screen>({ id: "welcome" });
+  // The mini panel (360 x 240) is the window: no header above it.
+  const [mini, setMini] = useState(false);
+  const onWindow = useCallback((mode: WindowMode) => {
+    setMini(mode === "mini");
+  }, []);
   const l10n = useMemo(() => localization(language), [language]);
   const main = useRef<HTMLElement>(null);
 
@@ -78,7 +83,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     <LocalizationProvider l10n={l10n}>
       <div className="app">
         <FooterProvider>
-          <header className="app-header">
+          <header className="app-header" hidden={mini && screen.id === "move"}>
             <Localized id="brand-home" attrs={{ "aria-label": true }}>
               <button
                 type="button"
@@ -146,6 +151,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "move" && (
               <MoveHost
                 old={screen.role === "old"}
+                onWindow={onWindow}
                 onPairAgain={() => { setScreen({ id: "pair", role: screen.role }); }}
                 onHome={() => { setScreen({ id: "welcome" }); }}
               />

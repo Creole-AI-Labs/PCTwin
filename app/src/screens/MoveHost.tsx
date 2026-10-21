@@ -4,7 +4,8 @@ import { helpCode, listenMove, moveApprove, moveBegin, movePause, moveReport, mo
 import type { HelpCode } from "../people";
 import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
-import { setWindowMode } from "../native";
+import { setWindowMode, type WindowMode } from "../native";
+import MiniPanel from "./MiniPanel";
 import type { Approval, FolderRole, PlanView } from "../plan";
 import DriveProblem from "./DriveProblem";
 import MoveEnded, { type MoveEnd } from "./MoveEnded";
@@ -85,12 +86,36 @@ export function next(view: View, event: MoveEvent): View {
  * that ends early shows its error page. Leaving is only by the page's own buttons, so a running
  * move is never left without a screen.
  */
-export default function MoveHost({ old, onPairAgain, onHome }: { old: boolean; onPairAgain: () => void; onHome: () => void }) {
+/** The window size each page is drawn for (the design system's three). */
+export function windowFor(view: View, expanded: boolean, mini: boolean): WindowMode {
+  if (view.kind === "progress") return mini ? "mini" : expanded ? "expanded" : "everyday";
+  if (view.kind === "plan" || view.kind === "report") return "expanded";
+  return "everyday";
+}
+
+export default function MoveHost({
+  old,
+  onPairAgain,
+  onHome,
+  onWindow,
+}: {
+  old: boolean;
+  onPairAgain: () => void;
+  onHome: () => void;
+  /** The window size the page asks for, so the frame can fit it (the mini panel has no header). */
+  onWindow?: (mode: WindowMode) => void;
+}) {
   const { l10n } = useLocalization();
   const [view, setView] = useState<View>({ kind: "wait", stage: old ? "scanning" : "waiting" });
   const [approval, setApproval] = useState<Approval | null>(null);
   const [planChanged, setPlanChanged] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [mini, setMini] = useState(false);
+  const mode = windowFor(view, expanded, mini);
+  useEffect(() => {
+    void setWindowMode(mode).catch(() => undefined);
+    onWindow?.(mode);
+  }, [mode, onWindow]);
   const [stopping, setStopping] = useState(false);
   const started = useRef(false);
   // How far the move got before it ended, for a help code.
@@ -208,12 +233,30 @@ export default function MoveHost({ old, onPairAgain, onHome }: { old: boolean; o
         onStop: () => { setStopping(true); },
         onSeeNeedsAction: () => { setExpanded(true); },
       };
+      if (mini) {
+        return (
+          <MiniPanel
+            progress={progress}
+            onPause={handlers.onPause}
+            onResume={handlers.onResume}
+            onOpen={() => {
+              setMini(false);
+            }}
+          />
+        );
+      }
       return (
         <>
           {expanded ? (
             <ProgressDetail progress={progress} onCollapse={() => { setExpanded(false); }} onSeeNeedsAction={handlers.onSeeNeedsAction} />
           ) : (
-            <ProgressCompact progress={progress} {...handlers} onMinimise={() => void setWindowMode("mini").catch(() => undefined)} />
+            <ProgressCompact
+              progress={progress}
+              {...handlers}
+              onMinimise={() => {
+                setMini(true);
+              }}
+            />
           )}
           {stop}
         </>

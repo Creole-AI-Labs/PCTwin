@@ -298,6 +298,29 @@ describe("get help", () => {
   });
 });
 
+describe("the window", () => {
+  it("each page asks for its size, and Keep compact turns the progress into the mini panel (F09) until Open", async () => {
+    const onWindow = vi.fn();
+    inApp(<MoveHost old={false} onPairAgain={vi.fn()} onHome={vi.fn()} onWindow={onWindow} />);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_begin", expect.anything());
+    });
+    expect(onWindow).toHaveBeenLastCalledWith("everyday");
+    send("move-plan", plan);
+    expect(onWindow).toHaveBeenLastCalledWith("expanded");
+    send("move-progress", runningQuiet);
+    expect(onWindow).toHaveBeenLastCalledWith("everyday");
+    fireEvent.click(screen.getByRole("button", { name: text("progress-compact") }));
+    expect(onWindow).toHaveBeenLastCalledWith("mini");
+    expect(screen.getByText(text("mini-title"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: text("mini-pause") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("move_pause");
+    fireEvent.click(screen.getByRole("button", { name: text("mini-open") }));
+    expect(onWindow).toHaveBeenLastCalledWith("everyday");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("progress-title"));
+  });
+});
+
 describe("where events take the page", () => {
   const wait = { kind: "wait", stage: "waiting" } as const;
   it("an end stays an end, and a plan never goes back to waiting", () => {
