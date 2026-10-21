@@ -17,6 +17,8 @@
 //! the folders, pairs through the handoff folder, answers the new laptop's choices by itself, and
 //! writes the reports.
 
+pub mod everyone;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

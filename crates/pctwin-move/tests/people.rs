@@ -237,6 +237,16 @@ async fn an_approved_person_s_files_move_through_the_helper() {
         let landed = new.path().join("bea").join(p.file_name().unwrap());
         assert_eq!(&std::fs::read(landed).unwrap(), bytes);
     }
+    // The mover's report: their own file by name, Bea as counts only, none of her names.
+    let report = pctwin_move::report::for_the_mover(&received, ADA);
+    assert_eq!(report.own.len(), 1);
+    assert_eq!(report.own[0].path, "ada.txt");
+    let bea = &report.people[BEA];
+    assert_eq!((bea.copied, bea.failed, bea.bytes_copied), (2, 0, 300_008));
+    let shown = format!("{report:?}");
+    for name in ["letter", "big.bin"] {
+        assert!(!shown.contains(name), "{name} named in {shown}");
+    }
     // The move is over: the helper ends.
     let client = Arc::try_unwrap(client).ok().unwrap().into_inner().unwrap();
     client.bye().unwrap();

@@ -23,6 +23,7 @@
 
 pub mod handover;
 pub mod people;
+pub mod report;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;

@@ -2403,6 +2403,28 @@ impl Destinations {
         self.admit(id, place, Destination::from_dir(root))
     }
 
+    /// Approves the folder the admin helper holds another person's files in during a move (its
+    /// answer to `HoldFor`), at `path`, as that person's place (`account_id`): their things land
+    /// only there and are never mixed with anyone else's. Opened as any approved folder is.
+    pub fn approve_holding(
+        &mut self,
+        id: &str,
+        account_id: &str,
+        path: &Path,
+    ) -> Result<(), GateError> {
+        if account_id.is_empty()
+            || account_id.len() > MAX_ACCOUNT_ID_BYTES
+            || account_id.chars().any(char::is_control)
+        {
+            return Err(GateError::BadDestinationId);
+        }
+        self.check_new(id)?;
+        let place = Approved::AnotherAccount {
+            account_id: account_id.to_string(),
+        };
+        self.admit(id, place, Destination::open(path)?)
+    }
+
     /// For tests (feature `fault-plan`): the place labelled `id` fakes `plan`'s faults.
     #[cfg(feature = "fault-plan")]
     pub fn fake_faults(&mut self, id: &str, plan: FaultPlan) -> Result<(), GateError> {

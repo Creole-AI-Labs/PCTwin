@@ -8,6 +8,9 @@
 //!     pctwin-labmove probe <out.json>
 //!     pctwin-labmove pack <lab folder> <account> <package folder>
 //!     pctwin-labmove send <handoff> <report.json> --package <package folder>
+//!     pctwin-labmove everyone <report.json> --laptop <id> --new-home <folder> --journal <file>
+//!         --new-names <prefix> [--session <token> --channel <name> [--dir <folder>]]
+//!     pctwin-labmove check-everyone <key.json> <evidence.json> <what the mover can read>...
 //!
 //! `fill-profile` builds a lab laptop into the signed-in person's real special folders, wherever
 //! they are; `snapshot-profile` records those folders the way reports name them. `probe` compares
@@ -149,6 +152,36 @@ async fn run(args: &[String]) -> Result<bool, String> {
             let held = pctwin_labmove::pack(root.as_ref(), account, out.as_ref())?;
             println!("packed {held} files");
             Ok(true)
+        }
+        [side, report, rest @ ..] if side == "everyone" => {
+            // The mover's report to their own file; the lab's evidence on standard output, which
+            // the lab keeps where only an administrator can read it.
+            let ran =
+                pctwin_labmove::everyone::everyone(pctwin_labmove::everyone::parse(rest)?).await?;
+            std::fs::write(
+                report,
+                serde_json::to_vec_pretty(&ran.report).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&ran.evidence).map_err(|e| e.to_string())?
+            );
+            Ok(true)
+        }
+        [side, key, evidence, visible @ ..] if side == "check-everyone" => {
+            let key: serde_json::Value = read(key)?;
+            let evidence: serde_json::Value = read(evidence)?;
+            let mut seen = Vec::new();
+            for v in visible {
+                let text = std::fs::read(v).map_err(|e| format!("{v}: {e}"))?;
+                seen.push((v.clone(), String::from_utf8_lossy(&text).into_owned()));
+            }
+            let problems = pctwin_labmove::everyone::check(&key, &evidence, &seen);
+            for p in &problems {
+                println!("PROBLEM: {p}");
+            }
+            Ok(problems.is_empty())
         }
         [side, out] if side == "probe" => {
             let (found, problems) = probe()?;

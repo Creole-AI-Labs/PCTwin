@@ -235,6 +235,32 @@ fn another_persons_account_needs_the_admin_helper() {
 }
 
 #[test]
+fn a_holding_folder_is_that_person_s_place() {
+    let held = tempfile::tempdir().unwrap();
+    let mut table = Destinations::new();
+    table
+        .approve_holding("for-bea", "S-1-5-21-1-2-3-1005", held.path())
+        .unwrap();
+    assert_eq!(
+        table.place("for-bea").unwrap(),
+        &Approved::AnotherAccount {
+            account_id: "S-1-5-21-1-2-3-1005".into()
+        }
+    );
+    assert_eq!(
+        write(&table, "for-bea", "Documents/d.txt", b"d").unwrap(),
+        "Documents/d.txt"
+    );
+    assert!(held.path().join("Documents/d.txt").exists());
+    // The same checks on the person and the label as any other.
+    for (id, account) in [("x", ""), ("y", "S-1-5
+21"), ("for-bea", "S-1-5-21-9")] {
+        assert!(table.approve_holding(id, account, held.path()).is_err());
+    }
+    assert_eq!(table.ids().count(), 1);
+}
+
+#[test]
 fn the_helper_path_is_only_for_another_account() {
     let dir = tempfile::tempdir().unwrap();
     let mut table = Destinations::new();

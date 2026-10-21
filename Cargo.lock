@@ -3515,6 +3515,7 @@ name = "pctwin-labmove"
 version = "0.1.0"
 dependencies = [
  "pctwin-gate",
+ "pctwin-helper",
  "pctwin-journal",
  "pctwin-lab",
  "pctwin-link",
