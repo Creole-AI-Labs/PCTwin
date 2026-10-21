@@ -5,9 +5,10 @@
 
 use std::collections::HashMap;
 
-use pctwin_record::{Inclusion, Item, ItemId, ItemKind, ItemPath, LeftOutReason, Record};
+use pctwin_record::{Inclusion, Item, ItemId, ItemKind, ItemPath, LeftOutReason, Record, Storage};
 use serde::{Deserialize, Serialize};
 
+use crate::marks::MarkSample;
 use crate::recognise::What;
 use crate::rules::Kind;
 
@@ -25,10 +26,29 @@ pub enum Worth {
     Junk,
 }
 
-/// What `item` is worth, from what placed it (`kind`, the rules file's word) and what the table
-/// named it (`what`). Anything the person made or kept, unless something says otherwise, is
-/// irreplaceable: worth never guesses downwards.
-pub fn worth(item: &Item, kind: Option<Kind>, what: Option<What>) -> Worth {
+/// Installers, which a download mark shows came from the internet and can come again.
+const INSTALLERS: [&str; 8] = [
+    ".exe",
+    ".msi",
+    ".msix",
+    ".pkg",
+    ".dmg",
+    ".appimage",
+    ".deb",
+    ".rpm",
+];
+
+/// What `item` is worth, from what placed it (`kind`, the rules file's word), what the table
+/// named it (`what`) and its folder's download-mark sample (`marks`). Anything the person made or
+/// kept, unless something says otherwise, is irreplaceable: worth never guesses downwards. Only
+/// an installer or disc image whose folder's sample is all downloaded is worth fetching again: a
+/// downloaded letter is still the person's own.
+pub fn worth(
+    item: &Item,
+    kind: Option<Kind>,
+    what: Option<What>,
+    marks: Option<MarkSample>,
+) -> Worth {
     if let Inclusion::LeftOut {
         reason: LeftOutReason::CloudOnly,
     } = item.inclusion
@@ -41,11 +61,31 @@ pub fn worth(item: &Item, kind: Option<Kind>, what: Option<What>) -> Worth {
         Some(Kind::System | Kind::App | Kind::OldSystem) => return Worth::Redownloadable,
         Some(Kind::AppData | Kind::KeepWhole) | None => {}
     }
+    let downloaded = marks.is_some_and(|m| m.all_downloaded());
+    let name = item
+        .path
+        .parts()
+        .last()
+        .map(|n| n.display().to_lowercase())
+        .unwrap_or_default();
     match what {
         // Installed games download again; Outlook's offline mail comes back from the server.
         Some(What::InstalledGames | What::EmailCache) => Worth::Redownloadable,
+        Some(What::DiscImage) if downloaded => Worth::Redownloadable,
+        None if downloaded && INSTALLERS.iter().any(|s| name.ends_with(s)) => Worth::Redownloadable,
         _ => Worth::Irreplaceable,
     }
+}
+
+/// Whether `item` is found only on this laptop: not kept in a cloud folder and not online-only,
+/// so if it is not moved it is gone. Such things are labelled "Only on this laptop" and move
+/// before things also kept in a cloud.
+pub fn only_on_this_laptop(item: &Item) -> bool {
+    !matches!(item.place.storage, Storage::Cloud { .. })
+        && item.inclusion
+            != (Inclusion::LeftOut {
+                reason: LeftOutReason::CloudOnly,
+            })
 }
 
 /// Folders with at least this many files in them, all told, are compared; smaller ones match too
@@ -192,37 +232,90 @@ mod tests {
     #[test]
     fn worth_comes_from_what_is_known_and_never_guesses_downwards() {
         let mine = file(Inclusion::Included);
-        assert_eq!(worth(&mine, None, None), Worth::Irreplaceable);
-        assert_eq!(worth(&mine, Some(Kind::Junk), None), Worth::Junk);
+        assert_eq!(worth(&mine, None, None, None), Worth::Irreplaceable);
+        assert_eq!(worth(&mine, Some(Kind::Junk), None, None), Worth::Junk);
         assert_eq!(
-            worth(&mine, Some(Kind::Rebuildable), None),
+            worth(&mine, Some(Kind::Rebuildable), None, None),
             Worth::Rebuildable
         );
-        assert_eq!(worth(&mine, Some(Kind::App), None), Worth::Redownloadable);
         assert_eq!(
-            worth(&mine, Some(Kind::KeepWhole), None),
+            worth(&mine, Some(Kind::App), None, None),
+            Worth::Redownloadable
+        );
+        assert_eq!(
+            worth(&mine, Some(Kind::KeepWhole), None, None),
             Worth::Irreplaceable
         );
         assert_eq!(
-            worth(&mine, None, Some(What::InstalledGames)),
+            worth(&mine, None, Some(What::InstalledGames), None),
             Worth::Redownloadable
         );
         // Outlook's offline mail comes back from the server; an archive and a vault do not.
         assert_eq!(
-            worth(&mine, None, Some(What::EmailCache)),
+            worth(&mine, None, Some(What::EmailCache), None),
             Worth::Redownloadable
         );
         for own in [What::EmailArchive, What::PasswordVault, What::CodeProject] {
-            assert_eq!(worth(&mine, None, Some(own)), Worth::Irreplaceable);
+            assert_eq!(worth(&mine, None, Some(own), None), Worth::Irreplaceable);
         }
         // An old backup is still the person's own.
         assert_eq!(
-            worth(&mine, None, Some(What::TimeMachine)),
+            worth(&mine, None, Some(What::TimeMachine), None),
             Worth::Irreplaceable
         );
         let online = file(Inclusion::LeftOut {
             reason: LeftOutReason::CloudOnly,
         });
-        assert_eq!(worth(&online, None, None), Worth::Redownloadable);
+        assert_eq!(worth(&online, None, None, None), Worth::Redownloadable);
+    }
+
+    fn named(name: &str) -> Item {
+        let mut i = file(Inclusion::Included);
+        i.path = ItemPath::new(vec![pctwin_record::ItemName::from_text(name)]).unwrap();
+        i
+    }
+
+    #[test]
+    fn only_a_downloaded_installer_is_worth_fetching_again() {
+        let all = Some(MarkSample {
+            looked: 3,
+            marked: 3,
+        });
+        let some = Some(MarkSample {
+            looked: 3,
+            marked: 2,
+        });
+        let setup = named("Setup.EXE");
+        assert_eq!(worth(&setup, None, None, all), Worth::Redownloadable);
+        // Not every file in its folder came from the internet: it may be the person's own.
+        assert_eq!(worth(&setup, None, None, some), Worth::Irreplaceable);
+        assert_eq!(worth(&setup, None, None, None), Worth::Irreplaceable);
+        // A downloaded letter is still the person's own.
+        assert_eq!(
+            worth(&named("letter.pdf"), None, None, all),
+            Worth::Irreplaceable
+        );
+        assert_eq!(
+            worth(&named("ubuntu.iso"), None, Some(What::DiscImage), all),
+            Worth::Redownloadable
+        );
+        assert_eq!(
+            worth(&named("family.iso"), None, Some(What::DiscImage), None),
+            Worth::Irreplaceable
+        );
+    }
+
+    #[test]
+    fn only_what_no_cloud_keeps_is_only_on_this_laptop() {
+        let mut local = file(Inclusion::Included);
+        assert!(only_on_this_laptop(&local));
+        local.place.storage = Storage::Cloud {
+            provider: pctwin_record::CloudProvider::OneDrive,
+        };
+        assert!(!only_on_this_laptop(&local));
+        let online = file(Inclusion::LeftOut {
+            reason: LeftOutReason::CloudOnly,
+        });
+        assert!(!only_on_this_laptop(&online));
     }
 }

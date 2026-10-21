@@ -39,6 +39,7 @@ mod drives;
 mod folders;
 mod health;
 mod laptop;
+mod marks;
 mod measure;
 mod people;
 mod recognise;
@@ -71,6 +72,7 @@ pub use health::{
 pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
 };
+pub use marks::{MarkSample, has_download_mark, sample_folder};
 pub use measure::{
     Measure, Size, cloud_only_mac, cloud_only_windows, is_cloud_only, is_icloud_stub_name, measure,
 };
@@ -97,4 +99,4 @@ pub use usage::{
 };
 pub use volumes::{DiskKind, Volume, VolumeKind, logical_disks, volume_kind, volumes_this_laptop};
 pub use whose::{Facts as PlaceFacts, HomeOf, People, Placement, Rule, Whose, place};
-pub use worth::{COPY_MIN_FILES, Worth, look_like_copies, worth};
+pub use worth::{COPY_MIN_FILES, Worth, look_like_copies, only_on_this_laptop, worth};

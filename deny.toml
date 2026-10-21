@@ -85,6 +85,9 @@ deny = [
     "pctwin-helper-os",
     # The helper program opens another person's files without following a link (O_NOFOLLOW).
     "pctwin-helper",
+    # The scan asks whether a file carries a download mark, by the attribute's presence only,
+    # never its value (21 October 2026).
+    "pctwin-scan",
     # Third-party crates that use rustix themselves (checked 9 October 2026).
     "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
     "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",

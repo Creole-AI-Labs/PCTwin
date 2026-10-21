@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pctwin_record::{FolderRole, Inclusion, Item, ItemId, ItemKind};
+use pctwin_record::{FolderRole, Inclusion, Item, ItemId, ItemKind, Storage};
 
 /// How soon something moves. Earlier variants move first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -15,6 +15,8 @@ pub enum Tier {
     /// in minutes.
     Essential,
     Rest,
+    /// Kept in a cloud folder too: safe there, so it moves after what is only on this laptop.
+    AlsoInCloud,
 }
 
 /// Files changed within this long count as recent.
@@ -69,6 +71,9 @@ pub fn plan_order_with(
                 (Some(rank), _) => (Tier::AskedFirst { rank }, changed),
                 (None, Some(used)) => (Tier::Personal, Some(used)),
                 (None, None) if is_essential(i, changed, now_ns) => (Tier::Essential, changed),
+                (None, None) if matches!(i.place.storage, Storage::Cloud { .. }) => {
+                    (Tier::AlsoInCloud, changed)
+                }
                 (None, None) => (Tier::Rest, changed),
             };
             (tier, when.unwrap_or(i64::MIN), i.size_bytes, i.id)

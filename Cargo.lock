@@ -3639,6 +3639,7 @@ dependencies = [
  "plist",
  "proptest",
  "roxmltree",
+ "rustix",
  "serde",
  "serde_json",
  "sysinfo",

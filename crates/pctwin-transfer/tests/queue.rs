@@ -328,3 +328,26 @@ fn lanes_see_every_file_in_flight_most_important_first_taking_turns() {
     assert_eq!(d.len(), 2);
     assert!(!d.contains(&sid(3)) && !d.contains(&sid(4)));
 }
+
+/// What is only on this laptop moves before what a cloud folder also keeps; documents in a cloud
+/// folder are still essentials.
+#[test]
+fn only_on_this_laptop_moves_before_what_a_cloud_keeps() {
+    let mut synced = file(FolderRole::Pictures, &["synced.jpg"]);
+    synced.place.storage = Storage::Cloud {
+        provider: pctwin_record::CloudProvider::OneDrive,
+    };
+    let local = file(FolderRole::Pictures, &["local.jpg"]);
+    let mut synced_doc = file(FolderRole::Documents, &["synced-letter.txt"]);
+    synced_doc.place.storage = synced.place.storage.clone();
+    let items = vec![synced.clone(), local.clone(), synced_doc.clone()];
+    let order = plan_order(&items, &[], &BTreeMap::new(), NOW);
+    assert_eq!(
+        order,
+        vec![
+            (synced_doc.id, Tier::Essential),
+            (local.id, Tier::Rest),
+            (synced.id, Tier::AlsoInCloud),
+        ]
+    );
+}
