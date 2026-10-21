@@ -236,7 +236,7 @@ pub struct Receipt {
 /// Sender: offers `offer` over `ch` (already paired), then sends what the receiver accepts.
 pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickError> {
     let version = agree_version(ch, MOVE_PROTOCOL).await?;
-    send_inventory(ch, &offer.record).await?;
+    send_inventory(ch, &offer.record, version).await?;
     let offered = files_of(&offer.record);
     let accepted = read_accepted(ch, &offered).await?;
     let jobs: Vec<SendJob> = offer
@@ -288,7 +288,7 @@ pub struct Incoming {
 /// Refused unless it is a Quick Send (everything in it shared, nothing about people).
 pub async fn receive_offer(ch: &mut impl Channel) -> Result<Incoming, QuickError> {
     let version = agree_version(ch, MOVE_PROTOCOL).await?;
-    let record = receive_inventory(ch).await?;
+    let record = receive_inventory(ch, version).await?;
     if record.items.iter().any(|i| i.owner != Owner::Shared) {
         return Err(QuickError::NotAQuickSend);
     }
@@ -326,7 +326,9 @@ impl Incoming {
                 .collect(),
             None => offered.iter().map(|f| f.id).collect(),
         };
-        let mut record = self.record.next_revision();
+        // The offered record is not needed afterwards: the next revision is made from it in place,
+        // never as a second copy.
+        let mut record = self.record.into_next_revision();
         for item in &mut record.items {
             if item.kind == ItemKind::File
                 && item.inclusion == Inclusion::Included

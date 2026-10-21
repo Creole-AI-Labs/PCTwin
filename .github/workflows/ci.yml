@@ -155,7 +155,7 @@ jobs:
       - name: Fuzz each target for a minute
         shell: bash
         run: |
-          for t in messages inventory_frames record paths pairing_messages typed_digits; do
+          for t in messages inventory_frames inventory_v2 record paths pairing_messages typed_digits; do
             echo "== $t"
             cargo +nightly fuzz run "$t" -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
           done
@@ -425,6 +425,14 @@ jobs:
             echo "app/src/contract has files that are not checked in" >&2
             exit 1
           fi
+      # The scan inventory's memory limit, measured on each system: hostile lists sent in pages
+      # must be refused before the new laptop's process passes MAX_HELD plus a fixed allowance
+      # (peak commit on Windows, largest resident size on macOS and Linux).
+      - name: Inventory memory limit
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then py=python; else py=python3; fi
+          "$py" scripts/inventory-memory.py
       # The desktop app, built and packaged on every system and kept unsigned for two weeks.
       # One package type per system keeps the build free of extra downloads.
       - name: Build the app

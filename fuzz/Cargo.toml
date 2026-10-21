@@ -36,6 +36,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "inventory_v2"
+path = "fuzz_targets/inventory_v2.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "record"
 path = "fuzz_targets/record.rs"
 test = false

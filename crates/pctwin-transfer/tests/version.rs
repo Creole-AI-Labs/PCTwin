@@ -81,9 +81,26 @@ async fn sent_by(ours: Versions) -> Vec<u8> {
 
 #[test]
 fn this_release_speaks_versions_two_to_four() {
+    // 3 sends the list in pages (PAGED_FROM); 4 adds Hold (HOLD_SINCE); 2 is kept for a laptop
+    // two versions behind.
     assert_eq!(MOVE_PROTOCOL.oldest(), 2);
     assert_eq!(MOVE_PROTOCOL.newest(), 4);
+    assert_eq!(pctwin_transfer::PAGED_FROM, 3);
     assert_eq!(pctwin_transfer::HOLD_SINCE, 4);
+}
+
+/// Every pair among 2, 3 and 4 agrees on the lower of the two, from either side, so a laptop on 3
+/// gets paging but no Hold, and one on 2 gets neither.
+#[tokio::test(start_paused = true)]
+async fn laptops_on_versions_two_three_and_four_agree_on_the_lower() {
+    for (x, y) in [(2u16, 2u16), (2, 3), (2, 4), (3, 3), (3, 4), (4, 4)] {
+        let lower = x.min(y);
+        let (a, b) = agree(v(2, x), v(2, y)).await;
+        assert_eq!(a.unwrap(), lower, "{x} with {y}");
+        assert_eq!(b.unwrap(), lower, "{y} with {x}");
+        assert_eq!(lower >= pctwin_transfer::PAGED_FROM, lower >= 3);
+        assert_eq!(lower >= pctwin_transfer::HOLD_SINCE, lower == 4);
+    }
 }
 
 #[test]
@@ -190,7 +207,7 @@ async fn a_range_that_starts_at_zero_or_runs_backwards_is_refused() {
 #[tokio::test(start_paused = true)]
 async fn the_message_form_is_fixed_for_every_release() {
     let kind = sent_by(v(1, 1)).await[0];
-    // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33).
+    // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33, 35).
     assert_eq!(kind, 34);
     assert_eq!(sent_by(v(2, 0x0103)).await, vec![kind, 0, 2, 1, 3]);
     // A later laptop that speaks versions 1 to 5 still agrees with this one on 4.

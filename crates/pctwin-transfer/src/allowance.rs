@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use pctwin_journal::{DownloadMark, PartialKeep};
 use pctwin_record::{Approval, Inclusion, Item, ItemId, ItemKind, LaptopId, Record, RecordError};
@@ -73,11 +74,23 @@ pub enum Refusal {
     KeptChanging,
 }
 
-/// One approved file: its approved size and where it lands.
+/// One approved file: its approved size and where it lands, held at a fixed size: the
+/// destination is shared by every file that lands in it, and the path inside it is kept as its
+/// digest, never as a second copy of the path (a received list can hold a very great many long
+/// paths; the scan inventory's memory count leaves room for exactly this entry per item,
+/// `pctwin_record::inventory::PLAN_ROOM`).
 #[derive(Debug, Clone)]
 struct Planned {
     size: u64,
-    place: LandingPlace,
+    destination: Arc<str>,
+    path: [u8; 32],
+}
+
+/// The digest a planned path is kept as (BLAKE3 in its own named mode).
+fn path_digest(path: &str) -> [u8; 32] {
+    let mut h = blake3::Hasher::new_derive_key("pctwin 2026-10-21 landing path");
+    h.update(path.as_bytes());
+    h.finalize().into()
 }
 
 /// Where one approved file is in the move.
@@ -124,22 +137,31 @@ impl Allowance {
         landing: impl Fn(&Item) -> Option<LandingPlace>,
     ) -> Result<Self, RecordError> {
         record.check(approval)?;
-        let files: HashMap<ItemId, Planned> = record
-            .items
-            .iter()
-            .filter(|i| i.inclusion == Inclusion::Included && i.kind == ItemKind::File)
-            .filter_map(|i| {
-                landing(i).map(|place| {
-                    (
-                        i.id,
-                        Planned {
-                            size: i.size_bytes,
-                            place,
-                        },
-                    )
-                })
-            })
-            .collect();
+        // Room for every item at once (counted in the inventory's memory limit), so the map
+        // never grows and moves while it is filled.
+        let mut files: HashMap<ItemId, Planned> = HashMap::with_capacity(record.items.len());
+        let mut destinations: HashMap<String, Arc<str>> = HashMap::new();
+        for i in &record.items {
+            if i.inclusion != Inclusion::Included || i.kind != ItemKind::File {
+                continue;
+            }
+            let Some(place) = landing(i) else {
+                continue;
+            };
+            let path = path_digest(&place.path);
+            let destination = destinations
+                .entry(place.destination)
+                .or_insert_with_key(|d| Arc::from(d.as_str()))
+                .clone();
+            files.insert(
+                i.id,
+                Planned {
+                    size: i.size_bytes,
+                    destination,
+                    path,
+                },
+            );
+        }
         let total = files.values().fold(0u64, |t, f| t.saturating_add(f.size));
         Ok(Self {
             source_laptop: record.source_laptop,
@@ -174,23 +196,24 @@ impl Allowance {
         sent.max(self.mark_floor)
     }
 
-    /// Where `item` lands, if it is in the plan.
-    pub fn place(&self, item: ItemId) -> Option<&LandingPlace> {
-        self.files.get(&item).map(|f| &f.place)
+    /// The destination `item` lands in, if it is in the plan (the path inside it is checked with
+    /// [`check_place`](Self::check_place)).
+    pub fn destination(&self, item: ItemId) -> Option<&str> {
+        self.files.get(&item).map(|f| &*f.destination)
     }
 
     /// Every approved file: its id, the destination it lands in, and its approved size.
     pub(crate) fn planned(&self) -> impl Iterator<Item = (ItemId, &str, u64)> {
         self.files
             .iter()
-            .map(|(id, f)| (*id, f.place.destination.as_str(), f.size))
+            .map(|(id, f)| (*id, &*f.destination, f.size))
     }
 
     /// Whether `item` is in the plan and announced exactly where the plan says it lands
     /// (`destination` and `path` inside it), or why not. Nothing about the attempt is counted.
     pub fn check_place(&self, item: ItemId, destination: &str, path: &str) -> Result<(), Refusal> {
         let planned = self.files.get(&item).ok_or(Refusal::NotInPlan)?;
-        if planned.place.destination != destination || planned.place.path != path {
+        if &*planned.destination != destination || planned.path != path_digest(path) {
             return Err(Refusal::NotWherePlanned);
         }
         Ok(())
@@ -291,5 +314,19 @@ impl Allowance {
     /// Bytes agreed to so far, each file counted once at its largest size.
     pub fn started_bytes(&self) -> u64 {
         self.started_total
+    }
+}
+
+#[cfg(test)]
+mod room {
+    use super::*;
+
+    /// A planned file's entry fits the room the inventory's memory count leaves for it: the map
+    /// is made with room for every item at once, at most about 2.3 slots an entry, plus a control
+    /// byte each, and holds nothing else per file.
+    #[test]
+    fn a_planned_file_fits_the_room_the_inventory_leaves_for_it() {
+        let entry = std::mem::size_of::<(ItemId, Planned)>() + 1;
+        assert!(entry * 23 / 10 < pctwin_record::inventory::PLAN_ROOM as usize);
     }
 }

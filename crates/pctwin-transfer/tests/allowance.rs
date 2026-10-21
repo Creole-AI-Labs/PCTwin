@@ -327,7 +327,8 @@ fn a_file_lands_only_where_the_plan_says() {
     let f = item(1, MIB, ItemKind::File, Inclusion::Included);
     let r = record(vec![f.clone()]);
     let mut a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
-    assert_eq!(a.place(f.id), Some(&LandingPlace::new("documents", "f1")));
+    assert_eq!(a.destination(f.id), Some("documents"));
+    assert_eq!(a.check_place(f.id, "documents", "f1"), Ok(()));
     // Another path in the right place, or the right path in another place: refused, and never
     // counted as an attempt (however often it is tried).
     for _ in 0..=pctwin_transfer::MAX_ATTEMPTS {
@@ -364,7 +365,7 @@ fn a_file_the_landing_gives_no_place_is_not_in_the_plan() {
         (i.id != skip).then(|| LandingPlace::new("documents", shown_path(&i.path)))
     })
     .unwrap();
-    assert_eq!(a.place(skip), None);
+    assert_eq!(a.destination(skip), None);
     assert_eq!(
         a.admit(skip, "documents", "f2", MIB),
         Err(Refusal::NotInPlan)

@@ -703,7 +703,11 @@ pub fn pack(root: &Path, account: &str, out: &Path) -> Result<usize, String> {
             held += 1;
         }
     }
-    std::fs::write(out.join("record.json"), scan.record.to_json()).map_err(err)?;
+    // Written a piece at a time, never as one text in memory.
+    let mut file =
+        std::io::BufWriter::new(std::fs::File::create(out.join("record.json")).map_err(err)?);
+    scan.record.write_json(&mut file).map_err(err)?;
+    std::io::Write::flush(&mut file).map_err(err)?;
     let snap = pctwin_lab::snapshot(root).map_err(err)?;
     std::fs::write(
         out.join("before.json"),
