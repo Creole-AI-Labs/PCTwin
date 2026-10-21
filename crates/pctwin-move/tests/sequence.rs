@@ -526,3 +526,82 @@ async fn every_predicted_name_is_the_name_it_lands_under() {
     assert_eq!(preview.problems.too_big.count, 0);
     assert_eq!(preview.problems.refused.count, 0);
 }
+
+/// Reads every file as it is, except one another program has open.
+struct OneBusy(PathBuf);
+
+impl pctwin_transfer::Opener for OneBusy {
+    fn open(&self, path: &Path) -> std::io::Result<Box<dyn pctwin_transfer::Source>> {
+        if path == self.0 {
+            return Err(std::io::Error::other(pctwin_transfer::InUse));
+        }
+        pctwin_transfer::FsOpener.open(path)
+    }
+}
+
+/// A file another program had open fails "in use", never copied torn; "Try again" sends only
+/// that file, and the report then shows it copied with everything else as it was.
+#[tokio::test]
+async fn try_again_brings_a_file_that_was_in_use() {
+    use pctwin_move::report::{to_try_again, tried_again};
+    let w = world();
+    let beach = w
+        .record
+        .items
+        .iter()
+        .find(|i| {
+            i.path
+                .parts()
+                .last()
+                .is_some_and(|p| p.display() == "beach.jpg")
+        })
+        .unwrap();
+    let busy = std::sync::Arc::new(OneBusy(source_in(w.old.path(), beach)));
+    let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
+    let (live, old_live) = (Live::default(), Live::default());
+    let (mut old, mut new) = mem_pair();
+    let mut steps = person(true);
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send_with(&mut old, &w.record, plan, &old_live, busy),
+            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &live),
+        )
+    })
+    .await;
+    sent.unwrap();
+    let first = received.unwrap();
+    let again = to_try_again(&first);
+    assert_eq!(again, std::collections::BTreeSet::from([beach.id]));
+    let line = first.files.iter().find(|f| f.item == beach.id).unwrap();
+    assert!(
+        matches!(&line.outcome, Some(ReceiveOutcome::Failed(f)) if f.cause() == Cause::InUse),
+        "{:?}",
+        line.outcome
+    );
+
+    // Try again: the program was closed; only that file is sent.
+    let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing).only(&again);
+    assert_eq!(plan.jobs.len(), 1);
+    let (mut old, mut new) = mem_pair();
+    let mut steps = person(true);
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send(&mut old, &w.record, plan, &old_live),
+            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &live),
+        )
+    })
+    .await;
+    assert_eq!(sent.unwrap().files.len(), 1);
+    let merged = tried_again(&first, &received.unwrap(), &again);
+    for line in &merged.files {
+        assert!(
+            matches!(line.outcome, Some(ReceiveOutcome::Finished(_))),
+            "{:?}",
+            line.outcome
+        );
+    }
+    assert_eq!(
+        std::fs::read(w.new.path().join("Pictures/beach.jpg")).unwrap(),
+        b"sand and sea"
+    );
+}

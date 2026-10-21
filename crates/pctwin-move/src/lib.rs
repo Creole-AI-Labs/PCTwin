@@ -84,6 +84,22 @@ pub struct SendPlan {
     pub not_sent: Vec<NotSent>,
 }
 
+impl SendPlan {
+    /// Only the files in `items` ("Try again" for files that were in use or kept changing):
+    /// every other job is dropped, and nothing is listed as not sent, since the first move's
+    /// report already says it.
+    pub fn only(self, items: &BTreeSet<ItemId>) -> SendPlan {
+        SendPlan {
+            jobs: self
+                .jobs
+                .into_iter()
+                .filter(|j| items.contains(&j.item))
+                .collect(),
+            not_sent: Vec::new(),
+        }
+    }
+}
+
 /// The files to send from `record`. `source` says where each file is read from (`None`: the old
 /// laptop has no folder for its role) and `landing` where it lands, which must be the very
 /// function the new laptop checks it with. Only files are sent; a file the record leaves out is
