@@ -11,7 +11,7 @@
 //!   file read before (its identity is pinned at the first read), so a file swapped in between
 //!   reads is caught.
 
-use std::fs::{File, Metadata, OpenOptions};
+use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
@@ -51,6 +51,7 @@ fn check(meta: &Metadata, entry: &Entry) -> Result<(), Refusal> {
 
 #[cfg(windows)]
 fn open(path: &std::path::Path) -> io::Result<File> {
+    use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
     const FILE_SHARE_READ: u32 = 0x1;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -61,13 +62,57 @@ fn open(path: &std::path::Path) -> io::Result<File> {
         .open(path)
 }
 
+/// Mac and Linux: opens `path` (absolute) one folder at a time from `/`, never through a link
+/// anyone but the system's own account (root) made: a folder somewhere above the file swapped for
+/// a link (to `/etc`, say) is refused, not followed. Links root made (a Mac's `/var`) are
+/// followed, since nobody else can make or change them. The file itself is never a link, and is
+/// opened without waiting (a pipe cannot hang the helper).
 #[cfg(unix)]
 fn open(path: &std::path::Path) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    OpenOptions::new()
-        .read(true)
-        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
-        .open(path)
+    use rustix::fs::{AtFlags, FileType, Mode, OFlags};
+    use std::path::Component;
+    let loop_err = || io::Error::from_raw_os_error(rustix::io::Errno::LOOP.raw_os_error());
+    let parts: Vec<&std::ffi::OsStr> = path
+        .components()
+        .map(|c| match c {
+            Component::RootDir => Ok(None),
+            Component::Normal(n) => Ok(Some(n)),
+            _ => Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        })
+        .collect::<io::Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    if !path.is_absolute() || parts.is_empty() {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let dir_flags = OFlags::DIRECTORY | OFlags::RDONLY | OFlags::CLOEXEC;
+    let mut dir = rustix::fs::open("/", dir_flags | OFlags::NOFOLLOW, Mode::empty())?;
+    for (i, name) in parts.iter().enumerate() {
+        let last = i + 1 == parts.len();
+        let st = rustix::fs::statat(&dir, *name, AtFlags::SYMLINK_NOFOLLOW)?;
+        let link = FileType::from_raw_mode(st.st_mode) == FileType::Symlink;
+        if link && (last || st.st_uid != 0) {
+            return Err(loop_err());
+        }
+        if last {
+            let fd = rustix::fs::openat(
+                &dir,
+                *name,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+                Mode::empty(),
+            )?;
+            return Ok(File::from(fd));
+        }
+        // A folder that was not a link when looked at is opened refusing one now.
+        let flags = if link {
+            dir_flags
+        } else {
+            dir_flags | OFlags::NOFOLLOW
+        };
+        dir = rustix::fs::openat(&dir, *name, flags, Mode::empty())?;
+    }
+    Err(loop_err())
 }
 
 /// The refusal for a failed open.
@@ -244,5 +289,29 @@ mod tests {
         assert_eq!(read_range(&entry, &mut None, 0, 1), Err(Refusal::InUse));
         drop(writer);
         assert!(read_range(&entry, &mut None, 0, 1).is_ok());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod open_tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_above_the_file_swapped_for_a_link_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("a.txt"), b"hello").unwrap();
+        // The plain path opens (the temp folder may sit under a link root made, as a Mac's /var).
+        assert!(open(&real.join("a.txt")).is_ok());
+        // A folder link made by this account (not root) anywhere above the file is refused.
+        std::os::unix::fs::symlink(&real, dir.path().join("via")).unwrap();
+        let e = open(&dir.path().join("via").join("a.txt")).unwrap_err();
+        assert_eq!(refused_open(&e), Refusal::NotPlain);
+        // And the file itself as a link.
+        std::os::unix::fs::symlink(real.join("a.txt"), real.join("b.txt")).unwrap();
+        assert!(open(&real.join("b.txt")).is_err());
+        // A relative path is never opened.
+        assert!(open(std::path::Path::new("real/a.txt")).is_err());
     }
 }
