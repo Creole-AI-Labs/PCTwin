@@ -23,6 +23,7 @@
 
 pub mod handover;
 pub mod people;
+pub mod reconnect;
 pub mod report;
 pub mod since;
 
