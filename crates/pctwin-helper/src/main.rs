@@ -103,15 +103,19 @@ fn run(args: &Args) -> Result<(), String> {
     let pipe = PipeServer::create(&name, &mover).map_err(|e| e.to_string())?;
     pipe.accept().map_err(|e| e.to_string())?;
     let caller = caller_of(&pipe).map_err(|e| e.to_string())?;
-    if caller.account != Account::Sid(mover) {
+    if caller.account != Account::Sid(mover.clone()) {
         return Err("a connection from another account was refused".into());
     }
     let laptop = args.laptop;
     let mut scanner = move |account: &str| scan_person(laptop, account);
     let mut stream = pipe.stream();
     let mut maker = pctwin_helper::account::create_account;
+    let mut system = pctwin_helper::newlaptop::System {
+        mover: Account::Sid(mover.clone()),
+    };
     Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
         .with_account_maker(&mut maker)
+        .with_new_laptop(&mut system)
         .serve(&mut stream)
         .map_err(|e| e.to_string())
 }
@@ -130,8 +134,12 @@ fn run(args: &Args) -> Result<(), String> {
     let laptop = args.laptop;
     let mut scanner = move |account: &str| scan_person(laptop, account);
     let mut maker = pctwin_helper::account::create_account;
+    let mut system = pctwin_helper::newlaptop::System {
+        mover: Account::Uid(mover),
+    };
     Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
         .with_account_maker(&mut maker)
+        .with_new_laptop(&mut system)
         .serve(&mut stream)
         .map_err(|e| e.to_string())
 }

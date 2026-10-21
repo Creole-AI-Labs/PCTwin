@@ -3,7 +3,7 @@
 //! files in its own plan, and reads only from that plan, by handle. Nothing else is accepted, and
 //! nothing a request says is ever taken as a path.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 
 use pctwin_gate::FileId;
@@ -33,6 +33,12 @@ pub struct Session<'s> {
     plan: Vec<(Entry, Option<FileId>)>,
     scanner: &'s mut Scanner<'s>,
     maker: Option<&'s mut AccountMaker<'s>>,
+    new_laptop: Option<&'s mut dyn crate::newlaptop::NewLaptop>,
+    /// Accounts made in this session: name to account ID.
+    made: BTreeMap<String, String>,
+    /// This move's holding area, once made, and each person's folder in it.
+    area: Option<std::path::PathBuf>,
+    held: BTreeMap<String, std::path::PathBuf>,
 }
 
 impl<'s> Session<'s> {
@@ -44,6 +50,86 @@ impl<'s> Session<'s> {
             plan: Vec::new(),
             scanner,
             maker: None,
+            new_laptop: None,
+            made: BTreeMap::new(),
+            area: None,
+            held: BTreeMap::new(),
+        }
+    }
+
+    /// On the new laptop: holding areas and hand-overs, by `system`.
+    pub fn with_new_laptop(mut self, system: &'s mut dyn crate::newlaptop::NewLaptop) -> Self {
+        self.new_laptop = Some(system);
+        self
+    }
+
+    /// The account `account` names: one made in this session (by its name), or an approved
+    /// account ID; and its name, when the helper made it.
+    fn account_of(&self, account: &str) -> Option<(pctwin_helper_os::Account, String)> {
+        let (id, name) = match self.made.get(account) {
+            Some(id) => (id.clone(), account.to_string()),
+            None if self.approved.contains(account) => (account.to_string(), String::new()),
+            None => return None,
+        };
+        let parsed = match id.parse::<u32>() {
+            Ok(uid) => pctwin_helper_os::Account::Uid(uid),
+            Err(_) => pctwin_helper_os::Account::Sid(pctwin_helper_os::Sid::parse(&id).ok()?),
+        };
+        Some((parsed, name))
+    }
+
+    fn hold_for(&mut self, account: &str) -> Answer {
+        if self.account_of(account).is_none() {
+            return Answer::Refused(Refusal::NotApproved);
+        }
+        let Some(system) = self.new_laptop.as_mut() else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        if let Some(path) = self.held.get(account) {
+            return Answer::Holding {
+                path: path.to_string_lossy().into_owned(),
+            };
+        }
+        let area = match &self.area {
+            Some(a) => a.clone(),
+            None => match system.area() {
+                Ok(a) => {
+                    self.area = Some(a.clone());
+                    a
+                }
+                Err(why) => return Answer::Refused(why),
+            },
+        };
+        // Named by the helper, never by the app.
+        let key = format!("p{}", self.held.len() + 1);
+        match system.person_folder(&area, &key) {
+            Ok(path) => {
+                self.held.insert(account.to_string(), path.clone());
+                Answer::Holding {
+                    path: path.to_string_lossy().into_owned(),
+                }
+            }
+            Err(why) => Answer::Refused(why),
+        }
+    }
+
+    fn hand_over_now(&mut self, account: &str) -> Answer {
+        let Some((parsed, name)) = self.account_of(account) else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        let Some(folder) = self.held.get(account).cloned() else {
+            return Answer::Refused(Refusal::NothingHeld);
+        };
+        let Some(system) = self.new_laptop.as_mut() else {
+            return Answer::Refused(Refusal::NotApproved);
+        };
+        match system.hand_over(&parsed, &name, &folder) {
+            Ok(c) => Answer::HandedOver {
+                landed: c.landed,
+                kept: c.kept,
+                failed: c.failed,
+            },
+            Err(why) => Answer::Refused(why),
         }
     }
 
@@ -62,10 +148,13 @@ impl<'s> Session<'s> {
             return Answer::Refused(Refusal::NotApproved);
         };
         match maker(name, full_name) {
-            Ok(made) => Answer::AccountMade {
-                account: made.account,
-                password: made.password.to_string(),
-            },
+            Ok(made) => {
+                self.made.insert(name.to_string(), made.account.clone());
+                Answer::AccountMade {
+                    account: made.account,
+                    password: made.password.to_string(),
+                }
+            }
             Err(why) => Answer::Refused(why),
         }
     }
@@ -113,6 +202,14 @@ impl<'s> Session<'s> {
                 }
                 Request::CreateAccount { name, full_name } => {
                     let answer = self.create(&name, &full_name);
+                    send_answer(channel, &answer)?;
+                }
+                Request::HoldFor { account } => {
+                    let answer = self.hold_for(&account);
+                    send_answer(channel, &answer)?;
+                }
+                Request::HandOverNow { account } => {
+                    let answer = self.hand_over_now(&account);
                     send_answer(channel, &answer)?;
                 }
                 Request::Bye => {

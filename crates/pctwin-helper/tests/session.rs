@@ -302,3 +302,130 @@ fn only_an_approved_person_s_account_is_made() {
     drop(maker);
     assert_eq!(made, ["bea"]);
 }
+
+/// New laptop: a person's folder in the holding area only for an approved person (one the
+/// helper made, or an approved account ID), named by the helper, the same one each time asked;
+/// a hand-over only of what is held, for that person.
+#[test]
+fn holding_and_handing_over_only_for_approved_people() {
+    use pctwin_helper::account::Made;
+    use pctwin_helper::newlaptop::{Counted, NewLaptop};
+    use std::path::{Path, PathBuf};
+
+    #[derive(Default)]
+    struct Fake {
+        areas: u32,
+        handed: Vec<(String, String, PathBuf)>,
+    }
+    impl NewLaptop for Fake {
+        fn area(&mut self) -> Result<PathBuf, Refusal> {
+            self.areas += 1;
+            Ok(PathBuf::from("/area"))
+        }
+        fn person_folder(&mut self, area: &Path, key: &str) -> Result<PathBuf, Refusal> {
+            Ok(area.join(key))
+        }
+        fn hand_over(
+            &mut self,
+            account: &pctwin_helper_os::Account,
+            name: &str,
+            folder: &Path,
+        ) -> Result<Counted, Refusal> {
+            self.handed.push((
+                format!("{account:?}"),
+                name.to_string(),
+                folder.to_path_buf(),
+            ));
+            Ok(Counted {
+                landed: 3,
+                kept: 0,
+                failed: 0,
+            })
+        }
+    }
+    let mut maker = |_: &str, _: &str| -> Result<Made, Refusal> {
+        Ok(Made {
+            account: "1005".into(),
+            password: zeroize::Zeroizing::new("abcd-efgh-jkmn-pqrs".into()),
+        })
+    };
+    let mut scanner = |_: &str| -> Result<Vec<(Item, Entry)>, Refusal> { Ok(Vec::new()) };
+    let mut fake = Fake::default();
+    let mut wire = Vec::new();
+    for r in [
+        hello(),
+        Request::HoldFor {
+            account: "carl".into(),
+        },
+        Request::HandOverNow {
+            account: "1007".into(),
+        },
+        Request::CreateAccount {
+            name: "bea".into(),
+            full_name: "Bea".into(),
+        },
+        Request::HoldFor {
+            account: "bea".into(),
+        },
+        Request::HoldFor {
+            account: "bea".into(),
+        },
+        Request::HoldFor {
+            account: "1007".into(),
+        },
+        Request::HandOverNow {
+            account: "bea".into(),
+        },
+    ] {
+        send_request(&mut wire, &r).unwrap();
+    }
+    let mut channel = Channel {
+        from_app: Cursor::new(wire),
+        to_app: Vec::new(),
+    };
+    Session::new(
+        "token".into(),
+        BTreeSet::from(["bea".to_string(), "1007".to_string()]),
+        &mut scanner,
+    )
+    .with_account_maker(&mut maker)
+    .with_new_laptop(&mut fake)
+    .serve(&mut channel)
+    .unwrap();
+    let mut read = channel.to_app.as_slice();
+    let mut out = Vec::new();
+    while !read.is_empty() {
+        out.push(read_from_helper(&mut read).unwrap());
+    }
+    let held = |p: &str| {
+        FromHelper::Answer(Answer::Holding {
+            path: Path::new("/area").join(p).to_string_lossy().into_owned(),
+        })
+    };
+    assert_eq!(
+        out,
+        vec![
+            FromHelper::Answer(Answer::Ready),
+            FromHelper::Answer(Answer::Refused(Refusal::NotApproved)),
+            FromHelper::Answer(Answer::Refused(Refusal::NothingHeld)),
+            FromHelper::Answer(Answer::AccountMade {
+                account: "1005".into(),
+                password: "abcd-efgh-jkmn-pqrs".into()
+            }),
+            held("p1"),
+            held("p1"),
+            held("p2"),
+            FromHelper::Answer(Answer::HandedOver {
+                landed: 3,
+                kept: 0,
+                failed: 0
+            }),
+        ]
+    );
+    // One holding area for the move; Bea's hand-over is into the account the helper made.
+    assert_eq!(fake.areas, 1);
+    assert_eq!(fake.handed.len(), 1);
+    assert_eq!(fake.handed[0].0, "Uid(1005)");
+    assert_eq!(fake.handed[0].1, "bea");
+    assert_eq!(fake.handed[0].2, Path::new("/area").join("p1"));
+}

@@ -36,6 +36,12 @@ pub enum Request {
     /// New laptop: make the approved person's standard account `name`, shown as `full_name`,
     /// with a temporary password they must change at their first sign-in.
     CreateAccount { name: String, full_name: String },
+    /// New laptop: the folder in this move's holding area where the approved person `account`'s
+    /// files are put during the move (made the first time it is asked for).
+    HoldFor { account: String },
+    /// New laptop: hand the approved person `account`'s held files over into their own folders,
+    /// now.
+    HandOverNow { account: String },
     /// The move is over: the helper ends.
     Bye,
 }
@@ -76,6 +82,8 @@ pub enum Refusal {
     AccountExists,
     #[error("the account could not be made")]
     AccountNotMade,
+    #[error("nothing is being held for that person")]
+    NothingHeld,
 }
 
 /// The helper's JSON answers.
@@ -89,6 +97,16 @@ pub enum Answer {
     AccountMade {
         account: String,
         password: String,
+    },
+    /// Where the person's files are put during the move.
+    Holding {
+        path: String,
+    },
+    /// The person's files handed over: how many landed, were kept aside (a name taken) or failed.
+    HandedOver {
+        landed: u64,
+        kept: u64,
+        failed: u64,
     },
     /// The person's totals; the handles follow in their own frame.
     Scanned {
