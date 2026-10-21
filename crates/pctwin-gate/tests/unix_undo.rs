@@ -560,9 +560,20 @@ fn on_macos_a_copy_on_another_drive_goes_to_that_drives_trash_or_is_kept() {
         std::fs::Permissions::from_mode(0o1333),
     )
     .unwrap();
-    let r = plain(&dest, "Docs/d.txt", file, b"on another drive");
     let uid = std::process::Command::new("id").arg("-u").output().unwrap();
     let uid = String::from_utf8(uid.stdout).unwrap().trim().to_string();
+    // A folder there for this person that others may write to is not theirs alone: kept.
+    let theirs = mnt.join(".Trashes").join(&uid);
+    std::fs::create_dir(&theirs).unwrap();
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o777)).unwrap();
+    assert_eq!(
+        plain(&dest, "Docs/d.txt", file, b"on another drive"),
+        Removed::NoTrash
+    );
+    assert_eq!(names(&mnt.join("Docs")), ["d.txt"]);
+    assert!(names(&theirs).is_empty());
+    std::fs::set_permissions(&theirs, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let r = plain(&dest, "Docs/d.txt", file, b"on another drive");
     let mine = std::fs::canonicalize(&mnt)
         .unwrap()
         .join(".Trashes")
