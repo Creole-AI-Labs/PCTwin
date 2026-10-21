@@ -137,6 +137,11 @@ pub async fn receive_people(ch: &mut impl Channel) -> Result<Vec<NamedPerson>, T
         .recv()
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
+    parse_people(&msg)
+}
+
+/// The other people, read from one message; anything else is refused.
+pub fn parse_people(msg: &[u8]) -> Result<Vec<NamedPerson>, TransferError> {
     let bad = || TransferError::Protocol("expected the other people".into());
     let (&kind, body) = msg.split_first().ok_or_else(bad)?;
     if kind != PEOPLE {
@@ -159,6 +164,11 @@ pub async fn receive_mover(ch: &mut impl Channel) -> Result<String, TransferErro
         .recv()
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
+    parse_mover(&msg)
+}
+
+/// The old laptop's word on who is moving, read from one message; anything else is refused.
+pub fn parse_mover(msg: &[u8]) -> Result<String, TransferError> {
     let bad = || TransferError::Protocol("expected who is moving".into());
     let (&kind, body) = msg.split_first().ok_or_else(bad)?;
     if kind != MOVER || body.is_empty() || body.len() > MAX_ACCOUNT_ID {
@@ -194,6 +204,11 @@ pub async fn receive_rules(ch: &mut impl Channel) -> Result<LandingRules, Transf
         .recv()
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
+    parse_rules(&msg)
+}
+
+/// The landing rules, read from one message; anything else is refused.
+pub fn parse_rules(msg: &[u8]) -> Result<LandingRules, TransferError> {
     let bad = |why: &str| TransferError::Protocol(format!("landing rules: {why}"));
     let (&kind, body) = msg.split_first().ok_or_else(|| bad("empty"))?;
     if kind != KIND {
