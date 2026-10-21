@@ -733,6 +733,7 @@ dest-format = A file in these folders is too big for the way { $place } is set u
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $folder } on { $drive }
 plan-group-to = Goes to { $place }
+plan-group-move = Move { $folder }
 plan-version = Plan version { $revision }
 plan-details = More details
 plan-preview-title = Before you start

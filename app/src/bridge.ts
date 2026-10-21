@@ -552,7 +552,8 @@ export function parseReportItem(value: unknown): ReportItem | null {
 export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[]) => run("move_begin", { fallback, others });
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
 export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
-export const moveApprove = (plan: PlanKey, approve: boolean) => run("move_approve", { plan, approve });
+/** The answer to the plan on screen; `leftOut`: the folders the person unticked (none of them moves). */
+export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = []) => run("move_approve", { plan, approve, leftOut });
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");

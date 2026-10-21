@@ -705,6 +705,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
             .collect(),
         fallback: Default::default(),
         held: Default::default(),
+        left_out: Default::default(),
     };
     struct ByRules {
         rules: LandingRules,

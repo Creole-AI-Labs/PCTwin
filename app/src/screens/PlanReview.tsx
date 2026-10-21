@@ -2,7 +2,7 @@ import { Localized, useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
-import { approvalHolds, leftOutByHand, type Approval, type PlanPreview, type PlanView } from "../plan";
+import { approvalHolds, leftOutByHand, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
@@ -60,6 +60,9 @@ export interface PlanReviewProps {
   onEdit?: () => void;
   /** The host was told the plan changed under an approval (the engine refused it): say so. */
   changedNotice?: boolean;
+  /** Folders the person unticked: they stay on the old laptop. With `onToggleGroup`, each group has a tick. */
+  leftOut?: readonly FolderRole[];
+  onToggleGroup?: (role: FolderRole, move: boolean) => void;
   /** The plan cannot be approved until people are mapped to accounts: go and do that. */
   onFixPeople?: () => void;
   onBack?: () => void;
@@ -74,7 +77,7 @@ export interface PlanReviewProps {
  * the same fingerprint. If the plan changes under an approval, the approval is dropped, the person is told so
  * out loud, and Start the move stays closed until they approve the new version.
  */
-export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, onFixPeople, onBack }: PlanReviewProps) {
+export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, onFixPeople, onBack }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const holds = approvalHolds(plan, approval);
@@ -99,7 +102,8 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
     if (stale) tell.current(null);
   }, [stale]);
 
-  const moving = plan.groups.reduce((sum, g) => sum + (g.size.kind === "unreadable" ? 0 : g.size.bytes), 0);
+  const kept = plan.groups.filter((g) => !leftOut.includes(g.role));
+  const moving = kept.reduce((sum, g) => sum + (g.size.kind === "unreadable" ? 0 : g.size.bytes), 0);
   const partly = plan.groups.some((g) => g.size.kind !== "known");
   const places = new Set(plan.groups.map((g) => `${g.toDrive}\u0000${g.toFolder}`));
   const placeText = (drive: string, folder: string) => (folder && drive ? l10n.getString("plan-place", { folder, drive }) : folder || drive);
@@ -141,7 +145,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
 
       <div className="plan-columns">
         <PlanBox title={l10n.getString("plan-what-title")}>
-          <p className="plan-lead">{l10n.getString("plan-what-body", { count: plan.groups.length, size: fmt.total(moving, partly) })}</p>
+          <p className="plan-lead">{l10n.getString("plan-what-body", { count: kept.length, size: fmt.total(moving, partly) })}</p>
           <ul className="plan-items">
             {plan.groups.map((g) => (
               <li key={g.id} className="plan-item">
@@ -157,6 +161,15 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
                 <small className="kit-hint">
                   <bdi dir="auto">{l10n.getString("plan-group-to", { place: placeText(g.toDrive, g.toFolder) })}</bdi>
                 </small>
+                {onToggleGroup && (
+                  <Checkbox
+                    checked={!leftOut.includes(g.role)}
+                    onChange={(on) => {
+                      onToggleGroup(g.role, on);
+                    }}
+                    label={l10n.getString("plan-group-move", { folder: l10n.getString(`plan-role-${g.role}`) })}
+                  />
+                )}
               </li>
             ))}
           </ul>

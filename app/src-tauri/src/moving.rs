@@ -74,7 +74,13 @@ struct Run {
     /// The old laptop's scan: set to stop it.
     scan_stop: Arc<AtomicBool>,
     /// The new laptop: the plan on screen, and where the person's answer goes.
-    waiting: Option<(PlanKey, oneshot::Sender<bool>)>,
+    waiting: Option<(
+        PlanKey,
+        std::collections::BTreeSet<FolderRole>,
+        oneshot::Sender<bool>,
+    )>,
+    /// The new laptop: the folders the person left out when they approved.
+    left_out: std::collections::BTreeSet<FolderRole>,
     /// The new laptop: the people on screen to place, this laptop's accounts, and where the
     /// person's choices go.
     placing: Option<Placing>,
@@ -123,6 +129,7 @@ impl Moving {
             live: live.clone(),
             scan_stop: scan_stop.clone(),
             waiting: None,
+            left_out: std::collections::BTreeSet::new(),
             placing: None,
             privacy: None,
             report: Vec::new(),
@@ -158,18 +165,28 @@ impl Moving {
         })?
     }
 
-    fn wait_for_answer(&self, key: PlanKey) -> oneshot::Receiver<bool> {
+    fn wait_for_answer(
+        &self,
+        key: PlanKey,
+        groups: std::collections::BTreeSet<FolderRole>,
+    ) -> oneshot::Receiver<bool> {
         let (tx, rx) = oneshot::channel();
         if let Some(run) = lock(&self.run).as_mut() {
-            run.waiting = Some((key, tx));
+            run.waiting = Some((key, groups, tx));
         }
         rx
     }
 
-    /// The person's answer to the plan on screen: only for exactly that revision.
-    fn answer(&self, key: &PlanKey, yes: bool) -> Result<(), MoveProblem> {
+    /// The person's answer to the plan on screen: only for exactly that revision, and leaving
+    /// out only folders that plan shows.
+    fn answer(&self, key: &PlanKey, yes: bool, left_out: &[FolderRole]) -> Result<(), MoveProblem> {
         self.with_run(|run| match run.waiting.take() {
-            Some((shown, tx)) if shown == *key => {
+            Some((shown, groups, tx)) if shown == *key => {
+                if left_out.iter().any(|r| !groups.contains(r)) {
+                    run.waiting = Some((shown, groups, tx));
+                    return Err(MoveProblem::PlanChanged);
+                }
+                run.left_out = left_out.iter().copied().collect();
                 let _ = tx.send(yes);
                 Ok(())
             }
@@ -178,6 +195,13 @@ impl Moving {
                 Err(MoveProblem::PlanChanged)
             }
         })?
+    }
+
+    fn left_out(&self) -> std::collections::BTreeSet<FolderRole> {
+        lock(&self.run)
+            .as_ref()
+            .map(|r| r.left_out.clone())
+            .unwrap_or_default()
     }
 
     fn wait_for_places(
@@ -235,7 +259,7 @@ impl Moving {
     fn stop(&self) -> Result<(), MoveProblem> {
         self.with_run(|run| {
             run.scan_stop.store(true, Ordering::Release);
-            if let Some((_, tx)) = run.waiting.take() {
+            if let Some((_, _, tx)) = run.waiting.take() {
                 let _ = tx.send(false);
             }
             // Dropping it ends the wait for the people's places: the move stops there.
@@ -1192,13 +1216,19 @@ impl<R: Runtime> Steps for AppSteps<R> {
                 }
             }
         }
-        let answer = self.moving.wait_for_answer(PlanKey {
-            revision: view.revision,
-            fingerprint: view.fingerprint.clone(),
-        });
+        let groups = view.groups.iter().map(|g| g.role).collect();
+        let answer = self.moving.wait_for_answer(
+            PlanKey {
+                revision: view.revision,
+                fingerprint: view.fingerprint.clone(),
+            },
+            groups,
+        );
         let _ = self.app.emit(PLAN_EVENT, view);
         match answer.await {
             Ok(true) => {
+                // The folders the person unticked: none of their files is sent or received.
+                self.rules.left_out = self.moving.left_out();
                 let _ = self.app.emit(STAGE_EVENT, Stage::Moving);
                 Ok(())
             }
@@ -1208,6 +1238,17 @@ impl<R: Runtime> Steps for AppSteps<R> {
 
     fn landing(&self, item: &Item) -> Option<LandingPlace> {
         self.rules.landing(item)
+    }
+
+    fn left_out(&self, record: &Record) -> Vec<ItemId> {
+        record
+            .items
+            .iter()
+            .filter(|i| {
+                shown_to_mover(i, &self.rules.mover) && self.rules.left_out.contains(&i.place.role)
+            })
+            .map(|i| i.id)
+            .collect()
     }
 
     fn mover(&mut self, account_id: &str) {
@@ -1433,6 +1474,7 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
         roles,
         fallback,
         held: BTreeMap::new(),
+        left_out: Default::default(),
     };
     let shown = found
         .iter()
@@ -1659,14 +1701,16 @@ pub async fn move_begin<R: Runtime>(
     spawn_run(app, moving, link, paired, side, live, scan_stop)
 }
 
-/// The person's answer to the plan on screen (M23), for exactly that revision.
+/// The person's answer to the plan on screen (M23), for exactly that revision, with the folders
+/// they unticked (`left_out`): none of those is moved.
 #[tauri::command]
 pub fn move_approve(
     moving: State<'_, AppMoving>,
     plan: PlanKey,
     approve: bool,
+    left_out: Vec<FolderRole>,
 ) -> Result<(), MoveProblem> {
-    moving.answer(&plan, approve)
+    moving.answer(&plan, approve, &left_out)
 }
 
 /// The new laptop: where each other person's things go (M06), and the words of the system
@@ -1908,27 +1952,42 @@ mod tests {
             revision: 2,
             fingerprint: "ab".into(),
         };
-        let mut rx = moving.wait_for_answer(key.clone());
+        let mut rx = moving.wait_for_answer(key.clone(), [FolderRole::Documents].into());
         let stale = PlanKey {
             revision: 1,
             fingerprint: "ab".into(),
         };
-        assert_eq!(moving.answer(&stale, true), Err(MoveProblem::PlanChanged));
+        assert_eq!(
+            moving.answer(&stale, true, &[]),
+            Err(MoveProblem::PlanChanged)
+        );
         assert!(rx.try_recv().is_err(), "no answer yet");
-        moving.answer(&key, true).unwrap();
+        // Leaving out a folder the plan does not show is refused, and the plan still waits.
+        assert_eq!(
+            moving.answer(&key, true, &[FolderRole::Music]),
+            Err(MoveProblem::PlanChanged)
+        );
+        moving.answer(&key, true, &[FolderRole::Documents]).unwrap();
+        assert_eq!(moving.left_out(), [FolderRole::Documents].into());
         assert_eq!(rx.try_recv(), Ok(true));
         // Answered once only.
-        assert_eq!(moving.answer(&key, true), Err(MoveProblem::PlanChanged));
+        assert_eq!(
+            moving.answer(&key, true, &[]),
+            Err(MoveProblem::PlanChanged)
+        );
     }
 
     #[test]
     fn stopping_before_the_approval_declines_the_plan() {
         let moving = Moving::default();
         let (live, scan_stop) = moving.begin().unwrap();
-        let mut rx = moving.wait_for_answer(PlanKey {
-            revision: 1,
-            fingerprint: "ab".into(),
-        });
+        let mut rx = moving.wait_for_answer(
+            PlanKey {
+                revision: 1,
+                fingerprint: "ab".into(),
+            },
+            Default::default(),
+        );
         moving.stop().unwrap();
         assert_eq!(rx.try_recv(), Ok(false));
         assert!(live.control.stopped());
@@ -2125,6 +2184,7 @@ mod tests {
             ]),
             fallback: BTreeMap::from([(FolderRole::Music, "From your old laptop/Music".into())]),
             held: BTreeMap::new(),
+            left_out: Default::default(),
         }
     }
 

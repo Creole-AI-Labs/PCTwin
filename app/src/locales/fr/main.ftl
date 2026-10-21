@@ -878,6 +878,7 @@ dest-format = Un fichier de ces dossiers est trop volumineux pour la façon dont
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $folder } sur { $drive }
 plan-group-to = Vers { $place }
+plan-group-move = Déplacer { $folder }
 plan-version = Version du plan { $revision }
 plan-details = Plus de détails
 plan-preview-title = Avant de commencer

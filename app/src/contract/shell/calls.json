@@ -129,6 +129,12 @@
         [
           "approve",
           true
+        ],
+        [
+          "leftOut",
+          [
+            "music"
+          ]
         ]
       ],
       "name": "move_approve"

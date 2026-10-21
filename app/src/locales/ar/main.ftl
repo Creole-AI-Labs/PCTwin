@@ -942,6 +942,7 @@ dest-format = أحد الملفات في هذه المجلدات كبير جدً
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $folder } على { $drive }
 plan-group-to = يذهب إلى { $place }
+plan-group-move = نقل { $folder }
 plan-version = إصدار الخطة { $revision }
 plan-details = مزيد من التفاصيل
 plan-preview-title = قبل أن تبدأ

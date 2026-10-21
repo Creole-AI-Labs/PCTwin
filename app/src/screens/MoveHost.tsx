@@ -149,6 +149,8 @@ export default function MoveHost({
   const [view, setView] = useState<View>({ kind: "wait", stage: old ? "scanning" : "waiting" });
   const [approval, setApproval] = useState<Approval | null>(null);
   const [planChanged, setPlanChanged] = useState(false);
+  // The folders the person unticked on the plan: they stay on the old laptop.
+  const [leftOut, setLeftOut] = useState<FolderRole[]>([]);
   // Why the other people ticked were not moved, when they were not: said until the move ends.
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -303,9 +305,13 @@ export default function MoveHost({
           plan={view.plan}
           approval={approval}
           changedNotice={planChanged}
+          leftOut={leftOut}
+          onToggleGroup={(role, move) => {
+            setLeftOut((out) => (move ? out.filter((r) => r !== role) : out.includes(role) ? out : [...out, role]));
+          }}
           onApprovalChange={setApproval}
           onStart={(a) => {
-            moveApprove(a, true).then(
+            moveApprove(a, true, leftOut).then(
               () => {
                 setView({ kind: "wait", stage: "moving" });
               },

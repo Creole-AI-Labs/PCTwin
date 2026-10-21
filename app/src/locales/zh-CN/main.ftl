@@ -689,6 +689,7 @@ dest-readonly = { $place }是只读的，无法复制任何内容到上面。请
 dest-format = 这些文件夹中有一个文件太大，按{ $place }目前的设置方式放不下。请选择其他地方。
 plan-place = { $drive }上的{ $folder }
 plan-group-to = 放到{ $place }
+plan-group-move = 移动 { $folder }
 plan-version = 方案版本{ $revision }
 plan-details = 更多详情
 plan-preview-title = 开始之前

@@ -362,6 +362,12 @@ pub trait Steps {
     /// The other people whose things are in the move, by name, as the old laptop said (the app's
     /// way of moving), before anyone is placed.
     fn people(&mut self, _people: &[landing::NamedPerson]) {}
+
+    /// Files the person chose, at their approval, to leave out (whole folders of theirs, say):
+    /// they are left out of the plan as their own choice, and `landing` gives them no place.
+    fn left_out(&self, _record: &Record) -> Vec<ItemId> {
+        Vec::new()
+    }
 }
 
 /// What the person sees before approving: whether the plan fits on this laptop, and about how
@@ -597,6 +603,14 @@ async fn receive_plan_told<C: Channel, S: Steps>(
     }
     let shown = preview(&record, |i| steps.landing(i), table, speed);
     steps.approve(&record, &shown).await?;
+    let out: std::collections::HashSet<ItemId> = steps.left_out(&record).into_iter().collect();
+    for item in &mut record.items {
+        if out.contains(&item.id) && item.inclusion == Inclusion::Included {
+            item.inclusion = Inclusion::LeftOut {
+                reason: LeftOutReason::ChosenByUser,
+            };
+        }
+    }
     let approval = record.approve()?;
     let allowance = Allowance::from_record(&record, &approval, |i| steps.landing(i))?;
     Ok(ApprovedPlan {

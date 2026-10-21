@@ -230,7 +230,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "pairing_old_rename" => json!({ "name": 7 }),
         "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
         "move_begin" => json!({ "fallback": 1, "others": 2 }),
-        "move_approve" => json!({ "plan": 1, "approve": "x" }),
+        "move_approve" => json!({ "plan": 1, "approve": "x", "leftOut": 3 }),
         "move_place_people" => json!({ "choices": 1, "words": 2 }),
         "move_privacy_answer" => json!({ "again": "x" }),
         "help_code" => json!({ "topic": 1, "step": 2 }),

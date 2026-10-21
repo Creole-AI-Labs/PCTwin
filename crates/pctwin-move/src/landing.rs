@@ -45,6 +45,10 @@ pub struct LandingRules {
     /// Each other approved person (by their account ID on the old laptop) to the place their
     /// things are held in until the hand-over.
     pub held: BTreeMap<String, String>,
+    /// The mover's (and shared) folders, by role, the person chose to leave out at approval:
+    /// none of their files is sent.
+    #[serde(default)]
+    pub left_out: std::collections::BTreeSet<FolderRole>,
 }
 
 impl LandingRules {
@@ -61,6 +65,7 @@ impl LandingRules {
                 ))
             }
             Owner::System => None,
+            _ if self.left_out.contains(&item.place.role) => None,
             _ => {
                 let places = NewPlaces::new(self.roles.clone());
                 let fallback = |role: FolderRole| {
@@ -239,6 +244,7 @@ mod tests {
             ]),
             fallback: BTreeMap::from([(FolderRole::Music, "Desde tu portátil/Música".into())]),
             held: BTreeMap::from([("1001".into(), "for-1".into())]),
+            left_out: Default::default(),
         }
     }
 
@@ -296,6 +302,43 @@ mod tests {
             r.landing(&item(Owner::Shared, FolderRole::Other, &["menu.txt"])),
             Some(LandingPlace::new("public", "menu.txt"))
         );
+    }
+
+    #[test]
+    fn a_folder_the_person_left_out_gets_no_place_but_other_people_keep_theirs() {
+        let mut r = rules();
+        r.left_out.insert(FolderRole::Documents);
+        let mine = item(
+            Owner::Person {
+                account_id: "1000".into(),
+            },
+            FolderRole::Documents,
+            &["a.txt"],
+        );
+        assert_eq!(r.landing(&mine), None);
+        let pictures = item(
+            Owner::Person {
+                account_id: "1000".into(),
+            },
+            FolderRole::Pictures,
+            &["b.jpg"],
+        );
+        assert!(r.landing(&pictures).is_some());
+        let bea = item(
+            Owner::Person {
+                account_id: "1001".into(),
+            },
+            FolderRole::Documents,
+            &["c.txt"],
+        );
+        assert_eq!(
+            r.landing(&bea),
+            Some(LandingPlace::new("for-1", "documents/c.txt"))
+        );
+        // Rules from a laptop that says nothing about it leave nothing out.
+        let without: LandingRules =
+            serde_json::from_str(r#"{"mover":"1000","roles":{},"fallback":{},"held":{}}"#).unwrap();
+        assert!(without.left_out.is_empty());
     }
 
     #[tokio::test]

@@ -126,10 +126,21 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(start);
     await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true });
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: [] });
     });
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-starting-title"));
+    });
+  });
+
+  it("a folder the person unticks stays on the old laptop: the approval says so, and the total leaves it out", async () => {
+    await host(false);
+    send("move-plan", plan);
+    fireEvent.click(screen.getByRole("checkbox", { name: text("plan-group-move", { folder: text("plan-role-documents") }) }));
+    fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
+    fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"] });
     });
   });
 
@@ -151,7 +162,7 @@ describe("the move, once paired", () => {
     await host(false);
     send("move-plan", plan);
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
-    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false });
+    expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [] });
   });
 
   it("shows the measured progress, then pausing and paused with a way to stop that asks first", async () => {

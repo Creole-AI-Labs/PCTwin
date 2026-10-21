@@ -859,6 +859,7 @@ dest-format = इन फ़ोल्डरों की एक फ़ाइल �
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $drive } पर { $folder }
 plan-group-to = { $place } पर जाएगा
+plan-group-move = { $folder } ले जाएँ
 plan-version = योजना वर्शन { $revision }
 plan-details = और जानकारी
 plan-preview-title = शुरू करने से पहले

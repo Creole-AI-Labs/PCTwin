@@ -873,6 +873,7 @@ dest-format = Um arquivo nestas pastas é grande demais para o jeito como { $pla
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $folder } em { $drive }
 plan-group-to = Vai para { $place }
+plan-group-move = Mover { $folder }
 plan-version = Versão do plano { $revision }
 plan-details = Mais detalhes
 plan-preview-title = Antes de começar

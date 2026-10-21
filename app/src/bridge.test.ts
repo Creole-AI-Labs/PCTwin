@@ -216,7 +216,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsResume();
       await qsStop();
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}" });
-      await moveApprove({ revision: 2, fingerprint: "9f" }, true);
+      await moveApprove({ revision: 2, fingerprint: "9f" }, true, ["music"]);
       await movePause();
       await moveResume();
       await moveStop();

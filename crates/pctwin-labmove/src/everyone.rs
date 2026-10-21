@@ -372,6 +372,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
             .collect(),
         fallback: BTreeMap::new(),
         held,
+        left_out: Default::default(),
     };
     let plan = pctwin_move::send_plan_where(
         &record,
