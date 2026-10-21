@@ -18,6 +18,10 @@ use serde::{Deserialize, Serialize};
 /// The message kind of the rules, kept apart from the transfer's (1 to 20), the inventory's (32,
 /// 33, 35), the version's (34) and the link test's (36, 37).
 const KIND: u8 = 39;
+/// The message kind of the old laptop's word on who is moving.
+const MOVER: u8 = 40;
+/// The longest account ID said (as the record allows).
+const MAX_ACCOUNT_ID: usize = 256;
 /// The rules are a handful of facts: far below the link's 64 KiB message limit.
 const MAX_RULES: usize = 60 * 1024;
 
@@ -63,6 +67,37 @@ impl LandingRules {
             }
         }
     }
+}
+
+/// The old laptop: says which of its people is moving (their account ID), right after the link
+/// test, so the new laptop can place everyone before the person approves.
+pub async fn send_mover(ch: &mut impl Channel, account_id: &str) -> Result<(), TransferError> {
+    if account_id.is_empty() || account_id.len() > MAX_ACCOUNT_ID {
+        return Err(TransferError::Protocol("not an account ID".into()));
+    }
+    let mut msg = vec![MOVER];
+    msg.extend_from_slice(account_id.as_bytes());
+    ch.send(&msg)
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)
+}
+
+/// The new laptop: who is moving, as the old laptop said; anything else is refused.
+pub async fn receive_mover(ch: &mut impl Channel) -> Result<String, TransferError> {
+    let msg = ch
+        .recv()
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    let bad = || TransferError::Protocol("expected who is moving".into());
+    let (&kind, body) = msg.split_first().ok_or_else(bad)?;
+    if kind != MOVER || body.is_empty() || body.len() > MAX_ACCOUNT_ID {
+        return Err(bad());
+    }
+    let id = std::str::from_utf8(body).map_err(|_| bad())?;
+    if id.chars().any(char::is_control) {
+        return Err(bad());
+    }
+    Ok(id.to_string())
 }
 
 /// The new laptop: sends the rules, once the person approved the plan.

@@ -270,6 +270,7 @@ pub async fn send_with<C: Channel>(
 pub async fn send_by_rules<C: Channel>(
     link: &mut C,
     record: &Record,
+    mover: &str,
     source: impl Fn(&Item) -> Option<PathBuf>,
     live: &Live,
     opener: Arc<dyn Opener>,
@@ -277,6 +278,7 @@ pub async fn send_by_rules<C: Channel>(
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record, version).await?;
     answer_link_test(link, version).await?;
+    landing::send_mover(link, mover).await?;
     let rules = landing::receive_rules(link).await?;
     let plan = send_plan_where(record, source, |i| rules.landing(i));
     let sent = run_sender(link, version, plan, live, opener).await?;
@@ -350,6 +352,10 @@ pub trait Steps {
     /// Where `item` lands on this laptop (`None`: it is not received). It must be the very
     /// function the old laptop sends with, so the old laptop never chooses a place.
     fn landing(&self, item: &Item) -> Option<LandingPlace>;
+
+    /// Which person on the old laptop is moving (their account ID there), as the old laptop said
+    /// (the app's way of moving, [`receive_by_rules`]), before anyone is placed.
+    fn mover(&mut self, _account_id: &str) {}
 }
 
 /// What the person sees before approving: whether the plan fits on this laptop, and about how
@@ -548,9 +554,24 @@ pub async fn receive_plan<C: Channel, S: Steps>(
     steps: &mut S,
     table: &Destinations,
 ) -> Result<ApprovedPlan, MoveError> {
+    receive_plan_told(link, steps, table, false).await
+}
+
+/// [`receive_plan`]; with `told`, the old laptop says who is moving after the link test, and
+/// `steps` hears it before anyone is placed.
+async fn receive_plan_told<C: Channel, S: Steps>(
+    link: &mut C,
+    steps: &mut S,
+    table: &Destinations,
+    told: bool,
+) -> Result<ApprovedPlan, MoveError> {
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     let mut record = receive_inventory(link, version).await?;
     let speed = measure_link(link, version).await?;
+    if told {
+        let mover = landing::receive_mover(link).await?;
+        steps.mover(&mover);
+    }
     let mut people = BTreeSet::new();
     let owners: Vec<String> = record
         .items
@@ -636,7 +657,7 @@ pub async fn receive_by_rules<C: Channel, S: Steps>(
     account: &str,
     live: &Live,
 ) -> Result<Received, MoveError> {
-    let approved = receive_plan(link, steps, table).await?;
+    let approved = receive_plan_told(link, steps, table, true).await?;
     landing::send_rules(link, &rules(steps)).await?;
     approved.receive(link, table, journal, account, live).await
 }

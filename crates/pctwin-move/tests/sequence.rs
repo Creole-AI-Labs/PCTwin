@@ -708,6 +708,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     };
     struct ByRules {
         rules: LandingRules,
+        told: Option<String>,
     }
     impl Steps for ByRules {
         async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
@@ -721,9 +722,13 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         fn landing(&self, item: &Item) -> Option<LandingPlace> {
             self.rules.landing(item)
         }
+        fn mover(&mut self, account_id: &str) {
+            self.told = Some(account_id.to_string());
+        }
     }
     let mut steps = ByRules {
         rules: rules.clone(),
+        told: None,
     };
     let (mut old, mut new) = mem_pair();
     let (old_live, new_live) = (Live::default(), Live::default());
@@ -732,6 +737,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
             pctwin_move::send_by_rules(
                 &mut old,
                 &w.record,
+                "1000",
                 |i| Some(source_in(w.old.path(), i)),
                 &old_live,
                 std::sync::Arc::new(pctwin_transfer::FsOpener),
@@ -749,6 +755,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     })
     .await;
     let (sent, got) = sent.unwrap();
+    assert_eq!(steps.told.as_deref(), Some("1000"), "told who is moving");
     assert_eq!(
         got, rules,
         "the old laptop placed by the new laptop's rules"
