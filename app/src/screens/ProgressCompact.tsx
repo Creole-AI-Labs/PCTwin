@@ -8,6 +8,8 @@ import { Eyebrow, GroupRows, Heading, MeasuredBar, Notices, NowLine, PercentValu
 export type ProgressHandlers = {
   onPause: () => void;
   onResume: () => void;
+  /** Open the stop dialog (X10), from the paused screen. */
+  onStop?: () => void;
   /** Open the list of items that need the person (the expanded view or the report). */
   onSeeNeedsAction: () => void;
 };
@@ -21,11 +23,12 @@ export default function ProgressCompact({
   progress,
   onPause,
   onResume,
+  onStop,
   onMinimise,
   onSeeNeedsAction,
 }: { progress: MoveProgress; onMinimise: () => void } & ProgressHandlers) {
   const { l10n } = useLocalization();
-  if (progress.state !== "running") return <Paused progress={progress} onResume={onResume} />;
+  if (progress.state !== "running") return <Paused progress={progress} onResume={onResume} onStop={onStop} />;
   return (
     <>
       <RouteStrip laptops={progress.laptops} />

@@ -6,6 +6,7 @@ import { setTrayLabels } from "./native";
 import { stop as stopPairing } from "./pairing";
 import ComingSoon, { type Soon } from "./screens/ComingSoon";
 import ConnectionRoute from "./screens/ConnectionRoute";
+import MoveHost from "./screens/MoveHost";
 import { FooterProvider } from "./screens/FrameFooter";
 import PairNew from "./screens/PairNew";
 import PairOld from "./screens/PairOld";
@@ -15,13 +16,15 @@ import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import "./styles.css";
 
-/** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), then pairing (C03 to C05); and Quick Send's home. */
+/** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), pairing (C03 to C05), then the move; and Quick Send's home. */
 type Screen =
   | { id: "welcome" }
   | { id: "role" }
   | { id: "connect"; role: Role }
   | { id: "together"; role: Role }
   | { id: "pair"; role: Role }
+  // The move, from paired to its outcome. Left only by its own buttons, so a running move always has a screen.
+  | { id: "move"; role: Role }
   | { id: "soon"; which: Soon }
   // Quick Send home. `notice` is set when the person chose something the engine cannot do yet.
   | { id: "quick"; notice: boolean };
@@ -62,7 +65,10 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 type="button"
                 className="brand"
                 aria-label="PCTwin home"
+                // During a move, home is reached by the move's own buttons only.
+                aria-disabled={screen.id === "move" ? true : undefined}
                 onClick={() => {
+                  if (screen.id === "move") return;
                   if (screen.id === "pair") void stopPairing().catch(() => undefined);
                   setScreen({ id: "welcome" });
                 }}
@@ -108,8 +114,15 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}
             {screen.id === "connect" && <ConnectionRoute onBack={() => { setScreen({ id: "role" }); }} onWifi={() => { setScreen({ id: "together", role: screen.role }); }} />}
             {screen.id === "together" && <PutTogether onBack={() => { setScreen({ id: "connect", role: screen.role }); }} onContinue={() => { setScreen({ id: "pair", role: screen.role }); }} />}
-            {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} />}
-            {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} />}
+            {screen.id === "pair" && screen.role === "old" && <PairOld onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "old" }); }} />}
+            {screen.id === "pair" && screen.role === "new" && <PairNew onBack={() => { setScreen({ id: "together", role: screen.role }); }} onPaired={() => { setScreen({ id: "move", role: "new" }); }} />}
+            {screen.id === "move" && (
+              <MoveHost
+                old={screen.role === "old"}
+                onPairAgain={() => { setScreen({ id: "pair", role: screen.role }); }}
+                onHome={() => { setScreen({ id: "welcome" }); }}
+              />
+            )}
           </main>
         </FooterProvider>
       </div>

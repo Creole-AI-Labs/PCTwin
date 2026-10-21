@@ -262,7 +262,8 @@ pair-new-number-waiting = Waiting for your old laptop…
 
 pair-done-eyebrow = All set
 pair-done-title = Your laptops are paired.
-pair-done-body = Your two laptops are connected. Choosing what to move comes next, and it is still being built, so nothing has moved yet.
+pair-done-body = Your two laptops are connected. Next, your old laptop finds your files, and you approve what moves on the new laptop. Nothing moves before you approve.
+pair-done-continue = Continue
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -716,6 +717,36 @@ plan-place = { $folder } on { $drive }
 plan-group-to = Goes to { $place }
 plan-version = Plan version { $revision }
 plan-details = More details
+plan-preview-title = Before you start
+plan-preview-fits = There is enough free space on this laptop.
+plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
+plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] About { $minutes } minute.
+       *[other] About { $minutes } minutes.
+    }
+plan-preview-time = About { $low } to { $high } minutes.
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } file gets a slightly different name, because this laptop does not allow its name. The report lists it.
+       *[other] { $count } files get a slightly different name, because this laptop does not allow their names. The report lists each one.
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } file is too big for this laptop’s drive and will not be copied.
+       *[other] { $count } files are too big for this laptop’s drive and will not be copied.
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } file has a name or folder this laptop does not allow, and will not be copied.
+       *[other] { $count } files have a name or folder this laptop does not allow, and will not be copied.
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } file would start by itself when someone signs in on this laptop. Check that you expect it.
+       *[other] { $count } files would start by themselves when someone signs in on this laptop. Check that you expect them.
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = Reference { $reference }
 # $count is how many files are affected in each line below.
@@ -872,6 +903,45 @@ outcome-next-title = What to do next
 outcome-old-safe = Anything not finished stays listed here. Nothing was removed from your old laptop.
 outcome-report = View complete report
 outcome-home = Return home
+move-fallback-folder = From your old laptop
+move-stop = Stop the move
+move-status-kept = Kept
+move-wait-eyebrow = Your move
+move-wait-scanning-title = Finding your files.
+move-wait-scanning-body = Your old laptop is looking through your folders. It only reads them: nothing is opened, changed or removed.
+move-wait-approval-title = Waiting for your new laptop.
+move-wait-approval-body = Your files are ready to go. Check the plan on your new laptop and approve it to start.
+move-wait-list-title = Waiting for your old laptop.
+move-wait-list-body = Your old laptop is finding your files. When it has finished, the plan appears here for you to approve. This can take a few minutes.
+move-wait-starting-title = Starting the move.
+move-wait-starting-body = The plan is approved. Copying starts in a moment.
+move-ended-eyebrow = Your move
+move-ended-kept-title = Already copied
+move-ended-kept-body = Everything copied and checked before this happened stays on the new laptop.
+move-ended-old-title = Your old laptop
+move-ended-old-body = Nothing on it was changed or removed.
+move-ended-old-badge = Unchanged
+move-ended-next = To try again, pair the laptops again. Files already copied and checked are found and not copied twice.
+move-lost-title = The connection to your other laptop was lost.
+move-lost-body = The laptops stopped reaching each other, so the move could not go on. Check that both are switched on, awake and near each other.
+move-not-approved-title = The move did not start.
+move-not-approved-old = The plan was not approved on the new laptop, so nothing was copied.
+move-not-approved-new = You did not approve the plan, so nothing was copied.
+move-failed-title = Something went wrong.
+move-failed-body = The move could not go on. If it happens again, More details below says what went wrong.
+move-refused-title = The move could not start.
+move-refused-not-paired = Your laptops are no longer paired. Pair them again to start the move.
+move-refused-busy = A move is already running on this laptop.
+move-refused-not-moving = There is no move running on this laptop.
+move-refused-plan-changed = The plan changed before it was approved. Pair the laptops again to see the new plan.
+move-refused-failed = This laptop’s folders could not be made ready for the move. Pair the laptops again to try once more.
+drive-problem-title = The move needs your attention.
+drive-problem-body = Copies saved in { $place } did not match the originals when PCTwin checked them, several times. The drive may be failing, full or unplugged, so copying there is paused.
+drive-problem-kept-title = Already copied and checked
+drive-problem-waiting-title = Still to copy to { $place }
+drive-problem-badge = Paused
+drive-problem-fix = Check that the drive is plugged in and has free space, then carry on. Nothing you chose is left out to get past this. You can also stop the move.
+drive-problem-carry-on = Carry on
 
 ## R02 Your move, item by item (detailed report)
 

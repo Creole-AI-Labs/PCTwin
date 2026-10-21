@@ -14,7 +14,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * every approved item is copied and checked; anything else, including a stopped move, says
  * "Partial". Item-by-item detail is in the report (R02).
  */
-export default function Outcome({ outcome, onReport }: { outcome: MoveOutcome; onReport: () => void }) {
+export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
   const needsAction = byStatus["needs-action"];
@@ -62,6 +62,11 @@ export default function Outcome({ outcome, onReport }: { outcome: MoveOutcome; o
         </div>
       )}
       <FrameFooter>
+        {onHome && (
+          <Button variant="quiet" onClick={onHome}>
+            {l10n.getString("outcome-home")}
+          </Button>
+        )}
         <Button variant="primary" onClick={onReport}>
           {l10n.getString("outcome-report")}
         </Button>

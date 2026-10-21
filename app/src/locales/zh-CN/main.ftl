@@ -250,7 +250,8 @@ pair-new-number-waiting = 正在等待你的旧笔记本电脑……
 
 pair-done-eyebrow = 一切就绪
 pair-done-title = 你的笔记本电脑已配对。
-pair-done-body = 你的两台笔记本电脑已连接。下一步是选择要迁移的内容，这部分还在开发中，所以目前还没有迁移任何东西。
+pair-done-body = 两台笔记本电脑已连接。接下来，旧笔记本电脑会查找你的文件，你在新笔记本电脑上批准要移动的内容。你批准之前，什么都不会移动。
+pair-done-continue = 继续
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -672,6 +673,31 @@ plan-place = { $drive }上的{ $folder }
 plan-group-to = 放到{ $place }
 plan-version = 方案版本{ $revision }
 plan-details = 更多详情
+plan-preview-title = 开始之前
+plan-preview-fits = 这台笔记本电脑有足够的可用空间。
+plan-preview-short = 这台笔记本电脑还需要 { $size } 可用空间。请在开始前释放一些空间，否则硬盘满时移动会停止。
+plan-preview-space-unknown = PCTwin 无法读取这台笔记本电脑的可用空间。
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+       *[other] 大约 { $minutes } 分钟。
+    }
+plan-preview-time = 大约 { $low } 到 { $high } 分钟。
+plan-preview-renamed =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件的名称会略有不同，因为这台笔记本电脑不允许使用原名称。报告会逐一列出。
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件对这台笔记本电脑的硬盘来说太大，不会被复制。
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件的名称或文件夹不被这台笔记本电脑允许，不会被复制。
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件会在有人登录这台笔记本电脑时自动运行。请确认这是你预期的。
+    }
 plan-reference = 参考编号{ $reference }
 plan-hand-cloud-only =
     { NUMBER($count) ->
@@ -816,6 +842,45 @@ outcome-next-title = 接下来要做什么
 outcome-old-safe = 未完成的内容会一直列在这里。旧笔记本电脑上没有删除任何东西。
 outcome-report = 查看完整报告
 outcome-home = 返回首页
+move-fallback-folder = 来自旧笔记本电脑
+move-stop = 停止移动
+move-status-kept = 已保留
+move-wait-eyebrow = 你的移动
+move-wait-scanning-title = 正在查找你的文件。
+move-wait-scanning-body = 旧笔记本电脑正在查看你的文件夹。它只读取：不会打开、更改或删除任何内容。
+move-wait-approval-title = 正在等待新笔记本电脑。
+move-wait-approval-body = 你的文件已准备好。在新笔记本电脑上查看计划并批准即可开始。
+move-wait-list-title = 正在等待旧笔记本电脑。
+move-wait-list-body = 旧笔记本电脑正在查找你的文件。完成后，计划会显示在这里供你批准。这可能需要几分钟。
+move-wait-starting-title = 正在开始移动。
+move-wait-starting-body = 计划已批准。复制马上开始。
+move-ended-eyebrow = 你的移动
+move-ended-kept-title = 已复制的内容
+move-ended-kept-body = 在此之前已复制并检查的内容都会留在新笔记本电脑上。
+move-ended-old-title = 你的旧笔记本电脑
+move-ended-old-body = 上面的任何内容都没有被更改或删除。
+move-ended-old-badge = 未更改
+move-ended-next = 要重试，请重新配对两台笔记本电脑。已复制并检查的文件会被识别，不会重复复制。
+move-lost-title = 与另一台笔记本电脑的连接已断开。
+move-lost-body = 两台笔记本电脑无法再互相连接，所以移动无法继续。请确认两台都已开机、未休眠且彼此靠近。
+move-not-approved-title = 移动没有开始。
+move-not-approved-old = 新笔记本电脑上没有批准计划，所以没有复制任何内容。
+move-not-approved-new = 你没有批准计划，所以没有复制任何内容。
+move-failed-title = 出了点问题。
+move-failed-body = 移动无法继续。如果再次发生，下方的“更多详情”会说明出了什么问题。
+move-refused-title = 移动无法开始。
+move-refused-not-paired = 两台笔记本电脑已不再配对。请重新配对以开始移动。
+move-refused-busy = 这台笔记本电脑上已有一个移动正在进行。
+move-refused-not-moving = 这台笔记本电脑上没有正在进行的移动。
+move-refused-plan-changed = 计划在批准前已更改。请重新配对两台笔记本电脑以查看新计划。
+move-refused-failed = 无法为移动准备好这台笔记本电脑的文件夹。请重新配对两台笔记本电脑再试一次。
+drive-problem-title = 移动需要你处理。
+drive-problem-body = PCTwin 多次检查后发现，保存在 { $place } 中的副本与原文件不一致。该硬盘可能出现故障、已满或已断开，因此复制到该处已暂停。
+drive-problem-kept-title = 已复制并检查
+drive-problem-waiting-title = 仍需复制到 { $place }
+drive-problem-badge = 已暂停
+drive-problem-fix = 请确认硬盘已连接且有可用空间，然后继续。不会为了绕过问题而遗漏你选择的任何内容。你也可以停止移动。
+drive-problem-carry-on = 继续
 
 ## R02 Your move, item by item (detailed report)
 

@@ -264,7 +264,8 @@ pair-new-number-waiting = Esperando a tu portátil antiguo…
 
 pair-done-eyebrow = Todo listo
 pair-done-title = Tus portátiles están vinculados.
-pair-done-body = Tus dos portátiles están conectados. Lo siguiente es elegir qué trasladar, y esa parte aún se está creando, así que todavía no se ha trasladado nada.
+pair-done-body = Tus dos portátiles están conectados. Ahora el portátil antiguo busca tus archivos y tú apruebas en el nuevo lo que se mueve. Nada se mueve antes de que lo apruebes.
+pair-done-continue = Continuar
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -852,6 +853,41 @@ plan-place = { $folder } en { $drive }
 plan-group-to = Va a { $place }
 plan-version = Versión del plan { $revision }
 plan-details = Más detalles
+plan-preview-title = Antes de empezar
+plan-preview-fits = Hay suficiente espacio libre en este portátil.
+plan-preview-short = Este portátil necesita { $size } más de espacio libre. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
+plan-preview-space-unknown = PCTwin no pudo leer cuánto espacio libre tiene este portátil.
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] Unos { $minutes } minuto.
+        [many] Unos { $minutes } de minutos.
+       *[other] Unos { $minutes } minutos.
+    }
+plan-preview-time = Entre { $low } y { $high } minutos, aproximadamente.
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } archivo tendrá un nombre algo distinto, porque este portátil no admite el suyo. El informe lo indica.
+        [many] { $count } de archivos tendrán un nombre algo distinto, porque este portátil no admite los suyos. El informe los indica uno a uno.
+       *[other] { $count } archivos tendrán un nombre algo distinto, porque este portátil no admite los suyos. El informe los indica uno a uno.
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } archivo es demasiado grande para el disco de este portátil y no se copiará.
+        [many] { $count } de archivos son demasiado grandes para el disco de este portátil y no se copiarán.
+       *[other] { $count } archivos son demasiado grandes para el disco de este portátil y no se copiarán.
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } archivo tiene un nombre o carpeta que este portátil no admite, y no se copiará.
+        [many] { $count } de archivos tienen un nombre o carpeta que este portátil no admite, y no se copiarán.
+       *[other] { $count } archivos tienen un nombre o carpeta que este portátil no admite, y no se copiarán.
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } archivo se abriría solo cuando alguien inicie sesión en este portátil. Comprueba que lo esperas.
+        [many] { $count } de archivos se abrirían solos cuando alguien inicie sesión en este portátil. Comprueba que los esperas.
+       *[other] { $count } archivos se abrirían solos cuando alguien inicie sesión en este portátil. Comprueba que los esperas.
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = Referencia { $reference }
 # $count is how many files are affected in each line below.
@@ -1014,6 +1050,45 @@ outcome-next-title = Qué hacer ahora
 outcome-old-safe = Lo que no terminó sigue en esta lista. No se quitó nada de tu portátil antiguo.
 outcome-report = Ver el informe completo
 outcome-home = Volver al inicio
+move-fallback-folder = De tu portátil antiguo
+move-stop = Detener el traslado
+move-status-kept = Guardado
+move-wait-eyebrow = Tu traslado
+move-wait-scanning-title = Buscando tus archivos.
+move-wait-scanning-body = Tu portátil antiguo está revisando tus carpetas. Solo las lee: no se abre, cambia ni borra nada.
+move-wait-approval-title = Esperando a tu portátil nuevo.
+move-wait-approval-body = Tus archivos están listos. Revisa el plan en el portátil nuevo y apruébalo para empezar.
+move-wait-list-title = Esperando a tu portátil antiguo.
+move-wait-list-body = Tu portátil antiguo está buscando tus archivos. Cuando termine, el plan aparecerá aquí para que lo apruebes. Puede tardar unos minutos.
+move-wait-starting-title = Empezando el traslado.
+move-wait-starting-body = El plan está aprobado. La copia empieza en un momento.
+move-ended-eyebrow = Tu traslado
+move-ended-kept-title = Ya copiado
+move-ended-kept-body = Todo lo copiado y comprobado antes de esto se queda en el portátil nuevo.
+move-ended-old-title = Tu portátil antiguo
+move-ended-old-body = No se cambió ni se borró nada en él.
+move-ended-old-badge = Sin cambios
+move-ended-next = Para intentarlo de nuevo, vuelve a emparejar los portátiles. Los archivos ya copiados y comprobados se reconocen y no se copian dos veces.
+move-lost-title = Se perdió la conexión con tu otro portátil.
+move-lost-body = Los portátiles dejaron de comunicarse, así que el traslado no pudo seguir. Comprueba que los dos estén encendidos, activos y cerca.
+move-not-approved-title = El traslado no empezó.
+move-not-approved-old = El plan no se aprobó en el portátil nuevo, así que no se copió nada.
+move-not-approved-new = No aprobaste el plan, así que no se copió nada.
+move-failed-title = Algo salió mal.
+move-failed-body = El traslado no pudo seguir. Si vuelve a pasar, Más detalles, abajo, explica qué falló.
+move-refused-title = El traslado no pudo empezar.
+move-refused-not-paired = Tus portátiles ya no están emparejados. Vuelve a emparejarlos para empezar el traslado.
+move-refused-busy = Ya hay un traslado en curso en este portátil.
+move-refused-not-moving = No hay ningún traslado en curso en este portátil.
+move-refused-plan-changed = El plan cambió antes de aprobarse. Vuelve a emparejar los portátiles para ver el plan nuevo.
+move-refused-failed = No se pudieron preparar las carpetas de este portátil para el traslado. Vuelve a emparejar los portátiles para intentarlo otra vez.
+drive-problem-title = El traslado necesita tu atención.
+drive-problem-body = Las copias guardadas en { $place } no coincidieron con los originales al comprobarlas PCTwin, varias veces. El disco puede estar fallando, lleno o desconectado, así que la copia allí está en pausa.
+drive-problem-kept-title = Ya copiado y comprobado
+drive-problem-waiting-title = Pendiente de copiar en { $place }
+drive-problem-badge = En pausa
+drive-problem-fix = Comprueba que el disco esté conectado y tenga espacio libre, y luego continúa. No se deja fuera nada de lo que elegiste para evitarlo. También puedes detener el traslado.
+drive-problem-carry-on = Continuar
 
 ## R02 Your move, item by item (detailed report)
 

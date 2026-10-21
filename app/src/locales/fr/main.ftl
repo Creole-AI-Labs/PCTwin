@@ -264,7 +264,8 @@ pair-new-number-waiting = En attente de votre ancien ordinateur portable…
 
 pair-done-eyebrow = Tout est prêt
 pair-done-title = Vos ordinateurs portables sont associés.
-pair-done-body = Vos deux ordinateurs portables sont connectés. Le choix de ce qu’il faut transférer est l’étape suivante. Elle est encore en construction, donc rien n’a encore été transféré.
+pair-done-body = Vos deux ordinateurs portables sont connectés. L’ancien cherche maintenant vos fichiers, puis vous approuvez sur le nouveau ce qui est déplacé. Rien ne bouge avant votre accord.
+pair-done-continue = Continuer
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -861,6 +862,41 @@ plan-place = { $folder } sur { $drive }
 plan-group-to = Vers { $place }
 plan-version = Version du plan { $revision }
 plan-details = Plus de détails
+plan-preview-title = Avant de commencer
+plan-preview-fits = Ce portable a assez d’espace libre.
+plan-preview-short = Ce portable a besoin de { $size } d’espace libre en plus. Libérez de l’espace avant de commencer, sinon le transfert s’arrêtera quand le disque sera plein.
+plan-preview-space-unknown = PCTwin n’a pas pu lire l’espace libre de ce portable.
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] Environ { $minutes } minute.
+        [many] Environ { $minutes } de minutes.
+       *[other] Environ { $minutes } minutes.
+    }
+plan-preview-time = Environ { $low } à { $high } minutes.
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } fichier aura un nom un peu différent, car ce portable n’accepte pas le sien. Le rapport l’indique.
+        [many] { $count } de fichiers auront un nom un peu différent, car ce portable n’accepte pas les leurs. Le rapport les indique un par un.
+       *[other] { $count } fichiers auront un nom un peu différent, car ce portable n’accepte pas les leurs. Le rapport les indique un par un.
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } fichier est trop gros pour le disque de ce portable et ne sera pas copié.
+        [many] { $count } de fichiers sont trop gros pour le disque de ce portable et ne seront pas copiés.
+       *[other] { $count } fichiers sont trop gros pour le disque de ce portable et ne seront pas copiés.
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } fichier a un nom ou un dossier que ce portable n’accepte pas, et ne sera pas copié.
+        [many] { $count } de fichiers ont un nom ou un dossier que ce portable n’accepte pas, et ne seront pas copiés.
+       *[other] { $count } fichiers ont un nom ou un dossier que ce portable n’accepte pas, et ne seront pas copiés.
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } fichier se lancerait tout seul à l’ouverture d’une session sur ce portable. Vérifiez que c’est voulu.
+        [many] { $count } de fichiers se lanceraient tout seuls à l’ouverture d’une session sur ce portable. Vérifiez que c’est voulu.
+       *[other] { $count } fichiers se lanceraient tout seuls à l’ouverture d’une session sur ce portable. Vérifiez que c’est voulu.
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = Référence { $reference }
 # $count is how many files are affected in each line below.
@@ -1023,6 +1059,45 @@ outcome-next-title = Que faire ensuite
 outcome-old-safe = Tout ce qui n’est pas terminé reste listé ici. Rien n’a été retiré de votre ancien ordinateur portable.
 outcome-report = Voir le rapport complet
 outcome-home = Retour à l’accueil
+move-fallback-folder = De votre ancien portable
+move-stop = Arrêter le transfert
+move-status-kept = Conservé
+move-wait-eyebrow = Votre transfert
+move-wait-scanning-title = Recherche de vos fichiers.
+move-wait-scanning-body = Votre ancien portable parcourt vos dossiers. Il les lit seulement : rien n’est ouvert, modifié ou supprimé.
+move-wait-approval-title = En attente du nouveau portable.
+move-wait-approval-body = Vos fichiers sont prêts. Vérifiez le plan sur le nouveau portable et approuvez-le pour commencer.
+move-wait-list-title = En attente de l’ancien portable.
+move-wait-list-body = Votre ancien portable cherche vos fichiers. Ensuite, le plan s’affiche ici pour que vous l’approuviez. Cela peut prendre quelques minutes.
+move-wait-starting-title = Début du transfert.
+move-wait-starting-body = Le plan est approuvé. La copie commence dans un instant.
+move-ended-eyebrow = Votre transfert
+move-ended-kept-title = Déjà copié
+move-ended-kept-body = Tout ce qui a été copié et vérifié avant cela reste sur le nouveau portable.
+move-ended-old-title = Votre ancien portable
+move-ended-old-body = Rien n’y a été modifié ni supprimé.
+move-ended-old-badge = Inchangé
+move-ended-next = Pour réessayer, associez à nouveau les portables. Les fichiers déjà copiés et vérifiés sont reconnus et ne sont pas copiés deux fois.
+move-lost-title = La connexion avec votre autre portable a été perdue.
+move-lost-body = Les portables ne communiquent plus, le transfert n’a donc pas pu continuer. Vérifiez qu’ils sont allumés, éveillés et proches l’un de l’autre.
+move-not-approved-title = Le transfert n’a pas commencé.
+move-not-approved-old = Le plan n’a pas été approuvé sur le nouveau portable, rien n’a donc été copié.
+move-not-approved-new = Vous n’avez pas approuvé le plan, rien n’a donc été copié.
+move-failed-title = Un problème est survenu.
+move-failed-body = Le transfert n’a pas pu continuer. Si cela se reproduit, Plus de détails, ci-dessous, indique ce qui s’est passé.
+move-refused-title = Le transfert n’a pas pu commencer.
+move-refused-not-paired = Vos portables ne sont plus associés. Associez-les à nouveau pour commencer le transfert.
+move-refused-busy = Un transfert est déjà en cours sur ce portable.
+move-refused-not-moving = Aucun transfert n’est en cours sur ce portable.
+move-refused-plan-changed = Le plan a changé avant d’être approuvé. Associez à nouveau les portables pour voir le nouveau plan.
+move-refused-failed = Les dossiers de ce portable n’ont pas pu être préparés. Associez à nouveau les portables pour réessayer.
+drive-problem-title = Le transfert a besoin de vous.
+drive-problem-body = Les copies enregistrées dans { $place } ne correspondaient pas aux originaux lors des vérifications de PCTwin, plusieurs fois. Le disque est peut-être défaillant, plein ou débranché : la copie y est en pause.
+drive-problem-kept-title = Déjà copié et vérifié
+drive-problem-waiting-title = Reste à copier dans { $place }
+drive-problem-badge = En pause
+drive-problem-fix = Vérifiez que le disque est branché et a de l’espace libre, puis continuez. Rien de ce que vous avez choisi n’est écarté pour contourner le problème. Vous pouvez aussi arrêter.
+drive-problem-carry-on = Continuer
 
 ## R02 Your move, item by item (detailed report)
 

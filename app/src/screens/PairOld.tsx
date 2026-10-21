@@ -40,7 +40,7 @@ const NOTICE_TEXT: Record<Notice, string> = {
  * question (a Mac's local network, Windows Firewall), a note says what it will ask (heads-up).
  * Locked: someone on this network tried wrong codes; only the person here can start again.
  */
-export default function PairOld({ onBack }: { onBack: () => void }) {
+export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("starting");
   const phaseNow = useRef<Phase>("starting");
@@ -253,7 +253,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
     }
   };
 
-  if (phase === "paired") return <Paired />;
+  if (phase === "paired") return <Paired onContinue={onPaired} />;
 
   return (
     <>

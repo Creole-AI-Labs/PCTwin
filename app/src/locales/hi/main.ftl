@@ -262,7 +262,8 @@ pair-new-number-waiting = आपके पुराने लैपटॉप क
 
 pair-done-eyebrow = सब तैयार
 pair-done-title = आपके लैपटॉप जोड़ दिए गए हैं।
-pair-done-body = आपके दोनों लैपटॉप कनेक्ट हैं। अगला कदम है यह चुनना कि क्या भेजना है। वह हिस्सा अभी बन रहा है, इसलिए अभी तक कुछ भी नहीं गया है।
+pair-done-body = आपके दोनों लैपटॉप जुड़ गए हैं। अब पुराना लैपटॉप आपकी फ़ाइलें ढूँढेगा, और नए लैपटॉप पर आप मंज़ूर करेंगे कि क्या जाएगा। आपकी मंज़ूरी से पहले कुछ नहीं जाता।
+pair-done-continue = आगे बढ़ें
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -842,6 +843,36 @@ plan-place = { $drive } पर { $folder }
 plan-group-to = { $place } पर जाएगा
 plan-version = योजना वर्शन { $revision }
 plan-details = और जानकारी
+plan-preview-title = शुरू करने से पहले
+plan-preview-fits = इस लैपटॉप में पर्याप्त जगह खाली है।
+plan-preview-short = इस लैपटॉप को { $size } और खाली जगह चाहिए। शुरू करने से पहले कुछ जगह खाली करें, वरना ड्राइव भरने पर स्थानांतरण रुक जाएगा।
+plan-preview-space-unknown = PCTwin यह नहीं पढ़ सका कि इस लैपटॉप में कितनी जगह खाली है।
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] लगभग { $minutes } मिनट।
+       *[other] लगभग { $minutes } मिनट।
+    }
+plan-preview-time = लगभग { $low } से { $high } मिनट।
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल का नाम थोड़ा बदलेगा, क्योंकि यह लैपटॉप उसका नाम स्वीकार नहीं करता। रिपोर्ट में यह लिखा होगा।
+       *[other] { $count } फ़ाइलों के नाम थोड़े बदलेंगे, क्योंकि यह लैपटॉप उनके नाम स्वीकार नहीं करता। रिपोर्ट में हर एक लिखी होगी।
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल इस लैपटॉप की ड्राइव के लिए बहुत बड़ी है और कॉपी नहीं होगी।
+       *[other] { $count } फ़ाइलें इस लैपटॉप की ड्राइव के लिए बहुत बड़ी हैं और कॉपी नहीं होंगी।
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल का नाम या फ़ोल्डर यह लैपटॉप स्वीकार नहीं करता, इसलिए वह कॉपी नहीं होगी।
+       *[other] { $count } फ़ाइलों के नाम या फ़ोल्डर यह लैपटॉप स्वीकार नहीं करता, इसलिए वे कॉपी नहीं होंगी।
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल इस लैपटॉप पर किसी के साइन इन करते ही अपने-आप चल पड़ेगी। देख लें कि आप यही चाहते हैं।
+       *[other] { $count } फ़ाइलें इस लैपटॉप पर किसी के साइन इन करते ही अपने-आप चल पड़ेंगी। देख लें कि आप यही चाहते हैं।
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = संदर्भ { $reference }
 # $count is how many files are affected in each line below.
@@ -998,6 +1029,45 @@ outcome-next-title = आगे क्या करें
 outcome-old-safe = जो पूरा नहीं हुआ, वह यहाँ सूची में रहता है। आपके पुराने लैपटॉप से कुछ भी नहीं हटाया गया।
 outcome-report = पूरी रिपोर्ट देखें
 outcome-home = होम पर लौटें
+move-fallback-folder = पुराने लैपटॉप से
+move-stop = स्थानांतरण रोकें
+move-status-kept = सुरक्षित
+move-wait-eyebrow = आपका स्थानांतरण
+move-wait-scanning-title = आपकी फ़ाइलें ढूँढी जा रही हैं।
+move-wait-scanning-body = आपका पुराना लैपटॉप आपके फ़ोल्डर देख रहा है। वह सिर्फ़ उन्हें पढ़ता है: कुछ भी खोला, बदला या हटाया नहीं जाता।
+move-wait-approval-title = नए लैपटॉप का इंतज़ार है।
+move-wait-approval-body = आपकी फ़ाइलें तैयार हैं। नए लैपटॉप पर योजना देखें और शुरू करने के लिए उसे मंज़ूर करें।
+move-wait-list-title = पुराने लैपटॉप का इंतज़ार है।
+move-wait-list-body = आपका पुराना लैपटॉप आपकी फ़ाइलें ढूँढ रहा है। पूरा होने पर योजना यहाँ मंज़ूरी के लिए दिखेगी। इसमें कुछ मिनट लग सकते हैं।
+move-wait-starting-title = स्थानांतरण शुरू हो रहा है।
+move-wait-starting-body = योजना मंज़ूर हो गई है। कॉपी करना कुछ ही पल में शुरू होगा।
+move-ended-eyebrow = आपका स्थानांतरण
+move-ended-kept-title = पहले से कॉपी हुआ
+move-ended-kept-body = इससे पहले जो कुछ कॉपी और जाँचा गया, वह नए लैपटॉप पर रहता है।
+move-ended-old-title = आपका पुराना लैपटॉप
+move-ended-old-body = उस पर कुछ भी बदला या हटाया नहीं गया।
+move-ended-old-badge = बिना बदलाव
+move-ended-next = फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें। पहले से कॉपी और जाँची गई फ़ाइलें पहचानी जाती हैं और दोबारा कॉपी नहीं होतीं।
+move-lost-title = आपके दूसरे लैपटॉप से कनेक्शन टूट गया।
+move-lost-body = लैपटॉप एक-दूसरे तक नहीं पहुँच पाए, इसलिए स्थानांतरण आगे नहीं बढ़ सका। देखें कि दोनों चालू हैं, जागे हुए हैं और पास-पास हैं।
+move-not-approved-title = स्थानांतरण शुरू नहीं हुआ।
+move-not-approved-old = नए लैपटॉप पर योजना मंज़ूर नहीं हुई, इसलिए कुछ भी कॉपी नहीं हुआ।
+move-not-approved-new = आपने योजना मंज़ूर नहीं की, इसलिए कुछ भी कॉपी नहीं हुआ।
+move-failed-title = कुछ गड़बड़ हो गई।
+move-failed-body = स्थानांतरण आगे नहीं बढ़ सका। अगर ऐसा फिर हो, तो नीचे ज़्यादा जानकारी में बताया गया है कि क्या गड़बड़ हुई।
+move-refused-title = स्थानांतरण शुरू नहीं हो सका।
+move-refused-not-paired = आपके लैपटॉप अब जुड़े नहीं हैं। स्थानांतरण शुरू करने के लिए उन्हें फिर से जोड़ें।
+move-refused-busy = इस लैपटॉप पर पहले से एक स्थानांतरण चल रहा है।
+move-refused-not-moving = इस लैपटॉप पर कोई स्थानांतरण नहीं चल रहा है।
+move-refused-plan-changed = मंज़ूरी से पहले योजना बदल गई। नई योजना देखने के लिए लैपटॉप फिर से जोड़ें।
+move-refused-failed = इस लैपटॉप के फ़ोल्डर स्थानांतरण के लिए तैयार नहीं हो सके। फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें।
+drive-problem-title = स्थानांतरण को आपका ध्यान चाहिए।
+drive-problem-body = PCTwin ने कई बार जाँचा, और { $place } में रखी कॉपियाँ मूल फ़ाइलों से मेल नहीं खाईं। ड्राइव ख़राब, भरी हुई या निकली हुई हो सकती है, इसलिए वहाँ कॉपी करना रुका है।
+drive-problem-kept-title = पहले से कॉपी और जाँचा गया
+drive-problem-waiting-title = { $place } में अभी कॉपी होना बाकी
+drive-problem-badge = रुका हुआ
+drive-problem-fix = देखें कि ड्राइव लगी है और उसमें जगह है, फिर आगे बढ़ें। इससे बचने के लिए आपकी चुनी कोई चीज़ छोड़ी नहीं जाती। आप स्थानांतरण रोक भी सकते हैं।
+drive-problem-carry-on = जारी रखें
 
 ## R02 Your move, item by item (detailed report)
 

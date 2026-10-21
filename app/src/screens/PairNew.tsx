@@ -25,7 +25,7 @@ function cleanCode(text: string): string {
  * search on a Mac, a note says what the Mac will ask (heads-up); a search that found nothing because
  * the Mac refuses local discovery says so, with where to switch it on.
  */
-export default function PairNew({ onBack }: { onBack: () => void }) {
+export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("searching");
   const [nearby, setNearby] = useState<Nearby[]>([]);
@@ -164,7 +164,7 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
     }
   };
 
-  if (phase === "paired") return <Paired />;
+  if (phase === "paired") return <Paired onContinue={onPaired} />;
 
   return (
     <>

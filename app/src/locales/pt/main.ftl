@@ -263,7 +263,8 @@ pair-new-number-waiting = Esperando seu notebook antigo…
 
 pair-done-eyebrow = Tudo certo
 pair-done-title = Seus notebooks estão pareados.
-pair-done-body = Seus dois notebooks estão conectados. A próxima etapa é escolher o que mover, e ela ainda está sendo construída, então nada foi movido ainda.
+pair-done-body = Seus dois notebooks estão conectados. Agora o notebook antigo procura seus arquivos, e você aprova no novo o que será movido. Nada é movido antes da sua aprovação.
+pair-done-continue = Continuar
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -856,6 +857,41 @@ plan-place = { $folder } em { $drive }
 plan-group-to = Vai para { $place }
 plan-version = Versão do plano { $revision }
 plan-details = Mais detalhes
+plan-preview-title = Antes de começar
+plan-preview-fits = Há espaço livre suficiente neste notebook.
+plan-preview-short = Este notebook precisa de mais { $size } de espaço livre. Libere espaço antes de começar, ou a transferência para quando o disco encher.
+plan-preview-space-unknown = O PCTwin não conseguiu ler quanto espaço livre este notebook tem.
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] Cerca de { $minutes } minuto.
+        [many] Cerca de { $minutes } de minutos.
+       *[other] Cerca de { $minutes } minutos.
+    }
+plan-preview-time = Cerca de { $low } a { $high } minutos.
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } arquivo terá um nome um pouco diferente, porque este notebook não aceita o nome dele. O relatório indica isso.
+        [many] { $count } de arquivos terão nomes um pouco diferentes, porque este notebook não aceita os nomes deles. O relatório indica cada um.
+       *[other] { $count } arquivos terão nomes um pouco diferentes, porque este notebook não aceita os nomes deles. O relatório indica cada um.
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } arquivo é grande demais para o disco deste notebook e não será copiado.
+        [many] { $count } de arquivos são grandes demais para o disco deste notebook e não serão copiados.
+       *[other] { $count } arquivos são grandes demais para o disco deste notebook e não serão copiados.
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } arquivo tem um nome ou pasta que este notebook não aceita, e não será copiado.
+        [many] { $count } de arquivos têm um nome ou pasta que este notebook não aceita, e não serão copiados.
+       *[other] { $count } arquivos têm um nome ou pasta que este notebook não aceita, e não serão copiados.
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } arquivo abriria sozinho quando alguém entrar neste notebook. Confira se você espera isso.
+        [many] { $count } de arquivos abririam sozinhos quando alguém entrar neste notebook. Confira se você espera isso.
+       *[other] { $count } arquivos abririam sozinhos quando alguém entrar neste notebook. Confira se você espera isso.
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = Referência { $reference }
 # $count is how many files are affected in each line below.
@@ -1018,6 +1054,45 @@ outcome-next-title = O que fazer agora
 outcome-old-safe = O que não terminou continua listado aqui. Nada foi removido do seu notebook antigo.
 outcome-report = Ver o relatório completo
 outcome-home = Voltar ao início
+move-fallback-folder = Do seu notebook antigo
+move-stop = Parar a transferência
+move-status-kept = Mantido
+move-wait-eyebrow = Sua transferência
+move-wait-scanning-title = Procurando seus arquivos.
+move-wait-scanning-body = Seu notebook antigo está olhando suas pastas. Ele só as lê: nada é aberto, alterado ou removido.
+move-wait-approval-title = Aguardando o notebook novo.
+move-wait-approval-body = Seus arquivos estão prontos. Confira o plano no notebook novo e aprove-o para começar.
+move-wait-list-title = Aguardando o notebook antigo.
+move-wait-list-body = Seu notebook antigo está procurando seus arquivos. Quando terminar, o plano aparece aqui para você aprovar. Isso pode levar alguns minutos.
+move-wait-starting-title = Iniciando a transferência.
+move-wait-starting-body = O plano foi aprovado. A cópia começa em instantes.
+move-ended-eyebrow = Sua transferência
+move-ended-kept-title = Já copiado
+move-ended-kept-body = Tudo o que foi copiado e verificado antes disso fica no notebook novo.
+move-ended-old-title = Seu notebook antigo
+move-ended-old-body = Nada nele foi alterado ou removido.
+move-ended-old-badge = Sem alterações
+move-ended-next = Para tentar de novo, pareie os notebooks outra vez. Os arquivos já copiados e verificados são reconhecidos e não são copiados duas vezes.
+move-lost-title = A conexão com seu outro notebook foi perdida.
+move-lost-body = Os notebooks pararam de se comunicar, então a transferência não pôde continuar. Confira se os dois estão ligados, ativos e perto um do outro.
+move-not-approved-title = A transferência não começou.
+move-not-approved-old = O plano não foi aprovado no notebook novo, então nada foi copiado.
+move-not-approved-new = Você não aprovou o plano, então nada foi copiado.
+move-failed-title = Algo deu errado.
+move-failed-body = A transferência não pôde continuar. Se acontecer de novo, Mais detalhes, abaixo, diz o que deu errado.
+move-refused-title = A transferência não pôde começar.
+move-refused-not-paired = Seus notebooks não estão mais pareados. Pareie-os de novo para começar a transferência.
+move-refused-busy = Já há uma transferência em andamento neste notebook.
+move-refused-not-moving = Não há nenhuma transferência em andamento neste notebook.
+move-refused-plan-changed = O plano mudou antes de ser aprovado. Pareie os notebooks de novo para ver o plano novo.
+move-refused-failed = Não foi possível preparar as pastas deste notebook para a transferência. Pareie os notebooks de novo para tentar outra vez.
+drive-problem-title = A transferência precisa da sua atenção.
+drive-problem-body = As cópias salvas em { $place } não bateram com os originais quando o PCTwin as verificou, várias vezes. O disco pode estar falhando, cheio ou desconectado, então a cópia lá está pausada.
+drive-problem-kept-title = Já copiado e verificado
+drive-problem-waiting-title = Ainda falta copiar para { $place }
+drive-problem-badge = Pausado
+drive-problem-fix = Confira se o disco está conectado e tem espaço livre, depois continue. Nada do que você escolheu fica de fora para contornar isso. Você também pode parar a transferência.
+drive-problem-carry-on = Continuar
 
 ## R02 Your move, item by item (detailed report)
 

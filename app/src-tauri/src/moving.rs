@@ -45,8 +45,8 @@ pub const PROBLEM_EVENT: &str = "move-problem";
 
 /// How often the screens are sent the progress.
 const TICK: Duration = Duration::from_millis(400);
-/// The longest name the person may give the folder that stands for one their new laptop lacks.
-const MAX_FALLBACK: usize = 120;
+/// The longest name (in bytes) for the folder that stands for one the new laptop lacks.
+const MAX_FALLBACK: usize = 255;
 
 /// The move on this laptop: at most one at a time.
 #[derive(Default)]
@@ -301,7 +301,35 @@ fn shown_to_mover(item: &Item, mover: &str) -> bool {
     }
 }
 
-fn plan_view(record: &Record, preview: &Preview, mover: &str, rules: &LandingRules) -> PlanView {
+/// Where a file lands, as the person reads it: the real folder on this laptop (from `shown`, by the
+/// destination's label), then any folder PCTwin adds in front of the file's own path (the one that
+/// stands for a folder this laptop lacks).
+fn shown_place(item: &Item, place: &LandingPlace, shown: &BTreeMap<String, String>) -> String {
+    let base = shown
+        .get(&place.destination)
+        .cloned()
+        .unwrap_or_else(|| place.destination.clone());
+    let own = shown_path(&item.path);
+    let added = place
+        .path
+        .strip_suffix(own.as_str())
+        .unwrap_or("")
+        .trim_end_matches('/');
+    if added.is_empty() {
+        base
+    } else {
+        format!("{base}/{added}")
+    }
+}
+
+/// The plan as M23 shows it. `shown` gives each destination label's real folder on this laptop.
+fn plan_view(
+    record: &Record,
+    preview: &Preview,
+    rules: &LandingRules,
+    shown: &BTreeMap<String, String>,
+) -> PlanView {
+    let mover = rules.mover.as_str();
     let mut groups: BTreeMap<FolderRole, (u64, u64, String)> = BTreeMap::new();
     let mut left: BTreeMap<String, (LeftOutReason, u64)> = BTreeMap::new();
     for item in &record.items {
@@ -310,17 +338,18 @@ fn plan_view(record: &Record, preview: &Preview, mover: &str, rules: &LandingRul
                 let g = groups.entry(item.place.role).or_insert_with(|| {
                     let to = rules
                         .landing(item)
-                        .map(|p| p.destination)
+                        .map(|p| shown_place(item, &p, shown))
                         .unwrap_or_default();
                     (0, 0, to)
                 });
                 g.0 = g.0.saturating_add(item.size_bytes);
                 g.1 += 1;
             }
-            Inclusion::Included => {}
-            Inclusion::LeftOut { reason } => {
+            Inclusion::LeftOut { reason } if shown_to_mover(item, mover) => {
                 left.entry(format!("{reason:?}")).or_insert((reason, 0)).1 += 1;
             }
+            // Another person's things are neither listed nor counted for the mover.
+            _ => {}
         }
     }
     let fit = &preview.fit;
@@ -802,6 +831,8 @@ struct AppSteps<R: Runtime> {
     me: String,
     rules: LandingRules,
     names: Arc<Mutex<HashMap<ItemId, String>>>,
+    /// Each destination label's real folder on this laptop, as the person reads it.
+    shown: BTreeMap<String, String>,
 }
 
 impl<R: Runtime> Steps for AppSteps<R> {
@@ -816,7 +847,7 @@ impl<R: Runtime> Steps for AppSteps<R> {
     }
 
     async fn approve(&mut self, record: &Record, preview: &Preview) -> Result<(), Stop> {
-        let view = plan_view(record, preview, &self.rules.mover, &self.rules);
+        let view = plan_view(record, preview, &self.rules, &self.shown);
         {
             let mut names = lock(&self.names);
             for item in &record.items {
@@ -912,10 +943,17 @@ async fn run_old<R: Runtime>(
     Ok(sent_outcome(&sent, &sweep.record))
 }
 
+/// What the new laptop needs before it can take a move: its places approved, the rules, the
+/// signed-in person, and each place's real folder to show.
+struct NewSide {
+    table: Destinations,
+    rules: LandingRules,
+    me: String,
+    shown: BTreeMap<String, String>,
+}
+
 /// The new laptop's places, as found here: every special folder approved by its role.
-fn new_places(
-    fallback: BTreeMap<FolderRole, String>,
-) -> Result<(Destinations, LandingRules, String), MoveProblem> {
+fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MoveProblem> {
     let me = pctwin_scan::list_people()
         .into_iter()
         .find(|p| p.is_me)
@@ -937,7 +975,21 @@ fn new_places(
         fallback,
         held: BTreeMap::new(),
     };
-    Ok((table, rules, me))
+    let shown = found
+        .iter()
+        .filter_map(|f| match f {
+            FolderLookup::Found(f) => {
+                Some((role_label(f.role).to_string(), f.path.display().to_string()))
+            }
+            FolderLookup::Missing { .. } => None,
+        })
+        .collect();
+    Ok(NewSide {
+        table,
+        rules,
+        me,
+        shown,
+    })
 }
 
 /// The new laptop's side: show the plan, wait for the approval, receive.
@@ -946,11 +998,16 @@ async fn run_new<R: Runtime>(
     moving: AppMoving,
     mut link: pctwin_link::Link,
     live: &Live,
-    setup: (Destinations, LandingRules, String),
+    setup: NewSide,
     names: Arc<Mutex<HashMap<ItemId, String>>>,
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
-    let (table, rules, me) = setup;
+    let NewSide {
+        table,
+        rules,
+        me,
+        shown,
+    } = setup;
     let journal_dir = app
         .path()
         .app_data_dir()
@@ -964,6 +1021,7 @@ async fn run_new<R: Runtime>(
         me: me.clone(),
         rules,
         names,
+        shown,
     };
     let received = pctwin_move::receive_by_rules(
         &mut link,
@@ -985,7 +1043,7 @@ fn spawn_run<R: Runtime>(
     moving: AppMoving,
     link: pctwin_link::Link,
     paired: PairedWith,
-    setup: Option<(Destinations, LandingRules, String)>,
+    setup: Option<NewSide>,
     live: Live,
     scan_stop: Arc<AtomicBool>,
 ) -> Result<(), MoveProblem> {
@@ -1346,6 +1404,89 @@ mod tests {
                 }
             })
         );
+    }
+
+    fn preview() -> Preview {
+        Preview {
+            fit: pctwin_transfer::Fit { places: Vec::new() },
+            problems: pctwin_move::Problems::default(),
+            bytes: 0,
+            bytes_per_second: None,
+            time: pctwin_transfer::TimeRange::NotKnown,
+        }
+    }
+
+    fn rules() -> LandingRules {
+        LandingRules {
+            mover: "1000".into(),
+            roles: BTreeMap::from([
+                (FolderRole::Documents, Storage::SystemDrive),
+                (FolderRole::Home, Storage::SystemDrive),
+            ]),
+            fallback: BTreeMap::from([(FolderRole::Music, "From your old laptop/Music".into())]),
+            held: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn each_group_shows_the_real_folder_it_lands_in() {
+        let shown = BTreeMap::from([
+            (
+                "documents".to_string(),
+                "C:/Users/Ada/Documents".to_string(),
+            ),
+            ("home".to_string(), "C:/Users/Ada".to_string()),
+        ]);
+        let mut record = Record::new(laptop());
+        record.items = vec![
+            item(
+                person("1000"),
+                FolderRole::Documents,
+                &["Letters", "a.txt"],
+                10,
+            ),
+            item(person("1000"), FolderRole::Documents, &["b.txt"], 5),
+            item(person("1000"), FolderRole::Music, &["song.mp3"], 7),
+            item(person("1001"), FolderRole::Pictures, &["secret.jpg"], 9),
+        ];
+        let mut bea_left = item(person("1001"), FolderRole::Videos, &["v.mp4"], 1);
+        bea_left.inclusion = Inclusion::LeftOut {
+            reason: LeftOutReason::CloudOnly,
+        };
+        let mut mine_left = item(person("1000"), FolderRole::Videos, &["w.mp4"], 1);
+        mine_left.inclusion = Inclusion::LeftOut {
+            reason: LeftOutReason::CloudOnly,
+        };
+        record.items.extend([bea_left, mine_left]);
+        let view = plan_view(&record, &preview(), &rules(), &shown);
+        let to: Vec<(&str, &str)> = view
+            .groups
+            .iter()
+            .map(|g| (g.id.as_str(), g.to_folder.as_str()))
+            .collect();
+        assert_eq!(
+            to,
+            [
+                ("documents", "C:/Users/Ada/Documents"),
+                ("music", "C:/Users/Ada/From your old laptop/Music"),
+            ]
+        );
+        assert_eq!(
+            view.groups[0].size,
+            Size::Known {
+                bytes: 15,
+                files: 2
+            }
+        );
+        // Bea's picture and her left-out video are neither listed nor counted.
+        assert_eq!(
+            view.left_out,
+            [LeftOut {
+                reason: LeftOutReason::CloudOnly,
+                count: 1
+            }]
+        );
+        assert!(!serde_json::to_string(&view).unwrap().contains("secret"));
     }
 
     #[test]

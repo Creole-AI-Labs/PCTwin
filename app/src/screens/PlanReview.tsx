@@ -2,11 +2,51 @@ import { Localized, useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
-import { approvalHolds, leftOutByHand, type Approval, type PlanView } from "../plan";
+import { approvalHolds, leftOutByHand, type Approval, type PlanPreview, type PlanView } from "../plan";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
+
+/**
+ * What the new laptop found before anything moves, each said plainly: whether it fits, about how
+ * long, and every file that will not go as it is. Nothing here is a promise; each line is measured
+ * or predicted by the very rules the copy uses.
+ */
+function PreviewNotes({ preview }: { preview: PlanPreview }) {
+  const { l10n } = useLocalization();
+  const fmt = useFormat();
+  const lines: { key: string; text: string }[] = [];
+  if (preview.fits === true) lines.push({ key: "fits", text: l10n.getString("plan-preview-fits") });
+  else if (preview.fits === false) lines.push({ key: "fits", text: l10n.getString("plan-preview-short", { size: fmt.total(preview.shortBytes, false) }) });
+  else lines.push({ key: "fits", text: l10n.getString("plan-preview-space-unknown") });
+  if (preview.minutes) {
+    const { low, high } = preview.minutes;
+    lines.push({ key: "time", text: low === high ? l10n.getString("plan-preview-time-one", { minutes: low }) : l10n.getString("plan-preview-time", { low, high }) });
+  }
+  for (const [key, count] of [
+    ["renamed", preview.renamed],
+    ["too-big", preview.tooBig],
+    ["refused", preview.refused],
+    ["runs-at-sign-in", preview.runsAtSignIn],
+  ] as const) {
+    if (count > 0) lines.push({ key, text: l10n.getString(`plan-preview-${key}`, { count }) });
+  }
+  const attention = preview.fits === false || preview.tooBig + preview.refused + preview.runsAtSignIn > 0;
+  return (
+    <div className="plan-notice">
+      <Banner tone={attention ? "attention" : "info"} title={l10n.getString("plan-preview-title")}>
+        <ul className="plan-items">
+          {lines.map((l) => (
+            <li key={l.key} className="plan-item">
+              <small className="plan-item-text">{l.text}</small>
+            </li>
+          ))}
+        </ul>
+      </Banner>
+    </div>
+  );
+}
 
 export interface PlanReviewProps {
   plan: PlanView;
@@ -16,8 +56,10 @@ export interface PlanReviewProps {
   onApprovalChange: (approval: Approval | null) => void;
   /** Start the move. Only ever called with an approval that holds for the plan on screen. */
   onStart: (approval: Approval) => void;
-  /** Go back and change the plan. */
-  onEdit: () => void;
+  /** Go back and change the plan. Without it (the plan cannot be changed here yet), there is no Edit button. */
+  onEdit?: () => void;
+  /** The host was told the plan changed under an approval (the engine refused it): say so. */
+  changedNotice?: boolean;
   /** The plan cannot be approved until people are mapped to accounts: go and do that. */
   onFixPeople?: () => void;
   onBack?: () => void;
@@ -32,7 +74,7 @@ export interface PlanReviewProps {
  * the same fingerprint. If the plan changes under an approval, the approval is dropped, the person is told so
  * out loud, and Start the move stays closed until they approve the new version.
  */
-export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, onFixPeople, onBack }: PlanReviewProps) {
+export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, onFixPeople, onBack }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const holds = approvalHolds(plan, approval);
@@ -47,7 +89,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
   }
   // An approval the host still holds for something other than this plan does not stand.
   const stale = approval !== null && !holds;
-  const showChanged = !holds && (changed || stale);
+  const showChanged = (!holds && (changed || stale)) || changedNotice;
   // The latest callback, so a host that makes a new one each render does not re-run the check below.
   const tell = useRef(onApprovalChange);
   useEffect(() => {
@@ -60,7 +102,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
   const moving = plan.groups.reduce((sum, g) => sum + (g.size.kind === "unreadable" ? 0 : g.size.bytes), 0);
   const partly = plan.groups.some((g) => g.size.kind !== "known");
   const places = new Set(plan.groups.map((g) => `${g.toDrive}\u0000${g.toFolder}`));
-  const placeText = (drive: string, folder: string) => (folder ? l10n.getString("plan-place", { folder, drive }) : drive);
+  const placeText = (drive: string, folder: string) => (folder && drive ? l10n.getString("plan-place", { folder, drive }) : folder || drive);
   const byHand = leftOutByHand(plan);
   const blocked = plan.blocked;
   const canStart = holds && !blocked;
@@ -94,6 +136,8 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
           </Banner>
         </div>
       )}
+
+      {plan.preview && <PreviewNotes preview={plan.preview} />}
 
       <div className="plan-columns">
         <PlanBox title={l10n.getString("plan-what-title")}>
@@ -173,9 +217,11 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
         <p>{l10n.getString("plan-reference", { reference })}</p>
       </details>
 
-      <div className="plan-actions">
-        <Button onClick={onEdit}>{l10n.getString("plan-edit")}</Button>
-      </div>
+      {onEdit && (
+        <div className="plan-actions">
+          <Button onClick={onEdit}>{l10n.getString("plan-edit")}</Button>
+        </div>
+      )}
       <FrameFooter>
           <Button
             variant="primary"
