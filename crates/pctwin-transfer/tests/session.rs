@@ -1279,13 +1279,25 @@ async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
-        // Started on several streams without ever finishing: each replaces the one before,
-        // and after a few tries the file is refused.
+        // Started on several streams without ever finishing, a block of it arriving each time:
+        // each replaces the one before, and after a few tries the file is refused. (A start
+        // that received nothing is no attempt: see `starts_that_received_nothing_are_not_attempts`.)
         let mut answers = Vec::new();
         for k in 0..(pctwin_transfer::MAX_ATTEMPTS + 2) {
-            let (start, _) = small_start(&l, 10 + k);
+            let stream = 10 + k;
+            let (start, blocks) = small_start(&l, stream);
             say(&mut old, &start).await;
-            answers.push(hear(&mut old).await);
+            let answer = hear(&mut old).await;
+            if matches!(answer, Message::Have { .. }) {
+                for piece in split_into_pieces(stream, &blocks[0].encode()) {
+                    say(&mut old, &piece).await;
+                }
+                assert!(matches!(
+                    hear(&mut old).await,
+                    Message::Receipt { written: true, .. }
+                ));
+            }
+            answers.push(answer);
         }
         let started = answers
             .iter()
@@ -2062,4 +2074,71 @@ async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
     assert_eq!(receiver.continued(), 0);
     assert_eq!(receiver.partway(), 1);
     assert!(!l.new_mine.path().join("Startup").exists());
+}
+
+/// A start cut off before anything of the file arrived is no attempt: an old laptop on a lossy
+/// link that starts a file over and over (more times than any file may be attempted) still gets
+/// it through, never "it kept changing".
+#[tokio::test]
+async fn starts_that_received_nothing_are_not_attempts() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // Started again and again on new streams, nothing of it ever sent.
+        for stream in 10..20u32 {
+            let (start, _) = small_start(&l, stream);
+            say(&mut old, &start).await;
+            assert!(
+                matches!(hear(&mut old).await, Message::Have { .. }),
+                "start {stream} accepted"
+            );
+        }
+        // Then the whole file.
+        let (start, blocks) = small_start(&l, 0);
+        let Message::StartFile { header, .. } = &start else {
+            unreachable!()
+        };
+        let stamp = header.stamp;
+        say(&mut old, &start).await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        for (b, block) in blocks.iter().enumerate() {
+            for piece in split_into_pieces(0, &block.encode()) {
+                say(&mut old, &piece).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::Receipt {
+                    stream: 0,
+                    block: b as u64,
+                    written: true,
+                }
+            );
+        }
+        say(
+            &mut old,
+            &Message::EndFile {
+                stream: 0,
+                stamp_after: stamp,
+                changed: false,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
+    r.unwrap();
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Finished(_))
+    ));
 }

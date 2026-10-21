@@ -322,6 +322,15 @@ impl Allowance {
         }
     }
 
+    /// The attempt at `item` ended before anything of it arrived (a start cut off on a lossy
+    /// link): not an attempt at all, so a file is never called "kept changing" for drops.
+    pub fn ended_unstarted(&mut self, item: ItemId) {
+        if let Some(p) = self.started.get_mut(&item) {
+            p.live = false;
+            p.attempts = p.attempts.saturating_sub(1);
+        }
+    }
+
     /// With the keep-time the person chose for partly copied files of this move.
     pub fn with_partial_keep(mut self, keep: PartialKeep) -> Self {
         self.partial_keep = keep;

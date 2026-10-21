@@ -2442,10 +2442,21 @@ impl<'d> ReceiverSession<'d> {
     /// An attempt let go because another start took its place: its partial file is removed with
     /// it (already failed if it had failed), and its file is counted as it now stands.
     fn started_again(&mut self, old: Incoming<'d>) {
-        self.allowance.ended(old.item, false);
+        self.end_attempt(&old);
         drop(old.assembly);
         let _ = self.journal.failed(old.entry, "it was started again");
         self.settle(old.item);
+    }
+
+    /// An attempt that ends unfinished: one that received nothing was no attempt (see
+    /// [`Allowance::ended_unstarted`]).
+    fn end_attempt(&mut self, old: &Incoming<'d>) {
+        let nothing = old.assembly.as_ref().is_some_and(|a| a.blocks_done() == 0);
+        if nothing && old.failure.is_none() {
+            self.allowance.ended_unstarted(old.item);
+        } else {
+            self.allowance.ended(old.item, false);
+        }
     }
 
     /// Counts `item` at the step its state says, after anything that may have changed it.
@@ -2783,7 +2794,7 @@ impl<'d> ReceiverSession<'d> {
             .collect();
         for k in dropped {
             if let Some(old) = self.streams.remove(&k) {
-                self.allowance.ended(old.item, false);
+                self.end_attempt(&old);
                 // Counted as its line says, or waiting for the old laptop to start it again.
                 self.settle(old.item);
             }
