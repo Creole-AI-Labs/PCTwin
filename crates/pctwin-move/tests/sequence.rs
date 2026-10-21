@@ -709,6 +709,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     struct ByRules {
         rules: LandingRules,
         told: Option<String>,
+        named: Vec<String>,
     }
     impl Steps for ByRules {
         async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
@@ -725,19 +726,28 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         fn mover(&mut self, account_id: &str) {
             self.told = Some(account_id.to_string());
         }
+        fn people(&mut self, people: &[pctwin_move::landing::NamedPerson]) {
+            self.named = people.iter().map(|p| p.name.clone()).collect();
+        }
     }
     let mut steps = ByRules {
         rules: rules.clone(),
         told: None,
+        named: Vec::new(),
     };
     let (mut old, mut new) = mem_pair();
     let (old_live, new_live) = (Live::default(), Live::default());
+    let bea = [pctwin_move::landing::NamedPerson {
+        account_id: "1001".into(),
+        name: "Bea".into(),
+    }];
     let (sent, received) = no_hang(async {
         tokio::join!(
             pctwin_move::send_by_rules(
                 &mut old,
                 &w.record,
                 "1000",
+                &bea,
                 |i| Some(source_in(w.old.path(), i)),
                 &old_live,
                 std::sync::Arc::new(pctwin_transfer::FsOpener),
@@ -756,6 +766,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     .await;
     let (sent, got) = sent.unwrap();
     assert_eq!(steps.told.as_deref(), Some("1000"), "told who is moving");
+    assert_eq!(steps.named, ["Bea"], "told the other people's names");
     assert_eq!(
         got, rules,
         "the old laptop placed by the new laptop's rules"

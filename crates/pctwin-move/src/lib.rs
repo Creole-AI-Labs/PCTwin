@@ -271,6 +271,7 @@ pub async fn send_by_rules<C: Channel>(
     link: &mut C,
     record: &Record,
     mover: &str,
+    people: &[landing::NamedPerson],
     source: impl Fn(&Item) -> Option<PathBuf>,
     live: &Live,
     opener: Arc<dyn Opener>,
@@ -279,6 +280,7 @@ pub async fn send_by_rules<C: Channel>(
     send_inventory(link, record, version).await?;
     answer_link_test(link, version).await?;
     landing::send_mover(link, mover).await?;
+    landing::send_people(link, people).await?;
     let rules = landing::receive_rules(link).await?;
     let plan = send_plan_where(record, source, |i| rules.landing(i));
     let sent = run_sender(link, version, plan, live, opener).await?;
@@ -356,6 +358,10 @@ pub trait Steps {
     /// Which person on the old laptop is moving (their account ID there), as the old laptop said
     /// (the app's way of moving, [`receive_by_rules`]), before anyone is placed.
     fn mover(&mut self, _account_id: &str) {}
+
+    /// The other people whose things are in the move, by name, as the old laptop said (the app's
+    /// way of moving), before anyone is placed.
+    fn people(&mut self, _people: &[landing::NamedPerson]) {}
 }
 
 /// What the person sees before approving: whether the plan fits on this laptop, and about how
@@ -571,6 +577,8 @@ async fn receive_plan_told<C: Channel, S: Steps>(
     if told {
         let mover = landing::receive_mover(link).await?;
         steps.mover(&mover);
+        let people = landing::receive_people(link).await?;
+        steps.people(&people);
     }
     let mut people = BTreeSet::new();
     let owners: Vec<String> = record

@@ -965,6 +965,7 @@ async fn run_old<R: Runtime>(
         &mut link,
         &sweep.record,
         &sweep.census.me,
+        &[],
         |item| {
             let mut path = roots.get(&item.id)?.clone();
             for part in item.path.parts() {

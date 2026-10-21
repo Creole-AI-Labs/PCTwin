@@ -20,8 +20,14 @@ use serde::{Deserialize, Serialize};
 const KIND: u8 = 39;
 /// The message kind of the old laptop's word on who is moving.
 const MOVER: u8 = 40;
+/// The message kind of the old laptop's word on the other people moving: their names.
+const PEOPLE: u8 = 41;
 /// The longest account ID said (as the record allows).
 const MAX_ACCOUNT_ID: usize = 256;
+/// The most other people one move names (a laptop has a handful of accounts).
+pub const MAX_PEOPLE: usize = 64;
+/// The longest name said for a person, in bytes.
+const MAX_NAME: usize = 256;
 /// The rules are a handful of facts: far below the link's 64 KiB message limit.
 const MAX_RULES: usize = 60 * 1024;
 
@@ -80,6 +86,66 @@ pub async fn send_mover(ch: &mut impl Channel, account_id: &str) -> Result<(), T
     ch.send(&msg)
         .await
         .map_err(|_| TransferError::ConnectionDropped)
+}
+
+/// Another person whose things are in the move: their account ID on the old laptop and the name
+/// their account shows there, so the new laptop can ask where their things go. Nothing of their
+/// files is in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamedPerson {
+    pub account_id: String,
+    pub name: String,
+}
+
+fn fine_text(text: &str, max: usize) -> bool {
+    !text.is_empty() && text.len() <= max && !text.chars().any(char::is_control)
+}
+
+/// The old laptop: names the other people whose things are in the move (none: an empty list),
+/// right after saying who is moving.
+pub async fn send_people(
+    ch: &mut impl Channel,
+    people: &[NamedPerson],
+) -> Result<(), TransferError> {
+    let fine = people.len() <= MAX_PEOPLE
+        && people
+            .iter()
+            .all(|p| fine_text(&p.account_id, MAX_ACCOUNT_ID) && fine_text(&p.name, MAX_NAME));
+    if !fine {
+        return Err(TransferError::Protocol("not a list of people".into()));
+    }
+    let body = serde_json::to_vec(people)
+        .map_err(|_| TransferError::Protocol("the people could not be written".into()))?;
+    let mut msg = Vec::with_capacity(body.len() + 1);
+    msg.push(PEOPLE);
+    msg.extend_from_slice(&body);
+    ch.send(&msg)
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)
+}
+
+/// The new laptop: the other people, as the old laptop named them. Anything else, too many,
+/// a name with control characters or one account named twice is refused.
+pub async fn receive_people(ch: &mut impl Channel) -> Result<Vec<NamedPerson>, TransferError> {
+    let msg = ch
+        .recv()
+        .await
+        .map_err(|_| TransferError::ConnectionDropped)?;
+    let bad = || TransferError::Protocol("expected the other people".into());
+    let (&kind, body) = msg.split_first().ok_or_else(bad)?;
+    if kind != PEOPLE {
+        return Err(bad());
+    }
+    let people: Vec<NamedPerson> = serde_json::from_slice(body).map_err(|_| bad())?;
+    let mut seen = std::collections::BTreeSet::new();
+    let fine = people.len() <= MAX_PEOPLE
+        && people.iter().all(|p| {
+            fine_text(&p.account_id, MAX_ACCOUNT_ID)
+                && fine_text(&p.name, MAX_NAME)
+                && seen.insert(p.account_id.as_str())
+        });
+    if fine { Ok(people) } else { Err(bad()) }
 }
 
 /// The new laptop: who is moving, as the old laptop said; anything else is refused.
@@ -263,5 +329,38 @@ mod tests {
         odd.extend_from_slice(br#"{"mover":"1","roles":{},"fallback":{},"held":{},"extra":1}"#);
         a.send(&odd).await.unwrap();
         assert!(receive_rules(&mut b).await.is_err());
+
+        // The other people: named whole, and anything odd refused on both sides.
+        let bea = NamedPerson {
+            account_id: "1001".into(),
+            name: "Bea".into(),
+        };
+        send_people(&mut a, std::slice::from_ref(&bea))
+            .await
+            .unwrap();
+        assert_eq!(receive_people(&mut b).await.unwrap(), vec![bea.clone()]);
+        send_people(&mut a, &[]).await.unwrap();
+        assert_eq!(receive_people(&mut b).await.unwrap(), vec![]);
+        let control = NamedPerson {
+            account_id: "1002".into(),
+            name: "Be\na".into(),
+        };
+        assert!(send_people(&mut a, &[control]).await.is_err());
+        let mut twice = vec![PEOPLE];
+        twice
+            .extend_from_slice(br#"[{"account_id":"1","name":"A"},{"account_id":"1","name":"B"}]"#);
+        a.send(&twice).await.unwrap();
+        assert!(receive_people(&mut b).await.is_err());
+        let mut tagged = vec![PEOPLE];
+        tagged.extend_from_slice(br#"[{"account_id":"1","name":"A","files":["x"]}]"#);
+        a.send(&tagged).await.unwrap();
+        assert!(receive_people(&mut b).await.is_err());
+        let many: Vec<NamedPerson> = (0..=MAX_PEOPLE)
+            .map(|n| NamedPerson {
+                account_id: n.to_string(),
+                name: "P".into(),
+            })
+            .collect();
+        assert!(send_people(&mut a, &many).await.is_err());
     }
 }
