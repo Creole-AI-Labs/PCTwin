@@ -13,6 +13,7 @@ mod help;
 mod history;
 #[cfg(test)]
 mod info_plist;
+pub mod limits;
 #[cfg(test)]
 mod lockdown;
 mod moving;

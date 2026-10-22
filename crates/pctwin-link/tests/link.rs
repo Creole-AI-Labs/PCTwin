@@ -1365,10 +1365,11 @@ async fn a_resume_is_refused_without_keys_or_for_another_plan() {
     opened.unwrap();
 }
 
-/// Waiting for lanes only ([`accept`]) never takes a resume, even once resumes are allowed: a
-/// resume is only ever the move's new main connection, taken through `accept_any`.
+/// Waiting for lanes only ([`accept`]) never returns a resume: a resume is only ever the move's new
+/// main connection, taken through `accept_any`. One that arrives meanwhile is still taken in, and
+/// handed over by the next `accept_any`, so whichever call waits, the way back is served.
 #[tokio::test]
-async fn waiting_for_lanes_only_never_takes_a_resume() {
+async fn waiting_for_lanes_only_never_returns_a_resume_but_keeps_it_for_accept_any() {
     let (mut old, mut new, host) = paired_with_host().await;
     let now = Instant::now();
     let mut old_keys = old.take_lane_keys().unwrap();
@@ -1378,17 +1379,23 @@ async fn waiting_for_lanes_only_never_takes_a_resume() {
     let addr = new.peer_addr();
     let mut listener = host.into_lanes(old_keys, old.peer_addr());
     listener.allow_resumes(old_resumes);
-    let serving = tokio::spawn(async move { listener.accept().await });
-    assert!(
-        pctwin_link::open_resume(addr, &mut new_resumes, fast())
-            .await
-            .is_err()
-    );
-    // The listener is still waiting for a lane, and serves the next one.
-    let (accepted, opened) =
-        tokio::join!(serving, pctwin_link::open_lane(addr, &mut new_keys, fast()));
-    accepted.unwrap().unwrap();
+    let lanes_only = async {
+        let lane = listener.accept().await;
+        (lane, listener)
+    };
+    let new_laptop = async {
+        let resumed = pctwin_link::open_resume(addr, &mut new_resumes, fast()).await;
+        let lane = pctwin_link::open_lane(addr, &mut new_keys, fast()).await;
+        (resumed, lane)
+    };
+    let ((lane, mut listener), (resumed, opened)) =
+        no_hang(async { tokio::join!(lanes_only, new_laptop) }).await;
+    resumed.unwrap();
     opened.unwrap();
+    lane.unwrap();
+    // The resume taken in meanwhile comes from `accept_any`, at once.
+    let kept = tokio::time::timeout(Duration::from_secs(1), listener.accept_any()).await;
+    assert!(matches!(kept, Ok(Ok(Arrival::Resumed(_)))));
 }
 
 /// An old laptop that answers a resume with a message of another kind is refused as unexpected,
@@ -1914,5 +1921,116 @@ async fn silence_is_not_held_against_an_address_but_a_false_first_word_is() {
     tokio::select! {
         () = strangers => {}
         _ = listener.accept_any() => panic!("nothing genuine arrived"),
+    }
+}
+
+/// A lane the returning laptop opens from its new address before its resume is taken (too early:
+/// lanes follow a resume) is closed unread and not held against that address: its resume, right
+/// after, is answered and taken.
+// A Mac answers only on 127.0.0.1, and the listener must know the paired laptop elsewhere.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lane_sent_before_the_resume_does_not_lock_the_new_address_out() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let elsewhere: std::net::SocketAddr = "127.0.0.77:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let new_laptop = async {
+        let early = pctwin_link::open_lane(at, &mut new_keys, config).await;
+        assert!(early.is_err(), "no lane before the resume");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        pctwin_link::open_resume(at, &mut new_resumes, config).await
+    };
+    let came_back = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(listener.accept_any(), new_laptop)
+    })
+    .await;
+    let (arrived, opened) = came_back.expect("it came back in time");
+    assert!(opened.is_ok(), "the resume: {:?}", opened.err());
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
+}
+
+/// Sends `frame` as a connection's first word to `at` and says whether the old laptop answered it
+/// (its reply begins with the same kind), keeping the connection open for `hold`.
+async fn first_word_answered(
+    at: std::net::SocketAddr,
+    kind: u8,
+    word: &[u8],
+    hold: Duration,
+) -> bool {
+    let mut raw = TcpStream::connect(at).await.unwrap();
+    let mut frame = vec![kind, 0, 0];
+    frame[1..3].copy_from_slice(&(word.len() as u16).to_be_bytes());
+    frame.extend_from_slice(word);
+    raw.write_all(&frame).await.unwrap();
+    let mut head = [0u8; 3];
+    let answered = matches!(
+        tokio::time::timeout(Duration::from_millis(500), raw.read_exact(&mut head)).await,
+        Ok(Ok(_)) if head[0] == kind
+    );
+    tokio::time::sleep(hold).await;
+    answered
+}
+
+/// When every handshake is taken, a resume's first word is closed before its keys are checked, so
+/// its number is not spent: the very same word, once there is room, is answered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn with_every_handshake_taken_a_resume_is_turned_away_without_spending_its_number() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    // Every handshake taken by lanes that never finish (each waits a second for its last word).
+    let lanes: Vec<Vec<u8>> = (0..pctwin_link::MAX_HANDSHAKES)
+        .map(|_| new_keys.open_lane(Instant::now()).unwrap().1)
+        .collect();
+    let (_resuming, word) = new_resumes.open(Instant::now()).unwrap();
+    let laptop = async {
+        let holding: Vec<_> = lanes
+            .iter()
+            .map(|w| first_word_answered(at, KIND_LANE, w, Duration::from_millis(1500)))
+            .collect();
+        let late = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            first_word_answered(at, KIND_RESUME, &word, Duration::ZERO).await
+        };
+        let (held, turned_away) = tokio::join!(futures_util::future::join_all(holding), late);
+        assert!(
+            held.iter().all(|a| *a),
+            "every lane's first word was answered"
+        );
+        assert!(!turned_away, "no room: turned away");
+        // Room again (the lanes gave up): the very same word is answered, its number unspent.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(first_word_answered(at, KIND_RESUME, &word, Duration::ZERO).await);
+    };
+    tokio::select! {
+        () = laptop => {}
+        _ = listener.accept_any() => panic!("nothing finished its handshake"),
     }
 }

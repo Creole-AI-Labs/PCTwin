@@ -732,6 +732,10 @@ redacted_debug!(Host, HostPending, GuestPending, Link, LaneListener, Arrival);
 /// [`Link::peer_addr`]), with no new code: the lane's own short handshake proves both laptops hold
 /// this pairing's keys. Each try uses the next lane number, even if it fails; a refusal means
 /// stop opening lanes and carry on over the ones already open.
+///
+/// The old laptop takes lanes only from the paired laptop's own address, and a new address becomes
+/// that only once a resume from it is accepted: after a drop, open lanes only over the resumed
+/// link, never before. Open at most [`MAX_HANDSHAKES`] at once.
 pub async fn open_lane(
     addr: SocketAddr,
     keys: &mut LaneKeys,
@@ -784,15 +788,21 @@ async fn open_numbered(
 }
 
 /// Connections from the paired laptop's own address that may wait at once for their first word,
-/// apart from everyone else's, so nobody else can ever push them out.
-const PEER_WAITING: usize = 4;
+/// apart from everyone else's, so nobody else can ever push them out: as many as it may open at
+/// once.
+const PEER_WAITING: usize = MAX_HANDSHAKES;
 /// Connections from any other address that may wait at once for their first word (a resume from a
 /// new address, or a stranger). Past this the oldest waiting is let go: a genuine laptop sends its
 /// first word the moment it connects, so it is never the oldest for long.
 const OTHER_WAITING: usize = 64;
 /// Handshakes that run at once past their first word. Only a first word that proves the keys gets
-/// one, so strangers can never take them.
-const HANDSHAKES: usize = 8;
+/// one, so strangers can never take them; the new laptop opens fewer lanes than this at once.
+pub const MAX_HANDSHAKES: usize = 8;
+/// The most connections the old laptop's listener holds at once during a move, whoever opens them:
+/// those waiting for a first word, the handshakes, and the refusals being said. The app makes room
+/// for many more open files than this.
+pub const MOST_HELD: usize = PEER_WAITING + OTHER_WAITING + MAX_HANDSHAKES + MAX_REFUSALS;
+
 /// How long a connection has to send its first message before it is let go (a genuine laptop sends
 /// it the moment it connects). Waiting costs a socket and nothing else.
 const FIRST_WORD: Duration = Duration::from_secs(2);
@@ -904,8 +914,10 @@ impl LaneListener {
         self.keys.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Waits for the next genuine lane and returns it. A resume is not accepted here; the move
-    /// uses [`accept_any`](Self::accept_any).
+    /// Waits for the next genuine lane and returns it. A resume is never returned here (the move
+    /// uses [`accept_any`](Self::accept_any)), but one that arrives meanwhile is still taken in
+    /// and kept for the next `accept_any`: whichever call is waiting, the new laptop's way back
+    /// is served once [`allow_resumes`](Self::allow_resumes) was called.
     pub async fn accept(&mut self) -> Result<Link, LinkError> {
         loop {
             if let Arrival::Lane(link) = self.serve(false).await? {
@@ -934,7 +946,7 @@ impl LaneListener {
                 // word waiting to be read is never pushed out by connections that came after it.
                 biased;
                 Some(step) = self.running.next(), if !self.running.is_empty() => {
-                    if let Some(arrival) = self.stepped(step, resumes) {
+                    if let Some(arrival) = self.stepped(step) {
                         match arrival {
                             Arrival::Resumed(link) if !resumes => self.resumed = Some(link),
                             arrival => return Ok(arrival),
@@ -943,7 +955,7 @@ impl LaneListener {
                 }
                 accepted = self.host.accept_local() => {
                     if let Some((stream, from)) = accepted {
-                        self.admit(stream, from, resumes);
+                        self.admit(stream, from);
                     }
                 }
             }
@@ -952,13 +964,13 @@ impl LaneListener {
 
     /// Lets a new connection wait for its first word, unless it may not be served at all. When its
     /// room is full, the oldest waiting there is let go.
-    fn admit(&mut self, stream: TcpStream, from: SocketAddr, resumes: bool) {
+    fn admit(&mut self, stream: TcpStream, from: SocketAddr) {
         let ip = exact(from.ip());
         let paired = ip == self.peer;
         if !paired {
             // Only a reconnection after a drop may come from another address, and only while the
             // keys for one are held.
-            let resume_allowed = resumes && self.keys_now().resumes.is_some();
+            let resume_allowed = self.keys_now().resumes.is_some();
             if !resume_allowed || self.is_penalised(ip) {
                 return;
             }
@@ -998,7 +1010,7 @@ impl LaneListener {
 
     /// One of the listener's connections got somewhere: a first word checked against the keys
     /// starts its handshake; an ended handshake may be a new link.
-    fn stepped(&mut self, step: Step, resumes: bool) -> Option<Arrival> {
+    fn stepped(&mut self, step: Step) -> Option<Arrival> {
         match step {
             Step::Heard {
                 id,
@@ -1009,7 +1021,7 @@ impl LaneListener {
                 self.waiting.retain(|w| w.id != id);
                 // Quiet, closed, or let go: nothing is held against it.
                 let (kind, msg1) = first.ok()?;
-                self.heard(from, stream, kind, &msg1, resumes);
+                self.heard(from, stream, kind, &msg1);
                 None
             }
             Step::Shaken { from, done } => {
@@ -1040,11 +1052,16 @@ impl LaneListener {
 
     /// A connection's first word: a device trying to pair is told the old laptop is busy; one that
     /// proves the keys gets a handshake; anything else is closed, and its address refused a while.
-    fn heard(&mut self, from: SocketAddr, stream: TcpStream, kind: u8, msg1: &[u8], resumes: bool) {
+    fn heard(&mut self, from: SocketAddr, stream: TcpStream, kind: u8, msg1: &[u8]) {
         let ip = exact(from.ip());
         let paired = ip == self.peer;
         if kind == KIND_HELLO {
             self.host.refuse(stream, KIND_BUSY);
+            return;
+        }
+        // No room to finish a handshake: closed before the keys are checked, so no number is
+        // spent on it, and nothing is held against it.
+        if self.handshakes >= MAX_HANDSHAKES {
             return;
         }
         // The keys are used here and let go before any wait.
@@ -1053,25 +1070,27 @@ impl LaneListener {
             let keys = &mut *held;
             let now = Instant::now();
             match (kind, keys.resumes.as_mut()) {
-                (KIND_LANE, _) if paired => keys.lanes.accept_lane(msg1, now).map_err(Some),
-                (KIND_RESUME, Some(r)) if resumes => r.accept(msg1, now).map_err(Some),
-                _ => Err(None),
+                (KIND_LANE, _) if paired => Some(keys.lanes.accept_lane(msg1, now)),
+                // A lane from an address not (yet) the paired laptop's: lanes follow a resume,
+                // so it is closed unread, its number not spent, and nothing held against it (the
+                // returning laptop's own, sent too early, must not lock out its resume).
+                (KIND_LANE, _) => return,
+                (KIND_RESUME, Some(r)) => Some(r.accept(msg1, now)),
+                _ => None,
             }
         };
         let (accepting, msg2) = match checked {
-            Ok(proved) => proved,
-            Err(_) => {
-                // Not a genuine lane or resume: the paired laptop's own address is never refused,
-                // so a stray message of its own cannot lock it out.
+            Some(Ok(proved)) => proved,
+            // Not a genuine lane or resume (it fails the keys, or is no lane or resume at all):
+            // that address is refused a while, but never the paired laptop's own, so a stray
+            // message of its own cannot lock it out.
+            Some(Err(_)) | None => {
                 if !paired {
                     self.penalise(ip);
                 }
                 return;
             }
         };
-        if self.handshakes >= HANDSHAKES {
-            return;
-        }
         self.handshakes += 1;
         let wait = self.host.config.step_timeout;
         self.running.push(Box::pin(async move {

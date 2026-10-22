@@ -47,6 +47,10 @@ pctwin-transfer = { path = "../../crates/pctwin-transfer" }
 pctwin-types = { path = "../../crates/pctwin-types" }
 tokio = { version = "1.53.2", features = ["rt", "sync", "time"] }
 
+# Room for open files on macOS and Linux (src/limits.rs), through the system's own call, safely.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["process"] }
+
 [dev-dependencies]
 pctwin-pairing = { path = "../../crates/pctwin-pairing" }
 # The real permission check on a mock runtime (tests/permissions.rs). Tests only; no new crate.

@@ -3381,6 +3381,7 @@ dependencies = [
  "pctwin-transfer",
  "pctwin-types",
  "rfd",
+ "rustix",
  "serde",
  "serde_json",
  "tauri",
