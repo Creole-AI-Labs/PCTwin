@@ -2977,8 +2977,10 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 }
-                // Someone else's laptop is never told what is here.
-                let same = if self.allowance.offers_what_is_here() {
+                // Someone else's laptop is never told what is here, and before move protocol 4
+                // (no keyed fingerprints) no laptop is: an older one would get this laptop's own
+                // fingerprint, so every file is simply sent.
+                let same = if self.allowance.offers_what_is_here() && self.version >= KEYED_SINCE {
                     self.same_file(&destination, &path, size)
                 } else {
                     None
@@ -3076,11 +3078,11 @@ impl<'d> ReceiverSession<'d> {
                 }
                 replies.push(self.not_identical(stream));
             }
-            Message::Skip { stream } if self.version >= KEYED_SINCE => {
-                // Only a print is taken as "identical" now: a bare skip is never believed.
+            Message::Skip { stream } => {
+                // Only a print, judged here, is taken as "identical": a bare skip is never
+                // believed, whatever version the other laptop says it has.
                 replies.push(self.not_identical(stream));
             }
-            Message::Skip { stream } => return self.skipped(stream, replies),
             Message::GiveUp { stream, why } => {
                 // The old laptop stopped sending this file: it fails, with the true reason.
                 let stored_wrong = self

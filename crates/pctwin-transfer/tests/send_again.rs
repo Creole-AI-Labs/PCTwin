@@ -3694,11 +3694,11 @@ async fn a_skip_not_accepted_is_sent_after_all_and_never_skipped_again() {
     assert_eq!(sender.outcome(id(0)), Some(&SendOutcome::Arrived));
 }
 
-/// The new laptop answers a skip: already there when it was, and "no" for a stream it does not
-/// hold.
+/// The new laptop answers every skip, and believes none: with a laptop on move protocol 3 it
+/// never offers what is here (an older laptop would get its own fingerprint), so even a file
+/// that is already there is answered "no" and sent.
 #[tokio::test]
 async fn the_new_laptop_answers_every_skip() {
-    // The exchange before move protocol 4: the fingerprint itself, and a bare skip.
     let l = laptops(&[300_000]);
     std::fs::create_dir_all(l.new.path().join("Documents")).unwrap();
     std::fs::write(landed(&l, 0), &l.files[0].1).unwrap();
@@ -3729,19 +3729,19 @@ async fn the_new_laptop_answers_every_skip() {
             },
         )
         .await;
-        assert!(matches!(
+        assert_eq!(
             hear(&mut old).await,
             Message::Have {
-                same_size: Some(_),
-                ..
+                stream: 0,
+                same_size: None
             }
-        ));
+        );
         say(&mut old, &Message::Skip { stream: 0 }).await;
         assert_eq!(
             hear(&mut old).await,
             Message::FileDone {
                 stream: 0,
-                ok: true
+                ok: false
             }
         );
         say(&mut old, &Message::AllSent).await;
@@ -3752,7 +3752,7 @@ async fn the_new_laptop_answers_every_skip() {
     .await
     .expect("hung");
     r.unwrap();
-    assert!(matches!(
+    assert!(!matches!(
         receiver.outcome(id(0)),
         Some(ReceiveOutcome::AlreadyThere(_))
     ));
