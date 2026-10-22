@@ -3554,6 +3554,7 @@ dependencies = [
 name = "pctwin-link"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "pctwin-pairing",
  "socket2",
  "thiserror 2.0.21",

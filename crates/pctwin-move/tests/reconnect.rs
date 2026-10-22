@@ -108,6 +108,33 @@ impl<C: Channel> Channel for Breaker<C> {
     }
 }
 
+/// The new laptop's end of the first connection, that goes silent when `cut` says so (checked at
+/// each send and receive): it neither reads nor writes again, yet stays open, so to the old laptop
+/// the connection still looks alive (a laptop that wandered off the Wi-Fi, say).
+struct Mute<C> {
+    inner: C,
+    cut: Box<dyn Fn() -> bool + Send>,
+    dead: bool,
+}
+
+impl<C: Channel> Channel for Mute<C> {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        self.dead = self.dead || (self.cut)();
+        if self.dead {
+            return Err(ChannelError);
+        }
+        self.inner.send(data).await
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        if self.dead {
+            return Err(ChannelError);
+        }
+        let got = self.inner.recv().await;
+        self.dead = self.dead || (self.cut)();
+        if self.dead { Err(ChannelError) } else { got }
+    }
+}
+
 /* ---------- The way back, in memory ---------- */
 
 /// What the new laptop's tries to come back meet.
@@ -937,4 +964,162 @@ async fn a_stop_while_waiting_for_the_approval_ends_it_at_once() {
         "{:?}",
         got.map(|s| s.ended)
     );
+}
+
+/// The new laptop gives up on a connection that still looks alive to the old laptop (it went
+/// silent rather than closing) and comes back on a new one: the old laptop drops the old one at
+/// once and carries on over the new one. At every point of the move the cut falls, both laptops
+/// finish, every file lands once, and both meters count exactly the plan.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_return_while_the_old_connection_still_looks_alive_carries_on_wherever_it_falls() {
+    let total = (FILES * FILE_BYTES) as u64;
+    for at in [
+        128 * 1024,
+        2 * 1024 * 1024,
+        4 * 1024 * 1024,
+        total - 128 * 1024,
+    ] {
+        let mut w = world();
+        let mut table = std::mem::take(&mut w.table);
+        let (mut back, mut dial, wire, _) = way_back(Way::Open);
+        let (old_live, new_live) = (Live::default(), Live::default());
+        let meter = new_live.meter.clone();
+        let fell = Arc::new(AtomicBool::new(false));
+        let cut = {
+            let fell = fell.clone();
+            move || meter.reading().bytes_written >= at && !fell.swap(true, Ordering::SeqCst)
+        };
+        let (mut old, new) = mem_pair();
+        let mut new = Mute {
+            inner: new,
+            cut: Box::new(cut),
+            dead: false,
+        };
+        let mut steps = Person {
+            rules: rules(),
+            at_approval: None,
+        };
+        let (sent, received) = no_hang(async {
+            tokio::join!(
+                old_side(&mut old, &w, &old_live, &mut back),
+                new_side(&mut new, &w, &mut table, &mut steps, &new_live, &mut dial)
+            )
+        })
+        .await;
+        let (sent, received) = (sent.unwrap(), received.unwrap());
+        assert!(fell.load(Ordering::SeqCst), "cut at {at}");
+        assert_eq!(wire.tries.load(Ordering::SeqCst), 1, "cut at {at}");
+        assert_eq!(sent.ended, Ended::Finished, "cut at {at}");
+        assert_eq!(received.ended, Ended::Finished, "cut at {at}");
+        for line in &sent.files {
+            assert_eq!(line.outcome, Some(SendOutcome::Arrived), "cut at {at}");
+        }
+        assert_eq!(landed_true(&w, &received), FILES, "cut at {at}");
+        let new_reading = new_live.meter.reading();
+        assert_eq!(new_reading.files.copied, FILES as u64, "cut at {at}");
+        assert_eq!(new_reading.files.failed, 0, "cut at {at}");
+        assert_eq!(new_reading.bytes_checked, total, "cut at {at}");
+        let old_reading = old_live.meter.reading();
+        assert_eq!(old_reading.files.copied, FILES as u64, "cut at {at}");
+        assert_eq!(old_reading.bytes_checked, total, "cut at {at}");
+    }
+}
+
+/// Strangers on the network holding connections to the old laptop's way back open, from more
+/// addresses than it serves at once, cannot end a dropped move: the new laptop comes back and the
+/// move finishes.
+// A Mac answers only on 127.0.0.1, and the strangers need addresses of their own.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn strangers_jamming_the_way_back_cannot_end_the_move() {
+    /// The real way back, telling the test where it listens.
+    struct Told {
+        inner: pctwin_move::resume::NetComeback,
+        port: Arc<Mutex<Option<u16>>>,
+    }
+    impl Comeback for Told {
+        type Link = pctwin_link::Link;
+        async fn open(&mut self, plan: &[u8; 32]) -> Option<u16> {
+            let port = self.inner.open(plan).await;
+            *self.port.lock().unwrap() = port;
+            port
+        }
+        async fn returned(&mut self) -> Option<pctwin_link::Link> {
+            self.inner.returned().await
+        }
+    }
+    async fn hold_open(from: std::net::IpAddr, port: Arc<Mutex<Option<u16>>>) {
+        use tokio::io::AsyncReadExt;
+        loop {
+            let at = *port.lock().unwrap();
+            if let Some(at) = at {
+                let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                socket.bind(std::net::SocketAddr::new(from, 0)).unwrap();
+                let to = std::net::SocketAddr::from(([127, 0, 0, 1], at));
+                if let Ok(mut held) = socket.connect(to).await {
+                    let mut sink = [0u8; 64];
+                    let _ =
+                        tokio::time::timeout(Duration::from_secs(5), held.read(&mut sink)).await;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+    let config = pctwin_link::LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(5),
+        silence_penalty: Duration::from_millis(200),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old_link, mut new_link) = paired(config).await;
+    let port = Arc::new(Mutex::new(None));
+    let mut back = Told {
+        inner: pctwin_move::resume::NetComeback::new(&mut old_link, config),
+        port: port.clone(),
+    };
+    let mut dial = pctwin_move::resume::NetRedial::new(&mut new_link, config);
+    let strangers: Vec<_> = (2..=9u8)
+        .map(|n| {
+            tokio::spawn(hold_open(
+                std::net::IpAddr::from([127, 0, 0, n]),
+                port.clone(),
+            ))
+        })
+        .collect();
+    let mut w = world();
+    let mut table = std::mem::take(&mut w.table);
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let meter = old_live.meter.clone();
+    let cut_once = Arc::new(AtomicBool::new(false));
+    let cut = {
+        let cut_once = cut_once.clone();
+        move || meter.reading().files.copied >= 1 && !cut_once.swap(true, Ordering::SeqCst)
+    };
+    let mut old = Breaker::new(old_link, cut);
+    let mut steps = Person {
+        rules: rules(),
+        at_approval: None,
+    };
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            old_side(&mut old, &w, &old_live, &mut back),
+            new_side(
+                &mut new_link,
+                &w,
+                &mut table,
+                &mut steps,
+                &new_live,
+                &mut dial
+            )
+        )
+    })
+    .await;
+    for s in strangers {
+        s.abort();
+    }
+    let (sent, received) = (sent.unwrap(), received.unwrap());
+    assert!(cut_once.load(Ordering::SeqCst), "the connection was cut");
+    assert_eq!(sent.ended, Ended::Finished);
+    assert_eq!(received.ended, Ended::Finished);
+    assert_eq!(landed_true(&w, &received), FILES);
 }

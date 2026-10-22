@@ -207,8 +207,7 @@ impl Comeback for NetComeback {
         let mut keys = self.keys.take()?;
         let here = self.here?;
         let resumes = keys.resume_keys(plan, std::time::Instant::now()).ok()?;
-        // The same address, any free port: the network both laptops are already on.
-        let host = pctwin_link::Host::bind(SocketAddr::new(here.ip(), 0), self.config)
+        let host = pctwin_link::Host::bind(listen_at(here), self.config)
             .await
             .ok()?;
         let port = host.local_addr().ok()?.port();
@@ -235,6 +234,14 @@ impl Comeback for NetComeback {
             }
         }
     }
+}
+
+/// Where the old laptop listens for the new laptop's return: the very address it has on the main
+/// connection (an IPv6 link-local address keeps its interface, its scope), on any free port.
+fn listen_at(here: SocketAddr) -> SocketAddr {
+    let mut at = here;
+    at.set_port(0);
+    at
 }
 
 /// The new laptop's way back over `pctwin-link`: reconnects to the old laptop's listener with the
@@ -307,6 +314,23 @@ mod tests {
         assert!(parse_port(&[RESUME_AT, 1, 2, 3]).is_err());
         assert!(parse_port(&[39, 1, 2]).is_err());
         assert!(parse_port(&[]).is_err());
+    }
+
+    #[test]
+    fn the_way_back_listens_on_the_main_connection_s_own_address_and_interface() {
+        let v6: SocketAddr = "[fe80::1%7]:51515".parse().unwrap();
+        let at = listen_at(v6);
+        assert_eq!(at.port(), 0);
+        let std::net::SocketAddr::V6(at) = at else {
+            panic!("still IPv6");
+        };
+        assert_eq!(at.scope_id(), 7, "the interface is kept");
+        assert_eq!(*at.ip(), "fe80::1".parse::<std::net::Ipv6Addr>().unwrap());
+        let v4: SocketAddr = "192.168.1.20:51515".parse().unwrap();
+        assert_eq!(
+            listen_at(v4),
+            "192.168.1.20:0".parse::<SocketAddr>().unwrap()
+        );
     }
 
     fn rules(mover: &str) -> LandingRules {

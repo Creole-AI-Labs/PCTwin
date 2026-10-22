@@ -783,16 +783,55 @@ async fn open_numbered(
     })
 }
 
-/// Old laptop, during the move: accepts extra lanes from the paired new laptop, one handshake at a
-/// time. Connections from any other address are closed without a word; a device trying to pair is
-/// told the old laptop is busy; a connection that sends anything but a genuine lane, or nothing
-/// within the step limit, is dropped and the next one served.
-pub struct LaneListener {
-    host: Host,
-    keys: LaneKeys,
+/// Handshakes the listener runs at once for the paired laptop's own address: kept for it alone,
+/// so nobody else can ever take its turn.
+const PEER_SLOTS: usize = 2;
+/// Handshakes the listener runs at once for any other address (a resume from a new address, or a
+/// stranger). Past this, a connection is closed at once.
+const OTHER_SLOTS: usize = 4;
+/// How long a connection has to send its first message before it is let go (a genuine laptop sends
+/// it the moment it connects), so a silent device holds a slot only briefly.
+const FIRST_WORD: Duration = Duration::from_secs(2);
+
+/// The keys a listener checks arrivals with, shared by the handshakes it runs at once. Each is
+/// used only between waits, never held across one.
+struct ListenKeys {
+    lanes: LaneKeys,
     /// Once the plan is approved: the keys to accept the new laptop's reconnection after a drop.
     resumes: Option<ResumeKeys>,
+}
+
+/// One handshake the listener is running: who it is from, which kind of slot it holds, and how it
+/// ended (the message kind, the new link's transport and its connection).
+struct Attempted {
+    from: SocketAddr,
+    peer_slot: bool,
+    done: Result<(u8, Transport, TcpStream), LinkError>,
+}
+
+type Attempt = std::pin::Pin<Box<dyn std::future::Future<Output = Attempted> + Send>>;
+
+/// Old laptop, during the move: accepts extra lanes from the paired new laptop, and (once the plan
+/// is approved) its reconnection after a drop. Several handshakes run at once, each with a short
+/// time to say its first word: the paired laptop's own address has slots of its own that no other
+/// device can take, and every other address shares a few more, past which connections are closed
+/// at once. A device trying to pair is told the old laptop is busy; a connection that sends
+/// anything but a genuine lane or resume is dropped, and its exact address refused for a while
+/// (never the paired laptop's). Handshakes in progress are kept between calls, so letting a call go
+/// never drops a laptop part way through its handshake.
+pub struct LaneListener {
+    host: Host,
+    keys: Arc<Mutex<ListenKeys>>,
+    /// The paired laptop's exact address: lanes come only from it. It moves only when a resume
+    /// from another address proves the keys.
     peer: IpAddr,
+    running: futures_util::stream::FuturesUnordered<Attempt>,
+    peer_busy: usize,
+    other_busy: usize,
+    /// Exact addresses refused for a while, until when.
+    penalised: HashMap<IpAddr, Instant>,
+    /// A resume that finished while only lanes were being waited for, for the next `accept_any`.
+    resumed: Option<Link>,
 }
 
 /// What arrived at the old laptop's listener during the move.
@@ -808,18 +847,35 @@ impl Host {
     pub fn into_lanes(self, keys: LaneKeys, peer: SocketAddr) -> LaneListener {
         LaneListener {
             host: self,
-            keys,
-            resumes: None,
-            peer: penalty_key(peer.ip()),
+            keys: Arc::new(Mutex::new(ListenKeys {
+                lanes: keys,
+                resumes: None,
+            })),
+            peer: exact(peer.ip()),
+            running: futures_util::stream::FuturesUnordered::new(),
+            peer_busy: 0,
+            other_busy: 0,
+            penalised: HashMap::new(),
+            resumed: None,
         }
     }
+}
+
+/// An address as one device has it: an IPv4 address seen through an IPv6 socket is that IPv4
+/// address. Nothing wider: a whole IPv6 /64 is never taken for one laptop.
+fn exact(ip: IpAddr) -> IpAddr {
+    ip.to_canonical()
 }
 
 impl LaneListener {
     /// Once the person approved the plan: also accept the new laptop's reconnection after a drop,
     /// with these resume keys (see [`accept_any`](Self::accept_any)).
     pub fn allow_resumes(&mut self, keys: ResumeKeys) {
-        self.resumes = Some(keys);
+        self.keys_now().resumes = Some(keys);
+    }
+
+    fn keys_now(&self) -> MutexGuard<'_, ListenKeys> {
+        self.keys.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Waits for the next genuine lane and returns it. A resume is not accepted here; the move
@@ -836,77 +892,148 @@ impl LaneListener {
     /// called) the new laptop's reconnection after a drop. A resume can arrive while the old main
     /// connection still looks alive (the new laptop gave up on it first): the app then drops the
     /// old one and carries the move on over the resumed one, so there is only ever one main
-    /// connection.
+    /// connection. Cancel-safe: handshakes in progress carry on at the next call.
     pub async fn accept_any(&mut self) -> Result<Arrival, LinkError> {
         self.serve(true).await
     }
 
     async fn serve(&mut self, resumes: bool) -> Result<Arrival, LinkError> {
+        use futures_util::StreamExt;
         loop {
-            let Some((mut stream, from)) = self.host.accept_local().await else {
-                continue;
-            };
-            let paired = penalty_key(from.ip()) == self.peer;
-            // Lanes come only from the paired laptop. Once resumes are allowed, its reconnection
-            // may come from another local address (a new Wi-Fi lease, Wi-Fi to cable): the resume
-            // keys prove it, not the address. An address that failed lately is not served at
-            // all, so silent connections cannot keep the paired laptop waiting.
-            if !paired && (!resumes || self.resumes.is_none()) {
-                continue;
+            if resumes && let Some(link) = self.resumed.take() {
+                return Ok(Arrival::Resumed(link));
             }
-            if !paired && self.host.is_penalised(from.ip()) {
-                continue;
+            tokio::select! {
+                Some(done) = self.running.next(), if !self.running.is_empty() => {
+                    if let Some(arrival) = self.ended(done) {
+                        match arrival {
+                            Arrival::Resumed(link) if !resumes => self.resumed = Some(link),
+                            arrival => return Ok(arrival),
+                        }
+                    }
+                }
+                accepted = self.host.accept_local() => {
+                    if let Some((stream, from)) = accepted {
+                        self.admit(stream, from, resumes);
+                    }
+                }
             }
-            let wait = self.host.config.step_timeout;
-            let lanes = &mut self.keys;
-            let resume_keys = if resumes { self.resumes.as_mut() } else { None };
-            let attempt = async {
-                let (kind, msg1) = match read_timed(&mut stream, wait).await? {
+        }
+    }
+
+    /// A handshake ended: its slot is free again, and a genuine one is a new link.
+    fn ended(&mut self, done: Attempted) -> Option<Arrival> {
+        if done.peer_slot {
+            self.peer_busy -= 1;
+        } else {
+            self.other_busy -= 1;
+        }
+        let ip = exact(done.from.ip());
+        match done.done {
+            Ok((kind, transport, stream)) => {
+                if kind == KIND_RESUME {
+                    // The paired laptop is now at this exact address: its lanes come from here.
+                    self.peer = ip;
+                }
+                let link = Link {
+                    transport,
+                    lanes: None,
+                    stream,
+                    peer: done.from,
+                    send_timeout: self.host.config.step_timeout,
+                    broken: false,
+                };
+                Some(if kind == KIND_RESUME {
+                    Arrival::Resumed(link)
+                } else {
+                    Arrival::Lane(link)
+                })
+            }
+            Err(_) => {
+                // The paired laptop's own address is never refused: a failed try of its own must
+                // not lock it out.
+                if ip != self.peer {
+                    self.penalise(ip);
+                }
+                None
+            }
+        }
+    }
+
+    /// Starts a handshake for a new connection, in a free slot of its kind, or closes it at once.
+    fn admit(&mut self, mut stream: TcpStream, from: SocketAddr, resumes: bool) {
+        let ip = exact(from.ip());
+        let paired = ip == self.peer;
+        let resume_allowed = resumes && self.keys_now().resumes.is_some();
+        if paired {
+            if self.peer_busy >= PEER_SLOTS {
+                return;
+            }
+            self.peer_busy += 1;
+        } else {
+            // Only a reconnection after a drop may come from another address, and only while the
+            // keys for one are held.
+            if !resume_allowed || self.is_penalised(ip) || self.other_busy >= OTHER_SLOTS {
+                return;
+            }
+            self.other_busy += 1;
+        }
+        let keys = Arc::clone(&self.keys);
+        let wait = self.host.config.step_timeout;
+        let first = FIRST_WORD.min(wait);
+        self.running.push(Box::pin(async move {
+            let done = async {
+                let (kind, msg1) = match read_timed(&mut stream, first).await? {
                     (KIND_HELLO, _) => {
                         notify(&mut stream, KIND_BUSY).await;
                         return Err(LinkError::Busy);
                     }
                     other => other,
                 };
-                let (accepting, msg2) = match (kind, resume_keys) {
-                    (KIND_LANE, _) => lanes.accept_lane(&msg1, Instant::now())?,
-                    (KIND_RESUME, Some(keys)) => keys.accept(&msg1, Instant::now())?,
-                    _ => return Err(LinkError::Unexpected),
+                // The keys are used here and let go before the next wait.
+                let (accepting, msg2) = {
+                    let mut held = keys.lock().unwrap_or_else(PoisonError::into_inner);
+                    let keys = &mut *held;
+                    let now = Instant::now();
+                    match (kind, keys.resumes.as_mut()) {
+                        (KIND_LANE, _) if paired => keys.lanes.accept_lane(&msg1, now)?,
+                        (KIND_RESUME, Some(r)) if resume_allowed => r.accept(&msg1, now)?,
+                        _ => return Err(LinkError::Unexpected),
+                    }
                 };
                 write_frame(&mut stream, kind, &msg2, wait).await?;
                 let msg3 = match read_timed(&mut stream, wait).await? {
                     (k, body) if k == kind => body,
                     _ => return Err(LinkError::Unexpected),
                 };
-                Ok((kind, accepting.confirm(&msg3, Instant::now())?))
-            };
-            let attempt = attempt.await;
-            if attempt.is_err() && !paired {
-                self.host.penalise(from.ip());
+                let transport = accepting.confirm(&msg3, Instant::now())?;
+                Ok((kind, transport, stream))
             }
-            if let Ok((kind, transport)) = attempt {
-                if kind != KIND_RESUME && !paired {
-                    // Never a lane from another address (unreachable: refused above).
-                    continue;
-                }
-                if !paired {
-                    // The paired laptop is now at this address: its lanes come from here.
-                    self.peer = penalty_key(from.ip());
-                }
-                let link = Link {
-                    transport,
-                    lanes: None,
-                    stream,
-                    peer: from,
-                    send_timeout: wait,
-                    broken: false,
-                };
-                return Ok(if kind == KIND_RESUME {
-                    Arrival::Resumed(link)
-                } else {
-                    Arrival::Lane(link)
-                });
+            .await;
+            Attempted {
+                from,
+                peer_slot: paired,
+                done,
             }
+        }));
+    }
+
+    fn is_penalised(&self, ip: IpAddr) -> bool {
+        self.penalised
+            .get(&ip)
+            .is_some_and(|&until| Instant::now() < until)
+    }
+
+    /// Refuses this exact address for a while (bounded, like the pairing host's).
+    fn penalise(&mut self, ip: IpAddr) {
+        let penalty = self.host.config.silence_penalty;
+        if penalty.is_zero() {
+            return;
+        }
+        let now = Instant::now();
+        self.penalised.retain(|_, until| now < *until);
+        if self.penalised.len() < MAX_PENALISED {
+            self.penalised.insert(ip, now + penalty);
         }
     }
 }
@@ -1092,6 +1219,25 @@ mod tests {
         assert_eq!(
             key("fd00:1:2:3::1"),
             "fd00:1:2:3::".parse::<IpAddr>().unwrap()
+        );
+    }
+
+    /// During the move the listener knows the paired laptop by its exact address: another device
+    /// in the same IPv6 /64 is not the paired laptop (the pairing host's /64 penalties are for
+    /// strangers guessing codes, not for telling the paired laptop apart).
+    #[test]
+    fn the_paired_laptop_is_its_exact_address_never_its_whole_64() {
+        let one: IpAddr = "fd00:1:2:3::10".parse().unwrap();
+        let neighbour: IpAddr = "fd00:1:2:3::99".parse().unwrap();
+        assert_ne!(exact(one), exact(neighbour));
+        assert_eq!(
+            penalty_key(one),
+            penalty_key(neighbour),
+            "unlike the /64 penalty key"
+        );
+        assert_eq!(
+            exact("::ffff:192.168.1.7".parse().unwrap()),
+            "192.168.1.7".parse::<IpAddr>().unwrap()
         );
     }
 
