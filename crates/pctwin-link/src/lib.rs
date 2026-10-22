@@ -792,9 +792,20 @@ async fn open_numbered(
 /// once.
 const PEER_WAITING: usize = MAX_HANDSHAKES;
 /// Connections from any other address that may wait at once for their first word (a resume from a
-/// new address, or a stranger). Past this the oldest waiting is let go: a genuine laptop sends its
-/// first word the moment it connects, so it is never the oldest for long.
-const OTHER_WAITING: usize = 64;
+/// new address, or a stranger). When it is full, the longest waiting that has had its
+/// [`PROTECTED`] time is let go for a newcomer; if none has, the newcomer is turned away. So to keep
+/// a returning laptop out, strangers must hold this many places, every one newer than
+/// [`PROTECTED`]: at least `OTHER_WAITING / PROTECTED` (512) new connections a second, from at
+/// least `OTHER_WAITING / WAITING_PER_ADDRESS` (64) addresses; and once in, it is never let go
+/// before [`PROTECTED`] has passed, however fast they come.
+const OTHER_WAITING: usize = 256;
+/// Waiting places one address may hold: past this its own longest waiting is let go, never anyone
+/// else's, so no one address can fill the room or push others out. (A returning laptop opens one
+/// connection at a time.)
+pub const WAITING_PER_ADDRESS: usize = 4;
+/// How long a waiting connection is safe from being let go for a newcomer: time for a late first
+/// word (a busy laptop, or a lost packet sent again, which takes a few hundred milliseconds).
+const PROTECTED: Duration = Duration::from_millis(500);
 /// Handshakes that run at once past their first word. Only a first word that proves the keys gets
 /// one, so strangers can never take them; the new laptop opens fewer lanes than this at once.
 pub const MAX_HANDSHAKES: usize = 8;
@@ -838,6 +849,9 @@ type Running = std::pin::Pin<Box<dyn std::future::Future<Output = Step> + Send>>
 struct Waiting {
     id: u64,
     paired: bool,
+    /// Its exact address, and since when it has waited.
+    ip: IpAddr,
+    since: Instant,
     let_go: Arc<tokio::sync::Notify>,
 }
 
@@ -975,13 +989,39 @@ impl LaneListener {
                 return;
             }
         }
-        let room = if paired { PEER_WAITING } else { OTHER_WAITING };
-        if self.waiting.iter().filter(|w| w.paired == paired).count() >= room
-            && let Some(oldest) = self.waiting.iter().find(|w| w.paired == paired)
+        // Who makes way for the newcomer, if anyone must (oldest first, as they wait in order).
+        let make_way = if paired {
+            // Only the paired laptop is in its own room: its longest waiting makes way.
+            let full = self.waiting.iter().filter(|w| w.paired).count() >= PEER_WAITING;
+            full.then(|| self.waiting.iter().find(|w| w.paired))
+                .flatten()
+        } else if self
+            .waiting
+            .iter()
+            .filter(|w| !w.paired && w.ip == ip)
+            .count()
+            >= WAITING_PER_ADDRESS
         {
-            // Let go at once; its place is freed when it says so.
-            oldest.let_go.notify_one();
-            let id = oldest.id;
+            // That address's own longest waiting makes way, never anyone else's.
+            self.waiting.iter().find(|w| !w.paired && w.ip == ip)
+        } else if self.waiting.iter().filter(|w| !w.paired).count() >= OTHER_WAITING {
+            // The longest waiting that has had its protected time; if none has, the newcomer is
+            // turned away.
+            match self
+                .waiting
+                .iter()
+                .find(|w| !w.paired && w.since.elapsed() >= PROTECTED)
+            {
+                Some(w) => Some(w),
+                None => return,
+            }
+        } else {
+            None
+        };
+        if let Some(w) = make_way {
+            // Let go at once; its place is freed here.
+            w.let_go.notify_one();
+            let id = w.id;
             self.waiting.retain(|w| w.id != id);
         }
         let id = self.next_id;
@@ -990,6 +1030,8 @@ impl LaneListener {
         self.waiting.push_back(Waiting {
             id,
             paired,
+            ip,
+            since: Instant::now(),
             let_go: Arc::clone(&let_go),
         });
         let first = FIRST_WORD.min(self.host.config.step_timeout);
