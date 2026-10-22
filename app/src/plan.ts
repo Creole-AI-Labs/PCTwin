@@ -164,6 +164,22 @@ export interface OverviewView {
   peopleWaiting: number;
 }
 
+/**
+ * The overview (M03) of a plan the new laptop received: what is chosen, from the plan's own sums;
+ * a destination problem when the plan says it does not fit; people waiting when the plan is held
+ * for them. Places the old laptop could not search are known only there, so none are counted.
+ */
+export function overviewOf(plan: PlanView): OverviewView {
+  const files = plan.groups.reduce((sum, g) => sum + (g.size.kind === "unreadable" ? 0 : g.size.files), 0);
+  const bytes = plan.groups.reduce((sum, g) => sum + (g.size.kind === "unreadable" ? 0 : g.size.bytes), 0);
+  return {
+    chosen: { folders: plan.groups.length, files, bytes, atLeast: plan.groups.some((g) => g.size.kind !== "known") },
+    unreadable: 0,
+    destinationProblems: plan.preview?.fits === false ? 1 : 0,
+    peopleWaiting: plan.blocked && plan.blocked !== "invalid" ? 1 : 0,
+  };
+}
+
 /** Everything in the overview that still needs the person. */
 export function attentionCount(view: OverviewView): number {
   return view.unreadable + view.destinationProblems + view.peopleWaiting;

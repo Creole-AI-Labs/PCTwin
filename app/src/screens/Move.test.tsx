@@ -77,6 +77,14 @@ function send(event: string, payload: unknown) {
   });
 }
 
+/** The engine sends the plan; the overview (M03) comes first, once, and Continue goes on to the plan. */
+function showPlan(p: unknown) {
+  send("move-plan", p);
+  if (screen.queryByRole("heading", { level: 1, name: text("overview-title") })) {
+    fireEvent.click(screen.getByRole("button", { name: text("overview-continue") }));
+  }
+}
+
 async function host(old: boolean) {
   const onPairAgain = vi.fn();
   const onHome = vi.fn();
@@ -165,10 +173,25 @@ describe("the move, once paired", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-lost-title"));
   });
 
+  it("new laptop: the overview (M03) comes once, before the first plan, with the plan's own totals", async () => {
+    await host(false);
+    send("move-plan", plan);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("overview-title"));
+    // 34 files, from the plan; the people were placed on their own page, so there is no People row.
+    expect(plain(document.body.textContent)).toContain("34");
+    expect(screen.queryByText(text("overview-people-title"))).toBeNull();
+    // Any row's Review goes to the plan, where each part is changed.
+    fireEvent.click(screen.getAllByRole("button", { name: (n) => n.includes(text("overview-review")) })[0]);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("plan-title"));
+    // A later revision of the plan does not show the overview again.
+    send("move-plan", { ...plan, revision: 3 });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("plan-title"));
+  });
+
   it("new laptop: shows the plan with what was found before the move, and approves exactly that revision", async () => {
     await host(false);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-list-title"));
-    send("move-plan", plan);
+    showPlan(plan);
     expect(screen.getByText(text("plan-preview-fits"))).toBeTruthy();
     expect(screen.getByText(withText(text("plan-preview-time", { low: 4, high: 8 })))).toBeTruthy();
     expect(screen.getByText(withText(text("plan-preview-renamed", { count: 1 })))).toBeTruthy();
@@ -189,7 +212,7 @@ describe("the move, once paired", () => {
 
   it("a folder the person unticks stays on the old laptop: the approval says so, and the total leaves it out", async () => {
     await host(false);
-    send("move-plan", plan);
+    showPlan(plan);
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-group-move", { folder: text("plan-role-documents") }) }));
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
@@ -200,7 +223,7 @@ describe("the move, once paired", () => {
 
   it("a folder sent to another place shows where and its free space, holds the start when it will not fit, and goes back to the usual place", async () => {
     await host(false);
-    send("move-plan", plan);
+    showPlan(plan);
     const [roomy] = placeAnswers;
     // A place too small for the group.
     replies.move_choose_place = () => ({ ...roomy, freeBytes: 1000 });
@@ -236,7 +259,7 @@ describe("the move, once paired", () => {
       throw refusal("plan-changed");
     };
     await host(false);
-    send("move-plan", plan);
+    showPlan(plan);
     fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
     fireEvent.click(screen.getByRole("button", { name: text("plan-start") }));
     await waitFor(() => {
@@ -247,7 +270,7 @@ describe("the move, once paired", () => {
 
   it("going back from the plan declines it", async () => {
     await host(false);
-    send("move-plan", plan);
+    showPlan(plan);
     fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
     expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: false, leftOut: [] });
   });
@@ -486,7 +509,7 @@ describe("get help", () => {
   it("an error page opens a problem code for that problem and how far the move got, to copy (no share sheet on a laptop)", async () => {
     replies.help_code = () => "K3QD-8XWA-2M7P";
     await host(false);
-    send("move-plan", plan);
+    showPlan(plan);
     send("move-problem", linkLost);
     fireEvent.click(screen.getByRole("button", { name: text("move-get-help") }));
     await waitFor(() => {
@@ -524,7 +547,7 @@ describe("the window", () => {
       expect(tauri.invoke).toHaveBeenCalledWith("move_begin", expect.anything());
     });
     expect(onWindow).toHaveBeenLastCalledWith("everyday");
-    send("move-plan", plan);
+    showPlan(plan);
     expect(onWindow).toHaveBeenLastCalledWith("expanded");
     send("move-progress", runningQuiet);
     expect(onWindow).toHaveBeenLastCalledWith("everyday");

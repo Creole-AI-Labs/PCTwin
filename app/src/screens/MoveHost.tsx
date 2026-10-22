@@ -35,12 +35,13 @@ import GetHelp from "./GetHelp";
 import type { MoveOutcome, MoveProgress, ReportItem } from "../move";
 import { setWindowMode, type WindowMode } from "../native";
 import MiniPanel from "./MiniPanel";
-import type { Approval, FolderRole, PlanView } from "../plan";
+import { overviewOf, type Approval, type FolderRole, type PlanView } from "../plan";
 import DriveProblem from "./DriveProblem";
 import MoveEnded, { type MoveEnd } from "./MoveEnded";
 import MoveWaiting from "./MoveWaiting";
 import Outcome from "./Outcome";
 import PlanReview, { type ChosenPlace, type PlaceNote } from "./PlanReview";
+import Overview from "./Overview";
 import MeetLaptop from "./MeetLaptop";
 import CheckConnection from "./CheckConnection";
 import { connectionCheck, peerReadiness, type Greeted, type Naming } from "../connection";
@@ -169,6 +170,8 @@ export default function MoveHost({
   // The places the person chose for some folders (M05), and why the last one was not taken.
   const [chosen, setChosen] = useState<Partial<Record<FolderRole, ChosenPlace>>>({});
   const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
+  // The overview (M03) comes once, before the first plan; a later revision goes straight to it.
+  const [overviewSeen, setOverviewSeen] = useState(false);
   // Why the other people ticked were not moved, when they were not: said until the move ends.
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   // How much of the mover's own things the scan has found so far (M02).
@@ -396,6 +399,12 @@ export default function MoveHost({
         />
       );
     case "plan":
+      if (!overviewSeen) {
+        const seen = () => {
+          setOverviewSeen(true);
+        };
+        return <Overview view={overviewOf(view.plan)} people={false} onOpen={seen} onContinue={seen} />;
+      }
       return (
         <PlanReview
           plan={view.plan}
