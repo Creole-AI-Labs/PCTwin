@@ -58,6 +58,48 @@ pub struct Found {
 /// measured (C07). Also when their PCTwin versions differ, before the move ends.
 pub const PEER_EVENT: &str = "move-peer";
 
+/// The connection during the move, once the plan is approved: waiting for the other laptop after
+/// a drop (C09), connected again, or ended for good (C10).
+pub const LINK_EVENT: &str = "move-link";
+
+pctwin_types::listed_enum! {
+    /// The connection during the move, as C09 and C10 show it. Every number is measured.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+    #[serde(tag = "kind", rename_all = "kebab-case")]
+    pub enum ConnectionView {
+        /// Connected again: the move carries on.
+        Connected,
+        /// The connection dropped and the move waits to carry on over a new one, trying by
+        /// itself (C09). `nothing_new`: the tries keep bringing nothing, so the screen says so,
+        /// with Stop. `last_seen_seconds`: since the other laptop was last heard from. What is
+        /// copied and checked so far, of the plan's size.
+        #[serde(rename_all = "camelCase")]
+        Waiting {
+            nothing_new: bool,
+            last_seen_seconds: u64,
+            saved_bytes: u64,
+            total_bytes: u64,
+        },
+        /// The move ended because the laptops could not find each other again without pairing
+        /// again (C10). What moved is in the report; `moved_something`: there is anything to see.
+        #[serde(rename_all = "camelCase")]
+        Ended {
+            moved_something: bool,
+            saved_bytes: u64,
+            total_bytes: u64,
+        },
+    }
+}
+
+/// What C09 and C10 say is kept: the bytes copied and checked so far, and the plan's size.
+fn saved(meter: &pctwin_transfer::MoveMeter) -> (u64, u64) {
+    let r = meter.reading();
+    (
+        r.bytes_checked.saturating_add(r.bytes_already_there),
+        r.bytes_planned,
+    )
+}
+
 /// This laptop and the other one, as each said when the move started (C06), and the link the new
 /// laptop measured (C07).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -381,6 +423,11 @@ impl Moving {
                 }
             }
         })?
+    }
+
+    /// "Try now" while waiting for the other laptop (C09).
+    fn retry(&self) -> Result<(), MoveProblem> {
+        self.with_run(|run| run.live.connection.try_now())
     }
 
     fn pause(&self, pause: bool) -> Result<(), MoveProblem> {
@@ -994,6 +1041,16 @@ fn source_of(item: &Item) -> String {
     format!("{}/{}", role_label(item.place.role), shown_path(&item.path))
 }
 
+/// Whether `f` is a file the move's end cut off (`ended`: how it ended), rather than one that
+/// failed on its own: it was never copied, and is counted as not copied.
+fn cut_off(f: &pctwin_transfer::Failure, ended: Ended) -> bool {
+    match ended {
+        Ended::Finished => false,
+        Ended::StoppedHere | Ended::StoppedThere => f.cause() == Cause::Stopped,
+        Ended::LinkLost => f.cause() == Cause::MoveEnded && f.why() == pctwin_move::LINK_LOST,
+    }
+}
+
 /// The new laptop's outcome and report for `mover`: their own and the shared files line by line;
 /// another person's files are never named or counted here.
 fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<ReportItem>) {
@@ -1039,7 +1096,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                 None,
                 Some(finished.final_path.clone()),
             ),
-            Some(ReceiveOutcome::Failed(f)) if stopped && f.cause() == Cause::Stopped => {
+            Some(ReceiveOutcome::Failed(f)) if cut_off(f, received.ended) => {
                 outcome.not_copied += 1;
                 continue;
             }
@@ -1097,7 +1154,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
                 (ItemStatus::Copied, None, Some(Evidence::AlreadyThere))
             }
-            Some(SendOutcome::Failed(f)) if stopped && f.cause() == Cause::Stopped => {
+            Some(SendOutcome::Failed(f)) if cut_off(f, sent.ended) => {
                 outcome.not_copied += 1;
                 continue;
             }
@@ -1446,6 +1503,7 @@ fn tick<R: Runtime>(
 ) {
     tauri::async_runtime::spawn(async move {
         let mut last = None;
+        let mut last_link: Option<ConnectionView> = None;
         let mut battery = None;
         let mut power_read: Option<std::time::Instant> = None;
         let mut paused_for_power = false;
@@ -1463,6 +1521,31 @@ fn tick<R: Runtime>(
                     }
                     battery = battery_notice(advice);
                 }
+            }
+            // While waiting for the other laptop, C09 is shown instead of the progress.
+            match live.connection.state() {
+                pctwin_move::reconnect::LinkState::Waiting { since, nothing_new } => {
+                    let (saved_bytes, total_bytes) = saved(&live.meter);
+                    let view = ConnectionView::Waiting {
+                        nothing_new,
+                        last_seen_seconds: since.elapsed().as_secs(),
+                        saved_bytes,
+                        total_bytes,
+                    };
+                    if last_link != Some(view) {
+                        let _ = app.emit(LINK_EVENT, view);
+                        last_link = Some(view);
+                    }
+                    tokio::time::sleep(TICK).await;
+                    continue;
+                }
+                pctwin_move::reconnect::LinkState::Connected if last_link.is_some() => {
+                    let _ = app.emit(LINK_EVENT, ConnectionView::Connected);
+                    last_link = None;
+                    // The progress is sent again in full.
+                    last = None;
+                }
+                _ => {}
             }
             let view = progress_view(
                 &live.meter.snapshot(),
@@ -1506,10 +1589,16 @@ async fn run_old<R: Runtime>(
     scan_stop: &AtomicBool,
     others: Vec<String>,
     other: Option<LabelView>,
-) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
+) -> Result<Ran, MoveError> {
+    // The pairing's keys, for the way back after a drop once the plan is approved.
+    let mut back =
+        pctwin_move::resume::NetComeback::new(&mut link, pctwin_link::LinkConfig::default());
     // Greeted first, so the new laptop knows at once, and waits for the list as long as the
-    // finding (and this laptop's person) takes.
-    let mut link = greet(app, &mut link, pctwin_move::greeting::Side::Old, other).await?;
+    // finding (and this laptop's person) takes. A stop ends the greeting at once.
+    let mut link = pctwin_move::or_stop(&live.control, async {
+        Ok(greet(app, &mut link, pctwin_move::greeting::Side::Old, other).await?)
+    })
+    .await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
@@ -1595,11 +1684,14 @@ async fn run_old<R: Runtime>(
         }
     }
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
+    let who = pctwin_move::Who {
+        mover: &mover,
+        people: &named,
+    };
     let sent = pctwin_move::send_by_rules(
         &mut link,
         &record,
-        &mover,
-        &named,
+        &who,
         |item| match handles.get(&item.id) {
             Some(h) => Some(pctwin_move::people::helper_source(*h)),
             None => {
@@ -1612,6 +1704,7 @@ async fn run_old<R: Runtime>(
         },
         live,
         opener,
+        &mut back,
     )
     .await;
     // The helper's session ends with the move, whatever became of it.
@@ -1621,7 +1714,20 @@ async fn run_old<R: Runtime>(
         let _ = client.bye();
     }
     let (sent, _rules) = sent?;
-    Ok(sent_outcome(&sent, &record, &mover))
+    let (outcome, report) = sent_outcome(&sent, &record, &mover);
+    Ok(Ran {
+        outcome,
+        report,
+        link_lost: sent.ended == Ended::LinkLost,
+    })
+}
+
+/// How this laptop's side of the move came out: the outcome (R01), the report (R02), and whether
+/// it ended because the laptops could not find each other again (C10).
+struct Ran {
+    outcome: MoveOutcome,
+    report: Vec<ReportItem>,
+    link_lost: bool,
 }
 
 /// Which laptop this is in the move, with what that side starts from.
@@ -1708,7 +1814,7 @@ async fn run_new<R: Runtime>(
     setup: NewSide,
     names: Arc<Mutex<HashMap<ItemId, String>>>,
     other: Option<LabelView>,
-) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
+) -> Result<Ran, MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let NewSide {
         mut table,
@@ -1741,15 +1847,26 @@ async fn run_new<R: Runtime>(
         live_control: live.control.clone(),
         chosen: BTreeMap::new(),
     };
-    let mut link = greet(app, &mut link, pctwin_move::greeting::Side::New, other).await?;
+    // The pairing's keys, for the way back after a drop once the plan is approved.
+    let mut redial =
+        pctwin_move::resume::NetRedial::new(&mut link, pctwin_link::LinkConfig::default());
+    // A stop ends the greeting at once.
+    let mut link = pctwin_move::or_stop(&live.control, async {
+        Ok(greet(app, &mut link, pctwin_move::greeting::Side::New, other).await?)
+    })
+    .await?;
+    let here = pctwin_move::Here {
+        journal: &journal,
+        account: &me,
+    };
     let received = pctwin_move::receive_by_rules(
         &mut link,
         &mut steps,
         |s, table| s.place_others(table),
         &mut table,
-        &journal,
-        &me,
+        here,
         live,
+        &mut redial,
     )
     .await;
     // Whatever became of the move, the helper's session ends; those placed get their things at
@@ -1758,7 +1875,11 @@ async fn run_new<R: Runtime>(
     let received = received?;
     let (mut outcome, report) = received_outcome(&received, &steps.rules.mover);
     outcome.people = people_outcome(&received, &steps.rules.mover, &steps.named, &not_handed);
-    Ok((outcome, report))
+    Ok(Ran {
+        outcome,
+        report,
+        link_lost: received.ended == Ended::LinkLost,
+    })
 }
 
 /// One line per other person in the move: how their things ended, counted, and whether they are
@@ -1834,7 +1955,11 @@ fn spawn_run<R: Runtime>(
             });
             done.store(true, Ordering::Release);
             match ran {
-                Ok((outcome, report)) => {
+                Ok(Ran {
+                    outcome,
+                    report,
+                    link_lost,
+                }) => {
                     let (state, left) = crate::history::move_state(&outcome);
                     crate::history::add(
                         &app,
@@ -1845,7 +1970,22 @@ fn spawn_run<R: Runtime>(
                         &crate::history::report_kept(&report),
                     );
                     moving.finish(report);
-                    let _ = app.emit(FINISHED_EVENT, outcome);
+                    if link_lost {
+                        // The laptops could not find each other again: C10, with what moved kept
+                        // in the report and the history.
+                        let (saved_bytes, total_bytes) = saved(&live.meter);
+                        let by = &outcome.by_status;
+                        let _ = app.emit(
+                            LINK_EVENT,
+                            ConnectionView::Ended {
+                                moved_something: by.copied + by.needs_action > 0,
+                                saved_bytes,
+                                total_bytes,
+                            },
+                        );
+                    } else {
+                        let _ = app.emit(FINISHED_EVENT, outcome);
+                    }
                 }
                 Err(e) => {
                     moving.finish(Vec::new());
@@ -2010,6 +2150,12 @@ pub fn move_resume(moving: State<'_, AppMoving>) -> Result<(), MoveProblem> {
     moving.pause(false)
 }
 
+/// "Try now" while waiting for the other laptop after a drop (C09): the next try starts at once.
+#[tauri::command]
+pub fn move_retry(moving: State<'_, AppMoving>) -> Result<(), MoveProblem> {
+    moving.retry()
+}
+
 /// Stops the rest of the move (X10). Not undo: what is copied and checked stays.
 #[tauri::command]
 pub fn move_stop(moving: State<'_, AppMoving>) -> Result<(), MoveProblem> {
@@ -2162,6 +2308,34 @@ mod tests {
         assert_eq!(outcome.by_status.copied, 1);
         assert_eq!(outcome.not_copied, 2);
         assert_eq!(report.len(), 1);
+    }
+
+    /// A move that ended because the laptops could not find each other again: what landed is
+    /// copied, what the end cut off is not copied (never copied, never a failure of its own), and
+    /// a file that failed on its own still says so; the history keeps it as stopped part way.
+    #[test]
+    fn a_move_ended_by_a_lost_connection_keeps_every_result_honest() {
+        let a = item(person("1000"), FolderRole::Documents, &["a.txt"], 10);
+        let b = item(person("1000"), FolderRole::Documents, &["b.txt"], 10);
+        let c = item(person("1000"), FolderRole::Documents, &["c.txt"], 10);
+        let cut = ReceiveOutcome::Failed(Failure::new(Cause::MoveEnded, pctwin_move::LINK_LOST));
+        let own = ReceiveOutcome::Failed(Failure::new(Cause::NoSpace, "no space"));
+        let r = received(
+            vec![
+                (a, Some(finished("a.txt", CheckedFrom::Drive))),
+                (b, Some(cut)),
+                (c, Some(own)),
+            ],
+            Ended::LinkLost,
+        );
+        let (outcome, report) = received_outcome(&r, "1000");
+        assert!(outcome.stopped);
+        assert_eq!(outcome.by_status.copied, 1);
+        assert_eq!(outcome.by_status.failed, 1);
+        assert_eq!(outcome.not_copied, 1);
+        assert_eq!(report.len(), 2);
+        assert_eq!(report[1].reason, Some(Reason::NotEnoughSpace));
+        assert_eq!(crate::history::move_state(&outcome), ("stopped", 2));
     }
 
     #[test]

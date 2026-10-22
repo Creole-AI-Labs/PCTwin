@@ -149,6 +149,7 @@ reconnect-expired = Passou tempo demais para reconectar automaticamente. Pareie 
 reconnect-unavailable = Não foi possível alcançar { $label }. Verifique se ele está ligado, ativo, com o PCTwin aberto e no mesmo Wi-Fi.
 reconnect-try-now = Tentar conectar de novo
 reconnect-pair-again = Parear de novo
+reconnect-nothing-new = Nada novo chegou há algum tempo. O PCTwin continua tentando sozinho, ou você pode parar a transferência. Tudo o que já foi copiado e verificado fica guardado.
 reconnect-details = Reconectar com segurança
 reconnect-details-body = Só estes dois notebooks podem se reconectar, e a cada vez eles usam uma nova conexão privada.
 

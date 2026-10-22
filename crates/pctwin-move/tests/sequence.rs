@@ -49,7 +49,18 @@ async fn send_greeted(
     opener: std::sync::Arc<dyn pctwin_transfer::Opener>,
 ) -> Result<(pctwin_move::Sent, pctwin_move::landing::LandingRules), MoveError> {
     let mut link = greeted(link, pctwin_move::greeting::Side::Old).await?;
-    pctwin_move::send_by_rules(&mut link, record, mover, people, source, live, opener).await
+    let who = pctwin_move::Who { mover, people };
+    let mut no_way_back = pctwin_move::resume::NoComeback;
+    pctwin_move::send_by_rules(
+        &mut link,
+        record,
+        &who,
+        source,
+        live,
+        opener,
+        &mut no_way_back,
+    )
+    .await
 }
 
 /// The new laptop's side with the app: greets first, then receives by its rules.
@@ -63,7 +74,10 @@ async fn receive_greeted<S: Steps>(
     live: &Live,
 ) -> Result<pctwin_move::Received, MoveError> {
     let mut link = greeted(link, pctwin_move::greeting::Side::New).await?;
-    pctwin_move::receive_by_rules(&mut link, steps, rules, table, journal, account, live).await
+    let here = pctwin_move::Here { journal, account };
+    let mut no_way_back = pctwin_move::resume::NoRedial;
+    pctwin_move::receive_by_rules(&mut link, steps, rules, table, here, live, &mut no_way_back)
+        .await
 }
 
 async fn greeted(

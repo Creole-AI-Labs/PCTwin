@@ -10,11 +10,25 @@ import "./connection.css";
 
 /**
  * C09 Waiting for your other laptop. Three states: reconnecting by itself, the pairing has expired
- * (pair again), and the other laptop cannot be reached (try now). What is saved is measured, and
- * nothing here says the move is finished. Laid out as in the mockup: the saved share, the other
- * laptop, the resume check, a note, and one action.
+ * (pair again), and the other laptop cannot be reached (try now): then nothing new has arrived for
+ * a while, which is said, with Stop. What is saved is measured, and nothing here says the move is
+ * finished. Laid out as in the mockup: the saved share, the other laptop, the resume check, a note,
+ * and the actions. `onRetry` is left out where this laptop does not do the trying (the old laptop
+ * waits for the new one to come back); `onStop` stops the move, and is left out once it has ended.
  */
-export default function WaitingForLaptop({ waiting, onRetry, onPairAgain, onBack }: { waiting: WaitingState; onRetry: () => void; onPairAgain: () => void; onBack?: () => void }) {
+export default function WaitingForLaptop({
+  waiting,
+  onRetry,
+  onPairAgain,
+  onStop,
+  onBack,
+}: {
+  waiting: WaitingState;
+  onRetry?: () => void;
+  onPairAgain: () => void;
+  onStop?: () => void;
+  onBack?: () => void;
+}) {
   const units = useUnits();
   const ago = useAgo();
   const { kind } = waiting;
@@ -111,10 +125,20 @@ export default function WaitingForLaptop({ waiting, onRetry, onPairAgain, onBack
             <Localized id="reconnect-unavailable" vars={{ label: waiting.otherLaptop }}>
               <p />
             </Localized>
+            <Localized id="reconnect-nothing-new">
+              <p />
+            </Localized>
           </Banner>
         )}
       </div>
       <FrameFooter>
+        {kind !== "pairing-expired" && onStop && (
+          <Button variant="quiet" onClick={onStop}>
+            <Localized id="move-stop">
+              <span />
+            </Localized>
+          </Button>
+        )}
         {kind === "pairing-expired" ? (
           <Button variant="primary" onClick={onPairAgain}>
             <Localized id="reconnect-pair-again">
@@ -122,11 +146,13 @@ export default function WaitingForLaptop({ waiting, onRetry, onPairAgain, onBack
             </Localized>
           </Button>
         ) : (
-          <Button variant="primary" onClick={onRetry}>
-            <Localized id="reconnect-try-now">
-              <span />
-            </Localized>
-          </Button>
+          onRetry && (
+            <Button variant="primary" onClick={onRetry}>
+              <Localized id="reconnect-try-now">
+                <span />
+              </Localized>
+            </Button>
+          )
         )}
       </FrameFooter>
     </>

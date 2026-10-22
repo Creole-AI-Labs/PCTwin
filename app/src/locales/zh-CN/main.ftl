@@ -140,6 +140,7 @@ reconnect-expired = 时间太久，无法自动重新连接。请重新配对，
 reconnect-unavailable = 无法连接到{ $label }。请检查它是否已开机、没有休眠、打开了PCTwin，并连接同一个Wi-Fi。
 reconnect-try-now = 重试连接
 reconnect-pair-again = 重新配对
+reconnect-nothing-new = 已经有一段时间没有新内容传来。PCTwin 会继续自动尝试，你也可以停止移动。目前已复制并检查过的内容都会保留。
 reconnect-details = 安全地重新连接
 reconnect-details-body = 只有这两台笔记本电脑可以重新连接，而且每次都使用新的私密连接。
 

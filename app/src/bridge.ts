@@ -633,6 +633,34 @@ export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole
 export const movePause = () => run("move_pause");
 export const moveResume = () => run("move_resume");
 export const moveStop = () => run("move_stop");
+/** "Try now" while waiting for the other laptop after a drop (C09). */
+export const moveRetry = () => run("move_retry");
+
+/**
+ * The connection during the move (`ConnectionView`, event `move-link`): connected again, waiting
+ * for the other laptop after a drop (C09; `nothingNew` once tries keep bringing nothing), or ended
+ * because the laptops could not find each other again (C10). Sizes are measured bytes.
+ */
+export type ConnectionView =
+  | { kind: "connected" }
+  | { kind: "waiting"; nothingNew: boolean; lastSeenSeconds: number; savedBytes: number; totalBytes: number }
+  | { kind: "ended"; movedSomething: boolean; savedBytes: number; totalBytes: number };
+
+export function parseConnectionView(value: unknown): ConnectionView | null {
+  const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
+  if (kind === "connected") return exactly(value, ["kind"]) ? { kind } : null;
+  if (kind === "waiting") {
+    const f = exactly(value, ["kind", "nothingNew", "lastSeenSeconds", "savedBytes", "totalBytes"]);
+    if (!f || typeof f.nothingNew !== "boolean" || !isCount(f.lastSeenSeconds) || !isCount(f.savedBytes) || !isCount(f.totalBytes)) return null;
+    return { kind, nothingNew: f.nothingNew, lastSeenSeconds: f.lastSeenSeconds, savedBytes: f.savedBytes, totalBytes: f.totalBytes };
+  }
+  if (kind === "ended") {
+    const f = exactly(value, ["kind", "movedSomething", "savedBytes", "totalBytes"]);
+    if (!f || typeof f.movedSomething !== "boolean" || !isCount(f.savedBytes) || !isCount(f.totalBytes)) return null;
+    return { kind, movedSomething: f.movedSomething, savedBytes: f.savedBytes, totalBytes: f.totalBytes };
+  }
+  return null;
+}
 export const moveReport = () => ask("move_report", (v) => listOf(v, parseReportItem));
 
 /** Every move event in one place. A payload that does not parse ends the move on screen as a problem, never shown as sent. */
@@ -645,7 +673,8 @@ export type MoveEvent =
   | { kind: "peer"; peer: Peer }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "finished"; outcome: MoveOutcome }
-  | { kind: "problem"; problem: EndedEarly };
+  | { kind: "problem"; problem: EndedEarly }
+  | { kind: "link"; link: ConnectionView };
 
 const UNREADABLE: MoveEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -665,6 +694,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-progress", parseMoveProgress, (progress) => ({ kind: "progress", progress })),
     on("move-finished", parseMoveOutcome, (outcome) => ({ kind: "finished", outcome })),
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),
+    on("move-link", parseConnectionView, (link) => ({ kind: "link", link })),
   ]);
   return () => {
     for (const stop of all) stop();

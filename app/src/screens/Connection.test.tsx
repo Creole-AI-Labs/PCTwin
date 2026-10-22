@@ -462,6 +462,32 @@ describe("C09 Waiting for your other laptop", () => {
     expect(screen.queryByRole("button", { name: text("reconnect-pair-again") })).toBeNull();
   });
 
+  it("not reachable for a while: says nothing new has arrived, with Stop beside Try now", () => {
+    const onStop = vi.fn();
+    inApp(<WaitingForLaptop waiting={{ ...base, kind: "unreachable" }} {...handlers()} onStop={onStop} />);
+    expect(screen.getByRole("alert").textContent).toContain(text("reconnect-nothing-new"));
+    fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: text("reconnect-try-now") })).toBeTruthy();
+    noStringsMissing();
+  });
+
+  it("where this laptop does not do the trying there is no Try now, only Stop; once pairing has expired, no Stop", () => {
+    const onStop = vi.fn();
+    const { rerender } = inApp(<WaitingForLaptop waiting={base} onPairAgain={vi.fn()} onStop={onStop} />);
+    expect(screen.queryByRole("button", { name: text("reconnect-try-now") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    rerender(
+      <LocalizationProvider l10n={l10n}>
+        <main>
+          <WaitingForLaptop waiting={{ ...base, kind: "pairing-expired" }} onPairAgain={vi.fn()} onStop={onStop} />
+        </main>
+      </LocalizationProvider>,
+    );
+    expect(screen.queryByRole("button", { name: text("move-stop") })).toBeNull();
+  });
+
   it("shows the resume check as a row, pending while it waits, and not pending once pairing has expired", () => {
     const { rerender } = inApp(<WaitingForLaptop waiting={base} {...handlers()} />);
     const resume = screen.getByText(text("reconnect-details")).closest("li");

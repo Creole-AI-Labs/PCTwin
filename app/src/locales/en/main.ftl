@@ -150,6 +150,8 @@ reconnect-expired = Too long has passed to reconnect by itself. Pair again, and 
 reconnect-unavailable = { $label } cannot be reached. Check that it is on, awake, has PCTwin open and is on the same Wi-Fi.
 reconnect-try-now = Retry connection
 reconnect-pair-again = Pair again
+# Shown with Stop when the tries to reconnect keep bringing nothing (the Task List's reconnect loop).
+reconnect-nothing-new = Nothing new has arrived for a while. PCTwin keeps trying by itself, or you can stop the move. Everything copied and checked so far stays.
 reconnect-details = Reconnecting safely
 reconnect-details-body = Only these two laptops can reconnect, and each time they use a new private connection.
 

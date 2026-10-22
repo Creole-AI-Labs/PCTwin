@@ -14,8 +14,10 @@ import {
   openPrivacySettings,
   moveReport,
   moveResume,
+  moveRetry,
   moveStop,
   toMoveProblem,
+  type ConnectionView,
   type HelpStep,
   type HelpTopic,
   type MoveEvent,
@@ -44,7 +46,9 @@ import PlanReview, { type ChosenPlace, type PlaceNote } from "./PlanReview";
 import Overview from "./Overview";
 import MeetLaptop from "./MeetLaptop";
 import CheckConnection from "./CheckConnection";
-import { connectionCheck, peerReadiness, type Greeted, type Naming } from "../connection";
+import { connectionCheck, peerReadiness, type Greeted, type Naming, type WaitingState } from "../connection";
+import ConnectionEnded from "./ConnectionEnded";
+import WaitingForLaptop from "./WaitingForLaptop";
 import { labelText } from "../pairing";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
@@ -64,7 +68,28 @@ type View =
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "outcome"; outcome: MoveOutcome }
   | { kind: "report"; outcome: MoveOutcome; items: ReportItem[] }
-  | { kind: "end"; end: MoveEnd };
+  | { kind: "end"; end: MoveEnd }
+  /** The connection dropped once the plan was approved: waiting for the other laptop (C09). */
+  | { kind: "reconnecting"; link: Waiting }
+  /** The laptops could not find each other again: the move ended, what moved is kept (C10). */
+  | { kind: "link-ended"; link: LinkEnded }
+  /** What moved before the connection ended for good, from the C10 dialog. */
+  | { kind: "moved"; link: LinkEnded; items: ReportItem[] };
+
+type Waiting = Extract<ConnectionView, { kind: "waiting" }>;
+type LinkEnded = Extract<ConnectionView, { kind: "ended" }>;
+
+/** C09's figures from the engine's: measured bytes as gigabytes, and why it waits. */
+export function waitingOf(link: Waiting | LinkEnded, otherLaptop: string): WaitingState {
+  const gb = (bytes: number) => bytes / 1_000_000_000;
+  return {
+    kind: link.kind === "ended" ? "pairing-expired" : link.nothingNew ? "unreachable" : "reconnecting",
+    otherLaptop,
+    savedGb: gb(link.savedBytes),
+    totalGb: gb(link.totalBytes),
+    lastSeenSeconds: link.kind === "waiting" ? link.lastSeenSeconds : null,
+  };
+}
 
 /** The folders a new laptop may lack: each gets a folder in the home, named in the person's language. */
 const MAY_LACK: readonly FolderRole[] = ["desktop", "documents", "downloads", "pictures", "music", "videos"];
@@ -104,13 +129,23 @@ export function stepOf(view: View, old: boolean): HelpStep {
       return "finished";
     case "end":
       return "finding";
+    case "reconnecting":
+    case "link-ended":
+    case "moved":
+      return "moving";
   }
 }
 
 /** Where a moved event takes the page. Nothing moves the page off an end, and a plan or progress never goes back to waiting. */
 export function next(view: View, event: MoveEvent): View {
-  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report") return view;
+  if (view.kind === "end" || view.kind === "outcome" || view.kind === "report" || view.kind === "link-ended" || view.kind === "moved") return view;
   switch (event.kind) {
+    case "link":
+      // Waiting for the other laptop takes the page until connected again (then the progress
+      // follows), or until the move ends.
+      if (event.link.kind === "waiting") return { kind: "reconnecting", link: event.link };
+      if (event.link.kind === "ended") return { kind: "link-ended", link: event.link };
+      return view.kind === "reconnecting" ? { kind: "wait", stage: "moving" } : view;
     case "stage":
       // Others not moved is a note, not a page of its own.
       if (event.stage.kind === "others-not-moved") return view;
@@ -126,7 +161,7 @@ export function next(view: View, event: MoveEvent): View {
       // A count, and the two laptops, for the waiting page: not pages of their own.
       return view;
     case "progress":
-      return { kind: "progress", progress: event.progress };
+      return view.kind === "reconnecting" ? view : { kind: "progress", progress: event.progress };
     case "finished":
       return { kind: "outcome", outcome: event.outcome };
     case "problem":
@@ -145,7 +180,7 @@ export function next(view: View, event: MoveEvent): View {
 /** The window size each page is drawn for (the design system's three). */
 export function windowFor(view: View, expanded: boolean, mini: boolean): WindowMode {
   if (view.kind === "progress") return mini ? "mini" : expanded ? "expanded" : "everyday";
-  if (view.kind === "plan" || view.kind === "report") return "expanded";
+  if (view.kind === "plan" || view.kind === "report" || view.kind === "moved") return "expanded";
   return "everyday";
 }
 
@@ -317,6 +352,9 @@ export default function MoveHost({
   }
 
   const othersNote = othersWhy ? l10n.getString(`move-others-${othersWhy}`) : undefined;
+  // The other laptop, as C09 names it: its label where pairing gave one (the old laptop's, so only
+  // on the new laptop), else "the other laptop".
+  const otherLaptop = !old && peer?.other ? labelText(l10n, peer.other) : l10n.getString("qs-label-other");
 
   switch (view.kind) {
     case "who":
@@ -522,6 +560,43 @@ export default function MoveHost({
       );
     case "report":
       return <Report items={view.items} onBack={() => { setView({ kind: "outcome", outcome: view.outcome }); }} />;
+    case "reconnecting":
+      return (
+        <>
+          <WaitingForLaptop
+            waiting={waitingOf(view.link, otherLaptop)}
+            // The new laptop does the trying; the old one waits for it to come back.
+            onRetry={old ? undefined : () => void moveRetry().catch(() => undefined)}
+            onPairAgain={onPairAgain}
+            onStop={() => {
+              setStopping(true);
+            }}
+          />
+          <StopMove open={stopping} onKeep={() => { setStopping(false); }} onStop={() => { setStopping(false); stopNow(); }} />
+        </>
+      );
+    case "link-ended": {
+      const link = view.link;
+      return (
+        <>
+          <WaitingForLaptop waiting={waitingOf(link, otherLaptop)} onPairAgain={onPairAgain} />
+          <ConnectionEnded
+            movedSomething={link.movedSomething}
+            onPairAgain={onPairAgain}
+            onHome={onHome}
+            onSeeMoved={() => {
+              // A report that cannot be read is not shown as an empty one: the dialog stays.
+              moveReport().then(
+                (items) => { setView({ kind: "moved", link, items }); },
+                () => undefined,
+              );
+            }}
+          />
+        </>
+      );
+    }
+    case "moved":
+      return <Report items={view.items} onBack={() => { setView({ kind: "link-ended", link: view.link }); }} />;
     case "end":
       return <MoveEnded end={view.end} old={old} onPairAgain={onPairAgain} onHome={onHome} onHelp={() => { openHelp(topicOf(view.end)); }} />;
   }

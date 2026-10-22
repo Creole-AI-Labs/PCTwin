@@ -26,6 +26,7 @@
     "allow-move-pause",
     "allow-move-resume",
     "allow-move-stop",
+    "allow-move-retry",
     "allow-move-report",
     "allow-move-people-here",
     "allow-help-code",

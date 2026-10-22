@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 import {
   OPTIONAL_KEYS,
+  parseConnectionView,
   parseEndedEarly,
   parseEvidence,
   parseHeadsUp,
@@ -53,6 +54,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   evidence: parseEvidence,
   "heads-up": parseHeadsUp,
   "move-problem": parseMoveProblem,
+  "move-link": parseConnectionView,
   "move-stage": parseMoveStage,
   "ended-early": parseEndedEarly,
   "plan-view": parsePlanView,

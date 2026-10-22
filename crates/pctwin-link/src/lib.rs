@@ -647,6 +647,12 @@ impl Link {
         self.peer
     }
 
+    /// This laptop's own address on this link: where the old laptop listens for the new laptop
+    /// coming back after a drop, on the network the two already share.
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.local_addr()
+    }
+
     /// Whether the operating system is probing this connection while it is quiet (see
     /// [`KEEPALIVE_IDLE`]), so a laptop that went away is noticed.
     pub fn keeps_alive(&self) -> bool {

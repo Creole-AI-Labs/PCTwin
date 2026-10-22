@@ -165,6 +165,37 @@ fn endings() -> Vec<EndedEarly> {
     ]
 }
 
+/// The connection during a move (C09, C10): connected again, waiting (trying, and with nothing
+/// new), and ended with and without anything moved.
+fn links() -> Vec<crate::moving::ConnectionView> {
+    use crate::moving::ConnectionView;
+    vec![
+        ConnectionView::Connected,
+        ConnectionView::Waiting {
+            nothing_new: false,
+            last_seen_seconds: 12,
+            saved_bytes: 81_600_000_000,
+            total_bytes: 120_000_000_000,
+        },
+        ConnectionView::Waiting {
+            nothing_new: true,
+            last_seen_seconds: 95,
+            saved_bytes: 81_600_000_000,
+            total_bytes: 120_000_000_000,
+        },
+        ConnectionView::Ended {
+            moved_something: true,
+            saved_bytes: 81_600_000_000,
+            total_bytes: 120_000_000_000,
+        },
+        ConnectionView::Ended {
+            moved_something: false,
+            saved_bytes: 0,
+            total_bytes: 120_000_000_000,
+        },
+    ]
+}
+
 fn peers() -> Vec<crate::moving::Peer> {
     use crate::moving::{LinkView, Peer, Versions};
     use pctwin_move::greeting::{About, Power, System};
@@ -520,6 +551,7 @@ fn families() -> Vec<(&'static str, Value)> {
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
         ("found", json([crate::moving::Found { bytes: 41_200_000 }])),
         ("peer", json(peers())),
+        ("move-link", json(links())),
         (
             "history-entry",
             json([
@@ -742,6 +774,12 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
     );
     check("move-stage", &stages(), Stage::variant, Stage::VARIANTS);
     check(
+        "move-link",
+        &links(),
+        crate::moving::ConnectionView::variant,
+        crate::moving::ConnectionView::VARIANTS,
+    );
+    check(
         "ended-early",
         &endings(),
         EndedEarly::variant,
@@ -809,6 +847,7 @@ fn calls() -> Value {
             { "name": "move_pause", "args": [] },
             { "name": "move_resume", "args": [] },
             { "name": "move_stop", "args": [] },
+            { "name": "move_retry", "args": [] },
             { "name": "move_report", "args": [] },
             { "name": "move_people_here", "args": [] },
             { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
@@ -842,6 +881,7 @@ fn calls() -> Value {
             "movePrivacy": PRIVACY_EVENT,
             "moveFound": crate::moving::FOUND_EVENT,
             "movePeer": crate::moving::PEER_EVENT,
+            "moveLink": crate::moving::LINK_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

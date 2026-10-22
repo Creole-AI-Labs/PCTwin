@@ -1,9 +1,10 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ended from "../contract/ended-early.json";
+import links from "../contract/move-link.json";
 import outcomes from "../contract/move-outcome.json";
 import placeAnswers from "../contract/place-answer.json";
 import peers from "../contract/peer.json";
@@ -104,7 +105,7 @@ const plan = plans[0];
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(9);
+    expect(tauri.handlers.size).toBe(10);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };
@@ -536,6 +537,92 @@ describe("get help", () => {
     await waitFor(() => {
       expect(screen.getByText("K3QD-8XWA-2M7P")).toBeTruthy();
     });
+  });
+});
+
+describe("a dropped connection during the move (C09, C10)", () => {
+  const [connected, waiting, nothingNew, endedMoved, endedNothing] = links;
+
+  it("new laptop: waits for the other laptop with what is saved, Try now tries at once, and the move carries on once connected", async () => {
+    await host(false);
+    send("move-progress", runningQuiet);
+    send("move-link", waiting);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("reconnect-title"));
+    // What is copied and checked so far, measured: 81.6 GB of 120 GB.
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("68");
+    expect(screen.getByRole("status").textContent).toContain(text("reconnect-trying"));
+    expect(plain(document.body.textContent)).toContain("12 seconds ago");
+    fireEvent.click(screen.getByRole("button", { name: text("reconnect-try-now") }));
+    expect(tauri.invoke).toHaveBeenCalledWith("move_retry");
+    // Progress still ticking underneath does not take the page away while waiting.
+    send("move-progress", runningQuiet);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("reconnect-title"));
+    send("move-link", connected);
+    send("move-progress", runningQuiet);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("progress-title"));
+  });
+
+  it("nothing new has arrived for a while: says so, and Stop asks first, as the progress page does", async () => {
+    await host(false);
+    send("move-link", nothingNew);
+    expect(screen.getByRole("alert").textContent).toContain(text("reconnect-nothing-new"));
+    fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
+    expect(screen.getByText(text("cancel-title"))).toBeTruthy();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("move_stop");
+  });
+
+  it("old laptop: it waits for the new laptop to come back, so there is no Try now, only Stop", async () => {
+    await host(true);
+    send("move-link", waiting);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("reconnect-title"));
+    expect(screen.queryByRole("button", { name: text("reconnect-try-now") })).toBeNull();
+    expect(screen.getByRole("button", { name: text("move-stop") })).toBeTruthy();
+  });
+
+  it("ended for good: the C10 dialog, and See what has moved opens the report of what moved, then comes back", async () => {
+    replies.move_report = () => reportItems;
+    const { onPairAgain, onHome } = await host(false);
+    send("move-link", waiting);
+    send("move-link", endedMoved);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByText(text("ended-title"))).toBeTruthy();
+    // Behind it, C09 says too long has passed to reconnect by itself, never that the move finished.
+    expect(screen.getByText(text("reconnect-expired"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: (n) => n.includes(text("ended-see-moved")) }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("report-title"));
+    });
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(screen.getByText(text("ended-title"))).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: (n) => n.includes(text("ended-pair-again")) }));
+    expect(onPairAgain).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: text("ended-home") }));
+    expect(onHome).toHaveBeenCalled();
+  });
+
+  it("ended with nothing moved: no See what has moved, since there is nothing to see", async () => {
+    await host(true);
+    send("move-progress", runningQuiet);
+    send("move-link", endedNothing);
+    expect(screen.getByText(text("ended-title"))).toBeTruthy();
+    expect(screen.queryByRole("button", { name: (n) => n.includes(text("ended-see-moved")) })).toBeNull();
+  });
+
+  it("a stop while waiting ends as a stopped move: the outcome, with what was copied", async () => {
+    await host(false);
+    send("move-link", waiting);
+    send("move-finished", { ...outcomes[0], stopped: true });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-stopped-title"));
+  });
+
+  it("has no accessibility violations while waiting, nor with the dialog open", async () => {
+    await host(false);
+    send("move-link", nothingNew);
+    let results = await axe.run(document.body, { rules: { region: { enabled: false } } });
+    expect(results.violations.map((v) => v.id)).toEqual([]);
+    send("move-link", endedMoved);
+    results = await axe.run(document.body, { rules: { region: { enabled: false } } });
+    expect(results.violations.map((v) => v.id)).toEqual([]);
   });
 });
 

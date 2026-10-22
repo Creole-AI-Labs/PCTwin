@@ -3565,9 +3565,12 @@ dependencies = [
 name = "pctwin-move"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "pctwin-gate",
  "pctwin-helper",
  "pctwin-journal",
+ "pctwin-link",
+ "pctwin-pairing",
  "pctwin-record",
  "pctwin-transfer",
  "serde",

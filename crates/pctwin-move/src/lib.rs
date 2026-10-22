@@ -27,6 +27,7 @@ pub mod landing;
 pub mod people;
 pub mod reconnect;
 pub mod report;
+pub mod resume;
 pub mod since;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -45,6 +46,9 @@ use pctwin_transfer::{
     TimeRange, TransferError, agree_version, answer_link_test, measure_link, plan_order,
     receive_inventory, send_inventory,
 };
+
+use reconnect::{LinkState, Reconnect};
+use resume::{Comeback, Redial, Redialed};
 
 /// Files a move sends at once.
 const IN_FLIGHT: usize = 4;
@@ -189,12 +193,14 @@ pub enum MoveError {
     Stopped(#[from] Stop),
 }
 
-/// What the screens hold while the move runs: the meter they read, and the person's stop and
-/// pause. Cheap to clone; the test lab passes a fresh one it never touches.
+/// What the screens hold while the move runs: the meter they read, the person's stop and pause,
+/// and the connection (waiting for the other laptop after a drop, with "Try now"). Cheap to clone;
+/// the test lab passes a fresh one it never touches.
 #[derive(Debug, Clone, Default)]
 pub struct Live {
     pub meter: MoveMeter,
     pub control: MoveControl,
+    pub connection: reconnect::Connection,
 }
 
 /// How the move ended.
@@ -206,10 +212,71 @@ pub enum Ended {
     StoppedHere,
     /// The person on the other laptop stopped it.
     StoppedThere,
+    /// After the plan was approved, the connection dropped and the laptops could not find each
+    /// other again without pairing again (the time or the tries to reconnect ran out, or the old
+    /// laptop could not listen for the new one). What moved is kept.
+    LinkLost,
 }
 
 /// What a file cut off by a stop is reported as: failed, never copied.
 pub const STOPPED: &str = "the move was stopped";
+
+/// What a file cut off by a connection that could not be made again is reported as: failed
+/// because the move ended, never copied.
+pub const LINK_LOST: &str = "the connection between the laptops was lost before it finished";
+
+/// What a file with no outcome of its own is reported as when the move ended as `ended`: nothing
+/// for a finished move (every file has one then).
+fn cut_off(ended: Ended) -> Option<Failure> {
+    match ended {
+        Ended::Finished => None,
+        Ended::StoppedHere | Ended::StoppedThere => Some(Failure::new(Cause::Stopped, STOPPED)),
+        Ended::LinkLost => Some(Failure::new(Cause::MoveEnded, LINK_LOST)),
+    }
+}
+
+/// Runs `work`, a wait on the other laptop before any file moves, unless the person here stops
+/// first: then it ends at once with [`Stop::Cancelled`], whatever the other laptop is doing (a
+/// silent laptop, a person taking their time, a link test fed a byte at a time). `work` is let go
+/// where it waits, and a connection let go part way through a read is closed for good, so the
+/// other laptop hears the move end when the caller lets the link go. Every wait before the files
+/// move goes through here; the transfer has its own stop, which tells the other laptop, and the
+/// waits for the other laptop's return after a drop watch the stop themselves.
+pub async fn or_stop<T>(
+    control: &MoveControl,
+    work: impl Future<Output = Result<T, MoveError>>,
+) -> Result<T, MoveError> {
+    tokio::select! {
+        biased;
+        () = control.wait_stopped() => Err(Stop::Cancelled.into()),
+        done = work => done,
+    }
+}
+
+/// What a dropped main connection comes to.
+enum OnDrop<T> {
+    /// The move fails with the drop (before the plan is approved, and for the test lab).
+    Fails,
+    /// The move ends, with every file's result kept (approved, but no way back).
+    Ends,
+    /// The laptops find each other again and carry on.
+    Resumes(T),
+}
+
+/// How much the move has done, to tell whether a connection moved anything before it ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Done(u64, u64);
+
+impl Done {
+    fn of(meter: &MoveMeter) -> Self {
+        let r = meter.reading();
+        let f = &r.files;
+        Self(
+            r.bytes_written.saturating_add(r.bytes_confirmed),
+            f.copied + f.already_there + f.needs_action + f.failed,
+        )
+    }
+}
 
 /// How the run of a session ended: finished, stopped (by either person), or an error.
 fn ended(ran: Result<(), TransferError>) -> Result<Ended, MoveError> {
@@ -261,7 +328,8 @@ pub async fn send_with<C: Channel>(
     let version = agree_version(link, MOVE_PROTOCOL).await?;
     send_inventory(link, record, version).await?;
     answer_link_test(link, version).await?;
-    run_sender(link, version, plan, live, opener).await
+    let on_drop = OnDrop::<&mut resume::NoComeback>::Fails;
+    run_sender(link, version, plan, live, opener, on_drop).await
 }
 
 /// The old laptop's side of a move with the app: as [`send_with`], except the files to send are
@@ -269,35 +337,62 @@ pub async fn send_with<C: Channel>(
 /// sent its [`landing::LandingRules`], so every file is announced exactly where that laptop
 /// checks it. `source` says where each file is read from. The laptops greeted first
 /// ([`greeting::greet`], before the files were found); its list follows [`greeting::list_coming`].
-pub async fn send_by_rules<C: Channel>(
+///
+/// Once the plan is approved the old laptop listens for the new laptop's return through `back`
+/// ([`resume`]): a dropped connection is then picked up again, without pairing again, and the move
+/// carries on where it stopped; if the laptops cannot find each other again the move ends with
+/// every file's result kept ([`Ended::LinkLost`]). A drop before then fails the move.
+pub async fn send_by_rules<C: Channel, B: Comeback>(
     link: &mut greeting::Greeted<'_, C>,
     record: &Record,
-    mover: &str,
-    people: &[landing::NamedPerson],
+    who: &Who<'_>,
     source: impl Fn(&Item) -> Option<PathBuf>,
     live: &Live,
     opener: Arc<dyn Opener>,
+    back: &mut B,
 ) -> Result<(Sent, landing::LandingRules), MoveError> {
     // The link was tested when the laptops greeted.
     let version = link.greeting().version;
-    greeting::list_coming(link).await?;
-    send_inventory(link, record, version).await?;
-    landing::send_mover(link, mover).await?;
-    landing::send_people(link, people).await?;
-    let rules = landing::receive_rules(link).await?;
+    // Everything before the files move waits on the other laptop (its person may take as long as
+    // they like to approve): the person here can stop it at any point.
+    let (rules, port) = or_stop(&live.control, async {
+        greeting::list_coming(link).await?;
+        send_inventory(link, record, version).await?;
+        landing::send_mover(link, who.mover).await?;
+        landing::send_people(link, who.people).await?;
+        let rules = landing::receive_rules(link).await?;
+        // The plan is approved: the way back opens, for exactly this plan.
+        let port = back.open(&resume::plan_print(&record.items, &rules)).await;
+        resume::say_port(link, port).await?;
+        Ok((rules, port))
+    })
+    .await?;
     let plan = send_plan_where(record, source, |i| rules.landing(i));
-    let sent = run_sender(link, version, plan, live, opener).await?;
+    let on_drop = match port {
+        Some(_) => OnDrop::Resumes(back),
+        None => OnDrop::Ends,
+    };
+    let sent = run_sender(link, version, plan, live, opener, on_drop).await?;
     Ok((sent, rules))
+}
+
+/// Who is in the move, as the old laptop tells the new one: the person moving (their account ID
+/// here) and the other people, by name.
+#[derive(Debug, Clone, Copy)]
+pub struct Who<'a> {
+    pub mover: &'a str,
+    pub people: &'a [landing::NamedPerson],
 }
 
 /// Runs the old laptop's sending of `plan` over `link` (the version agreed): one outcome per
 /// file, a stop said as one.
-async fn run_sender<C: Channel>(
+async fn run_sender<C: Channel, B: Comeback>(
     link: &mut C,
     version: u16,
     plan: SendPlan,
     live: &Live,
     opener: Arc<dyn Opener>,
+    on_drop: OnDrop<&mut B>,
 ) -> Result<Sent, MoveError> {
     let items: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
     let mut sender = SenderSession::new(plan.jobs, IN_FLIGHT)
@@ -305,22 +400,121 @@ async fn run_sender<C: Channel>(
         .with_protocol(version)
         .with_meter(live.meter.clone())
         .with_control(live.control.clone());
-    let ended = ended(sender.run(link).await)?;
-    let stopped = ended != Ended::Finished;
+    let ended = keep_sending(&mut sender, link, on_drop, live).await?;
+    let cut = cut_off(ended);
     Ok(Sent {
         files: items
             .into_iter()
             .map(|item| SentFile {
                 item,
-                // A file the stop cut off failed; it is never reported copied.
-                outcome: sender.outcome(item).cloned().or_else(|| {
-                    stopped.then(|| SendOutcome::Failed(Failure::new(Cause::Stopped, STOPPED)))
-                }),
+                // A file a stop or a lost connection cut off failed; it is never reported copied.
+                outcome: sender
+                    .outcome(item)
+                    .cloned()
+                    .or_else(|| cut.clone().map(SendOutcome::Failed)),
             })
             .collect(),
         not_sent: plan.not_sent,
         ended,
     })
+}
+
+/// The old laptop sends over `first`, then (when it resumes) over each connection the new laptop
+/// comes back on, until the move ends. While waiting for the new laptop the screen says so; a stop
+/// then ends the move at once.
+async fn keep_sending<C: Channel, B: Comeback>(
+    sender: &mut SenderSession,
+    first: &mut C,
+    on_drop: OnDrop<&mut B>,
+    live: &Live,
+) -> Result<Ended, MoveError> {
+    let back = match on_drop {
+        OnDrop::Resumes(back) => back,
+        OnDrop::Fails => return ended(sender.run(first).await),
+        OnDrop::Ends => return lost_for_good(sender.run(first).await, live),
+    };
+    let mut policy = Reconnect::new();
+    let mut now_on: Option<B::Link> = None;
+    loop {
+        let before = Done::of(&live.meter);
+        let ran = {
+            let run = async {
+                match now_on.as_mut() {
+                    Some(link) => sender.run(link).await,
+                    None => sender.run(first).await,
+                }
+            };
+            // The new laptop may come back while this connection still looks alive here (it gave
+            // up on it first): the move carries on over the new one, and this one is let go. (A run
+            // is only ever left at a wait, so the session stays as a drop leaves it.)
+            let came_back = async {
+                match back.returned().await {
+                    Some(link) => link,
+                    // It can no longer come back: this connection carries on while it lasts.
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                ran = run => Err(ran),
+                link = came_back => Ok(link),
+            }
+        };
+        let ran = match ran {
+            Ok(link) => {
+                now_on = Some(link);
+                live.connection.set(LinkState::Connected);
+                continue;
+            }
+            Err(ran) => ran,
+        };
+        if !matches!(ran, Err(TransferError::ConnectionDropped)) {
+            return ended(ran);
+        }
+        // The connection dropped: it is let go, and this laptop waits for the new one's return as
+        // long as its keys last. The waits are the new laptop's own, so this screen says "nothing
+        // new" when that one would.
+        drop(now_on.take());
+        let since = std::time::Instant::now();
+        let mut next = policy.ended(Done::of(&live.meter) != before);
+        let came_back = back.returned();
+        tokio::pin!(came_back);
+        let wait = tokio::time::sleep(next.wait);
+        tokio::pin!(wait);
+        let link = loop {
+            live.connection.set(LinkState::Waiting {
+                since,
+                nothing_new: next.nothing_new,
+            });
+            tokio::select! {
+                biased;
+                () = live.control.wait_stopped() => return Ok(Ended::StoppedHere),
+                link = &mut came_back => match link {
+                    Some(link) => break link,
+                    None => {
+                        live.connection.set(LinkState::Over);
+                        return Ok(Ended::LinkLost);
+                    }
+                },
+                () = &mut wait => {
+                    next = policy.ended(false);
+                    wait.as_mut().reset(tokio::time::Instant::now() + next.wait);
+                }
+            }
+        };
+        now_on = Some(link);
+        live.connection.set(LinkState::Connected);
+    }
+}
+
+/// A run that ends, with no way back: a dropped connection ends the move with every result kept.
+fn lost_for_good(ran: Result<(), TransferError>, live: &Live) -> Result<Ended, MoveError> {
+    match ran {
+        Err(TransferError::ConnectionDropped) => {
+            live.connection.set(LinkState::Over);
+            Ok(Ended::LinkLost)
+        }
+        ran => ended(ran),
+    }
 }
 
 /// Why the person stopped a move on the new laptop.
@@ -541,6 +735,8 @@ pub struct ApprovedPlan {
     allowance: Allowance,
     /// The move protocol version both laptops agreed.
     version: u16,
+    /// The old laptop's list as it arrived, for the plan's fingerprint ([`resume::plan_print`]).
+    listed: blake3::Hasher,
 }
 
 /// How one received file ended on the new laptop (`None`: it has no outcome).
@@ -586,6 +782,7 @@ async fn receive_plan_told<C: Channel, S: Steps>(
     table: &Destinations,
 ) -> Result<ApprovedPlan, MoveError> {
     let mut record = receive_inventory(link, version).await?;
+    let listed = resume::print_items(&record.items);
     let told = greeted.is_some();
     let speed = match greeted {
         Some(measured) => measured,
@@ -629,6 +826,7 @@ async fn receive_plan_told<C: Channel, S: Steps>(
         approval,
         allowance,
         version,
+        listed,
     })
 }
 
@@ -650,12 +848,32 @@ impl ApprovedPlan {
         account: &str,
         live: &Live,
     ) -> Result<Received, MoveError> {
-        let mut receiver = ReceiverSession::new(table, self.allowance, journal, account)
+        let here = Here { journal, account };
+        self.receive_on(
+            link,
+            table,
+            here,
+            live,
+            OnDrop::<&mut resume::NoRedial>::Fails,
+        )
+        .await
+    }
+
+    /// [`receive`](Self::receive), with what a dropped connection comes to.
+    async fn receive_on<C: Channel, R: Redial>(
+        self,
+        link: &mut C,
+        table: &Destinations,
+        here: Here<'_>,
+        live: &Live,
+        on_drop: OnDrop<&mut R>,
+    ) -> Result<Received, MoveError> {
+        let mut receiver = ReceiverSession::new(table, self.allowance, here.journal, here.account)
             .with_protocol(self.version)
             .with_meter(live.meter.clone())
             .with_control(live.control.clone());
-        let ended = ended(receiver.run(link).await)?;
-        let stopped = ended != Ended::Finished;
+        let ended = keep_receiving(&mut receiver, link, on_drop, live).await?;
+        let cut = cut_off(ended);
         let files = self
             .record
             .items
@@ -664,10 +882,10 @@ impl ApprovedPlan {
             .map(|i| ReceivedFile {
                 item: i.id,
                 changed_since_scan: receiver.changed_since_scan(i.id),
-                // A file the stop cut off failed; it is never reported copied.
-                outcome: receiver.outcome(i.id).or_else(|| {
-                    stopped.then(|| ReceiveOutcome::Failed(Failure::new(Cause::Stopped, STOPPED)))
-                }),
+                // A file a stop or a lost connection cut off failed; it is never reported copied.
+                outcome: receiver
+                    .outcome(i.id)
+                    .or_else(|| cut.clone().map(ReceiveOutcome::Failed)),
             })
             .collect();
         Ok(Received {
@@ -684,28 +902,109 @@ impl ApprovedPlan {
 /// the approval, since the people's places are decided during it; it may add places to `table`
 /// then (each other person's holding place, made only once the plan is approved). The laptops
 /// greeted first ([`greeting::greet`]); the old laptop's list is waited for however long it takes.
-pub async fn receive_by_rules<C: Channel, S: Steps>(
+///
+/// Once the plan is approved the new laptop can come back to the old one through `redial`
+/// ([`resume`]) after a drop: it waits a little longer after each try that brings nothing, tries
+/// at once when the person asks ([`reconnect::Connection::try_now`]), and the move carries on where
+/// it stopped. If the laptops cannot find each other again without pairing again the move ends
+/// with every file's result kept ([`Ended::LinkLost`]). A drop before then fails the move.
+pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
     link: &mut greeting::Greeted<'_, C>,
     steps: &mut S,
     rules: impl FnOnce(&mut S, &mut Destinations) -> landing::LandingRules,
     table: &mut Destinations,
-    journal: &dyn Ledger,
-    account: &str,
+    here: Here<'_>,
     live: &Live,
+    redial: &mut R,
 ) -> Result<Received, MoveError> {
-    // Greeted already: the list comes once the old laptop has found the files, however long
-    // its person takes.
-    greeting::wait_for_list(link).await?;
-    let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
-    let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
-    let rules = rules(steps, table);
-    // What this laptop accepts is made from the very rules the old laptop is sent, now that
-    // every place is known (another person's holding place is made only after the approval):
-    // both laptops place every file by one function, by construction.
-    approved.allowance =
-        Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?;
-    landing::send_rules(link, &rules).await?;
-    approved.receive(link, table, journal, account, live).await
+    // Everything before the files move waits on the other laptop (its person may take as long as
+    // they like to find the files): the person here can stop it at any point.
+    let (approved, port, plan) = or_stop(&live.control, async {
+        // Greeted already: the list comes once the old laptop has found the files, however long
+        // its person takes.
+        greeting::wait_for_list(link).await?;
+        let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
+        let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
+        let rules = rules(steps, table);
+        // What this laptop accepts is made from the very rules the old laptop is sent, now that
+        // every place is known (another person's holding place is made only after the
+        // approval): both laptops place every file by one function, by construction.
+        approved.allowance =
+            Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?;
+        landing::send_rules(link, &rules).await?;
+        // The plan is approved and the rules said: both laptops make their resume keys for
+        // exactly this plan, and the old laptop says where it waits for this one's return.
+        let plan = resume::finish_print(approved.listed.clone(), &rules);
+        let port = resume::hear_port(link).await?;
+        Ok((approved, port, plan))
+    })
+    .await?;
+    let on_drop = match port {
+        Some(port) if redial.prepare(&plan, port) => OnDrop::Resumes(redial),
+        _ => OnDrop::Ends,
+    };
+    approved.receive_on(link, table, here, live, on_drop).await
+}
+
+/// Where the new laptop records what it writes: the change journal, and the signed-in person's
+/// account here (who acts).
+#[derive(Clone, Copy)]
+pub struct Here<'a> {
+    pub journal: &'a dyn Ledger,
+    pub account: &'a str,
+}
+
+/// The new laptop receives over `first`, then (when it resumes) over each connection it comes back
+/// on, until the move ends. While waiting the screen says so; a stop then ends the move at once.
+async fn keep_receiving<C: Channel, R: Redial>(
+    receiver: &mut ReceiverSession<'_>,
+    first: &mut C,
+    on_drop: OnDrop<&mut R>,
+    live: &Live,
+) -> Result<Ended, MoveError> {
+    let redial = match on_drop {
+        OnDrop::Resumes(redial) => redial,
+        OnDrop::Fails => return ended(receiver.run(first).await),
+        OnDrop::Ends => return lost_for_good(receiver.run(first).await, live),
+    };
+    let mut policy = Reconnect::new();
+    let mut before = Done::of(&live.meter);
+    let mut ran = receiver.run(first).await;
+    loop {
+        if !matches!(ran, Err(TransferError::ConnectionDropped)) {
+            return ended(ran);
+        }
+        let since = std::time::Instant::now();
+        let mut next = policy.ended(Done::of(&live.meter) != before);
+        let mut link = loop {
+            live.connection.set(LinkState::Waiting {
+                since,
+                nothing_new: next.nothing_new,
+            });
+            tokio::select! {
+                biased;
+                () = live.control.wait_stopped() => return Ok(Ended::StoppedHere),
+                () = live.connection.tried_now() => {}
+                () = tokio::time::sleep(next.wait) => {}
+            }
+            let tried = tokio::select! {
+                biased;
+                () = live.control.wait_stopped() => return Ok(Ended::StoppedHere),
+                tried = redial.redial() => tried,
+            };
+            match tried {
+                Ok(link) => break link,
+                Err(Redialed::NotThere) => next = policy.ended(false),
+                Err(Redialed::Over) => {
+                    live.connection.set(LinkState::Over);
+                    return Ok(Ended::LinkLost);
+                }
+            }
+        };
+        live.connection.set(LinkState::Connected);
+        before = Done::of(&live.meter);
+        ran = receiver.run(&mut link).await;
+    }
 }
 
 /// The new laptop's whole side: [`receive_plan`], then [`ApprovedPlan::receive`].

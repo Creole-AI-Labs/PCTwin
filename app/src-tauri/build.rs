@@ -24,6 +24,7 @@ const COMMANDS: &[&str] = &[
     "move_pause",
     "move_resume",
     "move_stop",
+    "move_retry",
     "move_report",
     "move_people_here",
     "help_code",

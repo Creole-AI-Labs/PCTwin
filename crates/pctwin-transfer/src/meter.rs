@@ -596,8 +596,8 @@ impl MoveControl {
         }
     }
 
-    /// Returns once the move is stopped.
-    pub(crate) async fn wait_stopped(&self) {
+    /// Returns once the move is stopped (at once if it already is).
+    pub async fn wait_stopped(&self) {
         loop {
             // Made before looking: a stop made after this wakes it even before it is first
             // awaited (tokio's `notify_waiters` guarantee), so no stop is missed.

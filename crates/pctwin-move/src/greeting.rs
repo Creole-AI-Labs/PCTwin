@@ -26,6 +26,9 @@ const LIST_COMING: u8 = 43;
 const MEASURED: u8 = 44;
 /// What a laptop says it is: a handful of short words, far below the link's message limit.
 const MAX_ABOUT: usize = 512;
+/// The largest number the screens read exactly (2^53 - 1, JavaScript's safe integers): a free
+/// space or a speed said above it is refused here, rather than blanking the screen there.
+pub const MAX_SHOWN: u64 = (1 << 53) - 1;
 /// The longest chip name and version said.
 const MAX_WORD: usize = 32;
 
@@ -102,6 +105,7 @@ impl About {
         word(&self.chip)
             && word(&self.app)
             && !matches!(self.power, Power::Battery { percent } if percent > 100)
+            && self.free_bytes.is_none_or(|b| b <= MAX_SHOWN)
     }
 }
 
@@ -224,6 +228,9 @@ pub fn parse_measured(msg: &[u8]) -> Result<Option<u64>, TransferError> {
                 .map_err(|_| TransferError::Protocol("the link speed is not a number".into()))?;
             match u64::from_be_bytes(bytes) {
                 0 => Err(TransferError::Protocol("a link speed of nothing".into())),
+                speed if speed > MAX_SHOWN => Err(TransferError::Protocol(
+                    "a link speed beyond any network".into(),
+                )),
                 speed => Ok(Some(speed)),
             }
         }
@@ -384,6 +391,13 @@ mod tests {
         zero.extend(0u64.to_be_bytes());
         assert!(parse_measured(&zero).is_err());
         assert!(parse_measured(&[MEASURED, 1, 2]).is_err());
+        // The largest the screen reads exactly, and one more.
+        let mut most = vec![MEASURED];
+        most.extend(MAX_SHOWN.to_be_bytes());
+        assert_eq!(parse_measured(&most).unwrap(), Some(MAX_SHOWN));
+        let mut over = vec![MEASURED];
+        over.extend((MAX_SHOWN + 1).to_be_bytes());
+        assert!(parse_measured(&over).is_err());
         assert!(parse_measured(&[ABOUT]).is_err());
     }
 
@@ -401,6 +415,16 @@ mod tests {
         ] {
             assert!(parse_about(&msg(bad)).is_err(), "{bad}");
         }
+        // A free space the screen cannot read exactly is refused; the largest it can is not.
+        let most = format!(
+            r#"{{"system":"linux","chip":"x86_64","app":"0.1.0","power":{{"kind":"unknown"}},"freeBytes":{MAX_SHOWN}}}"#
+        );
+        assert!(parse_about(&msg(&most)).is_ok());
+        let over = format!(
+            r#"{{"system":"linux","chip":"x86_64","app":"0.1.0","power":{{"kind":"unknown"}},"freeBytes":{}}}"#,
+            MAX_SHOWN + 1
+        );
+        assert!(parse_about(&msg(&over)).is_err());
         let long = format!(
             r#"{{"system":"linux","chip":"x86_64","app":"{}","power":{{"kind":"unknown"}},"freeBytes":null}}"#,
             "1".repeat(MAX_ABOUT)

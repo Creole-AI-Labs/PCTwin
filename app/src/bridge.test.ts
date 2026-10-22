@@ -40,6 +40,7 @@ import {
   movePause,
   moveReport,
   moveResume,
+  moveRetry,
   moveStop,
   pairingHeadsUp,
   pairingNewConnect,
@@ -232,6 +233,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await movePause();
       await moveResume();
       await moveStop();
+      await moveRetry();
       await moveReport();
       await helpCode("connection-lost", "moving");
       await recoveryCheck();

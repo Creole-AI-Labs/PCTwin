@@ -4,7 +4,10 @@
 //! to a minute, and after two of them the screen says "Nothing new has arrived" with Stop. It
 //! never gives up on its own: only the person stops a move.
 
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+use tokio::sync::Notify;
 
 /// The first wait after a drop.
 pub const FIRST_WAIT: Duration = Duration::from_secs(1);
@@ -49,6 +52,56 @@ impl Reconnect {
             wait,
             nothing_new: self.idle_in_a_row >= NOTHING_NEW_AFTER,
         }
+    }
+}
+
+/// How the connection between the laptops stands, as the screens show it (C09).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LinkState {
+    /// Connected (or not yet started): nothing to show.
+    #[default]
+    Connected,
+    /// The connection dropped at `since` (when the other laptop was last heard from) and the move
+    /// waits to carry on over a new one. `nothing_new`: connections keep ending without anything
+    /// new arriving ([`NOTHING_NEW_AFTER`] in a row), so the screen says so, with Stop.
+    Waiting { since: Instant, nothing_new: bool },
+    /// The laptops can no longer find each other again without pairing again (the resume keys ran
+    /// out of time or tries, or the old laptop could not listen for the new one): the move ended.
+    Over,
+}
+
+#[derive(Debug, Default)]
+struct ConnectionInner {
+    state: Mutex<LinkState>,
+    /// "Try now": the next try starts at once rather than after its wait.
+    now: Notify,
+}
+
+/// The move's connection as the screens see it, and the person's "Try now". Cheap to clone; held
+/// in [`crate::Live`].
+#[derive(Debug, Clone, Default)]
+pub struct Connection(Arc<ConnectionInner>);
+
+impl Connection {
+    pub fn state(&self) -> LinkState {
+        *self.0.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The person chose "Try now" while waiting: the new laptop tries at once. Nothing happens
+    /// otherwise (a press while connected is not kept for a later drop).
+    pub fn try_now(&self) {
+        if matches!(self.state(), LinkState::Waiting { .. }) {
+            self.0.now.notify_one();
+        }
+    }
+
+    pub(crate) fn set(&self, state: LinkState) {
+        *self.0.state.lock().unwrap_or_else(PoisonError::into_inner) = state;
+    }
+
+    /// Returns once the person chose "Try now" (at once if they did since the last try).
+    pub(crate) async fn tried_now(&self) {
+        self.0.now.notified().await;
     }
 }
 

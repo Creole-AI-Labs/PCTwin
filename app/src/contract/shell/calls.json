@@ -207,6 +207,10 @@
     },
     {
       "args": [],
+      "name": "move_retry"
+    },
+    {
+      "args": [],
       "name": "move_report"
     },
     {
@@ -327,6 +331,7 @@
   "events": {
     "moveFinished": "move-finished",
     "moveFound": "move-found",
+    "moveLink": "move-link",
     "movePeer": "move-peer",
     "movePeople": "move-people",
     "movePlan": "move-plan",
