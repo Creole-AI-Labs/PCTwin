@@ -377,3 +377,15 @@
   cursor: pointer;
   font-weight: 600;
 }
+
+/* C06: the two laptops, while waiting. */
+.mv-peer {
+  margin-block: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.mv-peer-title {
+  font-size: 1rem;
+  margin: 0;
+}

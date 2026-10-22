@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ended from "../contract/ended-early.json";
 import outcomes from "../contract/move-outcome.json";
 import placeAnswers from "../contract/place-answer.json";
+import peers from "../contract/peer.json";
 import plans from "../contract/plan-view.json";
 import progresses from "../contract/move-progress.json";
 import reportItems from "../contract/report-item.json";
@@ -89,13 +90,13 @@ async function host(old: boolean) {
 const [running, pausing] = progresses;
 /** The running example without its drive problem. */
 const runningQuiet = Object.fromEntries(Object.entries(running).filter(([key]) => key !== "notice"));
-const [linkLost, notApproved, failed] = ended;
+const [linkLost, notApproved, failed, updateHere, updateThere] = ended;
 const plan = plans[0];
 
 describe("the move, once paired", () => {
   it("starts once, after listening, and names the folders a new laptop may lack in the person's words", async () => {
     await host(false);
-    expect(tauri.handlers.size).toBe(8);
+    expect(tauri.handlers.size).toBe(9);
     const begins = tauri.invoke.mock.calls.filter(([c]) => c === "move_begin");
     expect(begins).toHaveLength(1);
     const { fallback } = begins[0][1] as { fallback: Record<string, string> };
@@ -123,6 +124,27 @@ describe("the move, once paired", () => {
     fireEvent.click(screen.getByRole("button", { name: text("before-continue") }));
     fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
     expect(tauri.invoke).toHaveBeenCalledWith("move_stop");
+  });
+
+  it("both laptops are shown as each said when the move started (C06), old first, with a word to plug in when one is on battery", async () => {
+    await host(false);
+    // The new laptop (a Mac, plugged in) hears the old one (Windows, on battery).
+    send("move-peer", peers[0]);
+    const rows = screen.getByRole("region", { name: text("move-peer-title") }).querySelectorAll("li");
+    const [first, second] = [...rows].map((r) => plain(r.textContent));
+    expect(first).toContain(text("move-peer-old"));
+    expect(first).toContain(plain(text("move-peer-line", { system: text("move-peer-system-windows"), chip: "x86_64", app: "0.1.0" })));
+    expect(first).toContain(plain(text("move-peer-battery", { percent: 34 })));
+    expect(second).toContain(text("move-peer-system-mac"));
+    expect(second).toContain(text("move-peer-plugged"));
+    expect(screen.getByText(text("move-peer-plug-in"))).toBeTruthy();
+  });
+
+  it("no word to plug in when neither laptop is on battery", async () => {
+    await host(true);
+    send("move-peer", peers[1]);
+    expect(screen.getByRole("region", { name: text("move-peer-title") })).toBeTruthy();
+    expect(screen.queryByText(text("move-peer-plug-in"))).toBeNull();
   });
 
   it("new laptop: shows the plan with what was found before the move, and approves exactly that revision", async () => {
@@ -385,6 +407,18 @@ describe("the move's error pages", () => {
     expect(details?.textContent).toContain((linkLost as { detail: string }).detail);
     fireEvent.click(screen.getByRole("button", { name: text("ended-pair-again") }));
     expect(onPairAgain).toHaveBeenCalled();
+  });
+
+  it("a PCTwin too old on either laptop says which one to update, and nothing is claimed as copied", async () => {
+    await host(false);
+    send("move-problem", updateHere);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-update-here-title"));
+    expect(screen.getByText(text("move-update-here-body"))).toBeTruthy();
+    expect(screen.queryByText(text("move-ended-kept-body"))).toBeNull();
+    cleanup();
+    await host(true);
+    send("move-problem", updateThere);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-update-there-title"));
   });
 
   it("not approved: each laptop says it in its own words, and nothing is claimed as copied", async () => {

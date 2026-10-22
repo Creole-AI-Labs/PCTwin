@@ -160,6 +160,28 @@ fn endings() -> Vec<EndedEarly> {
         EndedEarly::Failed {
             detail: "the journal could not be opened".into(),
         },
+        EndedEarly::UpdateHere,
+        EndedEarly::UpdateThere,
+    ]
+}
+
+fn peers() -> Vec<crate::moving::Peer> {
+    use pctwin_move::greeting::{About, Power, System};
+    let about = |system, chip: &str, power| About {
+        system,
+        chip: chip.into(),
+        app: "0.1.0".into(),
+        power,
+    };
+    vec![
+        crate::moving::Peer {
+            mine: about(System::Mac, "aarch64", Power::Plugged),
+            theirs: about(System::Windows, "x86_64", Power::Battery { percent: 34 }),
+        },
+        crate::moving::Peer {
+            mine: about(System::Linux, "x86_64", Power::Unknown),
+            theirs: about(System::Other, "riscv64", Power::Plugged),
+        },
     ]
 }
 
@@ -464,6 +486,7 @@ fn families() -> Vec<(&'static str, Value)> {
         ("report-item", json(report_items())),
         ("privacy", json([crate::moving::Privacy { places: 3 }])),
         ("found", json([crate::moving::Found { bytes: 41_200_000 }])),
+        ("peer", json(peers())),
         (
             "history-entry",
             json([
@@ -785,6 +808,7 @@ fn calls() -> Value {
             "movePeople": PEOPLE_EVENT,
             "movePrivacy": PRIVACY_EVENT,
             "moveFound": crate::moving::FOUND_EVENT,
+            "movePeer": crate::moving::PEER_EVENT,
             "qsProgress": crate::quicksend::PROGRESS_EVENT,
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,

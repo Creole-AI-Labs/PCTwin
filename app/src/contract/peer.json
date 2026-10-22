@@ -1,0 +1,39 @@
+[
+  {
+    "mine": {
+      "app": "0.1.0",
+      "chip": "aarch64",
+      "power": {
+        "kind": "plugged"
+      },
+      "system": "mac"
+    },
+    "theirs": {
+      "app": "0.1.0",
+      "chip": "x86_64",
+      "power": {
+        "kind": "battery",
+        "percent": 34
+      },
+      "system": "windows"
+    }
+  },
+  {
+    "mine": {
+      "app": "0.1.0",
+      "chip": "x86_64",
+      "power": {
+        "kind": "unknown"
+      },
+      "system": "linux"
+    },
+    "theirs": {
+      "app": "0.1.0",
+      "chip": "riscv64",
+      "power": {
+        "kind": "plugged"
+      },
+      "system": "other"
+    }
+  }
+]

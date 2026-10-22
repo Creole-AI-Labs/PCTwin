@@ -21,6 +21,7 @@
 // pctwin-transfer. Tests make files to test on, so they are exempt.
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
+pub mod greeting;
 pub mod handover;
 pub mod landing;
 pub mod people;
@@ -266,9 +267,10 @@ pub async fn send_with<C: Channel>(
 /// The old laptop's side of a move with the app: as [`send_with`], except the files to send are
 /// worked out only once the new laptop's person has approved the plan and the new laptop has
 /// sent its [`landing::LandingRules`], so every file is announced exactly where that laptop
-/// checks it. `source` says where each file is read from.
+/// checks it. `source` says where each file is read from. The laptops greeted first
+/// ([`greeting::greet`], before the files were found); its list follows [`greeting::list_coming`].
 pub async fn send_by_rules<C: Channel>(
-    link: &mut C,
+    link: &mut greeting::Greeted<'_, C>,
     record: &Record,
     mover: &str,
     people: &[landing::NamedPerson],
@@ -276,7 +278,8 @@ pub async fn send_by_rules<C: Channel>(
     live: &Live,
     opener: Arc<dyn Opener>,
 ) -> Result<(Sent, landing::LandingRules), MoveError> {
-    let version = agree_version(link, MOVE_PROTOCOL).await?;
+    let version = link.greeting().version;
+    greeting::list_coming(link).await?;
     send_inventory(link, record, version).await?;
     answer_link_test(link, version).await?;
     landing::send_mover(link, mover).await?;
@@ -568,18 +571,19 @@ pub async fn receive_plan<C: Channel, S: Steps>(
     steps: &mut S,
     table: &Destinations,
 ) -> Result<ApprovedPlan, MoveError> {
-    receive_plan_told(link, steps, table, false).await
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
+    receive_plan_told(link, version, steps, table, false).await
 }
 
 /// [`receive_plan`]; with `told`, the old laptop says who is moving after the link test, and
 /// `steps` hears it before anyone is placed.
 async fn receive_plan_told<C: Channel, S: Steps>(
     link: &mut C,
+    version: u16,
     steps: &mut S,
     table: &Destinations,
     told: bool,
 ) -> Result<ApprovedPlan, MoveError> {
-    let version = agree_version(link, MOVE_PROTOCOL).await?;
     let mut record = receive_inventory(link, version).await?;
     let speed = measure_link(link, version).await?;
     if told {
@@ -673,9 +677,10 @@ impl ApprovedPlan {
 /// give exactly the places `steps.landing` gives) sent to the old laptop so it announces every
 /// file where this laptop checks it, then [`ApprovedPlan::receive`]. `rules` is asked for after
 /// the approval, since the people's places are decided during it; it may add places to `table`
-/// then (each other person's holding place, made only once the plan is approved).
+/// then (each other person's holding place, made only once the plan is approved). The laptops
+/// greeted first ([`greeting::greet`]); the old laptop's list is waited for however long it takes.
 pub async fn receive_by_rules<C: Channel, S: Steps>(
-    link: &mut C,
+    link: &mut greeting::Greeted<'_, C>,
     steps: &mut S,
     rules: impl FnOnce(&mut S, &mut Destinations) -> landing::LandingRules,
     table: &mut Destinations,
@@ -683,7 +688,11 @@ pub async fn receive_by_rules<C: Channel, S: Steps>(
     account: &str,
     live: &Live,
 ) -> Result<Received, MoveError> {
-    let mut approved = receive_plan_told(link, steps, table, true).await?;
+    // Greeted already: the list comes once the old laptop has found the files, however long
+    // its person takes.
+    greeting::wait_for_list(link).await?;
+    let version = link.greeting().version;
+    let mut approved = receive_plan_told(link, version, steps, table, true).await?;
     let rules = rules(steps, table);
     // What this laptop accepts is made from the very rules the old laptop is sent, now that
     // every place is known (another person's holding place is made only after the approval):

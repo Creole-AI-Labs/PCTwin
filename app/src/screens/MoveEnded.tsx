@@ -21,6 +21,10 @@ function wordsFor(end: MoveEnd, old: boolean): { title: string; body: string; co
       return { title: "move-not-approved-title", body: old ? "move-not-approved-old" : "move-not-approved-new", copiedMayStay: false };
     case "failed":
       return { title: "move-failed-title", body: "move-failed-body", copiedMayStay: true };
+    // The laptops could not agree before anything was looked at: nothing was copied.
+    case "update-here":
+    case "update-there":
+      return { title: `move-${end.why.kind}-title`, body: `move-${end.why.kind}-body`, copiedMayStay: false };
   }
 }
 

@@ -37,6 +37,40 @@ struct Mem {
     rx: mpsc::UnboundedReceiver<Vec<u8>>,
 }
 
+/// The old laptop's side with the app: greets first (as the app does, before finding the
+/// files), then sends by the new laptop's rules.
+async fn send_greeted(
+    link: &mut Mem,
+    record: &Record,
+    mover: &str,
+    people: &[pctwin_move::landing::NamedPerson],
+    source: impl Fn(&Item) -> Option<PathBuf>,
+    live: &Live,
+    opener: std::sync::Arc<dyn pctwin_transfer::Opener>,
+) -> Result<(pctwin_move::Sent, pctwin_move::landing::LandingRules), MoveError> {
+    let mut link = greeted(link).await?;
+    pctwin_move::send_by_rules(&mut link, record, mover, people, source, live, opener).await
+}
+
+/// The new laptop's side with the app: greets first, then receives by its rules.
+async fn receive_greeted<S: Steps>(
+    link: &mut Mem,
+    steps: &mut S,
+    rules: impl FnOnce(&mut S, &mut Destinations) -> pctwin_move::landing::LandingRules,
+    table: &mut Destinations,
+    journal: &dyn pctwin_journal::Ledger,
+    account: &str,
+    live: &Live,
+) -> Result<pctwin_move::Received, MoveError> {
+    let mut link = greeted(link).await?;
+    pctwin_move::receive_by_rules(&mut link, steps, rules, table, journal, account, live).await
+}
+
+async fn greeted(link: &mut Mem) -> Result<pctwin_move::greeting::Greeted<'_, Mem>, MoveError> {
+    use pctwin_move::greeting::{About, Power, greet};
+    Ok(greet(link, &About::here(Power::Unknown)).await?)
+}
+
 fn mem_pair() -> (Mem, Mem) {
     let (a_tx, b_rx) = mpsc::unbounded_channel();
     let (b_tx, a_rx) = mpsc::unbounded_channel();
@@ -746,7 +780,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
     }];
     let (sent, received) = no_hang(async {
         tokio::join!(
-            pctwin_move::send_by_rules(
+            send_greeted(
                 &mut old,
                 &w.record,
                 "1000",
@@ -755,7 +789,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
                 &old_live,
                 std::sync::Arc::new(pctwin_transfer::FsOpener),
             ),
-            pctwin_move::receive_by_rules(
+            receive_greeted(
                 &mut new,
                 &mut steps,
                 |s, _| s.rules.clone(),
@@ -832,7 +866,7 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
     let hold = holding.clone();
     let (sent, received) = no_hang(async {
         tokio::join!(
-            pctwin_move::send_by_rules(
+            send_greeted(
                 &mut old,
                 &w.record,
                 "2000",
@@ -841,7 +875,7 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
                 &old_live,
                 std::sync::Arc::new(pctwin_transfer::FsOpener),
             ),
-            pctwin_move::receive_by_rules(
+            receive_greeted(
                 &mut new,
                 &mut steps,
                 |s, table| {
@@ -919,7 +953,7 @@ async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() 
         let mut table = std::mem::take(&mut w.table);
         let (sent, received) = no_hang(async {
             tokio::join!(
-                pctwin_move::send_by_rules(
+                send_greeted(
                     &mut old,
                     &w.record,
                     "1000",
@@ -928,7 +962,7 @@ async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() 
                     &old_live,
                     std::sync::Arc::new(pctwin_transfer::FsOpener),
                 ),
-                pctwin_move::receive_by_rules(
+                receive_greeted(
                     &mut new,
                     &mut steps,
                     |s, table| {

@@ -9,5 +9,11 @@
   {
     "detail": "the journal could not be opened",
     "kind": "failed"
+  },
+  {
+    "kind": "update-here"
+  },
+  {
+    "kind": "update-there"
   }
 ]

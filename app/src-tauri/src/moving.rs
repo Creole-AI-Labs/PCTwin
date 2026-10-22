@@ -54,6 +54,50 @@ pub struct Found {
     pub bytes: u64,
 }
 
+/// Both laptops, as soon as the move starts: what each laptop is (C06).
+pub const PEER_EVENT: &str = "move-peer";
+
+/// This laptop and the other one, as each said when the move started (C06).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Peer {
+    pub mine: pctwin_move::greeting::About,
+    pub theirs: pctwin_move::greeting::About,
+}
+
+/// This laptop, as it tells the other one.
+fn about_here() -> pctwin_move::greeting::About {
+    use pctwin_move::greeting::Power;
+    let now = pctwin_power::power_now();
+    let power = match (now.on_battery, now.percent) {
+        (false, _) => Power::Plugged,
+        // Whole percents, 0 to 100.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        (true, Some(p)) => Power::Battery {
+            percent: p.round().clamp(0.0, 100.0) as u8,
+        },
+        (true, None) => Power::Unknown,
+    };
+    pctwin_move::greeting::About::here(power)
+}
+
+/// Both laptops, the moment the move starts and before anything is looked for: agree the
+/// protocol and say what each is, shown on both screens (C06).
+async fn greet<'l, R: Runtime>(
+    app: &AppHandle<R>,
+    link: &'l mut pctwin_link::Link,
+) -> Result<pctwin_move::greeting::Greeted<'l, pctwin_link::Link>, TransferError> {
+    let mine = about_here();
+    let greeted = pctwin_move::greeting::greet(link, &mine).await?;
+    let _ = app.emit(
+        PEER_EVENT,
+        Peer {
+            mine,
+            theirs: greeted.greeting().theirs.clone(),
+        },
+    );
+    Ok(greeted)
+}
+
 /// The old laptop (a Mac): some of the mover's places were kept private by the Mac's privacy
 /// settings; the Full Disk Access guide is shown.
 pub const PRIVACY_EVENT: &str = "move-privacy";
@@ -402,6 +446,10 @@ pctwin_types::listed_enum! {
         NotApproved,
         /// Something else went wrong (the general error page).
         Failed { detail: String },
+        /// PCTwin on this laptop is older than on the other one: update it here (C06).
+        UpdateHere,
+        /// PCTwin on the other laptop is older: update it there (C06).
+        UpdateThere,
     }
 }
 
@@ -409,6 +457,10 @@ impl EndedEarly {
     fn of(e: &MoveError) -> Self {
         match e {
             MoveError::Stopped(_) => Self::NotApproved,
+            MoveError::Transfer(TransferError::VersionGap(gap)) => match gap {
+                pctwin_transfer::VersionGap::ThisLaptopOlder => Self::UpdateHere,
+                pctwin_transfer::VersionGap::OtherLaptopOlder => Self::UpdateThere,
+            },
             MoveError::Transfer(TransferError::ConnectionDropped) => Self::LinkLost {
                 detail: e.to_string(),
             },
@@ -1400,6 +1452,9 @@ async fn run_old<R: Runtime>(
     scan_stop: &AtomicBool,
     others: Vec<String>,
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
+    // Greeted first, so the new laptop knows at once, and waits for the list as long as the
+    // finding (and this laptop's person) takes.
+    let mut link = greet(app, &mut link).await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
@@ -1630,6 +1685,7 @@ async fn run_new<R: Runtime>(
         live_control: live.control.clone(),
         chosen: BTreeMap::new(),
     };
+    let mut link = greet(app, &mut link).await?;
     let received = pctwin_move::receive_by_rules(
         &mut link,
         &mut steps,

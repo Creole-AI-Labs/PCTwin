@@ -327,6 +327,7 @@
   "events": {
     "moveFinished": "move-finished",
     "moveFound": "move-found",
+    "movePeer": "move-peer",
     "movePeople": "move-people",
     "movePlan": "move-plan",
     "movePrivacy": "move-privacy",

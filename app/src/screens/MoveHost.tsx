@@ -22,6 +22,7 @@ import {
   type OthersWhy,
   type PeopleHere,
   type PeopleToPlace,
+  type Peer,
   type WaitStage,
 } from "../bridge";
 import BeforeYouStart from "./BeforeYouStart";
@@ -72,6 +73,8 @@ function topicOf(end: MoveEnd): HelpTopic {
     case "not-approved":
       return "not-approved";
     case "failed":
+    case "update-here":
+    case "update-there":
       return "move-failed";
   }
 }
@@ -114,7 +117,8 @@ export function next(view: View, event: MoveEvent): View {
     case "privacy":
       return { kind: "privacy", places: event.privacy.places };
     case "found":
-      // A count for the waiting page, not a page of its own.
+    case "peer":
+      // A count, and the two laptops, for the waiting page: not pages of their own.
       return view;
     case "progress":
       return { kind: "progress", progress: event.progress };
@@ -165,6 +169,8 @@ export default function MoveHost({
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   // How much of the mover's own things the scan has found so far (M02).
   const [found, setFound] = useState<number | null>(null);
+  // The two laptops, as each said when the move started (C06).
+  const [peer, setPeer] = useState<Peer | null>(null);
   // "Before you leave this laptop": open or not, and the person's own ticks (their word only).
   const [before, setBefore] = useState(false);
   const [beforeItems, setBeforeItems] = useState<BeforeItem[]>(() =>
@@ -212,6 +218,7 @@ export default function MoveHost({
       if (!live) return;
       if (event.kind === "stage" && event.stage.kind === "others-not-moved") setOthersWhy(event.stage.why);
       if (event.kind === "found") setFound(event.bytes);
+      if (event.kind === "peer") setPeer(event.peer);
       setView((v) => next(v, event));
     }).then((stop) => {
       if (!live) {
@@ -302,6 +309,7 @@ export default function MoveHost({
           old={old}
           note={othersNote}
           found={view.stage === "scanning" ? found : null}
+          peer={peer}
           onBefore={
             old && view.stage === "waiting"
               ? () => {

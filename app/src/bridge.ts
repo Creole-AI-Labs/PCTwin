@@ -259,6 +259,38 @@ export type OthersWhy = (typeof OTHERS_WHY)[number];
 export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
 
 /** How much of the mover's own things the scan has found so far (only ever grows). */
+/** What a laptop said it is when the move started (C06, `About`). */
+export type About = {
+  system: "windows" | "mac" | "linux" | "other";
+  chip: string;
+  app: string;
+  power: { kind: "plugged" | "unknown" } | { kind: "battery"; percent: number };
+};
+
+/** This laptop and the other one (`Peer`). */
+export type Peer = { mine: About; theirs: About };
+
+function parseAbout(value: unknown): About | null {
+  const f = exactly(value, ["system", "chip", "app", "power"]);
+  if (!f || !oneOf(f.system, ["windows", "mac", "linux", "other"] as const) || typeof f.chip !== "string" || typeof f.app !== "string") return null;
+  const kind = typeof f.power === "object" && f.power !== null ? (f.power as Fields).kind : undefined;
+  let power: About["power"] | null = null;
+  if (kind === "plugged" || kind === "unknown") power = exactly(f.power, ["kind"]) ? { kind } : null;
+  else if (kind === "battery") {
+    const b = exactly(f.power, ["kind", "percent"]);
+    power = b && isCount(b.percent) && b.percent <= 100 ? { kind, percent: b.percent } : null;
+  }
+  return power && { system: f.system, chip: f.chip, app: f.app, power };
+}
+
+export function parsePeer(value: unknown): Peer | null {
+  const f = exactly(value, ["mine", "theirs"]);
+  if (!f) return null;
+  const mine = parseAbout(f.mine);
+  const theirs = parseAbout(f.theirs);
+  return mine && theirs && { mine, theirs };
+}
+
 export function parseFound(value: unknown): { bytes: number } | null {
   const f = exactly(value, ["bytes"]);
   return f && isCount(f.bytes) ? { bytes: f.bytes } : null;
@@ -306,7 +338,7 @@ export function parsePeopleToPlace(value: unknown): PeopleToPlace | null {
 export type PeopleHere = { people: { id: string; name: string; isYou: boolean }[]; canMoveOthers: boolean };
 
 /** Why a move ended before it finished (`EndedEarly`). `detail` is the engine's words, for "more details" only. */
-export type EndedEarly = { kind: "link-lost"; detail: string } | { kind: "not-approved" } | { kind: "failed"; detail: string };
+export type EndedEarly = { kind: "link-lost"; detail: string } | { kind: "not-approved" | "update-here" | "update-there" } | { kind: "failed"; detail: string };
 
 /** The exact plan revision the person answers. */
 export type PlanKey = { revision: number; fingerprint: string };
@@ -384,7 +416,7 @@ export function parsePeopleHere(value: unknown): PeopleHere | null {
 
 export function parseEndedEarly(value: unknown): EndedEarly | null {
   const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
-  if (kind === "not-approved") return exactly(value, ["kind"]) ? { kind } : null;
+  if (kind === "not-approved" || kind === "update-here" || kind === "update-there") return exactly(value, ["kind"]) ? { kind } : null;
   if (kind === "link-lost" || kind === "failed") {
     const f = exactly(value, ["kind", "detail"]);
     return f && typeof f.detail === "string" ? { kind, detail: f.detail } : null;
@@ -590,6 +622,7 @@ export type MoveEvent =
   | { kind: "people"; toPlace: PeopleToPlace }
   | { kind: "privacy"; privacy: Privacy }
   | { kind: "found"; bytes: number }
+  | { kind: "peer"; peer: Peer }
   | { kind: "progress"; progress: MoveProgress }
   | { kind: "finished"; outcome: MoveOutcome }
   | { kind: "problem"; problem: EndedEarly };
@@ -608,6 +641,7 @@ export async function listenMove(handler: (event: MoveEvent) => void): Promise<U
     on("move-people", parsePeopleToPlace, (toPlace) => ({ kind: "people", toPlace })),
     on("move-privacy", parsePrivacy, (privacy) => ({ kind: "privacy", privacy })),
     on("move-found", parseFound, (f) => ({ kind: "found", bytes: f.bytes })),
+    on("move-peer", parsePeer, (peer) => ({ kind: "peer", peer })),
     on("move-progress", parseMoveProgress, (progress) => ({ kind: "progress", progress })),
     on("move-finished", parseMoveOutcome, (outcome) => ({ kind: "finished", outcome })),
     on("move-problem", parseEndedEarly, (problem) => ({ kind: "problem", problem })),
