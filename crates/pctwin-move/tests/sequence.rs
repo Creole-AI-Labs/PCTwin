@@ -782,3 +782,93 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         assert_eq!(std::fs::read(landed).unwrap(), bytes);
     }
 }
+
+/// Another person's holding place is made only once the plan is approved (the app's helper makes
+/// it then). Their files are announced there by the rules the new laptop sends, and the new
+/// laptop accepts them there: what it accepts is made from those very rules, not from the places
+/// it knew when the person approved.
+#[tokio::test]
+async fn another_persons_files_land_in_a_holding_place_made_after_the_approval() {
+    use pctwin_move::landing::LandingRules;
+    let mut w = world();
+    // Here the mover is someone else ("2000"): every file in the world is another person's
+    // ("1000"), with no place for them when the plan is approved.
+    let before = LandingRules {
+        mover: "2000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+        left_out: Default::default(),
+    };
+    struct Late {
+        rules: LandingRules,
+    }
+    impl Steps for Late {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+            Ok(())
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    let holding = w.new.path().join("holding-1000");
+    std::fs::create_dir_all(&holding).unwrap();
+    let mut steps = Late {
+        rules: before.clone(),
+    };
+    let (mut old, mut new) = mem_pair();
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let mut table = std::mem::take(&mut w.table);
+    let hold = holding.clone();
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send_by_rules(
+                &mut old,
+                &w.record,
+                "2000",
+                &[],
+                |i| Some(source_in(w.old.path(), i)),
+                &old_live,
+                std::sync::Arc::new(pctwin_transfer::FsOpener),
+            ),
+            pctwin_move::receive_by_rules(
+                &mut new,
+                &mut steps,
+                |s, table| {
+                    // After the approval: the holding place is made and approved, and the rules
+                    // say to hold this person's things there.
+                    table.approve_holding("for-1", "1001", &hold).unwrap();
+                    let mut rules = s.rules.clone();
+                    rules.held.insert("1000".into(), "for-1".into());
+                    rules
+                },
+                &mut table,
+                &w.journal,
+                "1001",
+                &new_live
+            ),
+        )
+    })
+    .await;
+    let (sent, _) = sent.unwrap();
+    for line in &sent.files {
+        assert_eq!(line.outcome, Some(SendOutcome::Arrived), "{:?}", line.item);
+    }
+    for (line, (role, path, bytes)) in received.unwrap().files.iter().zip(FILES) {
+        assert!(
+            matches!(line.outcome, Some(ReceiveOutcome::Finished(_))),
+            "{:?}",
+            line.outcome
+        );
+        let landed = holding.join(role_label(role)).join(path.join("/"));
+        assert_eq!(std::fs::read(landed).unwrap(), bytes);
+    }
+}

@@ -533,6 +533,8 @@ pub fn preview(
 /// A plan the person approved on the new laptop, ready to receive.
 pub struct ApprovedPlan {
     record: Record,
+    /// The person's approval of exactly `record`.
+    approval: pctwin_record::Approval,
     allowance: Allowance,
     /// The move protocol version both laptops agreed.
     version: u16,
@@ -615,6 +617,7 @@ async fn receive_plan_told<C: Channel, S: Steps>(
     let allowance = Allowance::from_record(&record, &approval, |i| steps.landing(i))?;
     Ok(ApprovedPlan {
         record,
+        approval,
         allowance,
         version,
     })
@@ -680,8 +683,13 @@ pub async fn receive_by_rules<C: Channel, S: Steps>(
     account: &str,
     live: &Live,
 ) -> Result<Received, MoveError> {
-    let approved = receive_plan_told(link, steps, table, true).await?;
+    let mut approved = receive_plan_told(link, steps, table, true).await?;
     let rules = rules(steps, table);
+    // What this laptop accepts is made from the very rules the old laptop is sent, now that
+    // every place is known (another person's holding place is made only after the approval):
+    // both laptops place every file by one function, by construction.
+    approved.allowance =
+        Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?;
     landing::send_rules(link, &rules).await?;
     approved.receive(link, table, journal, account, live).await
 }

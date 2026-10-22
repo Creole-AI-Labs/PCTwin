@@ -1152,6 +1152,8 @@ impl<R: Runtime> AppSteps<R> {
             }
         }
         self.helper = Some(helper);
+        // This laptop places files by the very rules it sends.
+        self.rules = rules.clone();
         let _ = self.app.emit(STAGE_EVENT, Stage::Moving);
         rules
     }
