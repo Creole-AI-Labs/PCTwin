@@ -49,6 +49,16 @@ pub struct LandingRules {
     /// none of their files is sent.
     #[serde(default)]
     pub left_out: std::collections::BTreeSet<FolderRole>,
+    /// The mover's (and shared) folders, by role, the person sent to a folder they chose on the
+    /// new laptop (M05): each lands in the place [`chosen_label`] names, approved there.
+    #[serde(default)]
+    pub chosen: std::collections::BTreeSet<FolderRole>,
+}
+
+/// The label of the place the person chose for the folders of `role`: never one of the new
+/// laptop's own folders' labels.
+pub fn chosen_label(role: FolderRole) -> String {
+    format!("chosen-{}", role_label(role))
 }
 
 impl LandingRules {
@@ -66,6 +76,10 @@ impl LandingRules {
             }
             Owner::System => None,
             _ if self.left_out.contains(&item.place.role) => None,
+            _ if self.chosen.contains(&item.place.role) => Some(LandingPlace::new(
+                chosen_label(item.place.role),
+                shown_path(&item.path),
+            )),
             _ => {
                 let places = NewPlaces::new(self.roles.clone());
                 let fallback = |role: FolderRole| {
@@ -260,6 +274,56 @@ mod tests {
             fallback: BTreeMap::from([(FolderRole::Music, "Desde tu portátil/Música".into())]),
             held: BTreeMap::from([("1001".into(), "for-1".into())]),
             left_out: Default::default(),
+            chosen: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_folder_sent_to_a_place_the_person_chose_lands_there_and_nothing_else_moves() {
+        let mut r = rules();
+        r.chosen.insert(FolderRole::Pictures);
+        let mine = |r: &LandingRules, role, path: &[&str]| {
+            r.landing(&item(
+                Owner::Person {
+                    account_id: "1000".into(),
+                },
+                role,
+                path,
+            ))
+        };
+        assert_eq!(
+            mine(&r, FolderRole::Pictures, &["Trip", "a.jpg"]),
+            Some(LandingPlace::new(
+                chosen_label(FolderRole::Pictures),
+                "Trip/a.jpg"
+            ))
+        );
+        assert_eq!(
+            mine(&r, FolderRole::Documents, &["b.txt"]),
+            Some(LandingPlace::new("documents", "b.txt"))
+        );
+        // Another person's pictures still wait in their holding place.
+        let bea = item(
+            Owner::Person {
+                account_id: "1001".into(),
+            },
+            FolderRole::Pictures,
+            &["c.jpg"],
+        );
+        assert_eq!(
+            r.landing(&bea),
+            Some(LandingPlace::new("for-1", "pictures/c.jpg"))
+        );
+        // Left out wins: a folder left out is not sent anywhere.
+        r.left_out.insert(FolderRole::Pictures);
+        assert_eq!(mine(&r, FolderRole::Pictures, &["d.jpg"]), None);
+        // The label is never one of the new laptop's own folders.
+        for role in [
+            FolderRole::Pictures,
+            FolderRole::Documents,
+            FolderRole::Home,
+        ] {
+            assert_ne!(chosen_label(role), role_label(role));
         }
     }
 

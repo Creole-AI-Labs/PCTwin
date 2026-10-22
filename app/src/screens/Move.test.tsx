@@ -5,6 +5,7 @@ import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ended from "../contract/ended-early.json";
 import outcomes from "../contract/move-outcome.json";
+import placeAnswers from "../contract/place-answer.json";
 import plans from "../contract/plan-view.json";
 import progresses from "../contract/move-progress.json";
 import reportItems from "../contract/report-item.json";
@@ -155,6 +156,39 @@ describe("the move, once paired", () => {
     await waitFor(() => {
       expect(tauri.invoke).toHaveBeenCalledWith("move_approve", { plan: { revision: plan.revision, fingerprint: plan.fingerprint }, approve: true, leftOut: ["documents"] });
     });
+  });
+
+  it("a folder sent to another place shows where and its free space, holds the start when it will not fit, and goes back to the usual place", async () => {
+    await host(false);
+    send("move-plan", plan);
+    const [roomy] = placeAnswers;
+    // A place too small for the group.
+    replies.move_choose_place = () => ({ ...roomy, freeBytes: 1000 });
+    fireEvent.click(screen.getByRole("button", { name: text("plan-place-change") }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_choose_place", { role: "documents" });
+    });
+    const where = (roomy as { path: string }).path;
+    await waitFor(() => {
+      expect(screen.getByText((t) => t === text("plan-group-to", { place: where }))).toBeTruthy();
+    });
+    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toContain(text("plan-place-no-room"));
+    fireEvent.click(screen.getByRole("checkbox", { name: text("plan-approve") }));
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: text("plan-start") }).disabled).toBe(true);
+    // A drive with no safe way to name files is said so, and the place stays as it was.
+    replies.move_choose_place = () => placeAnswers[3];
+    fireEvent.click(screen.getByRole("button", { name: text("plan-place-change") }));
+    await waitFor(() => {
+      expect(screen.getAllByRole("alert").map((a) => a.textContent)).toContain(text("plan-place-no-safe-name"));
+    });
+    fireEvent.click(screen.getByRole("button", { name: text("plan-place-usual") }));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("move_usual_place", { role: "documents" });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(text("plan-place-no-room"))).toBeNull();
+    });
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: text("plan-start") }).disabled).toBe(false);
   });
 
   it("a plan that changed under the approval says so and does not start", async () => {

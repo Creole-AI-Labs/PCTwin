@@ -493,6 +493,22 @@ fn families() -> Vec<(&'static str, Value)> {
                 failed: 1,
             }]),
         ),
+        (
+            "place-answer",
+            json([
+                crate::moving::PlaceAnswer::Chosen {
+                    path: r"E:\Photos".into(),
+                    free_bytes: Some(512_000_000_000),
+                },
+                crate::moving::PlaceAnswer::Chosen {
+                    path: "/Volumes/Backup/Photos".into(),
+                    free_bytes: None,
+                },
+                crate::moving::PlaceAnswer::NotChosen,
+                crate::moving::PlaceAnswer::NoSafeName,
+                crate::moving::PlaceAnswer::CannotOpen,
+            ]),
+        ),
         ("qs-picked", json(qs_picked())),
         ("qs-offered", json(qs_offered())),
         (
@@ -730,6 +746,8 @@ fn calls() -> Value {
             { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]]] },
             { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]]] },
             { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}" }]] },
+            { "name": "move_choose_place", "args": [["role", "pictures"]] },
+            { "name": "move_usual_place", "args": [["role", "pictures"]] },
             { "name": "move_privacy_answer", "args": [["again", true]] },
             { "name": "open_privacy_settings", "args": [] },
             { "name": "move_pause", "args": [] },

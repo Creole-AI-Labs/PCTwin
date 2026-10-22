@@ -494,3 +494,15 @@
     border: 1px solid CanvasText;
   }
 }
+
+/* M05: sending a group to another folder. The warning is said in words, not colour alone. */
+.plan-place-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.plan-attention {
+  color: var(--colour-attention-text);
+  font-weight: 600;
+}

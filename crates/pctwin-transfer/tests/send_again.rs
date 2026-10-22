@@ -4689,11 +4689,13 @@ async fn undo_removes_a_damaged_copy_but_keeps_one_changed_since() {
             std::fs::write(&kept, b"the person's own words now").unwrap();
         }
         let items = pctwin_transfer::undo_items(journal).unwrap();
-        assert_eq!(items, vec![id(0)], "undo asks about the damaged copy's original");
-        let sent: HashMap<ItemId, PathBuf> = jobs(&l)
-            .into_iter()
-            .map(|j| (j.item, j.source))
-            .collect();
+        assert_eq!(
+            items,
+            vec![id(0)],
+            "undo asks about the damaged copy's original"
+        );
+        let sent: HashMap<ItemId, PathBuf> =
+            jobs(&l).into_iter().map(|j| (j.item, j.source)).collect();
         let (mut new, mut old) = mem_pair();
         let serve = async {
             let mut budget = pctwin_transfer::OriginalsBudget::new();
@@ -4712,7 +4714,10 @@ async fn undo_removes_a_damaged_copy_but_keeps_one_changed_since() {
         assert_eq!(report.files.len(), 1, "{report:?}");
         if changed {
             assert!(
-                matches!(report.files[0].outcome, pctwin_journal::UndoOutcome::Kept { .. }),
+                matches!(
+                    report.files[0].outcome,
+                    pctwin_journal::UndoOutcome::Kept { .. }
+                ),
                 "{report:?}"
             );
             assert!(kept.exists(), "the person's changes are kept");

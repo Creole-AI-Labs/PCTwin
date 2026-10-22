@@ -29,6 +29,7 @@ import {
   parseHistoryEntry,
   parsePicked,
   parseOffered,
+  parsePlaceAnswer,
   parseQsFolder,
   parseQsIncoming,
   parseQsProblem,
@@ -70,6 +71,7 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "qs-receipt": parseQsReceipt,
   "qs-progress": parseQsProgress,
   "qs-folder": parseQsFolder,
+  "place-answer": parsePlaceAnswer,
   "qs-problem": parseQsProblem,
   tidied: parseTidied,
 };

@@ -706,6 +706,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         fallback: Default::default(),
         held: Default::default(),
         left_out: Default::default(),
+        chosen: Default::default(),
     };
     struct ByRules {
         rules: LandingRules,
@@ -802,6 +803,7 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
         fallback: Default::default(),
         held: Default::default(),
         left_out: Default::default(),
+        chosen: Default::default(),
     };
     struct Late {
         rules: LandingRules,
@@ -870,5 +872,103 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
         );
         let landed = holding.join(role_label(role)).join(path.join("/"));
         assert_eq!(std::fs::read(landed).unwrap(), bytes);
+    }
+}
+
+/// M05: the person sent one folder to a place they chose on the new laptop. Once the plan is
+/// approved, the chosen place is approved and the rules send that folder there; the rest land as
+/// usual. A chosen place that could not be approved leaves its files failed, never put
+/// somewhere else.
+#[tokio::test]
+async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() {
+    use pctwin_move::landing::{LandingRules, chosen_label};
+    for approved in [true, false] {
+        let mut w = world();
+        let mut rules = LandingRules {
+            mover: "1000".into(),
+            roles: ROLES
+                .iter()
+                .map(|(r, _)| (*r, Storage::SystemDrive))
+                .collect(),
+            fallback: Default::default(),
+            held: Default::default(),
+            left_out: Default::default(),
+            chosen: Default::default(),
+        };
+        rules.chosen.insert(FolderRole::Pictures);
+        struct Chose {
+            rules: LandingRules,
+        }
+        impl Steps for Chose {
+            async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+                Ok(PersonTarget::ExistingAccount {
+                    account_id: "1001".into(),
+                })
+            }
+            async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+                Ok(())
+            }
+            fn landing(&self, item: &Item) -> Option<LandingPlace> {
+                self.rules.landing(item)
+            }
+        }
+        let drive = tempfile::tempdir().unwrap();
+        let mut steps = Chose { rules };
+        let (mut old, mut new) = mem_pair();
+        let (old_live, new_live) = (Live::default(), Live::default());
+        let mut table = std::mem::take(&mut w.table);
+        let (sent, received) = no_hang(async {
+            tokio::join!(
+                pctwin_move::send_by_rules(
+                    &mut old,
+                    &w.record,
+                    "1000",
+                    &[],
+                    |i| Some(source_in(w.old.path(), i)),
+                    &old_live,
+                    std::sync::Arc::new(pctwin_transfer::FsOpener),
+                ),
+                pctwin_move::receive_by_rules(
+                    &mut new,
+                    &mut steps,
+                    |s, table| {
+                        if approved {
+                            let place = pctwin_gate::Destination::open(drive.path()).unwrap();
+                            table
+                                .approve_chosen(&chosen_label(FolderRole::Pictures), place)
+                                .unwrap();
+                        }
+                        s.rules.clone()
+                    },
+                    &mut table,
+                    &w.journal,
+                    "1001",
+                    &new_live
+                ),
+            )
+        })
+        .await;
+        sent.unwrap();
+        for (line, (role, path, bytes)) in received.unwrap().files.iter().zip(FILES) {
+            let usual = w.new.path().join(folder_name(role)).join(path.join("/"));
+            let chosen = drive.path().join(path.join("/"));
+            if role == FolderRole::Pictures {
+                assert!(!usual.exists(), "never in the usual place");
+                if approved {
+                    assert!(matches!(line.outcome, Some(ReceiveOutcome::Finished(_))));
+                    assert_eq!(std::fs::read(chosen).unwrap(), bytes);
+                } else {
+                    assert!(
+                        !matches!(line.outcome, Some(ReceiveOutcome::Finished(_))),
+                        "{:?}",
+                        line.outcome
+                    );
+                    assert!(!chosen.exists());
+                }
+            } else {
+                assert!(matches!(line.outcome, Some(ReceiveOutcome::Finished(_))));
+                assert_eq!(std::fs::read(usual).unwrap(), bytes);
+            }
+        }
     }
 }

@@ -17,6 +17,8 @@ const COMMANDS: &[&str] = &[
     "move_begin",
     "move_approve",
     "move_place_people",
+    "move_choose_place",
+    "move_usual_place",
     "move_privacy_answer",
     "open_privacy_settings",
     "move_pause",

@@ -318,3 +318,37 @@ fn a_missing_folder_is_not_approved() {
     ));
     assert_eq!(everything_under(parent.path()), Vec::<String>::new());
 }
+
+/// A folder the person chose (M05) is approved as the very folder opened when they chose it:
+/// files land there, its label is taken only once, and (where a folder can be renamed while
+/// open) a folder put in its place afterwards is never written to.
+#[test]
+fn a_chosen_folder_is_the_one_opened_when_it_was_chosen() {
+    let parent = tempfile::tempdir().unwrap();
+    let chosen = parent.path().join("Photos drive");
+    std::fs::create_dir(&chosen).unwrap();
+    let opened = pctwin_gate::Destination::open(&chosen).unwrap();
+    let mut table = Destinations::new();
+    table.approve_chosen("chosen-pictures", opened).unwrap();
+    let again = pctwin_gate::Destination::open(&chosen).unwrap();
+    assert!(table.approve_chosen("chosen-pictures", again).is_err());
+    #[cfg(unix)]
+    {
+        std::fs::rename(&chosen, parent.path().join("moved")).unwrap();
+        std::fs::create_dir(&chosen).unwrap();
+    }
+    assert_eq!(
+        write(&table, "chosen-pictures", "a.jpg", b"1").unwrap(),
+        "a.jpg"
+    );
+    #[cfg(unix)]
+    {
+        assert!(parent.path().join("moved/a.jpg").exists());
+        assert!(
+            !chosen.join("a.jpg").exists(),
+            "never the folder put in its place"
+        );
+    }
+    #[cfg(not(unix))]
+    assert!(chosen.join("a.jpg").exists());
+}

@@ -165,6 +165,24 @@
     {
       "args": [
         [
+          "role",
+          "pictures"
+        ]
+      ],
+      "name": "move_choose_place"
+    },
+    {
+      "args": [
+        [
+          "role",
+          "pictures"
+        ]
+      ],
+      "name": "move_usual_place"
+    },
+    {
+      "args": [
+        [
           "again",
           true
         ]

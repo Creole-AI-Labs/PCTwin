@@ -3536,13 +3536,13 @@ impl<'d> ReceiverSession<'d> {
                 let failure = Failure::new(Cause::NotVerified, &why);
                 // Recorded with what is on the disk, so undo can take this copy away too; one
                 // that cannot be read back now is recorded failed only, and undo leaves it.
-                let recorded = self
-                    .kept_copy(destination, block_size, &kept)
-                    .is_some_and(|(fingerprint, landed)| {
+                let recorded = self.kept_copy(destination, block_size, &kept).is_some_and(
+                    |(fingerprint, landed)| {
                         self.journal
                             .kept_aside(entry, &failure, &kept, fingerprint, landed)
                             .is_ok()
-                    });
+                    },
+                );
                 if !recorded {
                     let _ = self.journal.failed(entry, &failure);
                 }

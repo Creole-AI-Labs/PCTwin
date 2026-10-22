@@ -91,6 +91,9 @@ struct Run {
     )>,
     /// The new laptop: the folders the person left out when they approved.
     left_out: std::collections::BTreeSet<FolderRole>,
+    /// The new laptop: the folders the person sent to a place they chose (M05), each opened
+    /// when they chose it, with the folder as the system showed it.
+    chosen: BTreeMap<FolderRole, (pctwin_gate::Destination, String)>,
     /// The new laptop: the people on screen to place, this laptop's accounts, and where the
     /// person's choices go.
     placing: Option<Placing>,
@@ -140,6 +143,7 @@ impl Moving {
             scan_stop: scan_stop.clone(),
             waiting: None,
             left_out: std::collections::BTreeSet::new(),
+            chosen: BTreeMap::new(),
             placing: None,
             privacy: None,
             report: Vec::new(),
@@ -205,6 +209,46 @@ impl Moving {
                 Err(MoveProblem::PlanChanged)
             }
         })?
+    }
+
+    /// Whether a place may be chosen for the folders of `role` now: only while a plan showing
+    /// them waits for the person's answer.
+    fn may_choose(&self, role: FolderRole) -> Result<(), MoveProblem> {
+        self.with_run(|run| match &run.waiting {
+            Some((_, groups, _)) if groups.contains(&role) => Ok(()),
+            _ => Err(MoveProblem::PlanChanged),
+        })?
+    }
+
+    /// The person chose `place` (opened just now) for the folders of `role`, or the usual
+    /// folder again (`None`). Only while the plan showing them waits for an answer.
+    fn choose(
+        &self,
+        role: FolderRole,
+        place: Option<(pctwin_gate::Destination, String)>,
+    ) -> Result<(), MoveProblem> {
+        self.with_run(|run| match &run.waiting {
+            Some((_, groups, _)) if groups.contains(&role) => {
+                match place {
+                    Some(place) => run.chosen.insert(role, place),
+                    None => run.chosen.remove(&role),
+                };
+                Ok(())
+            }
+            _ => Err(MoveProblem::PlanChanged),
+        })?
+    }
+
+    /// The places chosen, once the plan is approved, for the folders not left out.
+    fn take_chosen(&self) -> BTreeMap<FolderRole, (pctwin_gate::Destination, String)> {
+        lock(&self.run)
+            .as_mut()
+            .map(|r| {
+                let mut chosen = std::mem::take(&mut r.chosen);
+                chosen.retain(|role, _| !r.left_out.contains(role));
+                chosen
+            })
+            .unwrap_or_default()
     }
 
     fn left_out(&self) -> std::collections::BTreeSet<FolderRole> {
@@ -1021,6 +1065,8 @@ struct AppSteps<R: Runtime> {
     held_for: Vec<crate::others::Placed>,
     /// The person's stop, so starting the helper does not outlast it.
     live_control: pctwin_transfer::MoveControl,
+    /// The places the person chose for some folders, approved in the table with the rules.
+    chosen: BTreeMap<FolderRole, pctwin_gate::Destination>,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -1063,6 +1109,11 @@ impl<R: Runtime> AppSteps<R> {
     /// administrator says no, or the helper cannot start, they are not moved, and the screens are
     /// told why.
     fn place_others(&mut self, table: &mut Destinations) -> LandingRules {
+        // A chosen place that cannot be approved now leaves its files with no place: each is
+        // said to have failed, never put somewhere else.
+        for (role, place) in std::mem::take(&mut self.chosen) {
+            let _ = table.approve_chosen(&pctwin_move::landing::chosen_label(role), place);
+        }
         let mut rules = self.rules.clone();
         let Some((choices, words)) = self.placed.clone() else {
             return rules;
@@ -1241,6 +1292,13 @@ impl<R: Runtime> Steps for AppSteps<R> {
             Ok(true) => {
                 // The folders the person unticked: none of their files is sent or received.
                 self.rules.left_out = self.moving.left_out();
+                // The places the person chose: those folders land there, and nowhere else.
+                for (role, (place, shown)) in self.moving.take_chosen() {
+                    let label = pctwin_move::landing::chosen_label(role);
+                    self.rules.chosen.insert(role);
+                    self.shown.insert(label, shown);
+                    self.chosen.insert(role, place);
+                }
                 let _ = self.app.emit(STAGE_EVENT, Stage::Moving);
                 Ok(())
             }
@@ -1462,7 +1520,7 @@ enum ThisSide {
     Old {
         others: Vec<String>,
     },
-    New(NewSide),
+    New(Box<NewSide>),
 }
 
 /// What the new laptop needs before it can take a move: its places approved, the rules, the
@@ -1495,6 +1553,7 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
         fallback,
         held: BTreeMap::new(),
         left_out: Default::default(),
+        chosen: Default::default(),
     };
     let shown = found
         .iter()
@@ -1569,6 +1628,7 @@ async fn run_new<R: Runtime>(
         helper: None,
         held_for: Vec::new(),
         live_control: live.control.clone(),
+        chosen: BTreeMap::new(),
     };
     let received = pctwin_move::receive_by_rules(
         &mut link,
@@ -1651,7 +1711,7 @@ fn spawn_run<R: Runtime>(
             let ran = runtime.block_on(async {
                 match side {
                     ThisSide::New(setup) => {
-                        run_new(&app, moving.clone(), link, &live, setup, names).await
+                        run_new(&app, moving.clone(), link, &live, *setup, names).await
                     }
                     ThisSide::Old { others } => {
                         run_old(&app, &moving, link, &live, &scan_stop, others).await
@@ -1720,7 +1780,7 @@ pub async fn move_begin<R: Runtime>(
         ThisSide::Old { others }
     } else {
         match new_places(fallback) {
-            Ok(setup) => ThisSide::New(setup),
+            Ok(setup) => ThisSide::New(Box::new(setup)),
             Err(p) => {
                 moving.finish(Vec::new());
                 return Err(p);
@@ -1741,6 +1801,60 @@ pub fn move_approve(
     left_out: Vec<FolderRole>,
 ) -> Result<(), MoveProblem> {
     moving.answer(&plan, approve, &left_out)
+}
+
+/// What came of choosing a place for a group of folders (M05).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PlaceAnswer {
+    /// The folder, as the system shows it, and its free space when the drive says.
+    #[serde(rename_all = "camelCase")]
+    Chosen {
+        path: String,
+        free_bytes: Option<u64>,
+    },
+    /// The person closed the picker.
+    NotChosen,
+    /// The drive has no safe way to name files: choose another.
+    NoSafeName,
+    /// The folder could not be opened.
+    CannotOpen,
+}
+
+/// The new laptop, while the plan waits for an answer: the person chooses, in the system's
+/// picker, another folder for the folders of `role` (M05). It is opened and its drive tested
+/// now; it is approved only with the plan.
+#[tauri::command]
+pub async fn move_choose_place(
+    moving: State<'_, AppMoving>,
+    role: FolderRole,
+) -> Result<PlaceAnswer, MoveProblem> {
+    moving.may_choose(role)?;
+    let picked = tauri::async_runtime::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+        .await
+        .map_err(|_| MoveProblem::Failed)?;
+    let Some(folder) = picked else {
+        return Ok(PlaceAnswer::NotChosen);
+    };
+    let Ok(place) = pctwin_gate::Destination::open(&folder) else {
+        return Ok(PlaceAnswer::CannotOpen);
+    };
+    if place
+        .check_drive()
+        .is_ok_and(|check| check.naming == pctwin_gate::Naming::NoSafeMethod)
+    {
+        return Ok(PlaceAnswer::NoSafeName);
+    }
+    let path = folder.display().to_string();
+    let free_bytes = place.available_bytes();
+    moving.choose(role, Some((place, path.clone())))?;
+    Ok(PlaceAnswer::Chosen { path, free_bytes })
+}
+
+/// The new laptop: the folders of `role` go to their usual place again.
+#[tauri::command]
+pub fn move_usual_place(moving: State<'_, AppMoving>, role: FolderRole) -> Result<(), MoveProblem> {
+    moving.choose(role, None)
 }
 
 /// The new laptop: where each other person's things go (M06), and the words of the system
@@ -1972,6 +2086,57 @@ mod tests {
             status_of(Cause::OnlineOnly),
             (ItemStatus::NeedsAction, Reason::OnlineOnly)
         );
+    }
+
+    #[test]
+    fn a_place_is_chosen_only_for_a_folder_on_the_plan_waiting_and_only_kept_if_it_moves() {
+        // Opened only: nothing is written there.
+        let dir = std::env::temp_dir();
+        let open = || {
+            Some((
+                pctwin_gate::Destination::open(&dir).unwrap(),
+                "E:/Photos".to_string(),
+            ))
+        };
+        let moving = Moving::default();
+        moving.begin().unwrap();
+        // No plan on screen yet.
+        assert_eq!(
+            moving.choose(FolderRole::Pictures, open()),
+            Err(MoveProblem::PlanChanged)
+        );
+        let key = PlanKey {
+            revision: 1,
+            fingerprint: "ab".into(),
+        };
+        let _rx = moving.wait_for_answer(
+            key.clone(),
+            [FolderRole::Pictures, FolderRole::Music, FolderRole::Videos].into(),
+        );
+        // A folder the plan does not show.
+        assert_eq!(
+            moving.choose(FolderRole::Documents, open()),
+            Err(MoveProblem::PlanChanged)
+        );
+        assert!(moving.may_choose(FolderRole::Pictures).is_ok());
+        moving.choose(FolderRole::Pictures, open()).unwrap();
+        moving.choose(FolderRole::Music, open()).unwrap();
+        moving.choose(FolderRole::Videos, open()).unwrap();
+        // Back to the usual folder.
+        moving.choose(FolderRole::Videos, None).unwrap();
+        moving.answer(&key, true, &[FolderRole::Music]).unwrap();
+        // Once approved, nothing more is chosen.
+        assert_eq!(
+            moving.choose(FolderRole::Videos, open()),
+            Err(MoveProblem::PlanChanged)
+        );
+        let chosen = moving.take_chosen();
+        assert_eq!(
+            chosen.keys().copied().collect::<Vec<_>>(),
+            [FolderRole::Pictures],
+            "a folder left out goes nowhere, and one put back goes to its usual place"
+        );
+        assert!(moving.take_chosen().is_empty(), "taken once");
     }
 
     #[test]
@@ -2215,6 +2380,7 @@ mod tests {
             fallback: BTreeMap::from([(FolderRole::Music, "From your old laptop/Music".into())]),
             held: BTreeMap::new(),
             left_out: Default::default(),
+            chosen: Default::default(),
         }
     }
 

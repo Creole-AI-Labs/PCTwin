@@ -16,6 +16,8 @@ import {
   listenPairingOld,
   moveApprove,
   moveBegin,
+  moveChoosePlace,
+  moveUsualPlace,
   movePeopleHere,
   movePlacePeople,
   movePrivacyAnswer,
@@ -224,6 +226,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await historyOpen("1792627200000-0").catch(() => undefined);
       await historyExport();
       await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}" });
+      await moveChoosePlace("pictures").catch(() => undefined);
+      await moveUsualPlace("pictures");
       await moveApprove({ revision: 2, fingerprint: "9f" }, true, ["music"]);
       await movePause();
       await moveResume();

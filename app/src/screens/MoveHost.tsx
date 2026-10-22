@@ -5,10 +5,12 @@ import {
   listenMove,
   moveApprove,
   moveBegin,
+  moveChoosePlace,
   movePause,
   movePeopleHere,
   movePlacePeople,
   movePrivacyAnswer,
+  moveUsualPlace,
   openPrivacySettings,
   moveReport,
   moveResume,
@@ -37,7 +39,7 @@ import DriveProblem from "./DriveProblem";
 import MoveEnded, { type MoveEnd } from "./MoveEnded";
 import MoveWaiting from "./MoveWaiting";
 import Outcome from "./Outcome";
-import PlanReview from "./PlanReview";
+import PlanReview, { type ChosenPlace, type PlaceNote } from "./PlanReview";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
@@ -156,6 +158,9 @@ export default function MoveHost({
   const [planChanged, setPlanChanged] = useState(false);
   // The folders the person unticked on the plan: they stay on the old laptop.
   const [leftOut, setLeftOut] = useState<FolderRole[]>([]);
+  // The places the person chose for some folders (M05), and why the last one was not taken.
+  const [chosen, setChosen] = useState<Partial<Record<FolderRole, ChosenPlace>>>({});
+  const [placeNote, setPlaceNote] = useState<PlaceNote | null>(null);
   // Why the other people ticked were not moved, when they were not: said until the move ends.
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   // How much of the mover's own things the scan has found so far (M02).
@@ -352,6 +357,28 @@ export default function MoveHost({
           leftOut={leftOut}
           onToggleGroup={(role, move) => {
             setLeftOut((out) => (move ? out.filter((r) => r !== role) : out.includes(role) ? out : [...out, role]));
+          }}
+          chosen={chosen}
+          placeNote={placeNote}
+          onChoosePlace={(role) => {
+            setPlaceNote(null);
+            moveChoosePlace(role).then(
+              (answer) => {
+                if (answer.kind === "chosen") setChosen((c) => ({ ...c, [role]: { path: answer.path, freeBytes: answer.freeBytes } }));
+                else if (answer.kind !== "not-chosen") setPlaceNote({ role, kind: answer.kind });
+              },
+              () => {
+                setPlaceNote({ role, kind: "cannot-open" });
+              },
+            );
+          }}
+          onUsualPlace={(role) => {
+            moveUsualPlace(role).then(
+              () => {
+                setChosen((c) => Object.fromEntries(Object.entries(c).filter(([r]) => r !== role)));
+              },
+              () => undefined,
+            );
           }}
           onApprovalChange={setApproval}
           onStart={(a) => {

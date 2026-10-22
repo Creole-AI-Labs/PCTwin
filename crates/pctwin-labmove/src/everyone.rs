@@ -373,6 +373,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         fallback: BTreeMap::new(),
         held,
         left_out: Default::default(),
+        chosen: Default::default(),
     };
     let plan = pctwin_move::send_plan_where(
         &record,

@@ -2375,6 +2375,14 @@ impl Destinations {
         self.admit(id, place, destination)
     }
 
+    /// Approves a folder the person chose in the system's picker, under the label `id`, as the
+    /// very folder opened when they chose it ([`Destination::open`]): a folder swapped for
+    /// another since is never the one approved.
+    pub fn approve_chosen(&mut self, id: &str, destination: Destination) -> Result<(), GateError> {
+        self.check_new(id)?;
+        self.admit(id, Approved::ChosenDrive, destination)
+    }
+
     /// For tests: as [`approve`](Self::approve), on a drive behaving as `profile` says.
     #[doc(hidden)]
     pub fn approve_with_profile(

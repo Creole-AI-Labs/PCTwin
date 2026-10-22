@@ -29,10 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call, 43 names: the app's forty commands, listening to and
+/// Exactly what the screens may call, 45 names: the app's forty-two commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 43] = [
+const SCREENS_MAY_CALL: [&str; 45] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -48,6 +48,8 @@ const SCREENS_MAY_CALL: [&str; 43] = [
     "move_begin",
     "move_approve",
     "move_place_people",
+    "move_choose_place",
+    "move_usual_place",
     "move_privacy_answer",
     "open_privacy_settings",
     "move_pause",
@@ -236,6 +238,7 @@ fn wrong_arguments(cmd: &str) -> Value {
         "move_begin" => json!({ "fallback": 1, "others": 2 }),
         "move_approve" => json!({ "plan": 1, "approve": "x", "leftOut": 3 }),
         "move_place_people" => json!({ "choices": 1, "words": 2 }),
+        "move_choose_place" | "move_usual_place" => json!({ "role": 1 }),
         "move_privacy_answer" => json!({ "again": "x" }),
         "help_code" => json!({ "topic": 1, "step": 2 }),
         "quicksend_pick" => json!({ "folders": "x" }),
@@ -623,6 +626,7 @@ fn the_screens_argument_names_are_the_commands_own() {
                 | "set_tray_labels"
                 | "quicksend_pick"
                 | "quicksend_choose_folder"
+                | "move_choose_place"
                 | "history_export"
         ) {
             continue;

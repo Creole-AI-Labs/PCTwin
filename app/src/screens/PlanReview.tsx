@@ -48,6 +48,12 @@ function PreviewNotes({ preview }: { preview: PlanPreview }) {
   );
 }
 
+/** A folder the person chose for a group (M05), as the system shows it, with its free space when known. */
+export type ChosenPlace = { path: string; freeBytes: number | null };
+
+/** Why the place just chosen for a group was not taken. */
+export type PlaceNote = { role: FolderRole; kind: "no-safe-name" | "cannot-open" };
+
 export interface PlanReviewProps {
   plan: PlanView;
   /** The approval the host is holding. It only counts while it is for exactly this revision and fingerprint. */
@@ -63,6 +69,11 @@ export interface PlanReviewProps {
   /** Folders the person unticked: they stay on the old laptop. With `onToggleGroup`, each group has a tick. */
   leftOut?: readonly FolderRole[];
   onToggleGroup?: (role: FolderRole, move: boolean) => void;
+  /** The places chosen for some groups. With `onChoosePlace`, each group can be sent to another folder. */
+  chosen?: Partial<Record<FolderRole, ChosenPlace>>;
+  placeNote?: PlaceNote | null;
+  onChoosePlace?: (role: FolderRole) => void;
+  onUsualPlace?: (role: FolderRole) => void;
   /** The plan cannot be approved until people are mapped to accounts: go and do that. */
   onFixPeople?: () => void;
   onBack?: () => void;
@@ -77,7 +88,7 @@ export interface PlanReviewProps {
  * the same fingerprint. If the plan changes under an approval, the approval is dropped, the person is told so
  * out loud, and Start the move stays closed until they approve the new version.
  */
-export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, onFixPeople, onBack }: PlanReviewProps) {
+export default function PlanReview({ plan, approval, onApprovalChange, onStart, onEdit, changedNotice = false, leftOut = [], onToggleGroup, chosen = {}, placeNote = null, onChoosePlace, onUsualPlace, onFixPeople, onBack }: PlanReviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const holds = approvalHolds(plan, approval);
@@ -108,8 +119,19 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
   const places = new Set(plan.groups.map((g) => `${g.toDrive}\u0000${g.toFolder}`));
   const placeText = (drive: string, folder: string) => (folder && drive ? l10n.getString("plan-place", { folder, drive }) : folder || drive);
   const byHand = leftOutByHand(plan);
+  // Each chosen folder must hold every group sent to it.
+  const needs = new Map<string, number>();
+  for (const g of kept) {
+    const place = chosen[g.role];
+    if (place && g.size.kind !== "unreadable") needs.set(place.path, (needs.get(place.path) ?? 0) + g.size.bytes);
+  }
+  const noRoom = (role: FolderRole) => {
+    const place = chosen[role];
+    return !!place && !leftOut.includes(role) && place.freeBytes !== null && (needs.get(place.path) ?? 0) > place.freeBytes;
+  };
+  const roomless = plan.groups.some((g) => noRoom(g.role));
   const blocked = plan.blocked;
-  const canStart = holds && !blocked;
+  const canStart = holds && !blocked && !roomless;
   const reference = plan.fingerprint.slice(0, 8).toUpperCase();
 
   return (
@@ -159,8 +181,43 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
                   <PathText path={g.path} />
                 </small>
                 <small className="kit-hint">
-                  <bdi dir="auto">{l10n.getString("plan-group-to", { place: placeText(g.toDrive, g.toFolder) })}</bdi>
+                  <bdi dir="auto">{l10n.getString("plan-group-to", { place: chosen[g.role]?.path ?? placeText(g.toDrive, g.toFolder) })}</bdi>
                 </small>
+                {chosen[g.role]?.freeBytes != null && (
+                  <small className="kit-hint">{l10n.getString("plan-place-free", { size: fmt.total(chosen[g.role]?.freeBytes ?? 0, false) })}</small>
+                )}
+                {noRoom(g.role) && (
+                  <small className="kit-hint plan-attention" role="alert">
+                    {l10n.getString("plan-place-no-room")}
+                  </small>
+                )}
+                {placeNote?.role === g.role && (
+                  <small className="kit-hint plan-attention" role="alert">
+                    {l10n.getString(`plan-place-${placeNote.kind}`)}
+                  </small>
+                )}
+                {onChoosePlace && !leftOut.includes(g.role) && (
+                  <span className="plan-place-actions">
+                    <Button
+                      variant="quiet"
+                      onClick={() => {
+                        onChoosePlace(g.role);
+                      }}
+                    >
+                      {l10n.getString("plan-place-change")}
+                    </Button>
+                    {chosen[g.role] && onUsualPlace && (
+                      <Button
+                        variant="quiet"
+                        onClick={() => {
+                          onUsualPlace(g.role);
+                        }}
+                      >
+                        {l10n.getString("plan-place-usual")}
+                      </Button>
+                    )}
+                  </span>
+                )}
                 {onToggleGroup && (
                   <Checkbox
                     checked={!leftOut.includes(g.role)}
@@ -243,7 +300,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
             aria-describedby={holds ? undefined : "plan-hint"}
             onClick={() => {
               // Checked again at the moment of the click: the approval must still be for this exact plan.
-              if (approval && approvalHolds(plan, approval) && !blocked) onStart(approval);
+              if (approval && approvalHolds(plan, approval) && !blocked && !roomless) onStart(approval);
             }}
           >
             {l10n.getString("plan-start")}

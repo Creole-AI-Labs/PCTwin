@@ -558,6 +558,24 @@ export function parseReportItem(value: unknown): ReportItem | null {
 export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[]) => run("move_begin", { fallback, others });
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
 export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
+/** What came of choosing another place for a group of folders (M05). */
+export type PlaceAnswer = { kind: "chosen"; path: string; freeBytes: number | null } | { kind: "not-chosen" | "no-safe-name" | "cannot-open" };
+
+export function parsePlaceAnswer(value: unknown): PlaceAnswer | null {
+  if (typeof value !== "object" || value === null) return null;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind === "chosen") {
+    const f = exactly(value, ["kind", "path", "freeBytes"]);
+    return f && typeof f.path === "string" && isCountOrNull(f.freeBytes) ? { kind, path: f.path, freeBytes: f.freeBytes } : null;
+  }
+  const f = exactly(value, ["kind"]);
+  return f && oneOf(f.kind, ["not-chosen", "no-safe-name", "cannot-open"] as const) ? { kind: f.kind } : null;
+}
+
+/** While the plan waits: the person chooses another folder for the folders of `role`, in the system's picker. */
+export const moveChoosePlace = (role: FolderRole) => ask("move_choose_place", parsePlaceAnswer, { role });
+/** The folders of `role` go to their usual place again. */
+export const moveUsualPlace = (role: FolderRole) => run("move_usual_place", { role });
 /** The answer to the plan on screen; `leftOut`: the folders the person unticked (none of them moves). */
 export const moveApprove = (plan: PlanKey, approve: boolean, leftOut: FolderRole[] = []) => run("move_approve", { plan, approve, leftOut });
 export const movePause = () => run("move_pause");
