@@ -3171,7 +3171,8 @@ impl<'d> ReceiverSession<'d> {
                     && (incomplete || !matches!(a.check_stored(), Ok(StoredCheck::Matched)))
                 {
                     self.meter.checking(None);
-                    return self.set_aside(stream, s.item, s.entry, a);
+                    let kept_in = (s.destination.as_str(), s.block_size);
+                    return self.set_aside(stream, s.item, s.entry, kept_in, a);
                 }
                 let landed = if unchanged && incomplete && s.damaged >= 2 {
                     drop(a);
@@ -3526,14 +3527,25 @@ impl<'d> ReceiverSession<'d> {
         stream: u32,
         item: ItemId,
         entry: u64,
+        (destination, block_size): (&str, u64),
         a: Assembly<'d>,
     ) -> Result<Message, TransferError> {
         let outcome = match a.set_aside() {
             Ok(kept) => {
                 let why = format!("{READ_DIFFERENTLY} What arrived is kept as {kept}.");
-                let _ = self
-                    .journal
-                    .failed(entry, &Failure::new(Cause::NotVerified, &why));
+                let failure = Failure::new(Cause::NotVerified, &why);
+                // Recorded with what is on the disk, so undo can take this copy away too; one
+                // that cannot be read back now is recorded failed only, and undo leaves it.
+                let recorded = self
+                    .kept_copy(destination, block_size, &kept)
+                    .is_some_and(|(fingerprint, landed)| {
+                        self.journal
+                            .kept_aside(entry, &failure, &kept, fingerprint, landed)
+                            .is_ok()
+                    });
+                if !recorded {
+                    let _ = self.journal.failed(entry, &failure);
+                }
                 ReceiveOutcome::NeedsAction {
                     finished: Finished {
                         final_path: kept.clone(),
@@ -3555,6 +3567,39 @@ impl<'d> ReceiverSession<'d> {
         self.allowance.ended(item, true);
         self.end(item, stream, outcome, None);
         Ok(Message::FileDone { stream, ok: false })
+    }
+
+    /// The damaged copy at `kept` in `destination`, as it is on the disk now: its whole
+    /// fingerprint and what landed, all read through one handle on that very file.
+    fn kept_copy(
+        &self,
+        destination: &str,
+        block_size: u64,
+        kept: &str,
+    ) -> Option<([u8; 32], Landed)> {
+        let dest = self.table.get(destination).ok()?;
+        let stat = dest.stat(kept).ok()??;
+        let mut file = dest.open_read(kept).ok()?;
+        let meta = file.metadata().ok()?;
+        let modified_ns = stat.modified.map(crate::nanos);
+        if meta.len() != stat.len || meta.modified().ok().map(crate::nanos) != modified_ns {
+            return None;
+        }
+        let fingerprint = crate::fingerprint_reader(&mut file, stat.len, block_size).ok()??;
+        // Still the same file once read: nothing changed it meanwhile.
+        let after = dest.stat(kept).ok()??;
+        (after.id == stat.id && after.len == stat.len && after.modified == stat.modified).then(
+            || {
+                (
+                    fingerprint,
+                    Landed {
+                        size: stat.len,
+                        modified_ns,
+                        file: Some(file_id(stat.id)),
+                    },
+                )
+            },
+        )
     }
 
     /// The old laptop's file on `stream` is not identical to what is here after all: its partial

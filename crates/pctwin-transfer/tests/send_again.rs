@@ -4615,6 +4615,10 @@ impl pctwin_transfer::Source for UnsteadyFile {
     fn stamp(&mut self) -> std::io::Result<pctwin_transfer::Stamp> {
         self.file.stamp()
     }
+
+    fn identity(&mut self) -> std::io::Result<Option<pctwin_journal::FileId>> {
+        self.file.identity()
+    }
 }
 
 impl pctwin_transfer::Opener for Unsteady {
@@ -4661,6 +4665,66 @@ async fn a_file_the_old_drive_reads_differently_is_set_aside_as_a_damaged_copy()
     );
     assert!(l.new.path().join(&finished.final_path).exists());
     assert!(!landed(&l, 0).exists(), "never under the real name");
+}
+
+/// Undo takes the damaged copy away too, like any copy the move made, once the old laptop says
+/// the original is still there unchanged; a copy the person changed since is kept.
+#[tokio::test]
+async fn undo_removes_a_damaged_copy_but_keeps_one_changed_since() {
+    for changed in [false, true] {
+        let l = laptops(&[70_000]);
+        let table = table(&l, Some(Flip::OnEveryWrite));
+        let journal = common::journal();
+        let mut sender = SenderSession::new(jobs(&l), 1).with_opener(Arc::new(Unsteady(
+            std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0)),
+        )));
+        let mut receiver = ReceiverSession::new(&table, plan(&l), journal, "1001");
+        assert_eq!(move_all(&mut sender, &mut receiver).await, (true, true));
+        let Some(ReceiveOutcome::NeedsAction { finished, .. }) = receiver.outcome(id(0)) else {
+            panic!("expected a damaged copy kept");
+        };
+        let kept = l.new.path().join(&finished.final_path);
+        assert!(kept.exists());
+        if changed {
+            std::fs::write(&kept, b"the person's own words now").unwrap();
+        }
+        let items = pctwin_transfer::undo_items(journal).unwrap();
+        assert_eq!(items, vec![id(0)], "undo asks about the damaged copy's original");
+        let sent: HashMap<ItemId, PathBuf> = jobs(&l)
+            .into_iter()
+            .map(|j| (j.item, j.source))
+            .collect();
+        let (mut new, mut old) = mem_pair();
+        let serve = async {
+            let mut budget = pctwin_transfer::OriginalsBudget::new();
+            pctwin_transfer::serve_originals(&mut old, &sent, &mut budget)
+                .await
+                .unwrap();
+        };
+        let (originals, ()) = common::no_hang(async {
+            tokio::join!(
+                pctwin_transfer::check_originals(&mut new, journal, &items),
+                serve
+            )
+        })
+        .await;
+        let report = pctwin_transfer::undo(journal, &table, originals.unwrap()).unwrap();
+        assert_eq!(report.files.len(), 1, "{report:?}");
+        if changed {
+            assert!(
+                matches!(report.files[0].outcome, pctwin_journal::UndoOutcome::Kept { .. }),
+                "{report:?}"
+            );
+            assert!(kept.exists(), "the person's changes are kept");
+        } else {
+            assert_eq!(
+                report.files[0].outcome,
+                pctwin_journal::UndoOutcome::Deleted,
+                "{report:?}"
+            );
+            assert!(!kept.exists(), "the damaged copy is gone");
+        }
+    }
 }
 
 /// Quarantine Design, step 4: a drive that could not store 3 of its last checked files pauses the

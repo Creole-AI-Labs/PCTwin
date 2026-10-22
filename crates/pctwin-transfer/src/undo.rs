@@ -229,19 +229,25 @@ fn undo_all(
     // Files that were in use get one more try, once everything else is done.
     for at in in_use {
         let id = report.files[at].entry;
-        if let Some(entry) = journal.entry(id)? {
+        if let Some(entry) = journal.entry(id)?.and_then(as_copy) {
             report.files[at].outcome = undo_file(journal, table, originals, options, &entry)?;
         }
     }
     undo_folders(journal, table, report)
 }
 
-/// Committed files, newest first.
+/// The copies the move left on the disk, newest first: committed files, and the damaged copies
+/// kept beside their real names (each seen as the committed copy it is).
 fn committed(journal: &Journal) -> Result<Vec<Entry>, JournalError> {
-    let mut entries = journal.entries()?;
-    entries.retain(|e| matches!(e.state, State::Committed { .. }));
+    let mut entries: Vec<Entry> = journal.entries()?.into_iter().filter_map(as_copy).collect();
     entries.reverse();
     Ok(entries)
+}
+
+/// `entry` as the copy it left on the disk, if it left one.
+fn as_copy(mut entry: Entry) -> Option<Entry> {
+    entry.state = entry.state.copy_on_disk()?.clone();
+    Some(entry)
 }
 
 /// Whether undo is finished with this file (only "not done this time" is tried again).
@@ -1019,7 +1025,11 @@ pub fn close_undo(
 ) -> Result<pctwin_journal::ClosedToken, pctwin_journal::CloseError> {
     use pctwin_journal::Resolved;
     journal.close_undo(&mut |ticket, pending| {
-        let Some(entry) = journal.entry(pending.id).map_err(std::io::Error::other)? else {
+        let Some(entry) = journal
+            .entry(pending.id)
+            .map_err(std::io::Error::other)?
+            .and_then(as_copy)
+        else {
             return Ok(Resolved::Unresolved {
                 why: "the journal has no record of it".into(),
             });

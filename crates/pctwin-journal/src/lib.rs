@@ -494,6 +494,18 @@ impl State {
         }
     }
 
+    /// The copy this write left under a name in the destination, for undo: a committed file, or
+    /// the damaged copy a failed write kept beside its real name ([`Journal::kept_aside`]).
+    pub fn copy_on_disk(&self) -> Option<&State> {
+        match self {
+            State::Committed { .. } => Some(self),
+            State::Failed { reached, .. } if matches!(**reached, State::Committed { .. }) => {
+                Some(reached)
+            }
+            _ => None,
+        }
+    }
+
     /// Committed, existing and failed writes are finished.
     pub fn is_finished(&self) -> bool {
         matches!(
@@ -1722,6 +1734,34 @@ impl Journal {
         )
     }
 
+    /// It did not finish, but what arrived is kept beside its real name at `kept_path` (a damaged
+    /// copy the person is told about): failed, with that copy recorded as the step it reached, so
+    /// undo can remove it like any copy the move made, once it is proven the same file unchanged.
+    pub fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: Landed,
+    ) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "failed",
+            |s| {
+                (!s.is_finished()).then(|| State::Failed {
+                    why: why.into(),
+                    reached: Box::new(State::Committed {
+                        final_path: kept_path.into(),
+                        fingerprint,
+                        landed,
+                    }),
+                })
+            },
+            |_, _| Ok(()),
+        )
+    }
+
     /// Takes one step as its own committed transaction, if `next` allows it from where it is, with
     /// `also` recorded in the same transaction. A step that finishes the write takes it off the
     /// unfinished lists.
@@ -2265,6 +2305,18 @@ pub trait Ledger {
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
+    /// See [`Journal::kept_aside`]. A ledger that keeps no copies for undo records it failed.
+    fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: Landed,
+    ) -> Result<(), JournalError> {
+        let _ = (kept_path, fingerprint, landed);
+        self.failed(id, why)
+    }
     fn checkpoint(
         &self,
         id: u64,
@@ -2343,6 +2395,16 @@ impl Ledger for Journal {
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
         Journal::failed(self, id, why)
     }
+    fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: Landed,
+    ) -> Result<(), JournalError> {
+        Journal::kept_aside(self, id, why, kept_path, fingerprint, landed)
+    }
     fn checkpoint(
         &self,
         id: u64,
@@ -2367,7 +2429,7 @@ fn put_undo(
     undo: &Undo,
 ) -> Result<(), JournalError> {
     let entry = read_entry(entries, id)?;
-    if !matches!(entry.state, State::Committed { .. }) {
+    if entry.state.copy_on_disk().is_none() {
         return Err(JournalError::OutOfOrder {
             from: entry.state.name(),
             to: "undo",
@@ -2409,7 +2471,7 @@ fn pending_in(
         }
         let id = k.value();
         let entry = read_entry(entries, id)?;
-        let State::Committed { final_path, .. } = entry.state else {
+        let Some(State::Committed { final_path, .. }) = entry.state.copy_on_disk() else {
             return Err(damaged(format!(
                 "undo of entry {id}, which is not finished"
             )));
@@ -2417,8 +2479,8 @@ fn pending_in(
         out.push(Pending {
             id,
             stage,
+            path: final_path.clone(),
             destination: entry.write.destination,
-            path: final_path,
         });
     }
     Ok(out)
