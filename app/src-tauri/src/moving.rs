@@ -518,7 +518,23 @@ pub struct PreviewView {
     pub too_big: u64,
     pub refused: u64,
     pub runs_at_sign_in: u64,
+    /// The connection between the laptops, as measured just before the plan (C07); `None` when
+    /// it could not be measured.
+    pub link: Option<LinkView>,
 }
+
+/// The connection, measured (C07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkView {
+    pub bytes_per_second: u64,
+    /// Below [`SLOW_LINK`]: the person is told how to make it faster.
+    pub slow: bool,
+}
+
+/// Below this, about 40 megabits a second, a move of a whole laptop takes hours: a cable, or
+/// both laptops near the router, is worth suggesting.
+pub const SLOW_LINK: u64 = 5_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -630,6 +646,10 @@ fn plan_view(
             too_big: preview.problems.too_big.count,
             refused: preview.problems.refused.count,
             runs_at_sign_in: preview.problems.runs_at_sign_in.count,
+            link: preview.bytes_per_second.map(|b| LinkView {
+                bytes_per_second: b,
+                slow: b < SLOW_LINK,
+            }),
         },
     }
 }

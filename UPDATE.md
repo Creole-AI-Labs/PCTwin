@@ -6,7 +6,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Stage:** building the move itself (stage 1 of the plan). The foundations (stage 0) are done.
 - **Ready to use?** Not yet. Please don't move real files with it.
-- **Next:** the connection check before a move, then independent reviews, attack tests and the full test run on two machines.
+- **Next:** independent reviews of the newest parts, attack tests, and the full test run on two machines.
 
 ## 22 October 2026
 
@@ -19,6 +19,9 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Moving other people, in the app (Windows and Linux).** On the old laptop you tick who else is moving; one administrator approval covers them all. On the new laptop you choose an account for each, or a new one; a new account's temporary password appears once in the laptop's own window. Their things wait in a private place and land in their own folders when they first sign in, where PCTwin greets them with "Your things are ready". On a Mac this part isn't ready yet, and the app says so.
 - **Quick Send works.** Choose files in the system's own picker, pair, and send; the receiver sees what's offered, chooses a folder, and both sides get a receipt.
 - **Help without the internet,** a guide for Mac privacy settings, a checklist for the old laptop while you wait, and the laptop stays awake during a move (with a battery warning, and a safe pause when it's nearly empty).
+- **Meet your other laptop.** As soon as a move starts, both laptops show each other: the system, the PCTwin version and whether each is plugged in. If one runs on battery, PCTwin suggests plugging in. If one laptop has an older PCTwin, the page says which one to update.
+- **The plan shows the measured connection speed,** and if it is slow, how to make it faster (a cable, or both laptops near the router).
+- **A long scan no longer ends the move.** Before, the new laptop gave up after 30 seconds of waiting while the old laptop was still finding files or waiting for a Mac privacy setting or an administrator. Now it waits as long as that takes.
 - **Send a folder somewhere else.** On the plan, any folder can go to another place you choose on the new laptop (another drive, say). PCTwin shows how much space is free there, and won't start if it won't fit. If that place stops working, its files are reported as failed. They are never quietly put somewhere else.
 - **Undo also removes damaged copies.** If your old drive kept reading a file differently, PCTwin keeps what arrived as a "damaged copy" and tells you. Undo now removes that copy too, unless you changed it since.
 - **An independent security review** of the new parts found four things to tighten, and all four are fixed.

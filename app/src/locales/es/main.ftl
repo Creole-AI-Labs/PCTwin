@@ -882,6 +882,8 @@ plan-preview-title = Antes de empezar
 plan-preview-fits = Hay suficiente espacio libre en este portátil.
 plan-preview-short = Este portátil necesita { $size } más de espacio libre. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
 plan-preview-space-unknown = PCTwin no pudo leer cuánto espacio libre tiene este portátil.
+plan-preview-link = La conexión entre los portátiles mueve unos { $speed } por segundo, medido ahora mismo.
+plan-preview-slow = La conexión es lenta, así que la mudanza tardará más. Un cable de red, o los dos portátiles cerca del router, la hacen más rápida.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Unos { $minutes } minuto.

@@ -212,6 +212,10 @@ fn plans() -> Vec<PlanView> {
             too_big: 0,
             refused: 0,
             runs_at_sign_in: 1,
+            link: Some(crate::moving::LinkView {
+                bytes_per_second: 62_000_000,
+                slow: false,
+            }),
         },
     }]
 }

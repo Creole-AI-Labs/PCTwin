@@ -886,6 +886,8 @@ plan-preview-title = Antes de começar
 plan-preview-fits = Há espaço livre suficiente neste notebook.
 plan-preview-short = Este notebook precisa de mais { $size } de espaço livre. Libere espaço antes de começar, ou a transferência para quando o disco encher.
 plan-preview-space-unknown = O PCTwin não conseguiu ler quanto espaço livre este notebook tem.
+plan-preview-link = A conexão entre os notebooks transfere cerca de { $speed } por segundo, medido agora.
+plan-preview-slow = A conexão está lenta, então a mudança vai demorar mais. Um cabo de rede, ou os dois notebooks perto do roteador, deixa mais rápido.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Cerca de { $minutes } minuto.

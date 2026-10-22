@@ -213,6 +213,23 @@ describe("the move, once paired", () => {
     expect(screen.getByRole<HTMLButtonElement>("button", { name: text("plan-start") }).disabled).toBe(false);
   });
 
+  it("the plan says how fast the connection measured (C07), and how to make a slow one faster", async () => {
+    await host(false);
+    send("move-plan", plan);
+    expect(screen.getByText((t) => plain(t) === plain(text("plan-preview-link", { speed: "62 MB" })))).toBeTruthy();
+    expect(screen.queryByText(text("plan-preview-slow"))).toBeNull();
+    send("move-plan", { ...plan, revision: 3, preview: { ...plan.preview, link: { bytesPerSecond: 1_200_000, slow: true } } });
+    await waitFor(() => {
+      expect(screen.getByText(text("plan-preview-slow"))).toBeTruthy();
+    });
+    // Not measured: nothing is said about speed.
+    send("move-plan", { ...plan, revision: 4, preview: { ...plan.preview, link: null } });
+    await waitFor(() => {
+      expect(screen.queryByText(text("plan-preview-slow"))).toBeNull();
+    });
+    expect(screen.queryByText((t) => t.startsWith(plain(text("plan-preview-link", { speed: "" })).slice(0, 20)))).toBeNull();
+  });
+
   it("a plan that changed under the approval says so and does not start", async () => {
     replies.move_approve = () => {
       throw refusal("plan-changed");

@@ -746,6 +746,8 @@ plan-preview-title = Before you start
 plan-preview-fits = There is enough free space on this laptop.
 plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
 plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
+plan-preview-link = The connection between the laptops moves about { $speed } a second, measured just now.
+plan-preview-slow = The connection is slow, so the move will take longer. A network cable, or both laptops close to the router, makes it faster.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] About { $minutes } minute.

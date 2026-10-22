@@ -20,6 +20,10 @@ function PreviewNotes({ preview }: { preview: PlanPreview }) {
   if (preview.fits === true) lines.push({ key: "fits", text: l10n.getString("plan-preview-fits") });
   else if (preview.fits === false) lines.push({ key: "fits", text: l10n.getString("plan-preview-short", { size: fmt.total(preview.shortBytes, false) }) });
   else lines.push({ key: "fits", text: l10n.getString("plan-preview-space-unknown") });
+  if (preview.link) {
+    lines.push({ key: "link", text: l10n.getString("plan-preview-link", { speed: fmt.total(preview.link.bytesPerSecond, false) }) });
+    if (preview.link.slow) lines.push({ key: "slow", text: l10n.getString("plan-preview-slow") });
+  }
   if (preview.minutes) {
     const { low, high } = preview.minutes;
     lines.push({ key: "time", text: low === high ? l10n.getString("plan-preview-time-one", { minutes: low }) : l10n.getString("plan-preview-time", { low, high }) });
@@ -32,7 +36,7 @@ function PreviewNotes({ preview }: { preview: PlanPreview }) {
   ] as const) {
     if (count > 0) lines.push({ key, text: l10n.getString(`plan-preview-${key}`, { count }) });
   }
-  const attention = preview.fits === false || preview.tooBig + preview.refused + preview.runsAtSignIn > 0;
+  const attention = preview.fits === false || preview.link?.slow === true || preview.tooBig + preview.refused + preview.runsAtSignIn > 0;
   return (
     <div className="plan-notice">
       <Banner tone={attention ? "attention" : "info"} title={l10n.getString("plan-preview-title")}>

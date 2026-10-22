@@ -448,13 +448,19 @@ function parseLeftOut(value: unknown): LeftOut | null {
 }
 
 function parsePlanPreview(value: unknown): PlanPreview | null {
-  const f = exactly(value, ["fits", "shortBytes", "minutes", "renamed", "tooBig", "refused", "runsAtSignIn"]);
+  const f = exactly(value, ["fits", "shortBytes", "minutes", "renamed", "tooBig", "refused", "runsAtSignIn", "link"]);
   if (!f || !(f.fits === null || typeof f.fits === "boolean")) return null;
   const minutes = f.minutes === null ? null : parseRange(f.minutes);
   if (f.minutes !== null && minutes === null) return null;
   const { shortBytes, renamed, tooBig, refused, runsAtSignIn } = f;
   if (!isCount(shortBytes) || !isCount(renamed) || !isCount(tooBig) || !isCount(refused) || !isCount(runsAtSignIn)) return null;
-  return { fits: f.fits, shortBytes, minutes, renamed, tooBig, refused, runsAtSignIn };
+  let link: PlanPreview["link"] = null;
+  if (f.link !== null) {
+    const l = exactly(f.link, ["bytesPerSecond", "slow"]);
+    if (!l || !isCount(l.bytesPerSecond) || typeof l.slow !== "boolean") return null;
+    link = { bytesPerSecond: l.bytesPerSecond, slow: l.slow };
+  }
+  return { fits: f.fits, shortBytes, minutes, renamed, tooBig, refused, runsAtSignIn, link };
 }
 
 /** The plan for the person to approve (`PlanView`, event `move-plan`). */

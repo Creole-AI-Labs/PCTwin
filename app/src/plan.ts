@@ -343,6 +343,8 @@ export interface PlanPreview {
   refused: number;
   /** Would land where the new laptop starts programs by itself at sign-in. */
   runsAtSignIn: number;
+  /** The connection, measured just before the plan (C07); null when it could not be measured. `slow`: worth making faster. */
+  link: { bytesPerSecond: number; slow: boolean } | null;
 }
 
 /** One revision of the plan, exactly as it will run. Anything that changes it is a new revision and a new fingerprint. */

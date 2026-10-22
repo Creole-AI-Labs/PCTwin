@@ -702,6 +702,8 @@ plan-preview-title = 开始之前
 plan-preview-fits = 这台笔记本电脑有足够的可用空间。
 plan-preview-short = 这台笔记本电脑还需要 { $size } 可用空间。请在开始前释放一些空间，否则硬盘满时移动会停止。
 plan-preview-space-unknown = PCTwin 无法读取这台笔记本电脑的可用空间。
+plan-preview-link = 两台电脑之间的连接每秒约传输 { $speed }（刚刚测得）。
+plan-preview-slow = 连接较慢，搬家会花更长时间。使用网线，或让两台电脑靠近路由器，可以更快。
 plan-preview-time-one =
     { NUMBER($minutes) ->
        *[other] 大约 { $minutes } 分钟。
