@@ -2654,11 +2654,15 @@ impl<'d> IncomingFile<'d> {
     /// `<name> (damaged copy).pctwin-damaged` (numbered if that is taken), so the person can look
     /// at it; the original on the old laptop is untouched. Only where the drive names files
     /// safely; elsewhere (`Err`) it is removed like any unfinished file. The stored path it is
-    /// kept at.
-    pub fn set_aside(mut self) -> Result<String, GateError> {
+    /// kept at, and which file it is, read through the handle that wrote it (`None` if the drive
+    /// would not say), so it is never recorded as some other file found at that name later.
+    pub fn set_aside(mut self) -> Result<(String, Option<FileId>), GateError> {
         let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
-        // Closed first: Windows renames no open file.
-        drop(self.file.take());
+        // Which file it is, then closed: Windows renames no open file.
+        let written = self
+            .file
+            .take()
+            .and_then(|f| identity(&f.into_std()).ok().map(|(id, _)| id));
         let wanted = damaged_name(&self.name);
         let (name, _) = self
             .destination
@@ -2672,7 +2676,7 @@ impl<'d> IncomingFile<'d> {
                 }
                 self.temp_name = None;
                 flush_name(&self.dir, &name);
-                Ok(stored_path(&self.folder, &name))
+                Ok((stored_path(&self.folder, &name), written))
             }
             None => Err(GateError::Conflict),
         }

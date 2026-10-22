@@ -352,3 +352,27 @@ fn a_chosen_folder_is_the_one_opened_when_it_was_chosen() {
     #[cfg(not(unix))]
     assert!(chosen.join("a.jpg").exists());
 }
+
+/// A damaged copy is kept beside its real name, and set aside says which file it is, read
+/// through the handle that wrote it: the very file now at the kept name.
+#[test]
+fn a_file_set_aside_says_which_file_it_is() {
+    let mine = tempfile::tempdir().unwrap();
+    let mut table = Destinations::new();
+    table
+        .approve("me", Approved::MyFolders, mine.path())
+        .unwrap();
+    let dest = table.get("me").unwrap();
+    let mut file = dest
+        .create_file(&IncomingPath::parse("Docs/a.txt").unwrap(), 5)
+        .unwrap();
+    file.write_all(b"bytes").map_err(GateError::Io).unwrap();
+    let (kept, written) = file.set_aside().unwrap();
+    assert_eq!(kept, "Docs/a.txt (damaged copy).pctwin-damaged");
+    let now = dest.stat(&kept).unwrap().unwrap();
+    assert_eq!(written, Some(now.id));
+    assert!(
+        !mine.path().join("Docs/a.txt").exists(),
+        "never under the real name"
+    );
+}

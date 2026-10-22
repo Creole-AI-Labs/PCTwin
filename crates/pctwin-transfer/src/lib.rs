@@ -890,8 +890,8 @@ impl<'d> Assembly<'d> {
     }
 
     /// Keeps what arrived beside the real name as a damaged copy (see
-    /// [`IncomingFile::set_aside`]): the stored path it is kept at.
-    pub fn set_aside(self) -> Result<String, TransferError> {
+    /// [`IncomingFile::set_aside`]): the stored path it is kept at, and which file it is.
+    pub fn set_aside(self) -> Result<(String, Option<pctwin_gate::FileId>), TransferError> {
         Ok(self.file.set_aside()?)
     }
 

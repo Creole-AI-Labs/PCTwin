@@ -3531,18 +3531,18 @@ impl<'d> ReceiverSession<'d> {
         a: Assembly<'d>,
     ) -> Result<Message, TransferError> {
         let outcome = match a.set_aside() {
-            Ok(kept) => {
+            Ok((kept, written)) => {
                 let why = format!("{READ_DIFFERENTLY} What arrived is kept as {kept}.");
                 let failure = Failure::new(Cause::NotVerified, &why);
                 // Recorded with what is on the disk, so undo can take this copy away too; one
                 // that cannot be read back now is recorded failed only, and undo leaves it.
-                let recorded = self.kept_copy(destination, block_size, &kept).is_some_and(
-                    |(fingerprint, landed)| {
+                let recorded = self
+                    .kept_copy(destination, block_size, &kept, written)
+                    .is_some_and(|(fingerprint, landed)| {
                         self.journal
                             .kept_aside(entry, &failure, &kept, fingerprint, landed)
                             .is_ok()
-                    },
-                );
+                    });
                 if !recorded {
                     let _ = self.journal.failed(entry, &failure);
                 }
@@ -3570,15 +3570,20 @@ impl<'d> ReceiverSession<'d> {
     }
 
     /// The damaged copy at `kept` in `destination`, as it is on the disk now: its whole
-    /// fingerprint and what landed, all read through one handle on that very file.
+    /// fingerprint and what landed, all read through one handle on that very file, and only if
+    /// it is still the file written (`written`, read through the handle that wrote it).
     fn kept_copy(
         &self,
         destination: &str,
         block_size: u64,
         kept: &str,
+        written: Option<pctwin_gate::FileId>,
     ) -> Option<([u8; 32], Landed)> {
         let dest = self.table.get(destination).ok()?;
         let stat = dest.stat(kept).ok()??;
+        if Some(stat.id) != written {
+            return None;
+        }
         let mut file = dest.open_read(kept).ok()?;
         let meta = file.metadata().ok()?;
         let modified_ns = stat.modified.map(crate::nanos);
