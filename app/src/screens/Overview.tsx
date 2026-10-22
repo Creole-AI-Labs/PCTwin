@@ -36,7 +36,7 @@ export default function Overview({ view, onOpen, onContinue, onAllowAccess, onBa
       icon: <FolderIcon />,
       title: l10n.getString("overview-files-title"),
       body: l10n.getString("overview-files-body", { count: view.chosen.folders }),
-      needs: view.unreadable > 0,
+      needs: view.unreadable + view.filesNeedingLook > 0,
     },
     { row: "destinations", icon: <DriveIcon />, title: l10n.getString("overview-dest-title"), body: l10n.getString("overview-dest-body"), needs: view.destinationProblems > 0 },
     { row: "people", icon: <PeopleIcon />, title: l10n.getString("overview-people-title"), body: l10n.getString("overview-people-body"), needs: view.peopleWaiting > 0 },

@@ -33,6 +33,7 @@ function PreviewNotes({ preview }: { preview: PlanPreview }) {
     if (count > 0) lines.push({ key, text: l10n.getString(`plan-preview-${key}`, { count }) });
   }
   const attention = preview.fits === false || preview.tooBig + preview.refused + preview.runsAtSignIn > 0;
+  // (The overview counts the same items, by planAttention; space that could not be read is said here in its own words.)
   return (
     <div className="plan-notice">
       <Banner tone={attention ? "attention" : "info"} title={l10n.getString("plan-preview-title")}>

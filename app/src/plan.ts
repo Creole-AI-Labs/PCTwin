@@ -162,12 +162,16 @@ export interface OverviewView {
   destinationProblems: number;
   /** People whose owner has not signed in and approved yet. */
   peopleWaiting: number;
+  /** Files that will not go as they are (too big for the drive, refused, or would run at sign-in): the plan lists each. */
+  filesNeedingLook: number;
 }
 
 /**
  * The overview (M03) of a plan the new laptop received: what is chosen, from the plan's own sums;
- * a destination problem when the plan says it does not fit; people waiting when the plan is held
- * for them. Places the old laptop could not search are known only there, so none are counted.
+ * a destination problem when the plan does not fit or its free space could not be read; files that
+ * will not go as they are; people waiting when the plan is held for them. Places the old laptop
+ * could not search are known only there, so none are counted. The attention rule is the plan
+ * page's own ([`planAttention`]).
  */
 export function overviewOf(plan: PlanView): OverviewView {
   const files = plan.groups.reduce((sum, g) => sum + (g.size.kind === "unreadable" ? 0 : g.size.files), 0);
@@ -175,14 +179,25 @@ export function overviewOf(plan: PlanView): OverviewView {
   return {
     chosen: { folders: plan.groups.length, files, bytes, atLeast: plan.groups.some((g) => g.size.kind !== "known") },
     unreadable: 0,
-    destinationProblems: plan.preview?.fits === false ? 1 : 0,
+    destinationProblems: planAttention(plan).space ? 1 : 0,
     peopleWaiting: plan.blocked && plan.blocked !== "invalid" ? 1 : 0,
+    filesNeedingLook: planAttention(plan).files,
   };
 }
 
 /** Everything in the overview that still needs the person. */
 export function attentionCount(view: OverviewView): number {
-  return view.unreadable + view.destinationProblems + view.peopleWaiting;
+  return view.unreadable + view.destinationProblems + view.peopleWaiting + view.filesNeedingLook;
+}
+
+/** What on a plan needs the person before it starts, by the one rule the plan page and the overview share. */
+export function planAttention(plan: PlanView): { files: number; space: boolean } {
+  const p = plan.preview;
+  return {
+    files: p ? p.tooBig + p.refused + p.runsAtSignIn : 0,
+    // Not enough space, or space that could not be read, is never shown as fine.
+    space: p ? p.fits !== true : false,
+  };
 }
 
 /* ---------- M04 Keep what matters to you ---------- */
