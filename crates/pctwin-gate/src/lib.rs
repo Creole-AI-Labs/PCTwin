@@ -437,6 +437,16 @@ fn split_extension(name: &str) -> (&str, &str) {
     }
 }
 
+/// What follows a damaged copy's name, so nothing opens it as the real file.
+const DAMAGED: &str = " (damaged copy).pctwin-damaged";
+
+/// The name a damaged copy of `name` is kept under: its start, cut so the whole name stays well
+/// within what every drive allows (255 units), with room for a number if that name is taken.
+fn damaged_name(name: &str) -> String {
+    let room = 255usize.saturating_sub(name_units(DAMAGED) + 8);
+    format!("{}{DAMAGED}", cut_to(name, room))
+}
+
 /// Shortens `name` to at most `max` units ([`name_units`]), keeping its extension and whole
 /// characters.
 fn shorten(name: &str, max: usize) -> String {
@@ -2641,7 +2651,7 @@ impl<'d> IncomingFile<'d> {
         let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
         // Closed first: Windows renames no open file.
         drop(self.file.take());
-        let wanted = format!("{} (damaged copy).pctwin-damaged", self.name);
+        let wanted = damaged_name(&self.name);
         let (name, _) = self
             .destination
             .free_name(&self.dir, &self.folder, &wanted)?;
@@ -3488,6 +3498,20 @@ mod tests {
     //! [`Destination`] on the test machines' disks, so it is checked directly. So is what a space
     //! reservation's error means, since the test machines' disks can all reserve.
     use super::*;
+
+    #[test]
+    fn a_damaged_copy_of_a_long_name_still_fits_on_every_drive() {
+        for len in [10, 200, 230, 250, 255] {
+            let name = format!("{}.docx", "a".repeat(len - 5));
+            let kept = damaged_name(&name);
+            assert!(kept.ends_with(DAMAGED), "{kept}");
+            assert!(name_units(&kept) <= 255 - 8, "{len}: {}", name_units(&kept));
+        }
+        // Whole characters only, in any script.
+        let wide = "照片".repeat(120);
+        assert!(name_units(&damaged_name(&wide)) <= 255 - 8);
+        assert_eq!(damaged_name("report.docx"), format!("report.docx{DAMAGED}"));
+    }
 
     /// A folder's own handle is opened for paths only on Linux, and flushing through it fails, so
     /// a flush that quietly did nothing there would go unseen. The handle a flush uses must

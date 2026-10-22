@@ -3103,12 +3103,11 @@ impl<'d> ReceiverSession<'d> {
                     drop(s.assembly);
                     let _ = self.journal.failed(s.entry, why);
                     self.allowance.ended(s.item, false);
-                    self.end(
-                        s.item,
-                        stream,
-                        ReceiveOutcome::Failed(Failure::new(cause, why)),
-                        None,
-                    );
+                    let outcome = ReceiveOutcome::Failed(Failure::new(cause, why));
+                    // A file this drive kept storing wrong counts toward its brake, however
+                    // it ended.
+                    self.note_stored(&s.destination, &outcome);
+                    self.end(s.item, stream, outcome, None);
                 }
                 replies.push(Message::FileDone { stream, ok: false });
             }
