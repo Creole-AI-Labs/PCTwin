@@ -126,25 +126,43 @@ describe("the move, once paired", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("move_stop");
   });
 
-  it("both laptops are shown as each said when the move started (C06), old first, with a word to plug in when one is on battery", async () => {
+  it("once the laptops greet: C06 shows both, old first, then C07 the measured connection, then the waiting page", async () => {
     await host(false);
-    // The new laptop (a Mac, plugged in) hears the old one (Windows, on battery).
+    // The new laptop (a Mac) hears the old one (Windows, on battery), and the measured link.
     send("move-peer", peers[0]);
-    const rows = screen.getByRole("region", { name: text("move-peer-title") }).querySelectorAll("li");
-    const [first, second] = [...rows].map((r) => plain(r.textContent));
-    expect(first).toContain(text("move-peer-old"));
-    expect(first).toContain(plain(text("move-peer-line", { system: text("move-peer-system-windows"), chip: "x86_64", app: "0.1.0" })));
-    expect(first).toContain(plain(text("move-peer-battery", { percent: 34 })));
-    expect(second).toContain(text("move-peer-system-mac"));
-    expect(second).toContain(text("move-peer-plugged"));
-    expect(screen.getByText(text("move-peer-plug-in"))).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("peer-title"));
+    const page = plain(document.body.textContent);
+    expect(page.indexOf("Windows")).toBeLessThan(page.indexOf("Mac"));
+    expect(page).toContain("x86_64");
+    // The engine moving on underneath does not take the page away.
+    send("move-stage", { kind: "waiting" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("peer-title"));
+    fireEvent.click(screen.getByRole("button", { name: text("peer-continue") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("check-title"));
+    // Measured just now: 62 MB a second; the old laptop runs on battery, and it says so.
+    expect(plain(document.body.textContent)).toContain("62");
+    expect(screen.queryByRole("button", { name: text("check-again") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: text("check-continue") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-wait-list-title"));
   });
 
-  it("no word to plug in when neither laptop is on battery", async () => {
-    await host(true);
-    send("move-peer", peers[1]);
-    expect(screen.getByRole("region", { name: text("move-peer-title") })).toBeTruthy();
-    expect(screen.queryByText(text("move-peer-plug-in"))).toBeNull();
+  it("PCTwin versions that cannot move together stay on C06, which names the laptop to update, and Back goes home", async () => {
+    const { onHome } = await host(true);
+    send("move-peer", peers[2]);
+    expect(screen.getByText(text("peer-version-differs"))).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: text("peer-continue") }).disabled).toBe(true);
+    // The move then ends over the versions: the page stays, naming the laptop to update.
+    send("move-problem", updateHere);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("peer-title"));
+    fireEvent.click(screen.getByRole("button", { name: text("frame-back") }));
+    expect(onHome).toHaveBeenCalled();
+  });
+
+  it("any other end during C06 goes to its own page", async () => {
+    await host(false);
+    send("move-peer", peers[0]);
+    send("move-problem", linkLost);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("move-lost-title"));
   });
 
   it("new laptop: shows the plan with what was found before the move, and approves exactly that revision", async () => {
@@ -211,23 +229,6 @@ describe("the move, once paired", () => {
       expect(screen.queryByText(text("plan-place-no-room"))).toBeNull();
     });
     expect(screen.getByRole<HTMLButtonElement>("button", { name: text("plan-start") }).disabled).toBe(false);
-  });
-
-  it("the plan says how fast the connection measured (C07), and how to make a slow one faster", async () => {
-    await host(false);
-    send("move-plan", plan);
-    expect(screen.getByText((t) => plain(t) === plain(text("plan-preview-link", { speed: "62 MB" })))).toBeTruthy();
-    expect(screen.queryByText(text("plan-preview-slow"))).toBeNull();
-    send("move-plan", { ...plan, revision: 3, preview: { ...plan.preview, link: { bytesPerSecond: 1_200_000, slow: true } } });
-    await waitFor(() => {
-      expect(screen.getByText(text("plan-preview-slow"))).toBeTruthy();
-    });
-    // Not measured: nothing is said about speed.
-    send("move-plan", { ...plan, revision: 4, preview: { ...plan.preview, link: null } });
-    await waitFor(() => {
-      expect(screen.queryByText(text("plan-preview-slow"))).toBeNull();
-    });
-    expect(screen.queryByText((t) => t.startsWith(plain(text("plan-preview-link", { speed: "" })).slice(0, 20)))).toBeNull();
   });
 
   it("a plan that changed under the approval says so and does not start", async () => {

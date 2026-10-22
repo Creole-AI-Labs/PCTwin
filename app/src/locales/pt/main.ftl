@@ -121,7 +121,7 @@ check-status-connected = Disponível
 check-status-not-needed = Não precisa
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = Desconhecido
-check-speed-unknown = O PCTwin não conseguiu medir a conexão desta vez. Verifique de novo daqui a pouco.
+check-speed-unknown = O PCTwin não conseguiu medir a conexão desta vez. Os arquivos são movidos mesmo assim; só falta a estimativa de tempo.
 check-space-unknown = O PCTwin não conseguiu ler o espaço livre no notebook novo.
 check-power-unknown = O PCTwin não conseguiu saber se { $label } está ligado na tomada.
 check-internet-unknown = O PCTwin não conseguiu saber se este notebook está online. Tudo bem: copiar arquivos não precisa de internet.
@@ -886,8 +886,6 @@ plan-preview-title = Antes de começar
 plan-preview-fits = Há espaço livre suficiente neste notebook.
 plan-preview-short = Este notebook precisa de mais { $size } de espaço livre. Libere espaço antes de começar, ou a transferência para quando o disco encher.
 plan-preview-space-unknown = O PCTwin não conseguiu ler quanto espaço livre este notebook tem.
-plan-preview-link = A conexão entre os notebooks transfere cerca de { $speed } por segundo, medido agora.
-plan-preview-slow = A conexão está lenta, então a mudança vai demorar mais. Um cabo de rede, ou os dois notebooks perto do roteador, deixa mais rápido.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Cerca de { $minutes } minuto.
@@ -1222,18 +1220,10 @@ move-not-approved-old = O plano não foi aprovado no notebook novo, então nada 
 move-not-approved-new = Você não aprovou o plano, então nada foi copiado.
 move-failed-title = Algo deu errado.
 move-failed-body = A transferência não pôde continuar. Se acontecer de novo, Mais detalhes, abaixo, diz o que deu errado.
-move-peer-title = Seus dois notebooks
-move-peer-old = Notebook antigo
-move-peer-new = Notebook novo
-move-peer-line = { $system } · { $chip } · PCTwin { $app }
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
 move-peer-system-linux = Linux
 move-peer-system-other = Outro sistema
-move-peer-plugged = Na tomada
-move-peer-battery = Na bateria ({ $percent }%)
-move-peer-unknown = Energia desconhecida
-move-peer-plug-in = Se puder, ligue os dois notebooks na tomada. Uma mudança longa pode esgotar a bateria.
 move-update-here-title = Atualize o PCTwin neste notebook
 move-update-here-body = Este notebook tem um PCTwin mais antigo que o outro, então eles não podem mover arquivos juntos. Atualize o PCTwin aqui e comece de novo. Nada foi copiado.
 move-update-there-title = Atualize o PCTwin no outro notebook

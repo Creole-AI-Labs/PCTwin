@@ -166,21 +166,54 @@ fn endings() -> Vec<EndedEarly> {
 }
 
 fn peers() -> Vec<crate::moving::Peer> {
+    use crate::moving::{LinkView, Peer, Versions};
     use pctwin_move::greeting::{About, Power, System};
-    let about = |system, chip: &str, power| About {
+    let about = |system, chip: &str, app: &str, power, free_bytes| About {
         system,
         chip: chip.into(),
-        app: "0.1.0".into(),
+        app: app.into(),
         power,
+        free_bytes,
     };
     vec![
-        crate::moving::Peer {
-            mine: about(System::Mac, "aarch64", Power::Plugged),
-            theirs: about(System::Windows, "x86_64", Power::Battery { percent: 34 }),
+        Peer {
+            mine: about(
+                System::Mac,
+                "aarch64",
+                "0.1.0",
+                Power::Plugged,
+                Some(410_000_000_000),
+            ),
+            theirs: about(
+                System::Windows,
+                "x86_64",
+                "0.1.0",
+                Power::Battery { percent: 34 },
+                Some(52_000_000_000),
+            ),
+            other: Some(picked()),
+            versions: Versions::Same,
+            link: Some(LinkView {
+                bytes_per_second: 62_000_000,
+                slow: false,
+            }),
         },
-        crate::moving::Peer {
-            mine: about(System::Linux, "x86_64", Power::Unknown),
-            theirs: about(System::Other, "riscv64", Power::Plugged),
+        Peer {
+            mine: about(System::Linux, "x86_64", "0.1.0", Power::Unknown, None),
+            theirs: about(System::Other, "riscv64", "0.1.0", Power::Plugged, None),
+            other: None,
+            versions: Versions::Same,
+            link: Some(LinkView {
+                bytes_per_second: 1_200_000,
+                slow: true,
+            }),
+        },
+        Peer {
+            mine: about(System::Windows, "x86_64", "0.1.0", Power::Plugged, None),
+            theirs: about(System::Mac, "aarch64", "0.2.0", Power::Plugged, None),
+            other: None,
+            versions: Versions::UpdateHere,
+            link: None,
         },
     ]
 }
@@ -212,10 +245,6 @@ fn plans() -> Vec<PlanView> {
             too_big: 0,
             refused: 0,
             runs_at_sign_in: 1,
-            link: Some(crate::moving::LinkView {
-                bytes_per_second: 62_000_000,
-                slow: false,
-            }),
         },
     }]
 }

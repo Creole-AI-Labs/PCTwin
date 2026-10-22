@@ -259,19 +259,30 @@ export type OthersWhy = (typeof OTHERS_WHY)[number];
 export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
 
 /** How much of the mover's own things the scan has found so far (only ever grows). */
-/** What a laptop said it is when the move started (C06, `About`). */
+/** What a laptop said it is when the move started (C06, `About`). `freeBytes`: its free space, when read. */
 export type About = {
   system: "windows" | "mac" | "linux" | "other";
   chip: string;
   app: string;
   power: { kind: "plugged" | "unknown" } | { kind: "battery"; percent: number };
+  freeBytes: number | null;
 };
 
-/** This laptop and the other one (`Peer`). */
-export type Peer = { mine: About; theirs: About };
+/**
+ * This laptop and the other one as each said when the move started (`Peer`, C06), the other's
+ * pairing label when known, whether their PCTwin versions can move together, and the link the new
+ * laptop measured (C07; null when not measured).
+ */
+export type Peer = {
+  mine: About;
+  theirs: About;
+  other: Label | null;
+  versions: "same" | "update-here" | "update-there";
+  link: { bytesPerSecond: number; slow: boolean } | null;
+};
 
 function parseAbout(value: unknown): About | null {
-  const f = exactly(value, ["system", "chip", "app", "power"]);
+  const f = exactly(value, ["system", "chip", "app", "power", "freeBytes"]);
   if (!f || !oneOf(f.system, ["windows", "mac", "linux", "other"] as const) || typeof f.chip !== "string" || typeof f.app !== "string") return null;
   const kind = typeof f.power === "object" && f.power !== null ? (f.power as Fields).kind : undefined;
   let power: About["power"] | null = null;
@@ -280,15 +291,24 @@ function parseAbout(value: unknown): About | null {
     const b = exactly(f.power, ["kind", "percent"]);
     power = b && isCount(b.percent) && b.percent <= 100 ? { kind, percent: b.percent } : null;
   }
-  return power && { system: f.system, chip: f.chip, app: f.app, power };
+  if (!isCountOrNull(f.freeBytes)) return null;
+  return power && { system: f.system, chip: f.chip, app: f.app, power, freeBytes: f.freeBytes };
 }
 
 export function parsePeer(value: unknown): Peer | null {
-  const f = exactly(value, ["mine", "theirs"]);
-  if (!f) return null;
+  const f = exactly(value, ["mine", "theirs", "other", "versions", "link"]);
+  if (!f || !oneOf(f.versions, ["same", "update-here", "update-there"] as const)) return null;
   const mine = parseAbout(f.mine);
   const theirs = parseAbout(f.theirs);
-  return mine && theirs && { mine, theirs };
+  const other = f.other === null ? null : parseLabelView(f.other);
+  if (f.other !== null && other === null) return null;
+  let link: Peer["link"] = null;
+  if (f.link !== null) {
+    const l = exactly(f.link, ["bytesPerSecond", "slow"]);
+    if (!l || !isCount(l.bytesPerSecond) || typeof l.slow !== "boolean") return null;
+    link = { bytesPerSecond: l.bytesPerSecond, slow: l.slow };
+  }
+  return mine && theirs && { mine, theirs, other, versions: f.versions, link };
 }
 
 export function parseFound(value: unknown): { bytes: number } | null {
@@ -448,19 +468,13 @@ function parseLeftOut(value: unknown): LeftOut | null {
 }
 
 function parsePlanPreview(value: unknown): PlanPreview | null {
-  const f = exactly(value, ["fits", "shortBytes", "minutes", "renamed", "tooBig", "refused", "runsAtSignIn", "link"]);
+  const f = exactly(value, ["fits", "shortBytes", "minutes", "renamed", "tooBig", "refused", "runsAtSignIn"]);
   if (!f || !(f.fits === null || typeof f.fits === "boolean")) return null;
   const minutes = f.minutes === null ? null : parseRange(f.minutes);
   if (f.minutes !== null && minutes === null) return null;
   const { shortBytes, renamed, tooBig, refused, runsAtSignIn } = f;
   if (!isCount(shortBytes) || !isCount(renamed) || !isCount(tooBig) || !isCount(refused) || !isCount(runsAtSignIn)) return null;
-  let link: PlanPreview["link"] = null;
-  if (f.link !== null) {
-    const l = exactly(f.link, ["bytesPerSecond", "slow"]);
-    if (!l || !isCount(l.bytesPerSecond) || typeof l.slow !== "boolean") return null;
-    link = { bytesPerSecond: l.bytesPerSecond, slow: l.slow };
-  }
-  return { fits: f.fits, shortBytes, minutes, renamed, tooBig, refused, runsAtSignIn, link };
+  return { fits: f.fits, shortBytes, minutes, renamed, tooBig, refused, runsAtSignIn };
 }
 
 /** The plan for the person to approve (`PlanView`, event `move-plan`). */

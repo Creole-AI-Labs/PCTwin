@@ -1,7 +1,9 @@
-//! The first words of a move (C06), said the moment it starts and before the old laptop looks
-//! for anything: both laptops agree the move protocol and say what they are (the system, the
-//! chip, the PCTwin version, and whether they run on battery), so each screen can show the other
-//! laptop at once.
+//! The first words of a move (C06, C07), said the moment it starts and before the old laptop
+//! looks for anything: each laptop says what it is (the system, the chip, the PCTwin version,
+//! whether it runs on battery, and its free space), then they agree the move protocol, then the
+//! new laptop measures the link and tells the old one what it measured. Each screen can then show
+//! the other laptop and the connection at once. Laptops whose PCTwin versions share no protocol
+//! still hear what the other is first, so the person is told which laptop to update.
 //!
 //! The old laptop then finds the person's files, which may take minutes and may wait on the
 //! person (a Mac's privacy settings, an administrator's approval). The new laptop waits for
@@ -10,6 +12,7 @@
 
 use pctwin_transfer::{
     Channel, ChannelError, MOVE_PROTOCOL, TransferError, VERSION_WAIT, agree_version,
+    answer_link_test, measure_link,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +22,8 @@ use serde::{Deserialize, Serialize};
 const ABOUT: u8 = 42;
 /// The message kind of the old laptop's word that its list follows now.
 const LIST_COMING: u8 = 43;
+/// The message kind of the new laptop's word on the link speed it measured.
+const MEASURED: u8 = 44;
 /// What a laptop says it is: a handful of short words, far below the link's message limit.
 const MAX_ABOUT: usize = 512;
 /// The longest chip name and version said.
@@ -63,7 +68,7 @@ pub enum Power {
 
 /// What a laptop says it is (C06).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct About {
     pub system: System,
     /// The chip, as the system names it ("x86_64", "aarch64").
@@ -71,16 +76,19 @@ pub struct About {
     /// The PCTwin version.
     pub app: String,
     pub power: Power,
+    /// Free space where this laptop keeps people's files, in bytes, when it could be read.
+    pub free_bytes: Option<u64>,
 }
 
 impl About {
-    /// This laptop, powered as `power` says.
-    pub fn here(power: Power) -> Self {
+    /// This laptop, powered as `power` says, with `free_bytes` free.
+    pub fn here(power: Power, free_bytes: Option<u64>) -> Self {
         Self {
             system: System::here(),
             chip: std::env::consts::ARCH.to_string(),
             app: env!("CARGO_PKG_VERSION").to_string(),
             power,
+            free_bytes,
         }
     }
 
@@ -104,6 +112,29 @@ pub struct Greeting {
     pub version: u16,
     /// What the other laptop said it is.
     pub theirs: About,
+    /// The link speed the new laptop measured, in bytes a second (`None`: not measured).
+    pub bytes_per_second: Option<u64>,
+}
+
+/// Which laptop this is in the move: the new laptop measures the link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Old,
+    New,
+}
+
+/// A greeting that did not end in agreement, with what the other laptop said it is when it got
+/// that far (so a version gap can still name both laptops).
+#[derive(Debug)]
+pub struct NotGreeted {
+    pub theirs: Option<About>,
+    pub error: TransferError,
+}
+
+impl From<NotGreeted> for TransferError {
+    fn from(n: NotGreeted) -> Self {
+        n.error
+    }
 }
 
 /// A link the two laptops have greeted on, with what they agreed: the app's move runs only on
@@ -129,17 +160,81 @@ impl<C: Channel> Channel for Greeted<'_, C> {
     }
 }
 
-/// Both laptops, the moment the move starts: agree the protocol, then each says what it is.
+/// Both laptops, the moment the move starts: each says what it is, they agree the protocol, and
+/// the new laptop measures the link and says what it measured.
 pub async fn greet<'l, C: Channel>(
     link: &'l mut C,
     mine: &About,
-) -> Result<Greeted<'l, C>, TransferError> {
-    let greeting = greeting(link, mine).await?;
-    Ok(Greeted { link, greeting })
+    side: Side,
+) -> Result<Greeted<'l, C>, NotGreeted> {
+    let theirs = about(link, mine).await.map_err(|error| NotGreeted {
+        theirs: None,
+        error,
+    })?;
+    match agree(link, side).await {
+        Ok((version, bytes_per_second)) => Ok(Greeted {
+            link,
+            greeting: Greeting {
+                version,
+                theirs,
+                bytes_per_second,
+            },
+        }),
+        Err(error) => Err(NotGreeted {
+            theirs: Some(theirs),
+            error,
+        }),
+    }
 }
 
-async fn greeting(ch: &mut impl Channel, mine: &About) -> Result<Greeting, TransferError> {
-    let version = agree_version(ch, MOVE_PROTOCOL).await?;
+/// The protocol, then the link test (measured on the new laptop, told to the old one).
+async fn agree(link: &mut impl Channel, side: Side) -> Result<(u16, Option<u64>), TransferError> {
+    let version = agree_version(link, MOVE_PROTOCOL).await?;
+    let bytes_per_second = match side {
+        Side::New => {
+            let speed = measure_link(link, version).await?;
+            let mut msg = vec![MEASURED];
+            if let Some(speed) = speed {
+                msg.extend_from_slice(&speed.to_be_bytes());
+            }
+            link.send(&msg)
+                .await
+                .map_err(|_| TransferError::ConnectionDropped)?;
+            speed
+        }
+        Side::Old => {
+            answer_link_test(link, version).await?;
+            let got = tokio::time::timeout(VERSION_WAIT, link.recv())
+                .await
+                .map_err(|_| TransferError::NoAnswer("it did not say the link speed".into()))?
+                .map_err(|_| TransferError::ConnectionDropped)?;
+            parse_measured(&got)?
+        }
+    };
+    Ok((version, bytes_per_second))
+}
+
+/// Reads the new laptop's word on the link speed: none, or a speed of at least one byte a second.
+pub fn parse_measured(msg: &[u8]) -> Result<Option<u64>, TransferError> {
+    match msg {
+        [MEASURED] => Ok(None),
+        [MEASURED, rest @ ..] => {
+            let bytes: [u8; 8] = rest
+                .try_into()
+                .map_err(|_| TransferError::Protocol("the link speed is not a number".into()))?;
+            match u64::from_be_bytes(bytes) {
+                0 => Err(TransferError::Protocol("a link speed of nothing".into())),
+                speed => Ok(Some(speed)),
+            }
+        }
+        _ => Err(TransferError::Protocol(
+            "it did not say the link speed".into(),
+        )),
+    }
+}
+
+/// Says what this laptop is and hears what the other one is.
+async fn about(ch: &mut impl Channel, mine: &About) -> Result<About, TransferError> {
     let mut msg = vec![ABOUT];
     msg.extend_from_slice(
         &serde_json::to_vec(mine).map_err(|e| TransferError::Protocol(e.to_string()))?,
@@ -151,10 +246,7 @@ async fn greeting(ch: &mut impl Channel, mine: &About) -> Result<Greeting, Trans
         .await
         .map_err(|_| TransferError::NoAnswer("it did not say what it is".into()))?
         .map_err(|_| TransferError::ConnectionDropped)?;
-    Ok(Greeting {
-        version,
-        theirs: parse_about(&got)?,
-    })
+    parse_about(&got)
 }
 
 /// Reads what the other laptop said it is, refusing anything else.
@@ -227,37 +319,90 @@ mod tests {
             chip: "aarch64".into(),
             app: "0.1.0".into(),
             power,
+            free_bytes: Some(400_000_000_000),
         }
     }
 
     #[tokio::test]
-    async fn each_laptop_hears_what_the_other_is() {
+    async fn each_laptop_hears_what_the_other_is_and_both_know_the_measured_speed() {
         let (mut old, mut new) = pair();
         let windows = about(System::Windows, Power::Battery { percent: 40 });
         let mac = about(System::Mac, Power::Plugged);
-        let (a, b) = tokio::join!(greet(&mut old, &windows), greet(&mut new, &mac));
+        let (a, b) = tokio::join!(
+            greet(&mut old, &windows, Side::Old),
+            greet(&mut new, &mac, Side::New)
+        );
         let (a, b) = (a.unwrap(), b.unwrap());
         assert_eq!(a.greeting().theirs, mac);
         assert_eq!(b.greeting().theirs, windows);
         assert_eq!(a.greeting().version, b.greeting().version);
+        assert!(b.greeting().bytes_per_second.is_some(), "measured");
+        assert_eq!(
+            a.greeting().bytes_per_second,
+            b.greeting().bytes_per_second,
+            "the old laptop hears what the new one measured"
+        );
+    }
+
+    /// Laptops whose versions share no protocol still hear what the other is first, so the
+    /// person can be told which laptop to update.
+    #[tokio::test]
+    async fn a_version_gap_still_says_what_the_other_laptop_is() {
+        let (mut old, mut new) = pair();
+        let windows = about(System::Windows, Power::Plugged);
+        let newer = async {
+            // A newer PCTwin: says what it is, then offers only protocols far ahead.
+            let mut msg = vec![ABOUT];
+            msg.extend(serde_json::to_vec(&about(System::Mac, Power::Plugged)).unwrap());
+            new.send(&msg).await.unwrap();
+            let _ = new.recv().await;
+            new.send(&[34, 0x7f, 0x00, 0x7f, 0x00]).await.unwrap();
+            new
+        };
+        let (got, _new) = tokio::join!(greet(&mut old, &windows, Side::Old), newer);
+        let Err(not) = got else {
+            panic!("no protocol in common");
+        };
+        assert_eq!(not.theirs.map(|t| t.system), Some(System::Mac));
+        assert!(
+            matches!(
+                not.error,
+                TransferError::VersionGap(pctwin_transfer::VersionGap::ThisLaptopOlder)
+            ),
+            "{:?}",
+            not.error
+        );
+    }
+
+    #[test]
+    fn a_measured_speed_is_none_or_a_whole_number() {
+        assert_eq!(parse_measured(&[MEASURED]).unwrap(), None);
+        let mut msg = vec![MEASURED];
+        msg.extend(62_000_000u64.to_be_bytes());
+        assert_eq!(parse_measured(&msg).unwrap(), Some(62_000_000));
+        let mut zero = vec![MEASURED];
+        zero.extend(0u64.to_be_bytes());
+        assert!(parse_measured(&zero).is_err());
+        assert!(parse_measured(&[MEASURED, 1, 2]).is_err());
+        assert!(parse_measured(&[ABOUT]).is_err());
     }
 
     #[test]
     fn anything_but_plain_words_is_refused() {
         let msg = |json: &str| [&[ABOUT][..], json.as_bytes()].concat();
-        let good = r#"{"system":"linux","chip":"x86_64","app":"0.1.0","power":{"kind":"unknown"}}"#;
+        let good = r#"{"system":"linux","chip":"x86_64","app":"0.1.0","power":{"kind":"unknown"},"freeBytes":null}"#;
         assert!(parse_about(&msg(good)).is_ok());
         for bad in [
-            r#"{"system":"linux","chip":"x86 64","app":"0.1.0","power":{"kind":"unknown"}}"#,
-            r#"{"system":"linux","chip":"x86_64","app":"","power":{"kind":"unknown"}}"#,
-            r#"{"system":"linux","chip":"x86_64","app":"0.1.0","power":{"kind":"battery","percent":101}}"#,
-            r#"{"system":"amiga","chip":"x86_64","app":"0.1.0","power":{"kind":"unknown"}}"#,
-            r#"{"system":"linux","chip":"x86_64","app":"0.1.0","power":{"kind":"unknown"},"x":1}"#,
+            r#"{"system":"linux","chip":"x86 64","app":"0.1.0","power":{"kind":"unknown"},"freeBytes":null}"#,
+            r#"{"system":"linux","chip":"x86_64","app":"","power":{"kind":"unknown"},"freeBytes":null}"#,
+            r#"{"system":"linux","chip":"x86_64","app":"0.1.0","power":{"kind":"battery","percent":101},"freeBytes":null}"#,
+            r#"{"system":"amiga","chip":"x86_64","app":"0.1.0","power":{"kind":"unknown"},"freeBytes":null}"#,
+            r#"{"system":"linux","chip":"x86_64","app":"0.1.0","power":{"kind":"unknown"},"freeBytes":null,"x":1}"#,
         ] {
             assert!(parse_about(&msg(bad)).is_err(), "{bad}");
         }
         let long = format!(
-            r#"{{"system":"linux","chip":"x86_64","app":"{}","power":{{"kind":"unknown"}}}}"#,
+            r#"{{"system":"linux","chip":"x86_64","app":"{}","power":{{"kind":"unknown"}},"freeBytes":null}}"#,
             "1".repeat(MAX_ABOUT)
         );
         assert!(parse_about(&msg(&long)).is_err());

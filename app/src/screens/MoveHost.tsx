@@ -41,6 +41,10 @@ import MoveEnded, { type MoveEnd } from "./MoveEnded";
 import MoveWaiting from "./MoveWaiting";
 import Outcome from "./Outcome";
 import PlanReview, { type ChosenPlace, type PlaceNote } from "./PlanReview";
+import MeetLaptop from "./MeetLaptop";
+import CheckConnection from "./CheckConnection";
+import { connectionCheck, peerReadiness, type Greeted, type Naming } from "../connection";
+import { labelText } from "../pairing";
 import ProgressCompact from "./ProgressCompact";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
@@ -169,8 +173,10 @@ export default function MoveHost({
   const [othersWhy, setOthersWhy] = useState<OthersWhy | null>(null);
   // How much of the mover's own things the scan has found so far (M02).
   const [found, setFound] = useState<number | null>(null);
-  // The two laptops, as each said when the move started (C06).
+  // The two laptops, as each said when the move started (C06), and the connection (C07): each
+  // shown once, as its own page, before the waiting page.
   const [peer, setPeer] = useState<Peer | null>(null);
+  const [intro, setIntro] = useState<"meet" | "check" | "done">("meet");
   // "Before you leave this laptop": open or not, and the person's own ticks (their word only).
   const [before, setBefore] = useState(false);
   const [beforeItems, setBeforeItems] = useState<BeforeItem[]>(() =>
@@ -257,6 +263,40 @@ export default function MoveHost({
     void moveStop().catch(() => undefined);
   };
 
+  // C06 and C07 come first. A move that ended over PCTwin versions stays on C06, which names the
+  // laptop to update; any other end goes straight to its own page.
+  const versionsDiffer = peer !== null && peer.versions !== "same";
+  if (peer && !help && intro !== "done" && (view.kind !== "end" || versionsDiffer)) {
+    const naming: Naming = {
+      system: (s) => l10n.getString(`move-peer-system-${s}`),
+      thisLaptop: l10n.getString("qs-label-this"),
+      otherLaptop: l10n.getString("qs-label-other"),
+    };
+    const greeted: Greeted = { ...peer, otherLabel: peer.other ? labelText(l10n, peer.other) : null };
+    if (intro === "meet" || versionsDiffer) {
+      return (
+        <MeetLaptop
+          readiness={peerReadiness(greeted, old, naming)}
+          onContinue={() => {
+            setIntro("check");
+          }}
+          onBack={view.kind === "end" ? onHome : stopNow}
+        />
+      );
+    }
+    return (
+      <CheckConnection
+        check={connectionCheck(greeted, old, naming)}
+        onContinue={() => {
+          setIntro("done");
+        }}
+        onBack={() => {
+          setIntro("meet");
+        }}
+      />
+    );
+  }
+
   if (help) {
     return (
       <GetHelp
@@ -309,7 +349,6 @@ export default function MoveHost({
           old={old}
           note={othersNote}
           found={view.stage === "scanning" ? found : null}
-          peer={peer}
           onBefore={
             old && view.stage === "waiting"
               ? () => {

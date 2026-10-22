@@ -25,7 +25,8 @@ export default function CheckConnection({
 }: {
   check: ConnectionCheck | null;
   onContinue: () => void;
-  onRecheck: () => void;
+  /** Measure again. Without it there is no "Check again" (the move measured once, as the laptops greeted). */
+  onRecheck?: () => void;
   onBack: () => void;
 }) {
   return (
@@ -42,13 +43,15 @@ export default function CheckConnection({
       ) : (
         <Results check={check} />
       )}
-      <div className="connect-actions">
-        <Button className="connect-block" onClick={onRecheck}>
-          <Localized id="check-again">
-            <span />
-          </Localized>
-        </Button>
-      </div>
+      {onRecheck && (
+        <div className="connect-actions">
+          <Button className="connect-block" onClick={onRecheck}>
+            <Localized id="check-again">
+              <span />
+            </Localized>
+          </Button>
+        </div>
+      )}
       {check !== null && (
         <FrameFooter>
           <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>

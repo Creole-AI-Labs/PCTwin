@@ -122,7 +122,7 @@ check-status-connected = Disponible
 check-status-not-needed = Pas nécessaire
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = Inconnu
-check-speed-unknown = PCTwin n’a pas pu mesurer la connexion cette fois. Vérifiez à nouveau dans un instant.
+check-speed-unknown = PCTwin n’a pas pu mesurer la connexion cette fois. Les fichiers sont quand même transférés ; seule l’estimation du temps manque.
 check-space-unknown = PCTwin n’a pas pu lire l’espace libre sur le nouvel ordinateur portable.
 check-power-unknown = PCTwin ne sait pas si { $label } est branché.
 check-internet-unknown = PCTwin ne sait pas si cet ordinateur portable est en ligne. Ce n’est pas grave : la copie des fichiers n’a pas besoin d’internet.
@@ -891,8 +891,6 @@ plan-preview-title = Avant de commencer
 plan-preview-fits = Ce portable a assez d’espace libre.
 plan-preview-short = Ce portable a besoin de { $size } d’espace libre en plus. Libérez de l’espace avant de commencer, sinon le transfert s’arrêtera quand le disque sera plein.
 plan-preview-space-unknown = PCTwin n’a pas pu lire l’espace libre de ce portable.
-plan-preview-link = La connexion entre les ordinateurs transfère environ { $speed } par seconde, mesuré à l'instant.
-plan-preview-slow = La connexion est lente, le transfert prendra donc plus de temps. Un câble réseau, ou les deux ordinateurs près du routeur, le rend plus rapide.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Environ { $minutes } minute.
@@ -1227,18 +1225,10 @@ move-not-approved-old = Le plan n’a pas été approuvé sur le nouveau portabl
 move-not-approved-new = Vous n’avez pas approuvé le plan, rien n’a donc été copié.
 move-failed-title = Un problème est survenu.
 move-failed-body = Le transfert n’a pas pu continuer. Si cela se reproduit, Plus de détails, ci-dessous, indique ce qui s’est passé.
-move-peer-title = Vos deux ordinateurs
-move-peer-old = Ancien ordinateur
-move-peer-new = Nouvel ordinateur
-move-peer-line = { $system } · { $chip } · PCTwin { $app }
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
 move-peer-system-linux = Linux
 move-peer-system-other = Autre système
-move-peer-plugged = Branché
-move-peer-battery = Sur batterie ({ $percent } %)
-move-peer-unknown = Alimentation inconnue
-move-peer-plug-in = Branchez les deux ordinateurs si vous le pouvez. Un long transfert peut vider une batterie.
 move-update-here-title = Mettez à jour PCTwin sur cet ordinateur
 move-update-here-body = Cet ordinateur a une version de PCTwin plus ancienne que l'autre, ils ne peuvent donc pas transférer de fichiers ensemble. Mettez à jour PCTwin ici, puis recommencez. Rien n'a été copié.
 move-update-there-title = Mettez à jour PCTwin sur l'autre ordinateur

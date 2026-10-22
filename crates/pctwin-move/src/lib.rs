@@ -278,10 +278,10 @@ pub async fn send_by_rules<C: Channel>(
     live: &Live,
     opener: Arc<dyn Opener>,
 ) -> Result<(Sent, landing::LandingRules), MoveError> {
+    // The link was tested when the laptops greeted.
     let version = link.greeting().version;
     greeting::list_coming(link).await?;
     send_inventory(link, record, version).await?;
-    answer_link_test(link, version).await?;
     landing::send_mover(link, mover).await?;
     landing::send_people(link, people).await?;
     let rules = landing::receive_rules(link).await?;
@@ -572,20 +572,25 @@ pub async fn receive_plan<C: Channel, S: Steps>(
     table: &Destinations,
 ) -> Result<ApprovedPlan, MoveError> {
     let version = agree_version(link, MOVE_PROTOCOL).await?;
-    receive_plan_told(link, version, steps, table, false).await
+    receive_plan_told(link, version, None, steps, table).await
 }
 
-/// [`receive_plan`]; with `told`, the old laptop says who is moving after the link test, and
-/// `steps` hears it before anyone is placed.
+/// [`receive_plan`]. With `greeted` (the app's way, [`receive_by_rules`]), the link speed is the
+/// one measured when the laptops greeted, and the old laptop says who is moving after its list,
+/// which `steps` hears before anyone is placed; without, the link is tested after the list.
 async fn receive_plan_told<C: Channel, S: Steps>(
     link: &mut C,
     version: u16,
+    greeted: Option<Option<u64>>,
     steps: &mut S,
     table: &Destinations,
-    told: bool,
 ) -> Result<ApprovedPlan, MoveError> {
     let mut record = receive_inventory(link, version).await?;
-    let speed = measure_link(link, version).await?;
+    let told = greeted.is_some();
+    let speed = match greeted {
+        Some(measured) => measured,
+        None => measure_link(link, version).await?,
+    };
     if told {
         let mover = landing::receive_mover(link).await?;
         steps.mover(&mover);
@@ -691,8 +696,8 @@ pub async fn receive_by_rules<C: Channel, S: Steps>(
     // Greeted already: the list comes once the old laptop has found the files, however long
     // its person takes.
     greeting::wait_for_list(link).await?;
-    let version = link.greeting().version;
-    let mut approved = receive_plan_told(link, version, steps, table, true).await?;
+    let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
+    let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
     let rules = rules(steps, table);
     // What this laptop accepts is made from the very rules the old laptop is sent, now that
     // every place is known (another person's holding place is made only after the approval):

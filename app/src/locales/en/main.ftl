@@ -122,7 +122,7 @@ check-status-connected = Available
 check-status-not-needed = Not needed
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = Not known
-check-speed-unknown = PCTwin could not measure the connection this time. Check again in a moment.
+check-speed-unknown = PCTwin could not measure the connection this time. Files still move; only the time estimate is missing.
 check-space-unknown = PCTwin could not read the free space on the new laptop.
 check-power-unknown = PCTwin could not tell whether { $label } is plugged in.
 check-internet-unknown = PCTwin could not tell whether this laptop is online. That is fine: copying files does not need the internet.
@@ -746,8 +746,6 @@ plan-preview-title = Before you start
 plan-preview-fits = There is enough free space on this laptop.
 plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
 plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
-plan-preview-link = The connection between the laptops moves about { $speed } a second, measured just now.
-plan-preview-slow = The connection is slow, so the move will take longer. A network cable, or both laptops close to the router, makes it faster.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] About { $minutes } minute.
@@ -1061,18 +1059,10 @@ move-not-approved-old = The plan was not approved on the new laptop, so nothing 
 move-not-approved-new = You did not approve the plan, so nothing was copied.
 move-failed-title = Something went wrong.
 move-failed-body = The move could not go on. If it happens again, More details below says what went wrong.
-move-peer-title = Your two laptops
-move-peer-old = Old laptop
-move-peer-new = New laptop
-move-peer-line = { $system } · { $chip } · PCTwin { $app }
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
 move-peer-system-linux = Linux
 move-peer-system-other = Another system
-move-peer-plugged = Plugged in
-move-peer-battery = On battery ({ $percent }%)
-move-peer-unknown = Power not known
-move-peer-plug-in = Plug both laptops in if you can. A long move can empty a battery.
 move-update-here-title = Update PCTwin on this laptop
 move-update-here-body = This laptop has an older PCTwin than the other laptop, so they can't move files together. Update PCTwin here, then start again. Nothing was copied.
 move-update-there-title = Update PCTwin on the other laptop

@@ -122,7 +122,7 @@ check-status-connected = उपलब्ध
 check-status-not-needed = ज़रूरी नहीं
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = पता नहीं
-check-speed-unknown = PCTwin इस बार कनेक्शन नहीं माप सका। थोड़ी देर में फिर से जाँच करें।
+check-speed-unknown = PCTwin इस बार कनेक्शन नहीं माप सका। फ़ाइलें फिर भी जाएँगी; बस समय का अनुमान नहीं मिलेगा।
 check-space-unknown = PCTwin नए लैपटॉप पर उपलब्ध स्टोरेज नहीं पढ़ सका।
 check-power-unknown = PCTwin पता नहीं लगा सका कि { $label } प्लग इन है या नहीं।
 check-internet-unknown = PCTwin पता नहीं लगा सका कि यह लैपटॉप ऑनलाइन है या नहीं। कोई बात नहीं: फ़ाइलें कॉपी करने के लिए इंटरनेट की ज़रूरत नहीं है।
@@ -872,8 +872,6 @@ plan-preview-title = शुरू करने से पहले
 plan-preview-fits = इस लैपटॉप में पर्याप्त जगह खाली है।
 plan-preview-short = इस लैपटॉप को { $size } और खाली जगह चाहिए। शुरू करने से पहले कुछ जगह खाली करें, वरना ड्राइव भरने पर स्थानांतरण रुक जाएगा।
 plan-preview-space-unknown = PCTwin यह नहीं पढ़ सका कि इस लैपटॉप में कितनी जगह खाली है।
-plan-preview-link = दोनों लैपटॉप के बीच कनेक्शन लगभग { $speed } प्रति सेकंड भेजता है, अभी मापा गया।
-plan-preview-slow = कनेक्शन धीमा है, इसलिए ट्रांसफ़र में ज़्यादा समय लगेगा। नेटवर्क केबल, या दोनों लैपटॉप राउटर के पास रखने से यह तेज़ होता है।
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] लगभग { $minutes } मिनट।
@@ -1187,18 +1185,10 @@ move-not-approved-old = नए लैपटॉप पर योजना मं�
 move-not-approved-new = आपने योजना मंज़ूर नहीं की, इसलिए कुछ भी कॉपी नहीं हुआ।
 move-failed-title = कुछ गड़बड़ हो गई।
 move-failed-body = स्थानांतरण आगे नहीं बढ़ सका। अगर ऐसा फिर हो, तो नीचे ज़्यादा जानकारी में बताया गया है कि क्या गड़बड़ हुई।
-move-peer-title = आपके दोनों लैपटॉप
-move-peer-old = पुराना लैपटॉप
-move-peer-new = नया लैपटॉप
-move-peer-line = { $system } · { $chip } · PCTwin { $app }
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
 move-peer-system-linux = Linux
 move-peer-system-other = कोई दूसरा सिस्टम
-move-peer-plugged = चार्जर लगा है
-move-peer-battery = बैटरी पर ({ $percent }%)
-move-peer-unknown = बिजली की स्थिति पता नहीं
-move-peer-plug-in = हो सके तो दोनों लैपटॉप में चार्जर लगाएँ। लंबे ट्रांसफ़र में बैटरी खत्म हो सकती है।
 move-update-here-title = इस लैपटॉप पर PCTwin अपडेट करें
 move-update-here-body = इस लैपटॉप पर PCTwin दूसरे लैपटॉप से पुराना है, इसलिए दोनों मिलकर फ़ाइलें नहीं ले जा सकते। यहाँ PCTwin अपडेट करें, फिर से शुरू करें। कुछ भी कॉपी नहीं हुआ।
 move-update-there-title = दूसरे लैपटॉप पर PCTwin अपडेट करें

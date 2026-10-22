@@ -122,7 +122,7 @@ check-status-connected = متاح
 check-status-not-needed = غير مطلوب
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = غير معروف
-check-speed-unknown = تعذّر على PCTwin قياس الاتصال هذه المرة. تحقق مرة أخرى بعد لحظات.
+check-speed-unknown = تعذّر على PCTwin قياس الاتصال هذه المرة. ستنتقل الملفات مع ذلك؛ ينقص فقط تقدير الوقت.
 check-space-unknown = تعذّر على PCTwin قراءة المساحة المتاحة على الحاسوب المحمول الجديد.
 check-power-unknown = تعذّر على PCTwin معرفة هل { $label } موصول بالكهرباء.
 check-internet-unknown = تعذّر على PCTwin معرفة هل هذا الحاسوب المحمول متصل بالإنترنت. لا بأس، فنسخ الملفات لا يحتاج إلى الإنترنت.
@@ -955,8 +955,6 @@ plan-preview-title = قبل أن تبدأ
 plan-preview-fits = توجد مساحة فارغة كافية على هذا الحاسوب.
 plan-preview-short = يحتاج هذا الحاسوب إلى { $size } إضافية من المساحة الفارغة. وفّر بعض المساحة قبل البدء، وإلا سيتوقف النقل عند امتلاء القرص.
 plan-preview-space-unknown = تعذّر على PCTwin معرفة المساحة الفارغة على هذا الحاسوب.
-plan-preview-link = الاتصال بين الحاسوبين ينقل نحو { $speed } في الثانية، بحسب قياس الآن.
-plan-preview-slow = الاتصال بطيء، لذا سيستغرق النقل وقتًا أطول. كابل شبكة، أو وضع الحاسوبين قرب جهاز التوجيه، يجعله أسرع.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [zero] نحو { $minutes } دقيقة.
@@ -1354,18 +1352,10 @@ move-not-approved-old = لم تتم الموافقة على الخطة على ا
 move-not-approved-new = لم توافق على الخطة، لذلك لم يُنسخ شيء.
 move-failed-title = حدث خطأ ما.
 move-failed-body = تعذّر متابعة النقل. إذا تكرر ذلك، يوضح قسم مزيد من التفاصيل أدناه ما الذي حدث.
-move-peer-title = حاسوباك
-move-peer-old = الحاسوب القديم
-move-peer-new = الحاسوب الجديد
-move-peer-line = { $system } · { $chip } · PCTwin { $app }
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
 move-peer-system-linux = Linux
 move-peer-system-other = نظام آخر
-move-peer-plugged = موصول بالكهرباء
-move-peer-battery = على البطارية ({ $percent }%)
-move-peer-unknown = حالة الطاقة غير معروفة
-move-peer-plug-in = صِل الحاسوبين بالكهرباء إن أمكن. النقل الطويل قد يفرغ البطارية.
 move-update-here-title = حدّث PCTwin على هذا الحاسوب
 move-update-here-body = إصدار PCTwin على هذا الحاسوب أقدم من الحاسوب الآخر، لذا لا يمكنهما نقل الملفات معًا. حدّث PCTwin هنا ثم ابدأ من جديد. لم يُنسخ أي شيء.
 move-update-there-title = حدّث PCTwin على الحاسوب الآخر

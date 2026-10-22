@@ -48,7 +48,7 @@ async fn send_greeted(
     live: &Live,
     opener: std::sync::Arc<dyn pctwin_transfer::Opener>,
 ) -> Result<(pctwin_move::Sent, pctwin_move::landing::LandingRules), MoveError> {
-    let mut link = greeted(link).await?;
+    let mut link = greeted(link, pctwin_move::greeting::Side::Old).await?;
     pctwin_move::send_by_rules(&mut link, record, mover, people, source, live, opener).await
 }
 
@@ -62,13 +62,18 @@ async fn receive_greeted<S: Steps>(
     account: &str,
     live: &Live,
 ) -> Result<pctwin_move::Received, MoveError> {
-    let mut link = greeted(link).await?;
+    let mut link = greeted(link, pctwin_move::greeting::Side::New).await?;
     pctwin_move::receive_by_rules(&mut link, steps, rules, table, journal, account, live).await
 }
 
-async fn greeted(link: &mut Mem) -> Result<pctwin_move::greeting::Greeted<'_, Mem>, MoveError> {
+async fn greeted(
+    link: &mut Mem,
+    side: pctwin_move::greeting::Side,
+) -> Result<pctwin_move::greeting::Greeted<'_, Mem>, MoveError> {
     use pctwin_move::greeting::{About, Power, greet};
-    Ok(greet(link, &About::here(Power::Unknown)).await?)
+    Ok(greet(link, &About::here(Power::Unknown, None), side)
+        .await
+        .map_err(pctwin_transfer::TransferError::from)?)
 }
 
 fn mem_pair() -> (Mem, Mem) {

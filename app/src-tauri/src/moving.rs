@@ -54,17 +54,33 @@ pub struct Found {
     pub bytes: u64,
 }
 
-/// Both laptops, as soon as the move starts: what each laptop is (C06).
+/// Both laptops, as soon as the move starts: what each laptop is (C06) and the connection
+/// measured (C07). Also when their PCTwin versions differ, before the move ends.
 pub const PEER_EVENT: &str = "move-peer";
 
-/// This laptop and the other one, as each said when the move started (C06).
+/// This laptop and the other one, as each said when the move started (C06), and the link the new
+/// laptop measured (C07).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Peer {
     pub mine: pctwin_move::greeting::About,
     pub theirs: pctwin_move::greeting::About,
+    /// The other laptop's label as pairing showed it, when known.
+    pub other: Option<LabelView>,
+    pub versions: Versions,
+    /// `None`: not measured (or the versions differ).
+    pub link: Option<LinkView>,
 }
 
-/// This laptop, as it tells the other one.
+/// Whether the two laptops' PCTwin versions can move together, and if not, which to update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Versions {
+    Same,
+    UpdateHere,
+    UpdateThere,
+}
+
+/// This laptop, as it tells the other one: its power, and the free space in the home folder.
 fn about_here() -> pctwin_move::greeting::About {
     use pctwin_move::greeting::Power;
     let now = pctwin_power::power_now();
@@ -77,25 +93,50 @@ fn about_here() -> pctwin_move::greeting::About {
         },
         (true, None) => Power::Unknown,
     };
-    pctwin_move::greeting::About::here(power)
+    let free = std::env::home_dir()
+        .and_then(|home| pctwin_gate::Destination::open(&home).ok())
+        .and_then(|home| home.available_bytes());
+    pctwin_move::greeting::About::here(power, free)
 }
 
-/// Both laptops, the moment the move starts and before anything is looked for: agree the
-/// protocol and say what each is, shown on both screens (C06).
+/// Both laptops, the moment the move starts and before anything is looked for: each says what
+/// it is, they agree the protocol and the new laptop measures the link; both screens show it
+/// (C06, C07). PCTwin versions that cannot move together are shown too, naming the one to update.
 async fn greet<'l, R: Runtime>(
     app: &AppHandle<R>,
     link: &'l mut pctwin_link::Link,
+    side: pctwin_move::greeting::Side,
+    other: Option<LabelView>,
 ) -> Result<pctwin_move::greeting::Greeted<'l, pctwin_link::Link>, TransferError> {
     let mine = about_here();
-    let greeted = pctwin_move::greeting::greet(link, &mine).await?;
-    let _ = app.emit(
-        PEER_EVENT,
-        Peer {
-            mine,
-            theirs: greeted.greeting().theirs.clone(),
-        },
-    );
-    Ok(greeted)
+    let peer = |theirs, versions, link| Peer {
+        mine: mine.clone(),
+        theirs,
+        other: other.clone(),
+        versions,
+        link,
+    };
+    match pctwin_move::greeting::greet(link, &mine, side).await {
+        Ok(greeted) => {
+            let g = greeted.greeting();
+            let measured = g.bytes_per_second.map(|b| LinkView {
+                bytes_per_second: b,
+                slow: b < SLOW_LINK,
+            });
+            let _ = app.emit(PEER_EVENT, peer(g.theirs.clone(), Versions::Same, measured));
+            Ok(greeted)
+        }
+        Err(not) => {
+            if let (Some(theirs), TransferError::VersionGap(gap)) = (not.theirs, &not.error) {
+                let versions = match gap {
+                    pctwin_transfer::VersionGap::ThisLaptopOlder => Versions::UpdateHere,
+                    pctwin_transfer::VersionGap::OtherLaptopOlder => Versions::UpdateThere,
+                };
+                let _ = app.emit(PEER_EVENT, peer(theirs, versions, None));
+            }
+            Err(not.error)
+        }
+    }
 }
 
 /// The old laptop (a Mac): some of the mover's places were kept private by the Mac's privacy
@@ -518,12 +559,9 @@ pub struct PreviewView {
     pub too_big: u64,
     pub refused: u64,
     pub runs_at_sign_in: u64,
-    /// The connection between the laptops, as measured just before the plan (C07); `None` when
-    /// it could not be measured.
-    pub link: Option<LinkView>,
 }
 
-/// The connection, measured (C07).
+/// The connection the new laptop measured as the laptops greeted (C07).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinkView {
@@ -646,10 +684,6 @@ fn plan_view(
             too_big: preview.problems.too_big.count,
             refused: preview.problems.refused.count,
             runs_at_sign_in: preview.problems.runs_at_sign_in.count,
-            link: preview.bytes_per_second.map(|b| LinkView {
-                bytes_per_second: b,
-                slow: b < SLOW_LINK,
-            }),
         },
     }
 }
@@ -1471,10 +1505,11 @@ async fn run_old<R: Runtime>(
     live: &Live,
     scan_stop: &AtomicBool,
     others: Vec<String>,
+    other: Option<LabelView>,
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     // Greeted first, so the new laptop knows at once, and waits for the list as long as the
     // finding (and this laptop's person) takes.
-    let mut link = greet(app, &mut link).await?;
+    let mut link = greet(app, &mut link, pctwin_move::greeting::Side::Old, other).await?;
     let _ = app.emit(STAGE_EVENT, Stage::Scanning);
     let laptop = LaptopId::generate().map_err(|e| TransferError::Protocol(e.to_string()))?;
     let mut found = |v: &pctwin_scan::FrontierView<'_>| {
@@ -1672,6 +1707,7 @@ async fn run_new<R: Runtime>(
     live: &Live,
     setup: NewSide,
     names: Arc<Mutex<HashMap<ItemId, String>>>,
+    other: Option<LabelView>,
 ) -> Result<(MoveOutcome, Vec<ReportItem>), MoveError> {
     let _ = app.emit(STAGE_EVENT, Stage::Waiting);
     let NewSide {
@@ -1705,7 +1741,7 @@ async fn run_new<R: Runtime>(
         live_control: live.control.clone(),
         chosen: BTreeMap::new(),
     };
-    let mut link = greet(app, &mut link).await?;
+    let mut link = greet(app, &mut link, pctwin_move::greeting::Side::New, other).await?;
     let received = pctwin_move::receive_by_rules(
         &mut link,
         &mut steps,
@@ -1787,10 +1823,12 @@ fn spawn_run<R: Runtime>(
             let ran = runtime.block_on(async {
                 match side {
                     ThisSide::New(setup) => {
-                        run_new(&app, moving.clone(), link, &live, *setup, names).await
+                        let other = label.clone();
+                        run_new(&app, moving.clone(), link, &live, *setup, names, other).await
                     }
                     ThisSide::Old { others } => {
-                        run_old(&app, &moving, link, &live, &scan_stop, others).await
+                        let other = label.clone();
+                        run_old(&app, &moving, link, &live, &scan_stop, others, other).await
                     }
                 }
             });

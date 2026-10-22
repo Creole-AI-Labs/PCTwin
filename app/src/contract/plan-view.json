@@ -23,10 +23,6 @@
     ],
     "preview": {
       "fits": true,
-      "link": {
-        "bytesPerSecond": 62000000,
-        "slow": false
-      },
       "minutes": {
         "high": 8,
         "low": 4

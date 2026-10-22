@@ -122,7 +122,7 @@ check-status-connected = Disponible
 check-status-not-needed = No hace falta
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = Se desconoce
-check-speed-unknown = PCTwin no pudo medir la conexión esta vez. Vuelve a comprobarla en un momento.
+check-speed-unknown = PCTwin no pudo medir la conexión esta vez. Los archivos se mueven igual; solo falta la estimación de tiempo.
 check-space-unknown = PCTwin no pudo leer el espacio libre del portátil nuevo.
 check-power-unknown = PCTwin no pudo saber si { $label } está enchufado.
 check-internet-unknown = PCTwin no pudo saber si este portátil está en línea. No pasa nada: copiar archivos no necesita internet.
@@ -882,8 +882,6 @@ plan-preview-title = Antes de empezar
 plan-preview-fits = Hay suficiente espacio libre en este portátil.
 plan-preview-short = Este portátil necesita { $size } más de espacio libre. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
 plan-preview-space-unknown = PCTwin no pudo leer cuánto espacio libre tiene este portátil.
-plan-preview-link = La conexión entre los portátiles mueve unos { $speed } por segundo, medido ahora mismo.
-plan-preview-slow = La conexión es lenta, así que la mudanza tardará más. Un cable de red, o los dos portátiles cerca del router, la hacen más rápida.
 plan-preview-time-one =
     { NUMBER($minutes) ->
         [one] Unos { $minutes } minuto.
@@ -1218,18 +1216,10 @@ move-not-approved-old = El plan no se aprobó en el portátil nuevo, así que no
 move-not-approved-new = No aprobaste el plan, así que no se copió nada.
 move-failed-title = Algo salió mal.
 move-failed-body = El traslado no pudo seguir. Si vuelve a pasar, Más detalles, abajo, explica qué falló.
-move-peer-title = Tus dos portátiles
-move-peer-old = Portátil antiguo
-move-peer-new = Portátil nuevo
-move-peer-line = { $system } · { $chip } · PCTwin { $app }
 move-peer-system-windows = Windows
 move-peer-system-mac = Mac
 move-peer-system-linux = Linux
 move-peer-system-other = Otro sistema
-move-peer-plugged = Enchufado
-move-peer-battery = Con batería ({ $percent } %)
-move-peer-unknown = Alimentación desconocida
-move-peer-plug-in = Si puedes, enchufa los dos portátiles. Una mudanza larga puede agotar la batería.
 move-update-here-title = Actualiza PCTwin en este portátil
 move-update-here-body = Este portátil tiene una versión de PCTwin más antigua que el otro, así que no pueden mover archivos juntos. Actualiza PCTwin aquí y vuelve a empezar. No se copió nada.
 move-update-there-title = Actualiza PCTwin en el otro portátil
