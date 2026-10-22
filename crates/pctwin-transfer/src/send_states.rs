@@ -34,6 +34,8 @@ pub(crate) struct States {
     /// Per job: its group in the meter, and the step the meter counts it in.
     group: Vec<Group>,
     counted: Vec<Step>,
+    /// Per job: its size, counted as checked once the new laptop says it checked it.
+    size: Vec<u64>,
     meter: MoveMeter,
 }
 
@@ -49,6 +51,7 @@ impl States {
             v: jobs.iter().map(|_| SendState::Waiting).collect(),
             group,
             counted: vec![Step::Waiting; jobs.len()],
+            size: jobs.iter().map(|j| j.size).collect(),
             meter,
         }
     }
@@ -80,6 +83,13 @@ impl States {
         let now = step_of(&self.v[job]);
         if now != self.counted[job] {
             self.meter.step(self.group[job], self.counted[job], now);
+            // On the new laptop's word only (both steps are final): what it checked, or found
+            // already there, counts as saved on this laptop too.
+            match now {
+                Step::Copied => self.meter.checked_bytes(self.size[job]),
+                Step::AlreadyThere => self.meter.already_there_bytes(self.size[job]),
+                _ => {}
+            }
             self.counted[job] = now;
         }
     }

@@ -308,6 +308,9 @@ async fn both_meters_count_every_file_and_byte_by_destination_and_can_be_read_du
     assert_eq!(r.bytes_written, sizes);
     assert_eq!(r.bytes_already_there, 0);
     assert_eq!(r.checking, None);
+    // The old laptop counts as saved exactly what the new laptop said it checked.
+    assert_eq!(s.bytes_checked, sizes);
+    assert_eq!(s.bytes_already_there, 0);
     // The sender's counters are the meter's: one count, read two ways.
     assert_eq!(s.blocks_sent, sender.blocks_sent());
     assert_eq!(s.blocks_confirmed, sender.blocks_confirmed());
