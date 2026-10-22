@@ -86,6 +86,19 @@ describe("sending", () => {
   });
 });
 
+describe("dropping", () => {
+  it("takes drops only while the pick page is open, shows what was dropped, and says when something is over the window", async () => {
+    inApp(<QuickHost mode="send" onHome={vi.fn()} />);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("quicksend_accept_drops", { on: true });
+    });
+    send("quicksend-dragging", true);
+    expect(screen.getByText(text("qs-drop-active"))).toBeTruthy();
+    send("quicksend-picked", [{ id: "p7", name: "photo.jpg", kind: "file", included: true, bytes: 900, files: 1 }]);
+    expect(screen.getByText("photo.jpg")).toBeTruthy();
+  });
+});
+
 describe("receiving", () => {
   it("shows what is offered, takes the folder from the system's picker, accepts, and ends on its receipt", async () => {
     replies.quicksend_choose_folder = () => ({ path: "C:/Users/Ada/Downloads", freeBytes: 80_000_000_000 });

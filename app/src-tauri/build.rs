@@ -32,6 +32,7 @@ const COMMANDS: &[&str] = &[
     "history_open",
     "history_export",
     "quicksend_pick",
+    "quicksend_accept_drops",
     "quicksend_clear",
     "quicksend_offer",
     "quicksend_send",

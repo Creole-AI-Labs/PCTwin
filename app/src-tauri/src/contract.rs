@@ -745,6 +745,7 @@ fn calls() -> Value {
             { "name": "history_open", "args": [["id", "1792627200000-0"]] },
             { "name": "history_export", "args": [] },
             { "name": "quicksend_pick", "args": [["folders", false]] },
+            { "name": "quicksend_accept_drops", "args": [["on", true]] },
             { "name": "quicksend_clear", "args": [] },
             { "name": "quicksend_offer", "args": [["ids", ["p1"]]] },
             { "name": "quicksend_send", "args": [] },
@@ -770,6 +771,8 @@ fn calls() -> Value {
             "qsIncoming": crate::quicksend::INCOMING_EVENT,
             "qsReceipt": crate::quicksend::RECEIPT_EVENT,
             "qsProblem": crate::quicksend::PROBLEM_EVENT,
+            "qsPicked": crate::quicksend::PICKED_EVENT,
+            "qsDragging": crate::quicksend::DRAGGING_EVENT,
         },
         // What the screens may name when they ask for a help code: the engine's closed lists.
         "helpTopics": crate::help::HelpTopic::ALL,

@@ -247,6 +247,15 @@
       "name": "quicksend_pick"
     },
     {
+      "args": [
+        [
+          "on",
+          true
+        ]
+      ],
+      "name": "quicksend_accept_drops"
+    },
+    {
       "args": [],
       "name": "quicksend_clear"
     },
@@ -308,7 +317,9 @@
     "moveStage": "move-stage",
     "new": "pairing-new",
     "old": "pairing-old",
+    "qsDragging": "quicksend-dragging",
     "qsIncoming": "quicksend-incoming",
+    "qsPicked": "quicksend-picked",
     "qsProblem": "quicksend-problem",
     "qsProgress": "quicksend-progress",
     "qsReceipt": "quicksend-receipt"

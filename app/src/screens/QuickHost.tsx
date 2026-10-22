@@ -4,6 +4,7 @@ import {
   listenQuickSend,
   qsAnswer,
   qsChooseFolder,
+  qsAcceptDrops,
   qsClear,
   qsOffer,
   qsPause,
@@ -72,6 +73,7 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
   const [confirmed, setConfirmed] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const live = useRef(true);
   const me: Label = { kind: "named", name: l10n.getString("qs-label-this") };
   const other: Label = { kind: "named", name: l10n.getString("qs-label-other") };
@@ -82,6 +84,15 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
     let unlisten: (() => void) | null = null;
     void listenQuickSend((event) => {
       if (!live.current) return;
+      // Drops are lists for the pick page, not pages of their own.
+      if (event.kind === "picked") {
+        setItems((old) => merged(old, event.items));
+        return;
+      }
+      if (event.kind === "dragging") {
+        setDragging(event.over);
+        return;
+      }
       setView((v) => {
         if (v.kind === "receipt" || v.kind === "problem") return v;
         switch (event.kind) {
@@ -108,6 +119,15 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
     };
   }, []);
 
+  // Things dropped on the window are taken only while the pick page is open.
+  const picking = view.kind === "pick";
+  useEffect(() => {
+    void qsAcceptDrops(picking).catch(() => undefined);
+    return () => {
+      void qsAcceptDrops(false).catch(() => undefined);
+    };
+  }, [picking]);
+
   const pick = (folders: boolean) => {
     qsPick(folders).then(
       (fresh) => {
@@ -129,6 +149,7 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
         <>
           <QuickPick
             items={items}
+            dragging={dragging}
             onAddFiles={() => {
               pick(false);
             }}

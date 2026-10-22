@@ -725,6 +725,8 @@ export function parseQsProblem(value: unknown): QsProblem | null {
 
 export const qsPick = (folders: boolean) => ask("quicksend_pick", (v) => listOf(v, parsePicked), { folders });
 export const qsClear = () => run("quicksend_clear");
+/** The pick page is open (`on`) or closed: things dropped on the window are added only while it is. */
+export const qsAcceptDrops = (on: boolean) => run("quicksend_accept_drops", { on });
 export const qsOffer = (ids: string[]) => ask("quicksend_offer", (v) => listOf(v, parseOffered), { ids });
 export const qsSend = () => run("quicksend_send");
 export const qsReceive = () => run("quicksend_receive");
@@ -738,7 +740,9 @@ export type QsEvent =
   | { kind: "progress"; progress: SendProgress }
   | { kind: "incoming"; files: OfferedFile[] }
   | { kind: "receipt"; receipt: QsReceipt }
-  | { kind: "problem"; problem: QsProblem };
+  | { kind: "problem"; problem: QsProblem }
+  | { kind: "picked"; items: PickedItem[] }
+  | { kind: "dragging"; over: boolean };
 
 const QS_UNREADABLE: QsEvent = { kind: "problem", problem: { kind: "failed", detail: "" } };
 
@@ -753,6 +757,8 @@ export async function listenQuickSend(handler: (event: QsEvent) => void): Promis
     on("quicksend-incoming", parseQsIncoming, (i) => ({ kind: "incoming", files: i.files })),
     on("quicksend-receipt", parseQsReceipt, (receipt) => ({ kind: "receipt", receipt })),
     on("quicksend-problem", parseQsProblem, (problem) => ({ kind: "problem", problem })),
+    on("quicksend-picked", (v) => listOf(v, parsePicked), (items) => ({ kind: "picked", items })),
+    on("quicksend-dragging", (v) => (typeof v === "boolean" ? { over: v } : null), (d) => ({ kind: "dragging", over: d.over })),
   ]);
   return () => {
     for (const stop of all) stop();

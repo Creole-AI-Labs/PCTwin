@@ -34,6 +34,7 @@
     "allow-history-open",
     "allow-history-export",
     "allow-quicksend-pick",
+    "allow-quicksend-accept-drops",
     "allow-quicksend-clear",
     "allow-quicksend-offer",
     "allow-quicksend-send",

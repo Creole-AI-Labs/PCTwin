@@ -204,6 +204,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         history::history_open,
         history::history_export,
         quicksend::quicksend_pick,
+        quicksend::quicksend_accept_drops,
         quicksend::quicksend_clear,
         quicksend::quicksend_offer,
         quicksend::quicksend_send,
@@ -297,10 +298,21 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             Ok(())
         })
         // The person can switch the taskbar between light and dark at any time.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::ThemeChanged(_) = event {
-                refresh_tray_icon(window.app_handle());
-            }
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::ThemeChanged(_) => refresh_tray_icon(window.app_handle()),
+            // Quick Send's drag and drop: the paths stay here; the screens get names and sizes.
+            tauri::WindowEvent::DragDrop(drop) => match drop {
+                tauri::DragDropEvent::Enter { .. } | tauri::DragDropEvent::Over { .. } => {
+                    quicksend::dragging(window.app_handle(), true);
+                }
+                tauri::DragDropEvent::Leave => quicksend::dragging(window.app_handle(), false),
+                tauri::DragDropEvent::Drop { paths, .. } => {
+                    quicksend::dragging(window.app_handle(), false);
+                    quicksend::dropped(window.app_handle(), paths.clone());
+                }
+                _ => {}
+            },
+            _ => {}
         })
 }
 

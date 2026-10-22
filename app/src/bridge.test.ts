@@ -23,6 +23,7 @@ import {
   qsAnswer,
   qsChooseFolder,
   qsClear,
+  qsAcceptDrops,
   qsOffer,
   qsPause,
   qsPick,
@@ -210,6 +211,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await openPrivacySettings();
       await qsPick(false);
       await qsClear();
+      await qsAcceptDrops(true);
       await qsOffer(["p1"]);
       await qsSend();
       await qsReceive();

@@ -26,6 +26,10 @@ pub const INCOMING_EVENT: &str = "quicksend-incoming";
 pub const RECEIPT_EVENT: &str = "quicksend-receipt";
 /// It could not go on (the connection was lost, or something else).
 pub const PROBLEM_EVENT: &str = "quicksend-problem";
+/// Things dropped on the window while the pick page is open: the whole chosen list.
+pub const PICKED_EVENT: &str = "quicksend-picked";
+/// Whether something is being dragged over the window while the pick page is open.
+pub const DRAGGING_EVENT: &str = "quicksend-dragging";
 
 /// The most things one send may hold, chosen in the picker.
 const MAX_PICKED: usize = 1000;
@@ -46,6 +50,8 @@ enum Answer {
 
 #[derive(Default)]
 pub struct QuickSend {
+    /// The pick page is open: things dropped on the window are added.
+    accepting: AtomicBool,
     picked: Mutex<Vec<Picked>>,
     next_id: Mutex<u64>,
     offer: Mutex<Option<Offer>>,
@@ -269,6 +275,55 @@ fn tick<R: Runtime>(app: AppHandle<R>, live: Live, done: Arc<AtomicBool>) {
 
 /* ---------- Commands ---------- */
 
+/// Adds `paths` to what is chosen (each once, at most [`MAX_PICKED`]), and returns the list.
+fn add(qs: &QuickSend, paths: Vec<PathBuf>) -> Vec<PickedView> {
+    let mut picked = lock(&qs.picked);
+    let mut next = lock(&qs.next_id);
+    for path in paths {
+        if picked.len() >= MAX_PICKED || picked.iter().any(|p| p.path == path) {
+            continue;
+        }
+        *next += 1;
+        let folder = path.is_dir();
+        picked.push(Picked {
+            id: format!("p{next}"),
+            path,
+            folder,
+        });
+    }
+    picked.iter().map(view_of).collect()
+}
+
+/// Things dropped on the window: added only while the pick page is open (so a drop anywhere else
+/// does nothing), and the screens are sent the list (names and sizes, never a path).
+pub fn dropped<R: Runtime>(app: &AppHandle<R>, paths: Vec<PathBuf>) {
+    use tauri::Manager;
+    let qs = app.state::<AppQuickSend>();
+    if !qs.accepting.load(Ordering::Acquire) {
+        return;
+    }
+    let list = add(&qs, paths);
+    let _ = app.emit(PICKED_EVENT, list);
+}
+
+/// Something is (or no longer is) dragged over the window: told only while the pick page is open.
+pub fn dragging<R: Runtime>(app: &AppHandle<R>, over: bool) {
+    use tauri::Manager;
+    if app
+        .state::<AppQuickSend>()
+        .accepting
+        .load(Ordering::Acquire)
+    {
+        let _ = app.emit(DRAGGING_EVENT, over);
+    }
+}
+
+/// The pick page opened (`on`) or closed: drops are taken only while it is open.
+#[tauri::command]
+pub fn quicksend_accept_drops(qs: State<'_, AppQuickSend>, on: bool) {
+    qs.accepting.store(on, Ordering::Release);
+}
+
 /// Opens the system's picker for files or folders, and adds what was chosen (Q02).
 #[tauri::command]
 pub async fn quicksend_pick(
@@ -286,20 +341,7 @@ pub async fn quicksend_pick(
     .await
     .map_err(|_| MoveProblem::Failed)?
     .unwrap_or_default();
-    let mut picked = lock(&qs.picked);
-    let mut next = lock(&qs.next_id);
-    for path in chosen {
-        if picked.len() >= MAX_PICKED || picked.iter().any(|p| p.path == path) {
-            continue;
-        }
-        *next += 1;
-        picked.push(Picked {
-            id: format!("p{next}"),
-            path,
-            folder: folders,
-        });
-    }
-    Ok(picked.iter().map(view_of).collect())
+    Ok(add(&qs, chosen))
 }
 
 /// Forgets everything chosen, to start a new send.
