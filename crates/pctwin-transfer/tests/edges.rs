@@ -82,6 +82,13 @@ async fn two_files_to(paths: [&str; 2]) -> (tempfile::TempDir, Vec<Option<Receiv
     })
     .await;
     assert!(s.is_ok() && r.is_ok());
+    // Each file's one block landed once: the meter counts the files' own bytes, never the
+    // framing that carried them (which, for files this small, is most of what is sent).
+    assert_eq!(
+        landed.load(std::sync::atomic::Ordering::SeqCst),
+        26,
+        "landed bytes"
+    );
     for n in 0..2u8 {
         assert_eq!(sender.outcome(id(n)), Some(&SendOutcome::Arrived));
     }

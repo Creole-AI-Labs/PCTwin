@@ -2288,7 +2288,8 @@ pub struct ReceiverSession<'d> {
     /// The signed-in person's account on this laptop (who acts).
     account: String,
     allowance: Allowance,
-    /// Bytes of blocks written so far, readable while the move runs (for the lane driver).
+    /// The files' own bytes written so far, block by block, readable while the move runs (for
+    /// the lane driver); see [`meter`](Self::meter).
     written: Arc<AtomicU64>,
     /// What the move has counted, readable while it runs, and each planned file's group and
     /// step in it.
@@ -2396,7 +2397,10 @@ impl<'d> ReceiverSession<'d> {
         }
     }
 
-    /// A counter of bytes of blocks written, to read while the move runs (the lane driver's speed).
+    /// A counter of the files' own bytes written, block by block, to read while the move runs
+    /// (the lane driver's speed). A block sent again counts again, so a move that goes round in
+    /// circles shows; what carried the bytes (framing, fingerprints, compression) never counts,
+    /// so it compares with the files' sizes.
     pub fn meter(&self) -> Arc<AtomicU64> {
         self.written.clone()
     }
@@ -3289,13 +3293,12 @@ impl<'d> ReceiverSession<'d> {
             let fresh = !assembly.has_block(b.index);
             let raw = b.data.len() as u64;
             let receipt = assembly.accept(b)?;
-            Ok((receipt, fresh.then_some((hash, raw))))
+            Ok((receipt, raw, fresh.then_some(hash)))
         });
         match accepted {
-            Ok((receipt, fresh)) => {
-                self.written
-                    .fetch_add(whole.len() as u64, Ordering::Relaxed);
-                if let Some((hash, raw)) = fresh {
+            Ok((receipt, raw, fresh)) => {
+                self.written.fetch_add(raw, Ordering::Relaxed);
+                if let Some(hash) = fresh {
                     if let Some((group, _)) = self.steps.get(&s.item) {
                         self.meter.written(*group, raw);
                     }
