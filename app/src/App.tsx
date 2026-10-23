@@ -152,7 +152,6 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 onQuick={() => { setScreen({ id: "quick", notice: false }); }}
               />}
             {screen.id === "quick" && (
-              // History is not built yet: it says so, plainly, and changes nothing.
               <QuickHome
                 notice={screen.notice}
                 onSend={() => { setScreen({ id: "qs", mode: "send" }); }}

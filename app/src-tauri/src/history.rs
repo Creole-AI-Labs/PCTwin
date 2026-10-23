@@ -213,9 +213,33 @@ pub async fn history_export<R: Runtime>(app: AppHandle<R>) -> Result<Option<Stri
     let Some(folder) = folder else {
         return Ok(None);
     };
-    let path = folder.join("PCTwin history.csv");
-    std::fs::write(&path, csv(&entries)).map_err(|_| MoveProblem::Failed)?;
+    let path = save_new(&folder, csv(&entries).as_bytes()).map_err(|_| MoveProblem::Failed)?;
     Ok(Some(path.display().to_string()))
+}
+
+/// Writes `bytes` as a new file in `folder`, never over one already there: "PCTwin history.csv",
+/// or "PCTwin history (2).csv" and so on when that name is taken. Made with create-new, so a file
+/// that appears in between is not replaced either.
+fn save_new(folder: &std::path::Path, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    for n in 1..=999u32 {
+        let name = if n == 1 {
+            "PCTwin history.csv".to_string()
+        } else {
+            format!("PCTwin history ({n}).csv")
+        };
+        let path = folder.join(name);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(bytes)?;
+                file.sync_all()?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
 }
 
 /// The history as plain CSV: when, what, state, steps left.
@@ -233,6 +257,20 @@ pub fn csv(entries: &[Entry]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_export_never_replaces_a_file_already_there() {
+        let dir = std::env::temp_dir().join(format!("pctwin-history-export-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("PCTwin history.csv"), b"mine").unwrap();
+        let first = save_new(&dir, b"one").unwrap();
+        let second = save_new(&dir, b"two").unwrap();
+        assert_eq!(first.file_name().unwrap(), "PCTwin history (2).csv");
+        assert_eq!(second.file_name().unwrap(), "PCTwin history (3).csv");
+        assert_eq!(std::fs::read(dir.join("PCTwin history.csv")).unwrap(), b"mine");
+        assert_eq!(std::fs::read(&first).unwrap(), b"one");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn times_are_written_as_utc_dates() {
