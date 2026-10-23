@@ -20,6 +20,7 @@ fn stand_in_engine() {
     std::thread::sleep(std::time::Duration::from_secs(60));
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 fn start(harden: bool) -> Child {
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "stand_in_engine", "--ignored", "--nocapture"])
@@ -37,7 +38,9 @@ fn start(harden: bool) -> Child {
     child
 }
 
-/// Whether this account can read the process's memory.
+/// Whether this account can read the process's memory. (macOS: the hardened runtime, set when the
+/// app is signed, keeps it unreadable; nothing to look at in an unsigned test build.)
+#[cfg(any(windows, target_os = "linux"))]
 fn can_read(pid: u32) -> bool {
     #[cfg(windows)]
     {
@@ -68,11 +71,6 @@ fn can_read(pid: u32) -> bool {
             return false;
         };
         mem.seek(SeekFrom::Start(start)).is_ok() && mem.read(&mut [0u8; 1]).is_ok()
-    }
-    #[cfg(not(any(windows, target_os = "linux")))]
-    {
-        let _ = pid;
-        false
     }
 }
 

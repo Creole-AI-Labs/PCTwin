@@ -80,7 +80,10 @@ function Wait-Exit($process, [string]$what) {
 
 # Each person signs in once, so their home exists.
 foreach ($u in @($mover) + $people) {
-    $p = Start-As $u 'cmd.exe' @('/c', 'exit', '0') (Join-Path $admin "first-$u.out.txt") (Join-Path $admin "first-$u.err.txt")
+    # A real program, not a cmd built-in: Start-As quotes every argument, and cmd cannot run a
+    # quoted built-in ("exit").
+    $whoami = Join-Path ([Environment]::GetFolderPath('System')) 'whoami.exe'
+    $p = Start-As $u $whoami @('/user') (Join-Path $admin "first-$u.out.txt") (Join-Path $admin "first-$u.err.txt")
     if ((Wait-Exit $p "first sign-in of $u") -ne 0) { throw "$u could not sign in" }
 }
 

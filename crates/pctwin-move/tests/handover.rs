@@ -72,6 +72,23 @@ async fn held_files_land_in_the_person_s_folders_and_nothing_is_replaced() {
     assert!(done.not_plain.is_empty());
 }
 
+/// A person whose held folders hold nothing is handed nothing, without a fault (found on Linux CI,
+/// where a held folder with only a link failed the whole hand-over).
+#[tokio::test]
+async fn an_empty_holding_area_hands_over_nothing() {
+    let holding = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(holding.path().join("documents")).unwrap();
+    let places = BTreeMap::from([("documents".to_string(), "Documents".to_string())]);
+    let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
+    let done = hand_over(holding.path(), home.path(), &places, &journal, "1001")
+        .await
+        .unwrap();
+    assert!(done.files.is_empty());
+    assert!(done.not_plain.is_empty());
+}
+
 /// A link in the holding area is never followed: it is listed and left as it is.
 #[cfg(unix)]
 #[tokio::test]

@@ -89,7 +89,9 @@ async fn two_files_to(paths: [&str; 2]) -> (tempfile::TempDir, Vec<Option<Receiv
     (new, outcomes)
 }
 
-/// Every file landed whole under its own name: none written over another.
+/// Every file landed whole under its own name: none written over another. Each file reads back
+/// its own words, which only two files can do; the names are compared as given, since on a drive
+/// that tells case apart (Linux) two names differing only in case are two places.
 fn each_landed_whole(new: &tempfile::TempDir, outcomes: &[Option<ReceiveOutcome>]) {
     let mut names = Vec::new();
     for (n, o) in outcomes.iter().enumerate() {
@@ -100,7 +102,7 @@ fn each_landed_whole(new: &tempfile::TempDir, outcomes: &[Option<ReceiveOutcome>
             std::fs::read_to_string(new.path().join(&done.final_path)).unwrap(),
             format!("file number {n}")
         );
-        names.push(done.final_path.to_lowercase());
+        names.push(done.final_path.clone());
     }
     names.dedup();
     assert_eq!(names.len(), 2, "two files, two names: {outcomes:?}");

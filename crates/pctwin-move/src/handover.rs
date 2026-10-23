@@ -219,6 +219,14 @@ pub async fn hand_over(
             inclusion: Inclusion::Included,
         });
     }
+    // Nothing plain to hand over (only links, or nothing at all): nothing moves, and the record
+    // is not made, as a mapping for someone with no things is refused.
+    if record.items.is_empty() {
+        return Ok(HandOver {
+            files: Vec::new(),
+            not_plain,
+        });
+    }
     // Each item's path starts with its place's folder in the home: the gate makes it if missing.
     let landing =
         |i: &Item| -> Option<LandingPlace> { Some(LandingPlace::new(HOME, shown_path(&i.path))) };
