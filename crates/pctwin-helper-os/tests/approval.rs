@@ -1,6 +1,7 @@
 //! macOS: the administrator's approval for one move (Security Design part C). CI cannot type an
 //! administrator's password, so the check is proved with rights of the test's own: one macOS
-//! always allows and one it always denies, written with password-free sudo (gated by
+//! always allows, and one that needs an administrator's password (which nobody types here, as in
+//! the helper's own check, which may show nothing), written with password-free sudo (gated by
 //! PCTWIN_HELPER_OS_ADMIN_TESTS=1, set only in CI) and removed after. PCTwin's own right is then
 //! written as root and read back.
 #![cfg(target_os = "macos")]
@@ -9,7 +10,7 @@ use pctwin_helper_os::approval::{Approval, MOVE_RIGHT, approval_holds_for, defin
 use std::process::Command;
 
 const ALLOW: &str = "com.creoleailabs.pctwin.ci-allow";
-const DENY: &str = "com.creoleailabs.pctwin.ci-deny";
+const DENY: &str = "com.creoleailabs.pctwin.ci-needs-admin";
 
 fn admin_tests() -> bool {
     std::env::var("PCTWIN_HELPER_OS_ADMIN_TESTS").as_deref() == Ok("1")
@@ -32,7 +33,8 @@ fn macos_confirms_an_approval_only_for_a_right_it_holds() {
         "set PCTWIN_HELPER_OS_ADMIN_TESTS=1 (CI only)"
     );
     assert!(sudo_security(&["write", ALLOW, "allow"]));
-    assert!(sudo_security(&["write", DENY, "deny"]));
+    // macOS will not store a right ruled plain "deny" (-60005).
+    assert!(sudo_security(&["write", DENY, "authenticate-admin"]));
     let check = || {
         let rights = AuthorizationItemSetBuilder::new()
             .add_right(ALLOW)
