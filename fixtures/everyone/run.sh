@@ -88,7 +88,9 @@ laptop="$(openssl rand -hex 16)"
 token="$(openssl rand -hex 16)"
 uid() { id -u "$1"; }
 approve="$(uid pctwinbea),$(uid pctwincarl),pctwinnew1,pctwinnew2"
-channels=/var/run/pctwin-everyone
+# The real folder, as the app uses: the helper refuses a path through a link (/var/run on Linux,
+# /var on a Mac).
+if $mac; then channels=/private/var/run/pctwin-everyone; else channels=/run/pctwin-everyone; fi
 sudo rm -rf "$channels"
 
 # The system's prompt, said yes to: the helper started as root for this move (`--dir` is made by

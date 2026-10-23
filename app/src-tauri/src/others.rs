@@ -103,6 +103,18 @@ pub enum Asked {
     NotApproved,
 }
 
+/// Mac and Linux: the helper's channel folder, `name` inside the system's own run folder. The real
+/// folder, never a path through a link: the helper refuses to open a folder through one, and
+/// `/var/run` is a link on Linux, as `/var` is on a Mac.
+fn channel_folder(name: &str) -> std::path::PathBuf {
+    let run = if cfg!(target_os = "macos") {
+        "/private/var/run"
+    } else {
+        "/run"
+    };
+    std::path::Path::new(run).join(format!("pctwin-{name}"))
+}
+
 fn hex(bytes: usize) -> Result<String, MoveProblem> {
     let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
     Ok(token.chars().take(bytes * 2).collect())
@@ -122,10 +134,7 @@ fn launch(
     let dir = if cfg!(windows) {
         None
     } else {
-        Some(std::path::PathBuf::from(format!(
-            "/var/run/pctwin-{}",
-            hex(8)?
-        )))
+        Some(channel_folder(&hex(8)?))
     };
     let approve = approve.join(",");
     let laptop = laptop.to_hex();
@@ -456,6 +465,16 @@ impl NewHelper {
 mod tests {
     use super::*;
     use pctwin_scan::Resident;
+
+    /// The helper refuses a channel folder reached through a link, so the run folder the app
+    /// names must be the real one on this system (found on CI: `/var/run` is a link on Linux).
+    #[test]
+    #[cfg(unix)]
+    fn the_channel_folder_is_reached_through_no_link() {
+        let dir = channel_folder("0123456789abcdef");
+        let parent = dir.parent().unwrap();
+        assert_eq!(std::fs::canonicalize(parent).unwrap(), parent);
+    }
 
     fn census() -> Census {
         let r = |id: Option<&str>, kind, name: &str| Resident {
