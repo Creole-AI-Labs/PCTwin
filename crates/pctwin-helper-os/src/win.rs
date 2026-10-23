@@ -599,7 +599,9 @@ fn os_set_process_sddl(sddl: &[u16]) -> Result<(), HRESULT> {
 /// The home folder of the account `sid` (named `name`): made now if the person has never
 /// signed in (`CreateProfile`), else the one the system's profile list names.
 pub(crate) fn profile_folder(sid: &str, name: &str) -> Result<std::path::PathBuf, Error> {
-    let mut path = vec![0u16; 1024];
+    // MAX_PATH exactly: CreateProfile refuses a longer buffer with RPC_X_BAD_STUB_DATA
+    // (0x800706F7), which the two-accounts lab found.
+    let mut path = vec![0u16; 260];
     match os_create_profile(&wide(OsStr::new(sid)), &wide(OsStr::new(name)), &mut path) {
         Ok(()) => {
             let len = path.iter().position(|c| *c == 0).unwrap_or(path.len());
