@@ -565,6 +565,17 @@ impl MoveControl {
         self.0.braked.lock().ok().and_then(|b| b.clone())
     }
 
+    /// Whether the approved place `destination` paused the move and still holds it: nothing more
+    /// is written there until the person carries on.
+    pub(crate) fn is_braked(&self, destination: &str) -> bool {
+        let b = self
+            .0
+            .braked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        b.as_deref() == Some(destination)
+    }
+
     /// Counts the change, then wakes every waiter (after the count, so none misses it).
     fn changed(&self) {
         self.0.changes.fetch_add(1, Ordering::AcqRel);

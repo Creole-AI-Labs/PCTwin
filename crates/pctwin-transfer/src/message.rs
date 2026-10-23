@@ -61,7 +61,11 @@ pub enum Message {
         written: bool,
     },
     /// Receiver, after a new connection: continue this file (`item`; `stream` as it was, 0 after
-    /// the new laptop's app restarted) from here.
+    /// the new laptop's app restarted) from here. Also (move protocol
+    /// [`SET_DOWN_SINCE`](crate::SET_DOWN_SINCE) and later), in answer to a start, end or print
+    /// while the move runs: the drive of the file's place paused the move, so the file is set
+    /// down here partway, nothing more of it written; continue it from here once the move
+    /// carries on.
     ResumeFrom {
         stream: u32,
         item: ItemId,

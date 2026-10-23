@@ -55,6 +55,13 @@ pub const COPY_SINCE: u16 = 4;
 /// stream number another start may have reused. Version 4 has not been released.
 pub const KEYED_SINCE: u16 = 4;
 
+/// The first move protocol version where the new laptop may set a file down partway while the
+/// move runs: a start, end or print for a place whose drive paused the move (Quarantine Design,
+/// step 4) is answered with `ResumeFrom`, nothing more of the file is written there, and the old
+/// laptop picks it up from that ticket once the move carries on. It goes with `Hold`, which
+/// tells the old laptop of the pause. Version 4 has not been released, so it carries this too.
+pub const SET_DOWN_SINCE: u16 = 4;
+
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).
 const KIND: u8 = 34;
 const LEN: usize = 5;

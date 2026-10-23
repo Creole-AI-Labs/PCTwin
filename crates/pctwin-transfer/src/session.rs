@@ -22,11 +22,11 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::send_states::States;
-use crate::version::{COPY_SINCE, HOLD_SINCE, KEYED_SINCE, STOP_SINCE};
+use crate::version::{COPY_SINCE, HOLD_SINCE, KEYED_SINCE, SET_DOWN_SINCE, STOP_SINCE};
 use crate::{
-    Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
-    OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
-    answer_originals,
+    Allowance, Assembly, Block, BlockMap, Confirmed, FileSender, FsOpener,
+    MAX_ORIGINALS_PER_REQUEST, Opener, OriginalNow, OriginalsFault, ResumeTicket, StoredCheck,
+    Trailer, TransferError, answer_originals,
 };
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -1658,6 +1658,18 @@ impl SenderSession {
                 }
                 Ok(())
             }
+            Message::ResumeFrom {
+                stream,
+                item,
+                ticket,
+            } if lane == 0 && self.version >= SET_DOWN_SINCE => {
+                if let Some(&job) = self.job_of.get(&stream)
+                    && self.jobs[job].item == item
+                {
+                    self.set_down(job, ticket);
+                }
+                Ok(())
+            }
             Message::Have { stream, same_size } if lane == 0 => {
                 let Some(&job) = self.job_of.get(&stream) else {
                     return Ok(());
@@ -1707,6 +1719,39 @@ impl SenderSession {
                 Err(TransferError::StoppedThere)
             }
             _ => Err(protocol("unexpected message from the new laptop")),
+        }
+    }
+
+    /// The new laptop set `job` down partway, in answer to its start, end or print: the drive of
+    /// its place paused the move, and nothing more of it is written there. It is picked up again
+    /// from `ticket` once the move carries on, on the same stream, as after a dropped connection
+    /// (see `open`), and never counted as arrived or failed meanwhile. Ignored unless the file is
+    /// waiting on exactly that answer.
+    fn set_down(&mut self, job: usize, ticket: ResumeTicket) {
+        let still_turn = match &self.states[job] {
+            // Its start was answered so: no block of it was sent.
+            SendState::Open {
+                announced: true,
+                cleared: false,
+                ..
+            } => true,
+            SendState::Ended {
+                failure: None,
+                later: false,
+                ..
+            }
+            | SendState::Skipping => false,
+            _ => return,
+        };
+        if self.checks.iter().any(|(j, _)| *j == job) || self.skips.contains(&job) {
+            return;
+        }
+        self.dirty = true;
+        self.resume_from[job] = Some(ticket);
+        *self.states.slot(job) = SendState::Waiting;
+        if !still_turn {
+            self.scheduler
+                .push(self.jobs[job].item, self.jobs[job].tier);
         }
     }
 
@@ -2176,6 +2221,10 @@ struct Incoming<'d> {
     damaged: u32,
     /// Times its blocks were asked for again (see [`SEND_AGAIN_ROUNDS`]).
     rounds: u8,
+    /// Blocks of it came while its place's drive held the move, and were not written: at its
+    /// end it is picked up from its ticket again (see `set_down`), never asked for again as if
+    /// they were the drive's or the file's fault.
+    held_back: bool,
 }
 
 /// A file this laptop already received in this move, offered as possibly identical to a file
@@ -2615,6 +2664,7 @@ impl<'d> ReceiverSession<'d> {
                             own_print: None,
                             damaged: 0,
                             rounds: 0,
+                            held_back: false,
                         },
                     );
                     picked += 1;
@@ -2893,6 +2943,25 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 }
+                // A place whose drive paused the move takes no new file either: set down before
+                // anything here is created or changed (see `set_down`).
+                if self.control.is_braked(&destination) {
+                    let ticket = self
+                        .streams
+                        .get(&stream)
+                        .filter(|s| s.item == item && s.failure.is_none())
+                        .and_then(|s| s.assembly.as_ref())
+                        .map_or_else(
+                            || ResumeTicket {
+                                done: BlockMap::new(header.block_count),
+                                block_size: header.block_size,
+                                stamp: header.stamp,
+                            },
+                            Assembly::resume_ticket,
+                        );
+                    replies.push(self.set_down_as(stream, item, ticket));
+                    return Ok((replies, false));
+                }
                 // Sent as it is now; its line says when that is not as it was at the scan. Judged
                 // by its latest start, the one that lands.
                 if self.allowance.changed_since_scan(item, header.stamp) {
@@ -3042,6 +3111,7 @@ impl<'d> ReceiverSession<'d> {
                         own_print: None,
                         damaged: 0,
                         rounds: 0,
+                        held_back: false,
                     },
                 );
                 // A fresh attempt: nothing of an earlier one counts as written.
@@ -3065,6 +3135,10 @@ impl<'d> ReceiverSession<'d> {
                 changed,
             } => {
                 let trailer = Trailer::new(stamp_after, changed);
+                if let Some(down) = self.set_down(stream, Some(&trailer)) {
+                    replies.push(down);
+                    return Ok((replies, false));
+                }
                 if let Some(again) = self.send_again(stream, &trailer) {
                     replies.push(again);
                     return Ok((replies, false));
@@ -3073,6 +3147,11 @@ impl<'d> ReceiverSession<'d> {
             }
             // From move protocol 4 this laptop judges: the old laptop's print against its own.
             Message::Print { stream, print } if self.version >= KEYED_SINCE => {
+                // Taking it as already there, or making it from a copy here, would write there.
+                if let Some(down) = self.set_down(stream, None) {
+                    replies.push(down);
+                    return Ok((replies, false));
+                }
                 let same = self
                     .streams
                     .get(&stream)
@@ -3260,7 +3339,17 @@ impl<'d> ReceiverSession<'d> {
                     buffer.extend_from_slice(bytes);
                     if last {
                         let whole = slot.take().map(|(_, b)| b).unwrap_or_default();
-                        written = self.write_block(stream, &whole);
+                        written = if self.set_down_here(stream) {
+                            // Its place's drive paused the move: never written there, and not the
+                            // block's fault (not counted as damaged). It is missing from the
+                            // file's ticket, so it is sent again once the move carries on.
+                            if let Some(s) = self.streams.get_mut(&stream) {
+                                s.held_back = true;
+                            }
+                            Some((Block::number_in(&whole).unwrap_or(u64::MAX), false))
+                        } else {
+                            self.write_block(stream, &whole)
+                        };
                     }
                 }
             }
@@ -3497,6 +3586,58 @@ impl<'d> ReceiverSession<'d> {
         }
         replies.push(Message::FileDone { stream, ok: there });
         Ok((replies, false))
+    }
+
+    /// Whether the file open on `stream` goes to a place whose drive paused the move (Quarantine
+    /// Design, step 4): from the moment the brake is put on until the person carries on, nothing
+    /// more is written there, whatever was already on its way.
+    fn set_down_here(&self, stream: u32) -> bool {
+        self.streams
+            .get(&stream)
+            .is_some_and(|s| self.control.is_braked(&s.destination))
+    }
+
+    /// The file open on `stream` is set down partway, as it is, when its place's drive paused the
+    /// move: nothing of it is checked, named or written there, and the old laptop is told to pick
+    /// it up from its ticket once the move carries on (on the same stream, as after a dropped
+    /// connection). So is a file whose blocks were held back by such a pause, at its end (`trailer`)
+    /// once the move carries on: the blocks held back are sent again without a round of asking
+    /// again. Never one that cannot land anyway (it failed, or its end says it changed): those end
+    /// as usual. `None` when it is not set down.
+    fn set_down(&mut self, stream: u32, trailer: Option<&Trailer>) -> Option<Message> {
+        let braked = self
+            .streams
+            .get(&stream)
+            .is_some_and(|s| self.control.is_braked(&s.destination));
+        let s = self
+            .streams
+            .get_mut(&stream)
+            .filter(|s| s.failure.is_none())?;
+        let a = s.assembly.as_ref()?;
+        let unchanged = trailer.is_none_or(|t| !t.changed && t.stamp_after == a.header().stamp);
+        // (An older old laptop is asked for them again as usual: it knows no such answer.)
+        let held_back = trailer.is_some() && s.held_back && self.version >= SET_DOWN_SINCE;
+        if !unchanged || !(braked || held_back) {
+            return None;
+        }
+        s.held_back = false;
+        let (item, ticket) = (s.item, a.resume_ticket());
+        Some(self.set_down_as(stream, item, ticket))
+    }
+
+    /// How a file set down is told: from move protocol [`SET_DOWN_SINCE`], continue from
+    /// `ticket` later. An older old laptop knows no such answer and is told the file did not
+    /// arrive (true: it is kept here partway, unfinished, never shown as arrived).
+    fn set_down_as(&self, stream: u32, item: ItemId, ticket: ResumeTicket) -> Message {
+        if self.version >= SET_DOWN_SINCE {
+            Message::ResumeFrom {
+                stream,
+                item,
+                ticket,
+            }
+        } else {
+            Message::FileDone { stream, ok: false }
+        }
     }
 
     /// Counts a checked file towards its place's brake: a drive that could not store 3 of its

@@ -4771,6 +4771,108 @@ async fn a_drive_that_keeps_failing_pauses_the_move_and_says_which() {
     );
 }
 
+/// Quarantine Design, step 4, with many files on their way at once: every file is sent and
+/// checked side by side, so when the third of them fails and the move pauses, the ends of the
+/// others are already on the wire. None of them is checked, named or written any more at that
+/// place: each is set down partway, unfinished (never shown as arrived), to be picked up from
+/// there once the person carries on.
+#[tokio::test]
+async fn a_drive_that_pauses_the_move_takes_nothing_more_of_the_files_on_their_way() {
+    const FILES: usize = 12;
+    // One block each, and several (blocks of them on their way too).
+    for size in [70_000, 600_000] {
+        let l = laptops(&[size; FILES]);
+        let table = table(&l, Some(Flip::OnEveryWrite));
+        let control = pctwin_transfer::MoveControl::new();
+        let mut sender = SenderSession::new(jobs(&l), FILES);
+        let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+            .with_control(control.clone());
+        let written = receiver.meter();
+        let (mut a, mut b) = mem_pair();
+        let person = async {
+            while control.braked().is_none() {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let at_pause = written.load(std::sync::atomic::Ordering::SeqCst);
+            // Long enough for everything already on its way to arrive and be answered.
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            assert_eq!(
+                written.load(std::sync::atomic::Ordering::SeqCst),
+                at_pause,
+                "written there after the pause"
+            );
+            control.stop();
+        };
+        let (_, received, ()) = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+            tokio::join!(sender.run(&mut a), receiver.run(&mut b), person)
+        })
+        .await
+        .expect("the move hung");
+        assert_eq!(control.braked().as_deref(), Some("me"));
+        let mut failed = 0;
+        for n in 0..FILES {
+            match receiver.outcome(id(n as u8)) {
+                Some(ReceiveOutcome::Failed(why)) if why.contains("could not store") => failed += 1,
+                None => {}
+                other => panic!("file {n} ended after the pause: {other:?}"),
+            }
+            if !matches!(
+                receiver.outcome(id(n as u8)),
+                Some(ReceiveOutcome::Finished(_))
+            ) {
+                assert!(!landed(&l, n).exists(), "file {n} was named all the same");
+            }
+        }
+        assert_eq!(failed, 3, "paused at the third, nothing more ended there");
+        // Ended by the person's stop, never run on to the end.
+        assert!(received.is_err());
+        assert_ne!(
+            sender.outcome(id(FILES as u8 - 1)),
+            Some(&SendOutcome::Arrived)
+        );
+    }
+}
+
+/// The same, carrying on each time the drive pauses the move: every file set down is picked up
+/// where it was and ends for its own reason, and the move ends (never stuck on a file set down).
+#[tokio::test]
+async fn files_set_down_by_a_pause_are_picked_up_when_the_person_carries_on() {
+    const FILES: usize = 12;
+    let l = laptops(&[70_000; FILES]);
+    let table = table(&l, Some(Flip::OnEveryWrite));
+    let control = pctwin_transfer::MoveControl::new();
+    let mut sender = SenderSession::new(jobs(&l), FILES);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+        .with_control(control.clone());
+    let done = std::cell::Cell::new(false);
+    let ((s, r), brakes) = {
+        let (mut a, mut b) = mem_pair();
+        tokio::time::timeout(std::time::Duration::from_secs(120), async {
+            tokio::join!(
+                async {
+                    let ran = tokio::join!(sender.run(&mut a), receiver.run(&mut b));
+                    done.set(true);
+                    ran
+                },
+                carry_on_whenever_braked(&control, &done)
+            )
+        })
+        .await
+        .expect("hung")
+    };
+    s.unwrap();
+    r.unwrap();
+    assert!(brakes >= 1, "the drive never paused the move");
+    for n in 0..FILES {
+        match receiver.outcome(id(n as u8)) {
+            Some(ReceiveOutcome::Failed(why)) => {
+                assert!(why.contains("could not store"), "file {n}: {why}");
+            }
+            other => panic!("file {n}: {other:?}"),
+        }
+    }
+}
+
 /// Blocks a drop cut off are kept and sent again without reading the drive again: on a weak
 /// drive every block is read once, however often the connection drops.
 #[tokio::test]
