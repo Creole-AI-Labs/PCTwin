@@ -6,16 +6,20 @@
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-/// Where the lock is: a folder only the system and administrators write in normal use.
-pub fn lock_path() -> PathBuf {
+/// Where the lock is: a folder only the system and administrators can make things in, so no one
+/// else can take the lock first and keep every move from starting. On Windows that is
+/// `Program Files\PCTwin` (found by asking Windows, never the environment), not ProgramData,
+/// where every account may make folders.
+pub fn lock_path() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        let data = std::env::var_os("ProgramData").unwrap_or_else(|| r"C:\ProgramData".into());
-        PathBuf::from(data).join("PCTwin").join("helper.lock")
+        pctwin_helper_os::program_folder()
+            .map(|dir| dir.join("helper.lock"))
+            .map_err(|e| format!("the lock's folder: {e}"))
     }
     #[cfg(not(windows))]
     {
-        PathBuf::from("/run/pctwin-helper.lock")
+        Ok(PathBuf::from("/run/pctwin-helper.lock"))
     }
 }
 

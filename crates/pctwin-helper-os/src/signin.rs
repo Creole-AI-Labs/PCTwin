@@ -51,7 +51,7 @@ fn run(program: &Path, args: &[&str]) -> Result<String, Error> {
 /// identifier checked first so nothing else can be said to the shell).
 #[cfg(windows)]
 fn name_of(sid: &crate::Sid) -> Result<String, Error> {
-    let shell = system_tool(r"WindowsPowerShell\v1.0\powershell.exe");
+    let shell = system_tool(r"WindowsPowerShell\v1.0\powershell.exe")?;
     let out = run(
         &shell,
         &[
@@ -73,7 +73,7 @@ fn name_of(sid: &crate::Sid) -> Result<String, Error> {
 /// changed or swapped for a link while an elevated hand-over reads it.
 #[cfg(windows)]
 pub fn lock_to_administrators(folder: &Path, accounts: &[&crate::Sid]) -> Result<(), Error> {
-    let icacls = system_tool("icacls.exe");
+    let icacls = system_tool("icacls.exe")?;
     let folder_text = folder.to_string_lossy();
     run(
         &icacls,
@@ -105,9 +105,8 @@ pub fn lock_to_administrators(folder: &Path, accounts: &[&crate::Sid]) -> Result
 }
 
 #[cfg(windows)]
-fn system_tool(name: &str) -> PathBuf {
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    Path::new(&root).join("System32").join(name)
+fn system_tool(name: &str) -> Result<PathBuf, Error> {
+    crate::win::system_program(name)
 }
 
 /// Makes the hand-over of `folder` run at `person`'s next sign-in, as them. `name` is the
@@ -136,7 +135,7 @@ pub fn schedule(
         } else {
             name
         };
-        let icacls = system_tool("icacls.exe");
+        let icacls = system_tool("icacls.exe")?;
         let folder_text = folder.to_string_lossy();
         // Given to the administrators, never through a link (/L), then the mover's access
         // taken away, everything below too (/T).
@@ -175,7 +174,7 @@ pub fn schedule(
             ));
         }
         run(
-            &system_tool("schtasks.exe"),
+            &system_tool("schtasks.exe")?,
             &[
                 "/Create",
                 "/TN",
@@ -258,10 +257,10 @@ fn entry(key: &str, folder: &Path, program: &Path) -> (PathBuf, String, String) 
 pub fn clean(staging_root: &Path) {
     #[cfg(windows)]
     {
-        let Ok(list) = run(
-            &system_tool("schtasks.exe"),
-            &["/Query", "/FO", "CSV", "/NH"],
-        ) else {
+        let Ok(schtasks) = system_tool("schtasks.exe") else {
+            return;
+        };
+        let Ok(list) = run(&schtasks, &["/Query", "/FO", "CSV", "/NH"]) else {
             return;
         };
         for line in list.lines() {
@@ -275,22 +274,16 @@ pub fn clean(staging_root: &Path) {
                 continue;
             }
             let task = format!("PCTwin\\{PREFIX}{key}");
-            let still = run(
-                &system_tool("schtasks.exe"),
-                &["/Query", "/TN", &task, "/XML"],
-            )
-            .map(|xml| {
-                xml.split("--holding")
-                    .nth(1)
-                    .and_then(|r| r.split('"').nth(1))
-                    .is_some_and(|held| Path::new(held).exists())
-            })
-            .unwrap_or(true);
+            let still = run(&schtasks, &["/Query", "/TN", &task, "/XML"])
+                .map(|xml| {
+                    xml.split("--holding")
+                        .nth(1)
+                        .and_then(|r| r.split('"').nth(1))
+                        .is_some_and(|held| Path::new(held).exists())
+                })
+                .unwrap_or(true);
             if !still {
-                let _ = run(
-                    &system_tool("schtasks.exe"),
-                    &["/Delete", "/TN", &task, "/F"],
-                );
+                let _ = run(&schtasks, &["/Delete", "/TN", &task, "/F"]);
             }
         }
         let _ = staging_root;

@@ -49,7 +49,7 @@
 //!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
 //!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`, `os_net_user_add`,
 //!   `os_expire_password`, `os_create_dir_with_sddl`, `os_create_profile`,
-//!   `os_set_process_sddl`.
+//!   `os_set_process_sddl`, `os_windows_dir`, `os_machine_text`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`, `os_od_create_user`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -70,7 +70,9 @@ pub mod signin;
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
-pub use win::{PipeClient, PipeName, PipeServer, caller_of};
+pub use win::{
+    PipeClient, PipeName, PipeServer, SystemFolder, caller_of, program_folder, system_folder,
+};
 
 #[cfg(unix)]
 mod unix;

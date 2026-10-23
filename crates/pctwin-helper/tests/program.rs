@@ -1,6 +1,8 @@
 //! The helper program itself, over its real private channel (Windows: the named pipe only the
-//! mover's account can open). Started here without administrator rights, as this account; the
-//! real prompt cannot be clicked in a test.
+//! mover's account can open). Started here as this account; the real prompt cannot be clicked in
+//! a test. Without administrator rights (a developer's laptop) it must refuse at once, as it
+//! cannot take its one-helper lock where only administrators may write; with them (CI runners)
+//! it serves the session.
 
 #[cfg(windows)]
 #[test]
@@ -24,8 +26,26 @@ fn the_program_serves_one_session_from_the_mover_and_ends() {
             "--channel",
             name.as_str(),
         ])
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
+    // `net session` succeeds only with administrator rights.
+    let admin = std::process::Command::new("net")
+        .arg("session")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !admin {
+        let out = helper.wait_with_output().unwrap();
+        assert!(
+            !out.status.success(),
+            "a helper without administrator rights ran"
+        );
+        let why = String::from_utf8_lossy(&out.stderr);
+        assert!(why.contains("the lock's folder"), "{why}");
+        return;
+    }
     // The pipe exists once the program has made it.
     let client = (0..200)
         .find_map(|_| {

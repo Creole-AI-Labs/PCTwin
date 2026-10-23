@@ -37,6 +37,10 @@ use windows::Win32::System::Pipes::{
     ImpersonateNamedPipeClient, NAMED_PIPE_MODE, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_BYTE, PIPE_WAIT,
 };
+use windows::Win32::System::Registry::{
+    HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+};
+use windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE;
 use windows::Win32::System::Threading::{GetCurrentProcess, IsWow64Process2};
 use windows::Win32::System::Threading::{
@@ -617,11 +621,8 @@ pub(crate) fn profile_folder(sid: &str, name: &str) -> Result<std::path::PathBuf
 fn listed_profile(sid: &str) -> Result<std::path::PathBuf, Error> {
     Sid::parse(sid)?;
     let key = format!(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");
-    let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-    let reg = std::path::Path::new(&system)
-        .join("System32")
-        .join("reg.exe");
-    let out = std::process::Command::new(reg)
+    let system = system_folder(SystemFolder::Windows)?;
+    let out = std::process::Command::new(system.join("System32").join("reg.exe"))
         .args(["query", &key, "/v", "ProfileImagePath"])
         .output()?;
     let text = String::from_utf8_lossy(&out.stdout);
@@ -638,7 +639,11 @@ fn listed_profile(sid: &str) -> Result<std::path::PathBuf, Error> {
                 .map(|(_, v)| v.trim().to_string())
         })
         .ok_or(Error::NotSupported("no profile listed for that account"))?;
-    let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+    // %SystemDrive% is the drive Windows is on, taken from where Windows itself says it is.
+    let Some(std::path::Component::Prefix(drive)) = system.components().next() else {
+        return Err(Error::NotSupported("the Windows folder has no drive"));
+    };
+    let drive = drive.as_os_str().to_string_lossy();
     Ok(std::path::PathBuf::from(
         value.replace("%SystemDrive%", &drive),
     ))
@@ -694,7 +699,119 @@ fn os_image_path(process: BorrowedHandle<'_>) -> Result<PathBuf, HRESULT> {
     Ok(PathBuf::from(OsString::from_wide(&buffer)))
 }
 
+/// Where Windows is, as the kernel holds it (not the environment's `SystemRoot`).
+fn os_windows_dir() -> Result<PathBuf, HRESULT> {
+    let mut buffer = vec![0u16; 32_768];
+    // SAFETY: the binding passes the buffer's true length; the system writes at most that much
+    // and returns how many characters it wrote (0 on failure, more than the length if too small).
+    #[expect(unsafe_code, reason = "GetSystemWindowsDirectoryW has no safe binding")]
+    let len = unsafe { GetSystemWindowsDirectoryW(Some(&mut buffer)) } as usize;
+    if len == 0 || len >= buffer.len() {
+        return Err(windows::core::Error::from_thread().code());
+    }
+    buffer.truncate(len);
+    Ok(PathBuf::from(OsString::from_wide(&buffer)))
+}
+
+/// A plain text value (`REG_SZ`, never one with variables to fill in) from the 64-bit view of
+/// `HKEY_LOCAL_MACHINE`, which only administrators can change.
+fn os_machine_text(subkey: &[u16], value: &[u16]) -> Result<OsString, HRESULT> {
+    assert!(
+        subkey.ends_with(&[0]) && value.ends_with(&[0]),
+        "NUL-terminated"
+    );
+    let mut buffer = vec![0u16; 32_768];
+    let mut bytes = (buffer.len() * 2) as u32;
+    // SAFETY: both names are NUL-terminated (checked above) and only read; the data pointer is
+    // the buffer's and `bytes` its true size in bytes, which the system updates to what it wrote.
+    #[expect(unsafe_code, reason = "RegGetValueW has no safe binding")]
+    let e = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(subkey.as_ptr()),
+            PCWSTR(value.as_ptr()),
+            RRF_RT_REG_SZ | RRF_SUBKEY_WOW6464KEY,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut bytes),
+        )
+    };
+    if e != ERROR_SUCCESS {
+        return Err(e.to_hresult());
+    }
+    buffer.truncate(bytes as usize / 2);
+    while buffer.last() == Some(&0) {
+        buffer.pop();
+    }
+    Ok(OsString::from_wide(&buffer))
+}
+
 // ---- Safe code from here on. ----
+
+/// A folder of the system's own, as Windows names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemFolder {
+    /// Where Windows is (`C:\Windows`).
+    Windows,
+    /// Where 64-bit programs are installed (`C:\Program Files`).
+    ProgramFiles,
+}
+
+/// Where `which` is, from the kernel or the machine's registry: never from the environment, which
+/// whoever starts a program sets, so a mover could point an elevated helper at folders of their
+/// own (Security Design part C). Not the shell's known folders either: their paths are written
+/// with variables (`%windir%`) the shell fills in from the environment.
+pub fn system_folder(which: SystemFolder) -> Result<PathBuf, Error> {
+    let path = match which {
+        SystemFolder::Windows => {
+            os_windows_dir().map_err(|c| os_err("GetSystemWindowsDirectoryW", c))?
+        }
+        SystemFolder::ProgramFiles => PathBuf::from(
+            os_machine_text(
+                &wide(OsStr::new(r"SOFTWARE\Microsoft\Windows\CurrentVersion")),
+                &wide(OsStr::new("ProgramFilesDir")),
+            )
+            .map_err(|c| os_err("RegGetValueW", c))?,
+        ),
+    };
+    if !path.is_absolute() {
+        return Err(Error::NotSupported(
+            "the system named a folder that is not a full path",
+        ));
+    }
+    Ok(path)
+}
+
+/// A program in Windows' own `System32`.
+pub(crate) fn system_program(name: &str) -> Result<PathBuf, Error> {
+    Ok(system_folder(SystemFolder::Windows)?
+        .join("System32")
+        .join(name))
+}
+
+/// System and administrators only, protected from what the folder above allows.
+pub(crate) const ADMIN_ONLY: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+/// `Program Files\PCTwin`, made administrators-only if it is missing. Only administrators can
+/// make anything in Program Files, so one that exists was made by an administrator (the
+/// installer, or an earlier move); it must still be a plain folder, never a link.
+pub fn program_folder() -> Result<PathBuf, Error> {
+    let path = system_folder(SystemFolder::ProgramFiles)?.join("PCTwin");
+    match create_folder_with_access(&path, ADMIN_ONLY) {
+        Ok(()) => Ok(path),
+        Err(Error::NameTaken) => {
+            let meta = std::fs::symlink_metadata(&path)?;
+            if !meta.is_dir() || meta.file_type().is_symlink() {
+                return Err(Error::NotPrivate(format!(
+                    "{} is not a plain folder",
+                    path.display()
+                )));
+            }
+            Ok(path)
+        }
+        Err(e) => Err(e),
+    }
+}
 
 pub(crate) fn start_runas(request: &LaunchRequest) -> Result<Process, LaunchError> {
     let file = wide(request.program().as_os_str());

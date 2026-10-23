@@ -104,7 +104,9 @@ fn main() -> ExitCode {
         }
     };
     // One move at a time: held until this program ends.
-    let _lock = match pctwin_helper::lock::one_helper(&pctwin_helper::lock::lock_path()) {
+    let _lock = match pctwin_helper::lock::lock_path()
+        .and_then(|path| pctwin_helper::lock::one_helper(&path))
+    {
         Ok(l) => l,
         Err(why) => {
             eprintln!("pctwin-helper: {why}");

@@ -26,8 +26,9 @@ use std::path::Path;
 /// The folder every move's holding area is made in on this laptop.
 pub fn staging_root() -> Option<PathBuf> {
     #[cfg(windows)]
-    return std::env::var_os("ProgramFiles")
-        .map(|p| PathBuf::from(p).join("PCTwin").join("staging"));
+    return crate::system_folder(crate::SystemFolder::ProgramFiles)
+        .ok()
+        .map(|p| p.join("PCTwin").join("staging"));
     #[cfg(target_os = "macos")]
     return Some(PathBuf::from("/Library/Application Support/PCTwin/staging"));
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -48,20 +49,17 @@ pub fn create_holding_area(mover: &Account) -> Result<PathBuf, Error> {
     Err(Error::NotSupported("a holding area"))
 }
 
-/// System and administrators only, protected from what the folder above allows.
 #[cfg(windows)]
-const ADMIN_ONLY: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+use crate::win::ADMIN_ONLY;
 
 #[cfg(windows)]
 fn windows(mover: &Account, name: &str) -> Result<PathBuf, Error> {
     let Account::Sid(sid) = mover else {
         return Err(Error::BadInput("a Windows account"));
     };
-    let program_files = std::env::var_os("ProgramFiles")
-        .map(PathBuf::from)
-        .ok_or(Error::NotSupported("no Program Files folder"))?;
-    let mut path = program_files;
-    for part in ["PCTwin", "staging"] {
+    let mut path = crate::win::program_folder()?;
+    {
+        let part = "staging";
         path.push(part);
         match crate::win::create_folder_with_access(&path, ADMIN_ONLY) {
             Ok(()) => {}
