@@ -4722,11 +4722,14 @@ async fn undo_removes_a_damaged_copy_but_keeps_one_changed_since() {
             );
             assert!(kept.exists(), "the person's changes are kept");
         } else {
-            assert_eq!(
-                report.files[0].outcome,
-                pctwin_journal::UndoOutcome::Deleted,
-                "{report:?}"
-            );
+            // Gone from where it was: deleted, or on a Mac put in the Trash (and seen there).
+            match &report.files[0].outcome {
+                pctwin_journal::UndoOutcome::Deleted => {}
+                pctwin_journal::UndoOutcome::Trashed { at } if cfg!(target_os = "macos") => {
+                    assert!(std::path::Path::new(at).exists(), "{report:?}");
+                }
+                other => panic!("{other:?}: {report:?}"),
+            }
             assert!(!kept.exists(), "the damaged copy is gone");
         }
     }
