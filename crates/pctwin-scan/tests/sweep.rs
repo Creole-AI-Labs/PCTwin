@@ -89,7 +89,12 @@ fn census(lab: &Lab, bea: bool) -> Census {
         residents,
         account_list_read: true,
         system: SystemKind::this(),
-        uid_range: (1000, 60000),
+        // The lab's people are made-up accounts, but on Linux and macOS its files really belong
+        // to the account running the tests (uid 1001 on a GitHub Linux runner), who is none of
+        // them. Were that uid a person here, every sweep would find "someone from an old
+        // account" the lab never made. So in the lab no user ID is a person's; finding leftover
+        // owners by user ID is proven in the census tests.
+        uid_range: (1, 0),
     }
 }
 
