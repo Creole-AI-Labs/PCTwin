@@ -137,20 +137,16 @@ enum Launched {
     AllowInSettings,
 }
 
-/// Mac and Linux: the helper's channel folder, `name` (random, so no one can take it first) in a
-/// folder of root's that no one else can rename it out of. The real folder, never a path through
-/// a link: the helper refuses to open a folder through one, and `/var/run` is a link on Linux, as
-/// `/var` is on a Mac. On a Mac, `/private/var/run` is writable by the `daemon` group without
-/// the sticky bit, so root's sticky `/private/var/tmp` (found by the two-accounts lab).
+/// Linux: the helper's channel folder, `name` (random, so no one can take it first) in root's own
+/// `/run`, the real folder, never a path through a link: the helper refuses to open a folder
+/// through one, and `/var/run` is a link (found by the two-accounts lab). (A Mac's launch daemon
+/// has its own fixed channel, `pctwin_helper_os::daemon::CHANNEL_DIR`.)
+#[cfg(not(target_os = "macos"))]
 fn channel_folder(name: &str) -> std::path::PathBuf {
-    let run = if cfg!(target_os = "macos") {
-        "/private/var/tmp"
-    } else {
-        "/run"
-    };
-    std::path::Path::new(run).join(format!("pctwin-{name}"))
+    std::path::Path::new("/run").join(format!("pctwin-{name}"))
 }
 
+#[cfg(not(target_os = "macos"))]
 fn hex(bytes: usize) -> Result<String, MoveProblem> {
     let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
     Ok(token.chars().take(bytes * 2).collect())
@@ -617,7 +613,7 @@ mod tests {
     /// The helper refuses a channel folder reached through a link, so the run folder the app
     /// names must be the real one on this system (found on CI: `/var/run` is a link on Linux).
     #[test]
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     fn the_channel_folder_is_reached_through_no_link() {
         let dir = channel_folder("0123456789abcdef");
         let parent = dir.parent().unwrap();
