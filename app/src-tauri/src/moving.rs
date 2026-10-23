@@ -518,8 +518,11 @@ pub enum OthersWhy {
     NotApproved,
     /// The helper could not be started or reached.
     Failed,
-    /// This system cannot move other people in this version (a Mac).
+    /// This system cannot move other people in this version.
     NotHere,
+    /// A Mac: an administrator must first allow PCTwin in System Settings, Login Items (the
+    /// page was opened); the next move can then take them.
+    AllowInSettings,
 }
 
 pctwin_types::listed_enum! {
@@ -1324,18 +1327,25 @@ impl<R: Runtime> AppSteps<R> {
         let new_names: Vec<String> = names.values().cloned().collect();
         let control = self.live_control.clone();
         let stopped = move || control.stopped();
-        let mut helper =
-            match crate::others::NewHelper::start(&self.me, &new_names, &existing, &stopped) {
-                Ok(Some(h)) => h,
-                Ok(None) => {
-                    not_moved(OthersWhy::NotApproved);
-                    return rules;
-                }
-                Err(_) => {
-                    not_moved(OthersWhy::Failed);
-                    return rules;
-                }
-            };
+        let who: Vec<String> = going.iter().map(|(p, _)| p.name.clone()).collect();
+        let prompt = crate::others::approve_prompt(&words.approve, &who).unwrap_or_default();
+        let mut helper = match crate::others::NewHelper::start(
+            &self.me, &new_names, &existing, &prompt, &stopped,
+        ) {
+            Ok(crate::others::Started::Helper(h)) => h,
+            Ok(crate::others::Started::Refused) => {
+                not_moved(OthersWhy::NotApproved);
+                return rules;
+            }
+            Ok(crate::others::Started::AllowInSettings) => {
+                not_moved(OthersWhy::AllowInSettings);
+                return rules;
+            }
+            Err(_) => {
+                not_moved(OthersWhy::Failed);
+                return rules;
+            }
+        };
         for (n, (p, c)) in going.iter().enumerate() {
             let account = match c {
                 crate::others::PlaceChoice::Existing { account_id } => Ok(account_id.clone()),
@@ -1587,7 +1597,7 @@ async fn run_old<R: Runtime>(
     mut link: pctwin_link::Link,
     live: &Live,
     scan_stop: &AtomicBool,
-    others: Vec<String>,
+    others: Others,
     other: Option<LabelView>,
 ) -> Result<Ran, MoveError> {
     // The pairing's keys, for the way back after a drop once the plan is approved.
@@ -1628,7 +1638,8 @@ async fn run_old<R: Runtime>(
             Err(_) => return Err(Stop::Cancelled.into()),
         }
     }
-    let others = crate::others::checked_others(&sweep.census, &others)
+    let approve_words = others.approve;
+    let others = crate::others::checked_others(&sweep.census, &others.ids)
         .map_err(|_| TransferError::Protocol("someone ticked is not on this laptop".into()))?;
     if scan_stop.load(Ordering::Acquire) {
         return Err(Stop::Cancelled.into());
@@ -1655,7 +1666,12 @@ async fn run_old<R: Runtime>(
             not_moved(OthersWhy::Failed);
         } else {
             let _ = app.emit(STAGE_EVENT, Stage::Administrator);
-            match crate::others::ask_for(&mover, &others, laptop, &|| {
+            let names: Vec<String> = others
+                .iter()
+                .filter_map(|id| Some(sweep.census.by_account(id)?.suggested_name.clone()))
+                .collect();
+            let prompt = crate::others::approve_prompt(&approve_words, &names).unwrap_or_default();
+            match crate::others::ask_for(&mover, &others, laptop, &prompt, &|| {
                 scan_stop.load(Ordering::Acquire)
             }) {
                 Ok(crate::others::Asked::Approved(client, scanned)) => {
@@ -1679,6 +1695,7 @@ async fn run_old<R: Runtime>(
                     helper = Some(client);
                 }
                 Ok(crate::others::Asked::NotApproved) => not_moved(OthersWhy::NotApproved),
+                Ok(crate::others::Asked::AllowInSettings) => not_moved(OthersWhy::AllowInSettings),
                 Err(_) => not_moved(OthersWhy::Failed),
             }
         }
@@ -1734,7 +1751,7 @@ struct Ran {
 enum ThisSide {
     /// The old laptop, with the other people the mover ticked (M06).
     Old {
-        others: Vec<String>,
+        others: Others,
     },
     New(Box<NewSide>),
 }
@@ -2010,8 +2027,16 @@ fn check_fallback(fallback: &BTreeMap<FolderRole, String>) -> Result<(), MovePro
 
 /* ---------- Commands ---------- */
 
+/// The other people the mover ticked on the old laptop (M06), by account ID, with the words of a
+/// Mac's administrator window (`{names}` filled in with theirs).
+struct Others {
+    ids: Vec<String>,
+    approve: String,
+}
+
 /// Starts this laptop's side of the move with the paired link. `fallback`: for each folder the new
 /// laptop may lack, the folder in the home that stands for it, in the person's language.
+/// `approve`: the words of a Mac's administrator window, with `{names}`.
 #[tauri::command]
 pub async fn move_begin<R: Runtime>(
     app: AppHandle<R>,
@@ -2019,11 +2044,18 @@ pub async fn move_begin<R: Runtime>(
     moving: State<'_, AppMoving>,
     fallback: BTreeMap<FolderRole, String>,
     others: Vec<String>,
+    approve: String,
 ) -> Result<(), MoveProblem> {
     check_fallback(&fallback)?;
-    if others.len() > pctwin_move::landing::MAX_PEOPLE {
+    if others.len() > pctwin_move::landing::MAX_PEOPLE
+        || crate::others::approve_prompt(&approve, &[]).is_none()
+    {
         return Err(MoveProblem::Failed);
     }
+    let others = Others {
+        ids: others,
+        approve,
+    };
     let (live, scan_stop) = moving.begin()?;
     let Some((link, paired)) = pairing.take_link().await else {
         moving.finish(Vec::new());
@@ -2481,6 +2513,7 @@ mod tests {
         crate::others::PasswordWords {
             title: "New account".into(),
             body: "{name}: {account} {password}".into(),
+            approve: "Approve reading the files of {names}.".into(),
         }
     }
 
@@ -2506,6 +2539,7 @@ mod tests {
         let bad = crate::others::PasswordWords {
             title: "x".into(),
             body: "no places".into(),
+            approve: "Approve {names}.".into(),
         };
         assert_eq!(moving.place(&[new("S-2")], bad), Err(MoveProblem::Failed));
         assert!(rx.try_recv().is_err(), "still waiting");

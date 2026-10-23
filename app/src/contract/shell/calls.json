@@ -113,6 +113,10 @@
           [
             "1001"
           ]
+        ],
+        [
+          "approve",
+          "Approve reading the files of {names}."
         ]
       ],
       "name": "move_begin"
@@ -155,6 +159,7 @@
         [
           "words",
           {
+            "approve": "Approve reading the files of {names}.",
             "body": "{name}: {account} / {password}",
             "title": "New account"
           }

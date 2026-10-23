@@ -22,5 +22,9 @@
   {
     "kind": "others-not-moved",
     "why": "not-here"
+  },
+  {
+    "kind": "others-not-moved",
+    "why": "allow-in-settings"
   }
 ]

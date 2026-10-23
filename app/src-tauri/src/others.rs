@@ -3,9 +3,10 @@
 //! part C). The helper reads their files read-only and gives the app totals and handles, never
 //! names of files; the mover sees only how many of their things moved.
 //!
-//! Windows asks through UAC and Linux through polkit. A Mac starts the helper as a launch daemon
-//! that, as built, cannot yet be told which people were approved, so there other people are not
-//! moved in this version and the screens say so.
+//! Windows asks through UAC and Linux through polkit. A Mac switches the helper's launch daemon on
+//! (an administrator allows it once in System Settings, Login Items), then asks an administrator
+//! for each move in macOS's own window and opens the move with that approval (Security Design
+//! part C, "The administrator's approval on a Mac").
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -52,7 +53,24 @@ pub fn people_in(census: &Census) -> Vec<PersonHere> {
 }
 
 /// Whether this laptop can move other people in this version.
-pub const CAN_MOVE_OTHERS: bool = cfg!(any(windows, target_os = "linux"));
+pub const CAN_MOVE_OTHERS: bool = cfg!(any(windows, target_os = "linux", target_os = "macos"));
+
+/// The words of the administrator's window on a Mac, in the person's language, with `{names}`
+/// filled in with the people whose files are read: `None` unless the words are short plain text
+/// with that place exactly once.
+pub fn approve_prompt(words: &str, names: &[String]) -> Option<String> {
+    let plain = !words.is_empty()
+        && words.len() <= 400
+        && !words.chars().any(char::is_control)
+        && words.matches("{names}").count() == 1;
+    plain.then(|| {
+        let names: Vec<String> = names
+            .iter()
+            .map(|n| n.chars().filter(|c| !c.is_control()).collect())
+            .collect();
+        words.replace("{names}", &names.join(", "))
+    })
+}
 
 /// The people on this laptop (M06).
 #[tauri::command]
@@ -101,6 +119,22 @@ pub enum Asked {
     /// The administrator said no at the system's prompt (or this system cannot ask): only the
     /// mover's things move.
     NotApproved,
+    /// A Mac: an administrator has not yet allowed PCTwin in System Settings, Login Items (that
+    /// page is opened for them): only the mover's things move this time.
+    AllowInSettings,
+}
+
+/// How starting the helper went.
+enum Launched {
+    Connected(Client<pctwin_helper::client::Channel>),
+    /// The administrator said no.
+    Refused,
+    /// A Mac: PCTwin is not yet allowed in System Settings, Login Items.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(dead_code, reason = "only a Mac's launch daemon needs allowing")
+    )]
+    AllowInSettings,
 }
 
 /// Mac and Linux: the helper's channel folder, `name` (random, so no one can take it first) in a
@@ -124,8 +158,75 @@ fn hex(bytes: usize) -> Result<String, MoveProblem> {
 
 /// Starts the helper with the system's prompt for `approve` (old laptop: the other people's
 /// account IDs; new laptop: the names of accounts to make and the accounts to hold for), and
-/// connects to it. `None`: the administrator said no.
+/// connects to it. `prompt`: the words of a Mac's administrator window.
 fn launch(
+    mover: &str,
+    approve: &[String],
+    laptop: LaptopId,
+    prompt: &str,
+    stopped: &dyn Fn() -> bool,
+) -> Result<Launched, MoveProblem> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = mover;
+        launch_daemon(approve, laptop, prompt, stopped)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = prompt;
+        Ok(match launch_elevated(mover, approve, laptop, stopped)? {
+            Some(c) => Launched::Connected(c),
+            None => Launched::Refused,
+        })
+    }
+}
+
+/// A Mac: switches the launch daemon on, asks an administrator in macOS's own window showing
+/// `prompt`, and opens the move with that approval.
+#[cfg(target_os = "macos")]
+fn launch_daemon(
+    approve: &[String],
+    laptop: LaptopId,
+    prompt: &str,
+    stopped: &dyn Fn() -> bool,
+) -> Result<Launched, MoveProblem> {
+    use pctwin_helper_os::daemon::{DaemonStart, HELPER_PLIST, start_daemon};
+    match start_daemon(HELPER_PLIST).map_err(|_| MoveProblem::Failed)? {
+        DaemonStart::Running => {}
+        DaemonStart::NeedsApproval => {
+            pctwin_helper_os::daemon::open_approval_settings();
+            return Ok(Launched::AllowInSettings);
+        }
+    }
+    let Some(approval) =
+        pctwin_helper_os::approval::ask_administrator(prompt).map_err(|_| MoveProblem::Failed)?
+    else {
+        let _ = pctwin_helper_os::daemon::stop_daemon(HELPER_PLIST);
+        return Ok(Launched::Refused);
+    };
+    let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
+    // launchd may still be starting it: try its socket until it answers or the time is up.
+    let until = Instant::now() + HELPER_WAIT;
+    loop {
+        match pctwin_helper::client::connect_daemon(&approval, &token, approve, &laptop) {
+            Ok(c) => return Ok(Launched::Connected(c)),
+            Err(ClientError::Refused(_)) => {
+                let _ = pctwin_helper_os::daemon::stop_daemon(HELPER_PLIST);
+                return Ok(Launched::Refused);
+            }
+            Err(_) if Instant::now() < until && !stopped() => std::thread::sleep(TRY_EVERY),
+            Err(_) => {
+                let _ = pctwin_helper_os::daemon::stop_daemon(HELPER_PLIST);
+                return Err(MoveProblem::Failed);
+            }
+        }
+    }
+}
+
+/// Windows and Linux: starts the helper with the system's prompt and connects to it. `None`: the
+/// administrator said no.
+#[cfg(not(target_os = "macos"))]
+fn launch_elevated(
     mover: &str,
     approve: &[String],
     laptop: LaptopId,
@@ -199,18 +300,22 @@ fn launch(
     }
 }
 
-/// Starts the helper for `others` with the system's prompt, connects, and scans each one.
+/// Starts the helper for `others` with the system's prompt (a Mac's showing `prompt`), connects,
+/// and scans each one.
 pub fn ask_for(
     mover: &str,
     others: &[String],
     laptop: LaptopId,
+    prompt: &str,
     stopped: &dyn Fn() -> bool,
 ) -> Result<Asked, MoveProblem> {
     if !CAN_MOVE_OTHERS || others.is_empty() {
         return Ok(Asked::NotApproved);
     }
-    let Some(mut client) = launch(mover, others, laptop, stopped)? else {
-        return Ok(Asked::NotApproved);
+    let mut client = match launch(mover, others, laptop, prompt, stopped)? {
+        Launched::Connected(c) => c,
+        Launched::Refused => return Ok(Asked::NotApproved),
+        Launched::AllowInSettings => return Ok(Asked::AllowInSettings),
     };
     let mut scanned = Vec::new();
     for person in others {
@@ -225,6 +330,29 @@ pub fn ask_for(
         }
     }
     Ok(Asked::Approved(Arc::new(Mutex::new(client)), scanned))
+}
+
+#[cfg(test)]
+mod approve_tests {
+    use super::approve_prompt;
+
+    #[test]
+    fn the_administrator_window_names_the_people_in_the_persons_words() {
+        let names = ["Bea".to_string(), "Carl".to_string()];
+        assert_eq!(
+            approve_prompt("PCTwin will read the files of {names}.", &names).as_deref(),
+            Some("PCTwin will read the files of Bea, Carl.")
+        );
+        // Names cannot carry control characters into the window.
+        assert_eq!(
+            approve_prompt("{names}", &["Bea\u{1b}[2J".to_string()]).as_deref(),
+            Some("Bea[2J")
+        );
+        for bad in ["", "no place", "{names} {names}", "line\nbreak {names}"] {
+            assert_eq!(approve_prompt(bad, &names), None, "{bad:?}");
+        }
+        assert_eq!(approve_prompt(&"x".repeat(400), &names), None);
+    }
 }
 
 /// Whether `path` is strictly inside `root`, by its parts (no `..` or `.` anywhere).
@@ -282,11 +410,13 @@ pub struct PersonChoice {
 
 /// The words of the system window that shows a new account's temporary password, in the
 /// person's language: `{name}`, `{account}` and `{password}` are filled in.
+/// `approve`: the words of a Mac's administrator window, with `{names}` (see [`approve_prompt`]).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PasswordWords {
     pub title: String,
     pub body: String,
+    pub approve: String,
 }
 
 impl PasswordWords {
@@ -300,6 +430,7 @@ impl PasswordWords {
             && ["{name}", "{account}", "{password}"]
                 .iter()
                 .all(|k| self.body.matches(k).count() == 1)
+            && approve_prompt(&self.approve, &[]).is_some()
     }
 }
 
@@ -399,24 +530,38 @@ pub struct NewHelper {
     client: Client<pctwin_helper::client::Channel>,
 }
 
+/// How starting the new laptop's helper went.
+pub enum Started {
+    Helper(NewHelper),
+    /// The administrator said no.
+    Refused,
+    /// A Mac: PCTwin is not yet allowed in System Settings, Login Items (that page is opened).
+    AllowInSettings,
+}
+
 impl NewHelper {
-    /// Starts it with the system's prompt, for the accounts to make (`names`) and the existing
-    /// accounts to hold for (`accounts`). `None`: the administrator said no.
+    /// Starts it with the system's prompt (a Mac's showing `prompt`), for the accounts to make
+    /// (`names`) and the existing accounts to hold for (`accounts`).
     pub fn start(
         me: &str,
         names: &[String],
         accounts: &[String],
+        prompt: &str,
         stopped: &dyn Fn() -> bool,
-    ) -> Result<Option<NewHelper>, MoveProblem> {
+    ) -> Result<Started, MoveProblem> {
         if !CAN_MOVE_OTHERS {
-            return Ok(None);
+            return Ok(Started::Refused);
         }
         // New accounts' passwords and other people's files pass through this process: it is
         // hardened first, or nothing of theirs is handled.
         pctwin_helper::harden_engine().map_err(|_| MoveProblem::Failed)?;
         let approve: Vec<String> = names.iter().chain(accounts).cloned().collect();
         let laptop = LaptopId::from_hex(&"0".repeat(32)).map_err(|_| MoveProblem::Failed)?;
-        Ok(launch(me, &approve, laptop, stopped)?.map(|client| NewHelper { client }))
+        Ok(match launch(me, &approve, laptop, prompt, stopped)? {
+            Launched::Connected(client) => Started::Helper(NewHelper { client }),
+            Launched::Refused => Started::Refused,
+            Launched::AllowInSettings => Started::AllowInSettings,
+        })
     }
 
     /// Makes the account `name`, shown as `full`; its temporary password is shown once with
@@ -587,11 +732,16 @@ mod tests {
         let w = |body: &str| PasswordWords {
             title: "New account".into(),
             body: body.into(),
+            approve: "Approve reading the files of {names}.".into(),
         };
         assert!(w("{name}: sign in as {account} with {password}").fine());
         assert!(!w("{name} {account}").fine());
         assert!(!w("{name} {account} {password} {password}").fine());
         assert!(!w("{name}\u{1b}[2J {account} {password}").fine());
+        // The administrator window's words need their one place for the names, too.
+        let mut no_names = w("{name}: sign in as {account} with {password}");
+        no_names.approve = "Approve.".into();
+        assert!(!no_names.fine());
     }
 
     #[test]

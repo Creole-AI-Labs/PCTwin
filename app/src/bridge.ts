@@ -253,7 +253,7 @@ export type MoveProblem = { kind: (typeof MOVE_PROBLEMS)[number] };
 export type WaitStage = "scanning" | "waiting" | "moving" | "administrator";
 
 /** Why the other people ticked were not moved this time (`OthersWhy`). */
-export const OTHERS_WHY = ["not-approved", "failed", "not-here"] as const;
+export const OTHERS_WHY = ["not-approved", "failed", "not-here", "allow-in-settings"] as const;
 export type OthersWhy = (typeof OTHERS_WHY)[number];
 
 export type MoveStage = { kind: WaitStage } | { kind: "others-not-moved"; why: OthersWhy };
@@ -337,8 +337,8 @@ export type PeopleToPlace = {
   canPlace: boolean;
 };
 
-/** The words of the system window that shows a new account's temporary password: {name}, {account} and {password} are filled in there. */
-export type PasswordWords = { title: string; body: string };
+/** The words of the system window that shows a new account's temporary password: {name}, {account} and {password} are filled in there; `approve`, a Mac's administrator window, with {names}. */
+export type PasswordWords = { title: string; body: string; approve: string };
 
 export function parsePeopleToPlace(value: unknown): PeopleToPlace | null {
   const f = exactly(value, ["people", "accounts", "canPlace"]);
@@ -607,7 +607,8 @@ export function parseReportItem(value: unknown): ReportItem | null {
   return { ...line, ...result } as ReportItem;
 }
 
-export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[]) => run("move_begin", { fallback, others });
+/** `approve`: the words of a Mac's administrator window, with {names} filled in there with the people ticked. */
+export const moveBegin = (fallback: Partial<Record<FolderRole, string>>, others: string[], approve: string) => run("move_begin", { fallback, others, approve });
 export const movePeopleHere = () => ask("move_people_here", parsePeopleHere);
 export const movePlacePeople = (choices: { id: string; to: PlaceChoice }[], words: PasswordWords) => run("move_place_people", { choices, words });
 /** What came of choosing another place for a group of folders (M05). */

@@ -148,6 +148,9 @@ fn stages() -> Vec<Stage> {
         Stage::OthersNotMoved {
             why: OthersWhy::NotHere,
         },
+        Stage::OthersNotMoved {
+            why: OthersWhy::AllowInSettings,
+        },
     ]
 }
 
@@ -837,9 +840,9 @@ fn calls() -> Value {
             { "name": "pairing_stop", "args": [] },
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
-            { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]]] },
+            { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
             { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]]] },
-            { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}" }]] },
+            { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
             { "name": "move_choose_place", "args": [["role", "pictures"]] },
             { "name": "move_usual_place", "args": [["role", "pictures"]] },
             { "name": "move_privacy_answer", "args": [["again", true]] },

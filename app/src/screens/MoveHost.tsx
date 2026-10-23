@@ -232,7 +232,9 @@ export default function MoveHost({
   // Starts this laptop's side, with the other people the mover ticked (the old laptop only).
   const begin = useRef((others: string[]) => {
     const fallback = Object.fromEntries(MAY_LACK.map((role) => [role, `${l10n.getString("move-fallback-folder")}/${l10n.getString(`plan-role-${role}`)}`]));
-    moveBegin(fallback, others).catch((error: unknown) => {
+    // The place for the names passes through as it is: the engine fills it in a Mac's administrator window.
+    const approve = l10n.getString("approve-prompt", { names: "{names}" });
+    moveBegin(fallback, others, approve).catch((error: unknown) => {
       setView({ kind: "end", end: { kind: "refused", why: toMoveProblem(error) } });
     });
   });
@@ -424,6 +426,7 @@ export default function MoveHost({
             const words = {
               title: l10n.getString("password-title"),
               body: l10n.getString("password-body", { name: "{name}", account: "{account}", password: "{password}" }),
+              approve: l10n.getString("approve-prompt", { names: "{names}" }),
             };
             movePlacePeople(choices, words).then(
               () => {
