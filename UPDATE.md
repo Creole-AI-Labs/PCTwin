@@ -6,7 +6,21 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 - **Stage:** building the move itself (stage 1 of the plan). The foundations (stage 0) are done.
 - **Ready to use?** Not yet. Please don't move real files with it.
-- **Next:** independent reviews of the newest parts, attack tests, and the full test run on two machines.
+- **Next:** the last pieces of this stage, independent reviews of the newest parts, then one full test run before it is merged.
+
+## 24 October 2026
+
+**In progress (the full tests now run on Windows, Mac and Linux)**
+
+- **The engine's automatic tests pass on six test machines:** Windows (Intel and Arm), Mac (Apple and Intel chips) and Linux (Intel and Arm); the full test of moving everyone with real accounts is being finished. Running everything for the first time found real problems that a single laptop never could, and each is fixed: on Mac and Linux, moving other people could never have started (a folder the helper rightly refused, and a folder a Mac doesn't have); on Windows, a new account's home folder was never made; your own Desktop, Documents and Pictures were missed in a move of everyone; and on Windows, PowerShell 7 could hide who owns each folder.
+- **Moving other people now works on a Mac too.** Each move asks an administrator in the Mac's own password window, naming whose files will be read; PCTwin never sees the password. The first time, the Mac asks once for PCTwin to be allowed in System Settings.
+- **The administrator helper is harder to trick.** On Windows it finds system folders by asking Windows itself, never trusting settings a program could change; it reads another person's file only through the folders it found it in, so a folder swapped for a shortcut leads nowhere; and it runs with administrator rights only from inside Program Files. The Windows installer now installs for everyone on the laptop, asking an administrator once.
+- **The installers carry everything.** The helper programs now ship with the app on all three systems, checked automatically in every test run.
+- **A restart never loses a move.** While a move is under way, PCTwin opens by itself when you sign in again, ready to pick up.
+- **If both laptops chose the same role,** PCTwin says so and lets you switch one.
+- **Before the move,** a short checklist (plugged in, lids open, near the router); **during it,** one helpful tip at a time under the progress bar; **after it,** a check of photos, videos, music and documents planned against what arrived, and each line of the report says if a file changed since the scan or is no longer there.
+- **A failing drive stops at once.** When a drive keeps failing, the move pauses and nothing more is written there, even files already on their way; they wait to be sent elsewhere.
+- **"Start a full move"** is the main button's new name.
 
 ## 22 October 2026
 
