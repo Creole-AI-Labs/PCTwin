@@ -33,7 +33,7 @@ const BLOCK: usize = 4096;
 
 #[test]
 fn a_block_stored_wrong_is_taken_back_written_again_and_then_named() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_faults(FaultPlan {
@@ -59,7 +59,7 @@ fn a_block_stored_wrong_is_taken_back_written_again_and_then_named() {
 
 #[test]
 fn a_file_with_a_block_taken_back_is_never_named_until_it_is_written_and_checked_again() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let data = content(2 * BLOCK);
     let sent = hashes(&data, BLOCK);
@@ -77,7 +77,7 @@ fn a_file_with_a_block_taken_back_is_never_named_until_it_is_written_and_checked
 
 #[test]
 fn a_taken_back_check_does_not_survive_to_the_seal() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let data = content(2 * BLOCK);
     let sent = hashes(&data, BLOCK);
@@ -91,7 +91,7 @@ fn a_taken_back_check_does_not_survive_to_the_seal() {
 
 #[test]
 fn only_bytes_that_arrived_and_inside_the_file_can_be_taken_back() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let data = content(3 * BLOCK);
     let mut file = dest.create_file(&path("d.bin"), data.len() as u64).unwrap();

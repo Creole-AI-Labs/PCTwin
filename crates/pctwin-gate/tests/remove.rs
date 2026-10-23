@@ -69,10 +69,10 @@ fn setup() -> (tempfile::TempDir, Destination) {
     #[cfg(target_os = "macos")]
     {
         static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-        let home = HOME.get_or_init(|| tempfile::tempdir().unwrap());
+        let home = HOME.get_or_init(|| tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap());
         pctwin_gate::use_trash_home(home.path().to_path_buf());
     }
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::create_dir(root.path().join("Docs")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     (root, dest)
@@ -574,10 +574,13 @@ fn a_junction_at_the_name_is_never_followed_or_removed() {
     let (root, dest) = setup();
     std::fs::create_dir(root.path().join("Elsewhere")).unwrap();
     put(&root, "Elsewhere/keep.txt", b"the person's");
+    let native = |p: std::path::PathBuf| p.components().collect::<std::path::PathBuf>();
     let ok = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
-        .arg(root.path().join("Docs").join("a.txt"))
-        .arg(root.path().join("Elsewhere"))
+        // cmd takes `/` for a switch: the paths go in Windows' own form (a build folder named
+        // with `/`, as CARGO_TARGET_DIR may be, would otherwise reach it).
+        .arg(native(root.path().join("Docs").join("a.txt")))
+        .arg(native(root.path().join("Elsewhere")))
         .output()
         .is_ok_and(|o| o.status.success());
     assert!(ok, "mklink /J failed");

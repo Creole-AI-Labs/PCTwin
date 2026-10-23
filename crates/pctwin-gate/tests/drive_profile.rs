@@ -171,7 +171,7 @@ fn write(dest: &Destination, path: &str, bytes: &[u8]) -> Result<String, GateErr
 /// system.
 #[test]
 fn a_fat_drive_gets_windows_names_on_every_system() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Fat));
@@ -192,7 +192,7 @@ fn a_fat_drive_gets_windows_names_on_every_system() {
 #[cfg(unix)]
 #[test]
 fn a_posix_drive_keeps_the_system_s_names() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Ext4));
@@ -203,7 +203,7 @@ fn a_posix_drive_keeps_the_system_s_names() {
 /// file lands there as before.
 #[test]
 fn the_drive_type_is_read_when_a_destination_opens() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let kind = dest.profile().kind();
     if cfg!(target_os = "macos") {
@@ -265,7 +265,7 @@ fn another_program_reading_during_the_time_test_never_makes_a_drive_fat() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     for touch in [false, true] {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let stop = Arc::new(AtomicBool::new(false));
         let seen = Arc::new(AtomicUsize::new(0));
         let readers: Vec<_> = (0..2)
@@ -308,7 +308,7 @@ fn another_program_reading_during_the_time_test_never_makes_a_drive_fat() {
 /// in plain words, never part-way through.
 #[test]
 fn a_file_too_big_for_a_fat_drive_is_refused_before_anything_is_made() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Fat));
@@ -348,7 +348,7 @@ fn tells_case_apart(dir: &std::path::Path) -> bool {
 /// so each case runs where the real folder behaves that way.
 #[test]
 fn clash_numbers_follow_the_drive_s_case_rule() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     if !tells_case_apart(root.path()) {
         // The folder itself makes `A.jpg` the same name as `a.jpg`: one shared count.
         let dest = Destination::open(root.path())

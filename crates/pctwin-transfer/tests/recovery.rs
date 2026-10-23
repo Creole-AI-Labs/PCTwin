@@ -23,8 +23,8 @@ struct World {
 }
 
 fn world() -> World {
-    let root_dir = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let root_dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let root = root_dir.path().to_path_buf();
     std::fs::create_dir(root.join("Docs")).unwrap();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
@@ -452,7 +452,7 @@ fn a_different_folder_under_the_same_label_is_never_written_to() {
     let mut w = world();
     let bytes = data(4000);
     let id = w.verified(1, &bytes, Some(&bytes));
-    let other = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::create_dir(other.path().join("Docs")).unwrap();
     std::fs::write(other.path().join(w.temp(id)), &bytes).unwrap();
     let mut table = Destinations::new();
@@ -907,7 +907,7 @@ fn a_hand_edited_journal_never_reaches_the_person_s_files() {
 /// A journal file damaged on disk is refused with an error, never half-read.
 #[test]
 fn a_damaged_journal_file_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = dir.path().join("journal.redb");
     drop(Journal::open(&path).unwrap());
     let mut bytes = std::fs::read(&path).unwrap();

@@ -25,7 +25,7 @@ fn path(s: &str) -> IncomingPath {
 }
 
 fn setup() -> (tempfile::TempDir, Destination) {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     (root, dest)
 }
@@ -358,7 +358,7 @@ fn the_folder_a_path_lands_in_is_worked_out_without_touching_the_disk() {
 #[test]
 fn a_link_in_place_of_a_temporary_file_is_never_followed() {
     let (root, dest) = setup();
-    let outside = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(outside.path().join("secret"), b"s").unwrap();
     std::os::unix::fs::symlink(
         outside.path().join("secret"),

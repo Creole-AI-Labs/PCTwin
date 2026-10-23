@@ -34,11 +34,11 @@ fn world() -> World {
     #[cfg(target_os = "macos")]
     {
         static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-        let home = HOME.get_or_init(|| tempfile::tempdir().unwrap());
+        let home = HOME.get_or_init(|| tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap());
         pctwin_gate::use_trash_home(home.path().to_path_buf());
     }
-    let root_dir = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let root_dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let root = root_dir.path().to_path_buf();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut table = Destinations::new();
@@ -1051,7 +1051,7 @@ fn a_place_not_reachable_now_is_tried_again_later() {
 fn a_different_folder_under_the_same_label_is_never_undone() {
     let mut w = world();
     w.moved(1, "a.txt", b"a", &[]);
-    let other = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::copy(w.root.join("a.txt"), other.path().join("a.txt")).unwrap();
     let mut table = Destinations::new();
     table
@@ -1086,14 +1086,17 @@ fn a_file_in_a_folder_spelled_otherwise_on_the_disk_is_still_undone() {
 #[test]
 fn a_junction_put_in_place_of_a_folder_is_never_followed_by_undo() {
     let w = world();
-    let outside = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(outside.path().join("victim.txt"), b"outside-original").unwrap();
     w.moved(1, "jn/victim.txt", b"outside-original", &["jn"]);
     std::fs::remove_dir_all(w.root.join("jn")).unwrap();
+    let native = |p: &std::path::Path| p.components().collect::<std::path::PathBuf>();
     let made = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
-        .arg(w.root.join("jn"))
-        .arg(outside.path())
+        // cmd takes `/` for a switch: the paths go in Windows' own form (a build folder named
+        // with `/`, as CARGO_TARGET_DIR may be, would otherwise reach it).
+        .arg(native(&w.root.join("jn")))
+        .arg(native(outside.path()))
         .output()
         .unwrap();
     assert!(made.status.success());
@@ -1336,7 +1339,7 @@ fn the_undo_preview_says_what_undo_will_do_in_each_place() {
     use pctwin_gate::{Destination, DriveKind, DriveProfile, UndoHere};
     let mut w = world();
     w.moved(1, "a.txt", b"a", &[]);
-    let usb = tempfile::tempdir().unwrap();
+    let usb = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let fat = Destination::open(usb.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::ExFat));

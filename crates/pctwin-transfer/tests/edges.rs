@@ -44,8 +44,8 @@ fn id(n: u8) -> ItemId {
 /// Two files with different bytes, sent to `paths` in one approved folder; what landed, by
 /// stored path.
 async fn two_files_to(paths: [&str; 2]) -> (tempfile::TempDir, Vec<Option<ReceiveOutcome>>) {
-    let old = tempfile::tempdir().unwrap();
-    let new = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let new = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("me", Approved::MyFolders, new.path())
@@ -124,8 +124,8 @@ async fn places_differing_only_by_case_both_land_on_any_drive() {
 /// the move still ends well, and what is kept of the refusals stays within the plan's own size.
 #[tokio::test]
 async fn a_flood_of_refused_starts_never_piles_up() {
-    let old = tempfile::tempdir().unwrap();
-    let new = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let new = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("me", Approved::MyFolders, new.path())

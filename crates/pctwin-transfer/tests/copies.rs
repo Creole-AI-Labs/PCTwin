@@ -90,10 +90,10 @@ struct NewLaptop {
 impl NewLaptop {
     fn new() -> Self {
         Self {
-            me: tempfile::tempdir().unwrap(),
-            pictures: tempfile::tempdir().unwrap(),
-            shared: tempfile::tempdir().unwrap(),
-            other: tempfile::tempdir().unwrap(),
+            me: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+            pictures: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+            shared: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+            other: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         }
     }
 
@@ -138,7 +138,7 @@ struct Move {
 /// The files on the old laptop; the first is sent first, alone, so it has landed before the
 /// others start.
 fn a_move(files: Vec<File>) -> Move {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let jobs = files
         .iter()
         .enumerate()

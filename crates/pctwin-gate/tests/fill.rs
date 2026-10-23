@@ -100,7 +100,7 @@ fn steps(expect: &[u8]) -> Steps {
 
 #[test]
 fn a_file_filled_in_lands_whole_and_the_steps_are_recorded_in_order() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let bytes = vec![7u8; 3000];
     let s = sealed(&dest, "Docs/a.bin", &bytes);
@@ -135,7 +135,7 @@ fn a_file_filled_in_lands_whole_and_the_steps_are_recorded_in_order() {
 /// On a drive that keeps identities, the identity recorded once the file is made proves it.
 #[test]
 fn a_drive_that_keeps_identities_proves_the_file_by_it() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Ntfs).with_naming(Naming::FillIn));
@@ -146,7 +146,7 @@ fn a_drive_that_keeps_identities_proves_the_file_by_it() {
 /// Without a journal (a plain finish), a drive that fills in still lands files whole.
 #[test]
 fn a_plain_finish_fills_in_on_such_a_drive() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let mut file = dest
         .create_file(&IncomingPath::parse("b.txt").unwrap(), 3)
@@ -163,7 +163,7 @@ fn a_plain_finish_fills_in_on_such_a_drive() {
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Arc::new(fill_in(root.path()));
     let s = sealed(&dest, "c.txt", b"xyz");
     let real = std::fs::metadata(root.path().join(s.temp_path()))
@@ -267,7 +267,7 @@ fn the_file_is_hidden_and_tagged_while_filled_then_shown_with_its_real_date() {
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn an_old_original_never_costs_the_tag_and_never_leaves_it_behind() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Arc::new(fill_in(root.path()));
     let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(347_155_200); // 1981
     let mut file = dest
@@ -315,7 +315,7 @@ fn an_old_original_never_costs_the_tag_and_never_leaves_it_behind() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_drive_that_could_not_prove_a_filled_file_is_never_filled() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::ExFat).with_naming(Naming::FillIn));
@@ -326,7 +326,7 @@ fn a_drive_that_could_not_prove_a_filled_file_is_never_filled() {
 /// A name already taken (even by an empty file) is never touched: the file gets a numbered name.
 #[test]
 fn a_file_already_at_the_name_is_never_touched_and_a_clash_is_numbered() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(root.path().join("d.txt"), b"").unwrap();
     std::fs::write(root.path().join("d (2).txt"), b"theirs").unwrap();
     let dest = fill_in(root.path());
@@ -358,7 +358,7 @@ fn a_file_already_at_the_name_is_never_touched_and_a_clash_is_numbered() {
 /// before calling it filled, never touches that file, and keeps its own checked copy.
 #[test]
 fn another_program_replacing_the_file_mid_copy_is_noticed_and_its_file_kept() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = root.path().to_path_buf();
     let dest = fill_in(root.path()).with_fill_hook(1000, move |written| {
         if written == 1000 {
@@ -396,7 +396,7 @@ fn replace(from: &Path, to: &Path) -> io::Result<()> {
 /// the bytes copied) and records that; the checked file comes back.
 #[test]
 fn a_copy_error_removes_only_pctwin_s_own_partial_copy() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path()).with_fill_hook(1000, |written| {
         if written >= 2000 {
             Err(io::Error::other("the drive was pulled out"))
@@ -422,7 +422,7 @@ fn a_copy_error_removes_only_pctwin_s_own_partial_copy() {
 /// The same failure after another program put its file at the name: that file stays.
 #[test]
 fn a_copy_error_never_removes_another_program_s_file() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = root.path().to_path_buf();
     let dest = fill_in(root.path()).with_fill_hook(1000, move |written| {
         if written == 2000 {
@@ -450,7 +450,7 @@ fn a_copy_error_never_removes_another_program_s_file() {
 /// A copy that does not read back the same is never called filled, and is removed.
 #[test]
 fn a_copy_that_reads_back_differently_is_never_called_filled() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let s = sealed(&dest, "h.bin", b"abc");
     let plan = s.fill_plan().unwrap();
@@ -466,7 +466,7 @@ fn a_copy_that_reads_back_differently_is_never_called_filled() {
 /// A drive that names files at once is never filled in, even if asked.
 #[test]
 fn only_a_drive_that_needs_it_is_filled_in() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let s = sealed(&dest, "i.txt", b"x");
     let plan = FillPlan {
@@ -492,7 +492,7 @@ fn ten_thousand_races_for_a_name_never_mix_or_replace_a_file() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10_000);
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let ours = b"ours".to_vec();
     let mut pending: Option<Sealed<'_>> = None;
@@ -565,7 +565,7 @@ fn a_fill_that_cannot_be_recorded_stops_and_leaves_nothing_under_the_name() {
             Ok(())
         }
     }
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let s = sealed(&dest, "j.txt", b"abc");
     let plan = s.fill_plan().unwrap();
@@ -586,7 +586,7 @@ fn fail_after(
     name: &str,
     act: impl Fn(&Path, Option<pctwin_gate::Born>) + Send + Sync + 'static,
 ) -> (tempfile::TempDir, Vec<String>) {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = root.path().to_path_buf();
     let tag: Shared = Arc::default();
     let seen = Arc::clone(&tag);
@@ -703,7 +703,7 @@ fn a_failure_leaves_a_file_another_program_wrote_into_in_place() {
 /// filled: noticed by the last check, and its file kept.
 #[test]
 fn a_file_put_at_the_name_after_the_read_back_is_noticed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let bytes = vec![5u8; 3000];
     let s = sealed(&dest, "q.bin", &bytes);
@@ -731,7 +731,7 @@ fn a_file_put_at_the_name_after_the_read_back_is_noticed() {
 /// what was copied, and it is never called filled.
 #[test]
 fn a_byte_added_to_pctwin_s_file_after_the_read_back_is_noticed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let bytes = vec![6u8; 3000];
     let s = sealed(&dest, "g.bin", &bytes);
@@ -765,7 +765,7 @@ fn a_byte_added_to_pctwin_s_file_after_the_read_back_is_noticed() {
 #[test]
 fn after_a_restart_only_a_file_proven_pctwin_s_is_finished_or_removed() {
     use pctwin_gate::{Born, Fill, FillFinish, FillRemoval, FillTag};
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     std::fs::write(root.path().join(".pctwin-t.part"), b"abcdefgh").unwrap();
     let at = |name: &str, bytes: &[u8]| {
@@ -875,7 +875,7 @@ fn after_a_restart_only_a_file_proven_pctwin_s_is_finished_or_removed() {
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
 fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let steps_seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = Arc::clone(&steps_seen);
     let dest = fill_in(root.path()).with_show_hook(move |step| {
@@ -934,7 +934,7 @@ fn showing_a_committed_file_touches_only_one_proven_pctwin_s() {
 fn after_a_restart_an_empty_hidden_file_is_never_removed() {
     use pctwin_gate::{Fill, FillRemoval, FillTag};
     use std::os::windows::fs::OpenOptionsExt;
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     std::fs::write(root.path().join(".pctwin-t.part"), b"abc").unwrap();
     std::fs::OpenOptions::new()
@@ -976,7 +976,7 @@ fn after_a_restart_an_empty_hidden_file_is_never_removed() {
 #[test]
 fn a_file_put_in_place_of_pctwin_s_hidden_one_is_never_shown_though_it_carries_the_tag() {
     use std::os::windows::fs::OpenOptionsExt;
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = fill_in(root.path());
     let s = sealed(&dest, "u.txt", b"ours, whole");
     let plan = s.fill_plan().unwrap();
@@ -1055,7 +1055,7 @@ fn marked_hidden(path: &Path) -> bool {
 #[test]
 fn another_file_put_at_the_name_before_it_is_hidden_is_never_hidden_filled_or_removed() {
     for at in ["hide:named", "hide:held", "hide:checked"] {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let r = root.path().to_path_buf();
         let dest = fill_in(root.path()).with_flags_hook(move |step| {
             if step == at {
@@ -1099,7 +1099,7 @@ fn another_file_put_at_the_name_before_it_is_hidden_is_never_hidden_filled_or_re
 #[test]
 fn another_file_put_at_the_name_before_it_is_shown_keeps_its_mark_and_nothing_is_shown() {
     for at in ["show:named", "show:held", "show:checked"] {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let r = root.path().to_path_buf();
         let dest = fill_in(root.path()).with_flags_hook(move |step| {
             if step == at {

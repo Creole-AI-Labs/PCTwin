@@ -62,8 +62,8 @@ fn block_sizes_follow_the_file_size() {
 
 #[test]
 fn a_file_arrives_exactly_and_gets_its_name_only_when_complete() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let bytes = mixed_content(3 * 1024 * 1024 + 17);
     let path = source(src.path(), "report.bin", &bytes);
 
@@ -89,8 +89,8 @@ fn a_file_arrives_exactly_and_gets_its_name_only_when_complete() {
 
 #[test]
 fn a_file_is_read_back_from_the_drive_before_it_gets_its_name() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let bytes = mixed_content(300 * 1024 + 5);
     let path = source(src.path(), "a.bin", &bytes);
     let mut sender = FileSender::open(&path, None, true).unwrap();
@@ -111,8 +111,8 @@ fn a_file_is_read_back_from_the_drive_before_it_gets_its_name() {
 
 #[test]
 fn a_file_the_drive_stores_wrong_never_gets_its_name() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let bytes = mixed_content(300 * 1024 + 5);
     let path = source(src.path(), "a.bin", &bytes);
     let mut sender = FileSender::open(&path, None, true).unwrap();
@@ -144,8 +144,8 @@ fn a_file_the_drive_stores_wrong_never_gets_its_name() {
 
 #[test]
 fn an_empty_file_arrives_too() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "empty.txt", b"");
     let mut sender = FileSender::open(&path, None, true).unwrap();
     assert!(sender.next_block().unwrap().is_none());
@@ -162,7 +162,7 @@ fn an_empty_file_arrives_too() {
 
 #[test]
 fn compression_is_used_only_when_it_helps() {
-    let src = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let text = vec![b'a'; 200_000];
     let noise = mixed_content(400_000)[65536..65536 + 60_000].to_vec();
     let t = source(src.path(), "t.txt", &text);
@@ -183,7 +183,7 @@ fn compression_is_used_only_when_it_helps() {
 
 #[test]
 fn a_damaged_block_is_refused() {
-    let src = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "a.bin", &mixed_content(300_000));
     let mut sender = FileSender::open(&path, None, true).unwrap();
     let block_size = sender.header().block_size;
@@ -202,7 +202,7 @@ fn a_damaged_block_is_refused() {
 
 #[test]
 fn a_block_larger_than_announced_is_refused_however_it_is_packed() {
-    let src = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     // Highly compressible: a small packed block that would expand to far more than allowed.
     let path = source(src.path(), "zeros.bin", &vec![0u8; 4 * 1024 * 1024]);
     let mut sender = FileSender::open(&path, None, true).unwrap();
@@ -216,8 +216,8 @@ fn a_block_larger_than_announced_is_refused_however_it_is_packed() {
 
 #[test]
 fn blocks_arrive_in_any_order_and_one_sent_twice_is_written_once() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let bytes = mixed_content(400_000);
     let path = source(src.path(), "a.bin", &bytes);
     let mut sender = FileSender::open(&path, None, true).unwrap();
@@ -243,8 +243,8 @@ fn blocks_arrive_in_any_order_and_one_sent_twice_is_written_once() {
 
 #[test]
 fn a_block_outside_the_file_is_refused() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "a.bin", &mixed_content(400_000));
     let sender = FileSender::open(&path, None, true).unwrap();
     let count = sender.header().block_count;
@@ -272,8 +272,8 @@ fn a_block_outside_the_file_is_refused() {
 
 #[test]
 fn a_file_missing_blocks_is_not_finished() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "a.bin", &mixed_content(400_000));
     let mut sender = FileSender::open(&path, None, true).unwrap();
     let dest = Destination::open(dst.path()).unwrap();
@@ -300,8 +300,8 @@ fn a_file_missing_blocks_is_not_finished() {
 
 #[test]
 fn a_dropped_connection_resumes_from_the_exact_block() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let bytes = mixed_content(1024 * 1024);
     let path = source(src.path(), "big.bin", &bytes);
     let dest = Destination::open(dst.path()).unwrap();
@@ -332,8 +332,8 @@ fn a_dropped_connection_resumes_from_the_exact_block() {
 
 #[test]
 fn a_resume_sends_only_the_blocks_still_missing_wherever_they_are() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let bytes = mixed_content(2 * 1024 * 1024);
     let path = source(src.path(), "big.bin", &bytes);
     let dest = Destination::open(dst.path()).unwrap();
@@ -367,8 +367,8 @@ fn a_resume_sends_only_the_blocks_still_missing_wherever_they_are() {
 
 #[test]
 fn a_resume_ticket_that_does_not_fit_the_file_is_refused_without_crashing() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "big.bin", &mixed_content(1024 * 1024));
     let dest = Destination::open(dst.path()).unwrap();
     let first = FileSender::open(&path, None, true).unwrap();
@@ -397,8 +397,8 @@ fn a_resume_ticket_that_does_not_fit_the_file_is_refused_without_crashing() {
 
 #[test]
 fn a_file_changed_since_the_drop_starts_again() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "big.bin", &mixed_content(1024 * 1024));
     let dest = Destination::open(dst.path()).unwrap();
     let mut first = FileSender::open(&path, None, true).unwrap();
@@ -426,8 +426,8 @@ fn a_file_changed_since_the_drop_starts_again() {
 
 #[test]
 fn a_file_changed_while_being_read_is_never_finished() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "live.bin", &mixed_content(600_000));
     let mut sender = FileSender::open(&path, None, true).unwrap();
     let dest = Destination::open(dst.path()).unwrap();
@@ -471,7 +471,7 @@ proptest::proptest! {
     /// A real block with any single byte changed is refused, or still gives the exact original.
     #[test]
     fn any_changed_byte_is_caught(position in 0usize..2000, flip in 1u8..=255) {
-        let src = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let path = source(src.path(), "a.txt", &vec![b'q'; 1500]);
         let mut sender = FileSender::open(&path, None, true).unwrap();
         let first = sender.next_block().unwrap().unwrap();
@@ -493,8 +493,8 @@ proptest::proptest! {
 
 #[test]
 fn a_genuine_block_of_the_wrong_length_for_its_place_is_refused() {
-    let src = tempfile::tempdir().unwrap();
-    let dst = tempfile::tempdir().unwrap();
+    let src = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = source(src.path(), "a.bin", &mixed_content(400_000));
     let sender = FileSender::open(&path, None, true).unwrap();
     let dest = Destination::open(dst.path()).unwrap();
@@ -522,7 +522,7 @@ fn a_genuine_block_of_the_wrong_length_for_its_place_is_refused() {
 #[test]
 fn a_file_described_in_any_other_block_size_than_its_own_is_refused() {
     // Tiny blocks would make the new laptop keep a record for every few bytes.
-    let dst = tempfile::tempdir().unwrap();
+    let dst = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(dst.path()).unwrap();
     let size = 1024 * 1024;
     for block_size in [0, 4096, 2 * MIN_BLOCK, MAX_BLOCK, MAX_BLOCK * 2] {

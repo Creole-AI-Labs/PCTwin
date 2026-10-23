@@ -85,7 +85,7 @@ struct Laptops {
 
 /// The old laptop's files, of these sizes, all landing in "me".
 fn laptops(sizes: &[usize]) -> Laptops {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let files = sizes
         .iter()
         .enumerate()
@@ -98,7 +98,7 @@ fn laptops(sizes: &[usize]) -> Laptops {
         .collect();
     Laptops {
         _old: old,
-        new: tempfile::tempdir().unwrap(),
+        new: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         files,
     }
 }
@@ -942,7 +942,7 @@ impl Channel for CutAfterSecondRound {
 #[tokio::test]
 async fn after_the_new_laptop_restarts_a_file_out_of_rounds_fails_with_the_true_reason() {
     let l = laptops(&[300_000]);
-    let jdir = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = pctwin_journal::Journal::open(&jdir.path().join("j.redb")).unwrap();
     // Every file reads back wrong from this drive.
     let table = table(&l, Some(Flip::OnRead { at: 0 }));
@@ -1324,7 +1324,7 @@ impl Channel for LoseStart {
 #[tokio::test]
 async fn files_whose_start_is_lost_to_drops_again_and_again_still_arrive() {
     let l = laptops(&[300_000usize; 6]);
-    let jdir = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = pctwin_journal::Journal::open(&jdir.path().join("j.redb")).unwrap();
     let table = table(&l, None);
     let mut sender = SenderSession::new(jobs(&l), 4);
@@ -2013,8 +2013,8 @@ impl Moved {
 
 /// Moves `f.sizes` over a link that breaks as `f` says, until the old laptop's run ends well.
 async fn flaky(f: Flaky) -> Moved {
-    let old = tempfile::tempdir().unwrap();
-    let new = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let new = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut files = Vec::new();
     for (i, size) in f.sizes.iter().enumerate() {
         let len = usize::try_from(*size).unwrap();
@@ -2134,7 +2134,7 @@ async fn flaky(f: Flaky) -> Moved {
 #[tokio::test]
 async fn the_window_is_whole_until_a_loss_then_earned_from_the_floor() {
     let size = 40 << 20;
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let src = old.path().join("f0.bin");
     std::fs::write(&src, vec![0u8; size]).unwrap();
     let job = SendJob {
@@ -2209,7 +2209,7 @@ async fn a_lane_that_drops_starts_the_window_again_from_the_floor() {
 /// the lane's far end is already gone, so its first block cannot be sent.)
 #[tokio::test]
 async fn a_lane_lost_mid_connection_drops_the_window_to_the_floor() {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let src = old.path().join("f0.bin");
     std::fs::write(&src, vec![0u8; 72 << 20]).unwrap();
     let job = SendJob {
@@ -3387,7 +3387,7 @@ impl Channel for CutAfterRound {
 async fn a_restart_after_one_or_two_rounds_keeps_the_true_reason() {
     for after in [1u32, 2] {
         let l = laptops(&[300_000]);
-        let jdir = tempfile::tempdir().unwrap();
+        let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let journal = pctwin_journal::Journal::open(&jdir.path().join("j.redb")).unwrap();
         let table = table(&l, Some(Flip::OnRead { at: 0 }));
         let mut sender = SenderSession::new(jobs(&l), 1);
@@ -4497,7 +4497,7 @@ async fn an_unanswered_skip_ignores_the_ticket() {
 /// meets the read error.)
 #[tokio::test]
 async fn blocks_still_on_a_lane_from_an_ended_attempt_cannot_land_in_its_retry() {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let src = old.path().join("f0.bin");
     std::fs::write(&src, vec![0u8; 72 << 20]).unwrap();
     let h = FileSender::open(&src, None, false)

@@ -139,8 +139,8 @@ fn id(n: u8) -> ItemId {
 /// `count` files of 200 KB each, as jobs in that order.
 fn setup(count: u8) -> (Laptops, Vec<SendJob>) {
     let l = Laptops {
-        old: tempfile::tempdir().unwrap(),
-        new: tempfile::tempdir().unwrap(),
+        old: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+        new: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
     };
     let jobs = (0..count)
         .map(|n| {

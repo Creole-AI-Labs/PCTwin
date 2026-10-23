@@ -127,9 +127,9 @@ const LAPTOP: &str = "00112233445566778899aabbccddeeff";
 const SIZE: usize = 100 * 128 * 1024 - 7;
 
 fn world() -> World {
-    let old = tempfile::tempdir().unwrap();
-    let mine = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut table = Destinations::new();
     table
@@ -421,7 +421,7 @@ async fn a_file_from_another_old_laptop_or_another_folder_is_left_alone() {
     // Another folder under the same label: not touched either.
     let w2 = world();
     let ours = w2.left_behind(&blocks, &claims);
-    let other = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("me", Approved::MyFolders, other.path())

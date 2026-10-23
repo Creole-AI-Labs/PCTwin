@@ -63,10 +63,10 @@ struct World {
 }
 
 fn world() -> World {
-    let old = tempfile::tempdir().unwrap();
-    let mine = tempfile::tempdir().unwrap();
-    let shared = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let shared = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut table = Destinations::new();
     table

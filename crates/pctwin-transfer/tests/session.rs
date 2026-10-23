@@ -145,7 +145,7 @@ fn bytes_to_move() -> u64 {
 }
 
 fn laptops() -> Laptops {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let files: Vec<(PathBuf, Vec<u8>)> = FILES
         .iter()
         .enumerate()
@@ -158,8 +158,8 @@ fn laptops() -> Laptops {
         .collect();
     Laptops {
         _old: old,
-        new_mine: tempfile::tempdir().unwrap(),
-        new_shared: tempfile::tempdir().unwrap(),
+        new_mine: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+        new_shared: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         files,
     }
 }
@@ -1669,7 +1669,7 @@ async fn a_refused_block_stops_the_old_laptop_sending_that_file() {
 async fn a_stream_started_again_with_another_file_ends_the_first_in_the_journal_at_once() {
     let l = laptops();
     let table = table(&l);
-    let jdir = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = pctwin_journal::Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
     let big = FileSender::open(&l.files[2].0, None, true)
@@ -1794,7 +1794,7 @@ async fn an_old_laptop_cannot_choose_where_an_approved_file_lands() {
     // another approved place. Only the approved plan says where a file lands.
     let l = laptops();
     let table = table(&l);
-    let jdir = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = pctwin_journal::Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
     let (mut old, mut new) = mem_pair();

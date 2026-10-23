@@ -33,7 +33,7 @@ fn mark_on(path: &Path) -> Option<DownloadMark> {
 
 #[test]
 fn a_marked_file_arrives_marked_and_keeps_its_time() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let name = receive(&dest, "Downloads/setup.exe", Some(DownloadMark::Internet));
     let landed = root.path().join(&name);
@@ -53,7 +53,7 @@ fn a_marked_file_arrives_marked_and_keeps_its_time() {
 
 #[test]
 fn an_unmarked_file_arrives_unmarked() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let name = receive(&dest, "notes.txt", None);
     assert_eq!(mark_on(&root.path().join(name)), None);
@@ -61,7 +61,7 @@ fn an_unmarked_file_arrives_unmarked() {
 
 #[test]
 fn a_clashing_name_still_carries_the_mark() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(root.path().join("setup.exe"), b"mine").unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let name = receive(&dest, "setup.exe", Some(DownloadMark::Internet));
@@ -88,7 +88,7 @@ mod windows {
 
     #[test]
     fn the_marker_is_the_standard_zone_stream() {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let dest = Destination::open(root.path()).unwrap();
         let name = receive(&dest, "a.exe", Some(DownloadMark::Restricted));
         let text = std::fs::read_to_string(stream(&root.path().join(name))).unwrap();
@@ -97,7 +97,7 @@ mod windows {
 
     #[test]
     fn the_old_laptops_marker_is_read_by_its_zone() {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let file = root.path().join("f.bin");
         std::fs::write(&file, b"x").unwrap();
         assert_eq!(download_mark_of(&file), None, "no stream");
@@ -141,7 +141,7 @@ mod macos {
 
     #[test]
     fn the_marker_is_the_quarantine_attribute() {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let dest = Destination::open(root.path()).unwrap();
         let name = receive(&dest, "a.dmg", Some(DownloadMark::Internet));
         let mut value = [0u8; 256];
@@ -154,7 +154,7 @@ mod macos {
 
     #[test]
     fn the_old_laptops_quarantine_flag_is_read() {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let file = root.path().join("f.bin");
         std::fs::write(&file, b"x").unwrap();
         assert_eq!(download_mark_of(&file), None);
@@ -174,7 +174,7 @@ mod macos {
 /// marker could not be kept, so the report can tell the person plainly.
 #[test]
 fn a_drive_that_cannot_keep_markers_still_gets_the_file_and_says_so() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Fat).without_markers());
@@ -202,7 +202,7 @@ fn a_drive_that_cannot_keep_markers_still_gets_the_file_and_says_so() {
 /// Where the marker is kept, nothing is reported lost.
 #[test]
 fn a_kept_marker_is_not_reported_lost() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest
         .create_file(&IncomingPath::parse("a.exe").unwrap(), 1)

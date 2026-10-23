@@ -12,7 +12,7 @@ fn path(s: &str) -> IncomingPath {
 }
 
 fn setup() -> (tempfile::TempDir, Destination) {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     (root, dest)
 }
@@ -391,7 +391,7 @@ fn a_different_file_put_at_its_place_is_never_checked_in_its_stead() {
 fn a_file_in_a_compressed_folder_is_said_to_be_checked_from_memory() {
     use std::os::windows::fs::MetadataExt;
     const COMPRESSED: u32 = 0x0000_0800;
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let folder = root.path().join("packed");
     std::fs::create_dir(&folder).unwrap();
     let packed = std::process::Command::new("compact")

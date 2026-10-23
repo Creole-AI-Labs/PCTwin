@@ -139,7 +139,7 @@ fn bytes_to_move() -> u64 {
 }
 
 fn laptops() -> Laptops {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let files = FILES
         .iter()
         .enumerate()
@@ -152,7 +152,7 @@ fn laptops() -> Laptops {
         .collect();
     Laptops {
         _old: old,
-        new: tempfile::tempdir().unwrap(),
+        new: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         files,
     }
 }
@@ -446,7 +446,7 @@ async fn one_lane_and_several_lanes_move_the_same_files() {
 #[tokio::test]
 async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
     // Many small files, so there is always work left for a lane that joins late.
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let files: Vec<(PathBuf, Vec<u8>)> = (0..40u32)
         .map(|i| {
             let p = old.path().join(format!("f{i}.bin"));
@@ -457,7 +457,7 @@ async fn a_lane_that_joins_during_the_move_takes_a_share_of_it() {
         .collect();
     let l = Laptops {
         _old: old,
-        new: tempfile::tempdir().unwrap(),
+        new: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         files,
     };
     let table = table(&l);

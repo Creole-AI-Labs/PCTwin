@@ -10,7 +10,7 @@ use pctwin_transfer::{Fit, KEEP_FREE};
 
 #[test]
 fn places_on_one_drive_are_judged_on_what_they_need_together() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (a, b) = (root.path().join("a"), root.path().join("b"));
     std::fs::create_dir_all(&a).unwrap();
     std::fs::create_dir_all(&b).unwrap();

@@ -159,9 +159,9 @@ fn assert_landed_whole(journal: &Journal, dir: &Path, name: &str, bytes: &[u8]) 
 
 #[tokio::test]
 async fn a_move_onto_a_drive_with_no_safe_rename_lands_whole_through_the_journal() {
-    let old = tempfile::tempdir().unwrap();
-    let usb = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let usb = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = Journal::open(&jdir.path().join("j.redb")).unwrap();
     let table = table_for(
         Destination::open(usb.path())
@@ -343,9 +343,9 @@ async fn a_journal_that_fails_at_any_step_of_a_fill_is_recovered_whole() {
         "committed",
         "shown",
     ] {
-        let old = tempfile::tempdir().unwrap();
-        let usb = tempfile::tempdir().unwrap();
-        let jdir = tempfile::tempdir().unwrap();
+        let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let usb = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let journal = Journal::open(&jdir.path().join("j.redb")).unwrap();
         let table = table_for(
             Destination::open(usb.path())
@@ -376,7 +376,7 @@ async fn a_journal_that_fails_at_any_step_of_a_fill_is_recovered_whole() {
 /// left and the whole copy lands beside it, with a note.
 #[test]
 fn a_laptop_that_stops_dead_mid_fill_is_recovered_whole() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (old, usb, jdir) = dirs(work.path());
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--exact", "stops_dead_mid_fill", "--nocapture"])
@@ -490,7 +490,7 @@ fn a_laptop_that_stops_dead_at_any_step_of_finishing_a_fill_ends_with_one_shown_
         "show:created",
         "journal:shown",
     ] {
-        let work = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let (_, usb, jdir) = dirs(work.path());
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
@@ -635,7 +635,7 @@ fn assert_theirs_kept(journal: &Journal, usb: &Path, r: &pctwin_transfer::Recove
 /// is, says so, and puts the copy beside it.
 #[test]
 fn an_empty_hidden_file_made_after_pctwin_stopped_is_never_removed_or_taken() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (_, usb, jdir) = dirs(work.path());
     stopped_naming(work.path(), ("PCTWIN_DIE_AT", "journal:filling"));
     let journal = Journal::open(&jdir.join("j.redb")).unwrap();
@@ -660,7 +660,7 @@ fn an_empty_hidden_file_made_after_pctwin_stopped_is_never_removed_or_taken() {
 /// leaves that file, says so, and puts the copy beside it.
 #[test]
 fn a_taken_name_s_file_is_never_removed_after_a_stop_before_the_next_name() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (_, usb, jdir) = dirs(work.path());
     stopped_naming(work.path(), ("PCTWIN_TAKE_THEN_DIE", usb.to_str().unwrap()));
     let journal = Journal::open(&jdir.join("j.redb")).unwrap();
@@ -681,7 +681,7 @@ fn a_taken_name_s_file_is_never_removed_after_a_stop_before_the_next_name() {
 /// told in the same move, never that the file was copied.
 #[test]
 fn a_file_replaced_before_it_is_shown_is_reported_in_the_same_move() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (_, usb, jdir) = dirs(work.path());
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--exact", "moves_and_reports", "--nocapture"])
@@ -707,7 +707,7 @@ fn a_file_replaced_before_it_is_shown_is_reported_in_the_same_move() {
 /// the person is told in the same move, and the journal keeps the same words for good.
 #[test]
 fn a_file_removed_before_it_is_shown_is_reported_and_noted() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (_, usb, jdir) = dirs(work.path());
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--exact", "moves_and_reports", "--nocapture"])
@@ -797,7 +797,7 @@ fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
     };
     // How long a whole move takes here, so the kills fall across all of it.
     let whole = {
-        let work = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         dirs(work.path());
         let started = std::time::Instant::now();
         assert!(child(work.path()).wait().unwrap().success());
@@ -806,7 +806,7 @@ fn a_laptop_killed_at_random_moments_never_ends_with_a_second_copy() {
     let random = RandomState::new();
     let (mut committed, mut earlier, mut left_empty) = (0, 0, 0);
     for run in 0..runs {
-        let work = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let (_, usb, jdir) = dirs(work.path());
         let mut c = child(work.path());
         let at = whole.mul_f64((random.hash_one(run) % 1000) as f64 / 1000.0);
@@ -872,7 +872,7 @@ async fn moves_until_killed() {
 
 /// Runs the child that stops dead at `at` on a fresh place, and returns the folders and journal.
 fn stopped_at(at: &str) -> (tempfile::TempDir, PathBuf, Journal) {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (_, usb, jdir) = dirs(work.path());
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
@@ -895,7 +895,7 @@ fn stopped_at(at: &str) -> (tempfile::TempDir, PathBuf, Journal) {
 /// shows it with its real dates.
 #[tokio::test]
 async fn a_show_that_fails_part_way_is_finished_at_the_next_start() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (old, usb, jdir) = dirs(work.path());
     let journal = Journal::open(&jdir.join("j.redb")).unwrap();
     let failing = Destination::open(&usb)
@@ -1106,7 +1106,7 @@ fn a_hidden_file_that_is_not_pctwin_s_is_never_shown_and_is_reported() {
 #[cfg(windows)]
 #[test]
 fn another_programs_file_with_pctwins_tag_is_never_removed_on_windows() {
-    let work = tempfile::tempdir().unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let (_old, usb, jdir) = dirs(work.path());
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--exact", "stops_dead_mid_fill", "--nocapture"])

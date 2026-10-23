@@ -34,7 +34,7 @@ fn journal() -> &'static Journal {
 fn setup() -> Option<(tempfile::TempDir, Destination)> {
     #[cfg(target_os = "macos")]
     trash();
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::create_dir(root.path().join("Docs")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     put(&root, "Docs/probe.txt", b"probe");
@@ -62,7 +62,7 @@ fn setup() -> Option<(tempfile::TempDir, Destination)> {
 #[cfg(target_os = "macos")]
 fn trash() -> std::path::PathBuf {
     static HOME: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    let home = HOME.get_or_init(|| tempfile::tempdir().unwrap());
+    let home = HOME.get_or_init(|| tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap());
     pctwin_gate::use_trash_home(home.path().to_path_buf());
     home.path().join(".Trash")
 }
@@ -634,7 +634,7 @@ fn real_trash_child() {
     if std::env::var_os("PCTWIN_REAL_TRASH_CHILD").is_none() {
         return;
     }
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::create_dir(root.path().join("Docs")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let name = format!("pctwin-ci-{}.txt", std::process::id());
@@ -665,7 +665,7 @@ struct ApfsImage {
 #[cfg(target_os = "macos")]
 impl ApfsImage {
     fn new(volume: &str) -> Option<Self> {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let image = dir.path().join("drive.dmg");
         let mount = dir.path().join("mnt");
         std::fs::create_dir(&mount).unwrap();
