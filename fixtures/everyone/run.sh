@@ -163,7 +163,13 @@ if ! $mac; then
     exit 1
   fi
 fi
-wait "$engine"
+if ! wait "$engine"; then
+  # The move's own words, kept with the evidence and shown here.
+  sudo cp "$work/mover/log.txt" "$admin/mover-log.txt" 2>/dev/null || true
+  sudo cat "$work/mover/log.txt" >&2 || true
+  echo "the move failed" >&2
+  exit 1
+fi
 wait "$helper"
 
 python3 "$here/plant.py" key "$admin/planted.json" "$mover" "$work/mover/new-home" \

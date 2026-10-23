@@ -1667,7 +1667,9 @@ async fn paired_with(config: LinkConfig) -> (pctwin_link::Link, pctwin_link::Lin
 }
 
 /// A stranger on the network that keeps connections to `at` open from `from`, saying nothing, each
-/// until it is closed (or a while passes), then opens another.
+/// until it is closed (or a while passes), then opens another. (Not on a Mac: the tests that use
+/// it need more loopback addresses than 127.0.0.1, which macOS does not answer by default.)
+#[cfg(not(target_os = "macos"))]
 async fn hold_open(from: std::net::IpAddr, at: std::net::SocketAddr) {
     loop {
         let socket = tokio::net::TcpSocket::new_v4().unwrap();

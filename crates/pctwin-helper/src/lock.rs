@@ -17,7 +17,13 @@ pub fn lock_path() -> Result<PathBuf, String> {
             .map(|dir| dir.join("helper.lock"))
             .map_err(|e| format!("the lock's folder: {e}"))
     }
-    #[cfg(not(windows))]
+    // The system's own run folder, root's alone: /run on Linux; a Mac has none, and its /var is
+    // a link, so the real /private/var/run (found by the two-accounts lab).
+    #[cfg(target_os = "macos")]
+    {
+        Ok(PathBuf::from("/private/var/run/pctwin-helper.lock"))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         Ok(PathBuf::from("/run/pctwin-helper.lock"))
     }
