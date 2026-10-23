@@ -90,5 +90,26 @@ fn the_same_person_cannot_read_the_hardened_engine() {
         read_plain,
         "an ordinary process can be read: the look works"
     );
+    // The threat is the mover with ordinary rights. An administrator can open any process (CI's
+    // Windows runners run as one), so there this test cannot make its claim; the two-accounts
+    // lab (fixtures/everyone) makes it as a real ordinary account.
+    if windows_admin() {
+        eprintln!(
+            "run as an administrator: the hardened engine is checked by the two-accounts lab"
+        );
+        return;
+    }
     assert!(!read_hardened, "the hardened engine cannot be read");
+}
+
+/// Windows: whether this test runs with administrator rights (`net session` succeeds only then).
+#[cfg(any(windows, target_os = "linux"))]
+fn windows_admin() -> bool {
+    cfg!(windows)
+        && Command::new("net")
+            .arg("session")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
 }

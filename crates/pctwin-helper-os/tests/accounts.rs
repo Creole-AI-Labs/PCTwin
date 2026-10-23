@@ -63,7 +63,7 @@ fn names_are_checked_strictly_before_the_system_is_asked() {
 fn without_an_administrator_nothing_is_made() {
     let ci = std::env::var_os("CI").is_some();
     let admin_tests = std::env::var("PCTWIN_HELPER_OS_ADMIN_TESTS").as_deref() == Ok("1");
-    if !ci || admin_tests {
+    if !ci || admin_tests || is_admin() {
         return;
     }
     let r = add_standard_account("pctwinnoadmin", "PCTwin test", "a-long-password-1");
@@ -166,4 +166,22 @@ fn a_real_standard_account_is_made_once() {
         .args(["-deleteUser", &name])
         .status();
     result.unwrap();
+}
+
+/// Whether this test runs with an administrator's rights (CI's Windows runners do): then an
+/// account is rightly made, and "nothing is made" cannot be checked here.
+fn is_admin() -> bool {
+    #[cfg(windows)]
+    let admin = std::process::Command::new("net")
+        .arg("session")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    #[cfg(unix)]
+    let admin = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "0");
+    admin
 }
