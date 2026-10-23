@@ -21,7 +21,7 @@ export default function WhichLaptop({ onBack, onChoose }: { onBack: () => void; 
         </span>
       </div>
       <Localized id="role-eyebrow">
-        <p className="eyebrow">Start a move</p>
+        <p className="eyebrow">Start a full move</p>
       </Localized>
       <Localized id="role-title">
         <h1>Which laptop is this?</h1>

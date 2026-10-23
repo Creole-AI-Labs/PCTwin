@@ -15,12 +15,12 @@ welcome-eyebrow = आपका नया अध्याय तैयार ह�
 welcome-title-line1 = आपका सेटअप।
 welcome-title-line2 = आपका अगला लैपटॉप।
 welcome-body = अपनी फ़ाइलें, ऐप्स और जानी-पहचानी सेटिंग्स साथ ले चलें।
-welcome-start = स्थानांतरण शुरू करें
+welcome-start = पूरा स्थानांतरण शुरू करें
 
 ## F06 Old or new laptop
 
 role-back = वापस
-role-eyebrow = स्थानांतरण शुरू करें
+role-eyebrow = पूरा स्थानांतरण शुरू करें
 role-title = यह कौन-सा लैपटॉप है?
 role-body = दोनों लैपटॉप पर PCTwin खोलें। फिर बताएं कि यह कौन-सा है।
 role-old-title = मेरा पुराना लैपटॉप

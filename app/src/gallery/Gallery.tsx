@@ -50,7 +50,7 @@ export default function Gallery() {
       <Section title="Buttons">
         <div className="gallery-row">
           <Button variant="primary" icon={<ArrowForward />}>
-            Start a move
+            Start a full move
           </Button>
           <Button>Restore setup</Button>
           <Button variant="citron">Open my new laptop</Button>

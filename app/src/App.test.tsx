@@ -38,7 +38,7 @@ describe("screens", () => {
   it("Welcome shows the free move first, in English, with nothing missing", () => {
     render(<App initialLanguage="en" />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
-    expect(screen.getByRole("button", { name: /Start a move/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Start a full move/ })).toBeTruthy();
     expect(screen.getByText("Free personal moves. No account needed.")).toBeTruthy();
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
@@ -47,7 +47,7 @@ describe("screens", () => {
     const l10n = localization("en");
     const title = () => screen.getByRole("heading", { level: 1 }).textContent;
     render(<App initialLanguage="en" />);
-    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(title()).toBe("Which laptop is this?");
     fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
     expect(title()).toBe(l10n.getString("connect-title"));
@@ -85,7 +85,7 @@ describe("screens", () => {
     const footer = () => within(screen.getByRole("contentinfo"));
     expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
     expect(footer().getByRole("button", { name: l10n.getString("footer-help") })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
     expect(footer().getByText(l10n.getString("footer-note-move"))).toBeTruthy();
@@ -233,12 +233,12 @@ describe("screens", () => {
     for (const control of [...screen.getAllByRole("button"), ...screen.queryAllByRole("link")]) {
       expect(control.textContent).not.toMatch(paid);
     }
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a full move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
   });
 
   it("a new screen takes keyboard focus", () => {
     render(<App initialLanguage="en" />);
-    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(document.activeElement?.tagName).toBe("MAIN");
   });
 
@@ -246,7 +246,7 @@ describe("screens", () => {
     render(<App initialLanguage="en" />);
     const steps = ["welcome", "role", "connect", "together", "pair"];
     const at = steps.indexOf(which);
-    if (at >= 1) fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    if (at >= 1) fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     if (at >= 2) fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
     if (at >= 3) fireEvent.click(screen.getByRole("button", { name: /Use Wi-Fi/ }));
     if (at >= 4) fireEvent.click(screen.getByRole("button", { name: /Continue to pairing/ }));
@@ -270,8 +270,8 @@ describe("languages", () => {
       const start = l10n.getString("welcome-start");
       expect(start).not.toBe("welcome-start");
       expect(start).not.toBe("");
-      if (code === "en") expect(start).toBe("Start a move");
-      else expect(start).not.toBe("Start a move");
+      if (code === "en") expect(start).toBe("Start a full move");
+      else expect(start).not.toBe("Start a full move");
       // An id no language has is never shown as blank: the id itself comes back.
       expect(l10n.getString("no-such-message-anywhere", undefined, "fallback text")).toBe("fallback text");
     }

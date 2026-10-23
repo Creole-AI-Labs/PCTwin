@@ -15,7 +15,7 @@ function tone(state: HistoryEntry["state"]): "good" | "warn" | "neutral" {
 
 /**
  * F08 My PCTwin history: the moves and Quick Sends done on this laptop, newest first, each with its
- * report or receipt, and Start a move as the main action. Kept on this laptop only: no account,
+ * report or receipt, and Start a full move as the main action. Kept on this laptop only: no account,
  * nothing sent anywhere. A state says "Finished" only when the bridge says the whole thing finished
  * (for a Quick Send that is a receipt with every file in place, see historyStateOf). Export saves a
  * plain copy of the list; the bridge says where it went (or that it could not).

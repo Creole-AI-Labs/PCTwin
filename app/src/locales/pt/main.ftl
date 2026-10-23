@@ -15,12 +15,12 @@ welcome-eyebrow = Seu próximo capítulo, pronto.
 welcome-title-line1 = Sua configuração completa.
 welcome-title-line2 = Seu próximo notebook.
 welcome-body = Leve seus arquivos, apps e as configurações de sempre na mudança.
-welcome-start = Começar uma mudança
+welcome-start = Começar uma mudança completa
 
 ## F06 Old or new laptop
 
 role-back = Voltar
-role-eyebrow = Começar uma mudança
+role-eyebrow = Começar uma mudança completa
 role-title = Qual notebook é este?
 role-body = Abra o PCTwin nos dois notebooks. Depois diga qual é este.
 role-old-title = Meu notebook antigo

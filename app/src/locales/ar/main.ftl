@@ -15,12 +15,12 @@ welcome-eyebrow = فصلك التالي جاهز.
 welcome-title-line1 = إعدادك الكامل.
 welcome-title-line2 = حاسوبك المحمول التالي.
 welcome-body = ملفاتك وتطبيقاتك وإعداداتك المألوفة تنتقل معك.
-welcome-start = بدء النقل
+welcome-start = بدء نقل كامل
 
 ## F06 Old or new laptop
 
 role-back = رجوع
-role-eyebrow = بدء النقل
+role-eyebrow = بدء نقل كامل
 role-title = أي حاسوب محمول هذا؟
 role-body = افتح PCTwin على الحاسوبين المحمولين، ثم حدّد أيهما هذا.
 role-old-title = حاسوبي المحمول القديم

@@ -15,12 +15,12 @@ welcome-eyebrow = 你的新篇章，准备好了。
 welcome-title-line1 = 你的配置。
 welcome-title-line2 = 你的下一台笔记本电脑。
 welcome-body = 迁移时，把你的文件、应用和熟悉的设置一起带上。
-welcome-start = 开始迁移
+welcome-start = 开始完整迁移
 
 ## F06 Old or new laptop
 
 role-back = 返回
-role-eyebrow = 开始迁移
+role-eyebrow = 开始完整迁移
 role-title = 这是哪台笔记本电脑？
 role-body = 在两台笔记本电脑上都打开PCTwin，然后选择这是哪一台。
 role-old-title = 我的旧笔记本电脑

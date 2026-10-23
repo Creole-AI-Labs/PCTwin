@@ -58,13 +58,13 @@ const nothing = () => undefined;
 /* ---------------------------------------------------------------- F01 Resume your move */
 
 describe("F01 Welcome with an unfinished move", () => {
-  it("is unchanged when no move is waiting: Start a move, no Resume", () => {
+  it("is unchanged when no move is waiting: Start a full move, no Resume", () => {
     inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} />);
     expect(screen.getByRole("button", { name: text("welcome-start") })).toBeTruthy();
     expect(screen.queryByRole("button", { name: text("resume-open") })).toBeNull();
   });
 
-  it("the primary button reads Resume your move, not Start a move, and reopens the saved move", () => {
+  it("the primary button reads Resume your move, not Start a full move, and reopens the saved move", () => {
     const onStart = vi.fn();
     const onResume = vi.fn();
     inApp(<Welcome onStart={onStart} onSoon={nothing} onQuick={nothing} unfinished onResume={onResume} />);

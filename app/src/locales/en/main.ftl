@@ -15,12 +15,12 @@ welcome-eyebrow = Your next chapter, ready.
 welcome-title-line1 = Your setup.
 welcome-title-line2 = Your next laptop.
 welcome-body = Bring your files, apps and familiar settings along for the move.
-welcome-start = Start a move
+welcome-start = Start a full move
 
 ## F06 Old or new laptop
 
 role-back = Back
-role-eyebrow = Start a move
+role-eyebrow = Start a full move
 role-title = Which laptop is this?
 role-body = Open PCTwin on both laptops. Then say which one this is.
 role-old-title = My old laptop

@@ -44,7 +44,7 @@ export default function Welcome({
           </Localized>
         ) : (
           <Localized id="welcome-start">
-            <span>Start a move</span>
+            <span>Start a full move</span>
           </Localized>
         )}
         <ArrowForward />

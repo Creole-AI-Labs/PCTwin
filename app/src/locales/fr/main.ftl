@@ -15,12 +15,12 @@ welcome-eyebrow = Votre prochain chapitre vous attend.
 welcome-title-line1 = Votre configuration.
 welcome-title-line2 = Votre nouvel ordinateur portable.
 welcome-body = Emportez vos fichiers, vos applis et vos réglages habituels pour le transfert.
-welcome-start = Commencer un transfert
+welcome-start = Commencer un transfert complet
 
 ## F06 Old or new laptop
 
 role-back = Retour
-role-eyebrow = Commencer un transfert
+role-eyebrow = Commencer un transfert complet
 role-title = Quel ordinateur portable est-ce ?
 role-body = Ouvrez PCTwin sur les deux ordinateurs portables. Puis indiquez lequel est celui-ci.
 role-old-title = Mon ancien ordinateur portable
