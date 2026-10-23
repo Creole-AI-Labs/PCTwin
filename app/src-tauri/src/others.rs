@@ -194,7 +194,8 @@ fn launch_daemon(
     match start_daemon(HELPER_PLIST).map_err(|_| MoveProblem::Failed)? {
         DaemonStart::Running => {}
         DaemonStart::NeedsApproval => {
-            pctwin_helper_os::daemon::open_approval_settings();
+            use pctwin_helper_os::daemon::DaemonService;
+            pctwin_helper_os::daemon::SystemDaemons.open_approval_settings();
             return Ok(Launched::AllowInSettings);
         }
     }
