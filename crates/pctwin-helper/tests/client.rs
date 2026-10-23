@@ -58,6 +58,7 @@ fn the_new_laptop_s_steps_through_the_client() {
             Ok(pctwin_helper::person::PersonScan {
                 found: Vec::new(),
                 privacy_blocked: 2,
+                system_only: vec![std::path::PathBuf::from(r"C:\pctwin-lab\locked")],
             })
         };
         let mut maker = |name: &str, _full: &str| -> Result<Made, Refusal> {
@@ -93,6 +94,11 @@ fn the_new_laptop_s_steps_through_the_client() {
     // The app hears it, to show how to give the helper Full Disk Access.
     let scanned = client.scan_person("bea").unwrap();
     assert_eq!((scanned.files, scanned.privacy_blocked), (0, 2));
+    // The places only the administrators and the system may open, for the mover's blind spots.
+    assert_eq!(
+        scanned.system_only,
+        vec![std::path::PathBuf::from(r"C:\pctwin-lab\locked")]
+    );
     let made = client.create_account("bea", "Bea").unwrap();
     assert_eq!(made.account, "1005");
     assert_eq!(made.password.as_str(), "abcd-efgh-jkmn-pqrs");

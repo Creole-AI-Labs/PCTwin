@@ -587,6 +587,60 @@ fn a_folder_only_administrators_open_is_a_named_blind_spot() {
     assert_ne!(s.top_line, TopLine::Everything);
 }
 
+/// Windows: a folder whose permissions the mover may not even read looks the same whether it is
+/// another person's or the administrators' alone, so it is a nameless blind spot. The
+/// administrator helper, which can read them, says which are the administrators' and the
+/// system's only: those are named ("no permission"); another person's stays nameless.
+#[test]
+fn unreadable_places_the_helper_finds_system_only_are_named_and_the_rest_stay_nameless() {
+    let lab = lab();
+    write(&lab.d.join("Family/holiday.jpg"), 10);
+    write(&lab.d.join("Family/Locked/locked-thing.txt"), 10);
+    write(&lab.d.join("Family/BeaOnly/bea-thing.txt"), 10);
+    let mut answers = Answers::default();
+    for name in ["Locked", "BeaOnly"] {
+        answers.0.insert(
+            name.into(),
+            AccessFact::Unknown {
+                why: "the permissions could not be read (UnauthorizedAccessException)".into(),
+            },
+        );
+    }
+    let mut s = run(sized(facts(&lab, true), 0), &mut answers);
+    let nameless = |s: &Sweep| {
+        s.blind_spots
+            .iter()
+            .filter(|b| b.reason == BlindReason::AccessNotReadable && b.path.is_none())
+            .map(|b| b.count)
+            .sum::<u64>()
+    };
+    assert_eq!(nameless(&s), 2);
+    // Nothing of either is shown or saved.
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(
+        !json.contains("BeaOnly") && !json.contains("Locked"),
+        "{json}"
+    );
+    let before = s.blind_spots.iter().map(|b| b.count).sum::<u64>();
+
+    s.name_system_only(&[lab.d.join("Family/Locked")]);
+    let spot = s
+        .blind_spots
+        .iter()
+        .find(|b| b.path.as_deref().is_some_and(|p| p.ends_with("Locked")))
+        .unwrap_or_else(|| panic!("not named: {:#?}", s.blind_spots));
+    assert_eq!(spot.reason, BlindReason::NoPermission);
+    assert_eq!(nameless(&s), 1, "Bea's stays nameless");
+    assert_eq!(s.blind_spots.iter().map(|b| b.count).sum::<u64>(), before);
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("BeaOnly"), "{json}");
+    assert!(!s.record.items.iter().any(|i| shown(i).contains("thing")));
+    assert_ne!(s.top_line, TopLine::Everything);
+    // A path the mover never found unreadable names nothing.
+    s.name_system_only(&[lab.d.join("Family/BeaOnly/elsewhere")]);
+    assert_eq!(nameless(&s), 1);
+}
+
 #[test]
 fn a_folder_that_cannot_be_read_is_never_shown_as_empty() {
     let lab = lab();

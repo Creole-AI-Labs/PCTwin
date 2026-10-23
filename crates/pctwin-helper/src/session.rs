@@ -285,8 +285,8 @@ impl<'s> Session<'s> {
         if !self.approved.contains(account) {
             return send_answer(channel, &Answer::Refused(Refusal::NotApproved));
         }
-        let (found, privacy_blocked) = match (self.scanner)(account) {
-            Ok(scan) => (scan.found, scan.privacy_blocked),
+        let (found, privacy_blocked, system_only) = match (self.scanner)(account) {
+            Ok(scan) => (scan.found, scan.privacy_blocked, scan.system_only),
             Err(why) => return send_answer(channel, &Answer::Refused(why)),
         };
         if self.plan.len() + found.len() > MAX_HANDLES {
@@ -310,6 +310,11 @@ impl<'s> Session<'s> {
                 files: handles.len() as u64,
                 bytes,
                 privacy_blocked,
+                system_only: system_only
+                    .iter()
+                    .take(crate::person::MAX_SYSTEM_ONLY)
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect(),
             },
         )?;
         send_handles(channel, &handles)?;

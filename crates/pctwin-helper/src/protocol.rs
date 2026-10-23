@@ -134,6 +134,10 @@ pub enum Answer {
         /// shows how to give the helper Full Disk Access, and the move never claims them.
         #[serde(default)]
         privacy_blocked: u64,
+        /// Folders outside every home only the administrators and the system may open (see
+        /// `person::system_only`), so the mover's report can name them.
+        #[serde(default)]
+        system_only: Vec<String>,
     },
     Refused(Refusal),
     Goodbye,

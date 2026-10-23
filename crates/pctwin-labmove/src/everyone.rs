@@ -260,7 +260,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         pctwin_helper::harden_engine()?;
     }
     let laptop = args.laptop;
-    let sweep = tokio::task::spawn_blocking(move || {
+    let mut sweep = tokio::task::spawn_blocking(move || {
         pctwin_scan::sweep_this_laptop(laptop, &AtomicBool::new(false), &mut |_| {}, None)
     })
     .await
@@ -302,6 +302,13 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         declined.clone_from(&others);
     }
     let people: Vec<Scanned> = scanned.iter().map(|(_, s)| s.clone()).collect();
+    // The helper, which can read every folder's permissions, says which of the places the mover
+    // could not read are the administrators' and the system's only: those are named.
+    let system_only: Vec<PathBuf> = people
+        .iter()
+        .flat_map(|p| p.system_only.iter().cloned())
+        .collect();
+    sweep.name_system_only(&system_only);
     let handles = add_people(&mut record, &people);
     record.validate().map_err(err)?;
 

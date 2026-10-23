@@ -136,6 +136,9 @@ pub struct Scanned {
     /// macOS: places of theirs a privacy setting kept the helper out of (the helper needs Full
     /// Disk Access).
     pub privacy_blocked: u64,
+    /// Folders outside every home only the administrators and the system may open (see
+    /// `pctwin_scan::Sweep::name_system_only`).
+    pub system_only: Vec<std::path::PathBuf>,
 }
 
 /// An open session with the helper.
@@ -181,6 +184,7 @@ impl<S: Read + Write> Client<S> {
             files,
             bytes,
             privacy_blocked,
+            system_only,
         } = self.expect_answer(|a| matches!(a, Answer::Scanned { .. }))?
         else {
             return Err(ClientError::OutOfTurn);
@@ -205,6 +209,11 @@ impl<S: Read + Write> Client<S> {
             files,
             bytes,
             privacy_blocked,
+            system_only: system_only
+                .into_iter()
+                .take(crate::person::MAX_SYSTEM_ONLY)
+                .map(std::path::PathBuf::from)
+                .collect(),
             items: items.into_iter().zip(handles).collect(),
         })
     }

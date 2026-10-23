@@ -64,6 +64,11 @@ pub fn entries_of(sweep: &Sweep, account: &str) -> Vec<(Item, Entry)> {
 pub struct PersonScan {
     pub found: Vec<(Item, Entry)>,
     pub privacy_blocked: u64,
+    /// Places outside every home that only the administrators and the system may open, as the
+    /// helper (which can read their permissions) found them: the system's, nobody's private
+    /// corner, so the mover's report may name them where the mover could not tell them from
+    /// another person's. Never a file, never anything inside a home.
+    pub system_only: Vec<PathBuf>,
 }
 
 impl From<Vec<(Item, Entry)>> for PersonScan {
@@ -71,6 +76,7 @@ impl From<Vec<(Item, Entry)>> for PersonScan {
         Self {
             found,
             privacy_blocked: 0,
+            system_only: Vec::new(),
         }
     }
 }
@@ -121,5 +127,26 @@ pub fn scan_person(laptop: LaptopId, account: &str) -> Result<PersonScan, Refusa
     Ok(PersonScan {
         found: entries_of(&swept, account),
         privacy_blocked,
+        system_only: system_only(&swept),
     })
+}
+
+/// At most this many system-only places are told (each a folder's path, so the answer stays
+/// small whatever the laptop holds).
+pub const MAX_SYSTEM_ONLY: usize = 256;
+
+/// The places `sweep` found to be the system's only by who may open them (owned by the
+/// administrators or the system, nobody else allowed): never a rules-file corner, never inside a
+/// home (the "inside a home" rule comes first), never a file.
+pub fn system_only(sweep: &Sweep) -> Vec<PathBuf> {
+    sweep
+        .places
+        .iter()
+        .filter(|p| {
+            p.placement.whose == pctwin_scan::Whose::System
+                && p.placement.rule == pctwin_scan::Rule::OwnerOnly
+        })
+        .filter_map(|p| p.path.as_ref().map(PathBuf::from))
+        .take(MAX_SYSTEM_ONLY)
+        .collect()
 }

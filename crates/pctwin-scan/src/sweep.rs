@@ -321,6 +321,13 @@ pub struct Sweep {
     /// items into since.
     #[serde(skip)]
     pub item_roots: BTreeMap<usize, PathBuf>,
+    /// Per place whose permissions this person could not read (by its index in `places`), where
+    /// it is: kept in memory only, never shown or saved, so the administrator helper can say
+    /// which of them only the administrators and the system may open (see
+    /// [`name_system_only`](Self::name_system_only)). Outside every home: a name this person's
+    /// own listing showed.
+    #[serde(skip)]
+    pub unreadable_places: BTreeMap<usize, PathBuf>,
 }
 
 /// One person on "Who's moving?" (M06): who they are, and roughly how much is theirs when it
@@ -369,6 +376,54 @@ impl Sweep {
                 }
             })
             .collect()
+    }
+
+    /// The places this person could not read that the administrator helper, which could, found
+    /// only the administrators and the system may open (`system_only`): they are the system's,
+    /// not anyone's private corner, so each becomes a blind spot named with its place ("no
+    /// permission") in place of a nameless one. Any other unreadable place stays nameless. Never
+    /// moved, never counted as seen.
+    pub fn name_system_only(&mut self, system_only: &[PathBuf]) {
+        let found: Vec<(usize, PathBuf)> = self
+            .unreadable_places
+            .iter()
+            .filter(|(_, path)| system_only.iter().any(|s| same_place(s, path)))
+            .map(|(p, path)| (*p, path.clone()))
+            .collect();
+        for (p, path) in found {
+            let Some(place) = self.places.get_mut(p) else {
+                continue;
+            };
+            if place.placement.rule != Rule::AccessNotReadable {
+                continue;
+            }
+            place.placement = Placement {
+                whose: Whose::System,
+                kind: None,
+                rule: Rule::OwnerOnly,
+            };
+            let shown = path.to_string_lossy().into_owned();
+            place.path = Some(shown.clone());
+            place.fate = Fate::Counted;
+            let volume = Some(place.volume.clone());
+            self.unreadable_places.remove(&p);
+            // Its nameless line counted it once: that count moves to its own named line.
+            if let Some(i) = self.blind_spots.iter().position(|b| {
+                b.volume == volume && b.path.is_none() && b.reason == BlindReason::AccessNotReadable
+            }) {
+                let b = &mut self.blind_spots[i];
+                b.count = b.count.saturating_sub(1);
+                if b.count == 0 {
+                    self.blind_spots.remove(i);
+                }
+            }
+            self.blind_spots.push(BlindSpot {
+                volume,
+                path: Some(shown),
+                reason: BlindReason::NoPermission,
+                count: 1,
+            });
+        }
     }
 
     /// The rule that placed an item.
@@ -1132,6 +1187,7 @@ pub fn sweep(
         devs: Vec::new(),
         last_save: Duration::ZERO,
         roots: std::cell::RefCell::new(BTreeMap::new()),
+        unreadable: std::cell::RefCell::new(BTreeMap::new()),
     };
     s.prepare();
     let finished = s.run(stop, checkpoint);
@@ -1150,6 +1206,9 @@ struct Sweeper<'a> {
     last_save: Duration,
     /// Per place, the folder its items' paths start from (see [`Sweep::item_roots`]).
     roots: std::cell::RefCell<BTreeMap<usize, PathBuf>>,
+    /// Per place whose permissions could not be read, where it is (see
+    /// [`Sweep::unreadable_places`]).
+    unreadable: std::cell::RefCell<BTreeMap<usize, PathBuf>>,
 }
 
 impl Sweeper<'_> {
@@ -2217,6 +2276,7 @@ impl Sweeper<'_> {
 
     /// Starts a place for something outside everyone's home.
     fn start_place(&mut self, volume: usize, path: &Path, placement: Placement) -> usize {
+        let unreadable = placement.rule == Rule::AccessNotReadable;
         let (fate, space, private, owner) = match (&placement.whose, placement.kind) {
             (Whose::System, Some(Kind::App)) => (Fate::Counted, Space::Apps, false, None),
             (Whose::System, Some(Kind::Junk)) => (Fate::Counted, Space::Junk, false, None),
@@ -2239,7 +2299,7 @@ impl Sweeper<'_> {
             storage: self.storage(volume),
         });
         let shown = (!private).then(|| path.to_string_lossy().into_owned());
-        self.new_place(
+        let p = self.new_place(
             volume,
             shown,
             placement,
@@ -2253,7 +2313,11 @@ impl Sweeper<'_> {
                 collapsed: None,
                 root_item: None,
             },
-        )
+        );
+        if unreadable {
+            self.unreadable.borrow_mut().insert(p, path.to_path_buf());
+        }
+        p
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3350,6 +3414,7 @@ impl Sweeper<'_> {
             top_line,
             frontier,
             item_roots: self.roots.borrow().clone(),
+            unreadable_places: self.unreadable.borrow().clone(),
         }
     }
 }
