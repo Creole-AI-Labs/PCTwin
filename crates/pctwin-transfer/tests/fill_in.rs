@@ -1106,7 +1106,9 @@ fn a_hidden_file_that_is_not_pctwin_s_is_never_shown_and_is_reported() {
 #[cfg(windows)]
 #[test]
 fn another_programs_file_with_pctwins_tag_is_never_removed_on_windows() {
-    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    // The system temp folder (NTFS on C:), not the build disk: tunnelling is NTFS's, and a
+    // CI runner's build disk does not show it.
+    let work = tempfile::tempdir().unwrap();
     let (_old, usb, jdir) = dirs(work.path());
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--exact", "stops_dead_mid_fill", "--nocapture"])

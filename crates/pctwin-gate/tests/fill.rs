@@ -976,7 +976,9 @@ fn after_a_restart_an_empty_hidden_file_is_never_removed() {
 #[test]
 fn a_file_put_in_place_of_pctwin_s_hidden_one_is_never_shown_though_it_carries_the_tag() {
     use std::os::windows::fs::OpenOptionsExt;
-    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    // The system temp folder (NTFS on C:), not the build disk: tunnelling is NTFS's, and a
+    // CI runner's build disk does not show it.
+    let root = tempfile::tempdir().unwrap();
     let dest = fill_in(root.path());
     let s = sealed(&dest, "u.txt", b"ours, whole");
     let plan = s.fill_plan().unwrap();
