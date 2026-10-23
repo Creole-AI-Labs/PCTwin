@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SAMPLES } from "../gallery/samples";
 import { localization } from "../i18n";
@@ -54,11 +54,6 @@ function inApp(ui: ReactNode) {
       <main>{ui}</main>
     </LocalizationProvider>,
   );
-}
-
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
 }
 
 /** A screen's controlled tick, kept in a tiny harness so a test can click it. */

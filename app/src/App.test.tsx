@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "./testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { LANGUAGES, directionOf, localization, pickLanguage } from "./i18n";
@@ -27,12 +27,6 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-
-/** axe-core on the rendered page. Colour contrast needs real layout, so it is checked in the built app instead. */
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
 
 describe("screens", () => {
   it("Welcome shows the free move first, in English, with nothing missing", () => {

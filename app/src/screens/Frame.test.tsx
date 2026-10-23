@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import { useState, type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import FrameFooter, { FooterProvider } from "./FrameFooter";
@@ -22,11 +22,6 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
 
 const wrap = (ui: ReactNode, framed: boolean) => (
   <LocalizationProvider l10n={l10n}>{framed ? <FooterProvider><main>{ui}</main></FooterProvider> : <main>{ui}</main>}</LocalizationProvider>

@@ -1,9 +1,9 @@
 import { LocalizationProvider } from "@fluent/react";
 import { cleanup, render } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
-import { SAMPLES } from "./samples";
+import { GROUPS, SAMPLES } from "./samples";
 
 let warnings: string[] = [];
 
@@ -19,13 +19,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** axe-core on the rendered page. Colour contrast needs real layout, so it is checked in a real browser instead. */
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
-
 describe("screen samples", () => {
+  it("every group file is in the shared list, each with samples (a group left out would skip its checks without a word)", () => {
+    // Named here, not found the same way the list finds them: a file the list missed is caught.
+    // A new group file is added here too.
+    const groups = ["connection.tsx", "people.tsx", "plan.tsx", "progress.tsx", "quicksend.tsx", "start.tsx"];
+    expect(GROUPS.map((g) => g.file)).toEqual(groups);
+    expect(GROUPS.filter((g) => g.count === 0)).toEqual([]);
+  });
+
   it("every sample has its own id", () => {
     const ids = SAMPLES.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);

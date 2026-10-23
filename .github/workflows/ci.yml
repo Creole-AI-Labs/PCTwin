@@ -23,14 +23,22 @@ env:
 
 jobs:
   ui:
-    name: Screens (type check, lint, unit tests, build)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Also on Windows: the screen tests once failed there alone (16 October 2026), while Linux passed.
+    name: Screens (type check, lint, unit tests, build) (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: app
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        if: runner.os == 'Linux'
         with:
           egress-policy: block
           allowed-endpoints: >

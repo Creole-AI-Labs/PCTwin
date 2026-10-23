@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import PairNew from "./PairNew";
@@ -61,20 +61,30 @@ function inApp(ui: ReactNode) {
     </LocalizationProvider>);
 }
 
+/**
+ * Lets every reply already on its way arrive and the screen draw what follows: a task queued after
+ * them runs only once they have run. Order, not time, so a busy machine cannot make it fail.
+ */
+async function settle() {
+  for (let i = 0; i < 3; i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
 async function renderOld(onBack = vi.fn()) {
   inApp(<PairOld onBack={onBack} />);
-  await waitFor(() => {
-    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
-  });
+  await settle();
+  expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
   return onBack;
 }
 
 async function renderNew(found: unknown[], onBack = vi.fn()) {
   replies.pairing_new_search = () => found;
   inApp(<PairNew onBack={onBack} />);
-  await waitFor(() => {
-    expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
-  });
+  await settle();
+  expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
   return onBack;
 }
 
@@ -88,21 +98,13 @@ async function emit(channel: "pairing-old" | "pairing-new", payload: unknown) {
 const button = (id: string, vars?: Record<string, string | number>) => screen.getByRole("button", { name: nameIs(text(id, vars)) });
 const heading = () => screen.getByRole("heading", { level: 1 });
 
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
-
 function noMissingText() {
   expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
 }
 
 describe("old laptop", () => {
   it("listens before it starts, shows the label and the code as six even tiles with its countdown", async () => {
-    inApp(<PairOld onBack={vi.fn()} />);
-    await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
-    });
+    await renderOld();
     expect(tauri.handlers.has("pairing-old")).toBe(true);
     expect(heading().textContent).toBe(text("pair-old-title"));
 
@@ -134,16 +136,14 @@ describe("old laptop", () => {
     expect(screen.getByText(text("pair-old-rename-note"))).toBeTruthy();
     fireEvent.change(screen.getByLabelText(text("pair-old-rename-label")), { target: { value: "Ada's laptop" } });
     fireEvent.click(button("pair-old-rename-save"));
-    await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_rename", { name: "Ada's laptop" });
-    });
-    await waitFor(() => {
-      expect(screen.queryByLabelText(text("pair-old-rename-label"))).toBeNull();
-    });
+    // The save's reply and the field closing come in order, not on a clock: settle, then look.
+    // (Focus is not a change to the page, so a polling wait saw it only on its timer, and on a busy
+    // machine the time limit could run out first.)
+    await settle();
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_rename", { name: "Ada's laptop" });
+    expect(screen.queryByLabelText(text("pair-old-rename-label"))).toBeNull();
     // Closing the field returns focus to the button that opened it (moved once the field has gone).
-    await waitFor(() => {
-      expect(document.activeElement).toBe(button("pair-old-rename"));
-    });
+    expect(document.activeElement).toBe(button("pair-old-rename"));
 
     fireEvent.click(button("pair-old-rename"));
     fireEvent.click(button("pair-old-rename-cancel"));

@@ -1,7 +1,10 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
+
+/** The move page is checked without the landmark rule, and with colour contrast as far as axe can judge it here. */
+const MOVE_RULES = { region: { enabled: false }, "color-contrast": { enabled: true } };
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ended from "../contract/ended-early.json";
 import links from "../contract/move-link.json";
@@ -501,8 +504,7 @@ describe("the move's error pages", () => {
   it("has no accessibility violations", async () => {
     await host(false);
     send("move-problem", linkLost);
-    const results = await axe.run(document.body, { rules: { region: { enabled: false } } });
-    expect(results.violations.map((v) => v.id)).toEqual([]);
+    expect(await violations(MOVE_RULES)).toEqual([]);
   });
 });
 
@@ -618,11 +620,9 @@ describe("a dropped connection during the move (C09, C10)", () => {
   it("has no accessibility violations while waiting, nor with the dialog open", async () => {
     await host(false);
     send("move-link", nothingNew);
-    let results = await axe.run(document.body, { rules: { region: { enabled: false } } });
-    expect(results.violations.map((v) => v.id)).toEqual([]);
+    expect(await violations(MOVE_RULES)).toEqual([]);
     send("move-link", endedMoved);
-    results = await axe.run(document.body, { rules: { region: { enabled: false } } });
-    expect(results.violations.map((v) => v.id)).toEqual([]);
+    expect(await violations(MOVE_RULES)).toEqual([]);
   });
 });
 

@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import axe from "axe-core";
+import { violations as accessible } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import {
@@ -64,11 +64,6 @@ function inApp(ui: ReactNode) {
       <main>{ui}</main>
     </LocalizationProvider>,
   );
-}
-
-async function accessible(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
 }
 
 /** No screen in this part shows anything paid. */
