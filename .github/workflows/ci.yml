@@ -642,7 +642,10 @@ jobs:
       # nothing forgotten, with real accounts, the real helper and a hostile mover. The script is
       # the administrator and answers the system's prompt from outside the product.
       - name: Build the helper for everyone in one move
-        run: cargo build --locked -p pctwin-helper -p pctwin-labmove -p pctwin-move --bin pctwin-handover
+        # Two builds: a --bin narrows a build to that program alone.
+        run: |
+          cargo build --locked -p pctwin-helper -p pctwin-labmove
+          cargo build --locked -p pctwin-move --bin pctwin-handover
       - name: Everyone in one move (Linux and macOS)
         if: runner.os != 'Windows'
         run: bash fixtures/everyone/run.sh "$PWD/target/debug" /tmp/pctwin-everyone
