@@ -42,13 +42,13 @@ pub(crate) fn peer(stream: &UnixStream) -> Result<Caller, Error> {
     let cred = rustix::net::sockopt::socket_peercred(stream).map_err(|e| Error::Io(e.into()))?;
     let pid = cred.pid.as_raw_nonzero().get();
     let process_id = u32::try_from(pid).map_err(|_| Error::CallerGone)?;
-    let program = std::fs::read_link(format!("/proc/{pid}/exe")).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::NotFound {
-            Error::CallerGone
-        } else {
-            Error::Io(e)
-        }
-    })?;
+    // Only for the record: a process another account may not look into (the app looking at the
+    // hardened root helper) gives no path, and that never stops the connection.
+    let program = match std::fs::read_link(format!("/proc/{pid}/exe")) {
+        Ok(p) => p,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(Error::CallerGone),
+        Err(_) => std::path::PathBuf::new(),
+    };
     Ok(Caller {
         process_id,
         account: Account::Uid(cred.uid.as_raw()),

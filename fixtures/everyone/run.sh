@@ -90,7 +90,7 @@ uid() { id -u "$1"; }
 approve="$(uid pctwinbea),$(uid pctwincarl),pctwinnew1,pctwinnew2"
 # The real folder, as the app uses: the helper refuses a path through a link (/var/run on Linux,
 # /var on a Mac).
-if $mac; then channels=/private/var/run/pctwin-everyone; else channels=/run/pctwin-everyone; fi
+if $mac; then channels=/private/var/tmp/pctwin-everyone; else channels=/run/pctwin-everyone; fi
 sudo rm -rf "$channels"
 
 # The system's prompt, said yes to: the helper started as root for this move (`--dir` is made by
@@ -167,6 +167,10 @@ if ! wait "$engine"; then
   # The move's own words, kept with the evidence and shown here.
   sudo cp "$work/mover/log.txt" "$admin/mover-log.txt" 2>/dev/null || true
   sudo cat "$work/mover/log.txt" >&2 || true
+  # What was there to reach: the channel folder and the helper, still running or not.
+  sudo ls -la "$channels" >&2 || true
+  ps -o pid,user,stat,args -p "$helper" >&2 || true
+  pgrep -a pctwin-helper >&2 || true
   echo "the move failed" >&2
   exit 1
 fi

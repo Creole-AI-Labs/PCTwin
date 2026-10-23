@@ -103,12 +103,14 @@ pub enum Asked {
     NotApproved,
 }
 
-/// Mac and Linux: the helper's channel folder, `name` inside the system's own run folder. The real
-/// folder, never a path through a link: the helper refuses to open a folder through one, and
-/// `/var/run` is a link on Linux, as `/var` is on a Mac.
+/// Mac and Linux: the helper's channel folder, `name` (random, so no one can take it first) in a
+/// folder of root's that no one else can rename it out of. The real folder, never a path through
+/// a link: the helper refuses to open a folder through one, and `/var/run` is a link on Linux, as
+/// `/var` is on a Mac. On a Mac, `/private/var/run` is writable by the `daemon` group without
+/// the sticky bit, so root's sticky `/private/var/tmp` (found by the two-accounts lab).
 fn channel_folder(name: &str) -> std::path::PathBuf {
     let run = if cfg!(target_os = "macos") {
-        "/private/var/run"
+        "/private/var/tmp"
     } else {
         "/run"
     };
