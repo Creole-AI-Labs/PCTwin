@@ -129,6 +129,12 @@ check-internet-unknown = تعذّر على PCTwin معرفة هل هذا الح�
 check-again = التحقق مرة أخرى
 check-estimate-note = الوقت المقدّر ليس وعدًا ثابتًا.
 check-continue = اختيار ما يُنقل
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = قبل أن يبدأ النقل
+check-before-lids-title = أبقِ غطاءي الحاسوبين مفتوحين
+check-before-lids-body = قد يجعل إغلاق الغطاء الحاسوب المحمول يدخل في وضع السكون، فيتوقف النقل مؤقتًا.
+check-before-near-title = ابقَ قريبًا من موجّه Wi-Fi
+check-before-near-body = أبقِ الحاسوبين المحمولين قريبين منه أثناء نقل أغراضك.
 
 ## C09 Waiting for your other laptop
 
@@ -1119,6 +1125,17 @@ progress-state-verified = تم التحقق
 progress-state-checking = جارٍ التحقق
 progress-state-paused = متوقف مؤقتًا
 progress-checked-note = لا يُعدّ العنصر منسوخًا إلا بعد التحقق منه.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = نصيحة
+tips-pause = إيقاف النصائح مؤقتًا
+tips-resume = عرض مزيد من النصائح
+tips-next = النصيحة التالية
+tip-battery = يعمل هذا الحاسوب على البطارية. وصّله بالكهرباء إن أمكن، حتى لا ينقطع النقل الطويل.
+tip-closer = الاتصال بطيء. قد يزيد تقريب الحاسوبين المحمولين من موجّه Wi-Fi سرعته.
+tip-lids = أبقِ غطاء هذا الحاسوب مفتوحًا. قد يجعله إغلاق الغطاء يدخل في وضع السكون، فيتوقف النقل مؤقتًا.
+tip-keep-using = يمكنك متابعة استخدام هذا الحاسوب. PCTwin يقرأ منه فقط.
+tip-pause = يمكنك إيقاف النقل مؤقتًا في أي وقت ومتابعته لاحقًا.
+tip-power-cut = إذا انقطعت الكهرباء، شغّل الحاسوبين المحمولين وافتح PCTwin. سيتابع من حيث توقف، ولن يضيع أي شيء نُسخ وتم التحقق منه.
 
 ## F09 Mini panel
 

@@ -122,6 +122,12 @@ check-internet-unknown = PCTwin无法判断这台笔记本电脑是否在线。�
 check-again = 再次检查
 check-estimate-note = 预计时间仅供参考，并非固定承诺。
 check-continue = 选择要迁移的内容
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = 迁移开始前
+check-before-lids-title = 两台电脑的屏幕都保持打开
+check-before-lids-body = 合上屏幕可能会让笔记本电脑进入睡眠，迁移就会暂停。
+check-before-near-title = 靠近Wi-Fi路由器
+check-before-near-body = 迁移期间，让两台笔记本电脑都靠近路由器。
 
 ## C09 Waiting for your other laptop
 
@@ -811,6 +817,17 @@ progress-state-verified = 已检查
 progress-state-checking = 正在检查
 progress-state-paused = 已暂停
 progress-checked-note = 项目只有在检查之后才算已复制。
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = 提示
+tips-pause = 暂停提示
+tips-resume = 显示更多提示
+tips-next = 下一条提示
+tip-battery = 这台笔记本电脑正在使用电池。如果可以，请插上电源，以免长时间的迁移被打断。
+tip-closer = 连接较慢。把笔记本电脑移近Wi-Fi路由器可以加快速度。
+tip-lids = 请保持这台笔记本电脑的屏幕打开。合上屏幕可能会让它进入睡眠，迁移就会暂停。
+tip-keep-using = 你可以继续使用这台笔记本电脑。PCTwin只读取它上面的内容。
+tip-pause = 你可以随时暂停迁移，稍后再继续。
+tip-power-cut = 如果停电，请打开两台笔记本电脑并打开PCTwin。它会从中断的地方继续，已复制并检查的内容都不会丢失。
 
 ## F09 Mini panel
 

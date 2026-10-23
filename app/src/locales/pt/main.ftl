@@ -128,6 +128,12 @@ check-internet-unknown = O PCTwin não conseguiu saber se este notebook está on
 check-again = Verificar de novo
 check-estimate-note = A estimativa de tempo não é uma promessa fixa.
 check-continue = Escolher o que mover
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = Antes de a mudança começar
+check-before-lids-title = Deixe as duas tampas abertas
+check-before-lids-body = Uma tampa fechada pode colocar o notebook em repouso, e isso pausa a mudança.
+check-before-near-title = Fique perto do roteador Wi-Fi
+check-before-near-body = Deixe os dois notebooks perto dele enquanto suas coisas são movidas.
 
 ## C09 Waiting for your other laptop
 
@@ -1020,6 +1026,17 @@ progress-state-verified = Verificado
 progress-state-checking = Verificando
 progress-state-paused = Pausado
 progress-checked-note = Um item só conta como copiado depois de ser verificado.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = Dica
+tips-pause = Pausar dicas
+tips-resume = Mostrar mais dicas
+tips-next = Próxima dica
+tip-battery = Este notebook está usando a bateria. Ligue-o na tomada se puder, para que uma mudança longa não seja interrompida.
+tip-closer = A conexão está lenta. Aproximar os notebooks do roteador Wi-Fi pode deixá-la mais rápida.
+tip-lids = Deixe a tampa deste notebook aberta. Uma tampa fechada pode colocá-lo em repouso, e isso pausa a mudança.
+tip-keep-using = Você pode continuar usando este notebook. O PCTwin só lê os arquivos dele.
+tip-pause = Você pode pausar a mudança a qualquer momento e continuar depois.
+tip-power-cut = Se a energia acabar, ligue os dois notebooks e abra o PCTwin. Ele continua de onde parou, e nada do que foi copiado e verificado se perde.
 
 ## F09 Mini panel
 

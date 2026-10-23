@@ -115,6 +115,26 @@
 
 
 
+/* T14: one tip under the bar, in the shared note's look; its two controls sit under the words. */
+.mv-tip {
+  margin-top: var(--space-3);
+}
+
+.mv-tip-body {
+  min-width: 0;
+}
+
+.mv-tip-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mv-tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
+}
+
 .mv-now {
   margin-top: var(--space-3);
   color: var(--colour-muted);

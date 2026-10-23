@@ -129,6 +129,12 @@ check-internet-unknown = PCTwin ne sait pas si cet ordinateur portable est en li
 check-again = Vérifier à nouveau
 check-estimate-note = La durée estimée n’est pas une promesse.
 check-continue = Choisir quoi transférer
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = Avant le début du transfert
+check-before-lids-title = Gardez les deux écrans ouverts
+check-before-lids-body = Un écran fermé peut mettre un ordinateur portable en veille, ce qui met le transfert en pause.
+check-before-near-title = Restez près du routeur Wi-Fi
+check-before-near-body = Gardez les deux ordinateurs portables près de lui pendant le transfert.
 
 ## C09 Waiting for your other laptop
 
@@ -1025,6 +1031,17 @@ progress-state-verified = Vérifié
 progress-state-checking = Vérification
 progress-state-paused = En pause
 progress-checked-note = Un élément ne compte comme copié qu’une fois vérifié.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = Conseil
+tips-pause = Suspendre les conseils
+tips-resume = Afficher d’autres conseils
+tips-next = Conseil suivant
+tip-battery = Ce portable fonctionne sur batterie. Branchez-le si vous le pouvez, pour qu’un long transfert ne soit pas interrompu.
+tip-closer = La connexion est lente. Rapprocher les ordinateurs portables du routeur Wi-Fi peut l’accélérer.
+tip-lids = Gardez l’écran de ce portable ouvert. Un écran fermé peut le mettre en veille, ce qui met le transfert en pause.
+tip-keep-using = Vous pouvez continuer à utiliser ce portable. PCTwin ne fait que lire ses fichiers.
+tip-pause = Vous pouvez mettre le transfert en pause à tout moment et reprendre plus tard.
+tip-power-cut = En cas de coupure de courant, rallumez les deux ordinateurs portables et ouvrez PCTwin. Il reprend là où il s’était arrêté, et rien de ce qui a été copié et vérifié n’est perdu.
 
 ## F09 Mini panel
 

@@ -377,6 +377,26 @@ describe("C07 Let's check the connection", () => {
     expect(screen.getByRole("main").textContent).not.toMatch(/standard|smart/i);
   });
 
+  it("before the move: lids open and near the router, as the person's to do, with no status PCTwin cannot see", async () => {
+    inApp(<CheckConnection check={good} {...handlers()} />);
+    const list = screen.getByRole("region", { name: text("check-before-title") });
+    for (const id of ["check-before-lids", "check-before-near"]) {
+      const item = within(list).getByText(text(`${id}-title`)).closest("li");
+      expect(item?.textContent).toContain(text(`${id}-body`));
+      // Advice, not a check: no Ready or Plug in beside it.
+      expect(item?.querySelector(".kit-chip")).toBeNull();
+    }
+    // Power stays the measured row above, said once.
+    expect(within(list).queryByText(text("check-power-title"))).toBeNull();
+    noStringsMissing();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("while measuring, the checklist waits with the results", () => {
+    inApp(<CheckConnection check={null} {...handlers()} />);
+    expect(screen.queryByText(text("check-before-title"))).toBeNull();
+  });
+
   it("Check again and Back call out", () => {
     const h = handlers();
     inApp(<CheckConnection check={good} {...h} />);

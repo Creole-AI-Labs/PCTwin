@@ -129,6 +129,12 @@ check-internet-unknown = PCTwin पता नहीं लगा सका क�
 check-again = फिर से जाँच करें
 check-estimate-note = समय का अनुमान कोई पक्का वादा नहीं है।
 check-continue = चुनें कि क्या भेजना है
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = स्थानांतरण शुरू होने से पहले
+check-before-lids-title = दोनों लैपटॉप के ढक्कन खुले रखें
+check-before-lids-body = ढक्कन बंद करने से लैपटॉप स्लीप में जा सकता है, जिससे स्थानांतरण रुक जाता है।
+check-before-near-title = Wi-Fi राउटर के पास रहें
+check-before-near-body = जब तक आपकी चीज़ें जा रही हैं, दोनों लैपटॉप उसके पास रखें।
 
 ## C09 Waiting for your other laptop
 
@@ -996,6 +1002,17 @@ progress-state-verified = जाँचा गया
 progress-state-checking = जाँच हो रही है
 progress-state-paused = रुका हुआ
 progress-checked-note = कोई आइटम जाँच होने के बाद ही कॉपी हुआ माना जाता है।
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = सुझाव
+tips-pause = सुझाव रोकें
+tips-resume = और सुझाव दिखाएँ
+tips-next = अगला सुझाव
+tip-battery = यह लैपटॉप बैटरी पर चल रहा है। हो सके तो इसे प्लग इन करें, ताकि लंबा स्थानांतरण बीच में न रुके।
+tip-closer = कनेक्शन धीमा है। लैपटॉप को Wi-Fi राउटर के पास ले जाने से यह तेज़ हो सकता है।
+tip-lids = इस लैपटॉप का ढक्कन खुला रखें। ढक्कन बंद करने से यह स्लीप में जा सकता है, जिससे स्थानांतरण रुक जाता है।
+tip-keep-using = आप इस लैपटॉप का इस्तेमाल करते रह सकते हैं। PCTwin इससे सिर्फ़ पढ़ता है।
+tip-pause = आप कभी भी स्थानांतरण रोक सकते हैं और बाद में जारी रख सकते हैं।
+tip-power-cut = अगर बिजली चली जाए, तो दोनों लैपटॉप चालू करें और PCTwin खोलें। यह वहीं से जारी रखता है जहाँ रुका था, और जो कॉपी और जाँचा जा चुका है, उसमें से कुछ नहीं खोता।
 
 ## F09 Mini panel
 

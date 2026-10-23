@@ -129,6 +129,12 @@ check-internet-unknown = PCTwin no pudo saber si este portátil está en línea.
 check-again = Comprobar de nuevo
 check-estimate-note = El tiempo calculado es aproximado, no una promesa.
 check-continue = Elegir qué trasladar
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = Antes de que empiece el traslado
+check-before-lids-title = Deja las dos tapas abiertas
+check-before-lids-body = Una tapa cerrada puede dejar el portátil en reposo, y eso pausa el traslado.
+check-before-near-title = Quédate cerca del router Wi-Fi
+check-before-near-body = Deja los dos portátiles cerca de él mientras se trasladan tus cosas.
 
 ## C09 Waiting for your other laptop
 
@@ -1016,6 +1022,17 @@ progress-state-verified = Comprobado
 progress-state-checking = Comprobando
 progress-state-paused = En pausa
 progress-checked-note = Un elemento solo cuenta como copiado después de comprobarlo.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = Consejo
+tips-pause = Pausar los consejos
+tips-resume = Ver más consejos
+tips-next = Siguiente consejo
+tip-battery = Este portátil funciona con batería. Enchúfalo si puedes, para que un traslado largo no se corte.
+tip-closer = La conexión es lenta. Acercar los portátiles al router Wi-Fi puede acelerarla.
+tip-lids = Deja abierta la tapa de este portátil. Una tapa cerrada puede dejarlo en reposo, y eso pausa el traslado.
+tip-keep-using = Puedes seguir usando este portátil. PCTwin solo lee de él.
+tip-pause = Puedes pausar el traslado cuando quieras y seguir más tarde.
+tip-power-cut = Si se va la luz, enciende los dos portátiles y abre PCTwin. Sigue desde donde se quedó, y no se pierde nada de lo copiado y comprobado.
 
 ## F09 Mini panel
 

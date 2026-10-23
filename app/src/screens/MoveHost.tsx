@@ -537,6 +537,7 @@ export default function MoveHost({
             <ProgressCompact
               progress={progress}
               {...handlers}
+              tips={{ old, onBattery: peer?.mine.power.kind === "battery", slow: peer?.link?.slow ?? false }}
               onMinimise={() => {
                 setMini(true);
               }}

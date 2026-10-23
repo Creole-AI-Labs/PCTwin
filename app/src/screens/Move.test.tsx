@@ -11,6 +11,7 @@ import links from "../contract/move-link.json";
 import outcomes from "../contract/move-outcome.json";
 import placeAnswers from "../contract/place-answer.json";
 import peers from "../contract/peer.json";
+import { tipsFor } from "./MoveTips";
 import plans from "../contract/plan-view.json";
 import progresses from "../contract/move-progress.json";
 import reportItems from "../contract/report-item.json";
@@ -292,6 +293,21 @@ describe("the move, once paired", () => {
     // The stop dialog (X10) asks first; nothing is stopped yet.
     expect(tauri.invoke).not.toHaveBeenCalledWith("move_stop");
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("the tip under the bar is about this laptop, as it said when the laptops greeted (T14)", async () => {
+    await host(true);
+    // This laptop on mains power, over a link measured slow as the laptops greeted.
+    const greeted = { ...peers[0], link: { bytesPerSecond: 1_200_000, slow: true } };
+    send("move-peer", greeted);
+    fireEvent.click(screen.getByRole("button", { name: text("peer-continue") }));
+    fireEvent.click(screen.getByRole("button", { name: text("check-continue") }));
+    send("move-progress", runningQuiet);
+    const tips = tipsFor({ old: true, onBattery: greeted.mine.power.kind === "battery", slow: greeted.link.slow, batteryWarning: false });
+    // The greeting's slow link puts the router tip first; the old laptop also hears it may keep using itself.
+    expect(tips[0]).toBe(greeted.mine.power.kind === "battery" ? "tip-battery" : "tip-closer");
+    expect(tips).toContain("tip-keep-using");
+    expect(document.querySelector(".mv-tip-text")?.textContent).toBe(text(tips[0]));
   });
 
   it("a drive that is not keeping files holds the move (X07): carry on or stop, nothing dropped", async () => {

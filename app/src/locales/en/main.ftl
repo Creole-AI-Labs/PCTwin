@@ -129,6 +129,12 @@ check-internet-unknown = PCTwin could not tell whether this laptop is online. Th
 check-again = Check again
 check-estimate-note = The time estimate is not a fixed promise.
 check-continue = Choose what to move
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = Before the move starts
+check-before-lids-title = Keep both lids open
+check-before-lids-body = A closed lid can put a laptop to sleep, which pauses the move.
+check-before-near-title = Stay near the Wi-Fi router
+check-before-near-body = Keep both laptops close to it while your things move.
 
 ## C09 Waiting for your other laptop
 
@@ -871,6 +877,17 @@ progress-state-verified = Checked
 progress-state-checking = Checking
 progress-state-paused = Paused
 progress-checked-note = An item counts as copied only after it is checked.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = Tip
+tips-pause = Pause tips
+tips-resume = Show more tips
+tips-next = Next tip
+tip-battery = This laptop is on battery. Plug it in if you can, so a long move is not cut short.
+tip-closer = The connection is slow. Moving the laptops closer to the Wi-Fi router can speed it up.
+tip-lids = Keep this laptop’s lid open. A closed lid can put it to sleep, which pauses the move.
+tip-keep-using = You can keep using this laptop. PCTwin only reads from it.
+tip-pause = You can pause the move at any time and carry on later.
+tip-power-cut = If the power goes off, turn both laptops on and open PCTwin. It carries on from where it stopped, and nothing copied and checked is lost.
 
 ## F09 Mini panel
 

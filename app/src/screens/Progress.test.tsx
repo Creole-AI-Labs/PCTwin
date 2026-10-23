@@ -1,6 +1,6 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
@@ -30,6 +30,7 @@ import MiniPanel from "./MiniPanel";
 import Outcome from "./Outcome";
 import Paused from "./Paused";
 import ProgressCompact from "./ProgressCompact";
+import { TIP_SECONDS, tipsFor, type TipContext } from "./MoveTips";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
 import StopMove from "./StopMove";
@@ -247,6 +248,89 @@ describe("X01 Move progress, compact", () => {
     expect(screen.getByText(text("progress-old-safe"))).toBeTruthy();
     expectClean();
     expect(await violations()).toEqual([]);
+  });
+
+  describe("T14 one tip under the bar", () => {
+    const calm: TipContext = { old: false, onBattery: false, slow: false, batteryWarning: false };
+    const compact = (p: MoveProgress, tips: Omit<TipContext, "batteryWarning">) =>
+      inApp(<ProgressCompact progress={p} tips={tips} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+    const tipText = () => document.querySelector(".mv-tip-text")?.textContent;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("each laptop's tips are about itself: battery only on battery, the router only when slow, keep using only on the old one", () => {
+      expect(tipsFor(calm)).toEqual(["tip-lids", "tip-pause", "tip-power-cut"]);
+      expect(tipsFor({ ...calm, old: true })).toEqual(["tip-lids", "tip-keep-using", "tip-pause", "tip-power-cut"]);
+      expect(tipsFor({ ...calm, onBattery: true, slow: true })).toEqual(["tip-battery", "tip-closer", "tip-lids", "tip-pause", "tip-power-cut"]);
+      // A pinned battery warning is not repeated as a tip.
+      expect(tipsFor({ ...calm, onBattery: true, batteryWarning: true })).not.toContain("tip-battery");
+    });
+
+    it("changes about every 12 seconds, never as a live announcement, and Pause tips holds it", () => {
+      vi.useFakeTimers();
+      compact(sample.running, calm);
+      const panel = screen.getByRole("region", { name: text("tips-label") });
+      expect(panel.closest("[aria-live]")).toBeNull();
+      expect(panel.querySelector("[aria-live], [role=status], [role=alert]")).toBeNull();
+      expect(tipText()).toBe(text("tip-lids"));
+      act(() => {
+        vi.advanceTimersByTime(TIP_SECONDS * 1000 - 1);
+      });
+      expect(tipText()).toBe(text("tip-lids"));
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(tipText()).toBe(text("tip-pause"));
+      fireEvent.click(within(panel).getByRole("button", { name: text("tips-pause") }));
+      act(() => {
+        vi.advanceTimersByTime(TIP_SECONDS * 5000);
+      });
+      expect(tipText()).toBe(text("tip-pause"));
+      // Paused, Next tip still moves on by hand, and the control says it can start again.
+      fireEvent.click(within(panel).getByRole("button", { name: text("tips-next") }));
+      expect(tipText()).toBe(text("tip-power-cut"));
+      fireEvent.click(within(panel).getByRole("button", { name: text("tips-resume") }));
+      act(() => {
+        vi.advanceTimersByTime(TIP_SECONDS * 1000);
+      });
+      expect(tipText()).toBe(text("tip-lids"));
+    });
+
+    it("with reduced motion the tip stays still: no Pause tips, and Next tip by hand", () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener: noop, removeEventListener: noop }));
+      try {
+        compact(sample.running, calm);
+        act(() => {
+          vi.advanceTimersByTime(TIP_SECONDS * 3000);
+        });
+        expect(tipText()).toBe(text("tip-lids"));
+        expect(screen.queryByRole("button", { name: text("tips-pause") })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: text("tips-next") }));
+        expect(tipText()).toBe(text("tip-pause"));
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("the battery warning stays pinned in the notices while the tips go on without a battery tip", () => {
+      compact(sample.lowBattery, { old: false, onBattery: true, slow: false });
+      expect(screen.getByText(text("progress-low-battery"))).toBeTruthy();
+      expect(tipText()).toBe(text("tip-lids"));
+    });
+
+    it("has every string and no accessibility problems, in all its states", async () => {
+      compact(sample.running, { old: true, onBattery: true, slow: true });
+      expectClean();
+      expect(await violations()).toEqual([]);
+    });
+
+    it("without tips (the host gives none), there is no tip panel", () => {
+      inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+      expect(document.querySelector(".mv-tip")).toBeNull();
+    });
   });
 
   it("time left and speed are ranges, and only when measured", () => {
