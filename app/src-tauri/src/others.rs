@@ -267,7 +267,7 @@ fn launch_elevated(
     } else {
         "pctwin-helper"
     };
-    let mut request = pctwin_helper_os::LaunchRequest::beside_current_exe(program, &args)
+    let mut request = pctwin_helper_os::LaunchRequest::installed_helper(program, &args)
         .map_err(|_| MoveProblem::Failed)?;
     if !cfg!(windows) {
         request = request.with_input(format!("{token}\n").as_bytes());

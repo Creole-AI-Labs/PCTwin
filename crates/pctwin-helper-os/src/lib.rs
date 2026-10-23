@@ -465,6 +465,10 @@ impl std::fmt::Debug for LaunchRequest {
     }
 }
 
+/// Linux: where the package installs the helper programs (`pctwin-helper`, `pctwin-handover`),
+/// named by the polkit policy (packaging/linux).
+pub const LINUX_HELPER_DIR: &str = "/usr/lib/pctwin";
+
 impl LaunchRequest {
     /// Checks the program and arguments.
     ///
@@ -498,6 +502,24 @@ impl LaunchRequest {
 
     pub fn input(&self) -> Option<&[u8]> {
         self.input.as_deref()
+    }
+
+    /// The installed helper program `file_name`, started with `args`: on Linux in
+    /// [`LINUX_HELPER_DIR`], the one place its polkit policy lets `pkexec` run it from (the app
+    /// itself is in /usr/bin); elsewhere beside the app (Windows: in Program Files; a Mac: in the
+    /// app's Contents/MacOS).
+    pub fn installed_helper(file_name: &str, args: &[&str]) -> Result<LaunchRequest, Error> {
+        if cfg!(target_os = "linux") {
+            let mut parts = Path::new(file_name).components();
+            let plain =
+                matches!(parts.next(), Some(Component::Normal(_))) && parts.next().is_none();
+            if !plain {
+                return Err(Error::BadInput("not a plain file name"));
+            }
+            LaunchRequest::new(&Path::new(LINUX_HELPER_DIR).join(file_name), args)
+        } else {
+            LaunchRequest::beside_current_exe(file_name, args)
+        }
     }
 
     /// The program `file_name` in the folder this program was started from (the app's own
