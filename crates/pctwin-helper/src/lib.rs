@@ -15,6 +15,7 @@ pub mod account;
 pub mod client;
 pub mod lock;
 pub mod newlaptop;
+pub mod opening;
 pub mod person;
 pub mod protocol;
 pub mod read;

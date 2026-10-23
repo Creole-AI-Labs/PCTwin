@@ -28,6 +28,16 @@ pub const ITEMS_PER_FRAME: usize = 1000;
 pub enum Request {
     /// First, and only first: the session this helper was started for, by its token.
     Hello { session: String },
+    /// macOS only, before [`Request::Hello`]: the launch daemon is started by the system, not for
+    /// one move, so the app opens the move with the administrator's approval (the 32-byte
+    /// external form, as 64 hexadecimal characters), the session's token, the people approved
+    /// and the laptop's ID. See `pctwin_helper::opening`.
+    Open {
+        approval: String,
+        session: String,
+        approve: Vec<String>,
+        laptop: String,
+    },
     /// Find the approved person `account`'s files (read-only) and keep them in the helper; the
     /// app gets their totals and a handle for each file, never their names.
     ScanPerson { account: String },

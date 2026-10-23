@@ -12,6 +12,9 @@
 //! the system and readable by no one else), accepts one connection, refuses it unless it comes
 //! from the mover's account, serves that one session and ends. Anything it does not understand
 //! on its command line ends it before the channel is made.
+//!
+//! On a Mac it is instead the launch daemon, `pctwin-helper --daemon`, started by the system; see
+//! `pctwin_helper::opening`.
 
 use std::collections::BTreeSet;
 use std::process::ExitCode;
@@ -96,7 +99,11 @@ fn main() -> ExitCode {
     // before its own mode is set.
     #[cfg(unix)]
     rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
-    let args = match parse(std::env::args().skip(1)) {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw == ["--daemon"] {
+        return daemon_main();
+    }
+    let args = match parse(raw.into_iter()) {
         Ok(a) => a,
         Err(why) => {
             eprintln!("pctwin-helper: {why}");
@@ -165,17 +172,122 @@ fn run(args: &Args) -> Result<(), String> {
     if caller.account != Account::Uid(mover) {
         return Err("a connection from another account was refused".into());
     }
-    let laptop = args.laptop;
+    serve_unix(
+        &mut stream,
+        mover,
+        args.session.clone(),
+        args.approve.clone(),
+        args.laptop,
+    )
+}
+
+/// Mac and Linux: one session for the mover `mover` on `stream`.
+#[cfg(unix)]
+fn serve_unix(
+    stream: &mut std::os::unix::net::UnixStream,
+    mover: u32,
+    session: String,
+    approve: BTreeSet<String>,
+    laptop: LaptopId,
+) -> Result<(), String> {
     let mut scanner = move |account: &str| scan_person(laptop, account);
     let mut maker = pctwin_helper::account::create_account;
     let mut system = pctwin_helper::newlaptop::System {
-        mover: Account::Uid(mover),
+        mover: pctwin_helper_os::Account::Uid(mover),
     };
-    Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
+    Session::new(session, approve, &mut scanner)
         .with_account_maker(&mut maker)
         .with_new_laptop(&mut system)
-        .serve(&mut stream)
+        .serve(stream)
         .map_err(|e| e.to_string())
+}
+
+/// `pctwin-helper --daemon`: the launch daemon on a Mac (Security Design part C, "The
+/// administrator's approval on a Mac"). Started by the system, as root, when the app switches it
+/// on; it serves the first move opened with an administrator's approval, then ends.
+fn daemon_main() -> ExitCode {
+    #[cfg(target_os = "macos")]
+    let r = daemon();
+    #[cfg(not(target_os = "macos"))]
+    let r: Result<(), String> = Err("--daemon is for a Mac only".into());
+    match r {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(why) => {
+            eprintln!("pctwin-helper: {why}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn daemon() -> Result<(), String> {
+    use pctwin_helper::opening::{NotOpened, open};
+    use pctwin_helper_os::daemon::{CHANNEL_DIR, CHANNEL_SOCKET, WAITS_SECS};
+    use pctwin_helper_os::{Account, ChannelDir, SocketServer, approval};
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let _lock =
+        pctwin_helper::lock::lock_path().and_then(|p| pctwin_helper::lock::one_helper(&p))?;
+    if let Some(root) = pctwin_helper_os::holding::staging_root() {
+        pctwin_helper_os::signin::clean(&root);
+    }
+    approval::define_move_right().map_err(|e| format!("PCTwin's right: {e}"))?;
+    // The folder above the channel: root's own plain folder, which others may only pass through.
+    let dir = Path::new(CHANNEL_DIR);
+    let above = dir.parent().ok_or("no folder above the channel")?;
+    std::fs::create_dir_all(above).map_err(|e| format!("the channel's folder: {e}"))?;
+    let meta = std::fs::symlink_metadata(above).map_err(|e| e.to_string())?;
+    if !meta.is_dir() || meta.file_type().is_symlink() || meta.uid() != 0 {
+        return Err(format!(
+            "{} is not root's own plain folder",
+            above.display()
+        ));
+    }
+    std::fs::set_permissions(above, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())?;
+    // Left by an earlier run: only root can make anything here.
+    if std::fs::symlink_metadata(dir).is_ok() {
+        std::fs::remove_dir_all(dir).map_err(|e| format!("the old channel: {e}"))?;
+    }
+    let channel = ChannelDir::create(dir).map_err(|e| e.to_string())?;
+    let server =
+        SocketServer::bind_for_anyone(&channel, CHANNEL_SOCKET).map_err(|e| e.to_string())?;
+    // Nobody opens a move in time (the Mac started up with the daemon still on, or the app went
+    // away): it ends.
+    let opened = std::sync::Arc::new(AtomicBool::new(false));
+    let watch = std::sync::Arc::clone(&opened);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(WAITS_SECS));
+        if !watch.load(Ordering::Acquire) {
+            std::process::exit(0);
+        }
+    });
+    // A few tries, so a connection from another account (refused) cannot take the move's place.
+    for _ in 0..16 {
+        let (mut stream, caller) = server.accept().map_err(|e| e.to_string())?;
+        let Account::Uid(mover) = caller.account else {
+            continue;
+        };
+        if mover == 0 {
+            continue;
+        }
+        let mut holds =
+            |a: &approval::Approval| approval::approval_holds(a).map_err(|e| e.to_string());
+        match open(&mut stream, &mover.to_string(), &mut holds) {
+            Ok(o) => {
+                opened.store(true, Ordering::Release);
+                return serve_unix(&mut stream, mover, o.session, o.approve, o.laptop);
+            }
+            Err(NotOpened::NotApproved) => {
+                eprintln!("pctwin-helper: account {mover}: not approved");
+            }
+            Err(NotOpened::Malformed(why) | NotOpened::Channel(why)) => {
+                eprintln!("pctwin-helper: account {mover}: {why}");
+            }
+        }
+    }
+    Err("no move was opened".into())
 }
 
 #[cfg(test)]

@@ -212,6 +212,18 @@ impl SocketServer {
     /// relative to the folder's handle. Only this process's account can write in the folder,
     /// so the entry cannot be swapped between the check and the change.
     pub fn bind(dir: &ChannelDir, name: &str, client: u32) -> Result<SocketServer, Error> {
+        Self::make(dir, name, Some(client))
+    }
+
+    /// macOS's launch daemon: the socket `name` in `dir`, which any account on this Mac may
+    /// connect to (mode 0666, root's own). It does not know who is moving until someone
+    /// connects: the kernel then says which account it is, and nothing is served before the
+    /// administrator's approval for that move is confirmed (`pctwin_helper::opening`).
+    pub fn bind_for_anyone(dir: &ChannelDir, name: &str) -> Result<SocketServer, Error> {
+        Self::make(dir, name, None)
+    }
+
+    fn make(dir: &ChannelDir, name: &str, client: Option<u32>) -> Result<SocketServer, Error> {
         if name.is_empty()
             || name.len() > 32
             || !name
@@ -234,8 +246,9 @@ impl SocketServer {
         if FileType::from_raw_mode(st.st_mode) != FileType::Socket || st.st_uid != euid() {
             return Err(Error::NotPrivate("the socket was swapped".into()));
         }
-        rustix::fs::chmodat(&dir.fd, name, mode(SOCKET_MODE), AtFlags::empty()).map_err(io)?;
-        if client != euid() {
+        let socket_mode = if client.is_some() { SOCKET_MODE } else { 0o666 };
+        rustix::fs::chmodat(&dir.fd, name, mode(socket_mode), AtFlags::empty()).map_err(io)?;
+        if let Some(client) = client.filter(|c| *c != euid()) {
             rustix::fs::chownat(
                 &dir.fd,
                 name,

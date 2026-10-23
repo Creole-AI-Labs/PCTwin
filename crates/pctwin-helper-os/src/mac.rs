@@ -1,10 +1,12 @@
 //! macOS: who is calling on the helper's socket, and switching the helper's launch daemon on and
 //! off through SMAppService.
 //!
-//! The four `os_daemon_*` / `os_open_login_items` functions and `os_od_create_user` are the
-//! only unsafe code here, one block each, listed in scripts/unsafe-fence.sh: the Service
-//! Management and Open Directory bindings mark every method unsafe. Reading the caller needs
-//! none (nix and libproc wrap it safely).
+//! The four `os_daemon_*` / `os_open_login_items` functions, `os_od_create_user` and
+//! `os_authorization_holds` are the only unsafe code here, one block each, listed in
+//! scripts/unsafe-fence.sh: the Service Management and Open Directory bindings mark every method
+//! unsafe, and the security-framework wrapper has no way to check a right on an approval made
+//! elsewhere. Reading the caller and asking an administrator need none (nix, libproc and
+//! security-framework wrap them safely).
 
 use crate::daemon::{DaemonService, DaemonState};
 use crate::{Account, Caller, Error};
@@ -293,3 +295,122 @@ const _: () = {
     assert!(SMAppServiceStatus::RequiresApproval.0 == 2);
     assert!(SMAppServiceStatus::NotFound.0 == 3);
 };
+
+/// The administrator's approval for one move (see `crate::approval`): the app's side, through the
+/// safe wrapper. macOS shows its own window with `prompt`; PCTwin never sees the password.
+pub(crate) fn ask_administrator(prompt: &str) -> Result<Option<crate::approval::Approval>, Error> {
+    use security_framework::authorization::{Authorization, AuthorizationItemSetBuilder, Flags};
+    const CANCELLED: i32 = -60006; // errAuthorizationCanceled
+    const DENIED: i32 = -60005; // errAuthorizationDenied
+    let fail = |call: &'static str| {
+        move |e: security_framework::base::Error| Error::Os {
+            call,
+            code: i64::from(e.code()),
+        }
+    };
+    let rights = AuthorizationItemSetBuilder::new()
+        .add_right(crate::approval::MOVE_RIGHT)
+        .map_err(fail("AuthorizationItemSet"))?
+        .build();
+    let environment = AuthorizationItemSetBuilder::new()
+        .add_string("prompt", prompt)
+        .map_err(fail("AuthorizationItemSet"))?
+        .build();
+    let flags = Flags::INTERACTION_ALLOWED | Flags::EXTEND_RIGHTS | Flags::PREAUTHORIZE;
+    let approved = match Authorization::new(Some(rights), Some(environment), flags) {
+        Ok(a) => a,
+        Err(e) if e.code() == CANCELLED || e.code() == DENIED => return Ok(None),
+        Err(e) => return Err(fail("AuthorizationCreate")(e)),
+    };
+    let form = approved
+        .make_external_form()
+        .map_err(fail("AuthorizationMakeExternalForm"))?;
+    let mut bytes = [0u8; 32];
+    for (to, from) in bytes.iter_mut().zip(form.bytes.iter()) {
+        *to = *from as u8;
+    }
+    Ok(Some(crate::approval::Approval(bytes)))
+}
+
+/// The helper, as root: writes the right `name` as `definition` (a property list) into the
+/// authorization database with Apple's own tool.
+pub(crate) fn define_right(name: &str, definition: &str) -> Result<(), Error> {
+    use std::io::Write;
+    let mut child = Command::new("/usr/bin/security")
+        .args(["authorizationdb", "write", name])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    if let Some(mut input) = child.stdin.take() {
+        input.write_all(definition.as_bytes())?;
+    }
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(Error::Os {
+            call: "security authorizationdb write",
+            code: i64::from(status.code().unwrap_or(-1)),
+        })
+    }
+}
+
+/// The helper: whether `approval` holds the right `right` now.
+pub(crate) fn approval_holds(
+    approval: &crate::approval::Approval,
+    right: &str,
+) -> Result<bool, Error> {
+    let right = std::ffi::CString::new(right).map_err(|_| Error::BadInput("a right's name"))?;
+    os_authorization_holds(&approval.0, &right).map_err(|code| Error::Os {
+        call: "AuthorizationCreateFromExternalForm",
+        code: i64::from(code),
+    })
+}
+
+/// Turns the external form `form` back into an approval, asks macOS whether it holds `right`
+/// with nothing shown (no interaction allowed), and lets it go. `Err` only when the form is not
+/// an approval at all; a refused right is `Ok(false)`.
+fn os_authorization_holds(form: &[u8; 32], right: &std::ffi::CStr) -> Result<bool, i32> {
+    use security_framework_sys::authorization as sys;
+    let mut external = sys::AuthorizationExternalForm { bytes: [0; 32] };
+    for (to, from) in external.bytes.iter_mut().zip(form) {
+        *to = *from as std::ffi::c_char;
+    }
+    // SAFETY: every pointer is to a live local (the form, the out-reference, the one item and
+    // its set) or to `right`, NUL-terminated and borrowed for the call; the item set is only
+    // read; no rights are asked to be copied back (null); the reference made here is freed once,
+    // after its last use, and only if it was made.
+    #[expect(
+        unsafe_code,
+        reason = "checking a right on an approval made in another process has no safe binding"
+    )]
+    let r = unsafe {
+        let mut made: sys::AuthorizationRef = std::ptr::null_mut();
+        let status = sys::AuthorizationCreateFromExternalForm(&external, &mut made);
+        if status != sys::errAuthorizationSuccess {
+            Err(status)
+        } else {
+            let mut item = sys::AuthorizationItem {
+                name: right.as_ptr(),
+                valueLength: 0,
+                value: std::ptr::null_mut(),
+                flags: 0,
+            };
+            let rights = sys::AuthorizationItemSet {
+                count: 1,
+                items: &mut item,
+            };
+            let held = sys::AuthorizationCopyRights(
+                made,
+                &rights,
+                std::ptr::null(),
+                sys::kAuthorizationFlagExtendRights,
+                std::ptr::null_mut(),
+            );
+            sys::AuthorizationFree(made, sys::kAuthorizationFlagDefaults);
+            Ok(held == sys::errAuthorizationSuccess)
+        }
+    };
+    r
+}

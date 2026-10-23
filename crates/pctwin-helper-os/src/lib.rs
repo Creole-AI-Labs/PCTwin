@@ -51,7 +51,7 @@
 //!   `os_expire_password`, `os_create_dir_with_sddl`, `os_create_profile`,
 //!   `os_set_process_sddl`, `os_windows_dir`, `os_machine_text`.
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
-//!   `os_open_login_items`, `os_od_create_user`.
+//!   `os_open_login_items`, `os_od_create_user`, `os_authorization_holds`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
 //!   through rustix's safe wrapper.
 //!
@@ -62,6 +62,7 @@ use std::fmt;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+pub mod approval;
 pub mod chip;
 pub mod daemon;
 pub mod holding;

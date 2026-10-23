@@ -47,6 +47,8 @@ objc2 = "0.6.5"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
 objc2-open-directory = { version = "0.3.2", default-features = false, features = ["std", "CFOpenDirectory", "CFOpenDirectoryConstants", "ODNode", "ODRecord", "ODSession"] }
+security-framework = "3"
+security-framework-sys = "2"
 
 [dev-dependencies]
 tempfile = "3"

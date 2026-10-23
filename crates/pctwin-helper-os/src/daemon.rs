@@ -14,6 +14,15 @@ use crate::Error;
 /// (from `packaging/macos`).
 pub const HELPER_PLIST: &str = "com.creoleailabs.pctwin.helper.plist";
 
+/// The launch daemon's channel: the folder (made by the daemon, root's own, mode 0711) inside a
+/// folder only root writes in, and the socket in it. Fixed, so the app finds it; nobody else can
+/// make anything there, so nothing can stand in for it.
+pub const CHANNEL_DIR: &str = "/Library/Application Support/PCTwin/channel";
+/// The socket in [`CHANNEL_DIR`].
+pub const CHANNEL_SOCKET: &str = "helper.sock";
+/// How long the daemon waits for a move to be opened before it ends.
+pub const WAITS_SECS: u64 = 600;
+
 /// A launch daemon's state, as Service Management reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DaemonState {

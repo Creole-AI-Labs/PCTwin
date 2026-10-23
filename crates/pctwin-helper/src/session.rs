@@ -236,6 +236,11 @@ impl<'s> Session<'s> {
                     send_answer(channel, &Answer::Refused(Refusal::NoSession))?;
                     return Ok(());
                 }
+                // Only ever the first message to a launch daemon, never inside a session.
+                Request::Open { .. } => {
+                    send_answer(channel, &Answer::Refused(Refusal::WrongSession))?;
+                    return Ok(());
+                }
                 Request::ScanPerson { account } => self.scan(channel, &account)?,
                 Request::ReadBlocks {
                     handle,

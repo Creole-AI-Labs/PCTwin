@@ -71,6 +71,41 @@ pub fn connect(
     Ok(client)
 }
 
+/// macOS: connects to the launch daemon's socket (refused unless root serves it), opens the move
+/// with the administrator's `approval` for the people `approve` on the laptop `laptop`, then the
+/// session with `token`. A refusal (the approval not confirmed) comes back as
+/// [`ClientError::Refused`].
+#[cfg(unix)]
+pub fn connect_daemon(
+    approval: &pctwin_helper_os::approval::Approval,
+    token: &str,
+    approve: &[String],
+    laptop: &pctwin_record::LaptopId,
+) -> Result<Client<Channel>, ClientError> {
+    use pctwin_helper_os::daemon::{CHANNEL_DIR, CHANNEL_SOCKET};
+    let path = Path::new(CHANNEL_DIR).join(CHANNEL_SOCKET);
+    let mut stream =
+        pctwin_helper_os::connect(&path, 0).map_err(|e| ClientError::Unreachable(e.to_string()))?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+        .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+    send_request(
+        &mut stream,
+        &Request::Open {
+            approval: crate::opening::approval_to_hex(approval),
+            session: token.to_string(),
+            approve: approve.to_vec(),
+            laptop: laptop.to_hex(),
+        },
+    )?;
+    let client = Client::open(stream, token)?;
+    client
+        .stream
+        .set_read_timeout(None)
+        .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+    Ok(client)
+}
+
 /// An account the helper made on the new laptop.
 pub struct MadeAccount {
     /// The system's ID for it.
