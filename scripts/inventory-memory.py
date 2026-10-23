@@ -93,9 +93,10 @@ def peak_macos(proc, done):
             return None
         now, most = info[FOOTPRINT], info[LIFETIME_MAX_FOOTPRINT]
         # The largest is updated by the system now and then, so the current one can be ahead of
-        # it for a moment: the larger of the two counts. Both must be of a believable size, or
-        # the fields are not where they are expected.
-        if not (0 < now < 1 << 36 and most < 1 << 36):
+        # it for a moment: the larger of the two counts. The current one reads 0 as the process
+        # ends (seen on CI). Both must be of a believable size and one of them above 0, or the
+        # fields are not where they are expected.
+        if not (now < 1 << 36 and most < 1 << 36 and max(now, most) > 0):
             raise RuntimeError(f"unexpected memory counters: footprint {now}, largest {most}")
         return max(now, most)
 
