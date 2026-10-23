@@ -25,7 +25,7 @@ use pctwin_types::{ItemStatus, Reason};
 use crate::moving::{
     ByStatus, Bytes, Counts, Current, EndedEarly, Evidence, GroupName, Laptops, LeftOut, MoveGroup,
     MoveOutcome, MoveProblem, MoveProgress, Notice, OthersWhy, PlanGroup, PlanView, PreviewView,
-    Range, ReportItem, RunState, Size, Stage,
+    Range, ReportItem, ReportNote, RunState, Size, Stage,
 };
 use crate::pairing::{HeadsUp, LabelView, NearbyView, NewView, OldView, ProblemView};
 
@@ -394,6 +394,7 @@ fn report_items() -> Vec<ReportItem> {
         status,
         reason,
         evidence,
+        note: None,
     };
     vec![
         line("1", ItemStatus::Copied, None, Some(Evidence::Drive)),
@@ -411,6 +412,15 @@ fn report_items() -> Vec<ReportItem> {
         line("3", ItemStatus::Failed, Some(Reason::Unreadable), None),
         line("4", ItemStatus::NeedsAction, Some(Reason::OnlineOnly), None),
         line("5", ItemStatus::SkippedByUser, None, None),
+        // Sent as it is now, and gone before it could be sent ("changed since the scan").
+        ReportItem {
+            note: Some(ReportNote::ChangedSinceScan),
+            ..line("9", ItemStatus::Copied, None, Some(Evidence::Drive))
+        },
+        ReportItem {
+            note: Some(ReportNote::NoLongerThere),
+            ..line("10", ItemStatus::Failed, Some(Reason::Unreadable), None)
+        },
     ]
 }
 

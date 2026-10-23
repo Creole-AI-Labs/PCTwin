@@ -133,8 +133,15 @@ export type Outcome =
   | { status: "failed"; reason: FailedReason; evidence?: never }
   | { status: "needs-action"; reason: NeedsActionReason; evidence?: never };
 
+/**
+ * What the report adds beside a line's result (the shell's `ReportNote`): it changed on the old
+ * laptop after the scan and was sent as it is now, or it was gone before it could be sent.
+ */
+export const REPORT_NOTES = ["changed-since-scan", "no-longer-there"] as const;
+export type ReportNote = (typeof REPORT_NOTES)[number];
+
 /** One line of the detailed report (R02). Names and paths are the person's own text. */
-export type ReportItem = { id: string; name: string; source: string; destination?: string } & Outcome;
+export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote } & Outcome;
 
 /* ---------- Progress: measured numbers only ---------- */
 

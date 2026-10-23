@@ -1014,6 +1014,26 @@ pub struct ReportItem {
     /// Exactly when it was copied.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<Evidence>,
+    /// What else the report says of this line, beside its result.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<ReportNote>,
+}
+
+/// A word the report adds to a line ("Changed since the scan", Product Spec, 16 October 2026).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReportNote {
+    /// It changed on the old laptop after the scan, so it was sent as it is now.
+    ChangedSinceScan,
+    /// It was gone from the old laptop by the time it was to be sent.
+    NoLongerThere,
+}
+
+impl ReportNote {
+    /// The note for a file that did not arrive, by its cause: only one that was gone has one.
+    fn of_failure(f: &pctwin_transfer::Failure) -> Option<Self> {
+        (f.cause() == Cause::NoLongerThere).then_some(Self::NoLongerThere)
+    }
 }
 
 /// The status and reason the report shows for a file that did not arrive, by its cause. A file
@@ -1071,7 +1091,8 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
         if !shown_to_mover(item, mover) {
             continue;
         }
-        let (status, reason, evidence, destination) = match &file.outcome {
+        let changed = file.changed_since_scan.then_some(ReportNote::ChangedSinceScan);
+        let (status, reason, evidence, destination, note) = match &file.outcome {
             Some(ReceiveOutcome::Finished(f)) => {
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
                 if matches!(f.checked_from, Some(CheckedFrom::Memory(_))) {
@@ -1082,6 +1103,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                     None,
                     Some(Evidence::of(f.checked_from)),
                     Some(f.final_path.clone()),
+                    changed,
                 )
             }
             Some(ReceiveOutcome::AlreadyThere(p)) => {
@@ -1091,6 +1113,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                     None,
                     Some(Evidence::AlreadyThere),
                     Some(p.clone()),
+                    changed,
                 )
             }
             Some(ReceiveOutcome::NeedsAction { finished, .. }) => (
@@ -1098,6 +1121,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                 Some(Reason::FinishByHand),
                 None,
                 Some(finished.final_path.clone()),
+                changed,
             ),
             Some(ReceiveOutcome::Failed(f)) if cut_off(f, received.ended) => {
                 outcome.not_copied += 1;
@@ -1105,13 +1129,13 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
             }
             Some(ReceiveOutcome::Failed(f)) => {
                 let (status, reason) = status_of(f.cause());
-                (status, Some(reason), None, None)
+                (status, Some(reason), None, None, ReportNote::of_failure(f))
             }
             None if stopped => {
                 outcome.not_copied += 1;
                 continue;
             }
-            None => (ItemStatus::Failed, Some(Reason::NotVerified), None, None),
+            None => (ItemStatus::Failed, Some(Reason::NotVerified), None, None, None),
         };
         outcome.by_status.add(status);
         let source = source_of(item);
@@ -1123,6 +1147,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
             status,
             reason,
             evidence,
+            note,
         });
     }
     (outcome, report)
@@ -1148,14 +1173,14 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
         let Some(item) = items.get(&file.item) else {
             continue;
         };
-        let (status, reason, evidence) = match &file.outcome {
+        let (status, reason, evidence, note) = match &file.outcome {
             Some(SendOutcome::Arrived) => {
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
-                (ItemStatus::Copied, None, Some(Evidence::NewLaptop))
+                (ItemStatus::Copied, None, Some(Evidence::NewLaptop), None)
             }
             Some(SendOutcome::AlreadyThere) => {
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
-                (ItemStatus::Copied, None, Some(Evidence::AlreadyThere))
+                (ItemStatus::Copied, None, Some(Evidence::AlreadyThere), None)
             }
             Some(SendOutcome::Failed(f)) if cut_off(f, sent.ended) => {
                 outcome.not_copied += 1;
@@ -1163,13 +1188,13 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             }
             Some(SendOutcome::Failed(f)) => {
                 let (s, r) = status_of(f.cause());
-                (s, Some(r), None)
+                (s, Some(r), None, ReportNote::of_failure(f))
             }
             None if stopped => {
                 outcome.not_copied += 1;
                 continue;
             }
-            None => (ItemStatus::Failed, Some(Reason::NotVerified), None),
+            None => (ItemStatus::Failed, Some(Reason::NotVerified), None, None),
         };
         outcome.by_status.add(status);
         let source = source_of(item);
@@ -1181,6 +1206,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             status,
             reason,
             evidence,
+            note,
         });
     }
     for not in &sent.not_sent {
@@ -1205,6 +1231,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             status: ItemStatus::SkippedByUser,
             reason: None,
             evidence: None,
+            note: None,
         });
     }
     (outcome, report)
@@ -2373,6 +2400,44 @@ mod tests {
         assert_eq!(report.len(), 2);
         assert_eq!(report[1].reason, Some(Reason::NotEnoughSpace));
         assert_eq!(crate::history::move_state(&outcome), ("stopped", 2));
+    }
+
+    #[test]
+    fn a_file_sent_as_it_is_now_or_gone_before_it_was_sent_says_so_beside_its_result() {
+        let a = item(person("1000"), FolderRole::Documents, &["a.txt"], 10);
+        let b = item(person("1000"), FolderRole::Documents, &["b.txt"], 10);
+        let c = item(person("1000"), FolderRole::Documents, &["c.txt"], 10);
+        let d = item(person("1000"), FolderRole::Documents, &["d.txt"], 10);
+        let gone = ReceiveOutcome::Failed(Failure::new(Cause::NoLongerThere, "not found"));
+        let unreadable = ReceiveOutcome::Failed(Failure::new(Cause::Unreadable, "denied"));
+        let mut r = received(
+            vec![
+                (a, Some(finished("a.txt", CheckedFrom::Drive))),
+                (b, Some(finished("b.txt", CheckedFrom::Drive))),
+                (c, Some(gone)),
+                (d, Some(unreadable)),
+            ],
+            Ended::Finished,
+        );
+        r.files[0].changed_since_scan = true;
+        let (_, report) = received_outcome(&r, "1000");
+        let notes: Vec<_> = report.iter().map(|l| l.note).collect();
+        assert_eq!(
+            notes,
+            vec![
+                Some(ReportNote::ChangedSinceScan),
+                None,
+                Some(ReportNote::NoLongerThere),
+                None
+            ]
+        );
+        // A changed file is still copied and checked: the note never changes the result.
+        assert_eq!(report[0].status, ItemStatus::Copied);
+        assert_eq!(report[2].status, ItemStatus::Failed);
+        let text = serde_json::to_value(&report).unwrap();
+        assert_eq!(text[0]["note"], "changed-since-scan");
+        assert_eq!(text[2]["note"], "no-longer-there");
+        assert!(text[1].get("note").is_none());
     }
 
     #[test]

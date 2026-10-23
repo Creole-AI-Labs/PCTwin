@@ -71,5 +71,24 @@
     "name": "5.txt",
     "source": "documents/5.txt",
     "status": "skipped-by-user"
+  },
+  {
+    "destination": "9.txt",
+    "evidence": {
+      "from": "drive"
+    },
+    "id": "00000000000000000000000000000009",
+    "name": "9.txt",
+    "note": "changed-since-scan",
+    "source": "documents/9.txt",
+    "status": "copied"
+  },
+  {
+    "id": "00000000000000000000000000000010",
+    "name": "10.txt",
+    "note": "no-longer-there",
+    "reason": "unreadable",
+    "source": "documents/10.txt",
+    "status": "failed"
   }
 ]

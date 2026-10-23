@@ -1243,6 +1243,9 @@ report-from = कहाँ से: { $path }
 report-to = कहाँ: { $path }
 report-none = इस नतीजे वाला कोई आइटम नहीं है।
 report-more-details = और जानकारी
+# Added 23 October 2026: what the report says beside a line's result (changed since the scan).
+report-note-changed-since-scan = स्कैन के बाद बदला: इसे अभी जैसा है, वैसा ही कॉपी किया गया।
+report-note-no-longer-there = अब वहाँ नहीं है: भेजे जाने से पहले इसे पुराने लैपटॉप पर हटाया, नाम बदला या मिटाया गया।
 
 # Evidence: how a copied item was checked.
 evidence-read-back = ड्राइव से वापस पढ़कर जाँचा गया।

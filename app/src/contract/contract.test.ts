@@ -164,6 +164,7 @@ describe("shapes the engine never sends are refused", () => {
     ["a copied line without its check", parseReportItem, { id: "1", name: "a", source: "a", status: "copied" }],
     ["a failed line that claims a check", parseReportItem, { id: "1", name: "a", source: "a", status: "failed", reason: "unreadable", evidence: { from: "drive" } }],
     ["a failed line with a reason of another status", parseReportItem, { id: "1", name: "a", source: "a", status: "failed", reason: "sign-in" }],
+    ["a report note the shell has not", parseReportItem, { id: "1", name: "a", source: "a", status: "skipped-by-user", note: "moved-by-magic" }],
     ["a plan fingerprint that is not hex", parsePlanView, { revision: 1, fingerprint: "zz", groups: [], leftOut: [], preview: null }],
     ["a pause state the engine has not", parseMoveProgress, { state: "stopped", laptops: { old: null }, groups: [], counts: {}, bytes: { checked: 0, total: 0 } }],
     ["an unknown move problem", parseMoveProblem, { kind: "hacked" }],

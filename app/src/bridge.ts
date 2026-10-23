@@ -14,7 +14,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ITEM_STATUSES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
+import { ITEM_STATUSES, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import type { OfferedFile, Outcome as QsOutcome, PickedItem, Receipt, SendProgress } from "./quicksend";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
@@ -371,7 +371,7 @@ export type PlanKey = { revision: number; fingerprint: string };
  */
 export const OPTIONAL_KEYS: Partial<Record<string, readonly string[]>> = {
   "move-progress": ["current", "speed", "minutesLeft", "notice"],
-  "report-item": ["destination", "reason", "evidence"],
+  "report-item": ["destination", "reason", "evidence", "note"],
   "qs-picked": ["problem"],
 };
 
@@ -600,7 +600,14 @@ export function parseReportItem(value: unknown): ReportItem | null {
   if ("destination" in f && typeof f.destination !== "string") return null;
   const result = parseResult("reason" in f ? { status: f.status, reason: f.reason } : { status: f.status });
   if (!result) return null;
-  const line = { id: f.id, name: f.name, source: f.source, ...(typeof f.destination === "string" ? { destination: f.destination } : {}) };
+  if ("note" in f && !oneOf(f.note, REPORT_NOTES)) return null;
+  const line = {
+    id: f.id,
+    name: f.name,
+    source: f.source,
+    ...(typeof f.destination === "string" ? { destination: f.destination } : {}),
+    ...(oneOf(f.note, REPORT_NOTES) ? { note: f.note } : {}),
+  };
   if (result.status === "copied") {
     const evidence = parseReportEvidence(f.evidence);
     return evidence ? { ...line, status: "copied", evidence } : null;

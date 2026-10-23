@@ -1283,6 +1283,9 @@ report-from = De : { $path }
 report-to = Vers : { $path }
 report-none = Aucun élément n’a ce résultat.
 report-more-details = Plus de détails
+# Added 23 October 2026: what the report says beside a line's result (changed since the scan).
+report-note-changed-since-scan = Modifié depuis l’analyse : il a été copié tel qu’il est maintenant.
+report-note-no-longer-there = N’est plus là : il a été déplacé, renommé ou supprimé sur l’ancien ordinateur portable avant de pouvoir être envoyé.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Vérifié en le relisant depuis le disque.

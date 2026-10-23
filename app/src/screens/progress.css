@@ -238,6 +238,7 @@
 }
 
 .mv-reason,
+.mv-note,
 .mv-evidence {
   margin-block-start: var(--space-2);
   font-size: var(--type-supporting);
@@ -245,6 +246,11 @@
 
 .mv-evidence {
   color: var(--colour-muted);
+}
+
+/* A note says what else happened to the line (changed since the scan, no longer there): plain ink, weighted as the result, never colour alone. */
+.mv-note {
+  font-weight: 600;
 }
 
 /* A check from memory is its own line, set apart by a rule and the words, not by colour */

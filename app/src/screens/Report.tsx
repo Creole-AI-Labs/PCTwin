@@ -13,6 +13,10 @@ const PAGE = 100;
  * happened and what to do), and how it was checked. A copied file was either read back from the
  * drive or checked from this laptop's memory, and the two are different lines, never merged.
  * Source and destination sit behind More details. Long reports show a page at a time.
+ *
+ * A line's note says what else happened: "changed since the scan" (copied as it is now, so the
+ * copy is newer than the plan showed), or "no longer there" (gone from the old laptop before it
+ * could be sent), which says why in place of the general reason.
  */
 export default function Report({ items, onBack }: { items: ReportItem[]; onBack: () => void }) {
   const { l10n } = useLocalization();
@@ -45,7 +49,8 @@ export default function Report({ items, onBack }: { items: ReportItem[]; onBack:
                     <ResultChip result={item.status} />
                   </td>
                   <td>
-                    {item.reason && <ReasonText reason={item.reason} />}
+                    {item.note && <p className="mv-note" data-note={item.note}>{l10n.getString(`report-note-${item.note}`)}</p>}
+                    {item.reason && item.note !== "no-longer-there" && <ReasonText reason={item.reason} />}
                     <EvidenceLine outcome={item} />
                     <details className="mv-details">
                       <summary>{l10n.getString("report-more-details")}</summary>

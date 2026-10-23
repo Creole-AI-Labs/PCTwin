@@ -913,6 +913,26 @@ describe("R02 Your move, item by item", () => {
     expect(plain(details.textContent)).toContain(plain(text("report-to", { path })));
   });
 
+  it("a file changed since the scan says so beside its result, which stays copied and checked", async () => {
+    const changed: ReportItem = { id: "c", name: "Budget.xlsx", source: "Budget.xlsx", status: "copied", evidence: { from: "drive" }, note: "changed-since-scan" };
+    const gone: ReportItem = { id: "g", name: "Draft.docx", source: "Draft.docx", status: "failed", reason: "unreadable", note: "no-longer-there" };
+    const plainFailed: ReportItem = { id: "u", name: "Locked.pst", source: "Locked.pst", status: "failed", reason: "unreadable" };
+    inApp(<Report items={[changed, gone, plainFailed]} onBack={noop} />);
+    const row = rowOf("Budget.xlsx");
+    expect(within(row).getByText(text("report-note-changed-since-scan"))).toBeTruthy();
+    expect(within(row).getByText(text("evidence-read-back"))).toBeTruthy();
+    // Gone before it could be sent: that is the why, said in place of "could not be read".
+    const goneRow = rowOf("Draft.docx");
+    expect(within(goneRow).getByText(text("report-note-no-longer-there"))).toBeTruthy();
+    expect(within(goneRow).queryByText(text("reason-unreadable"))).toBeNull();
+    expect(within(goneRow).getByText(text("evidence-not-checked"))).toBeTruthy();
+    // A line with no note has none.
+    expect(rowOf("Locked.pst").querySelector(".mv-note")).toBeNull();
+    expect(within(rowOf("Locked.pst")).getByText(text("reason-unreadable"))).toBeTruthy();
+    expectClean();
+    expect(await violations()).toEqual([]);
+  });
+
   it("an item that did not finish is marked as not checked", () => {
     inApp(<Report items={sample.report} onBack={noop} />);
     expect(within(rowOf("Archive.zip")).getByText(text("evidence-not-checked"))).toBeTruthy();
