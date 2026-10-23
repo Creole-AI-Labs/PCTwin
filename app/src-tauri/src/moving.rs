@@ -1153,7 +1153,9 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                 Some(ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_))
             ),
         );
-        let changed = file.changed_since_scan.then_some(ReportNote::ChangedSinceScan);
+        let changed = file
+            .changed_since_scan
+            .then_some(ReportNote::ChangedSinceScan);
         let (status, reason, evidence, destination, note) = match &file.outcome {
             Some(ReceiveOutcome::Finished(f)) => {
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
@@ -1197,7 +1199,13 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                 outcome.not_copied += 1;
                 continue;
             }
-            None => (ItemStatus::Failed, Some(Reason::NotVerified), None, None, None),
+            None => (
+                ItemStatus::Failed,
+                Some(Reason::NotVerified),
+                None,
+                None,
+                None,
+            ),
         };
         outcome.by_status.add(status);
         let source = source_of(item);
@@ -2473,7 +2481,12 @@ mod tests {
 
     #[test]
     fn the_after_move_check_counts_the_movers_photos_and_documents_planned_and_copied() {
-        let photo = item(person("1000"), FolderRole::Pictures, &["Holiday", "IMG_1.JPG"], 10);
+        let photo = item(
+            person("1000"),
+            FolderRole::Pictures,
+            &["Holiday", "IMG_1.JPG"],
+            10,
+        );
         let lost = item(person("1000"), FolderRole::Pictures, &["IMG_2.heic"], 10);
         let there = item(person("1000"), FolderRole::Pictures, &["IMG_3.png"], 10);
         let doc = item(person("1000"), FolderRole::Documents, &["tax.pdf"], 10);
@@ -2486,7 +2499,10 @@ mod tests {
                     lost,
                     Some(ReceiveOutcome::Failed(Failure::new(Cause::Unreadable, "x"))),
                 ),
-                (there, Some(ReceiveOutcome::AlreadyThere("IMG_3.png".into()))),
+                (
+                    there,
+                    Some(ReceiveOutcome::AlreadyThere("IMG_3.png".into())),
+                ),
                 (doc, Some(finished("tax.pdf", CheckedFrom::Drive))),
                 (other, Some(finished("notes.bin", CheckedFrom::Drive))),
                 (beas, Some(finished("secret.jpg", CheckedFrom::Drive))),

@@ -229,7 +229,11 @@ fn save_new(folder: &std::path::Path, bytes: &[u8]) -> std::io::Result<std::path
             format!("PCTwin history ({n}).csv")
         };
         let path = folder.join(name);
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
             Ok(mut file) => {
                 file.write_all(bytes)?;
                 file.sync_all()?;
@@ -260,14 +264,18 @@ mod tests {
 
     #[test]
     fn an_export_never_replaces_a_file_already_there() {
-        let dir = std::env::temp_dir().join(format!("pctwin-history-export-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("pctwin-history-export-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("PCTwin history.csv"), b"mine").unwrap();
         let first = save_new(&dir, b"one").unwrap();
         let second = save_new(&dir, b"two").unwrap();
         assert_eq!(first.file_name().unwrap(), "PCTwin history (2).csv");
         assert_eq!(second.file_name().unwrap(), "PCTwin history (3).csv");
-        assert_eq!(std::fs::read(dir.join("PCTwin history.csv")).unwrap(), b"mine");
+        assert_eq!(
+            std::fs::read(dir.join("PCTwin history.csv")).unwrap(),
+            b"mine"
+        );
         assert_eq!(std::fs::read(&first).unwrap(), b"one");
         std::fs::remove_dir_all(&dir).unwrap();
     }
