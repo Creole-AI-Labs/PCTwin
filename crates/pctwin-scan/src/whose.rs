@@ -255,7 +255,15 @@ pub fn place(facts: &Facts<'_>, people: &dyn People) -> Placement {
             Some(owner) if owner.parse::<u32>().is_ok_and(|uid| uid != 0) => {
                 one(owner, Rule::OwnerOnly)
             }
-            // Owned by the administrators or the system, and nobody else could open it.
+            // Owned by the administrators or the system, and nobody else could open it: the
+            // system's, never someone's "from an old account" (those are owners that are no
+            // longer accounts; the administrators and the system are).
+            Some(owner) if is_system_owner(owner) => Placement {
+                whose: Whose::System,
+                kind: None,
+                rule: Rule::OwnerOnly,
+            },
+            // An owner that could not be read: nothing better is known.
             _ => Placement {
                 whose: Whose::FromOldAccount { account_id: None },
                 kind: None,
@@ -274,4 +282,14 @@ pub fn place(facts: &Facts<'_>, people: &dyn People) -> Placement {
             rule: Rule::NamedPeople,
         },
     }
+}
+
+/// Whether `owner` (as an access list names it) is the administrators or the system itself, not
+/// a person: `root` on macOS and Linux; on Windows the local system, local and network service,
+/// the Administrators group and the system's own services (TrustedInstaller among them).
+fn is_system_owner(owner: &str) -> bool {
+    matches!(
+        owner,
+        "0" | "SY" | "BA" | "LS" | "NS" | "S-1-5-18" | "S-1-5-19" | "S-1-5-20" | "S-1-5-32-544"
+    ) || owner.starts_with("S-1-5-80-")
 }

@@ -1562,6 +1562,9 @@ impl Sweeper<'_> {
             if let Some(v) = volume {
                 self.state.places[place].volume = self.mount_text(v);
             }
+            // Its items' paths start from the special folder itself (as every place's do from
+            // its own folder): what the old laptop sends them from.
+            self.roots.borrow_mut().insert(place, found.path.clone());
             let scan = scan_managed_folder(
                 &self.facts.laptop,
                 &owner,
@@ -1945,8 +1948,12 @@ impl Sweeper<'_> {
                 self.blind(job.volume, None, reason);
                 return;
             }
+            // A folder found to be the system's only by who could open it (not a corner the rules
+            // file names) is not known to be the system's own files: named as a blind spot below.
+            let by_access = self.state.places[p].placement.rule == Rule::OwnerOnly;
             if matches!(meta.space, Space::TheSystem | Space::Apps | Space::Junk)
                 && why != Refusal::Gone
+                && !by_access
             {
                 // The system's own corners: named on the volume's line, size unknown. (One that
                 // changed during the scan was not seen at all, so it is a blind spot below.)
@@ -3372,6 +3379,11 @@ fn readers(w: &Whose, me: &str) -> Readers {
 fn narrowed(child: &Whose, parent: &Whose, me: &str) -> Option<Whose> {
     if !matches!(parent, Whose::Shared { .. }) {
         return None;
+    }
+    // Only the administrators and the system could open it: the system's own corner, never
+    // shared with everyone because the place around it is.
+    if *child == Whose::System {
+        return Some(Whose::System);
     }
     let around = readers(parent, me);
     let own = match readers(child, me) {

@@ -308,6 +308,49 @@ fn things_in_odd_places_on_every_drive_are_found_and_the_systems_are_only_counte
     assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
 }
 
+/// Every item the sweep lists can be found again on the drive: its place's folder (the sweep's
+/// `item_roots`, by `placed_by`) and its path lead to it. The mover's special folders too, which
+/// are read apart from the walk: without their folder the old laptop has nothing to send them
+/// from, and the mover's own files never leave.
+#[test]
+fn every_item_listed_leads_back_to_its_file_known_folders_included() {
+    let lab = lab();
+    write(&lab.ada.join("Documents/cv.docx"), 40);
+    write(&lab.ada.join("Documents/letters/2019.txt"), 20);
+    write(&lab.ada.join("code/site/index.html"), 50);
+    write(&lab.d.join("Photos/beach.jpg"), 200);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let place_of: BTreeMap<_, _> = s.placed_by.iter().copied().collect();
+    let mut files = 0;
+    for item in s
+        .record
+        .items
+        .iter()
+        .filter(|i| i.kind == pctwin_record::ItemKind::File)
+    {
+        let place = place_of
+            .get(&item.id)
+            .unwrap_or_else(|| panic!("{} has no place", shown(item)));
+        let mut path = s
+            .item_roots
+            .get(place)
+            .unwrap_or_else(|| panic!("{}: its place has no folder", shown(item)))
+            .clone();
+        for part in item.path.parts() {
+            path.push(part.on_disk());
+        }
+        assert!(
+            path.is_file(),
+            "{} leads to {}",
+            shown(item),
+            path.display()
+        );
+        files += 1;
+    }
+    find(&s, FolderRole::Documents, "letters/2019.txt");
+    assert!(files >= 4, "{files}");
+}
+
 #[test]
 fn one_walker_on_a_hard_disk_and_up_to_four_on_an_ssd() {
     assert_eq!(DiskKind::Hdd.walkers(4), 1);
@@ -499,6 +542,48 @@ fn a_locked_home_is_a_blind_spot_with_no_names_and_a_readable_one_is_only_counte
         })
         .unwrap();
     assert_eq!(bea.bytes, 40);
+    assert_ne!(s.top_line, TopLine::Everything);
+}
+
+/// With several people, a folder in a shared place that only the administrators and the system
+/// may open is the system's, not someone's from an old account: the mover cannot read it, so it
+/// is a blind spot named with its place (it is nobody's private corner), never moved and never
+/// counted as seen.
+#[test]
+fn a_folder_only_administrators_open_is_a_named_blind_spot() {
+    let lab = lab();
+    if !can_lock(&lab.d) {
+        eprintln!("not reachable: this account reads every folder (root)");
+        return;
+    }
+    write(&lab.d.join("Family/holiday.jpg"), 10);
+    write(&lab.d.join("Family/Locked/locked-thing.txt"), 10);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "Locked".into(),
+        AccessFact::Known(access_from_sddl("O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)").unwrap()),
+    );
+    let _g = Locked::new(&lab.d.join("Family/Locked"));
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    assert!(
+        !s.record
+            .items
+            .iter()
+            .any(|i| shown(i).contains("locked-thing"))
+    );
+    let spot = s
+        .blind_spots
+        .iter()
+        .find(|b| b.path.as_deref().is_some_and(|p| p.ends_with("Locked")))
+        .unwrap_or_else(|| panic!("not named: {:#?}", s.blind_spots));
+    assert_eq!(spot.reason, BlindReason::NoPermission);
+    assert!(
+        !s.places
+            .iter()
+            .any(|p| matches!(p.placement.whose, Whose::FromOldAccount { .. })),
+        "{:#?}",
+        s.places
+    );
     assert_ne!(s.top_line, TopLine::Everything);
 }
 

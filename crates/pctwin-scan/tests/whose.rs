@@ -311,7 +311,16 @@ fn the_owner_decides_only_for_owner_only_access_and_a_gone_owner_goes_to_an_old_
         }
     );
     assert_eq!(p.rule, Rule::UnresolvableOwner);
+    // Owned by the administrators (or root), and only they and the system could open it: the
+    // system's. The administrators are an account, never gone, so not "from an old account".
     let p = decide(known("O:BAD:P(A;;FA;;;BA)(A;;FA;;;SY)"), &TWO);
+    assert_eq!(p.whose, Whose::System);
+    assert_eq!(p.rule, Rule::OwnerOnly);
+    let root_only = access_from_mode(0, 0, 0o700, &groups());
+    let p = decide(AccessFact::Known(root_only), &TWO);
+    assert_eq!(p.whose, Whose::System);
+    // An owner that could not be read at all: nothing better is known.
+    let p = decide(known("D:P(A;;FA;;;BA)(A;;FA;;;SY)"), &TWO);
     assert_eq!(p.whose, Whose::FromOldAccount { account_id: None });
 }
 
