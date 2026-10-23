@@ -49,17 +49,82 @@ fn check(meta: &Metadata, entry: &Entry) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// Windows: the error for a link or junction on the way to the file (ERROR_CANT_RESOLVE_FILENAME).
 #[cfg(windows)]
-fn open(path: &std::path::Path) -> io::Result<File> {
-    use std::fs::OpenOptions;
+const LINK_ON_THE_WAY: i32 = 1921;
+
+/// Windows: opens without following a link at that name, sharing it for reading only, so while
+/// the handle is held no one can write it, rename it, delete it or turn it into a link. A folder
+/// needs the backup flag to be opened at all (and gets no other right from it unless the backup
+/// privilege is switched on, which the helper never does).
+#[cfg(windows)]
+fn open_held(path: &std::path::Path, folder: bool) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     const FILE_SHARE_READ: u32 = 0x1;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    OpenOptions::new()
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let flags = if folder {
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS
+    } else {
+        FILE_FLAG_OPEN_REPARSE_POINT
+    };
+    std::fs::OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .custom_flags(flags)
         .open(path)
+}
+
+/// Windows: opens every folder between the drive and the file, one at a time from the drive's
+/// top, each refused if it is a link or junction, and holds them all. Read access shared for
+/// reading only takes part in Windows' sharing rules, so while they are held no folder on the way
+/// can be renamed, deleted or turned into a link: the path cannot be changed under the open that
+/// follows. A cloud folder's placeholder is not a link (its tag names no other place), so it is
+/// passed through like any folder.
+#[cfg(windows)]
+fn hold_folders(path: &std::path::Path) -> io::Result<Vec<File>> {
+    use std::path::{Component, Prefix};
+    let invalid = || io::Error::from(io::ErrorKind::InvalidInput);
+    let mut parts = path.components();
+    let mut at = match (parts.next(), parts.next()) {
+        (Some(Component::Prefix(p)), Some(Component::RootDir))
+            if matches!(p.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)) =>
+        {
+            PathBuf::from(p.as_os_str()).join(std::path::MAIN_SEPARATOR_STR)
+        }
+        _ => return Err(invalid()),
+    };
+    let names = parts
+        .map(|c| match c {
+            Component::Normal(n) => Ok(n),
+            _ => Err(invalid()),
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let Some((_, folders)) = names.split_last() else {
+        return Err(invalid());
+    };
+    let mut held = Vec::with_capacity(folders.len());
+    for name in folders {
+        at.push(name);
+        let folder = open_held(&at, true)?;
+        let meta = folder.metadata()?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return Err(io::Error::from_raw_os_error(LINK_ON_THE_WAY));
+        }
+        held.push(folder);
+    }
+    Ok(held)
+}
+
+/// Windows: opens `path` (a full path on a drive) read-only, never through a link or junction on
+/// the way or at the file, with the folders above held while it opens (see [`hold_folders`]).
+/// Shared for reading only, so a program writing it makes the open fail: "in use".
+#[cfg(windows)]
+fn open(path: &std::path::Path) -> io::Result<File> {
+    let held = hold_folders(path)?;
+    let file = open_held(path, false);
+    drop(held);
+    file
 }
 
 /// Mac and Linux: opens `path` (absolute) one folder at a time from `/`, never through a link
@@ -123,6 +188,10 @@ fn refused_open(e: &io::Error) -> Refusal {
     const IN_USE: [i32; 0] = [];
     #[cfg(unix)]
     if e.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error()) {
+        return Refusal::NotPlain;
+    }
+    #[cfg(windows)]
+    if e.raw_os_error() == Some(LINK_ON_THE_WAY) {
         return Refusal::NotPlain;
     }
     match e.kind() {
@@ -313,5 +382,77 @@ mod open_tests {
         assert!(open(&real.join("b.txt")).is_err());
         // A relative path is never opened.
         assert!(open(std::path::Path::new("real/a.txt")).is_err());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod open_tests {
+    use super::*;
+
+    fn entry_for(path: &std::path::Path) -> Entry {
+        let meta = std::fs::metadata(path).unwrap();
+        Entry {
+            path: path.to_path_buf(),
+            size: meta.len(),
+            modified_ns: nanos(&meta),
+        }
+    }
+
+    /// A junction (a folder link anyone can make, no rights needed) made with the system's own
+    /// `mklink`.
+    fn junction(link: &std::path::Path, target: &std::path::Path) {
+        let ok = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "mklink /J");
+    }
+
+    #[test]
+    fn a_folder_above_the_file_swapped_for_a_junction_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join("mine");
+        let theirs = dir.path().join("theirs");
+        std::fs::create_dir_all(mine.join("Docs")).unwrap();
+        std::fs::create_dir_all(&theirs).unwrap();
+        std::fs::write(mine.join("Docs").join("a.txt"), b"hello").unwrap();
+        // What the scan saw.
+        let entry = entry_for(&mine.join("Docs").join("a.txt"));
+        // A file of the same size and time somewhere else, then the folder swapped for a
+        // junction to it: the path now leads there.
+        std::fs::write(theirs.join("a.txt"), b"HELLO").unwrap();
+        let file = std::fs::File::options()
+            .write(true)
+            .open(theirs.join("a.txt"))
+            .unwrap();
+        file.set_modified(std::fs::metadata(&entry.path).unwrap().modified().unwrap())
+            .unwrap();
+        drop(file);
+        std::fs::rename(mine.join("Docs"), mine.join("Docs-was")).unwrap();
+        junction(&mine.join("Docs"), &theirs);
+        assert_eq!(read_range(&entry, &mut None, 0, 5), Err(Refusal::NotPlain));
+        // The plain path still reads.
+        let plain = entry_for(&mine.join("Docs-was").join("a.txt"));
+        assert_eq!(read_range(&plain, &mut None, 0, 5).unwrap(), b"hello");
+        // A relative path is never opened.
+        assert!(open(std::path::Path::new(r"mine\Docs-was\a.txt")).is_err());
+    }
+
+    /// While the file is being opened, no folder above it can be renamed or replaced.
+    #[test]
+    fn the_folders_above_are_held_while_the_file_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("Docs");
+        std::fs::create_dir_all(docs.join("Trips")).unwrap();
+        std::fs::write(docs.join("Trips").join("a.txt"), b"hello").unwrap();
+        let held = hold_folders(&docs.join("Trips").join("a.txt")).unwrap();
+        assert!(std::fs::rename(&docs, dir.path().join("Moved")).is_err());
+        assert!(std::fs::rename(docs.join("Trips"), docs.join("Moved")).is_err());
+        drop(held);
+        assert!(std::fs::rename(docs.join("Trips"), docs.join("Moved")).is_ok());
     }
 }
