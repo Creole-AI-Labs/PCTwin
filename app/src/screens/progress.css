@@ -135,6 +135,12 @@
   column-gap: var(--space-4);
 }
 
+/* Quiet controls under a quiet line: still a 32px target (above WCAG's 24px), less weight than the move's own actions. */
+.mv-tip-actions .mv-link {
+  min-height: 32px;
+  font-size: var(--type-supporting);
+}
+
 .mv-now {
   margin-top: var(--space-3);
   color: var(--colour-muted);

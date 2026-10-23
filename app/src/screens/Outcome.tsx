@@ -14,7 +14,7 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * every approved item is copied and checked; anything else, including a stopped move, says
  * "Partial". Item-by-item detail is in the report (R02).
  *
- * Under it, the after-move check: each kind of file the person cares about (photos, videos, music,
+ * Under them (and the warning, which stays first), the after-move check: each kind of file the person cares about (photos, videos, music,
  * documents) that the plan held, with how many arrived copied and checked, counted the way the
  * scan counted them. A kind the plan did not hold is left out; one short of its plan says Partial.
  */
@@ -60,7 +60,6 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           }
         />
       </RowList>
-      <AfterMoveCheck outcome={outcome} />
       {(outcome.people ?? []).length > 0 && (
         <RowList>
           {(outcome.people ?? []).map((p) => (
@@ -83,6 +82,7 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           <Banner tone="attention">{l10n.getString("outcome-old-safe")}</Banner>
         </div>
       )}
+      <AfterMoveCheck outcome={outcome} />
       <FrameFooter>
         {onHome && (
           <Button variant="quiet" onClick={onHome}>
