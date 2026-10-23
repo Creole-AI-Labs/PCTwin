@@ -188,6 +188,16 @@ fn pkexec_refusals_end_as_typed_answers() {
     assert_eq!(p.wait().unwrap(), Ended::Exited(126));
 }
 
+/// Windows: the helper is started with administrator rights only from inside Program Files,
+/// where only administrators can change a file; this test program sits in the build folder,
+/// which its account can write, so it is refused before any prompt is shown.
+#[cfg(windows)]
+#[test]
+fn a_helper_its_own_account_could_replace_is_never_elevated() {
+    let r = launch_elevated(&helper_path(), &[]);
+    assert!(matches!(r, Err(Error::NotPrivate(_))), "{r:?}");
+}
+
 #[cfg(windows)]
 #[test]
 fn a_started_process_is_waited_for_through_its_handle() {
@@ -321,15 +331,22 @@ fn real_runas_starts_and_reports_the_exit_code() {
     if !silent {
         panic!("UAC would show a prompt here; this test runs only where it cannot (CI)");
     }
-    let cmd =
-        PathBuf::from(std::env::var("ComSpec").unwrap_or(r"C:\Windows\System32\cmd.exe".into()));
-    match launch_elevated(&cmd, &["/c", "exit", "7"]).unwrap() {
-        Elevation::Started(mut p) => {
+    // Only a program inside Program Files is elevated: a copy of cmd is put there (this runner's
+    // account is an administrator) and removed after.
+    let folder = PathBuf::from(r"C:\Program Files\PCTwin-ci-test");
+    std::fs::create_dir_all(&folder).unwrap();
+    let cmd = folder.join("cmd.exe");
+    std::fs::copy(r"C:\Windows\System32\cmd.exe", &cmd).unwrap();
+    let r = launch_elevated(&cmd, &["/c", "exit", "7"]);
+    let ended = match r {
+        Ok(Elevation::Started(mut p)) => {
             assert_ne!(p.id(), 0);
-            assert_eq!(p.wait().unwrap(), Ended::Exited(7));
+            p.wait()
         }
-        Elevation::Refused => panic!("refused with no prompt"),
-    }
+        other => panic!("{other:?}"),
+    };
+    let _ = std::fs::remove_dir_all(&folder);
+    assert_eq!(ended.unwrap(), Ended::Exited(7));
 }
 
 /// A drive letter mapped to a network share (here this computer's own administrative share)

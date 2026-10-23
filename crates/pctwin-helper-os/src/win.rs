@@ -813,7 +813,30 @@ pub fn program_folder() -> Result<PathBuf, Error> {
     }
 }
 
+/// Refuses a program outside Program Files. Elevating a program its own account can replace would
+/// let any program that account runs swap it in the moment before the administrator approves; in
+/// Program Files only administrators can change a file. The request's path is already the one
+/// the system resolved (no link, junction or short name left), and is compared with Program
+/// Files as the system resolves it, as found from the machine's registry (never the environment).
+fn only_from_program_files(program: &std::path::Path) -> Result<(), Error> {
+    let root = std::fs::canonicalize(system_folder(SystemFolder::ProgramFiles)?)?;
+    let real = std::fs::canonicalize(program)?;
+    let inside = real
+        .strip_prefix(&root)
+        .is_ok_and(|rest| rest.components().count() >= 2);
+    if inside {
+        Ok(())
+    } else {
+        Err(Error::NotPrivate(format!(
+            "{} is not inside {}: only a program there is started with administrator rights",
+            program.display(),
+            root.display()
+        )))
+    }
+}
+
 pub(crate) fn start_runas(request: &LaunchRequest) -> Result<Process, LaunchError> {
+    only_from_program_files(request.program()).map_err(LaunchError::Failed)?;
     let file = wide(request.program().as_os_str());
     let parameters = wide(OsStr::new(&request.windows_parameters()));
     match os_shell_execute_runas(&file, &parameters) {

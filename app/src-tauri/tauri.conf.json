@@ -42,6 +42,11 @@
     ],
     "macOS": {
       "hardenedRuntime": true
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine"
+      }
     }
   }
 }
