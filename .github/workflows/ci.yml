@@ -471,9 +471,10 @@ jobs:
               plutil -lint "$app/Contents/Library/LaunchDaemons/com.creoleailabs.pctwin.helper.plist" ;;
             Linux)
               list="$(dpkg -c "$bundle"/deb/*.deb)"
-              for f in ./usr/lib/pctwin/pctwin-helper ./usr/lib/pctwin/pctwin-handover \
-                ./usr/share/polkit-1/actions/com.creoleailabs.pctwin.helper.policy; do
-                echo "$list" | grep -F " $f" || { echo "missing: $f" >&2; echo "$list" >&2; exit 1; }
+              # dpkg lists paths with or without a leading "./".
+              for f in usr/lib/pctwin/pctwin-helper usr/lib/pctwin/pctwin-handover \
+                usr/share/polkit-1/actions/com.creoleailabs.pctwin.helper.policy; do
+                echo "$list" | grep -E " (\./)?$f\$" || { echo "missing: $f" >&2; echo "$list" >&2; exit 1; }
               done ;;
           esac
       # The Mac app as built must carry the Local Network keys (src-tauri/Info.plist, merged by
