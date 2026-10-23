@@ -18,6 +18,7 @@ import {
   pairingOldShuffle,
   pairingOldStart,
   pairingOldStartAgain,
+  pairingOldNearby,
   pairingStop,
   toProblem,
   type HeadsUp,
@@ -69,6 +70,7 @@ export const oldDecline = pairingOldDecline;
 export const oldShuffle = pairingOldShuffle;
 export const oldRename = pairingOldRename;
 export const oldStartAgain = pairingOldStartAgain;
+export const oldNearby = pairingOldNearby;
 export const stop = pairingStop;
 export const newSearch = pairingNewSearch;
 export const newConnect = pairingNewConnect;

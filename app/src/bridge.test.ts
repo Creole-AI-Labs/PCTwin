@@ -51,6 +51,7 @@ import {
   pairingOldShuffle,
   pairingOldStart,
   pairingOldStartAgain,
+  pairingOldNearby,
   pairingStop,
   setTrayLabels,
   setWindowMode,
@@ -204,6 +205,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingOldShuffle();
       await pairingOldRename("Kitchen laptop");
       await pairingOldStartAgain();
+      await pairingOldNearby().catch(() => undefined);
       await pairingHeadsUp("old");
       await pairingStop();
       await pairingNewSearch();

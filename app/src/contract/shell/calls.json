@@ -71,6 +71,10 @@
       "name": "pairing_old_start_again"
     },
     {
+      "args": [],
+      "name": "pairing_old_nearby"
+    },
+    {
       "args": [
         [
           "role",

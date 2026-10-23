@@ -836,6 +836,7 @@ fn calls() -> Value {
             { "name": "pairing_old_shuffle", "args": [] },
             { "name": "pairing_old_rename", "args": [["name", "Kitchen laptop"]] },
             { "name": "pairing_old_start_again", "args": [] },
+            { "name": "pairing_old_nearby", "args": [] },
             { "name": "pairing_heads_up", "args": [["role", "old"]] },
             { "name": "pairing_stop", "args": [] },
             { "name": "pairing_new_search", "args": [] },

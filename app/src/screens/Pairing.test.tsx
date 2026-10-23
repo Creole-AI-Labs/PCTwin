@@ -992,3 +992,40 @@ describe("someone tried wrong codes, and the system's own questions", () => {
     noMissingText();
   });
 });
+
+describe("both laptops chose the same role (F06)", () => {
+  it("the old laptop says so when another old laptop is nearby, and switches this one", async () => {
+    replies.pairing_old_nearby = () => true;
+    const onBack = await renderOld();
+    await emit("pairing-old", { kind: "label", label: fox });
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pair-old-same-role")))).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-old-switch")) }));
+    await waitFor(() => {
+      expect(onBack).toHaveBeenCalled();
+    });
+  });
+
+  it("the old laptop says nothing when no other old laptop is nearby", async () => {
+    replies.pairing_old_nearby = () => false;
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await waitFor(() => {
+      expect(tauri.invoke.mock.calls.some(([command]) => command === "pairing_old_nearby")).toBe(true);
+    });
+    expect(screen.queryByText(withText(text("pair-old-same-role")))).toBeNull();
+  });
+
+  it("the new laptop that finds no old laptop asks whether both chose New laptop, and can switch", async () => {
+    const onBack = await renderNew([]);
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pair-new-none-same-role")))).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-new-switch")) }));
+    await waitFor(() => {
+      expect(onBack).toHaveBeenCalled();
+    });
+  });
+});

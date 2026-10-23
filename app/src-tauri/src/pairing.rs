@@ -656,6 +656,24 @@ pub async fn pairing_old_start_again(state: State<'_, AppPairing>) -> Result<(),
     Ok(())
 }
 
+/// How long the old laptop listens for another old laptop nearby.
+const NEARBY_WAIT: Duration = Duration::from_secs(3);
+
+/// Old laptop: whether another laptop nearby is showing a code as an old laptop too (both chose
+/// Old laptop, so neither looks for the other): the screen says so and offers to switch this one
+/// (F06, decided 20 October 2026). Only listens; it announces nothing more.
+#[tauri::command]
+pub async fn pairing_old_nearby(state: State<'_, AppPairing>) -> Result<bool, ProblemView> {
+    let mine = state.old().await?.label();
+    let found = NewJourney::new(config()).search(NEARBY_WAIT).await?;
+    Ok(another_old(&found, mine.as_ref()))
+}
+
+/// Whether `found` holds an old laptop other than this one (showing `mine`).
+fn another_old(found: &[Found], mine: Option<&Label>) -> bool {
+    found.iter().any(|f| Some(&f.label) != mine)
+}
+
 /// Either laptop: the notes to show before starting pairing as `role` on this system.
 #[tauri::command]
 pub fn pairing_heads_up(role: PairRole) -> Vec<HeadsUp> {
@@ -735,6 +753,23 @@ pub async fn pairing_new_connect<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_old_laptop_is_one_showing_another_label() {
+        let found = |label: &Label| Found {
+            label: label.clone(),
+            addrs: Vec::new(),
+            same_label_nearby: false,
+            pairing_versions: vec![1],
+        };
+        let mine = Label::named("Kitchen").unwrap();
+        let theirs = Label::named("Study").unwrap();
+        assert!(!another_old(&[], Some(&mine)));
+        // This laptop hears its own announcement: that is not another one.
+        assert!(!another_old(&[found(&mine)], Some(&mine)));
+        assert!(another_old(&[found(&mine), found(&theirs)], Some(&mine)));
+        assert!(another_old(&[found(&theirs)], None));
+    }
 
     use pctwin_link::{Host, HostPending, LinkError};
     use pctwin_pairing::RotatingSender;

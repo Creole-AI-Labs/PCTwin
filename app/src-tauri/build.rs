@@ -10,6 +10,7 @@ const COMMANDS: &[&str] = &[
     "pairing_old_shuffle",
     "pairing_old_rename",
     "pairing_old_start_again",
+    "pairing_old_nearby",
     "pairing_heads_up",
     "pairing_stop",
     "pairing_new_search",

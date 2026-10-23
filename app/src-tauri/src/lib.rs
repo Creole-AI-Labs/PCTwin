@@ -7,6 +7,9 @@
 //! builds the real app with [`app`] and [`context`] on Tauri's mock runtime and calls every command
 //! Tauri knows, so anything granted beyond the closed list fails it.
 
+// The engine-written contract (contract.rs) lists every command in one json! value.
+#![recursion_limit = "256"]
+
 #[cfg(test)]
 mod contract;
 mod help;
@@ -183,6 +186,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         pairing::pairing_old_shuffle,
         pairing::pairing_old_rename,
         pairing::pairing_old_start_again,
+        pairing::pairing_old_nearby,
         pairing::pairing_heads_up,
         pairing::pairing_stop,
         pairing::pairing_new_search,

@@ -11,6 +11,7 @@ import {
   oldRename,
   oldShuffle,
   oldStart,
+  oldNearby,
   oldStartAgain,
   stop,
   toProblem,
@@ -249,6 +250,28 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
     setPhase(code ? "code" : "starting");
   };
 
+  // Both laptops chose Old laptop: neither looks for the other. While the code shows, listen now
+  // and then for another old laptop nearby, and say so.
+  const [sameRole, setSameRole] = useState(false);
+  useEffect(() => {
+    if (phase !== "code") return;
+    let live = true;
+    const look = () => {
+      oldNearby().then(
+        (found) => {
+          if (live) setSameRole(found);
+        },
+        () => undefined,
+      );
+    };
+    look();
+    const every = window.setInterval(look, 15000);
+    return () => {
+      live = false;
+      window.clearInterval(every);
+    };
+  }, [phase]);
+
   // Confirm disables itself while checking: keep the person's place on the checking note.
   useEffect(() => {
     if (checking) checkingNote.current?.focus();
@@ -397,6 +420,18 @@ export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPa
                 <Localized id={NOTICE_TEXT[notice]}>
                   <p />
                 </Localized>
+              </Banner>
+            )}
+            {sameRole && (
+              <Banner tone="attention">
+                <Localized id="pair-old-same-role">
+                  <p />
+                </Localized>
+                <Button onClick={back}>
+                  <Localized id="pair-old-switch">
+                    <span />
+                  </Localized>
+                </Button>
               </Banner>
             )}
           </div>

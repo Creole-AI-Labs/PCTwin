@@ -226,6 +226,10 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
           <Localized id="pair-new-none-body">
             <p className="subhead" />
           </Localized>
+          {/* Both laptops chose New laptop: nobody shows a code, so nothing can be found. */}
+          <Localized id="pair-new-none-same-role">
+            <p />
+          </Localized>
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button
@@ -236,6 +240,11 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
               }}
             >
               <Localized id="pair-new-search-again">
+                <span />
+              </Localized>
+            </Button>
+            <Button className="pair-block" onClick={back}>
+              <Localized id="pair-new-switch">
                 <span />
               </Localized>
             </Button>

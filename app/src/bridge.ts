@@ -224,6 +224,8 @@ export const pairingOldDecline = (round: number) => run("pairing_old_decline", {
 export const pairingOldShuffle = () => run("pairing_old_shuffle");
 export const pairingOldRename = (name: string) => run("pairing_old_rename", { name });
 export const pairingOldStartAgain = () => run("pairing_old_start_again");
+/** Whether another laptop nearby is showing a code as the old laptop too (both chose Old laptop). */
+export const pairingOldNearby = () => ask("pairing_old_nearby", (v) => (typeof v === "boolean" ? v : null));
 export const pairingStop = () => run("pairing_stop");
 export const pairingHeadsUp = (role: PairRole) => ask("pairing_heads_up", parseHeadsUpList, { role });
 export const pairingNewSearch = () => ask("pairing_new_search", parseNearbyList);
