@@ -396,6 +396,11 @@ fn holding_and_handing_over_only_for_approved_people() {
         Request::HoldFor {
             account: "bea".into(),
         },
+        // The app names the account it had made by the ID given back (found by the Windows
+        // two-accounts lab): the same person, the same folder.
+        Request::HoldFor {
+            account: "1005".into(),
+        },
         Request::HoldFor {
             account: "1007".into(),
         },
@@ -445,6 +450,7 @@ fn holding_and_handing_over_only_for_approved_people() {
                 password: "abcd-efgh-jkmn-pqrs".into(),
                 secure_token: true,
             }),
+            held("p1"),
             held("p1"),
             held("p1"),
             held("p2"),

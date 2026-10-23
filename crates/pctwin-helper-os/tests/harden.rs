@@ -3,7 +3,9 @@
 //! stands in for the engine; a second copy, not hardened, shows the same look works on an
 //! ordinary process, so the check is real.
 
+#[cfg(any(windows, target_os = "linux"))]
 use std::io::{BufRead, BufReader};
+#[cfg(any(windows, target_os = "linux"))]
 use std::process::{Child, Command, Stdio};
 
 /// Run in a copy of this program: hardens itself when asked, says so, and waits to be ended.

@@ -63,11 +63,26 @@ impl<'s> Session<'s> {
         self
     }
 
-    /// The account `account` names: one made in this session (by its name), or an approved
+    /// An account made in this session, named by its name or by the ID the helper gave back for
+    /// it (the app holds and hands over by that ID): its name and ID.
+    fn made_account(&self, account: &str) -> Option<(&String, &String)> {
+        self.made
+            .get_key_value(account)
+            .or_else(|| self.made.iter().find(|(_, id)| id.as_str() == account))
+    }
+
+    /// The one key a person's held folder is kept under, however the app names them: a made
+    /// account's name, else the approved ID as given.
+    fn held_key(&self, account: &str) -> String {
+        self.made_account(account)
+            .map_or_else(|| account.to_string(), |(name, _)| name.clone())
+    }
+
+    /// The account `account` names: one made in this session (by its name or ID), or an approved
     /// account ID; and its name, when the helper made it.
     fn account_of(&self, account: &str) -> Option<(pctwin_helper_os::Account, String)> {
-        let (id, name) = match self.made.get(account) {
-            Some(id) => (id.clone(), account.to_string()),
+        let (id, name) = match self.made_account(account) {
+            Some((name, id)) => (id.clone(), name.clone()),
             None if self.approved.contains(account) => (account.to_string(), String::new()),
             None => return None,
         };
@@ -82,10 +97,11 @@ impl<'s> Session<'s> {
         if self.account_of(account).is_none() {
             return Answer::Refused(Refusal::NotApproved);
         }
+        let held_key = self.held_key(account);
         let Some(system) = self.new_laptop.as_mut() else {
             return Answer::Refused(Refusal::NotApproved);
         };
-        if let Some(path) = self.held.get(account) {
+        if let Some(path) = self.held.get(&held_key) {
             return Answer::Holding {
                 path: path.to_string_lossy().into_owned(),
             };
@@ -110,7 +126,7 @@ impl<'s> Session<'s> {
         };
         match system.person_folder(&area, &key, &person) {
             Ok(path) => {
-                self.held.insert(account.to_string(), path.clone());
+                self.held.insert(held_key, path.clone());
                 Answer::Holding {
                     path: path.to_string_lossy().into_owned(),
                 }
@@ -123,7 +139,7 @@ impl<'s> Session<'s> {
         let Some((person, name)) = self.account_of(account) else {
             return Answer::Refused(Refusal::NotApproved);
         };
-        let Some(folder) = self.held.get(account).cloned() else {
+        let Some(folder) = self.held.get(&self.held_key(account)).cloned() else {
             return Answer::Refused(Refusal::NothingHeld);
         };
         let key = folder
@@ -152,7 +168,7 @@ impl<'s> Session<'s> {
         let Some((parsed, name)) = self.account_of(account) else {
             return Answer::Refused(Refusal::NotApproved);
         };
-        let Some(folder) = self.held.get(account).cloned() else {
+        let Some(folder) = self.held.get(&self.held_key(account)).cloned() else {
             return Answer::Refused(Refusal::NothingHeld);
         };
         let Some(system) = self.new_laptop.as_mut() else {
