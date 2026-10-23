@@ -87,7 +87,7 @@ pub use people::{
 };
 pub use recognise::{Recognised, Recogniser, TableError, What};
 pub use rules::{Kind, Row, Rules, RulesError, System, Where};
-pub use scan::{Counts, Scan, Stamp, scan_folder, scan_managed_folder};
+pub use scan::{Category, Counts, Scan, Stamp, category, scan_folder, scan_managed_folder};
 pub use state::{
     Changes, DoneFolder, NextOwner, STATE_FORMAT, ScanState, StateError, changes_between,
 };

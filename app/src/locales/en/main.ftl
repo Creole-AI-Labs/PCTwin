@@ -948,6 +948,13 @@ outcome-title = Welcome to your next laptop.
 outcome-body = Here is what happened to everything you approved.
 outcome-files-title = Selected files
 outcome-status-partial = Partly done
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = Checked after the move
+outcome-kind-photos = Photos
+outcome-kind-videos = Videos
+outcome-kind-music = Music
+outcome-kind-documents = Documents
+outcome-kind-count = { $copied } of { $planned } copied and checked
 outcome-next-title = What to do next
 outcome-old-safe = Anything not finished stays listed here. Nothing was removed from your old laptop.
 outcome-report = View complete report

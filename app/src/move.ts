@@ -268,7 +268,19 @@ export type MoveOutcome = {
   stopped: boolean;
   /** Copied files checked from this laptop's memory, not the drive. */
   checkedFromMemory: number;
+  /** The after-move check (absent in the screens' own samples that predate it). */
+  afterMove?: AfterMove;
 };
+
+/** One kind of file after the move: how many the plan held, and how many are copied and checked. */
+export type KindCount = { planned: number; copied: number };
+
+/** The kinds the after-move check counts, in the order it lists them (as the scan counts them). */
+export const KINDS = ["photos", "videos", "music", "documents"] as const;
+export type Kind = (typeof KINDS)[number];
+
+/** The mover's photos, videos, music and documents in the plan, each with how many arrived checked. */
+export type AfterMove = Record<Kind, KindCount>;
 
 /* ---------- Formatting ---------- */
 

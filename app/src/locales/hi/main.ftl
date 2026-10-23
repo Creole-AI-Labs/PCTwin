@@ -1073,6 +1073,13 @@ outcome-title = आपके अगले लैपटॉप पर आपका
 outcome-body = आपने जो कुछ मंज़ूर किया था, उसके साथ क्या हुआ, यहाँ देखें।
 outcome-files-title = चुनी गई फ़ाइलें
 outcome-status-partial = कुछ हिस्सा पूरा
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = स्थानांतरण के बाद जाँचा गया
+outcome-kind-photos = फ़ोटो
+outcome-kind-videos = वीडियो
+outcome-kind-music = संगीत
+outcome-kind-documents = दस्तावेज़
+outcome-kind-count = { $planned } में से { $copied } कॉपी और जाँचे गए
 outcome-next-title = आगे क्या करें
 outcome-old-safe = जो पूरा नहीं हुआ, वह यहाँ सूची में रहता है। आपके पुराने लैपटॉप से कुछ भी नहीं हटाया गया।
 outcome-report = पूरी रिपोर्ट देखें

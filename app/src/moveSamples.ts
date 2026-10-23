@@ -102,6 +102,17 @@ export const finishedClean: MoveOutcome = {
 
 export const finishedMemory: MoveOutcome = { ...finishedClean, checkedFromMemory: 6000 };
 
+/** A mixed move with its after-move check: two photos short, no music in the plan. */
+export const finishedChecked: MoveOutcome = {
+  ...finishedMixed,
+  afterMove: {
+    photos: { planned: 4210, copied: 4208 },
+    videos: { planned: 96, copied: 96 },
+    music: { planned: 0, copied: 0 },
+    documents: { planned: 1312, copied: 1312 },
+  },
+};
+
 export const finishedStopped: MoveOutcome = {
   byStatus: { ...noStatuses(), copied: 3100 },
   notCopied: 2900,

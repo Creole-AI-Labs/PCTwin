@@ -271,8 +271,10 @@ fn extension(name: &str) -> Option<String> {
     (!stem.is_empty() && !ext.is_empty()).then(|| ext.to_lowercase())
 }
 
+/// What kind of file a name says it is, by its extension, as the scan counts it ([`Counts`]). The
+/// after-move check counts the same way, so the two can be held side by side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Category {
+pub enum Category {
     Photo,
     Video,
     Music,
@@ -280,7 +282,8 @@ pub(crate) enum Category {
     Other,
 }
 
-pub(crate) fn category(name: &str) -> Category {
+/// The [`Category`] of a file called `name`.
+pub fn category(name: &str) -> Category {
     let Some(ext) = extension(name) else {
         return Category::Other;
     };

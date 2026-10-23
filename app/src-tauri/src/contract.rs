@@ -382,6 +382,17 @@ fn outcomes() -> Vec<MoveOutcome> {
         bytes_checked: 1_100_000,
         stopped: false,
         checked_from_memory: 3,
+        after_move: crate::moving::AfterMove {
+            photos: crate::moving::KindCount {
+                planned: 12,
+                copied: 11,
+            },
+            documents: crate::moving::KindCount {
+                planned: 20,
+                copied: 20,
+            },
+            ..Default::default()
+        },
     }]
 }
 

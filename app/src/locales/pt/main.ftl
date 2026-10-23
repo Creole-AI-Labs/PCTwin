@@ -1098,6 +1098,13 @@ outcome-title = Boas-vindas ao seu próximo notebook.
 outcome-body = Veja o que aconteceu com tudo o que você aprovou.
 outcome-files-title = Arquivos selecionados
 outcome-status-partial = Feito em parte
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = Verificado depois da mudança
+outcome-kind-photos = Fotos
+outcome-kind-videos = Vídeos
+outcome-kind-music = Músicas
+outcome-kind-documents = Documentos
+outcome-kind-count = { $copied } de { $planned } copiados e verificados
 outcome-next-title = O que fazer agora
 outcome-old-safe = O que não terminou continua listado aqui. Nada foi removido do seu notebook antigo.
 outcome-report = Ver o relatório completo

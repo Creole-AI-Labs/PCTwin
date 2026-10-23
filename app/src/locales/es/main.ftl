@@ -1094,6 +1094,13 @@ outcome-title = Te damos la bienvenida a tu nuevo portátil.
 outcome-body = Esto es lo que pasó con todo lo que aprobaste.
 outcome-files-title = Archivos seleccionados
 outcome-status-partial = Hecho en parte
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = Comprobado después del traslado
+outcome-kind-photos = Fotos
+outcome-kind-videos = Vídeos
+outcome-kind-music = Música
+outcome-kind-documents = Documentos
+outcome-kind-count = { $copied } de { $planned } copiados y comprobados
 outcome-next-title = Qué hacer ahora
 outcome-old-safe = Lo que no terminó sigue en esta lista. No se quitó nada de tu portátil antiguo.
 outcome-report = Ver el informe completo

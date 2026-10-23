@@ -971,6 +971,44 @@ pub struct MoveOutcome {
     pub bytes_checked: u64,
     pub stopped: bool,
     pub checked_from_memory: u64,
+    /// The after-move check: the mover's photos, videos, music and documents in the plan, and how
+    /// many of each are copied and checked.
+    pub after_move: AfterMove,
+}
+
+/// One kind of file in the after-move check: how many the approved plan held, and how many of
+/// those are on the new laptop, copied and checked (or the same file already there).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct KindCount {
+    pub planned: u64,
+    pub copied: u64,
+}
+
+/// What matters to people, counted after the move the way the scan counts it (by each file's
+/// kind, [`pctwin_scan::category`]). Other kinds of file are in the totals, not here.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct AfterMove {
+    pub photos: KindCount,
+    pub videos: KindCount,
+    pub music: KindCount,
+    pub documents: KindCount,
+}
+
+impl AfterMove {
+    /// Counts one planned file of the mover's, by its name, and whether it is copied and checked.
+    fn add(&mut self, name: &str, copied: bool) {
+        let kind = match pctwin_scan::category(name) {
+            pctwin_scan::Category::Photo => &mut self.photos,
+            pctwin_scan::Category::Video => &mut self.videos,
+            pctwin_scan::Category::Music => &mut self.music,
+            pctwin_scan::Category::Document => &mut self.documents,
+            pctwin_scan::Category::Other => return,
+        };
+        kind.planned += 1;
+        if copied {
+            kind.copied += 1;
+        }
+    }
 }
 
 /// How a copied file is known to be a true copy: every copied line says which, and they are never
@@ -1091,6 +1129,13 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
         if !shown_to_mover(item, mover) {
             continue;
         }
+        outcome.after_move.add(
+            &name_of(&shown_path(&item.path)),
+            matches!(
+                file.outcome,
+                Some(ReceiveOutcome::Finished(_) | ReceiveOutcome::AlreadyThere(_))
+            ),
+        );
         let changed = file.changed_since_scan.then_some(ReportNote::ChangedSinceScan);
         let (status, reason, evidence, destination, note) = match &file.outcome {
             Some(ReceiveOutcome::Finished(f)) => {
@@ -1173,6 +1218,13 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
         let Some(item) = items.get(&file.item) else {
             continue;
         };
+        outcome.after_move.add(
+            &name_of(&shown_path(&item.path)),
+            matches!(
+                file.outcome,
+                Some(SendOutcome::Arrived | SendOutcome::AlreadyThere)
+            ),
+        );
         let (status, reason, evidence, note) = match &file.outcome {
             Some(SendOutcome::Arrived) => {
                 outcome.bytes_checked = outcome.bytes_checked.saturating_add(item.size_bytes);
@@ -2400,6 +2452,79 @@ mod tests {
         assert_eq!(report.len(), 2);
         assert_eq!(report[1].reason, Some(Reason::NotEnoughSpace));
         assert_eq!(crate::history::move_state(&outcome), ("stopped", 2));
+    }
+
+    #[test]
+    fn the_after_move_check_counts_the_movers_photos_and_documents_planned_and_copied() {
+        let photo = item(person("1000"), FolderRole::Pictures, &["Holiday", "IMG_1.JPG"], 10);
+        let lost = item(person("1000"), FolderRole::Pictures, &["IMG_2.heic"], 10);
+        let there = item(person("1000"), FolderRole::Pictures, &["IMG_3.png"], 10);
+        let doc = item(person("1000"), FolderRole::Documents, &["tax.pdf"], 10);
+        let other = item(person("1000"), FolderRole::Documents, &["notes.bin"], 10);
+        let beas = item(person("1001"), FolderRole::Pictures, &["secret.jpg"], 7);
+        let r = received(
+            vec![
+                (photo, Some(finished("IMG_1.JPG", CheckedFrom::Drive))),
+                (
+                    lost,
+                    Some(ReceiveOutcome::Failed(Failure::new(Cause::Unreadable, "x"))),
+                ),
+                (there, Some(ReceiveOutcome::AlreadyThere("IMG_3.png".into()))),
+                (doc, Some(finished("tax.pdf", CheckedFrom::Drive))),
+                (other, Some(finished("notes.bin", CheckedFrom::Drive))),
+                (beas, Some(finished("secret.jpg", CheckedFrom::Drive))),
+            ],
+            Ended::Finished,
+        );
+        let (outcome, _) = received_outcome(&r, "1000");
+        // Another person's photo is not counted for the mover; a failed one is planned, not copied.
+        assert_eq!(
+            outcome.after_move.photos,
+            KindCount {
+                planned: 3,
+                copied: 2
+            }
+        );
+        assert_eq!(
+            outcome.after_move.documents,
+            KindCount {
+                planned: 1,
+                copied: 1
+            }
+        );
+        assert_eq!(outcome.after_move.videos, KindCount::default());
+        let text = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(text["afterMove"]["photos"]["planned"], 3);
+    }
+
+    #[test]
+    fn the_old_laptop_counts_as_copied_only_what_the_new_laptop_confirmed() {
+        let a = item(person("1000"), FolderRole::Pictures, &["a.jpg"], 10);
+        let b = item(person("1000"), FolderRole::Pictures, &["b.jpg"], 10);
+        let mut record = Record::new(laptop());
+        record.items = vec![a.clone(), b.clone()];
+        let sent = Sent {
+            files: vec![
+                pctwin_move::SentFile {
+                    item: a.id,
+                    outcome: Some(SendOutcome::Arrived),
+                },
+                pctwin_move::SentFile {
+                    item: b.id,
+                    outcome: None,
+                },
+            ],
+            not_sent: Vec::new(),
+            ended: Ended::Finished,
+        };
+        let (outcome, _) = sent_outcome(&sent, &record, "1000");
+        assert_eq!(
+            outcome.after_move.photos,
+            KindCount {
+                planned: 2,
+                copied: 1
+            }
+        );
     }
 
     #[test]

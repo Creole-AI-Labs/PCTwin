@@ -766,6 +766,25 @@ describe("R01 Welcome to your next laptop", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("the after-move check: each kind the plan held, with its counts; one short says Partial, a kind not in the plan is left out", async () => {
+    inApp(<Outcome outcome={sample.finishedChecked} {...props} />);
+    const check = screen.getByRole("region", { name: text("outcome-kinds-title") });
+    const kindRow = (k: string) => within(check).getByText(text(`outcome-kind-${k}`)).closest("li") as HTMLElement;
+    expect(plain(kindRow("photos").textContent)).toContain(plain(text("outcome-kind-count", { copied: 4208, planned: 4210 })));
+    expect(within(kindRow("photos")).getByText(text("outcome-status-partial"))).toBeTruthy();
+    expect(within(kindRow("photos")).queryByText(text("progress-state-verified"))).toBeNull();
+    expect(within(kindRow("videos")).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(within(kindRow("documents")).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(within(check).queryByText(text("outcome-kind-music"))).toBeNull();
+    expectClean();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("without the after-move check (nothing of those kinds), there is no such section", () => {
+    inApp(<Outcome outcome={{ ...sample.finishedClean, afterMove: { photos: { planned: 0, copied: 0 }, videos: { planned: 0, copied: 0 }, music: { planned: 0, copied: 0 }, documents: { planned: 0, copied: 0 } } }} {...props} />);
+    expect(screen.queryByText(text("outcome-kinds-title"))).toBeNull();
+  });
+
   it("anything that failed or needs the person is Partial, never verified, and the warning shows", () => {
     inApp(<Outcome outcome={sample.finishedMixed} {...props} />);
     expect(within(chip()).getByText(text("outcome-status-partial"))).toBeTruthy();

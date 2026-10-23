@@ -1,5 +1,23 @@
 [
   {
+    "afterMove": {
+      "documents": {
+        "copied": 20,
+        "planned": 20
+      },
+      "music": {
+        "copied": 0,
+        "planned": 0
+      },
+      "photos": {
+        "copied": 11,
+        "planned": 12
+      },
+      "videos": {
+        "copied": 0,
+        "planned": 0
+      }
+    },
     "byStatus": {
       "converted": 0,
       "copied": 30,

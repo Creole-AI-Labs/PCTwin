@@ -1200,6 +1200,13 @@ outcome-title = مرحبًا بك في حاسوبك المحمول التالي.
 outcome-body = هذا ما حدث لكل ما وافقت عليه.
 outcome-files-title = الملفات المحددة
 outcome-status-partial = تم جزئيًا
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = ما تم التحقق منه بعد النقل
+outcome-kind-photos = الصور
+outcome-kind-videos = الفيديوهات
+outcome-kind-music = الموسيقى
+outcome-kind-documents = المستندات
+outcome-kind-count = { $copied } من { $planned } نُسخت وتم التحقق منها
 outcome-next-title = الخطوات التالية
 outcome-old-safe = كل ما لم يكتمل يبقى مدرجًا هنا. لم يُحذف أي شيء من حاسوبك المحمول القديم.
 outcome-report = عرض التقرير الكامل

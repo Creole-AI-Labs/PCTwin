@@ -1,7 +1,7 @@
 import { useLocalization } from "@fluent/react";
-import { Badge, Banner, Button, Metrics, Row, RowList } from "../components/kit";
+import { Badge, Banner, Button, Metrics, Row, RowList, Section } from "../components/kit";
 import { Attention, Check } from "../icons";
-import { formatBytes, pageLocale, type MoveOutcome } from "../move";
+import { KINDS, formatBytes, pageLocale, type MoveOutcome } from "../move";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
@@ -13,6 +13,10 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
  * its honest chip, and a warning when anything is unresolved. The chip says "Verified" only when
  * every approved item is copied and checked; anything else, including a stopped move, says
  * "Partial". Item-by-item detail is in the report (R02).
+ *
+ * Under it, the after-move check: each kind of file the person cares about (photos, videos, music,
+ * documents) that the plan held, with how many arrived copied and checked, counted the way the
+ * scan counted them. A kind the plan did not hold is left out; one short of its plan says Partial.
  */
 export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void }) {
   const { l10n } = useLocalization();
@@ -56,6 +60,7 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           }
         />
       </RowList>
+      <AfterMoveCheck outcome={outcome} />
       {(outcome.people ?? []).length > 0 && (
         <RowList>
           {(outcome.people ?? []).map((p) => (
@@ -89,5 +94,40 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
         </Button>
       </FrameFooter>
     </>
+  );
+}
+
+/** The after-move check: one row per kind the plan held, with its counts and an honest chip. */
+function AfterMoveCheck({ outcome }: { outcome: MoveOutcome }) {
+  const { l10n } = useLocalization();
+  const kinds = KINDS.filter((k) => (outcome.afterMove?.[k].planned ?? 0) > 0);
+  if (!outcome.afterMove || kinds.length === 0) return null;
+  const after = outcome.afterMove;
+  return (
+    <Section title={l10n.getString("outcome-kinds-title")}>
+      <RowList>
+        {kinds.map((k) => {
+          const { planned, copied } = after[k];
+          return (
+            <Row
+              key={k}
+              title={l10n.getString(`outcome-kind-${k}`)}
+              detail={l10n.getString("outcome-kind-count", { copied, planned })}
+              end={
+                copied === planned ? (
+                  <Badge tone="good" icon={<Check className="mv-icon" />}>
+                    {l10n.getString("progress-state-verified")}
+                  </Badge>
+                ) : (
+                  <Badge tone="warn" icon={<Attention className="mv-icon" />}>
+                    {l10n.getString("outcome-status-partial")}
+                  </Badge>
+                )
+              }
+            />
+          );
+        })}
+      </RowList>
+    </Section>
   );
 }

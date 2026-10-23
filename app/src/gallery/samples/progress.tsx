@@ -36,6 +36,7 @@ export const samples: Sample[] = [
   { id: "X10-stop", title: "Stop the rest of the move?", size: "everyday", render: () => <StopMove open onStop={nothing} onKeep={nothing} /> },
   { id: "R01-clean", title: "Outcome, everything copied", size: "everyday", render: () => <Outcome outcome={data.finishedClean} onReport={nothing} /> },
   { id: "R01-mixed", title: "Outcome, some need you or failed", size: "everyday", render: () => <Outcome outcome={data.finishedMixed} onReport={nothing} /> },
+  { id: "R01-after-move", title: "Outcome, with the after-move check", size: "everyday", render: () => <Outcome outcome={data.finishedChecked} onReport={nothing} /> },
   { id: "R01-memory", title: "Outcome, checked from memory", size: "everyday", render: () => <Outcome outcome={data.finishedMemory} onReport={nothing} /> },
   { id: "R01-stopped", title: "Outcome, stopped by the person", size: "everyday", render: () => <Outcome outcome={data.finishedStopped} onReport={nothing} /> },
   { id: "R02-report", title: "Report, item by item", size: "expanded", render: () => <Report items={data.report} onBack={nothing} /> },

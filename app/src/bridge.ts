@@ -14,7 +14,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ITEM_STATUSES, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
+import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import type { OfferedFile, Outcome as QsOutcome, PickedItem, Receipt, SendProgress } from "./quicksend";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
@@ -573,14 +573,28 @@ function parsePersonOutcome(value: unknown): PersonOutcome | null {
 }
 
 export function parseMoveOutcome(value: unknown): MoveOutcome | null {
-  const f = exactly(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "checkedFromMemory"]);
+  const f = exactly(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "checkedFromMemory", "afterMove"]);
   if (!f || !isCount(f.notCopied) || !isCount(f.bytesChecked) || typeof f.stopped !== "boolean" || !isCount(f.checkedFromMemory)) return null;
   const by = exactly(f.byStatus, ITEM_STATUSES);
   if (!by || !ITEM_STATUSES.every((s) => isCount(by[s]))) return null;
   const byStatus = Object.fromEntries(ITEM_STATUSES.map((s) => [s, by[s]])) as MoveOutcome["byStatus"];
   const people = listOf(f.people, parsePersonOutcome);
   if (!people) return null;
-  return { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, checkedFromMemory: f.checkedFromMemory };
+  const afterMove = parseAfterMove(f.afterMove);
+  if (!afterMove) return null;
+  return { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, checkedFromMemory: f.checkedFromMemory, afterMove };
+}
+
+/** The after-move check: every kind, each with whole counts, and never more copied than planned. */
+function parseAfterMove(value: unknown): MoveOutcome["afterMove"] | null {
+  const f = exactly(value, KINDS);
+  if (!f) return null;
+  const counts = KINDS.map((k) => {
+    const c = exactly(f[k], ["planned", "copied"]);
+    return c && isCount(c.planned) && isCount(c.copied) && c.copied <= c.planned ? { planned: c.planned, copied: c.copied } : null;
+  });
+  if (counts.some((c) => c === null)) return null;
+  return Object.fromEntries(KINDS.map((k, i) => [k, counts[i]])) as NonNullable<MoveOutcome["afterMove"]>;
 }
 
 /** How a copied line in the report was checked: the gate's two, or one of the move's own. */

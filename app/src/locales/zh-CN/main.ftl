@@ -886,6 +886,13 @@ outcome-title = 欢迎使用你的新笔记本电脑。
 outcome-body = 以下是你同意的每项内容的结果。
 outcome-files-title = 已选文件
 outcome-status-partial = 部分完成
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = 迁移后已检查
+outcome-kind-photos = 照片
+outcome-kind-videos = 视频
+outcome-kind-music = 音乐
+outcome-kind-documents = 文档
+outcome-kind-count = { $planned } 个中已复制并检查 { $copied } 个
 outcome-next-title = 接下来要做什么
 outcome-old-safe = 未完成的内容会一直列在这里。旧笔记本电脑上没有删除任何东西。
 outcome-report = 查看完整报告
