@@ -24,6 +24,7 @@ mod others;
 mod pairing;
 mod quicksend;
 mod recovery;
+mod restart;
 
 use serde::Deserialize;
 use tauri::ipc::Invoke;
@@ -249,6 +250,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .plugin(tauri_plugin_opener::init())
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(restart::plugin())
         .manage(pairing::new_state())
         .manage(moving::new_state())
         .manage(quicksend::new_state())

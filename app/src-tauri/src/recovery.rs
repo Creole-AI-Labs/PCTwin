@@ -56,11 +56,16 @@ impl From<&pctwin_transfer::Recovered> for Tidied {
 pub fn recovery_check<R: Runtime>(app: AppHandle<R>) -> Result<Interrupted, MoveProblem> {
     let path = journal_path(&app).ok_or(MoveProblem::Failed)?;
     if !path.exists() {
+        crate::restart::nothing_left(&app);
         return Ok(Interrupted { unfinished: 0 });
     }
     let journal = pctwin_journal::Journal::open(&path).map_err(|_| MoveProblem::Busy)?;
     let unfinished = journal.unfinished().map_err(|_| MoveProblem::Failed)?.len()
         + journal.unshown().map_err(|_| MoveProblem::Failed)?.len();
+    // Nothing to pick up: PCTwin need not open by itself at sign-in any more.
+    if unfinished == 0 {
+        crate::restart::nothing_left(&app);
+    }
     Ok(Interrupted {
         unfinished: count(unfinished),
     })

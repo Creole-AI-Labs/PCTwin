@@ -1987,6 +1987,9 @@ fn spawn_run<R: Runtime>(
                         &crate::history::report_kept(&report),
                     );
                     moving.finish(report);
+                    if !link_lost {
+                        crate::restart::nothing_left(&app);
+                    }
                     if link_lost {
                         // The laptops could not find each other again: C10, with what moved kept
                         // in the report and the history.
@@ -2057,6 +2060,8 @@ pub async fn move_begin<R: Runtime>(
         approve,
     };
     let (live, scan_stop) = moving.begin()?;
+    // Until the move is over, a restart opens PCTwin again at sign-in (src/restart.rs).
+    crate::restart::while_moving(&app);
     let Some((link, paired)) = pairing.take_link().await else {
         moving.finish(Vec::new());
         return Err(MoveProblem::NotPaired);
