@@ -2,21 +2,36 @@ import { Localized, useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
 import { Banner, Button, Checkbox } from "../components/kit";
 import { ArrowForward, Info } from "../icons";
-import { approvalHolds, leftOutByHand, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
+import { approvalHolds, leftOutByHand, movesFirst, type Approval, type FolderRole, type PlanPreview, type PlanView } from "../plan";
+import { pageLocale } from "../move";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import { FolderTitle, PathText, PlanBox, useFormat } from "./PlanParts";
 
+type ListFormatter = new (locale: string, options: { type: "conjunction" }) => { format: (items: string[]) => string };
+
+/** Names as a list in the page's language ("Desktop and Documents"); commas where the system has no list format. */
+function listText(names: string[]): string {
+  const ListFormat = (Intl as unknown as { ListFormat?: ListFormatter }).ListFormat;
+  return ListFormat ? new ListFormat(pageLocale(), { type: "conjunction" }).format(names) : names.join(", ");
+}
+
 /**
  * What the new laptop found before anything moves, each said plainly: whether it fits, about how
- * long, and every file that will not go as it is. Nothing here is a promise; each line is measured
- * or predicted by the very rules the copy uses.
+ * long, what moves first, and every file that will not go as it is. Nothing here is a promise;
+ * each line is measured or predicted by the very rules the copy uses. `first`: the groups the move
+ * sends first ("we'll move these first"), so the new laptop is useful sooner.
  */
-function PreviewNotes({ preview }: { preview: PlanPreview }) {
+function PreviewNotes({ preview, first }: { preview: PlanPreview; first: FolderRole[] }) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const lines: { key: string; text: string }[] = [];
+  if (first.length > 0) {
+    const names = first.map((role) => l10n.getString(`plan-role-${role}`));
+    const list = listText(names);
+    lines.push({ key: "first", text: l10n.getString("plan-preview-first", { places: list }) });
+  }
   if (preview.fits === true) lines.push({ key: "fits", text: l10n.getString("plan-preview-fits") });
   else if (preview.fits === false) lines.push({ key: "fits", text: l10n.getString("plan-preview-short", { size: fmt.total(preview.shortBytes, false) }) });
   else lines.push({ key: "fits", text: l10n.getString("plan-preview-space-unknown") });
@@ -164,7 +179,7 @@ export default function PlanReview({ plan, approval, onApprovalChange, onStart, 
         </div>
       )}
 
-      {plan.preview && <PreviewNotes preview={plan.preview} />}
+      {plan.preview && <PreviewNotes preview={plan.preview} first={movesFirst(plan, leftOut)} />}
 
       <div className="plan-columns">
         <PlanBox title={l10n.getString("plan-what-title")}>

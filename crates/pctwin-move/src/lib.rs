@@ -110,6 +110,18 @@ impl SendPlan {
     }
 }
 
+/// The order a move sends `record`'s items in, each with its tier: what the person asked for
+/// first, then their essentials, then the rest. The send and the plan's "we'll move these first"
+/// preview both read this one order, so the preview cannot say otherwise than the move does.
+pub fn move_order(record: &Record) -> Vec<(ItemId, Tier)> {
+    plan_order(&record.items, &[], &BTreeMap::new(), 0)
+}
+
+/// Whether an item of this tier moves before the rest (asked for, personal or essential).
+pub fn moves_first(tier: Tier) -> bool {
+    tier < Tier::Rest
+}
+
 /// The files to send from `record`. `source` says where each file is read from (`None`: the old
 /// laptop has no folder for its role) and `landing` where it lands, which must be the very
 /// function the new laptop checks it with. Only files are sent; a file the record leaves out is
@@ -172,7 +184,7 @@ pub fn send_plan_where(
     }
     // The order the app moves things in; anything it does not place goes last.
     let mut jobs = Vec::new();
-    for (id, tier) in plan_order(&record.items, &[], &BTreeMap::new(), 0) {
+    for (id, tier) in move_order(record) {
         if let Some(mut job) = by_item.remove(&id) {
             job.tier = tier;
             jobs.push(job);

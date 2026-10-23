@@ -387,6 +387,17 @@ export interface PlanView {
   blocked?: PlanBlock;
   /** Sent by the engine with every plan; absent only in the screens' own samples. */
   preview?: PlanPreview;
+  /**
+   * The groups whose things move first ("we'll move these first": what the person asked for, then
+   * their essentials), in the order they start, from the very order the move sends in. Absent only
+   * in the screens' own samples.
+   */
+  first?: FolderRole[];
+}
+
+/** The groups that move first and are still in the plan (one the person left out moves nothing). */
+export function movesFirst(plan: PlanView, leftOut: readonly FolderRole[]): FolderRole[] {
+  return (plan.first ?? []).filter((role) => !leftOut.includes(role) && plan.groups.some((g) => g.role === role));
 }
 
 /** Whether the approval the person gave is for exactly this revision, unchanged. */

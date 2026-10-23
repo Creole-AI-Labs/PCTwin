@@ -1,6 +1,9 @@
 [
   {
     "fingerprint": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+    "first": [
+      "documents"
+    ],
     "groups": [
       {
         "id": "documents",

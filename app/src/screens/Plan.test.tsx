@@ -11,11 +11,13 @@ import {
   chosenTotals,
   isPartial,
   leftOutByHand,
+  movesFirst,
   sizeParts,
   windowModeFor,
   type Approval,
   type DestGroup,
   type FolderChoice,
+  type PlanPreview,
   type PlanView,
   type ScanView,
 } from "../plan";
@@ -602,6 +604,31 @@ describe("M23 plan review and approval", () => {
     noMissingStrings();
     expectNothingPaid();
     expect(await accessible()).toEqual([]);
+  });
+
+  describe("we'll move these first", () => {
+    const preview: PlanPreview = { fits: true, shortBytes: 0, minutes: null, renamed: 0, tooBig: 0, refused: 0, runsAtSignIn: 0 };
+    /** The preview's lines, as said. */
+    const lines = () => [...document.querySelectorAll(".plan-notice .plan-item-text")].map((el) => plain(el.textContent));
+    const firstSays = (places: string) => plain(text("plan-preview-first", { places }));
+
+    it("names the groups the move sends first, in the move's own order, among the found-before-the-move notes", async () => {
+      inApp(view({ ...sample.plan, preview, first: ["documents", "pictures"] }, null));
+      expect(lines()).toContain(firstSays("Documents and Pictures"));
+      noMissingStrings();
+      expect(await accessible()).toEqual([]);
+    });
+
+    it("a group the person left out, or one not in the plan, is never said to move first", () => {
+      inApp(view({ ...sample.plan, preview, first: ["documents", "music", "pictures"] }, null, { leftOut: ["pictures"] }));
+      expect(lines()).toContain(firstSays("Documents"));
+    });
+
+    it("with nothing moving first there is no such line", () => {
+      inApp(view({ ...sample.plan, preview, first: [] }, null));
+      expect(lines().some((l) => l.startsWith(firstSays("").slice(0, 10)))).toBe(false);
+      expect(movesFirst({ ...sample.plan, first: ["documents"] }, ["documents"])).toEqual([]);
+    });
   });
 
   it("with nothing to do by hand it says so", () => {

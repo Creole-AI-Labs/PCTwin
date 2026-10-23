@@ -881,6 +881,8 @@ plan-version = योजना वर्शन { $revision }
 plan-details = और जानकारी
 plan-preview-title = शुरू करने से पहले
 plan-preview-fits = इस लैपटॉप में पर्याप्त जगह खाली है।
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = हम पहले ये भेजेंगे, ताकि आपका नया लैपटॉप जल्दी इस्तेमाल के लिए तैयार हो: { $places }।
 plan-preview-short = इस लैपटॉप को { $size } और खाली जगह चाहिए। शुरू करने से पहले कुछ जगह खाली करें, वरना ड्राइव भरने पर स्थानांतरण रुक जाएगा।
 plan-preview-space-unknown = PCTwin यह नहीं पढ़ सका कि इस लैपटॉप में कितनी जगह खाली है।
 plan-preview-time-one =

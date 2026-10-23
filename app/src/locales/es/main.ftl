@@ -891,6 +891,8 @@ plan-version = Versión del plan { $revision }
 plan-details = Más detalles
 plan-preview-title = Antes de empezar
 plan-preview-fits = Hay suficiente espacio libre en este portátil.
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = Trasladaremos esto primero, para que tu portátil nuevo esté listo antes: { $places }.
 plan-preview-short = Este portátil necesita { $size } más de espacio libre. Libera espacio antes de empezar o el traslado se detendrá cuando el disco se llene.
 plan-preview-space-unknown = PCTwin no pudo leer cuánto espacio libre tiene este portátil.
 plan-preview-time-one =

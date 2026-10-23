@@ -711,6 +711,8 @@ plan-version = 方案版本{ $revision }
 plan-details = 更多详情
 plan-preview-title = 开始之前
 plan-preview-fits = 这台笔记本电脑有足够的可用空间。
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = 我们会先迁移这些，让你的新笔记本电脑更快可以使用：{ $places }。
 plan-preview-short = 这台笔记本电脑还需要 { $size } 可用空间。请在开始前释放一些空间，否则硬盘满时移动会停止。
 plan-preview-space-unknown = PCTwin 无法读取这台笔记本电脑的可用空间。
 plan-preview-time-one =

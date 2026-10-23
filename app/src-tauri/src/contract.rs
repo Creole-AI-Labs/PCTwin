@@ -254,6 +254,7 @@ fn peers() -> Vec<crate::moving::Peer> {
 
 fn plans() -> Vec<PlanView> {
     vec![PlanView {
+        first: vec![FolderRole::Documents],
         revision: 2,
         fingerprint: "9f".repeat(32),
         groups: vec![PlanGroup {

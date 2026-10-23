@@ -756,6 +756,8 @@ plan-version = Plan version { $revision }
 plan-details = More details
 plan-preview-title = Before you start
 plan-preview-fits = There is enough free space on this laptop.
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = We’ll move these first, so your new laptop is ready to use sooner: { $places }.
 plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
 plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
 plan-preview-time-one =

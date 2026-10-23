@@ -964,6 +964,8 @@ plan-version = إصدار الخطة { $revision }
 plan-details = مزيد من التفاصيل
 plan-preview-title = قبل أن تبدأ
 plan-preview-fits = توجد مساحة فارغة كافية على هذا الحاسوب.
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = سننقل هذه أولًا، ليصبح حاسوبك المحمول الجديد جاهزًا للاستخدام أسرع: { $places }.
 plan-preview-short = يحتاج هذا الحاسوب إلى { $size } إضافية من المساحة الفارغة. وفّر بعض المساحة قبل البدء، وإلا سيتوقف النقل عند امتلاء القرص.
 plan-preview-space-unknown = تعذّر على PCTwin معرفة المساحة الفارغة على هذا الحاسوب.
 plan-preview-time-one =

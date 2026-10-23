@@ -632,6 +632,9 @@ pub struct PlanView {
     pub groups: Vec<PlanGroup>,
     pub left_out: Vec<LeftOut>,
     pub preview: PreviewView,
+    /// The groups whose things move first ("we'll move these first"), in the order they start,
+    /// from the very order the move sends in ([`pctwin_move::move_order`]).
+    pub first: Vec<FolderRole>,
 }
 
 /// Whether `item` is the mover's to see by name: their own and the shared things, never another
@@ -708,7 +711,21 @@ fn plan_view(
             high: slowest.as_secs().div_ceil(60),
         }),
     };
+    // The mover's own groups that hold something moving first, in the order they start.
+    let by_id: HashMap<ItemId, &Item> = record.items.iter().map(|i| (i.id, i)).collect();
+    let mut first: Vec<FolderRole> = Vec::new();
+    for (id, tier) in pctwin_move::move_order(record) {
+        let Some(item) = by_id.get(&id) else { continue };
+        if pctwin_move::moves_first(tier)
+            && shown_to_mover(item, mover)
+            && groups.contains_key(&item.place.role)
+            && !first.contains(&item.place.role)
+        {
+            first.push(item.place.role);
+        }
+    }
     PlanView {
+        first,
         revision: record.revision,
         fingerprint: record.fingerprint().to_hex(),
         groups: groups
@@ -2960,6 +2977,38 @@ mod tests {
             }]
         );
         assert!(!serde_json::to_string(&view).unwrap().contains("secret"));
+        // The documents move first (essentials), the music after: as the move's own order says.
+        assert_eq!(view.first, [FolderRole::Documents]);
+    }
+
+    #[test]
+    fn moves_first_lists_only_the_movers_groups_in_the_order_the_move_sends_them() {
+        let shown = BTreeMap::new();
+        let mut record = Record::new(laptop());
+        record.items = vec![
+            item(person("1000"), FolderRole::Music, &["song.mp3"], 7),
+            item(person("1000"), FolderRole::Documents, &["b.txt"], 5),
+            item(person("1000"), FolderRole::Desktop, &["note.txt"], 50),
+            // Bea's desktop is an essential of hers, never named for the mover.
+            item(person("1001"), FolderRole::Desktop, &["secret.txt"], 1),
+        ];
+        let view = plan_view(&record, &preview(), &rules(), &shown);
+        let order: Vec<FolderRole> = pctwin_move::move_order(&record)
+            .into_iter()
+            .filter(|(_, t)| pctwin_move::moves_first(*t))
+            .filter_map(|(id, _)| {
+                record
+                    .items
+                    .iter()
+                    .find(|i| i.id == id && i.owner == person("1000"))
+            })
+            .map(|i| i.place.role)
+            .collect();
+        assert_eq!(view.first, order);
+        assert_eq!(view.first.len(), 2);
+        assert!(view.first.contains(&FolderRole::Desktop));
+        assert!(view.first.contains(&FolderRole::Documents));
+        assert!(!view.first.contains(&FolderRole::Music));
     }
 
     #[test]

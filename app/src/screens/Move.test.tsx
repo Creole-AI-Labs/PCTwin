@@ -671,7 +671,7 @@ describe("where events take the page", () => {
     const end = next(wait, { kind: "problem", problem: { kind: "not-approved" } });
     expect(end.kind).toBe("end");
     expect(next(end, { kind: "stage", stage: { kind: "moving" } })).toBe(end);
-    const planned = next(wait, { kind: "plan", plan: { ...plan, groups: [], leftOut: [] } });
+    const planned = next(wait, { kind: "plan", plan: { ...plan, groups: [], leftOut: [], first: [] } });
     expect(next(planned, { kind: "stage", stage: { kind: "waiting" } })).toBe(planned);
   });
 });

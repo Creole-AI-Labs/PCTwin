@@ -481,12 +481,14 @@ function parsePlanPreview(value: unknown): PlanPreview | null {
 
 /** The plan for the person to approve (`PlanView`, event `move-plan`). */
 export function parsePlanView(value: unknown): PlanView | null {
-  const f = exactly(value, ["revision", "fingerprint", "groups", "leftOut", "preview"]);
+  const f = exactly(value, ["revision", "fingerprint", "groups", "leftOut", "preview", "first"]);
   if (!f || !isCount(f.revision) || typeof f.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(f.fingerprint)) return null;
   const groups = listOf(f.groups, parsePlanGroup);
   const leftOut = listOf(f.leftOut, parseLeftOut);
   const preview = parsePlanPreview(f.preview);
-  return groups && leftOut && preview ? { revision: f.revision, fingerprint: f.fingerprint, groups, leftOut, preview } : null;
+  const first = listOf(f.first, (r) => (oneOf(r, FOLDER_ROLES) ? r : null));
+  if (first && new Set(first).size !== first.length) return null;
+  return groups && leftOut && preview && first ? { revision: f.revision, fingerprint: f.fingerprint, groups, leftOut, preview, first } : null;
 }
 
 const COUNT_KEYS = ["total", "waiting", "copying", "checking", "done", "needsAction", "failed", "skippedByUser"] as const;

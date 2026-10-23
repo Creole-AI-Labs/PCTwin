@@ -895,6 +895,8 @@ plan-version = Versão do plano { $revision }
 plan-details = Mais detalhes
 plan-preview-title = Antes de começar
 plan-preview-fits = Há espaço livre suficiente neste notebook.
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = Vamos mover isto primeiro, para que seu notebook novo fique pronto mais cedo: { $places }.
 plan-preview-short = Este notebook precisa de mais { $size } de espaço livre. Libere espaço antes de começar, ou a transferência para quando o disco encher.
 plan-preview-space-unknown = O PCTwin não conseguiu ler quanto espaço livre este notebook tem.
 plan-preview-time-one =
