@@ -54,7 +54,8 @@ make_user() {
 for u in "$mover" "${people[@]}"; do make_user "$u"; done
 for n in 1 2 3; do remove_user "pctwinnew$n"; done
 
-sudo install -m 0755 "$bin/pctwin-labmove" "$bin/pctwin-helper" /usr/local/bin/
+# The helper runs the hand-over program from its own folder, as in the app.
+sudo install -m 0755 "$bin/pctwin-labmove" "$bin/pctwin-helper" "$bin/pctwin-handover" /usr/local/bin/
 sudo rm -rf "$work" /srv/pctwin-* /Users/Shared/pctwin-* 2>/dev/null || true
 # The lab's own folder outside any home, open to everyone like the drive's top; each person's
 # folder in it is theirs alone.
