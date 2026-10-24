@@ -6,7 +6,7 @@ import { ProgressBar } from "../components/kit";
 import { localization } from "../i18n";
 import Paired from "../screens/Paired";
 import { fakeAnimations, type FakeAnimation } from "../testing/animations";
-import { resetOpening } from "./openingRule";
+import { APP_VERSION, resetOpening } from "./openingRule";
 import { resetMotion } from "./preference";
 import { arrivalOffset, resetScreenMotion, settleScreen } from "./screen";
 
@@ -17,7 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: tauri.listen }));
 let anim: ReturnType<typeof fakeAnimations>;
 
 function startApp(language: "en" | "ar" = "en"): void {
-  localStorage.setItem("pctwin.opening.shown", "seen");
+  localStorage.setItem("pctwin.opening.shown", APP_VERSION);
   resetOpening();
   render(<App initialLanguage={language} />);
 }

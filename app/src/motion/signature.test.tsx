@@ -9,7 +9,7 @@ import { BLUE_FOX, GREEN_OWL, OFFER, RECEIPT_PARTIAL, RECEIPT_WHOLE } from "../q
 import Outcome from "../screens/Outcome";
 import QuickReceipt from "../screens/QuickReceipt";
 import { fakeAnimations } from "../testing/animations";
-import { resetOpening } from "./openingRule";
+import { APP_VERSION, resetOpening } from "./openingRule";
 import { resetMotion } from "./preference";
 import { resetScreenMotion, settleRows } from "./screen";
 
@@ -30,7 +30,7 @@ function withLayout(): void {
 
 /** Start the app past its opening (an ordinary start, already shown this version). */
 function startApp(): void {
-  localStorage.setItem("pctwin.opening.shown", "seen");
+  localStorage.setItem("pctwin.opening.shown", APP_VERSION);
   resetOpening();
   render(<App initialLanguage="en" />);
 }

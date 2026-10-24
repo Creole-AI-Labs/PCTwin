@@ -81,7 +81,9 @@
   top: calc(26% - 37px);
 }
 
+/* The pack's crop: the case only, none of the lockup's name under it. */
 .opening-case .brand-mark {
+  height: 20px;
   transform: scale(3.2);
 }
 
