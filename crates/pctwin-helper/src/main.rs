@@ -100,7 +100,10 @@ fn main() -> ExitCode {
     #[cfg(unix)]
     rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
     let raw: Vec<String> = std::env::args().skip(1).collect();
-    if raw == ["--daemon"] {
+    // On a Mac, launchd starts the daemon with no arguments (its property list names the program
+    // only, as Service Management requires): that, or --daemon, is daemon mode (found by the
+    // fresh-context review: the daemon could never have started).
+    if raw == ["--daemon"] || (cfg!(target_os = "macos") && raw.is_empty()) {
         return daemon_main();
     }
     let args = match parse(raw.into_iter()) {
@@ -263,8 +266,10 @@ fn daemon() -> Result<(), String> {
             std::process::exit(0);
         }
     });
-    // A few tries, so a connection from another account (refused) cannot take the move's place.
-    for _ in 0..16 {
+    // Connections are taken one at a time until a move is opened, or the time above runs out:
+    // a refused caller never uses up the daemon, and one that says nothing is let go after a few
+    // seconds, so it cannot hold the move's place (found by the fresh-context review).
+    loop {
         let (mut stream, caller) = server.accept().map_err(|e| e.to_string())?;
         let Account::Uid(mover) = caller.account else {
             continue;
@@ -272,11 +277,18 @@ fn daemon() -> Result<(), String> {
         if mover == 0 {
             continue;
         }
+        if stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .is_err()
+        {
+            continue;
+        }
         let mut holds =
             |a: &approval::Approval| approval::approval_holds(a).map_err(|e| e.to_string());
         match open(&mut stream, &mover.to_string(), &mut holds) {
             Ok(o) => {
                 opened.store(true, Ordering::Release);
+                stream.set_read_timeout(None).map_err(|e| e.to_string())?;
                 return serve_unix(&mut stream, mover, o.session, o.approve, o.laptop);
             }
             Err(NotOpened::NotApproved) => {
@@ -287,7 +299,6 @@ fn daemon() -> Result<(), String> {
             }
         }
     }
-    Err("no move was opened".into())
 }
 
 #[cfg(test)]

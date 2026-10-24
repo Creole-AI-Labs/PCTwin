@@ -58,8 +58,11 @@ fn the_launch_daemon_runs_the_bundled_helper_for_this_app() {
     let compact: String = p.split_whitespace().collect();
     assert!(compact.contains("<key>RunAtLoad</key><true/>"));
     assert!(compact.contains("<key>KeepAlive</key><false/>"));
-    assert!(p.contains("exits at once unless a move is in progress"));
-    assert!(p.contains("on its next launch after a crash"));
+    // Started with no arguments (launchd names the program only), it is the daemon; it serves
+    // one approved move and ends, or ends after ten minutes with none.
+    assert!(p.contains("Started with no"));
+    assert!(p.contains("arguments, the helper is the launch daemon"));
+    assert!(p.contains("ends after ten minutes with none"));
     for k in [
         "Program",
         "ProgramArguments",
