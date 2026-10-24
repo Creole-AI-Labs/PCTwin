@@ -57,11 +57,25 @@ for n in 1 2 3; do remove_user "pctwinnew$n"; done
 # The helper runs the hand-over program from its own folder, as in the app, and only from a folder
 # root alone can change, all the way up (as an installed PCTwin is): the tools are installed in
 # one, and found by name through links to them.
-tools=/opt/pctwin-lab-tools
+# (Not /opt: on the Linux runners it is writable by others, and the helper rightly refused it.)
+tools=/usr/lib/pctwin-lab-tools
 if [ "$(uname)" = Darwin ]; then tools=/Library/PCTwin-lab-tools; fi
 sudo rm -rf "$tools"
 sudo install -d -m 0755 -o root "$tools"
 sudo install -m 0755 -o root "$bin/pctwin-labmove" "$bin/pctwin-helper" "$bin/pctwin-handover" "$tools/"
+# The same check the helper makes, before anything starts: every folder from the tools up is
+# root's, and nobody else may write to it; otherwise this says which one, and stops.
+at="$tools/pctwin-handover"
+while :; do
+  owner="$(stat -c %u "$at" 2>/dev/null || stat -f %u "$at")"
+  mode="$(stat -c %a "$at" 2>/dev/null || stat -f %Lp "$at")"
+  if [ "$owner" != 0 ] || [ $(( 0$mode & 022 )) -ne 0 ]; then
+    echo "$at is not root's alone (owner $owner, mode $mode): the helper would refuse the hand-over program" >&2
+    exit 1
+  fi
+  [ "$at" = / ] && break
+  at="$(dirname "$at")"
+done
 for t in pctwin-labmove pctwin-helper pctwin-handover; do
   sudo ln -sf "$tools/$t" "/usr/local/bin/$t"
 done
