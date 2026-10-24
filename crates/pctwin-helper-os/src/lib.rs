@@ -903,10 +903,19 @@ mod tests {
                 .wait_at_most(std::time::Duration::from_millis(300))
                 .unwrap()
         );
-        // Reaped by the system once its parent is gone: wait a moment for it to vanish.
+        // Ended: gone, or (where nothing reaps orphans, as in a container) only a zombie.
+        let ended = |pid: rustix::process::Pid| {
+            rustix::process::test_kill_process(pid).is_err()
+                || std::fs::read_to_string(format!("/proc/{}/stat", pid.as_raw_nonzero()))
+                    .is_ok_and(|stat| {
+                        stat.rsplit(')')
+                            .next()
+                            .is_some_and(|rest| rest.trim_start().starts_with('Z'))
+                    })
+        };
         let mut gone = false;
         for _ in 0..100 {
-            if rustix::process::test_kill_process(grandchild).is_err() {
+            if ended(grandchild) {
                 gone = true;
                 break;
             }
