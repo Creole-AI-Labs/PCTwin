@@ -86,6 +86,28 @@ describe("sending", () => {
   });
 });
 
+describe("sending the missing pieces (Q19)", () => {
+  it("from a sender's receipt with things that did not arrive, offers only those again and checks them as any send", async () => {
+    replies.quicksend_offer_missing = () => offeredExamples.slice(0, 1);
+    inApp(<QuickHost mode="send" onHome={vi.fn()} />);
+    send("quicksend-receipt", { ...receipts[0], side: "sender" });
+    expect(heading()).toBe(text("qs-receipt-title"));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-receipt-missing")) }));
+    expect(heading()).toBe(text("qs-missing-title"));
+    // A late word from the engine never takes the person off this page.
+    send("quicksend-progress", { phase: "copying", filesDone: 1, filesTotal: 2, bytesDone: 1, bytesTotal: 2, current: null, failed: 0, speed: null });
+    expect(heading()).toBe(text("qs-missing-title"));
+    fireEvent.click(screen.getByRole("checkbox", { name: (n) => n.includes(text("qs-missing-ack")) }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-missing-continue")) }));
+    await waitFor(() => {
+      expect(tauri.invoke.mock.calls.map((c: unknown[]) => String(c[0]))).toContain("quicksend_offer_missing");
+    });
+    await waitFor(() => {
+      expect(heading()).toBe(text("qs-check-title"));
+    });
+  });
+});
+
 describe("dropping", () => {
   it("takes drops only while the pick page is open, shows what was dropped, and says when something is over the window", async () => {
     inApp(<QuickHost mode="send" onHome={vi.fn()} />);

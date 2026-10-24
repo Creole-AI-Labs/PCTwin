@@ -41,6 +41,7 @@
     "allow-quicksend-accept-drops",
     "allow-quicksend-clear",
     "allow-quicksend-offer",
+    "allow-quicksend-offer-missing",
     "allow-quicksend-send",
     "allow-quicksend-receive",
     "allow-quicksend-choose-folder",

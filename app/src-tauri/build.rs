@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "quicksend_accept_drops",
     "quicksend_clear",
     "quicksend_offer",
+    "quicksend_offer_missing",
     "quicksend_send",
     "quicksend_receive",
     "quicksend_choose_folder",

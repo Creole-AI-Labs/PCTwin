@@ -27,6 +27,7 @@ import {
   qsClear,
   qsAcceptDrops,
   qsOffer,
+  qsOfferMissing,
   qsPause,
   qsPick,
   qsReceive,
@@ -186,7 +187,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
             ? 42
             : command === "help_code"
               ? "K3QD-8XWA-2M7P"
-              : command === "quicksend_pick" || command === "quicksend_offer" || command === "history_list"
+              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list"
                 ? []
                 : command === "recovery_check"
                 ? { unfinished: 0 }
@@ -218,6 +219,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsClear();
       await qsAcceptDrops(true);
       await qsOffer(["p1"]);
+      await qsOfferMissing();
       await qsSend();
       await qsReceive();
       await qsChooseFolder();

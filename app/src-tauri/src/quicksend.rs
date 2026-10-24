@@ -59,6 +59,18 @@ pub struct QuickSend {
     live: Mutex<Option<Live>>,
     answer: Mutex<Option<oneshot::Sender<Answer>>>,
     offered: Mutex<Vec<ItemId>>,
+    /// What the offer being made was made of (the chosen things), for sending the missing pieces.
+    chosen: Mutex<Vec<PathBuf>>,
+    /// The last send from this window: what was chosen, its offer's ID and its receipt (Q19).
+    last: Mutex<Option<LastSend>>,
+}
+
+/// A send that ended, as Q19 needs it: the same chosen things, offered again under the same
+/// offer ID, keep their file IDs, so the receipt says which of them are missing.
+struct LastSend {
+    chosen: Vec<PathBuf>,
+    laptop: pctwin_record::LaptopId,
+    receipt: Receipt,
 }
 
 pub type AppQuickSend = Arc<QuickSend>;
@@ -368,10 +380,36 @@ pub async fn quicksend_offer(
             .map(|p| p.path.clone())
             .collect()
     };
+    *lock(&qs.chosen) = paths.clone();
     let offer = tauri::async_runtime::spawn_blocking(move || Offer::of(&paths))
         .await
         .map_err(|_| MoveProblem::Failed)?
         .map_err(|_| MoveProblem::Failed)?;
+    let files = offered(offer.files());
+    *lock(&qs.offer) = Some(offer);
+    Ok(files)
+}
+
+/// The sender, after a send that did not bring everything (Q19): the same chosen things offered
+/// again under the same offer ID, keeping only what the last receipt says did not arrive. What
+/// changed since is offered as it is now, and checked and accepted again. Nothing to send again
+/// is an empty list; no earlier send here is `NotMoving`.
+#[tauri::command]
+pub async fn quicksend_offer_missing(
+    qs: State<'_, AppQuickSend>,
+) -> Result<Vec<OfferedView>, MoveProblem> {
+    let (chosen, laptop, receipt) = {
+        let last = lock(&qs.last);
+        let last = last.as_ref().ok_or(MoveProblem::NotMoving)?;
+        (last.chosen.clone(), last.laptop, last.receipt.clone())
+    };
+    *lock(&qs.chosen) = chosen.clone();
+    let offer = tauri::async_runtime::spawn_blocking(move || {
+        Offer::of_again(&chosen, laptop).map(|o| o.only_missing(&receipt))
+    })
+    .await
+    .map_err(|_| MoveProblem::Failed)?
+    .map_err(|_| MoveProblem::Failed)?;
     let files = offered(offer.files());
     *lock(&qs.offer) = Some(offer);
     Ok(files)
@@ -385,6 +423,9 @@ pub async fn quicksend_send<R: Runtime>(
     qs: State<'_, AppQuickSend>,
 ) -> Result<(), MoveProblem> {
     let offer = lock(&qs.offer).take().ok_or(MoveProblem::NotMoving)?;
+    let laptop = offer.laptop();
+    let chosen = lock(&qs.chosen).clone();
+    let state = qs.inner().clone();
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
@@ -400,6 +441,11 @@ pub async fn quicksend_send<R: Runtime>(
                 Ok(r) => {
                     let stopped = live.control.stopped();
                     let view = receipt_view("sender", &r, stopped);
+                    *lock(&state.last) = Some(LastSend {
+                        chosen,
+                        laptop,
+                        receipt: r.clone(),
+                    });
                     crate::history::add(
                         &app,
                         "send",

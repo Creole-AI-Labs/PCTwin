@@ -887,6 +887,7 @@ fn calls() -> Value {
             { "name": "quicksend_accept_drops", "args": [["on", true]] },
             { "name": "quicksend_clear", "args": [] },
             { "name": "quicksend_offer", "args": [["ids", ["p1"]]] },
+            { "name": "quicksend_offer_missing", "args": [] },
             { "name": "quicksend_send", "args": [] },
             { "name": "quicksend_receive", "args": [] },
             { "name": "quicksend_choose_folder", "args": [] },

@@ -7,6 +7,7 @@ import {
   qsAcceptDrops,
   qsClear,
   qsOffer,
+  qsOfferMissing,
   qsPause,
   qsPick,
   qsReceive,
@@ -27,6 +28,7 @@ import PairNew from "./PairNew";
 import PairOld from "./PairOld";
 import QuickApprove from "./QuickApprove";
 import QuickIncoming from "./QuickIncoming";
+import QuickMissing from "./QuickMissing";
 import QuickPick from "./QuickPick";
 import QuickProgress from "./QuickProgress";
 import QuickReceipt from "./QuickReceipt";
@@ -45,6 +47,7 @@ type View =
   | { kind: "where"; files: OfferedFile[] }
   | { kind: "progress"; progress: SendProgress }
   | { kind: "receipt"; receipt: QsReceipt }
+  | { kind: "missing"; receipt: QsReceipt }
   | { kind: "problem"; problem: QsProblem };
 
 const STARTING: SendProgress = { phase: "copying", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, current: null, failed: 0, speed: null };
@@ -94,7 +97,7 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
         return;
       }
       setView((v) => {
-        if (v.kind === "receipt" || v.kind === "problem") return v;
+        if (v.kind === "receipt" || v.kind === "missing" || v.kind === "problem") return v;
         switch (event.kind) {
           case "progress":
             return { kind: "progress", progress: event.progress };
@@ -312,8 +315,36 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
           to={to}
           files={offered}
           stopped={view.receipt.stopped}
+          onSendMissing={() => {
+            setApproved(false);
+            setView({ kind: "missing", receipt: view.receipt });
+          }}
           onHistory={onHome}
           onDone={onHome}
+        />
+      );
+    case "missing":
+      return (
+        <QuickMissing
+          receipt={{ lines: view.receipt.lines }}
+          approved={approved}
+          onApprovedChange={setApproved}
+          onContinue={() => {
+            // The same chosen things offered again, only what did not arrive: then checked, paired
+            // and approved as any send.
+            qsOfferMissing().then((files) => {
+              setOffered(files);
+              setChecked(false);
+              setView({ kind: "review", files });
+            }, fail);
+          }}
+          onNewSend={() => {
+            setItems([]);
+            setView({ kind: "pick" });
+          }}
+          onBack={() => {
+            setView({ kind: "receipt", receipt: view.receipt });
+          }}
         />
       );
     case "problem":

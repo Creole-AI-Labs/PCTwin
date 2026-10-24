@@ -303,6 +303,10 @@
     },
     {
       "args": [],
+      "name": "quicksend_offer_missing"
+    },
+    {
+      "args": [],
       "name": "quicksend_send"
     },
     {

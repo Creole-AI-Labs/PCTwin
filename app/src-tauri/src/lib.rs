@@ -216,6 +216,7 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         quicksend::quicksend_accept_drops,
         quicksend::quicksend_clear,
         quicksend::quicksend_offer,
+        quicksend::quicksend_offer_missing,
         quicksend::quicksend_send,
         quicksend::quicksend_receive,
         quicksend::quicksend_choose_folder,

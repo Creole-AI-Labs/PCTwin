@@ -856,6 +856,8 @@ export const qsClear = () => run("quicksend_clear");
 /** The pick page is open (`on`) or closed: things dropped on the window are added only while it is. */
 export const qsAcceptDrops = (on: boolean) => run("quicksend_accept_drops", { on });
 export const qsOffer = (ids: string[]) => ask("quicksend_offer", (v) => listOf(v, parseOffered), { ids });
+/** Q19: the same chosen things offered again, only what the last receipt says did not arrive. */
+export const qsOfferMissing = () => ask("quicksend_offer_missing", (v) => listOf(v, parseOffered));
 export const qsSend = () => run("quicksend_send");
 export const qsReceive = () => run("quicksend_receive");
 export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
