@@ -354,7 +354,7 @@ fn daemon_main() -> ExitCode {
 
 #[cfg(target_os = "macos")]
 fn daemon() -> Result<(), String> {
-    use pctwin_helper::accepting::{Accepted, OPENING_TIME, first_opening};
+    use pctwin_helper::accepting::{Accepted, Deadlined, NotAccepted, OPENING_TIME, first_opening};
     use pctwin_helper::opening::{NotOpened, open};
     use pctwin_helper_os::daemon::{CHANNEL_DIR, CHANNEL_SOCKET, WAITS_SECS};
     use pctwin_helper_os::{Account, ChannelDir, SocketServer, approval};
@@ -404,14 +404,18 @@ fn daemon() -> Result<(), String> {
     // caller never uses up the daemon, and callers that say nothing (or say it slowly) never
     // queue the real mover behind them (second fresh-context review).
     let accept = move || {
-        let (stream, caller) = server.accept().map_err(|e| e.to_string())?;
+        // The listener's own failure ends the daemon; one connection's lets that caller go.
+        let stream = server
+            .accept_connection()
+            .map_err(|e| NotAccepted::of(&e))?;
+        // Who called: a caller whose account cannot be read is let go, the door stays open.
+        let caller =
+            pctwin_helper_os::caller_of(&stream).map_err(|e| NotAccepted::Caller(e.to_string()))?;
         // Anyone the system cannot name by user ID is never served (as root is not).
         let uid = match caller.account {
             Account::Uid(uid) => uid,
             _ => 0,
         };
-        // Each read has the opening's time at most, and the whole opening is cut off after it.
-        let _ = stream.set_read_timeout(Some(OPENING_TIME));
         let cutter = stream.try_clone().ok();
         Ok(Accepted {
             stream,
@@ -423,7 +427,7 @@ fn daemon() -> Result<(), String> {
             }),
         })
     };
-    let open_move = |stream: &mut std::os::unix::net::UnixStream, uid: u32| {
+    let open_move = |stream: &mut Deadlined<std::os::unix::net::UnixStream>, uid: u32| {
         let mut holds =
             |a: &approval::Approval| approval::approval_holds(a).map_err(|e| e.to_string());
         open(stream, &uid.to_string(), &mut holds)

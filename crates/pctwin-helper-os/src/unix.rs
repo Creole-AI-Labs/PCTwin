@@ -261,6 +261,12 @@ impl SocketServer {
         Ok(server)
     }
 
+    /// Waits for a connection, without asking who made it (see [`caller_of`]): an error here is
+    /// the listener's or this one connection's, by its kind, never a failure to read who called.
+    pub fn accept_connection(&self) -> std::io::Result<UnixStream> {
+        self.listener.accept().map(|(stream, _)| stream)
+    }
+
     /// Waits for a connection and says who made it.
     pub fn accept(&self) -> Result<(UnixStream, Caller), Error> {
         let (stream, _) = self.listener.accept()?;
