@@ -623,6 +623,15 @@ describe("Q14 Handover receipt", () => {
     expect(screen.getByText(nameIs(text("qs-receipt-declined-send")))).toBeTruthy();
   });
 
+  it("a file from another laptop whose downloaded mark the drive could not keep says to open it with care", () => {
+    const unmarked: Receipt = {
+      lines: [{ path: "setup.exe", outcome: { kind: "needs-action", landedAs: "setup.exe", why: "engine words", word: "mark-not-kept" } }],
+    };
+    receipt({ side: "receive", receipt: unmarked });
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-receipt-mark-not-kept", { path: "setup.exe" })));
+    expect(screen.queryByText(text("qs-receipt-box-title"))).toBeNull();
+  });
+
   it("an identical file already there is its own line and is never shown as Copied", () => {
     receipt();
     const row = screen.getByText("Project brief.pdf").closest("li");

@@ -1566,6 +1566,7 @@ qs-receipt-size = { $size } मूल से मेल खाया
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = इस फ़ोल्डर का कुछ हिस्सा पहुँचा नहीं या जाँचा नहीं गया।
 qs-receipt-needs-action = { $path } वहाँ है, पर पूरा नहीं हुआ। क्या करना है, यह ज़्यादा जानकारी में है।
+qs-receipt-mark-not-kept = { $path } वहाँ है, पर यह ड्राइव इसे किसी दूसरे लैपटॉप से डाउनलोड की गई फ़ाइल के रूप में चिह्नित नहीं कर सकी। इसे सावधानी से खोलें।
 qs-receipt-status-verified = जाँचा गया
 qs-receipt-status-unfinished = अधूरा
 qs-receipt-not-completed = पूरा नहीं हुआ।

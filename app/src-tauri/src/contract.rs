@@ -505,6 +505,7 @@ fn qs_receipts() -> Vec<crate::quicksend::ReceiptView> {
                 OutcomeView::NeedsAction {
                     landed_as: "d.jpg".into(),
                     why: "open it once to check it".into(),
+                    word: None,
                 },
             ),
             line(

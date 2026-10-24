@@ -157,6 +157,9 @@ pub enum OutcomeView {
         #[serde(rename = "landedAs")]
         landed_as: String,
         why: String,
+        /// The screens' own words for it, when there are some (the engine's are for More details).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        word: Option<&'static str>,
     },
     Failed {
         why: String,
@@ -196,6 +199,7 @@ fn receipt_view(side: &'static str, r: &Receipt, stopped: bool) -> ReceiptView {
                     Outcome::NeedsAction { landed_as, why } => OutcomeView::NeedsAction {
                         landed_as: landed_as.clone(),
                         why: why.clone(),
+                        word: (why == pctwin_quicksend::MARK_NOT_KEPT).then_some("mark-not-kept"),
                     },
                     Outcome::Failed { why, .. } => OutcomeView::Failed { why: why.clone() },
                 },
@@ -682,6 +686,19 @@ mod tests {
             OutcomeView::NeedsAction { .. }
         ));
         let json = serde_json::to_value(&v).unwrap();
+        assert!(json["lines"][1]["outcome"].get("word").is_none());
+        // A stranger's file whose mark the drive could not keep: the screens' own words.
+        let unmarked = Receipt {
+            lines: vec![pctwin_quicksend::ReceiptLine {
+                path: "a.exe".into(),
+                outcome: Outcome::NeedsAction {
+                    landed_as: "a.exe".into(),
+                    why: pctwin_quicksend::MARK_NOT_KEPT.into(),
+                },
+            }],
+        };
+        let u = serde_json::to_value(receipt_view("receiver", &unmarked, false)).unwrap();
+        assert_eq!(u["lines"][0]["outcome"]["word"], "mark-not-kept");
         assert_eq!(json["lines"][0]["outcome"]["kind"], "arrived");
         assert_eq!(json["lines"][1]["outcome"]["kind"], "needs-action");
         assert_eq!(json["lines"][2]["outcome"]["kind"], "declined");

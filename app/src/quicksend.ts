@@ -53,9 +53,16 @@ export type Outcome =
   /** The receiver did not accept it. */
   | { kind: "declined" }
   /** It is in the folder but not finished as a proven copy; `why` says what to do. Never counted as arrived. */
-  | { kind: "needs-action"; landedAs: string; why: string }
+  | { kind: "needs-action"; landedAs: string; why: string; word?: NeedsActionWord }
   /** It did not arrive; `why` is the engine's own short reason. */
   | { kind: "failed"; why: string };
+
+/**
+ * The screens' own words for a needs-action line, when the engine names one: "mark-not-kept", a
+ * file from another laptop on a drive that could not mark it as downloaded (open it with care).
+ */
+export const NEEDS_ACTION_WORDS = ["mark-not-kept"] as const;
+export type NeedsActionWord = (typeof NEEDS_ACTION_WORDS)[number];
 
 export type ReceiptLine = { path: string; outcome: Outcome };
 

@@ -313,7 +313,8 @@ mod tests {
             send_state(&r(
                 vec![line(OutcomeView::NeedsAction {
                     landed_as: "a".into(),
-                    why: "x".into()
+                    why: "x".into(),
+                    word: None,
                 })],
                 false
             )),

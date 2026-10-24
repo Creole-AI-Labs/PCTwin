@@ -15,7 +15,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
-import type { OfferedFile, Outcome as QsOutcome, PickedItem, Receipt, SendProgress } from "./quicksend";
+import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
 /* ---------- Shapes ---------- */
@@ -800,8 +800,12 @@ function parseQsOutcome(value: unknown): QsOutcome | null {
     return f && typeof f.landedAs === "string" ? { kind, landedAs: f.landedAs } : null;
   }
   if (kind === "needs-action") {
-    const f = exactly(value, ["kind", "landedAs", "why"]);
-    return f && typeof f.landedAs === "string" && typeof f.why === "string" ? { kind, landedAs: f.landedAs, why: f.why } : null;
+    // The screens' own words come only as one of the known ones.
+    const worded = exactly(value, ["kind", "landedAs", "why", "word"]);
+    const f = worded ?? exactly(value, ["kind", "landedAs", "why"]);
+    if (!f || typeof f.landedAs !== "string" || typeof f.why !== "string") return null;
+    if (worded) return oneOf(f.word, NEEDS_ACTION_WORDS) ? { kind, landedAs: f.landedAs, why: f.why, word: f.word } : null;
+    return { kind, landedAs: f.landedAs, why: f.why };
   }
   if (kind === "failed") {
     const f = exactly(value, ["kind", "why"]);

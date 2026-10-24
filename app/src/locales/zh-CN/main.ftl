@@ -1351,6 +1351,7 @@ qs-receipt-size = { $size }与原文件一致
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = 这个文件夹没有全部送达并通过检查。
 qs-receipt-needs-action = { $path } 已在那里，但尚未完成。具体做法见“更多详情”。
+qs-receipt-mark-not-kept = { $path } 已在那里，但这个磁盘无法把它标记为从另一台笔记本电脑下载的文件。请谨慎打开。
 qs-receipt-status-verified = 已检查
 qs-receipt-status-unfinished = 未完成
 qs-receipt-not-completed = 没有完成。

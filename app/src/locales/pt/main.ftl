@@ -1609,6 +1609,7 @@ qs-receipt-size = { $size } iguais ao original
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = Nem tudo desta pasta chegou e foi verificado.
 qs-receipt-needs-action = { $path } está lá, mas não terminado. O que fazer está em Mais detalhes.
+qs-receipt-mark-not-kept = { $path } está lá, mas esta unidade não conseguiu marcá-lo como baixado de outro notebook. Abra com cuidado.
 qs-receipt-status-verified = Verificado
 qs-receipt-status-unfinished = Não terminado
 qs-receipt-not-completed = Não concluído.

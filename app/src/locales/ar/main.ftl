@@ -1765,6 +1765,7 @@ qs-receipt-size = تطابق { $size } مع الأصل
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = لم يصل كل ما في هذا المجلد، أو لم يتم التحقق منه كله.
 qs-receipt-needs-action = { $path } موجود، لكنه لم يكتمل. ما يجب فعله موجود في مزيد من التفاصيل.
+qs-receipt-mark-not-kept = { $path } موجود، لكن هذا القرص لم يتمكن من تمييزه كملف تم تنزيله من حاسوب محمول آخر. افتحه بحذر.
 qs-receipt-status-verified = تم التحقق
 qs-receipt-status-unfinished = لم يكتمل
 qs-receipt-not-completed = لم يكتمل.

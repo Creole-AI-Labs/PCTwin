@@ -455,29 +455,7 @@ impl Incoming {
                     let outcome = if !wanted.contains(&f.id) {
                         Outcome::Declined
                     } else {
-                        match receiver.outcome(f.id) {
-                            Some(ReceiveOutcome::Finished(done)) => Outcome::Arrived {
-                                landed_as: done.final_path.clone(),
-                            },
-                            // Not finished as a visible, proven copy: never "arrived".
-                            Some(ReceiveOutcome::NeedsAction { finished, why }) => {
-                                Outcome::NeedsAction {
-                                    landed_as: finished.final_path.clone(),
-                                    why: why.clone(),
-                                }
-                            }
-                            Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
-                                landed_as: stored.clone(),
-                            },
-                            Some(ReceiveOutcome::Failed(why)) => Outcome::Failed {
-                                cause: why.cause(),
-                                why: why.to_string(),
-                            },
-                            None => Outcome::Failed {
-                                cause: Cause::NotAccepted,
-                                why: "it did not arrive".into(),
-                            },
-                        }
+                        received(receiver.outcome(f.id).as_ref())
                     };
                     ReceiptLine {
                         path: f.path,
@@ -491,6 +469,45 @@ impl Incoming {
     /// Declines the whole offer: nothing is sent, nothing is written.
     pub async fn decline(self, ch: &mut impl Channel) -> Result<(), QuickError> {
         write_accepted(ch, &BTreeSet::new()).await
+    }
+}
+
+/// The words for a file from someone else's laptop that landed on a drive that could not mark it
+/// as downloaded (FAT and exFAT sticks, some network drives): the system will not warn when it is
+/// opened, so the person is told to take care.
+pub const MARK_NOT_KEPT: &str =
+    "This drive could not mark the file as downloaded from another laptop. Open it with care.";
+
+/// How a file the receiver accepted came to be, from the receiving session's outcome. A file from
+/// someone else's laptop whose "downloaded" mark the drive could not keep needs the person's care:
+/// never simply "arrived".
+fn received(outcome: Option<&ReceiveOutcome>) -> Outcome {
+    match outcome {
+        Some(ReceiveOutcome::Finished(done)) if done.mark_not_kept.is_some() => {
+            Outcome::NeedsAction {
+                landed_as: done.final_path.clone(),
+                why: MARK_NOT_KEPT.into(),
+            }
+        }
+        Some(ReceiveOutcome::Finished(done)) => Outcome::Arrived {
+            landed_as: done.final_path.clone(),
+        },
+        // Not finished as a visible, proven copy: never "arrived".
+        Some(ReceiveOutcome::NeedsAction { finished, why }) => Outcome::NeedsAction {
+            landed_as: finished.final_path.clone(),
+            why: why.clone(),
+        },
+        Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
+            landed_as: stored.clone(),
+        },
+        Some(ReceiveOutcome::Failed(why)) => Outcome::Failed {
+            cause: why.cause(),
+            why: why.to_string(),
+        },
+        None => Outcome::Failed {
+            cause: Cause::NotAccepted,
+            why: "it did not arrive".into(),
+        },
     }
 }
 
@@ -586,6 +603,36 @@ mod tests {
 
     async fn read(msg: Vec<u8>, offer: &[OfferedFile]) -> Result<BTreeSet<ItemId>, QuickError> {
         read_accepted(&mut Answer(Some(msg)), offer).await
+    }
+
+    /// Exit-gate review (24 October 2026): a stranger's file on a drive that cannot keep the
+    /// "downloaded" mark (no marker drive: FAT, exFAT, some network drives) is never just "arrived":
+    /// it needs the person's care, in plain words. One with its mark kept arrived.
+    #[test]
+    fn a_strangers_file_whose_mark_was_not_kept_needs_care() {
+        let done = |mark| {
+            ReceiveOutcome::Finished(pctwin_gate::Finished {
+                final_path: "Holiday/beach.jpg".into(),
+                sent_path: "Holiday/beach.jpg".into(),
+                changes: Vec::new(),
+                mark_not_kept: mark,
+                time_not_kept: false,
+                checked_from: None,
+            })
+        };
+        assert_eq!(
+            received(Some(&done(Some(DownloadMark::Internet)))),
+            Outcome::NeedsAction {
+                landed_as: "Holiday/beach.jpg".into(),
+                why: MARK_NOT_KEPT.into()
+            }
+        );
+        assert_eq!(
+            received(Some(&done(None))),
+            Outcome::Arrived {
+                landed_as: "Holiday/beach.jpg".into()
+            }
+        );
     }
 
     /// The answer names only offered files, each once, with the right count and nothing more.

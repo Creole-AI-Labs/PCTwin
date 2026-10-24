@@ -1441,6 +1441,7 @@ qs-receipt-size = { $size } matched the original
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = Not all of this folder arrived and was checked.
 qs-receipt-needs-action = { $path } is there, but not finished. What to do is under More details.
+qs-receipt-mark-not-kept = { $path } is there, but this drive could not mark it as downloaded from another laptop. Open it with care.
 qs-receipt-status-verified = Checked
 qs-receipt-status-unfinished = Unfinished
 qs-receipt-not-completed = Not completed.

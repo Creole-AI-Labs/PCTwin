@@ -68,7 +68,7 @@ function LineDetail({ line, side, stopped }: { line: ReceiptLine; side: Side; st
     case "needs-action":
       return (
         <>
-          {l10n.getString("qs-receipt-needs-action", { path: outcome.landedAs })}
+          {l10n.getString(outcome.word ? `qs-receipt-${outcome.word}` : "qs-receipt-needs-action", { path: outcome.landedAs })}
           <details className="qs-more">
             <Localized id="qs-receipt-more">
               <summary />
