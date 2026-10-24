@@ -623,7 +623,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Everyone in one move sweeps the whole runner several times (the mover, each approved
     # person through the helper, and again with no administrator).
-    timeout-minutes: 90
+    # Two whole-disk sweeps of a Mac runner (with and without an administrator) take most of an hour.
+    timeout-minutes: 120
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'

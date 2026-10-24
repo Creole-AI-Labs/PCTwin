@@ -187,15 +187,18 @@ if ! $mac; then
     exit 1
   fi
 fi
-# A bounded wait: a move that does not end in 25 minutes is stopped on both sides, and its log
+# (45, not 25: a hosted Mac runner carries about 400 GB and 4 million files of developer tools,
+# and the sweep still lists every file even in places it never moves; the faster sweep is a
+# Task List follow-up. Seen in CI run 40119696543: still sweeping, steadily, at 25 minutes.)
+# A bounded wait: a move that does not end in 45 minutes is stopped on both sides, and its log
 # (where it got to, stage by stage) and the helper's are kept and shown like a failure's.
 waited=0
-while kill -0 "$engine" 2>/dev/null && [ "$waited" -lt 1500 ]; do
+while kill -0 "$engine" 2>/dev/null && [ "$waited" -lt 2700 ]; do
   sleep 5
   waited=$((waited + 5))
 done
 if kill -0 "$engine" 2>/dev/null; then
-  echo "the move did not finish in 25 minutes: stopping it" >&2
+  echo "the move did not finish in 45 minutes: stopping it" >&2
   sudo pkill -u "$(uid "$mover")" -f "^pctwin-labmove everyone" 2>/dev/null || true
   sudo kill "$helper" 2>/dev/null || true
   sudo pkill -f "^pctwin-helper --session $token" 2>/dev/null || true
