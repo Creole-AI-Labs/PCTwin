@@ -55,7 +55,9 @@ pub struct QuickSend {
     picked: Mutex<Vec<Picked>>,
     next_id: Mutex<u64>,
     offer: Mutex<Option<Offer>>,
-    folder: Mutex<Option<PathBuf>>,
+    /// The folder the receiver chose, opened when it was chosen (the very folder written to, never
+    /// whatever is at its path later); taken by the receive it was chosen for.
+    folder: Mutex<Option<pctwin_gate::Destination>>,
     live: Mutex<Option<Live>>,
     answer: Mutex<Option<oneshot::Sender<Answer>>>,
     offered: Mutex<Vec<ItemId>>,
@@ -526,7 +528,7 @@ pub async fn quicksend_receive<R: Runtime>(
                 match rx.await {
                     Ok(Answer::Accept(chosen)) => {
                         let folder = lock(&qs.folder)
-                            .clone()
+                            .take()
                             .ok_or(pctwin_quicksend::QuickError::NothingChosen)?;
                         if let Some(dir) = journal_at.parent() {
                             let _ = std::fs::create_dir_all(dir);
@@ -537,14 +539,7 @@ pub async fn quicksend_receive<R: Runtime>(
                         let done = Arc::new(AtomicBool::new(false));
                         tick(app.clone(), live.clone(), done.clone());
                         let r = incoming
-                            .accept_live(
-                                &mut link,
-                                &folder,
-                                chosen.as_deref(),
-                                &journal,
-                                &me,
-                                &live,
-                            )
+                            .accept_into(&mut link, folder, chosen.as_deref(), &journal, &me, &live)
                             .await;
                         done.store(true, Ordering::Release);
                         r.map(Some)
@@ -552,6 +547,8 @@ pub async fn quicksend_receive<R: Runtime>(
                     _ => incoming.decline(&mut link).await.map(|()| None),
                 }
             });
+            // Chosen for this receive only: the next one chooses again.
+            lock(&qs.folder).take();
             match ran {
                 Ok(Some(r)) => {
                     let stopped = live.control.stopped();
@@ -604,15 +601,20 @@ pub async fn quicksend_choose_folder(
     let Some(folder) = chosen else {
         return Ok(None);
     };
-    let free_bytes = pctwin_gate::Destination::open(&folder)
-        .ok()
-        .and_then(|d| d.available_bytes());
+    let view = held_folder(&qs, &folder).ok_or(MoveProblem::Failed)?;
+    Ok(Some(view))
+}
+
+/// Opens the folder the person chose at `folder` and holds it for the receive, replacing any
+/// chosen before; what the screens show of it. `None` when it cannot be opened.
+fn held_folder(qs: &QuickSend, folder: &std::path::Path) -> Option<FolderView> {
+    let dest = pctwin_gate::Destination::open(folder).ok()?;
     let view = FolderView {
         path: folder.display().to_string(),
-        free_bytes,
+        free_bytes: dest.available_bytes(),
     };
-    *lock(&qs.folder) = Some(folder);
-    Ok(Some(view))
+    *lock(&qs.folder) = Some(dest);
+    Some(view)
 }
 
 /// The receiver's answer (Q08): accept the files `ids` (all of them with none), or decline.
@@ -775,6 +777,39 @@ mod tests {
             view_of(&p(dir.join("gone.txt"), false)).problem,
             Some("missing")
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Exit-gate review (24 October 2026): the folder chosen is held open from the choice, so a
+    /// folder put at its path afterwards is not the one written to; the receive takes it, so the
+    /// next receive chooses again.
+    #[test]
+    fn the_chosen_folder_is_held_from_the_choice_and_used_once() {
+        let qs = QuickSend::default();
+        let dir = tempfile_dir().join("held");
+        let chosen = dir.join("Inbox");
+        std::fs::create_dir_all(&chosen).unwrap();
+        assert!(held_folder(&qs, &chosen).is_some());
+        // Swapped after the choice: the path now names another folder.
+        let moved = dir.join("Inbox-moved");
+        let swapped = std::fs::rename(&chosen, &moved).is_ok();
+        if swapped {
+            std::fs::create_dir_all(&chosen).unwrap();
+            let held = lock(&qs.folder).take().unwrap();
+            let id = held.folder_identity("").unwrap();
+            let there = pctwin_gate::Destination::open(&moved)
+                .unwrap()
+                .folder_identity("")
+                .unwrap();
+            assert_eq!(
+                id, there,
+                "the held folder is the one chosen, wherever it is now"
+            );
+        } else {
+            // Windows keeps a folder held open from being renamed: it cannot be swapped at all.
+            lock(&qs.folder).take();
+        }
+        assert!(lock(&qs.folder).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

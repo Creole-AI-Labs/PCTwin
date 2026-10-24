@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use pctwin_gate::{Approved, Destinations};
+use pctwin_gate::Destinations;
 use pctwin_journal::{DownloadMark, Ledger};
 use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
@@ -403,6 +403,24 @@ impl Incoming {
         account: &str,
         live: &pctwin_move::Live,
     ) -> Result<Receipt, QuickError> {
+        let dest = pctwin_gate::Destination::open(dest)
+            .map_err(|e| QuickError::Destination(e.to_string()))?;
+        self.accept_into(ch, dest, chosen, journal, account, live)
+            .await
+    }
+
+    /// As [`accept_live`](Self::accept_live), into the very folder `dest` opened when the person
+    /// chose it in the system's picker: a folder put at that path since (another folder, a link
+    /// somewhere else) is never the one written to.
+    pub async fn accept_into(
+        self,
+        ch: &mut impl Channel,
+        dest: pctwin_gate::Destination,
+        chosen: Option<&[ItemId]>,
+        journal: &dyn Ledger,
+        account: &str,
+        live: &pctwin_move::Live,
+    ) -> Result<Receipt, QuickError> {
         let offered = self.files();
         let wanted: BTreeSet<ItemId> = match chosen {
             Some(ids) => ids
@@ -434,7 +452,7 @@ impl Incoming {
             .with_mark_floor(DownloadMark::Internet);
         let mut table = Destinations::new();
         table
-            .approve(DESTINATION, Approved::MyFolders, dest)
+            .approve_chosen(DESTINATION, dest)
             .map_err(|e| QuickError::Destination(e.to_string()))?;
         write_accepted(ch, &wanted).await?;
         let mut receiver = ReceiverSession::new(&table, allowance, journal, account)
