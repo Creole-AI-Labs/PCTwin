@@ -8,6 +8,20 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Ready to use?** Not yet. Please don't move real files with it.
 - **Next:** the last pieces of this stage, independent reviews of the newest parts, then one full test run before it is merged.
 
+## 25 October 2026
+
+**In progress (every full test passes on Windows, Mac and Linux)**
+
+- **Moving everyone now passes its full test on all three systems.** Real accounts, an administrator's approval, each person's things in their own new account, and the same move without an administrator: all green on Windows, Mac and Linux, alongside two laptops on a poor connection and real USB drives.
+- **The home screen says what PCTwin does:** "Send files, or move everything." The laptop choice now reads "This is my old laptop" and "This is my new laptop", and a send names who is sending.
+- **PCTwin opens with a short animation** of its name settling into place, once on the first start and after an update, with Skip and the Escape key. Every screen moves gently and calmly; you can choose to follow your system, reduce motion or turn it off, and nothing ever waits for an animation.
+- **Folders that belong together arrive together.** A Photos Library, a Pages or Keynote document or a project's history now moves as its files, lands whole beside one that is already there and is never mixed into another; folders that can simply be made again are left out and said so.
+- **Too much for one move?** PCTwin says so before you approve, names what will not move, and offers another way for it.
+- **Quick Send:** resend only the pieces that did not arrive; the same files sent twice are never saved twice; and the whole flow works with a keyboard alone, in all seven languages.
+- **Other people's things stay private.** Their file names are never written where the person doing the move can read them, and a crash part way is tidied up for them too, so they never receive half a file.
+- **The Windows installer asks once** whether PCTwin may receive things from your other laptop on home and work networks (never public Wi-Fi), and uninstalling removes that again.
+- **Before Windows or Linux asks for an administrator,** PCTwin shows whose files will be read, since their own windows cannot.
+
 ## 24 October 2026
 
 **In progress (the full tests now run on Windows, Mac and Linux)**
