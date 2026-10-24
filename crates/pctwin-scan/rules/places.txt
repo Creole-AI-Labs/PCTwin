@@ -72,6 +72,10 @@ windows | sysroot | actions-runner | app
 windows | sysroot | CodeQL | app
 windows | sysroot | Julia-#.#.# | app
 windows | sysroot | selenium | app
+windows | sysroot | ghcup | app
+windows | sysroot | mingw32 | app
+windows | sysroot | PostgreSQL | app
+windows | sysroot | WindowsAzure | system
 windows | sysroot | pagefile.sys | system
 windows | sysroot | hiberfil.sys | system
 windows | sysroot | swapfile.sys | system

@@ -103,12 +103,20 @@ fn tool_folders_at_the_top_of_the_system_drive_are_apps() {
         "CodeQL",
         "Julia-1.10.4",
         "selenium",
+        "ghcup",
+        "mingw32",
+        "PostgreSQL",
     ] {
         let row = win
             .at_root(name, true)
             .unwrap_or_else(|| panic!("{name} is not named"));
         assert_eq!(row.kind, Kind::App, "{name}");
     }
+    // The cloud's own agent on a virtual machine is the system's.
+    assert_eq!(
+        win.at_root("WindowsAzure", true).unwrap().kind,
+        Kind::System
+    );
     // Only a version number stands for `#`: a person's own folders are not programs.
     for name in [
         "Python",
