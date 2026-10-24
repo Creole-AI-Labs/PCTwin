@@ -29,6 +29,52 @@ pub const MAX_FRAME: usize = 1 + 4 + MAX_HANDLES * 16;
 /// Items in one frame of a person's items (well inside [`MAX_FRAME`] however long their names).
 pub const ITEMS_PER_FRAME: usize = 1000;
 
+/// A secret said over the channel (a new account's temporary password): cleared from memory when
+/// dropped, never shown by `Debug`, and read and written as a plain JSON string without another
+/// copy.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Secret(zeroize::Zeroizing<String>);
+
+impl Secret {
+    pub fn new(text: zeroize::Zeroizing<String>) -> Self {
+        Self(text)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The secret itself, still cleared when dropped.
+    pub fn into_inner(self) -> zeroize::Zeroizing<String> {
+        self.0
+    }
+}
+
+impl From<&str> for Secret {
+    fn from(text: &str) -> Self {
+        Self(zeroize::Zeroizing::new(text.to_string()))
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(redacted)")
+    }
+}
+
+impl Serialize for Secret {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Secret {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // The string is moved into the clearing buffer, never copied.
+        String::deserialize(d).map(|s| Self(zeroize::Zeroizing::new(s)))
+    }
+}
+
 /// What the app asks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -121,7 +167,7 @@ pub enum Answer {
     /// (never on PCTwin's screens) and keeps it nowhere.
     AccountMade {
         account: String,
-        password: String,
+        password: Secret,
         /// macOS: whether the account can unlock FileVault (`false`: turn it on in System
         /// Settings, Users & Groups). Always `true` elsewhere.
         secure_token: bool,
@@ -255,9 +301,27 @@ pub fn read_request(r: &mut impl Read) -> Result<Request, FrameError> {
     serde_json::from_slice(&body).map_err(|e| FrameError::Bad(e.to_string()))
 }
 
+/// Counts the bytes written to it, keeping none.
+struct Counter(usize);
+
+impl Write for Counter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Sends `answer`. The frame is written into one buffer of exactly its size (measured first, so
+/// it never grows and leaves a copy behind), cleared once sent: an answer can hold a secret.
 pub fn send_answer(w: &mut impl Write, answer: &Answer) -> Result<(), FrameError> {
-    let mut body = vec![ANSWER];
-    serde_json::to_writer(&mut body, answer).map_err(|e| FrameError::Bad(e.to_string()))?;
+    let mut size = Counter(1);
+    serde_json::to_writer(&mut size, answer).map_err(|e| FrameError::Bad(e.to_string()))?;
+    let mut body = zeroize::Zeroizing::new(Vec::with_capacity(size.0));
+    body.push(ANSWER);
+    serde_json::to_writer(&mut *body, answer).map_err(|e| FrameError::Bad(e.to_string()))?;
     write_frame(w, &body)
 }
 
@@ -289,13 +353,17 @@ pub fn send_items(w: &mut impl Write, items: &[&pctwin_record::Item]) -> Result<
 
 pub fn read_from_helper(r: &mut impl Read) -> Result<FromHelper, FrameError> {
     let body = read_frame(r, MAX_FRAME)?;
+    if body.first() == Some(&ANSWER) {
+        // Cleared once read: an answer can hold a secret.
+        let body = zeroize::Zeroizing::new(body);
+        return serde_json::from_slice(&body[1..])
+            .map(FromHelper::Answer)
+            .map_err(|e| FrameError::Bad(e.to_string()));
+    }
     let (kind, rest) = body
         .split_first()
         .ok_or_else(|| FrameError::Bad("an empty frame".into()))?;
     match *kind {
-        ANSWER => serde_json::from_slice(rest)
-            .map(FromHelper::Answer)
-            .map_err(|e| FrameError::Bad(e.to_string())),
         BLOCKS => Ok(FromHelper::Blocks(rest.to_vec())),
         HANDLES => {
             if rest.len() % 16 != 0 {
@@ -325,6 +393,28 @@ pub fn read_from_helper(r: &mut impl Read) -> Result<FromHelper, FrameError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A new account's password crosses whole, but is never shown by `Debug` (an answer logged or
+    /// put in a panic message keeps it out).
+    #[test]
+    fn a_password_crosses_whole_and_is_never_shown() {
+        let made = Answer::AccountMade {
+            account: "S-1-5-21-1-2-3-1001".into(),
+            password: "abcd-efgh-jkmn-pqrs".into(),
+            secure_token: true,
+        };
+        let shown = format!("{made:?}");
+        assert!(!shown.contains("abcd"), "{shown}");
+        assert!(shown.contains("redacted"), "{shown}");
+        let mut wire = Vec::new();
+        send_answer(&mut wire, &made).unwrap();
+        let back = read_from_helper(&mut wire.as_slice()).unwrap();
+        let FromHelper::Answer(Answer::AccountMade { password, .. }) = back else {
+            panic!("not an account made");
+        };
+        assert_eq!(password.as_str(), "abcd-efgh-jkmn-pqrs");
+        assert_eq!(password.into_inner().as_str(), "abcd-efgh-jkmn-pqrs");
+    }
 
     #[test]
     fn requests_and_answers_cross_whole() {

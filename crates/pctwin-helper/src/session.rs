@@ -210,7 +210,7 @@ impl<'s> Session<'s> {
                 self.made.insert(name.to_string(), made.account.clone());
                 Answer::AccountMade {
                     account: made.account,
-                    password: made.password.to_string(),
+                    password: crate::protocol::Secret::new(made.password),
                     secure_token: made.secure_token,
                 }
             }

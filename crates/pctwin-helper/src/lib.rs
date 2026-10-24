@@ -23,7 +23,7 @@ pub mod read;
 pub mod session;
 
 pub use client::{Client, ClientError, HandedOver, MadeAccount, Scanned, connect};
-pub use protocol::{Answer, FromHelper, Handle, Refusal, Request};
+pub use protocol::{Answer, FromHelper, Handle, Refusal, Request, Secret};
 pub use protocol::{MAX_SYSTEM_ASK, MAX_SYSTEM_ASKED, MAX_SYSTEM_PATH};
 pub use read::Entry;
 pub use session::Session;

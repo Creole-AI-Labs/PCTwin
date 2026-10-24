@@ -283,7 +283,7 @@ impl<S: Read + Write> Client<S> {
                 secure_token,
             } => Ok(MadeAccount {
                 account,
-                password: zeroize::Zeroizing::new(password),
+                password: password.into_inner(),
                 secure_token,
             }),
             _ => Err(ClientError::OutOfTurn),
