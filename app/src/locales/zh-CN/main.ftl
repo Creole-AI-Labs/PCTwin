@@ -1217,6 +1217,7 @@ qs-choose-continue = 检查这些文件
 qs-check-title = 检查你要分享的内容。
 qs-check-body = 在这些文件离开这台笔记本电脑之前，请检查一遍。
 qs-check-included = 包含
+qs-file-type = 类型：.{ $ext }
 qs-check-shared-note = 另一台笔记本电脑能看到这些文件的名称、大小和日期。
 qs-check-changed = { $name }在你选择后有变化。请再次检查。
 qs-check-ack = 我已检查这些文件

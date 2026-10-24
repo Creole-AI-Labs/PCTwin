@@ -1302,6 +1302,7 @@ qs-choose-continue = Check these files
 qs-check-title = Check what you are sharing.
 qs-check-body = Look over these files before they leave this laptop.
 qs-check-included = Included
+qs-file-type = Type: .{ $ext }
 qs-check-shared-note = The other laptop sees these files’ names, sizes and dates.
 qs-check-changed = { $name } changed since you chose it. Check it again.
 qs-check-ack = I have checked these files

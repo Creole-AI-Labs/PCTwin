@@ -1427,6 +1427,7 @@ qs-choose-continue = इन फ़ाइलों की जाँच करे�
 qs-check-title = जाँच लें कि क्या शेयर हो रहा है।
 qs-check-body = इस लैपटॉप से जाने से पहले इन फ़ाइलों को एक बार देख लें।
 qs-check-included = शामिल
+qs-file-type = प्रकार: .{ $ext }
 qs-check-shared-note = दूसरा लैपटॉप इन फ़ाइलों के नाम, साइज़ और तारीख़ें देखता है।
 qs-check-changed = चुनने के बाद { $name } बदल गया है। इसे फिर से जाँचें।
 qs-check-ack = मैंने इन फ़ाइलों की जाँच कर ली है

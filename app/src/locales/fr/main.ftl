@@ -1472,6 +1472,7 @@ qs-choose-continue = Vérifier ces fichiers
 qs-check-title = Vérifiez ce que vous partagez.
 qs-check-body = Relisez ces fichiers avant qu’ils quittent cet ordinateur portable.
 qs-check-included = Inclus
+qs-file-type = Type : .{ $ext }
 qs-check-shared-note = L’autre ordinateur portable voit le nom, la taille et la date de ces fichiers.
 qs-check-changed = { $name } a changé depuis votre choix. Vérifiez-le à nouveau.
 qs-check-ack = J’ai vérifié ces fichiers

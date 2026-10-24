@@ -1467,6 +1467,7 @@ qs-choose-continue = Verificar estes arquivos
 qs-check-title = Confira o que você vai compartilhar.
 qs-check-body = Revise estes arquivos antes que saiam deste notebook.
 qs-check-included = Incluído
+qs-file-type = Tipo: .{ $ext }
 qs-check-shared-note = O outro notebook vê os nomes, tamanhos e datas destes arquivos.
 qs-check-changed = { $name } mudou desde que você escolheu. Verifique de novo.
 qs-check-ack = Já conferi estes arquivos

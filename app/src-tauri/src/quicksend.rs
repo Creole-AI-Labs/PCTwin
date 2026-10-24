@@ -133,10 +133,30 @@ fn offered(files: Vec<pctwin_quicksend::OfferedFile>) -> Vec<OfferedView> {
         .into_iter()
         .map(|f| OfferedView {
             id: f.id.to_hex(),
-            path: f.path,
+            path: shown_safely(&f.path),
             size: f.size,
         })
         .collect()
+}
+
+/// A name or path as the screens may show it: characters that reorder or hide text (direction
+/// overrides, isolates and marks) and control characters are shown as their code ("[U+202E]"), so
+/// a name from another laptop can never look like something else ("invoice\u{202E}fdp.exe" would
+/// show as "invoiceexe.pdf"). The file keeps its real name; only what is shown changes.
+fn shown_safely(name: &str) -> String {
+    let hidden = |c: char| {
+        c.is_control()
+            || matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    };
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if hidden(c) {
+            out.push_str(&format!("[U+{:04X}]", c as u32));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// How one file ended, as the screens show it.
@@ -187,17 +207,17 @@ fn receipt_view(side: &'static str, r: &Receipt, stopped: bool) -> ReceiptView {
             .lines
             .iter()
             .map(|l| LineView {
-                path: l.path.clone(),
+                path: shown_safely(&l.path),
                 outcome: match &l.outcome {
                     Outcome::Arrived { landed_as } => OutcomeView::Arrived {
-                        landed_as: landed_as.clone(),
+                        landed_as: shown_safely(landed_as),
                     },
                     Outcome::AlreadyThere { landed_as } => OutcomeView::AlreadyThere {
-                        landed_as: landed_as.clone(),
+                        landed_as: shown_safely(landed_as),
                     },
                     Outcome::Declined => OutcomeView::Declined,
                     Outcome::NeedsAction { landed_as, why } => OutcomeView::NeedsAction {
-                        landed_as: landed_as.clone(),
+                        landed_as: shown_safely(landed_as),
                         why: why.clone(),
                         word: (why == pctwin_quicksend::MARK_NOT_KEPT).then_some("mark-not-kept"),
                     },
@@ -702,6 +722,41 @@ mod tests {
         assert_eq!(json["lines"][0]["outcome"]["kind"], "arrived");
         assert_eq!(json["lines"][1]["outcome"]["kind"], "needs-action");
         assert_eq!(json["lines"][2]["outcome"]["kind"], "declined");
+    }
+
+    /// Exit-gate review (24 October 2026): a name that reorders itself when shown
+    /// (`invoice\u{202E}fdp.exe` shows as "invoiceexe.pdf") or hides control characters is shown
+    /// with them as their codes, on the offer and on the receipt; plain names are unchanged.
+    #[test]
+    fn a_name_that_reorders_or_hides_text_is_shown_with_its_codes() {
+        assert_eq!(
+            shown_safely("Docs/invoice\u{202E}fdp.exe"),
+            "Docs/invoice[U+202E]fdp.exe"
+        );
+        assert_eq!(
+            shown_safely("a\u{2066}b\u{0007}c\u{0085}"),
+            "a[U+2066]b[U+0007]c[U+0085]"
+        );
+        assert_eq!(shown_safely("Holiday/été 2.jpg"), "Holiday/été 2.jpg");
+        let files = offered(vec![pctwin_quicksend::OfferedFile {
+            id: ItemId::from_hex(&"0".repeat(32)).unwrap(),
+            path: "invoice\u{202E}fdp.exe".into(),
+            size: 1,
+        }]);
+        assert_eq!(files[0].path, "invoice[U+202E]fdp.exe");
+        let r = Receipt {
+            lines: vec![pctwin_quicksend::ReceiptLine {
+                path: "invoice\u{202E}fdp.exe".into(),
+                outcome: Outcome::Arrived {
+                    landed_as: "invoice\u{202E}fdp.exe".into(),
+                },
+            }],
+        };
+        let v = receipt_view("receiver", &r, false);
+        assert_eq!(v.lines[0].path, "invoice[U+202E]fdp.exe");
+        assert!(
+            matches!(&v.lines[0].outcome, OutcomeView::Arrived { landed_as } if landed_as == "invoice[U+202E]fdp.exe")
+        );
     }
 
     #[test]

@@ -141,9 +141,33 @@ export type HistoryEntry =
 
 /* ---------- Rules the words depend on ---------- */
 
+/**
+ * A name as the screens may show it: characters that reorder or hide text (right-to-left and other
+ * direction overrides and isolates, direction marks) and control characters are shown as their code
+ * ("[U+202E]"), so a name from another laptop can never look like something else
+ * ("invoice\u202Efdp.exe" would show as "invoiceexe.pdf").
+ */
+export function shownSafely(name: string): string {
+  const hidden = (c: number) =>
+    c <= 0x1f || (c >= 0x7f && c <= 0x9f) || c === 0x61c || c === 0x200e || c === 0x200f || (c >= 0x202a && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
+  let out = "";
+  for (const ch of name) {
+    const c = ch.codePointAt(0) ?? 0;
+    out += hidden(c) ? `[U+${c.toString(16).toUpperCase().padStart(4, "0")}]` : ch;
+  }
+  return out;
+}
+
 export function fileName(path: string): string {
   const parts = path.split("/").filter(Boolean);
-  return parts.length === 0 ? path : parts[parts.length - 1];
+  return shownSafely(parts.length === 0 ? path : parts[parts.length - 1]);
+}
+
+/** The real type of a file by its name, as the system will treat it: what follows its last dot ("exe"), or null. */
+export function extensionOf(path: string): string | null {
+  const name = path.split("/").filter(Boolean).pop() ?? path;
+  const at = name.lastIndexOf(".");
+  return at > 0 && at < name.length - 1 ? shownSafely(name.slice(at + 1)) : null;
 }
 
 export function totalBytes(files: readonly { size: number }[]): number {

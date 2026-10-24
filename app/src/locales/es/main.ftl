@@ -1463,6 +1463,7 @@ qs-choose-continue = Revisar estos archivos
 qs-check-title = Revisa lo que vas a compartir.
 qs-check-body = Mira bien estos archivos antes de que salgan de este portátil.
 qs-check-included = Incluido
+qs-file-type = Tipo: .{ $ext }
 qs-check-shared-note = El otro portátil ve el nombre, el tamaño y la fecha de estos archivos.
 qs-check-changed = { $name } cambió desde que lo elegiste. Revísalo de nuevo.
 qs-check-ack = Ya revisé estos archivos

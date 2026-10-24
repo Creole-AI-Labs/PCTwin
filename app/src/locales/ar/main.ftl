@@ -1614,6 +1614,7 @@ qs-choose-continue = التحقق من هذه الملفات
 qs-check-title = تحقق مما ستشاركه.
 qs-check-body = راجع هذه الملفات قبل أن تغادر هذا الحاسوب المحمول.
 qs-check-included = مضمّن
+qs-file-type = النوع: .{ $ext }
 qs-check-shared-note = يرى الحاسوب المحمول الآخر أسماء هذه الملفات وأحجامها وتواريخها.
 qs-check-changed = تغيّر { $name } منذ أن اخترته. تحقق منه مرة أخرى.
 qs-check-ack = لقد تحققت من هذه الملفات
