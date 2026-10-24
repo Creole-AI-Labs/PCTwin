@@ -450,6 +450,21 @@ async fn a_record_that_is_not_a_fresh_scan_is_refused() {
 }
 
 #[tokio::test]
+async fn the_old_laptop_cannot_name_a_list_that_never_crossed() {
+    // Only the new laptop records which paged list crossed; a whole record sent by the old
+    // laptop that already names one is claiming something that did not happen.
+    let mut r = record(2);
+    r.inventory = Some(
+        pctwin_record::encode_inventory(&r.source_laptop, &r.items)
+            .unwrap()
+            .fingerprint(),
+    );
+    let (got, _) = hostile(honest(&r.to_json())).await;
+    let why = refused(got);
+    assert!(why.contains("list"), "{why}");
+}
+
+#[tokio::test]
 async fn the_old_laptop_cannot_decide_where_shared_things_go() {
     let mut r = record(2);
     r.mapping.shared = SharedTarget::Skip;
@@ -620,6 +635,17 @@ async fn hostile_paged(frames: Vec<Vec<u8>>) -> Result<Record, TransferError> {
     receive_inventory(&mut new, PAGED).await
 }
 
+/// The record the new laptop builds from `sent`'s pages: the same, naming the list that crossed.
+fn as_sent(sent: &Record) -> Record {
+    let mut want = sent.clone();
+    want.inventory = Some(
+        pctwin_record::encode_inventory(&sent.source_laptop, &sent.items)
+            .unwrap()
+            .fingerprint(),
+    );
+    want
+}
+
 #[tokio::test]
 async fn a_large_list_crosses_in_pages_and_arrives_exactly() {
     let sent = record(25_000);
@@ -629,14 +655,14 @@ async fn a_large_list_crosses_in_pages_and_arrives_exactly() {
         receive_inventory(&mut new, PAGED)
     );
     s.unwrap();
-    assert_eq!(r.unwrap(), sent);
+    assert_eq!(r.unwrap(), as_sent(&sent));
 }
 
 #[tokio::test]
 async fn the_paged_list_is_what_a_good_sender_sends_frame_for_frame() {
     let sent = record(12_000);
     let frames = paged_frames(&sent);
-    assert_eq!(hostile_paged(frames).await.unwrap(), sent);
+    assert_eq!(hostile_paged(frames).await.unwrap(), as_sent(&sent));
 }
 
 #[tokio::test]
@@ -806,7 +832,10 @@ async fn a_device_bound_item_marked_to_move_is_refused_in_pages() {
     sent.items[1].inclusion = Inclusion::LeftOut {
         reason: pctwin_record::LeftOutReason::DeviceBound,
     };
-    assert_eq!(hostile_paged(paged_frames(&sent)).await.unwrap(), sent);
+    assert_eq!(
+        hostile_paged(paged_frames(&sent)).await.unwrap(),
+        as_sent(&sent)
+    );
 }
 
 /// A paired sender that keeps sending pages cannot grow the new laptop's memory without limit:
@@ -910,4 +939,29 @@ async fn the_personal_order_crosses_from_protocol_4_and_never_before() {
             assert!(got.personal.is_empty(), "protocol {version}");
         }
     }
+}
+
+/// Scan record version 2, point 6: the inventory's fingerprint, taken over the bytes exactly as
+/// they crossed, stays with the record the new laptop builds from it, so the plan the person
+/// approves names the very inventory that arrived (not a re-encoding of it).
+#[tokio::test]
+async fn the_record_built_from_pages_names_the_inventory_that_crossed() {
+    let sent = record(5);
+    let (mut old, mut new) = pair();
+    let (s, r) = tokio::join!(
+        send_inventory(&mut old, &sent, PAGED),
+        receive_inventory(&mut new, PAGED)
+    );
+    s.unwrap();
+    let got = r.unwrap();
+    let crossed = pctwin_record::encode_inventory(&sent.source_laptop, &sent.items)
+        .unwrap()
+        .fingerprint();
+    assert_eq!(got.inventory, Some(crossed));
+    // The plan's own fingerprint (what an approval holds) depends on it.
+    let mut other = got.clone();
+    other.inventory = None;
+    assert_ne!(got.fingerprint(), other.fingerprint());
+    // Kept through every revision the new laptop makes.
+    assert_eq!(got.next_revision().inventory, Some(crossed));
 }

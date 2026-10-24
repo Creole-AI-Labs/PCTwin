@@ -552,6 +552,13 @@ pub struct Record {
     /// fingerprinted exactly as before.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub personal: Vec<ItemId>,
+    /// On the new laptop, a record built from the old laptop's paged list (scan inventory version
+    /// 2 and later): the fingerprint of that list, taken over its bytes exactly as they crossed
+    /// (Scan record version 2, point 6). It counts in this record's own fingerprint, so the plan
+    /// the person approves names the very list that arrived, never a re-encoding of it. Written
+    /// only when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<Fingerprint>,
 }
 
 /// Most items in the personal order (the most recently used are kept).
@@ -580,6 +587,7 @@ impl Record {
                 shared: SharedTarget::SharedFolder,
             },
             personal: Vec::new(),
+            inventory: None,
         }
     }
 

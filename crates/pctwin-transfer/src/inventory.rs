@@ -237,10 +237,11 @@ async fn receive_paged(ch: &mut impl Channel) -> Result<Record, TransferError> {
     drop(bytes);
     let laptop = reader.laptop();
     let personal = reader.personal().to_vec();
-    reader.finish().map_err(|e| refused(&e.to_string()))?;
+    let crossed = reader.finish().map_err(|e| refused(&e.to_string()))?;
     let mut record = Record::new(laptop);
     record.items = items;
     record.personal = personal;
+    record.inventory = Some(crossed);
     record.validate().map_err(|e| refused(&e.to_string()))?;
     Ok(record)
 }
@@ -340,6 +341,10 @@ async fn receive_json(ch: &mut impl Channel) -> Result<Record, TransferError> {
     // A scan is always the first revision; revisions are made on this laptop.
     if record.revision != 1 || record.previous.is_some() {
         return Err(refused("it is not a fresh scan"));
+    }
+    // Only this laptop records which paged list crossed, and none did on this route.
+    if record.inventory.is_some() {
+        return Err(refused("it names a list that never crossed"));
     }
     if !undecided(&record) {
         return Err(refused(
