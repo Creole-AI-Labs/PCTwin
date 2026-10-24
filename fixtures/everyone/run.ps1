@@ -204,7 +204,9 @@ $e = Get-Content (Join-Path $admin 'evidence-none.json') -Raw | ConvertFrom-Json
 $unreadable = (@($e.blind_spots) | Where-Object { $_.reason -eq 'access-not-readable' } | Measure-Object -Property count -Sum).Sum
 if ($locked -gt 0 -and $unreadable -lt 1) { throw 'without an administrator, the places the mover could not read are not counted' }
 if ($unreadable -gt 0 -and $e.top_line.line -eq 'everything') { throw 'the report says everything moved, though places could not be read' }
-if (-not $e.others -or (@($e.declined) | Sort-Object) -join ',' -ne (@($e.others) | Sort-Object) -join ',') {
+$declined = (@($e.declined) | Sort-Object) -join ','
+$others = (@($e.others) | Sort-Object) -join ','
+if (-not $e.others -or $declined -ne $others) {
     throw 'without an administrator, the others must be listed, and none scanned'
 }
 Write-Host 'everyone in one move: passed'
