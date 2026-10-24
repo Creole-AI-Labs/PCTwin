@@ -169,12 +169,32 @@ fn launch(
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = prompt;
+        // Windows' and Linux's own prompts cannot name the people: a native box does, before
+        // them, with the names filled in here (never by the screens). No, or no words: nothing
+        // is started.
+        if !confirmed(prompt, |words| {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Warning)
+                .set_title("PCTwin")
+                .set_description(words)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show()
+                == rfd::MessageDialogResult::Ok
+        }) {
+            return Ok(Launched::Refused);
+        }
         Ok(match launch_elevated(mover, approve, laptop, stopped)? {
             Some(c) => Launched::Connected(c),
             None => Launched::Refused,
         })
     }
+}
+
+/// Windows and Linux: whether the person said yes to `prompt` (the people's names filled in) in
+/// the native box `ask` shows. Empty words never ask, and are a no.
+#[cfg(any(not(target_os = "macos"), test))]
+fn confirmed(prompt: &str, ask: impl FnOnce(&str) -> bool) -> bool {
+    !prompt.is_empty() && ask(prompt)
 }
 
 /// A Mac: switches the launch daemon on, asks an administrator in macOS's own window showing
@@ -332,6 +352,23 @@ pub fn ask_for(
 #[cfg(test)]
 mod approve_tests {
     use super::approve_prompt;
+
+    /// The native box before the system's prompt: shown with the names, its no is a no, and
+    /// words that could not be made are a no without asking.
+    #[test]
+    fn the_names_are_confirmed_before_the_system_prompt() {
+        use super::confirmed;
+        let names = vec!["Bea".to_string(), "Carl".to_string()];
+        let words = approve_prompt("PCTwin will read the files of {names}.", &names).unwrap();
+        let shown = std::cell::RefCell::new(String::new());
+        assert!(confirmed(&words, |w| {
+            shown.replace(w.to_string());
+            true
+        }));
+        assert_eq!(*shown.borrow(), "PCTwin will read the files of Bea, Carl.");
+        assert!(!confirmed(&words, |_| false));
+        assert!(!confirmed("", |_| panic!("never asked without words")));
+    }
 
     #[test]
     fn the_administrator_window_names_the_people_in_the_persons_words() {
