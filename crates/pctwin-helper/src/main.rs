@@ -323,6 +323,7 @@ fn daemon_main() -> ExitCode {
 
 #[cfg(target_os = "macos")]
 fn daemon() -> Result<(), String> {
+    use pctwin_helper::accepting::{Accepted, OPENING_TIME, first_opening};
     use pctwin_helper::opening::{NotOpened, open};
     use pctwin_helper_os::daemon::{CHANNEL_DIR, CHANNEL_SOCKET, WAITS_SECS};
     use pctwin_helper_os::{Account, ChannelDir, SocketServer, approval};
@@ -367,39 +368,45 @@ fn daemon() -> Result<(), String> {
             std::process::exit(0);
         }
     });
-    // Connections are taken one at a time until a move is opened, or the time above runs out:
-    // a refused caller never uses up the daemon, and one that says nothing is let go after a few
-    // seconds, so it cannot hold the move's place (found by the fresh-context review).
-    loop {
-        let (mut stream, caller) = server.accept().map_err(|e| e.to_string())?;
-        let Account::Uid(mover) = caller.account else {
-            continue;
+    // Callers are taken as they come, each with a few seconds in all to open a move and at most
+    // one waiting per account, until a move is opened or the time above runs out: a refused
+    // caller never uses up the daemon, and callers that say nothing (or say it slowly) never
+    // queue the real mover behind them (second fresh-context review).
+    let accept = move || {
+        let (stream, caller) = server.accept().map_err(|e| e.to_string())?;
+        // Anyone the system cannot name by user ID is never served (as root is not).
+        let uid = match caller.account {
+            Account::Uid(uid) => uid,
+            _ => 0,
         };
-        if mover == 0 {
-            continue;
-        }
-        if stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .is_err()
-        {
-            continue;
-        }
+        // Each read has the opening's time at most, and the whole opening is cut off after it.
+        let _ = stream.set_read_timeout(Some(OPENING_TIME));
+        let cutter = stream.try_clone().ok();
+        Ok(Accepted {
+            stream,
+            uid,
+            cut: Box::new(move || {
+                if let Some(c) = cutter {
+                    let _ = c.shutdown(std::net::Shutdown::Both);
+                }
+            }),
+        })
+    };
+    let open_move = |stream: &mut std::os::unix::net::UnixStream, uid: u32| {
         let mut holds =
             |a: &approval::Approval| approval::approval_holds(a).map_err(|e| e.to_string());
-        match open(&mut stream, &mover.to_string(), &mut holds) {
-            Ok(o) => {
-                opened.store(true, Ordering::Release);
-                stream.set_read_timeout(None).map_err(|e| e.to_string())?;
-                return serve_unix(&mut stream, mover, o.session, o.approve, o.laptop);
-            }
-            Err(NotOpened::NotApproved) => {
-                eprintln!("pctwin-helper: account {mover}: not approved");
-            }
-            Err(NotOpened::Malformed(why) | NotOpened::Channel(why)) => {
-                eprintln!("pctwin-helper: account {mover}: {why}");
-            }
+        open(stream, &uid.to_string(), &mut holds)
+    };
+    let log = |uid: u32, why: &NotOpened| match why {
+        NotOpened::NotApproved => eprintln!("pctwin-helper: account {uid}: not approved"),
+        NotOpened::Malformed(why) | NotOpened::Channel(why) => {
+            eprintln!("pctwin-helper: account {uid}: {why}");
         }
-    }
+    };
+    let (mut stream, mover, o) = first_opening(accept, open_move, OPENING_TIME, log)?;
+    opened.store(true, Ordering::Release);
+    stream.set_read_timeout(None).map_err(|e| e.to_string())?;
+    serve_unix(&mut stream, mover, o.session, o.approve, o.laptop)
 }
 
 #[cfg(test)]
