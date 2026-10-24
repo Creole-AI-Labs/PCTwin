@@ -681,3 +681,84 @@ async fn the_missing_pieces_are_offered_and_sent_once_more_and_nothing_else() {
         big.len()
     );
 }
+
+/// Everything under `dir`, as paths relative to it, sorted.
+fn every_file(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_dir() {
+                todo.push(e.path());
+            } else {
+                let rel = e
+                    .path()
+                    .strip_prefix(dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// QS06: an archive, a program, a document with macros and a shortcut arrive exactly as sent:
+/// nothing is unpacked, opened or run, and nothing appears beside them.
+#[tokio::test]
+async fn harmful_looking_files_arrive_as_they_are_and_nothing_is_unpacked_or_run() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    // A zip's own header and a tiny archive-bomb-like body; a Windows program's header; a
+    // macro document; a Windows shortcut.
+    let mut bomb = b"PK\x03\x04".to_vec();
+    bomb.extend(std::iter::repeat_n(0u8, 4096));
+    let things: Vec<(&str, Vec<u8>)> = vec![
+        ("bomb.zip", bomb),
+        ("setup.exe", b"MZ\x90\x00not really a program".to_vec()),
+        (
+            "report.docm",
+            b"PK\x03\x04[Content_Types].xml vbaProject.bin".to_vec(),
+        ),
+        ("open me.lnk", b"L\x00\x00\x00\x01\x14\x02\x00".to_vec()),
+    ];
+    for (name, bytes) in &things {
+        write(&old.path().join(name), bytes);
+    }
+    let picked: Vec<_> = things.iter().map(|(n, _)| old.path().join(n)).collect();
+    let (_, received) = run(
+        Offer::of(&picked).unwrap(),
+        async |incoming: Incoming, ch: &mut Mem| {
+            Some(
+                incoming
+                    .accept(ch, dest.path(), None, &journal(jdir.path()), "1001")
+                    .await
+                    .unwrap(),
+            )
+        },
+    )
+    .await;
+    let received = received.unwrap();
+    for (name, bytes) in &things {
+        assert!(
+            matches!(outcome(&received, name), Outcome::Arrived { .. }),
+            "{name}"
+        );
+        assert_eq!(
+            &std::fs::read(dest.path().join(name)).unwrap(),
+            bytes,
+            "{name} unchanged"
+        );
+    }
+    let mut want: Vec<String> = things.iter().map(|(n, _)| (*n).to_string()).collect();
+    want.sort();
+    assert_eq!(
+        every_file(dest.path()),
+        want,
+        "nothing unpacked or made beside them"
+    );
+}
