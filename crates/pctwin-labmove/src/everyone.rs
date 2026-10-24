@@ -108,22 +108,42 @@ impl pctwin_scan::AccessReader for CountedReads {
     }
 }
 
+/// Whether `path` is one of `folders` or inside one: compared folder by folder, without case,
+/// either separator, and the long `\\?\` form the same as the short one.
+pub fn is_inside_any(path: &str, folders: &[PathBuf]) -> bool {
+    let parts = |s: &str| -> Vec<String> {
+        let s = s.strip_prefix(r"\\?\").unwrap_or(s);
+        s.split(['\\', '/'])
+            .filter(|p| !p.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let path = parts(path);
+    folders.iter().any(|f| {
+        let f = parts(&f.to_string_lossy());
+        !f.is_empty() && path.len() >= f.len() && path[..f.len()] == f[..]
+    })
+}
+
 /// Lab only: leaves out of `sweep`'s record every item of a place at or inside one of
 /// `folders`. How many were left out.
 pub fn leave_out_folders(sweep: &mut pctwin_scan::Sweep, folders: &[PathBuf]) -> usize {
     if folders.is_empty() {
         return 0;
     }
-    let inside = |p: &std::path::Path| {
-        folders
-            .iter()
-            .any(|f| leaves_out(std::slice::from_ref(f), p) || p.starts_with(f))
-    };
+    // Matched on the places' own paths, as the stage log names them (not the roots kept for the
+    // helper, which on Windows are written the long way, `\\?\C:\...`, and never matched).
     let gone: std::collections::BTreeSet<usize> = sweep
-        .item_roots
+        .places
         .iter()
-        .filter(|(_, root)| inside(root))
-        .map(|(p, _)| *p)
+        .enumerate()
+        .filter(|(_, place)| {
+            place
+                .path
+                .as_deref()
+                .is_some_and(|path| is_inside_any(path, folders))
+        })
+        .map(|(n, _)| n)
         .collect();
     let place_of: HashMap<_, _> = sweep.placed_by.iter().copied().collect();
     let before = sweep.record.items.len();

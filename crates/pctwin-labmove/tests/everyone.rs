@@ -216,3 +216,23 @@ fn the_lab_leaves_out_only_the_drives_it_names() {
         std::path::Path::new(r"C:\")
     ));
 }
+
+/// The lab's left-out folders match the places as the sweep names them, written either way:
+/// the short and the long Windows forms, any case, either separator; never a folder that only
+/// begins with the same letters.
+#[test]
+fn a_left_out_folder_matches_its_places_however_they_are_written() {
+    let folders = vec![
+        std::path::PathBuf::from(r"C:\Julia"),
+        std::path::PathBuf::from("/srv/runner"),
+    ];
+    let inside = |p: &str| pctwin_labmove::everyone::is_inside_any(p, &folders);
+    assert!(inside(r"C:\Julia"));
+    assert!(inside(r"C:\Julia\bin\julia.exe"));
+    assert!(inside(r"\\?\C:\Julia\lib"));
+    assert!(inside(r"c:/julia/share"));
+    assert!(inside("/srv/runner/work"));
+    assert!(!inside(r"C:\JuliaData"));
+    assert!(!inside(r"C:\Users\mover\Julia"));
+    assert!(!inside("/srv"));
+}
