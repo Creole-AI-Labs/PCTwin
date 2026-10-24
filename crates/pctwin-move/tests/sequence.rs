@@ -1025,3 +1025,120 @@ async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() 
         }
     }
 }
+
+/// Records the order the new laptop finished files in: which stream each start named, and each
+/// "done" it answered, seen on its own connection.
+struct Watched {
+    inner: Mem,
+    streams: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u32, ItemId>>>,
+    finished: std::sync::Arc<std::sync::Mutex<Vec<ItemId>>>,
+}
+
+impl Channel for Watched {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        if let Ok(pctwin_transfer::Message::FileDone { stream, ok: true }) =
+            pctwin_transfer::Message::decode(data)
+            && let Some(item) = self.streams.lock().unwrap().get(&stream)
+        {
+            self.finished.lock().unwrap().push(*item);
+        }
+        self.inner.send(data).await
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        let data = self.inner.recv().await?;
+        if let Ok(pctwin_transfer::Message::StartFile { stream, item, .. }) =
+            pctwin_transfer::Message::decode(&data)
+        {
+            self.streams.lock().unwrap().insert(stream, item);
+        }
+        Ok(data)
+    }
+}
+
+/// A move of many pictures, of which the person's own essentials (the record's personal order)
+/// are three near the end of the list: the order the new laptop finished them in, and how each
+/// ended.
+async fn finish_order(
+    personal: &[usize],
+) -> (Vec<ItemId>, Vec<ItemId>, Vec<Option<ReceiveOutcome>>) {
+    let w = world();
+    let mut record = w.record.clone();
+    let pictures: Vec<Item> = (0..24)
+        .map(|n| {
+            let p = item(
+                FolderRole::Pictures,
+                &["Holiday", &format!("photo {n:02}.jpg")],
+                ItemKind::File,
+                64,
+                Inclusion::Included,
+            );
+            write(&source_in(w.old.path(), &p), &[n as u8; 64]);
+            p
+        })
+        .collect();
+    record.items.extend(pictures.iter().cloned());
+    record.personal = personal.iter().map(|n| pictures[*n].id).collect();
+    record.validate().unwrap();
+    let plan = send_plan(&record, |i| Some(source_in(w.old.path(), i)), landing);
+    let (mut old, new) = mem_pair();
+    let finished = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut new = Watched {
+        inner: new,
+        streams: Default::default(),
+        finished: finished.clone(),
+    };
+    let mut steps = person(true);
+    let (quiet, quiet_old) = (Live::default(), Live::default());
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send(&mut old, &record, plan, &quiet_old),
+            pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &quiet),
+        )
+    })
+    .await;
+    sent.unwrap();
+    let received = received.unwrap();
+    let order = finished.lock().unwrap().clone();
+    let outcomes = received.files.iter().map(|f| f.outcome.clone()).collect();
+    (order, record.personal.clone(), outcomes)
+}
+
+/// The person's own essentials (Task List 1.5) are sent and finished on the new laptop before
+/// anything else, in their order; everything still ends as it would.
+#[tokio::test]
+async fn the_persons_own_essentials_arrive_before_anything_else() {
+    let (order, personal, outcomes) = finish_order(&[21, 19, 23]).await;
+    // All of them before anything else (side by side, a few files are sent at once, so among
+    // themselves they may end in any order).
+    let first: std::collections::BTreeSet<ItemId> =
+        order[..personal.len()].iter().copied().collect();
+    let wanted: std::collections::BTreeSet<ItemId> = personal.iter().copied().collect();
+    assert_eq!(first, wanted, "{order:?}");
+    assert!(
+        outcomes
+            .iter()
+            .all(|o| matches!(o, Some(ReceiveOutcome::Finished(_)))),
+        "{outcomes:?}"
+    );
+}
+
+/// With no essentials of the person's own, the move goes as it always did: nothing is put in
+/// the personal tier, and every file ends as before.
+#[tokio::test]
+async fn a_move_with_no_personal_essentials_goes_as_before() {
+    let (order, personal, outcomes) = finish_order(&[]).await;
+    assert!(personal.is_empty());
+    assert_eq!(order.len(), outcomes.len());
+    assert!(
+        outcomes
+            .iter()
+            .all(|o| matches!(o, Some(ReceiveOutcome::Finished(_)))),
+        "{outcomes:?}"
+    );
+    let w = world();
+    assert!(
+        pctwin_move::move_order(&w.record)
+            .iter()
+            .all(|(_, tier)| *tier != pctwin_transfer::Tier::Personal)
+    );
+}
