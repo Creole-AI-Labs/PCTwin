@@ -259,12 +259,22 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     if args.helper.is_some() {
         pctwin_helper::harden_engine()?;
     }
+    // Where the move got to, to the log (stderr), so a run that never ends still says where.
+    let began = Instant::now();
+    let stage = |what: &str| eprintln!("[{:>6.1} s] {what}", began.elapsed().as_secs_f64());
+    stage("finding the mover's things");
     let laptop = args.laptop;
     let mut sweep = tokio::task::spawn_blocking(move || {
         pctwin_scan::sweep_this_laptop(laptop, &AtomicBool::new(false), &mut |_| {}, None)
     })
     .await
     .map_err(err)?;
+    stage(&format!(
+        "found: {} places, {} items, {} blind spots",
+        sweep.places.len(),
+        sweep.record.items.len(),
+        sweep.blind_spots.len()
+    ));
     let me = sweep.census.me.clone();
     let others: Vec<String> = sweep
         .census
@@ -291,6 +301,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     let mut declined = Vec::new();
     if let Some(helper) = &helper {
         for person in &others {
+            stage(&format!("the helper scans {person}"));
             let answer = helper.lock().map_err(err)?.scan_person(person);
             match answer {
                 Ok(s) => scanned.push((person.clone(), s)),
@@ -399,6 +410,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         targets,
         rules: rules.clone(),
     };
+    stage(&format!("moving {} files", plan.jobs.len()));
     let (mut a, mut b) = mem_pair();
     let (here, there) = (Live::default(), Live::default());
     let (sent, received) = tokio::join!(
@@ -406,6 +418,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         pctwin_move::receive(&mut b, &mut steps, &table, &journal, &me, &there),
     );
     let (sent, received) = (sent.map_err(err)?, received.map_err(err)?);
+    stage("moved; handing over");
 
     let mut planted_links = Vec::new();
     if args.hostile {

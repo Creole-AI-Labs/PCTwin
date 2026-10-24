@@ -141,11 +141,21 @@ Start-Sleep -Seconds 5
 $engineProbe = 'try { if ((Get-Process -Id ' + $run.Id + ').Modules.Count -gt 0) { exit 0 } else { exit 1 } } catch { exit 1 }'
 $lookEngine = Start-As $mover 'powershell.exe' @('-NoProfile', '-NonInteractive', '-Command', $engineProbe) (Join-Path $admin 'engine-look.out.txt') (Join-Path $admin 'engine-look.err.txt')
 if ((Wait-Exit $lookEngine 'the mover looking into their engine') -eq 0) { throw 'the mover read their own engine while it carried other people''s things' }
-if ((Wait-Exit $run 'the move') -ne 0) {
-    Get-Content (Join-Path $moverDir 'log.txt') -ErrorAction SilentlyContinue | Write-Host
-    throw 'the move failed'
+# The mover's log (where the move got to, stage by stage) is kept with the evidence whatever
+# happens, a move that never ends included: stopped, then saved, then the reason.
+try {
+    if ((Wait-Exit $run 'the move') -ne 0) { throw 'the move failed' }
+    $null = Wait-Exit $helper 'the helper'
+} catch {
+    Stop-Process -Id $run.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    throw
+} finally {
+    Copy-Item (Join-Path $moverDir 'log.txt') (Join-Path $admin 'mover-log.txt') -ErrorAction SilentlyContinue
+    Get-Content (Join-Path $admin 'mover-log.txt') -ErrorAction SilentlyContinue | Write-Host
+    Get-Content (Join-Path $admin 'helper-3.err.txt') -ErrorAction SilentlyContinue | Write-Host
 }
-$null = Wait-Exit $helper 'the helper'
 
 python (Join-Path $here 'plant.py') key (Join-Path $admin 'planted.json') $mover $newHome (Join-Path $admin 'evidence.json') (Join-Path $admin 'key.json')
 if ($LASTEXITCODE -ne 0) { throw 'the key could not be written' }
