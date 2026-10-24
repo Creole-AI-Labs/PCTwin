@@ -364,12 +364,27 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     }
     let people: Vec<Scanned> = scanned.iter().map(|(_, s)| s.clone()).collect();
     // The helper, which can read every folder's permissions, says which of the places the mover
-    // could not read are the administrators' and the system's only: those are named.
-    let system_only: Vec<PathBuf> = people
-        .iter()
-        .flat_map(|p| p.system_only.iter().cloned())
-        .collect();
-    sweep.name_system_only(&system_only);
+    // could not read are the administrators' and the system's only: the mover asks about its own
+    // and hears yes or no for each; those are named.
+    if let Some(helper) = &helper {
+        let mine: Vec<PathBuf> = sweep.unreadable_places.values().cloned().collect();
+        let mut system_only = Vec::new();
+        for batch in mine.chunks(pctwin_helper::MAX_SYSTEM_ASK) {
+            let answers = helper
+                .lock()
+                .map_err(err)?
+                .system_only(batch)
+                .map_err(|e| format!("asking the helper: {e}"))?;
+            system_only.extend(
+                batch
+                    .iter()
+                    .zip(answers)
+                    .filter(|(_, yes)| *yes)
+                    .map(|(p, _)| p.clone()),
+            );
+        }
+        sweep.name_system_only(&system_only);
+    }
     let handles = add_people(&mut record, &people);
     record.validate().map_err(err)?;
 

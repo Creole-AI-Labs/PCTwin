@@ -39,6 +39,11 @@ pub struct Session<'s> {
     /// This move's holding area, once made, and each person's folder in it.
     area: Option<std::path::PathBuf>,
     held: BTreeMap<String, std::path::PathBuf>,
+    /// The places the helper's own sweep found only the administrators and the system may open,
+    /// outside every home: kept here, never sent; only yes or no about the mover's own places.
+    system_only: Vec<std::path::PathBuf>,
+    /// Places asked about so far (at most [`crate::MAX_SYSTEM_ASKED`]).
+    asked: usize,
 }
 
 impl<'s> Session<'s> {
@@ -54,6 +59,8 @@ impl<'s> Session<'s> {
             made: BTreeMap::new(),
             area: None,
             held: BTreeMap::new(),
+            system_only: Vec::new(),
+            asked: 0,
         }
     }
 
@@ -242,6 +249,10 @@ impl<'s> Session<'s> {
                     return Ok(());
                 }
                 Request::ScanPerson { account } => self.scan(channel, &account)?,
+                Request::SystemOnly { paths } => {
+                    let answer = self.system_only(&paths);
+                    send_answer(channel, &answer)?;
+                }
                 Request::ReadBlocks {
                     handle,
                     offset,
@@ -281,12 +292,45 @@ impl<'s> Session<'s> {
         }
     }
 
+    /// Which of `paths` (the mover's own places it could not read) this helper's sweep found only
+    /// the administrators and the system may open: yes or no for each, in order. Before any
+    /// scan, every answer is no; too many places, or one too long, is refused.
+    fn system_only(&mut self, paths: &[String]) -> Answer {
+        if paths.len() > crate::MAX_SYSTEM_ASK
+            || paths.iter().any(|p| p.len() > crate::MAX_SYSTEM_PATH)
+            || self.asked.saturating_add(paths.len()) > crate::MAX_SYSTEM_ASKED
+        {
+            return Answer::Refused(Refusal::TooMuch);
+        }
+        self.asked += paths.len();
+        let same = |a: &std::path::Path, b: &std::path::Path| {
+            let text = |p: &std::path::Path| {
+                let t = p.to_string_lossy();
+                let t = t.trim_end_matches(['/', '\\']).to_string();
+                if cfg!(windows) { t.to_lowercase() } else { t }
+            };
+            text(a) == text(b)
+        };
+        Answer::SystemOnly {
+            answers: paths
+                .iter()
+                .map(|p| {
+                    let p = std::path::Path::new(p);
+                    self.system_only.iter().any(|s| same(s, p))
+                })
+                .collect(),
+        }
+    }
+
     fn scan(&mut self, channel: &mut impl Write, account: &str) -> Result<(), FrameError> {
         if !self.approved.contains(account) {
             return send_answer(channel, &Answer::Refused(Refusal::NotApproved));
         }
-        let (found, privacy_blocked, system_only) = match (self.scanner)(account) {
-            Ok(scan) => (scan.found, scan.privacy_blocked, scan.system_only),
+        let (found, privacy_blocked) = match (self.scanner)(account) {
+            Ok(scan) => {
+                self.system_only = scan.system_only;
+                (scan.found, scan.privacy_blocked)
+            }
             Err(why) => return send_answer(channel, &Answer::Refused(why)),
         };
         if self.plan.len() + found.len() > MAX_HANDLES {
@@ -310,11 +354,6 @@ impl<'s> Session<'s> {
                 files: handles.len() as u64,
                 bytes,
                 privacy_blocked,
-                system_only: system_only
-                    .iter()
-                    .take(crate::person::MAX_SYSTEM_ONLY)
-                    .map(|p| p.to_string_lossy().into_owned())
-                    .collect(),
             },
         )?;
         send_handles(channel, &handles)?;

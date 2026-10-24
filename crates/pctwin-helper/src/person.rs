@@ -67,9 +67,9 @@ pub struct PersonScan {
     pub found: Vec<(Item, Entry)>,
     pub privacy_blocked: u64,
     /// Places outside every home that only the administrators and the system may open, as the
-    /// helper (which can read their permissions) found them: the system's, nobody's private
-    /// corner, so the mover's report may name them where the mover could not tell them from
-    /// another person's. Never a file, never anything inside a home.
+    /// helper (which can read their permissions) found them. Kept in the helper, never sent: the
+    /// mover asks about its own unreadable places and is told only yes or no for each
+    /// (`Request::SystemOnly`).
     pub system_only: Vec<PathBuf>,
 }
 

@@ -136,9 +136,6 @@ pub struct Scanned {
     /// macOS: places of theirs a privacy setting kept the helper out of (the helper needs Full
     /// Disk Access).
     pub privacy_blocked: u64,
-    /// Folders outside every home only the administrators and the system may open (see
-    /// `pctwin_scan::Sweep::name_system_only`).
-    pub system_only: Vec<std::path::PathBuf>,
 }
 
 /// An open session with the helper.
@@ -184,7 +181,6 @@ impl<S: Read + Write> Client<S> {
             files,
             bytes,
             privacy_blocked,
-            system_only,
         } = self.expect_answer(|a| matches!(a, Answer::Scanned { .. }))?
         else {
             return Err(ClientError::OutOfTurn);
@@ -209,13 +205,27 @@ impl<S: Read + Write> Client<S> {
             files,
             bytes,
             privacy_blocked,
-            system_only: system_only
-                .into_iter()
-                .take(crate::person::MAX_SYSTEM_ONLY)
-                .map(std::path::PathBuf::from)
-                .collect(),
             items: items.into_iter().zip(handles).collect(),
         })
+    }
+
+    /// Which of `paths` (this side's own places it could not read) only the administrators and
+    /// the system may open, as the helper's own sweep found: yes or no for each, in order. At
+    /// most [`MAX_SYSTEM_ASK`](crate::MAX_SYSTEM_ASK) at once (more is refused by the helper).
+    pub fn system_only(&mut self, paths: &[std::path::PathBuf]) -> Result<Vec<bool>, ClientError> {
+        send_request(
+            &mut self.stream,
+            &Request::SystemOnly {
+                paths: paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect(),
+            },
+        )?;
+        match self.expect_answer(|a| matches!(a, Answer::SystemOnly { .. }))? {
+            Answer::SystemOnly { answers } if answers.len() == paths.len() => Ok(answers),
+            _ => Err(ClientError::OutOfTurn),
+        }
     }
 
     /// Reads `len` bytes from `offset` of the file behind `handle`.

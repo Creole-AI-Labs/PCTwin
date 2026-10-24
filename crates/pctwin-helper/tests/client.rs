@@ -94,11 +94,24 @@ fn the_new_laptop_s_steps_through_the_client() {
     // The app hears it, to show how to give the helper Full Disk Access.
     let scanned = client.scan_person("bea").unwrap();
     assert_eq!((scanned.files, scanned.privacy_blocked), (0, 2));
-    // The places only the administrators and the system may open, for the mover's blind spots.
+    // Which of the places the mover could not read only the administrators and the system may
+    // open: the mover asks about its own, the helper answers yes or no for each (no path ever
+    // comes from the helper). A place it did not find so, or one in a home, is a no.
+    let asked = [
+        std::path::PathBuf::from(r"C:\pctwin-lab\locked"),
+        std::path::PathBuf::from(r"C:\pctwin-lab\bea-only"),
+        std::path::PathBuf::from(r"C:\Users\bea\Documents"),
+    ];
     assert_eq!(
-        scanned.system_only,
-        vec![std::path::PathBuf::from(r"C:\pctwin-lab\locked")]
+        client.system_only(&asked).unwrap(),
+        vec![true, false, false]
     );
+    // Never more at once than the helper answers.
+    let many = vec![std::path::PathBuf::from(r"C:\x"); pctwin_helper::MAX_SYSTEM_ASK + 1];
+    assert!(matches!(
+        client.system_only(&many),
+        Err(ClientError::Refused(Refusal::TooMuch))
+    ));
     let made = client.create_account("bea", "Bea").unwrap();
     assert_eq!(made.account, "1005");
     assert_eq!(made.password.as_str(), "abcd-efgh-jkmn-pqrs");

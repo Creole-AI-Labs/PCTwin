@@ -13,6 +13,12 @@ use serde::{Deserialize, Serialize};
 
 /// Longest request, in bytes: commands are short.
 pub const MAX_REQUEST: usize = 64 * 1024;
+/// Most places asked about in one `SystemOnly`.
+pub const MAX_SYSTEM_ASK: usize = 64;
+/// Longest place asked about, in bytes.
+pub const MAX_SYSTEM_PATH: usize = 900;
+/// Most places asked about in one session.
+pub const MAX_SYSTEM_ASKED: usize = 4096;
 /// Longest read in one `ReadBlocks`: one block of the largest size a move uses.
 pub const MAX_READ: u32 = 16 * 1024 * 1024;
 /// Most files one person's scan hands out (the move record's own limit is lower).
@@ -41,6 +47,11 @@ pub enum Request {
     /// Find the approved person `account`'s files (read-only) and keep them in the helper; the
     /// app gets their totals and a handle for each file, never their names.
     ScanPerson { account: String },
+    /// Of these places the mover could not read (its own sweep's, at most [`MAX_SYSTEM_ASK`],
+    /// each at most [`MAX_SYSTEM_PATH`] bytes), which only the administrators and the system may
+    /// open: answered yes or no for each from the helper's own sweep, never with a path. A place
+    /// inside a home is never one.
+    SystemOnly { paths: Vec<String> },
     /// Read `len` bytes from `offset` of the file behind `handle`.
     ReadBlocks { handle: u64, offset: u64, len: u32 },
     /// New laptop: make the approved person's standard account `name`, shown as `full_name`,
@@ -134,10 +145,11 @@ pub enum Answer {
         /// shows how to give the helper Full Disk Access, and the move never claims them.
         #[serde(default)]
         privacy_blocked: u64,
-        /// Folders outside every home only the administrators and the system may open (see
-        /// `person::system_only`), so the mover's report can name them.
-        #[serde(default)]
-        system_only: Vec<String>,
+    },
+    /// For each place asked about in `SystemOnly`, in order: whether the helper found it to be
+    /// a folder outside every home that only the administrators and the system may open.
+    SystemOnly {
+        answers: Vec<bool>,
     },
     Refused(Refusal),
     Goodbye,

@@ -148,7 +148,6 @@ fn an_approved_person_is_scanned_and_read_only_by_handle() {
                 files: 2,
                 bytes: 26,
                 privacy_blocked: 0,
-                system_only: Vec::new(),
             }),
             FromHelper::Handles(vec![
                 Handle {
