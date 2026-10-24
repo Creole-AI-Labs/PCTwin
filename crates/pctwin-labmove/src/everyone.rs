@@ -384,11 +384,26 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
             spent: Duration::ZERO,
         };
         let usage = pctwin_scan::usage_of(&facts.census);
+        // About once a minute, how far the sweep has got, so a slow one says whether it is still
+        // moving or stuck.
+        let mut said = Instant::now();
         let mut found = pctwin_scan::sweep(
             facts,
             &mut reader,
             &AtomicBool::new(false),
-            &mut |_| {},
+            &mut |view| {
+                if said.elapsed() >= Duration::from_secs(60) {
+                    said = Instant::now();
+                    let so_far = view.found_so_far();
+                    eprintln!(
+                        "[{:>6.1} s] sweeping: {} files, {} bytes so far, {} folders waiting",
+                        began.elapsed().as_secs_f64(),
+                        so_far.files,
+                        so_far.bytes,
+                        view.pending()
+                    );
+                }
+            },
             &pctwin_scan::SweepLimits::default(),
             None,
         );
