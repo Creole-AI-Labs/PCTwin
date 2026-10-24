@@ -21,7 +21,10 @@ import HistoryHost from "./screens/HistoryHost";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import MotionChoice from "./motion/MotionChoice";
+import Opening from "./motion/Opening";
+import { openingKind, type OpeningKind } from "./motion/openingRule";
 import { applyToDocument } from "./motion/preference";
+import { restoreReveal } from "./motion/play";
 import "./styles.css";
 
 /** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), pairing (C03 to C05), then the move; and Quick Send's home. */
@@ -58,6 +61,10 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   }, []);
   const l10n = useMemo(() => localization(language), [language]);
   const main = useRef<HTMLElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
+  // The Wordplay opening on the first launch and after an update; a short restoration otherwise.
+  // It is drawn over the app, which is built underneath from the first frame.
+  const [opening, setOpening] = useState<OpeningKind>(() => openingKind());
 
   // At start: a move that stopped part way on this laptop is picked up first. Asked once; a laptop
   // with nothing to pick up (or outside the app) stays on Welcome.
@@ -86,6 +93,12 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   }, []);
 
   useEffect(() => {
+    if (opening === "restore") restoreReveal(frame.current);
+    // Once, at start.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     document.documentElement.lang = language;
     document.documentElement.dir = directionOf(language);
     void setTrayLabels(l10n.getString("tray-show"), l10n.getString("tray-quit")).catch(() => undefined);
@@ -95,7 +108,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   useEffect(() => {
     if (!main.current) return;
     main.current.scrollTop = 0;
-    // A screen that already moved focus to its own heading keeps it.
+    // A screen that already moved focus to its own heading keeps it; while the opening is up, focus is on Skip intro.
+    if (main.current.closest("[inert]")) return;
     if (!main.current.contains(document.activeElement)) main.current.focus();
   }, [screen]);
 
@@ -106,7 +120,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
 
   return (
     <LocalizationProvider l10n={l10n}>
-      <div className="app">
+      <div className="app" ref={frame}>
         <FooterProvider
           // Leaving pairing or a move for the help page would end them, so there Help opens the website.
           onHelp={
@@ -199,6 +213,18 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
           </main>
         </FooterProvider>
       </div>
+      {(opening === "wordplay" || opening === "still") && (
+        <Opening
+          kind={opening}
+          app={frame}
+          // A screen that needs the person (a move to pick up, things handed over) ends it at once.
+          interrupt={screen.id !== "welcome"}
+          onDone={() => {
+            setOpening("none");
+            main.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
     </LocalizationProvider>
   );
 }
