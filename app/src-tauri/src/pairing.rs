@@ -730,6 +730,8 @@ pub async fn pairing_new_connect<R: Runtime>(
     index: usize,
     code: String,
 ) -> Result<u8, ProblemView> {
+    // The code the person typed is wiped from memory once the attempt no longer needs it.
+    let code = zeroize::Zeroizing::new(code);
     let old = state
         .found
         .lock()

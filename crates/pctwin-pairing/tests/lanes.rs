@@ -92,7 +92,9 @@ fn a_replayed_lane_opening_never_spends_its_number_and_is_refused_once_confirmed
     let now = Instant::now();
     let (opening, l1) = new.open_lane(now).unwrap();
     // Someone who copied lane message 1 sends it first, again and again.
-    let copies: Vec<_> = (0..5).map(|_| old.accept_lane(&l1, now).unwrap().0).collect();
+    let copies: Vec<_> = (0..5)
+        .map(|_| old.accept_lane(&l1, now).unwrap().0)
+        .collect();
     let (accepting, l2) = old.accept_lane(&l1, now).unwrap();
     assert_eq!(accepting.lane(), 1);
     // The genuine lane still completes.

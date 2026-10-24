@@ -405,6 +405,8 @@ impl PairingCode {
         (self.digits[5] - b'0') & 1
     }
 
+    /// The code as SPAKE2 takes it. SPAKE2 keeps its own copy, which it does not wipe: callers hold
+    /// the result only for the one call that needs it (a temporary, dropped at once).
     fn password(&self) -> Password {
         Password::new(self.digits)
     }
@@ -518,7 +520,7 @@ impl SenderSession {
 pub struct SenderAwaitingReveal {
     transport: TransportState,
     lane_secret: Zeroizing<[u8; 32]>,
-    handshake_hash: Vec<u8>,
+    handshake_hash: Zeroizing<Vec<u8>>,
     confirm: ConfirmKeys,
     commitment: [u8; COMMIT_LEN],
     deadline: Deadline,
@@ -1541,7 +1543,8 @@ fn derive_lane_secret(
     psk: &[u8; 32],
     handshake_hash: &[u8],
 ) -> Result<Zeroizing<[u8; 32]>, PairingError> {
-    let mut info = b"lane secret".to_vec();
+    // Holds the handshake hash: wiped when dropped.
+    let mut info = Zeroizing::new(b"lane secret".to_vec());
     info.extend_from_slice(handshake_hash);
     let mut secret = Zeroizing::new([0u8; 32]);
     Hkdf::<Sha256>::new(Some(LANE_SECRET_SALT), psk)
@@ -1607,11 +1610,15 @@ fn noise_builder<'a>(psk: &'a [u8; 32], prologue: &'a [u8]) -> Result<Builder<'a
         .map_err(|_| PairingError::HandshakeFailed)
 }
 
-fn finish_handshake(hs: HandshakeState) -> Result<(TransportState, Vec<u8>), PairingError> {
+/// The finished handshake's transport and its final hash (wiped from memory when dropped: the
+/// match number and the confirmation keys come from it).
+fn finish_handshake(
+    hs: HandshakeState,
+) -> Result<(TransportState, Zeroizing<Vec<u8>>), PairingError> {
     if !hs.is_handshake_finished() {
         return Err(PairingError::HandshakeFailed);
     }
-    let handshake_hash = hs.get_handshake_hash().to_vec();
+    let handshake_hash = Zeroizing::new(hs.get_handshake_hash().to_vec());
     let transport = hs
         .into_transport_mode()
         .map_err(|_| PairingError::HandshakeFailed)?;
@@ -1634,7 +1641,8 @@ struct ConfirmKeys {
 impl ConfirmKeys {
     fn derive(psk: &[u8; 32], handshake_hash: &[u8]) -> Result<Self, PairingError> {
         let one = |who: &[u8]| -> Result<Zeroizing<[u8; 32]>, PairingError> {
-            let mut info = who.to_vec();
+            // Holds the handshake hash: wiped when dropped.
+            let mut info = Zeroizing::new(who.to_vec());
             info.extend_from_slice(handshake_hash);
             let mut key = Zeroizing::new([0u8; 32]);
             Hkdf::<Sha256>::new(Some(CONFIRM_SALT), psk)
