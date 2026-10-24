@@ -19,6 +19,12 @@ criteria = "safe-to-run"
 version = "0.10.2"
 notes = "Reviewed 15 Oct 2026. Dev-dependency only, pulled in by proptest 1.12 as its RNG (rng feature). RustCrypto project crate. About 2800 lines. Review depth is limited: I inspected where the 73 lines of unsafe sit (sse2, avx2, avx512 and neon backends: SIMD intrinsics on the 64-byte state, pointer offsets inside the state and output arrays, transmutes between vector arrays) and the build and I/O surface, not each intrinsic call. Backend choice uses cpufeatures. No build script, no network, file or process access (grep)."
 
+[[audits.ctutils]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.4.5"
+notes = "Reviewed 25 October 2026: the RustCrypto constant-time helpers pulled in by digest, updated for RUSTSEC-2026-0385 (non-constant-time mask generation and u128 comparisons). Read the whole source diff (choice.rs, lib.rs, traits/ct_gt.rs and ct_lt.rs, and the new primitives.rs, 363 lines): the bit-trick comparison macros move into const functions in primitives.rs, Choice::and and the to_*_mask functions go through to_u8 so the compiler cannot turn them into short-circuiting branches, and on 32-bit targets u128 comparisons are built from opaque 64-bit halves. The crate forbids unsafe code (#![forbid(unsafe_code)]); no build script; no file, network or process access. Cargo.toml only excludes a test folder and adds a test target."
+
 [[audits.dirs]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
