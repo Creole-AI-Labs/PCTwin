@@ -1220,7 +1220,90 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
             note,
         });
     }
+    let wholes = whole_lines(&received.record, mover, &report, &mut outcome);
+    report.extend(wholes);
     (outcome, report)
+}
+
+/// A line for each folder that moves as one whole (a Photos Library, a project's history) shown
+/// to `mover`: moved only when every file the plan had inside it was copied; otherwise it needs
+/// action, and its missing files are on their own lines with why. Built from the files' lines in
+/// `report`; one with none of its files reported (all of them skipped or cut off) has no line of
+/// its own unless something inside it was copied.
+fn whole_lines(
+    record: &Record,
+    mover: &str,
+    report: &[ReportItem],
+    outcome: &mut MoveOutcome,
+) -> Vec<ReportItem> {
+    let mut lines = Vec::new();
+    for whole in record.items.iter().filter(|i| {
+        i.kind == pctwin_record::ItemKind::Package
+            && i.inclusion == Inclusion::Included
+            && shown_to_mover(i, mover)
+    }) {
+        let depth = whole.path.parts().len();
+        let inside = |i: &&Item| {
+            i.kind == pctwin_record::ItemKind::File
+                && i.inclusion == Inclusion::Included
+                && i.owner == whole.owner
+                && i.place == whole.place
+                && i.path.parts().len() > depth
+                && i.path.parts()[..depth] == *whole.path.parts()
+        };
+        let planned: Vec<String> = record
+            .items
+            .iter()
+            .filter(inside)
+            .map(|i| i.id.to_hex())
+            .collect();
+        if planned.is_empty() {
+            continue;
+        }
+        let lines_inside: Vec<&ReportItem> =
+            report.iter().filter(|r| planned.contains(&r.id)).collect();
+        let copied = lines_inside
+            .iter()
+            .filter(|r| r.status == ItemStatus::Copied)
+            .count();
+        if copied == 0
+            && lines_inside
+                .iter()
+                .all(|r| r.status == ItemStatus::SkippedByUser)
+        {
+            continue;
+        }
+        let source = source_of(whole);
+        let all = copied == planned.len();
+        // Where it landed: the folder its first copied file is in, at the whole's depth.
+        let destination = lines_inside
+            .iter()
+            .find(|r| r.status == ItemStatus::Copied)
+            .and_then(|r| {
+                let rest = r.source.strip_prefix(&format!("{source}/"))?;
+                r.destination
+                    .as_deref()?
+                    .strip_suffix(&format!("/{rest}"))
+                    .map(str::to_string)
+            });
+        let (status, reason) = if all {
+            (ItemStatus::Copied, None)
+        } else {
+            (ItemStatus::NeedsAction, Some(Reason::PartsMissing))
+        };
+        outcome.by_status.add(status);
+        lines.push(ReportItem {
+            id: whole.id.to_hex(),
+            name: name_of(&source),
+            source,
+            destination,
+            status,
+            reason,
+            evidence: None,
+            note: None,
+        });
+    }
+    lines
 }
 
 /// The old laptop's outcome: what it sent and how the new laptop answered. The new laptop's
@@ -1311,6 +1394,8 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
             note: None,
         });
     }
+    let wholes = whole_lines(record, mover, &report, &mut outcome);
+    report.extend(wholes);
     (outcome, report)
 }
 
@@ -1895,6 +1980,7 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
         held: BTreeMap::new(),
         left_out: Default::default(),
         chosen: Default::default(),
+        wholes: Default::default(),
     };
     let shown = found
         .iter()
@@ -2381,6 +2467,73 @@ mod tests {
                 .collect(),
             ended,
         }
+    }
+
+    /// A folder that moves as one whole (here a Photos Library) has its own line: moved only when
+    /// every file in it was, else needs action, with the file that did not arrive on its own line.
+    #[test]
+    fn a_whole_folder_says_moved_only_when_every_file_in_it_did() {
+        let lib = "Album.photoslibrary";
+        let mut whole = item(person("1000"), FolderRole::Pictures, &[lib], 0);
+        whole.kind = ItemKind::Package;
+        let a = item(
+            person("1000"),
+            FolderRole::Pictures,
+            &[lib, "originals", "a.jpg"],
+            4,
+        );
+        let b = item(
+            person("1000"),
+            FolderRole::Pictures,
+            &[lib, "database", "p.db"],
+            3,
+        );
+        let line = |report: &[ReportItem]| {
+            report
+                .iter()
+                .find(|r| r.id == whole.id.to_hex())
+                .cloned()
+                .expect("the whole has a line")
+        };
+        let with = |b_outcome| {
+            let mut r = received(
+                vec![
+                    (
+                        a.clone(),
+                        Some(finished(
+                            &format!("{lib}/originals/a.jpg"),
+                            CheckedFrom::Drive,
+                        )),
+                    ),
+                    (b.clone(), b_outcome),
+                ],
+                Ended::Finished,
+            );
+            r.record.items.insert(0, whole.clone());
+            received_outcome(&r, "1000")
+        };
+        let (outcome, report) = with(Some(finished(
+            &format!("{lib}/database/p.db"),
+            CheckedFrom::Drive,
+        )));
+        let l = line(&report);
+        assert_eq!(l.status, ItemStatus::Copied);
+        assert_eq!(l.reason, None);
+        assert_eq!(l.destination.as_deref(), Some(lib));
+        assert_eq!(l.source, format!("pictures/{lib}"));
+        assert_eq!(outcome.by_status.copied, 3);
+
+        let failed =
+            ReceiveOutcome::Failed(pctwin_transfer::Failure::new(Cause::NotVerified, "no"));
+        let (outcome, report) = with(Some(failed));
+        let l = line(&report);
+        assert_eq!(l.status, ItemStatus::NeedsAction);
+        assert_eq!(l.reason, Some(Reason::PartsMissing));
+        assert_eq!(outcome.by_status.needs_action, 1);
+        // The file that did not arrive is named on its own line, with why.
+        let missing = report.iter().find(|r| r.id == b.id.to_hex()).unwrap();
+        assert_eq!(missing.status, ItemStatus::Failed);
+        assert!(missing.reason.is_some());
     }
 
     #[test]
@@ -2939,6 +3092,7 @@ mod tests {
             held: BTreeMap::new(),
             left_out: Default::default(),
             chosen: Default::default(),
+            wholes: Default::default(),
         }
     }
 

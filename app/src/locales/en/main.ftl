@@ -1167,6 +1167,7 @@ reason-online-only = This file is stored online only, so it was not on the old l
 reason-manual-install = This app must come from its maker’s website. Download and install it there.
 reason-restart = The new laptop must restart to finish. Restart it when you are ready.
 reason-finish-by-hand = PCTwin cannot do this step for you. Follow the steps shown for it in this report.
+reason-parts-missing = Some files inside this folder did not arrive, so it is not complete on the new laptop. They are listed in this report with why. Send them again, or copy the folder another way.
 
 ## Item results (every item ends with one of these)
 

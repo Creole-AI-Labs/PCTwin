@@ -955,7 +955,14 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         greeting::wait_for_list(link).await?;
         let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
         let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
-        let rules = rules(steps, table);
+        let mut rules = rules(steps, table);
+        // A folder that moves as one whole never lands merged into one already here.
+        rules.keep_wholes_apart(&approved.record.items, |destination, path| {
+            let Ok(dest) = table.get(destination) else {
+                return false;
+            };
+            pctwin_gate::IncomingPath::parse(path).is_ok_and(|p| dest.has(&p))
+        });
         // What this laptop accepts is made from the very rules the old laptop is sent, now that
         // every place is known (another person's holding place is made only after the
         // approval): both laptops place every file by one function, by construction.

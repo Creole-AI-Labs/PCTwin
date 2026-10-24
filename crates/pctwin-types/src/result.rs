@@ -47,11 +47,14 @@ pub enum Reason {
     Restart,
     /// A step PCTwin cannot do for the person; the report lists it as a checklist entry.
     FinishByHand,
+    /// A folder that moves as one whole (a Photos Library, a project's history) arrived without
+    /// every file inside it: those are listed in the report with why.
+    PartsMissing,
 }
 
 impl Reason {
     /// Every reason, in report order.
-    pub const ALL: [Reason; 15] = [
+    pub const ALL: [Reason; 16] = [
         Reason::NotEnoughSpace,
         Reason::ChangedDuringMove,
         Reason::Unreadable,
@@ -67,6 +70,7 @@ impl Reason {
         Reason::ManualInstall,
         Reason::Restart,
         Reason::FinishByHand,
+        Reason::PartsMissing,
     ];
 
     /// The one status this reason belongs to.
@@ -86,7 +90,8 @@ impl Reason {
             | Reason::OnlineOnly
             | Reason::ManualInstall
             | Reason::Restart
-            | Reason::FinishByHand => ItemStatus::NeedsAction,
+            | Reason::FinishByHand
+            | Reason::PartsMissing => ItemStatus::NeedsAction,
         }
     }
 }
@@ -247,7 +252,8 @@ mod tests {
             names.join(","),
             "\"not-enough-space\",\"changed-during-move\",\"unreadable\",\"not-verified\",\
              \"refused-by-safety-check\",\"name-not-allowed\",\"install-failed\",\"no-equivalent\",\
-             \"sign-in\",\"activation\",\"permission\",\"online-only\",\"manual-install\",\"restart\",\"finish-by-hand\""
+             \"sign-in\",\"activation\",\"permission\",\"online-only\",\"manual-install\",\"restart\",\"finish-by-hand\",\
+             \"parts-missing\""
         );
     }
 }

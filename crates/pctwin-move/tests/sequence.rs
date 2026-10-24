@@ -760,6 +760,7 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        wholes: Default::default(),
     };
     struct ByRules {
         rules: LandingRules,
@@ -857,6 +858,7 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        wholes: Default::default(),
     };
     struct Late {
         rules: LandingRules,
@@ -1049,6 +1051,7 @@ async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() 
             held: Default::default(),
             left_out: Default::default(),
             chosen: Default::default(),
+            wholes: Default::default(),
         };
         rules.chosen.insert(FolderRole::Pictures);
         struct Chose {
@@ -1243,4 +1246,140 @@ async fn a_move_with_no_personal_essentials_goes_as_before() {
             .iter()
             .all(|(_, tier)| *tier != pctwin_transfer::Tier::Personal)
     );
+}
+
+/// Gap found 24 October 2026, end to end: a folder that moves as one whole (here a Photos Library)
+/// is sent as its files, each with its own result, and lands whole. The new laptop already has a
+/// library of that name, so this one lands beside it under a name of its own, the one there left
+/// exactly as it was: never merged.
+#[tokio::test]
+async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there() {
+    use pctwin_move::landing::LandingRules;
+    let mut w = world();
+    let lib = "Photos Library.photoslibrary";
+    let whole = item(
+        FolderRole::Pictures,
+        &[lib],
+        ItemKind::Package,
+        0,
+        Inclusion::Included,
+    );
+    let inside: [(&[&str], &[u8]); 2] = [
+        (&[lib, "originals", "A", "beach.heic"], b"the beach"),
+        (&[lib, "database", "Photos.sqlite"], b"rows"),
+    ];
+    w.record.items.push(whole);
+    for (path, bytes) in inside {
+        let f = item(
+            FolderRole::Pictures,
+            path,
+            ItemKind::File,
+            bytes.len() as u64,
+            Inclusion::Included,
+        );
+        write(&source_in(w.old.path(), &f), bytes);
+        w.record.items.push(f);
+    }
+    w.record.validate().unwrap();
+    // The new laptop's own library, already there.
+    let theirs = w
+        .new
+        .path()
+        .join("Pictures")
+        .join(lib)
+        .join("database/Photos.sqlite");
+    write(&theirs, b"the new laptop's own");
+
+    let rules = LandingRules {
+        mover: "1000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+        left_out: Default::default(),
+        chosen: Default::default(),
+        wholes: Default::default(),
+    };
+    struct Mine {
+        rules: LandingRules,
+    }
+    impl Steps for Mine {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+            Ok(())
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    let mut steps = Mine { rules };
+    let (mut old, mut new) = mem_pair();
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let mut table = std::mem::take(&mut w.table);
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            send_greeted(
+                &mut old,
+                &w.record,
+                "1000",
+                &[],
+                |i| Some(source_in(w.old.path(), i)),
+                &old_live,
+                std::sync::Arc::new(pctwin_transfer::FsOpener),
+            ),
+            receive_greeted(
+                &mut new,
+                &mut steps,
+                |s, _| s.rules.clone(),
+                &mut table,
+                &w.journal,
+                "1001",
+                &new_live
+            ),
+        )
+    })
+    .await;
+    let (sent, said) = sent.unwrap();
+    let received = received.unwrap();
+    // Every file of the library was sent and has its own result.
+    for line in &sent.files {
+        assert_eq!(line.outcome, Some(SendOutcome::Arrived), "{:?}", line.item);
+    }
+    let ours = "Photos Library (2).photoslibrary".to_string();
+    assert_eq!(
+        said.wholes.values().collect::<Vec<_>>(),
+        [&ours],
+        "the old laptop was told the name it lands under"
+    );
+    for (path, bytes) in inside {
+        let id = w
+            .record
+            .items
+            .iter()
+            .find(|i| i.path.parts().len() == path.len() && shown_path(&i.path) == path.join("/"))
+            .unwrap()
+            .id;
+        let line = received.files.iter().find(|f| f.item == id).unwrap();
+        let Some(ReceiveOutcome::Finished(done)) = &line.outcome else {
+            panic!("{path:?} ended {:?}", line.outcome);
+        };
+        let rest = path[1..].join("/");
+        assert_eq!(done.final_path, format!("{ours}/{rest}"));
+        let landed = w.new.path().join("Pictures").join(&ours).join(&rest);
+        assert_eq!(std::fs::read(landed).unwrap(), bytes);
+    }
+    // The library already there is exactly as it was, and holds nothing of the move.
+    assert_eq!(std::fs::read(&theirs).unwrap(), b"the new laptop's own");
+    let there: Vec<_> = std::fs::read_dir(w.new.path().join("Pictures").join(lib))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(there, ["database"]);
 }

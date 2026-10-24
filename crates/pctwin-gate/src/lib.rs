@@ -1601,6 +1601,32 @@ impl Destination {
         Some((shown.join("/"), meta.len()))
     }
 
+    /// Whether anything (a file, a folder, a link) is already where something sent as `path`
+    /// would be stored, names converted exactly as for writing. Nothing is created and no link is
+    /// followed out of the approved folder.
+    pub fn has(&self, path: &IncomingPath) -> bool {
+        let Some((last, folders)) = path.components().split_last() else {
+            return false;
+        };
+        let Ok(mut dir) = self.root.try_clone() else {
+            return false;
+        };
+        for folder in folders {
+            let name = convert_name(folder, self.profile_of(&dir).name_rules()).name;
+            match dir.symlink_metadata(&name) {
+                Ok(m) if m.is_dir() => {}
+                Ok(_) => return true,
+                Err(_) => return false,
+            }
+            match dir.open_dir(&name) {
+                Ok(d) => dir = d,
+                Err(_) => return false,
+            }
+        }
+        let name = convert_name(last, self.profile_of(&dir).name_rules()).name;
+        dir.symlink_metadata(&name).is_ok()
+    }
+
     /// Opens a stored file to read, by its stored path (as [`find`](Self::find) or
     /// [`Finished::final_path`] give it). Never follows a link.
     pub fn open_read(&self, stored: &str) -> io::Result<std::fs::File> {

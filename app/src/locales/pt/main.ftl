@@ -1328,6 +1328,7 @@ reason-online-only = Este arquivo está guardado só online, então não estava 
 reason-manual-install = Este app precisa vir do site do desenvolvedor. Baixe e instale por lá.
 reason-restart = O notebook novo precisa reiniciar para terminar. Reinicie quando quiser.
 reason-finish-by-hand = O PCTwin não consegue fazer esta etapa por você. Siga os passos mostrados para ela neste relatório.
+reason-parts-missing = Alguns arquivos desta pasta não chegaram, por isso ela não está completa no notebook novo. Eles aparecem neste relatório com o motivo. Envie-os de novo ou copie a pasta de outro jeito.
 
 ## Item results (every item ends with one of these)
 

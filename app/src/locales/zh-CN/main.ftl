@@ -1092,6 +1092,7 @@ reason-online-only = 这个文件仅在线存储，所以旧笔记本电脑上�
 reason-manual-install = 这个应用必须从开发者的官网获取。请到那里下载并安装。
 reason-restart = 新笔记本电脑需要重启才能完成。准备好后请重启。
 reason-finish-by-hand = PCTwin无法替你完成这一步。请按照这份报告中为它列出的步骤操作。
+reason-parts-missing = 这个文件夹里有些文件没有到达，所以它在新电脑上并不完整。这份报告列出了这些文件及原因。请再次发送它们，或用其他方式复制这个文件夹。
 
 ## Item results (every item ends with one of these)
 

@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use pctwin_record::{FolderRole, Item, Owner, Storage};
+use pctwin_record::{FolderRole, Inclusion, Item, ItemKind, Owner, Storage};
 use pctwin_transfer::{
     Channel, LandingPlace, NewPlaces, TransferError, landing_for, role_label, shown_path,
 };
@@ -53,7 +53,17 @@ pub struct LandingRules {
     /// new laptop (M05): each lands in the place [`chosen_label`] names, approved there.
     #[serde(default)]
     pub chosen: std::collections::BTreeSet<FolderRole>,
+    /// Folders that move as one whole ([`ItemKind::Package`]) whose landing place already holds
+    /// something on the new laptop: by `<destination>\n<path>` where it would have landed, the
+    /// path it lands at instead (a name of its own beside it, "Photos Library (2).photoslibrary"),
+    /// so it is never merged into what is there; an empty path when no name could be given (its
+    /// files are not received). See [`keep_wholes_apart`](Self::keep_wholes_apart).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub wholes: BTreeMap<String, String>,
 }
+
+/// The most wholes given another name in one move (each is a line of the rules).
+pub const MAX_WHOLES_RENAMED: usize = 256;
 
 /// The label of the place the person chose for the folders of `role`: never one of the new
 /// laptop's own folders' labels.
@@ -66,6 +76,87 @@ impl LandingRules {
     /// by the new laptop's folders ([`landing_for`]); another approved person's in their holding
     /// place, one folder per place label (`<label>/<path>`), as the hand-over reads it.
     pub fn landing(&self, item: &Item) -> Option<LandingPlace> {
+        let place = self.landing_as_planned(item)?;
+        if self.wholes.is_empty() {
+            return Some(place);
+        }
+        // Inside (or at) a whole given a name of its own: the same path below that name.
+        for (at, instead) in &self.wholes {
+            let Some((destination, path)) = at.split_once('\n') else {
+                continue;
+            };
+            if place.destination != destination {
+                continue;
+            }
+            let rest = if place.path == path {
+                Some("")
+            } else {
+                place
+                    .path
+                    .strip_prefix(path)
+                    .and_then(|r| r.strip_prefix('/'))
+            };
+            if let Some(rest) = rest {
+                if instead.is_empty() {
+                    return None;
+                }
+                let moved = if rest.is_empty() {
+                    instead.clone()
+                } else {
+                    format!("{instead}/{rest}")
+                };
+                return Some(LandingPlace::new(place.destination, moved));
+            }
+        }
+        Some(place)
+    }
+
+    /// Gives each folder that moves as one whole ([`ItemKind::Package`] in `items`) a name of its
+    /// own where `taken(destination, path)` says something is already at its landing place on
+    /// this laptop: "Name (2).ext", the first such name free, so it lands whole beside what is
+    /// there, never merged into it. Past [`MAX_WHOLES_RENAMED`], its files are not received (said
+    /// as not sent, never merged).
+    pub fn keep_wholes_apart(&mut self, items: &[Item], taken: impl Fn(&str, &str) -> bool) {
+        let mut given: std::collections::BTreeSet<(String, String)> = Default::default();
+        for item in items {
+            if item.kind != ItemKind::Package || item.inclusion != Inclusion::Included {
+                continue;
+            }
+            let Some(place) = self.landing_as_planned(item) else {
+                continue;
+            };
+            if !taken(&place.destination, &place.path) {
+                continue;
+            }
+            let key = format!("{}\n{}", place.destination, place.path);
+            if self.wholes.len() >= MAX_WHOLES_RENAMED {
+                self.wholes.insert(key, String::new());
+                continue;
+            }
+            let (parent, name) = match place.path.rsplit_once('/') {
+                Some((parent, name)) => (format!("{parent}/"), name.to_string()),
+                None => (String::new(), place.path.clone()),
+            };
+            let (stem, ext) = match name.rsplit_once('.') {
+                Some((stem, ext)) if !stem.is_empty() => (stem.to_string(), format!(".{ext}")),
+                _ => (name.clone(), String::new()),
+            };
+            let instead = (2..=1000)
+                .map(|n| format!("{parent}{stem} ({n}){ext}"))
+                .find(|p| {
+                    !taken(&place.destination, p)
+                        && !given.contains(&(place.destination.clone(), p.clone()))
+                });
+            let instead = instead.unwrap_or_default();
+            if !instead.is_empty() {
+                given.insert((place.destination.clone(), instead.clone()));
+            }
+            self.wholes.insert(key, instead);
+        }
+    }
+
+    /// Where `item` lands by the rules alone, before any whole is given a name of its own.
+    fn landing_as_planned(&self, item: &Item) -> Option<LandingPlace> {
         match &item.owner {
             Owner::Person { account_id } if *account_id != self.mover => {
                 let label = self.held.get(account_id)?;
@@ -275,6 +366,7 @@ mod tests {
             held: BTreeMap::from([("1001".into(), "for-1".into())]),
             left_out: Default::default(),
             chosen: Default::default(),
+            wholes: Default::default(),
         }
     }
 
@@ -484,5 +576,55 @@ mod tests {
             })
             .collect();
         assert!(send_people(&mut a, &many).await.is_err());
+    }
+
+    /// A folder that moves as one whole lands beside what is already at its place on the new
+    /// laptop, under a name of its own, with every file inside it below that name: never merged
+    /// into the folder there. One with nothing in its way lands as planned.
+    #[test]
+    fn a_whole_meeting_something_already_there_lands_whole_under_a_name_of_its_own() {
+        let me = || Owner::Person {
+            account_id: "1000".into(),
+        };
+        let whole = |path: &[&str]| {
+            let mut i = item(me(), FolderRole::Documents, path);
+            i.kind = ItemKind::Package;
+            i.size_bytes = 0;
+            i
+        };
+        let items = vec![
+            whole(&["Album.photoslibrary"]),
+            item(
+                me(),
+                FolderRole::Documents,
+                &["Album.photoslibrary", "originals", "a.jpg"],
+            ),
+            whole(&["proj", ".git"]),
+            item(me(), FolderRole::Documents, &["proj", ".git", "HEAD"]),
+            whole(&["Trip.pages"]),
+            item(me(), FolderRole::Documents, &["Trip.pages", "Index.zip"]),
+            // A file beside a whole, named like it, is not inside it.
+            item(me(), FolderRole::Documents, &["Album.photoslibrary.txt"]),
+        ];
+        let here = [
+            "Album.photoslibrary",
+            "Album (2).photoslibrary",
+            "proj/.git",
+        ];
+        let mut r = rules();
+        r.keep_wholes_apart(&items, |d, p| d == "documents" && here.contains(&p));
+        let at = |n: usize| r.landing(&items[n]).unwrap().path;
+        assert_eq!(at(0), "Album (3).photoslibrary");
+        assert_eq!(at(1), "Album (3).photoslibrary/originals/a.jpg");
+        assert_eq!(at(2), "proj/.git (2)");
+        assert_eq!(at(3), "proj/.git (2)/HEAD");
+        assert_eq!(at(4), "Trip.pages");
+        assert_eq!(at(5), "Trip.pages/Index.zip");
+        assert_eq!(at(6), "Album.photoslibrary.txt");
+        // Said to the old laptop with the rules, so both place every file alike.
+        let back: LandingRules = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back, r);
+        // With nothing given another name the rules read as before.
+        assert!(!serde_json::to_string(&rules()).unwrap().contains("wholes"));
     }
 }

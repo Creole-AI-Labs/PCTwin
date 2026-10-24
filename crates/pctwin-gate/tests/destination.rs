@@ -460,3 +460,21 @@ fn looking_up_never_follows_a_link_out_of_the_approved_folder() {
     assert_eq!(dest.find(&path("link/secret.txt")), None);
     assert!(dest.open_read("link/secret.txt").is_err());
 }
+
+/// Whether anything is already at a path (a folder that moves as one whole is never merged into
+/// one there): a file or a folder counts, nothing is created by looking, and the name is
+/// converted exactly as for writing.
+#[test]
+fn whether_anything_is_already_at_a_path_is_told_without_creating_anything() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    write(&dest, "Pictures/Album.photoslibrary/database/x", b"1").unwrap();
+    assert!(dest.has(&path("Pictures/Album.photoslibrary")));
+    assert!(dest.has(&path("Pictures/Album.photoslibrary/database/x")));
+    assert!(dest.has(&path("Pictures")));
+    assert!(!dest.has(&path("Pictures/Other.photoslibrary")));
+    assert!(!dest.has(&path("Nowhere/Album.photoslibrary")));
+    assert!(!root.path().join("Nowhere").exists());
+    // A file where a folder on the way would be: something is there.
+    assert!(dest.has(&path("Pictures/Album.photoslibrary/database/x/deeper")));
+}

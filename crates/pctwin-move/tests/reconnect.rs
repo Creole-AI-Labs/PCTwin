@@ -331,6 +331,7 @@ fn rules() -> LandingRules {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        wholes: Default::default(),
     }
 }
 

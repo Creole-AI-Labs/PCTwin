@@ -1324,6 +1324,7 @@ reason-online-only = Este archivo solo está guardado en línea, así que no est
 reason-manual-install = Esta aplicación hay que conseguirla en la web de su fabricante. Descárgala e instálala desde allí.
 reason-restart = El portátil nuevo tiene que reiniciarse para terminar. Reinícialo cuando te venga bien.
 reason-finish-by-hand = PCTwin no puede hacer este paso por ti. Sigue los pasos que aparecen para él en este informe.
+reason-parts-missing = Algunos archivos de esta carpeta no llegaron, así que no está completa en el portátil nuevo. Aparecen en este informe con el motivo. Envíalos de nuevo o copia la carpeta de otra forma.
 
 ## Item results (every item ends with one of these)
 

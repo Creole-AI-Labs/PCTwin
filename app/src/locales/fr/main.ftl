@@ -1333,6 +1333,7 @@ reason-online-only = Ce fichier est stocké seulement en ligne, il n’était do
 reason-manual-install = Cette appli doit venir du site de son éditeur. Téléchargez-la et installez-la depuis ce site.
 reason-restart = Le nouvel ordinateur portable doit redémarrer pour terminer. Redémarrez-le quand vous le souhaitez.
 reason-finish-by-hand = PCTwin ne peut pas faire cette étape à votre place. Suivez les étapes indiquées pour elle dans ce rapport.
+reason-parts-missing = Certains fichiers de ce dossier ne sont pas arrivés, il n’est donc pas complet sur le nouvel ordinateur. Ils sont listés dans ce rapport avec la raison. Envoyez-les à nouveau, ou copiez le dossier autrement.
 
 ## Item results (every item ends with one of these)
 

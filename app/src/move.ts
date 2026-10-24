@@ -53,7 +53,7 @@ export const FAILED_REASONS = [
 export type FailedReason = (typeof FAILED_REASONS)[number];
 
 /** The reasons that belong to `needs-action` (the person must finish a step). */
-export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand"] as const;
+export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand", "parts-missing"] as const;
 export type NeedsActionReason = (typeof NEEDS_ACTION_REASONS)[number];
 
 export type Reason = FailedReason | NeedsActionReason;
