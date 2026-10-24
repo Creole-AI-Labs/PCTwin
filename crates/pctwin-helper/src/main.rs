@@ -229,11 +229,42 @@ fn clean_start(mut raw: Vec<String>) -> Result<Vec<String>, ExitCode> {
     match pctwin_helper_os::minimal_env().map(|want| start_decision(&have, &want, restarted)) {
         Ok(Start::Run) => Ok(raw),
         Ok(Start::Restart) => Err(restart_clean(&raw)),
-        Ok(Start::Refuse) | Err(_) => {
-            eprintln!("pctwin-helper: its environment could not be made clean");
+        Ok(Start::Refuse) => {
+            let want = pctwin_helper_os::minimal_env().unwrap_or_default();
+            eprintln!(
+                "pctwin-helper: its environment could not be made clean (names that differ: {})",
+                names_that_differ(&have, &want).join(", ")
+            );
+            Err(ExitCode::FAILURE)
+        }
+        Err(e) => {
+            eprintln!("pctwin-helper: its environment could not be made clean: {e}");
             Err(ExitCode::FAILURE)
         }
     }
+}
+
+/// The names (never the values) in `have` or `want` that are not the same in both.
+#[cfg(windows)]
+fn names_that_differ(
+    have: &[(std::ffi::OsString, std::ffi::OsString)],
+    want: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Vec<String> {
+    let find = |pairs: &[(std::ffi::OsString, std::ffi::OsString)], name: &str| {
+        pairs
+            .iter()
+            .find(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
+    };
+    let mut names: Vec<String> = have
+        .iter()
+        .chain(want)
+        .map(|(k, _)| k.to_string_lossy().to_uppercase())
+        .filter(|name| find(have, name) != find(want, name))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Starts this program again, as it was started, with only the minimal environment, and ends

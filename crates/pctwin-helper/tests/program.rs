@@ -89,5 +89,10 @@ fn the_program_refuses_a_command_line_it_does_not_understand() {
         .args(["--run", "cmd"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
