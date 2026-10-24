@@ -277,4 +277,8 @@ e = json.load(open(sys.argv[1]))
 if sorted(e["declined"]) != sorted(e["others"]) or not e["others"]:
     sys.exit("without an administrator, the others must be listed, and none scanned")
 PY
+# What this run cannot prove, kept with its evidence and said in its log.
+if [[ "$(uname)" == Darwin ]]; then gaps=mac; else gaps=linux; fi
+sudo cp "$here/named-gaps-$gaps.txt" "$admin/named-gaps.txt" 2>/dev/null || true
+cat "$here/named-gaps-$gaps.txt"
 echo "everyone in one move: passed"

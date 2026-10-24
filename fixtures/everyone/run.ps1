@@ -214,4 +214,7 @@ $others = (@($e.others) | Sort-Object) -join ','
 if (-not $e.others -or $declined -ne $others) {
     throw 'without an administrator, the others must be listed, and none scanned'
 }
+# What this run cannot prove, kept with its evidence and said in its log.
+Copy-Item (Join-Path $here 'named-gaps-windows.txt') (Join-Path $admin 'named-gaps.txt') -ErrorAction SilentlyContinue
+Get-Content (Join-Path $here 'named-gaps-windows.txt') | Write-Host
 Write-Host 'everyone in one move: passed'

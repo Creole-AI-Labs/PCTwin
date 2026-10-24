@@ -1,0 +1,6 @@
+Not proven by this run (named gaps; they need real people or real hardware):
+- The administrator types the password in macOS's own window (here it is approved from outside the product).
+- FileVault start-up unlock for a new account.
+- The helper started by launchd from a signed app (signing comes before launch).
+- The Local Network permission on a signed build.
+- A real restart and sign-in during a move.
