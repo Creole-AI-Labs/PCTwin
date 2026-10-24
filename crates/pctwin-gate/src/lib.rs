@@ -2070,6 +2070,11 @@ pub enum Removed {
     NotThatFile,
     /// The very file, but changed since: left as it is.
     Changed,
+    /// The very file, its contents as they were (same size, same last change to its contents),
+    /// but its details changed since (Spotlight, a download mark, a tag or its permissions move
+    /// the change time without touching the contents): left as it is all the same, since
+    /// PCTwin cannot prove what else changed.
+    DetailsChanged,
     /// The file has more than one name on the drive: left as it is.
     Linked,
     /// Another program is using the file: left as it is, for another try.

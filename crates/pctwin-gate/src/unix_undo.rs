@@ -267,6 +267,53 @@ impl Look {
     }
 }
 
+/// What a move into the Trash came to, by what the system said: landed (to be checked), the
+/// name taken there (try the next), or anything else: the copy is still under its private name,
+/// so it is put back under its own at once (never left under the private name until the next
+/// undo, whatever the error: no room, a quota, a failing drive, no permission).
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(
+        dead_code,
+        reason = "macOS moves copies into the Trash; elsewhere only tested"
+    )
+)]
+#[derive(Debug, PartialEq, Eq)]
+enum IntoTrashStep {
+    Landed,
+    NameTaken,
+    PutBack,
+}
+
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(
+        dead_code,
+        reason = "macOS moves copies into the Trash; elsewhere only tested"
+    )
+)]
+fn into_trash_step(renamed: Result<(), Errno>) -> IntoTrashStep {
+    match renamed {
+        Ok(()) => IntoTrashStep::Landed,
+        Err(Errno::EXIST) => IntoTrashStep::NameTaken,
+        Err(_) => IntoTrashStep::PutBack,
+    }
+}
+
+/// Why the very file is kept when it no longer looks exactly as `before` (`now`): a second
+/// name; its contents changed; or only its details (its change time moved, size and last
+/// change to its contents as they were). Kept every way: what counts as unchanged never
+/// loosens; only what the person is told is more exact.
+fn kept_because(before: &Look, now: &Look) -> Removed {
+    if now.names > 1 {
+        Removed::Linked
+    } else if now.same_contents(before) {
+        Removed::DetailsChanged
+    } else {
+        Removed::Changed
+    }
+}
+
 /// Whether two looks are at the very same file (same drive, same number).
 fn same_file(a: &rustix::fs::Stat, b: &rustix::fs::Stat) -> bool {
     a.st_dev == b.st_dev && a.st_ino == b.st_ino
@@ -293,7 +340,7 @@ fn looked_again(
     }
     Ok(Some(
         match rustix::fs::statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
-            Ok(under) if same_file(&under, &held) => Removed::Changed,
+            Ok(under) if same_file(&under, &held) => kept_because(before, &now),
             Ok(_) => Removed::NotThatFile,
             Err(Errno::NOENT) => Removed::Gone,
             Err(e) => return Err(e.into()),
@@ -784,30 +831,28 @@ fn into_trash(
         }
         let now = Look::from(&held_now);
         if now != expect {
-            return Ok(IntoTrash::NotProven(if now.names > 1 {
-                Removed::Linked
-            } else {
-                Removed::Changed
-            }));
+            return Ok(IntoTrash::NotProven(kept_because(&expect, &now)));
         }
         let entry = trash.entry(&to);
-        match acts.rename_into(dir, private, &trash.base, &entry) {
-            Ok(()) => {}
-            Err(Errno::EXIST) => continue,
-            Err(
-                Errno::XDEV
-                | Errno::PERM
-                | Errno::ACCESS
-                | Errno::ROFS
-                | Errno::NOTSUP
-                | Errno::INVAL
-                | Errno::NOSYS,
-            ) => return Ok(IntoTrash::Refused),
-            Err(e) => return Err(e.into()),
+        match into_trash_step(acts.rename_into(dir, private, &trash.base, &entry)) {
+            IntoTrashStep::Landed => {}
+            IntoTrashStep::NameTaken => continue,
+            // Still under its private name: the caller puts it back under its own at once.
+            IntoTrashStep::PutBack => return Ok(IntoTrash::Refused),
         }
         match rustix::fs::statat(&trash.base, entry.as_str(), AtFlags::SYMLINK_NOFOLLOW) {
             Ok(landed) if same_file(&landed, &held_now) => {}
             _ => {
+                // Not the copy that was proven (swapped under the private name in the moment
+                // between the proof and the move): what went into the Trash goes straight back
+                // to where it was taken from, never left there; the journal says where to look.
+                let _ = rustix::fs::renameat_with(
+                    &trash.base,
+                    entry.as_str(),
+                    dir,
+                    private,
+                    RenameFlags::NOREPLACE,
+                );
                 return Err(GateError::Io(io::Error::other(
                     "what went into the Trash could not be confirmed to be this copy",
                 )));
@@ -1724,6 +1769,57 @@ fn put_back_as(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whatever the system says about the move into the Trash, the copy is never left under
+    /// its private name: anything but "landed" or "name taken" puts it back at once.
+    #[test]
+    fn any_failed_move_into_the_trash_puts_the_copy_back() {
+        assert_eq!(into_trash_step(Ok(())), IntoTrashStep::Landed);
+        assert_eq!(into_trash_step(Err(Errno::EXIST)), IntoTrashStep::NameTaken);
+        for e in [
+            Errno::NOSPC,
+            Errno::DQUOT,
+            Errno::IO,
+            Errno::XDEV,
+            Errno::PERM,
+            Errno::ACCESS,
+            Errno::ROFS,
+            Errno::CANCELED,
+        ] {
+            assert_eq!(into_trash_step(Err(e)), IntoTrashStep::PutBack, "{e:?}");
+        }
+    }
+
+    /// Kept every way; what the person is told says which: a second name, contents changed, or
+    /// only details changed (the change time moved, size and last change to the contents as
+    /// they were).
+    #[test]
+    fn what_changed_is_told_apart_and_the_copy_is_kept_every_way() {
+        let before = Look {
+            len: 10,
+            modified: (100, 5),
+            changed: (100, 5),
+            names: 1,
+        };
+        let details = Look {
+            changed: (200, 0),
+            ..before
+        };
+        assert_eq!(kept_because(&before, &details), Removed::DetailsChanged);
+        let contents = Look {
+            modified: (150, 0),
+            changed: (150, 0),
+            ..before
+        };
+        assert_eq!(kept_because(&before, &contents), Removed::Changed);
+        let grown = Look { len: 11, ..details };
+        assert_eq!(kept_because(&before, &grown), Removed::Changed);
+        let linked = Look {
+            names: 2,
+            ..details
+        };
+        assert_eq!(kept_because(&before, &linked), Removed::Linked);
+    }
     #[cfg(not(target_os = "macos"))]
     use std::os::unix::fs::PermissionsExt;
 

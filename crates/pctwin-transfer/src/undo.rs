@@ -71,6 +71,9 @@ impl UndoReport {
 
 /// The plain reason for a file changed since the move.
 pub const CHANGED_SINCE: &str = "you changed this since the move, so it was kept";
+/// The plain reason for a copy whose contents look as they were, but whose details changed
+/// since the move (a tag, a download mark, its permissions, the system indexing it).
+pub const DETAILS_CHANGED: &str = "its details changed since the move (not what is in it, as far as PCTwin can tell), so it was kept to be safe";
 /// The plain reason for a file (or its folder) moved or renamed since the move.
 pub const MOVED_SINCE: &str = "it is no longer where the move put it (moved, renamed or removed since), so it was left as it is";
 /// The plain reason when the old laptop could not confirm the original (not connected, or no
@@ -454,6 +457,7 @@ fn outcome_of(removed: Removed) -> Result<UndoOutcome, String> {
         Removed::Removed => UndoOutcome::Deleted,
         Removed::Gone => kept(MOVED_SINCE),
         Removed::NotThatFile | Removed::Changed => kept(CHANGED_SINCE),
+        Removed::DetailsChanged => kept(DETAILS_CHANGED),
         Removed::Linked => kept(SECOND_NAME),
         Removed::CloudOnly => kept(ONLINE_ONLY),
         Removed::Unsupported => kept(NO_SAFE_REMOVAL),

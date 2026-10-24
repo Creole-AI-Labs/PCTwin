@@ -148,9 +148,21 @@ fn in_home(
             shown,
         }));
     }
-    // macOS's privacy protection may refuse to open the Trash itself while still letting a name
-    // be moved into it: then the move goes through the home folder, to `.Trash/<name>`, once the
-    // Trash is seen to be a private folder of this person's (what lands there is checked after).
+    // macOS's privacy protection may refuse to open the Trash for reading while still letting a
+    // name be moved into it: then it is opened only to pass through (never following a link)
+    // and checked by its handle, so every move into it is made relative to that very folder.
+    if let Some(fd) = open_to_pass_through(&h, ".Trash")?
+        && rustix::fs::fstat(&fd).is_ok_and(|st| private_folder(&st, dev, uid))
+    {
+        return Ok(Some(Trash {
+            base: fd,
+            prefix: "",
+            shown,
+        }));
+    }
+    // Only where even that is refused: the move goes through the home folder, to
+    // `.Trash/<name>`, once the Trash is seen to be a private folder of this person's (what lands
+    // there is checked after).
     match rustix::fs::statat(&h, ".Trash", AtFlags::SYMLINK_NOFOLLOW) {
         Ok(st) if private_folder(&st, dev, uid) => Ok(Some(Trash {
             base: h,
@@ -245,20 +257,44 @@ fn open_to_pass_through(dir: &OwnedFd, name: &str) -> std::io::Result<Option<Own
 }
 
 /// Whether the copy `file` is in the Trash folder `trash` (an absolute path the journal
-/// recorded) under `to`. A look the system refuses is "no".
+/// recorded) under `to`. The Trash is reached from the folder above it, opened only to pass
+/// through (never following a link), and the name looked at there without opening it, so
+/// macOS's privacy protection, which may refuse to open the Trash or a file in it, still lets
+/// the honest answer ("in the Trash") be given. A look the system refuses is "no".
 pub(crate) fn holds(trash: &str, to: &str, file: crate::FileId) -> bool {
-    let path = format!("{trash}/{to}");
-    let Ok(fd) = rustix::fs::open(
-        path.as_str(),
-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::NOCTTY | OFlags::CLOEXEC,
-        Mode::empty(),
-    ) else {
+    let path = std::path::Path::new(trash);
+    let (Some(above), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str()))
+    else {
         return false;
     };
-    let f = std::fs::File::from(fd);
-    rustix::fs::fstat(&f)
-        .is_ok_and(|st| FileType::from_raw_mode(st.st_mode) == FileType::RegularFile)
-        && crate::identity(&f).is_ok_and(|(id, _)| id == file)
+    let Ok(up) = rustix::fs::open(
+        above,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .or_else(|_| {
+        rustix::fs::open(
+            above,
+            OFlags::from_bits_retain(SEARCH) | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+    }) else {
+        return false;
+    };
+    let Ok(Some(inside)) = open_to_pass_through(&up, name) else {
+        return false;
+    };
+    let Ok(st) = rustix::fs::statat(&inside, to, AtFlags::SYMLINK_NOFOLLOW) else {
+        return false;
+    };
+    #[allow(
+        clippy::unnecessary_cast,
+        reason = "field types differ between systems"
+    )]
+    let number = st.st_ino as u64;
+    FileType::from_raw_mode(st.st_mode) == FileType::RegularFile
+        && number == file.index.get()
+        && rustix::fs::fstatvfs(&inside).is_ok_and(|v| v.f_fsid == file.volume)
 }
 
 #[cfg(test)]
