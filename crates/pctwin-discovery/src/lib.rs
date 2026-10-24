@@ -584,6 +584,10 @@ impl Discovery {
     }
 }
 
+/// The lowest port an announcement may name: below it are ports only system services use (and 0,
+/// which no listener has), never a PCTwin listener's.
+const FIRST_USABLE_PORT: u16 = 1024;
+
 /// Reads one announcement: its label and usable addresses, or `None` if either is missing.
 fn read_announcement(info: &ResolvedService) -> Option<Found> {
     let mut fields = Vec::new();
@@ -606,6 +610,10 @@ fn read_announcement(info: &ResolvedService) -> Option<Found> {
 /// Keeps local-network addresses that are not loopback, IPv4 first, at most [`MAX_ADDRS`]. An
 /// IPv6 link-local address is only usable with its interface, so it keeps its scope.
 fn usable_addrs<'a>(ips: impl Iterator<Item = &'a ScopedIp>, port: u16) -> Vec<SocketAddr> {
+    // PCTwin listens on a port the system gives it: never 0, never one only system services use.
+    if port < FIRST_USABLE_PORT {
+        return Vec::new();
+    }
     let mut addrs: Vec<SocketAddr> = ips
         .filter_map(|ip| {
             let plain = ip.to_ip_addr();
@@ -714,6 +722,19 @@ mod tests {
         let v4_kept = kept.iter().filter(|a| a.is_ipv4()).count();
         assert_eq!(v4_kept, 3, "{kept:?}");
         assert!(kept[..3].iter().all(SocketAddr::is_ipv4));
+    }
+
+    /// PCTwin listens on a port the system gives it, never port 0 and never one of the ports
+    /// below 1024 that only system services use: an announcement naming one is not PCTwin's
+    /// and is not followed.
+    #[test]
+    fn an_announcement_on_port_0_or_a_system_port_is_not_followed() {
+        let ips = [v4("192.168.1.20")];
+        for port in [0, 1, 22, 80, 443, 1023] {
+            assert!(usable_addrs(ips.iter(), port).is_empty(), "{port}");
+        }
+        assert_eq!(usable_addrs(ips.iter(), 1024).len(), 1);
+        assert_eq!(usable_addrs(ips.iter(), 65535).len(), 1);
     }
 
     #[test]
