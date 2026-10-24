@@ -762,3 +762,52 @@ async fn harmful_looking_files_arrive_as_they_are_and_nothing_is_unpacked_or_run
         "nothing unpacked or made beside them"
     );
 }
+
+/// QS04: the same things offered twice, as the same offer again and as a fresh one, into the same
+/// folder: nothing is written twice and no numbered copy appears. The receiver finds each file
+/// already there only once its bytes arrived (the sender is never told what is here), so the
+/// sender's receipt says it arrived and the receiver's that it was already there.
+#[tokio::test]
+async fn a_duplicate_offer_writes_nothing_twice() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let picked = chosen(old.path());
+    let first = Offer::of(&picked).unwrap();
+    let laptop = first.laptop();
+    let accept = async |incoming: Incoming, ch: &mut Mem| {
+        Some(
+            incoming
+                .accept(ch, dest.path(), None, &journal(jdir.path()), "1001")
+                .await
+                .unwrap(),
+        )
+    };
+    let (_, received) = run(first, accept).await;
+    assert!(received.is_some());
+    let after_first = every_file(dest.path());
+    for again in [
+        Offer::of_again(&picked, laptop).unwrap(),
+        Offer::of(&picked).unwrap(),
+    ] {
+        let (sent, received) = run(again, accept).await;
+        let received = received.unwrap();
+        for path in ["Holiday/beach.jpg", "Holiday/day 2/boat.jpg", "letter.txt"] {
+            assert!(
+                matches!(outcome(&received, path), Outcome::AlreadyThere { .. }),
+                "{path}: {:?}",
+                outcome(&received, path)
+            );
+            assert!(
+                matches!(outcome(&sent, path), Outcome::Arrived { .. }),
+                "{path} on the sender: {:?}",
+                outcome(&sent, path)
+            );
+        }
+        assert_eq!(
+            every_file(dest.path()),
+            after_first,
+            "nothing new was written"
+        );
+    }
+}

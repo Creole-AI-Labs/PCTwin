@@ -2213,6 +2213,10 @@ struct Incoming<'d> {
     size: u64,
     /// The stored path of a same-size file already there, offered as possibly identical.
     same: Option<String>,
+    /// Where nothing is said to the other laptop about what is here (a Quick Send): the stored
+    /// path of a same-size file already at its name, compared only once this file has arrived
+    /// and been checked, so an identical one is not written twice.
+    unsaid: Option<String>,
     /// Or an identical file this laptop already received in this move, to make this one from.
     copy_of: Option<CopyOf>,
     /// This laptop's own fingerprint of that file, once worked out.
@@ -2677,6 +2681,7 @@ impl<'d> ReceiverSession<'d> {
                             destination: w.destination.clone(),
                             size: w.size,
                             same: None,
+                            unsaid: self.unsaid_same(&w.destination, &w.path, w.size),
                             copy_of: None,
                             own_print: None,
                             damaged: 0,
@@ -3108,6 +3113,7 @@ impl<'d> ReceiverSession<'d> {
                         return Ok((replies, false));
                     }
                 };
+                let unsaid = self.unsaid_same(&destination, &path, size);
                 // Every start is answered: nothing like it is here, or (once its fingerprint is
                 // worked out off the main loop) the fingerprint of the same-size file that is.
                 match same.map(|(_, f)| f).or(copy_file) {
@@ -3132,6 +3138,7 @@ impl<'d> ReceiverSession<'d> {
                         destination,
                         size,
                         same: stored,
+                        unsaid,
                         copy_of,
                         own_print: None,
                         damaged: 0,
@@ -3295,18 +3302,20 @@ impl<'d> ReceiverSession<'d> {
                     let _ = self.journal.failed(s.entry, &why);
                     Ok(ReceiveOutcome::Failed(why))
                 } else {
-                    land(self.journal, dest, a, trailer, s.entry).map(|out| match out {
-                        // Stored wrong again on this laptop, though the old laptop sent the
-                        // same bytes each time.
-                        ReceiveOutcome::Failed(f)
-                            if unchanged && !incomplete && f.cause() == Cause::NotVerified =>
-                        {
-                            ReceiveOutcome::Failed(Failure::new(
-                                Cause::CouldNotWrite,
-                                NOT_STORED_HERE,
-                            ))
+                    land(self.journal, dest, a, trailer, s.entry, s.unsaid.as_deref()).map(|out| {
+                        match out {
+                            // Stored wrong again on this laptop, though the old laptop sent the
+                            // same bytes each time.
+                            ReceiveOutcome::Failed(f)
+                                if unchanged && !incomplete && f.cause() == Cause::NotVerified =>
+                            {
+                                ReceiveOutcome::Failed(Failure::new(
+                                    Cause::CouldNotWrite,
+                                    NOT_STORED_HERE,
+                                ))
+                            }
+                            out => out,
                         }
-                        out => out,
                     })
                 };
                 self.meter.checking(None);
@@ -3324,13 +3333,17 @@ impl<'d> ReceiverSession<'d> {
             }
         };
         self.note_stored(&s.destination, &outcome);
-        // Landed (kept on this laptop, never sent again), even when it still needs action.
-        let ok = matches!(
-            outcome,
-            ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
-        );
+        // Landed (kept on this laptop, never sent again), even when it still needs action; or
+        // found identical to the file already at its name once it arrived (delivered: the old
+        // laptop is told only that it arrived).
+        let there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
+        let ok = there
+            || matches!(
+                outcome,
+                ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
+            );
         self.allowance.ended(s.item, ok);
-        let landed = ok.then(|| (s.destination.clone(), s.size));
+        let landed = (ok && !there).then(|| (s.destination.clone(), s.size));
         self.end(s.item, stream, outcome, landed);
         Ok(Message::FileDone { stream, ok })
     }
@@ -3888,6 +3901,17 @@ impl<'d> ReceiverSession<'d> {
 
     /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path,
     /// opened to fingerprint.
+    /// Where this laptop may not say what it has ([`Allowance::offers_what_is_here`]): the stored
+    /// path of a same-size file already at `path`, to compare once the file has arrived. Nothing
+    /// of it is told to the other laptop.
+    fn unsaid_same(&self, destination: &str, path: &str, size: u64) -> Option<String> {
+        if self.allowance.offers_what_is_here() {
+            return None;
+        }
+        self.same_file(destination, path, size)
+            .map(|(stored, _)| stored)
+    }
+
     fn same_file(
         &self,
         destination: &str,
@@ -4167,6 +4191,7 @@ fn land(
     assembly: Assembly<'_>,
     trailer: Trailer,
     entry: u64,
+    unsaid: Option<&str>,
 ) -> Result<ReceiveOutcome, TransferError> {
     let fail = |why: Failure| -> Result<ReceiveOutcome, TransferError> {
         journal.failed(entry, &why).map_err(record)?;
@@ -4186,6 +4211,20 @@ fn land(
         Ok(sealed) => sealed,
         Err(e) => return fail(Failure::of(&e, Side::New)),
     };
+    // The file already at its name, if it is this very file (its whole fingerprint, read from
+    // it now): kept as it is, and the copy that arrived dropped, so nothing is written twice.
+    if let Some(stored) = unsaid {
+        let identical = dest.open_read(stored).ok().and_then(|mut f| {
+            crate::fingerprint_reader(&mut f, size, block_size)
+                .ok()
+                .flatten()
+        });
+        if identical == Some(fingerprint) {
+            drop(sealed);
+            journal.existing(entry, stored).map_err(record)?;
+            return Ok(ReceiveOutcome::AlreadyThere(stored.to_string()));
+        }
+    }
     // Which file it is, so after a crash only this very file is ever taken as it.
     let sealed_as = sealed.identity().ok().map(file_id);
     // If the journal cannot take it, the checked file is still kept (never thrown away), for
