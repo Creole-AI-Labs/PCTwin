@@ -329,13 +329,9 @@ fn daemon() -> Result<(), String> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
     use std::sync::atomic::{AtomicBool, Ordering};
-    let _lock =
-        pctwin_helper::lock::lock_path().and_then(|p| pctwin_helper::lock::one_helper(&p))?;
-    if let Some(root) = pctwin_helper_os::holding::staging_root() {
-        pctwin_helper_os::signin::clean(&root);
-    }
-    approval::define_move_right().map_err(|e| format!("PCTwin's right: {e}"))?;
-    // The folder above the channel: root's own plain folder, which others may only pass through.
+    // The folder above the channel, which also holds the lock: root's own plain folder, which
+    // others may only pass through. Checked before the lock is taken in it (second fresh-context
+    // review), so nothing in a folder someone else made is ever opened.
     let dir = Path::new(CHANNEL_DIR);
     let above = dir.parent().ok_or("no folder above the channel")?;
     std::fs::create_dir_all(above).map_err(|e| format!("the channel's folder: {e}"))?;
@@ -348,6 +344,12 @@ fn daemon() -> Result<(), String> {
     }
     std::fs::set_permissions(above, std::fs::Permissions::from_mode(0o755))
         .map_err(|e| e.to_string())?;
+    let _lock =
+        pctwin_helper::lock::lock_path().and_then(|p| pctwin_helper::lock::one_helper(&p))?;
+    if let Some(root) = pctwin_helper_os::holding::staging_root() {
+        pctwin_helper_os::signin::clean(&root);
+    }
+    approval::define_move_right().map_err(|e| format!("PCTwin's right: {e}"))?;
     // Left by an earlier run: only root can make anything here.
     if std::fs::symlink_metadata(dir).is_ok() {
         std::fs::remove_dir_all(dir).map_err(|e| format!("the old channel: {e}"))?;
