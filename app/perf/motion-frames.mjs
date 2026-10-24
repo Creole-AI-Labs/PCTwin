@@ -25,6 +25,9 @@ const SLOW_SHARE = 0.05;
 // Building a new screen happens once, at the click, before any motion: it gets its own limit
 // (at four times slower, about a tenth of a second on an ordinary laptop).
 const READY_MS = 400;
+// The first frame after the page loads holds the app starting and drawing itself the first time
+// (not motion); it gets its own limit.
+const SHOWN_MS = 1000;
 
 function serve() {
   const server = spawn(`pnpm exec vite preview --port ${PORT} --strictPort`, { shell: true, stdio: "ignore" });
@@ -52,7 +55,8 @@ async function frames(page, ms) {
         let last = performance.now();
         const end = last + ms;
         const tick = (now) => {
-          gaps.push(now - last);
+          // A frame can be stamped a moment before the clock was first read: never below 0.
+          gaps.push(Math.max(0, now - last));
           last = now;
           if (now < end) requestAnimationFrame(tick);
           else done(gaps);
@@ -69,7 +73,9 @@ function summary(name, gaps) {
   const longest = sorted.at(-1) ?? 0;
   const slow = gaps.filter((g) => g > P95_MS).length / Math.max(1, gaps.length);
   const ok = p95 <= P95_MS && longest <= LONGEST_MS && slow <= SLOW_SHARE;
-  return { name, frames: gaps.length, p95: Math.round(p95), longest: Math.round(longest), slowShare: Number(slow.toFixed(3)), ok };
+  // Where the longest frame fell, so a failure says whether it was the start or the middle.
+  const longestAt = gaps.indexOf(Math.max(...gaps));
+  return { name, frames: gaps.length, p95: Math.round(p95), longest: Math.round(longest), longestAt, slowShare: Number(slow.toFixed(3)), ok };
 }
 
 const server = serve();
@@ -83,7 +89,10 @@ try {
   }
   // A fresh browser has nothing stored, so this is a first launch: the opening plays.
   await ready(page);
-  const opening = summary("the opening", await frames(page, 6500));
+  const openingGaps = await frames(page, 6500);
+  const firstMs = Math.round(openingGaps[0] ?? 0);
+  const shown = { name: "the app first shown", frames: 1, p95: firstMs, longest: firstMs, longestAt: 0, slowShare: 0, ok: firstMs <= SHOWN_MS };
+  const opening = summary("the opening", openingGaps.slice(1));
   // A screen change, there and back.
   const start = page.getByRole("button", { name: /Start a full move/ }).first();
   await start.waitFor({ timeout: 15000 });
@@ -102,12 +111,12 @@ try {
     if (t >= CLICK_AT && t <= CLICK_AT + 600 && (buildAt < 0 || g > gaps[buildAt])) buildAt = i;
   });
   const readyMs = Math.round(buildAt >= 0 ? gaps[buildAt] : 0);
-  const built = { name: "the new screen ready", frames: 1, p95: readyMs, longest: readyMs, slowShare: 0, ok: readyMs <= READY_MS };
+  const built = { name: "the new screen ready", frames: 1, p95: readyMs, longest: readyMs, longestAt: 0, slowShare: 0, ok: readyMs <= READY_MS };
   const screen = summary("the screen change's motion", gaps.filter((_, i) => i !== buildAt));
-  const result = { engine, slowedDown: engine === "webkit" ? 1 : SLOWDOWN, limits: { p95: P95_MS, longest: LONGEST_MS, slowShare: SLOW_SHARE, ready: READY_MS }, results: [opening, built, screen] };
+  const result = { engine, slowedDown: engine === "webkit" ? 1 : SLOWDOWN, limits: { p95: P95_MS, longest: LONGEST_MS, slowShare: SLOW_SHARE, ready: READY_MS, shown: SHOWN_MS }, results: [shown, opening, built, screen] };
   writeFileSync(out, JSON.stringify(result, null, 2));
   for (const r of result.results) {
-    console.log(`${r.ok ? "smooth" : "STUTTERS"}: ${r.name} on ${engine}: ${r.frames} frames, 95% within ${r.p95} ms, longest ${r.longest} ms, ${Math.round(r.slowShare * 100)}% slow`);
+    console.log(`${r.ok ? "smooth" : "STUTTERS"}: ${r.name} on ${engine}: ${r.frames} frames, 95% within ${r.p95} ms, longest ${r.longest} ms (frame ${r.longestAt}), ${Math.round(r.slowShare * 100)}% slow`);
     if (!r.ok) failed = true;
   }
   await browser.close();
