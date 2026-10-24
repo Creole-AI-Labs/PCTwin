@@ -84,24 +84,30 @@ def keep(user, path, top, how):
         if how in ("own", "only"):
             target = top or path
             if how == "only":
+                # A folder passes its rules on; a file (planted into a folder made earlier) takes
+                # them plainly: on a file Windows drops rules marked to pass on, which would leave
+                # it with none, readable by nobody.
+                on = "(OI)(CI)" if os.path.isdir(target) else ""
                 icacls(
                     target,
                     "/inheritance:r",
                     "/grant:r",
-                    f"{user}:(OI)(CI)F",
-                    "*S-1-5-32-544:(OI)(CI)F",
-                    "*S-1-5-18:(OI)(CI)F",
+                    f"{user}:{on}F",
+                    f"*S-1-5-32-544:{on}F",
+                    f"*S-1-5-18:{on}F",
                 )
             icacls(target, "/setowner", user, "/T", "/C", "/Q")
         elif how == "shared":
             icacls(top or path, "/grant", "*S-1-5-32-545:(OI)(CI)RX")
         elif how == "locked":
+            target = top or path
+            on = "(OI)(CI)" if os.path.isdir(target) else ""
             icacls(
-                top or path,
+                target,
                 "/inheritance:r",
                 "/grant:r",
-                "*S-1-5-32-544:(OI)(CI)F",
-                "*S-1-5-18:(OI)(CI)F",
+                f"*S-1-5-32-544:{on}F",
+                f"*S-1-5-18:{on}F",
             )
         return
     import pwd
