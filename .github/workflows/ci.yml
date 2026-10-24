@@ -273,6 +273,7 @@ jobs:
         run: |
           cargo test -p pctwin-gate --test real_fat --locked --no-run
           cargo test -p pctwin-move --test sequence --locked --no-run
+          cargo test -p pctwin-move --test full_drive --locked --no-run
       # Problems found before the move: every predicted name is the name the file lands under, on
       # each real drive (the runners' own NTFS, APFS and ext4 drives are the Rust job's run).
       - name: Predicted names on real drives
@@ -281,6 +282,19 @@ jobs:
         env:
           PCTWIN_REQUIRE_FAT: "1"
         run: cargo test -p pctwin-move --test sequence --locked on_real_drives -- --nocapture
+      # A move into a drive that fills up part way (Task List 1.8): a small size-limited tmpfs,
+      # nearly full. What landed is whole and finished, what did not fit ends "no space", nothing
+      # partly written is left, and once space is freed the rest moves with nothing sent twice.
+      - name: A move into a drive that fills up (Linux)
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          small="$RUNNER_TEMP/small-drive"
+          mkdir -p "$small"
+          sudo mount -t tmpfs -o size=8m,mode=1777 tmpfs "$small"
+          PCTWIN_SMALL_DRIVE="$small" cargo test -p pctwin-move --test full_drive --locked -- --nocapture
+          sudo umount "$small"
       - name: Gate on real drives (before the remount)
         timeout-minutes: 10
         shell: bash
