@@ -528,8 +528,9 @@ pub async fn quicksend_receive<R: Runtime>(
                         files: offered(files),
                     },
                 );
-                match rx.await {
-                    Ok(Answer::Accept(chosen)) => {
+                // The person has as long as the sender waits (then the offer is declined).
+                match tokio::time::timeout(pctwin_quicksend::ANSWER_WAIT, rx).await {
+                    Ok(Ok(Answer::Accept(chosen))) => {
                         let folder = lock(&qs.folder)
                             .take()
                             .ok_or(pctwin_quicksend::QuickError::NothingChosen)?;

@@ -55,7 +55,13 @@ pub enum QuickError {
     Record(#[from] RecordError),
     #[error("the chosen folder cannot be used: {0}")]
     Destination(String),
+    #[error("the other laptop did not answer the offer in time")]
+    NotAnswered,
 }
+
+/// How long the sender waits for the receiver's person to answer the offer before it ends,
+/// honestly, as not answered.
+pub const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 /// One offered file, as both screens list it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -293,7 +299,22 @@ pub async fn send_live(
     let version = agree_version(ch, MOVE_PROTOCOL).await?;
     send_inventory(ch, &offer.record, version).await?;
     let offered = files_of(&offer.record);
-    let accepted = read_accepted(ch, &offered).await?;
+    let Some(accepted) = wait_for_answer(ch, &offered, live).await? else {
+        // Stopped here while waiting: nothing was sent, and the receipt says so.
+        return Ok(Receipt {
+            lines: offered
+                .into_iter()
+                .map(|f| ReceiptLine {
+                    id: f.id,
+                    path: f.path,
+                    outcome: Outcome::Failed {
+                        cause: Cause::Stopped,
+                        why: "the send was stopped before it was sent".into(),
+                    },
+                })
+                .collect(),
+        });
+    };
     let jobs: Vec<SendJob> = offer
         .jobs
         .into_iter()
@@ -558,6 +579,20 @@ async fn write_accepted(ch: &mut impl Channel, ids: &BTreeSet<ItemId>) -> Result
     Ok(())
 }
 
+/// The receiver's answer, waited for at most [`ANSWER_WAIT`]; `None` when the person here stopped
+/// the send while it waited (it ends at once: nothing was sent).
+async fn wait_for_answer(
+    ch: &mut impl Channel,
+    offered: &[OfferedFile],
+    live: &pctwin_move::Live,
+) -> Result<Option<BTreeSet<ItemId>>, QuickError> {
+    tokio::select! {
+        answer = read_accepted(ch, offered) => answer.map(Some),
+        () = live.control.wait_stopped() => Ok(None),
+        () = tokio::time::sleep(ANSWER_WAIT) => Err(QuickError::NotAnswered),
+    }
+}
+
 /// The receiver's answer: only ids it was offered, each once, and nothing else in the message.
 async fn read_accepted(
     ch: &mut impl Channel,
@@ -710,6 +745,42 @@ mod tests {
                 landed_as: "Holiday/beach.jpg".into()
             }
         );
+    }
+
+    /// A receiver that never answers.
+    struct Silent;
+
+    impl Channel for Silent {
+        async fn send(&mut self, _: &[u8]) -> Result<(), pctwin_transfer::ChannelError> {
+            Ok(())
+        }
+        async fn recv(&mut self) -> Result<Vec<u8>, pctwin_transfer::ChannelError> {
+            std::future::pending().await
+        }
+    }
+
+    /// Exit-gate review (24 October 2026): a receiver that never answers the offer is waited for
+    /// at most [`ANSWER_WAIT`], then the send ends as not answered; the person here stopping ends
+    /// the wait at once.
+    #[tokio::test(start_paused = true)]
+    async fn the_wait_for_an_answer_ends_in_time_or_at_a_stop() {
+        let offer = offered(2);
+        let live = pctwin_move::Live::default();
+        let start = tokio::time::Instant::now();
+        let got = wait_for_answer(&mut Silent, &offer, &live).await;
+        assert!(matches!(got, Err(QuickError::NotAnswered)), "{got:?}");
+        assert!(start.elapsed() >= ANSWER_WAIT);
+
+        let live = pctwin_move::Live::default();
+        let stop = live.control.clone();
+        let start = tokio::time::Instant::now();
+        let mut silent = Silent;
+        let (got, ()) = tokio::join!(wait_for_answer(&mut silent, &offer, &live), async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            stop.stop();
+        });
+        assert!(matches!(got, Ok(None)), "{got:?}");
+        assert!(start.elapsed() < ANSWER_WAIT);
     }
 
     /// The answer names only offered files, each once, with the right count and nothing more.

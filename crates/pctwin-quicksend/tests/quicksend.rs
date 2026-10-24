@@ -511,7 +511,13 @@ async fn a_stopped_send_ends_with_a_receipt_and_nothing_is_called_arrived() {
     let j = journal(new.path());
     let (sent, got) = no_hang(async {
         tokio::join!(
-            async { pctwin_quicksend::send_live(&mut a, offer, &live).await },
+            async {
+                // Stopped while it waits for the answer: it ends at once, and the connection
+                // closes (as the app's does when a send ends).
+                let sent = pctwin_quicksend::send_live(&mut a, offer, &live).await;
+                drop(a);
+                sent
+            },
             async {
                 let incoming = receive_offer(&mut b).await.unwrap();
                 incoming.accept(&mut b, new.path(), None, &j, "me").await
