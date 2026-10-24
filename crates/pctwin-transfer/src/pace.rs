@@ -9,7 +9,8 @@
 //! rarely still give a speed, measured over the time between them.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 /// Readings must cover at least this long before there is a speed.
 pub const WARM_UP: Duration = Duration::from_secs(5);

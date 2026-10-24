@@ -7,7 +7,7 @@
 //! The old laptop could answer faster or slower than the link really is (send early, or hold
 //! back); that only changes an estimate the person sees, never what moves.
 
-use std::time::Instant;
+use tokio::time::Instant;
 
 use crate::{Channel, TransferError};
 

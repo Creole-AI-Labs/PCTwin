@@ -1078,7 +1078,7 @@ async fn a_downgrade_to_version_three_learns_nothing_and_skips_nothing() {
 #[tokio::test]
 async fn during_a_real_move_the_time_left_is_never_made_up_and_ends_done_on_both_laptops() {
     use pctwin_transfer::{TimeLeft, WARM_UP};
-    use std::time::Instant;
+    use tokio::time::Instant;
 
     let w = world();
     let jobs = vec![w.file(1, 3 * 1024 * 1024, "me"), w.file(2, 1000, "shared")];

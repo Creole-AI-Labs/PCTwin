@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use tokio::time::Instant;
 
 use pctwin_record::ItemId;
 use serde::Serialize;

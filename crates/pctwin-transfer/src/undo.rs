@@ -849,7 +849,7 @@ fn within<T: Send + 'static>(
     let Some(busy) = Busy::claim(key) else {
         return Ok(Within::Busy);
     };
-    let deadline = std::time::Instant::now() + wait;
+    let deadline = tokio::time::Instant::now() + wait;
     let (lending, lent) = right.lend();
     let (asks, asked) = mpsc::channel::<Ask<T>>();
     std::thread::Builder::new()
@@ -873,7 +873,7 @@ fn within<T: Send + 'static>(
         })
         .map_err(|e| JournalError::Storage(e.to_string()))?;
     loop {
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
         match asked.recv_timeout(left) {
             Ok(Ask::Record(stage, answer)) => {
                 let _ = answer.send(journal.record_undo(right, id, &stage));
@@ -1067,7 +1067,8 @@ mod tests {
     use super::*;
     use pctwin_journal::{Actor, Landed, Permission, PlannedWrite, UndoRight};
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tokio::time::Instant;
 
     fn journal() -> (tempfile::TempDir, Journal) {
         let dir = tempfile::tempdir().unwrap();

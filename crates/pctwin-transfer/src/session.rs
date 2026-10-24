@@ -5,7 +5,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, GateError, IncomingPath};
 use pctwin_journal::{
