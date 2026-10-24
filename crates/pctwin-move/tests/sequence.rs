@@ -1562,7 +1562,6 @@ async fn held_move_stopping_at(w: &mut World, holding: &Path, at: &'static str) 
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     struct Held {
         rules: LandingRules,
