@@ -212,6 +212,23 @@ impl<S: Read + Write> Client<S> {
     /// Which of `paths` (this side's own places it could not read) only the administrators and
     /// the system may open, as the helper's own sweep found: yes or no for each, in order. At
     /// most [`MAX_SYSTEM_ASK`](crate::MAX_SYSTEM_ASK) at once (more is refused by the helper).
+    /// [`system_only`](Self::system_only) for any number of places: asked in requests that
+    /// always fit (see [`crate::protocol::system_only_batches`]); a place too long to ask about
+    /// is answered no without asking.
+    pub fn system_only_all(
+        &mut self,
+        paths: &[std::path::PathBuf],
+    ) -> Result<Vec<bool>, ClientError> {
+        let mut answers = vec![false; paths.len()];
+        for batch in crate::protocol::system_only_batches(paths) {
+            let asked: Vec<std::path::PathBuf> = batch.iter().map(|i| paths[*i].clone()).collect();
+            for (i, yes) in batch.iter().zip(self.system_only(&asked)?) {
+                answers[*i] = yes;
+            }
+        }
+        Ok(answers)
+    }
+
     pub fn system_only(&mut self, paths: &[std::path::PathBuf]) -> Result<Vec<bool>, ClientError> {
         send_request(
             &mut self.stream,

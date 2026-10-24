@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 
 /// Longest request, in bytes: commands are short.
 pub const MAX_REQUEST: usize = 64 * 1024;
-/// Most places asked about in one `SystemOnly`.
+/// Most places asked about in one `SystemOnly`; the whole request, as sent, is at most
+/// [`MAX_REQUEST`] bytes too (see [`system_only_batches`]).
 pub const MAX_SYSTEM_ASK: usize = 64;
 /// Longest place asked about, in bytes.
 pub const MAX_SYSTEM_PATH: usize = 900;
@@ -210,6 +211,35 @@ pub fn read_frame(r: &mut impl Read, limit: usize) -> Result<Vec<u8>, FrameError
     let mut body = vec![0u8; len];
     r.read_exact(&mut body)?;
     Ok(body)
+}
+
+/// `paths` split into `SystemOnly` requests that each fit: at most [`MAX_SYSTEM_ASK`] places,
+/// and at most [`MAX_REQUEST`] bytes as sent, counting each place as JSON writes it (a byte may
+/// take six). Each batch holds indexes into `paths`; a place longer than [`MAX_SYSTEM_PATH`] is
+/// in none (it is never asked about). One place of the longest kind always fits alone.
+pub fn system_only_batches(paths: &[std::path::PathBuf]) -> Vec<Vec<usize>> {
+    // The request around the places: its name and brackets, with room to spare.
+    const AROUND: usize = 256;
+    let mut batches = Vec::new();
+    let mut batch = Vec::new();
+    let mut size = AROUND;
+    for (i, p) in paths.iter().enumerate() {
+        let text = p.to_string_lossy();
+        if text.len() > MAX_SYSTEM_PATH {
+            continue;
+        }
+        let sent = serde_json::to_string(text.as_ref()).map_or(usize::MAX, |t| t.len() + 1);
+        if !batch.is_empty() && (batch.len() == MAX_SYSTEM_ASK || size + sent > MAX_REQUEST) {
+            batches.push(std::mem::take(&mut batch));
+            size = AROUND;
+        }
+        batch.push(i);
+        size += sent;
+    }
+    if !batch.is_empty() {
+        batches.push(batch);
+    }
+    batches
 }
 
 pub fn send_request(w: &mut impl Write, request: &Request) -> Result<(), FrameError> {

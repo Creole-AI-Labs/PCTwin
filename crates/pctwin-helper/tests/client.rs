@@ -172,3 +172,43 @@ fn every_scan_s_system_only_places_are_kept() {
     client.bye().unwrap();
     helper.join().unwrap();
 }
+
+/// The largest asks there can be (64 places of 900 bytes each, every byte one JSON writes as
+/// six): asked through the client, they go in requests that always fit, and every place is
+/// answered, never a broken frame. A place too long to ask about is a no.
+#[test]
+fn the_largest_asks_always_fit_and_are_all_answered() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let worst = |n: usize| PathBuf::from(format!("/{n:03}{}", "\u{1}".repeat(896)));
+    let helper = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut scanner = |_: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
+            Ok(pctwin_helper::person::PersonScan {
+                found: Vec::new(),
+                privacy_blocked: 0,
+                system_only: vec![worst(7)],
+            })
+        };
+        Session::new(
+            "tok".into(),
+            BTreeSet::from(["bea".to_string()]),
+            &mut scanner,
+        )
+        .serve(&mut stream)
+        .unwrap();
+    });
+    let mut client = Client::open(TcpStream::connect(addr).unwrap(), "tok").unwrap();
+    client.scan_person("bea").unwrap();
+    let mut asked: Vec<PathBuf> = (0..200).map(worst).collect();
+    asked.push(PathBuf::from(format!(
+        "/{}",
+        "x".repeat(pctwin_helper::MAX_SYSTEM_PATH)
+    )));
+    let answers = client.system_only_all(&asked).unwrap();
+    assert_eq!(answers.len(), asked.len());
+    assert_eq!(answers.iter().filter(|a| **a).count(), 1);
+    assert!(answers[7]);
+    client.bye().unwrap();
+    helper.join().unwrap();
+}

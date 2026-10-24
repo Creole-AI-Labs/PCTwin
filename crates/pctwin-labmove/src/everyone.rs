@@ -368,21 +368,18 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     // and hears yes or no for each; those are named.
     if let Some(helper) = &helper {
         let mine: Vec<PathBuf> = sweep.unreadable_places.values().cloned().collect();
-        let mut system_only = Vec::new();
-        for batch in mine.chunks(pctwin_helper::MAX_SYSTEM_ASK) {
-            let answers = helper
-                .lock()
-                .map_err(err)?
-                .system_only(batch)
-                .map_err(|e| format!("asking the helper: {e}"))?;
-            system_only.extend(
-                batch
-                    .iter()
-                    .zip(answers)
-                    .filter(|(_, yes)| *yes)
-                    .map(|(p, _)| p.clone()),
-            );
-        }
+        // Asked in requests that always fit, however long the names.
+        let answers = helper
+            .lock()
+            .map_err(err)?
+            .system_only_all(&mine)
+            .map_err(|e| format!("asking the helper: {e}"))?;
+        let system_only: Vec<PathBuf> = mine
+            .into_iter()
+            .zip(answers)
+            .filter(|(_, yes)| *yes)
+            .map(|(p, _)| p)
+            .collect();
         sweep.name_system_only(&system_only);
     }
     let handles = add_people(&mut record, &people);
