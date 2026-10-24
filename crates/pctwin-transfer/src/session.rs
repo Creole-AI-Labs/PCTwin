@@ -2372,6 +2372,10 @@ pub struct ReceiverSession<'d> {
     copies: HashMap<u64, Vec<ItemId>>,
     copy_sources: usize,
     streams: BTreeMap<u32, Incoming<'d>>,
+    /// Part-copies of files that ended while their place's drive held the move paused, by that
+    /// place: kept as they are, since nothing more is written there until the person carries on,
+    /// then cleared (or when the move ends).
+    parked: Vec<(String, Assembly<'d>)>,
     /// Files picked up again after the app restarted, waiting for the old laptop to continue them.
     restored: BTreeMap<ItemId, Incoming<'d>>,
     /// How each file's last attempt ended, kept per file (never per stream), so nothing started
@@ -2440,6 +2444,7 @@ impl<'d> ReceiverSession<'d> {
             copies: HashMap::new(),
             copy_sources: 0,
             streams: BTreeMap::new(),
+            parked: Vec::new(),
             restored: BTreeMap::new(),
             ended: BTreeMap::new(),
             continued: 0,
@@ -2927,6 +2932,9 @@ impl<'d> ReceiverSession<'d> {
         slot: &mut Slot,
     ) -> Result<(Vec<Message>, bool), TransferError> {
         let mut replies = Vec::new();
+        // Part-copies kept at a paused place are cleared once it no longer holds the move.
+        let control = &self.control;
+        self.parked.retain(|(place, _)| control.is_braked(place));
         match m {
             Message::StartFile {
                 stream,
@@ -2959,6 +2967,11 @@ impl<'d> ReceiverSession<'d> {
                             },
                             Assembly::resume_ticket,
                         );
+                    // An older old laptop cannot be told to hold it for later: it is told no,
+                    // and the file ends with the true reason and what to do.
+                    if self.version < SET_DOWN_SINCE {
+                        self.refuse(item, Failure::new(Cause::CouldNotWrite, PAUSED_THERE));
+                    }
                     replies.push(self.set_down_as(stream, item, ticket));
                     return Ok((replies, false));
                 }
@@ -3183,7 +3196,14 @@ impl<'d> ReceiverSession<'d> {
                     GiveUpWhy::Unreadable => (Cause::Unreadable, UNREADABLE_THERE),
                 };
                 if let Some(s) = self.streams.remove(&stream) {
-                    drop(s.assembly);
+                    // Clearing its part-copy would change a drive that holds the move paused:
+                    // it is kept as it is until the person carries on.
+                    match s.assembly {
+                        Some(a) if self.control.is_braked(&s.destination) => {
+                            self.parked.push((s.destination.clone(), a));
+                        }
+                        a => drop(a),
+                    }
                     let _ = self.journal.failed(s.entry, why);
                     self.allowance.ended(s.item, false);
                     let outcome = ReceiveOutcome::Failed(Failure::new(cause, why));
@@ -4026,6 +4046,7 @@ const BRAKE_WINDOW: usize = 20;
 
 /// Quarantine Design, step 3: the words for a file that would not come right.
 const READ_DIFFERENTLY: &str = "This file read differently each time on your old laptop, so its drive may be failing. Your original is untouched.";
+const PAUSED_THERE: &str = "the drive it was going to paused the move, so it was not copied. Once that drive is working, send it again. Your original is untouched";
 const NOT_STORED_HERE: &str =
     "This laptop could not store this file correctly. Your original is untouched.";
 const SENT_DAMAGED: &str = "The old laptop sent it damaged each time. Your original is untouched.";

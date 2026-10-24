@@ -4948,3 +4948,209 @@ async fn a_new_laptop_that_earns_the_window_then_drops_it_stays_within_the_bound
         m.assert_reads_bounded(FLOOR, BLOCK, WINDOW);
     }
 }
+
+/// What the new laptop says next, past any word of its pause.
+async fn hear_past_holds(ch: &mut Mem) -> Message {
+    loop {
+        match hear(ch).await {
+            Message::Hold { .. } => continue,
+            m => return m,
+        }
+    }
+}
+
+/// Every file left under `dir`, at any depth.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                found.push(p);
+            }
+        }
+    }
+    found
+}
+
+/// Brake follow-up (23 October 2026): a file the old laptop gives up on while its place's drive
+/// holds the move paused keeps its part-copy as it is there, since nothing more is written to that
+/// drive until the person carries on; it is cleared once they do.
+#[tokio::test]
+async fn a_file_given_up_at_a_paused_place_is_not_cleared_there_until_the_person_carries_on() {
+    let l = laptops(&[70_000; 4]);
+    let table = table(&l, Some(Flip::OnEveryWrite));
+    let control = pctwin_transfer::MoveControl::new();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+        .with_control(control.clone());
+    let (mut old, mut new) = mem_pair();
+    let start = |stream: u32, n: usize, header: Header| Message::StartFile {
+        stream,
+        item: id(n as u8),
+        destination: "me".into(),
+        path: format!("Documents/f{n}.bin"),
+        header,
+        resumed_done: 0,
+    };
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // File 3 starts first and is part way when the drive pauses the move.
+        let mut late = FileSender::open(&l.files[3].0, None, false).unwrap();
+        say(&mut old, &start(9, 3, late.header().clone())).await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        for piece in split_into_pieces(9, &late.block_at(0).unwrap().encode()) {
+            say(&mut old, &piece).await;
+        }
+        assert!(matches!(hear(&mut old).await, Message::Receipt { .. }));
+        brake_me(&mut old, &l).await;
+        assert_eq!(control.braked().as_deref(), Some("me"));
+        let before = files_under(l.new.path());
+        assert_eq!(before.len(), 1, "file 3's part-copy: {before:?}");
+        // The old laptop gives up on file 3 while the move is paused: its part-copy stays.
+        say(
+            &mut old,
+            &Message::GiveUp {
+                stream: 9,
+                why: GiveUpWhy::ReadTooOften,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear_past_holds(&mut old).await,
+            Message::FileDone {
+                stream: 9,
+                ok: false
+            }
+        );
+        assert_eq!(files_under(l.new.path()), before, "nothing changed there");
+        control.carry_on();
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    assert!(matches!(
+        receiver.outcome(id(3)),
+        Some(ReceiveOutcome::Failed(_))
+    ));
+    assert_eq!(
+        files_under(l.new.path()),
+        Vec::<PathBuf>::new(),
+        "cleared once carried on"
+    );
+}
+
+/// The test plays the old laptop: three files the drive of "me" stores wrong, each sent whole,
+/// asked for again and given up on (streams 0 to 2), so the drive pauses the move.
+async fn brake_me(old: &mut Mem, l: &Laptops) {
+    for n in 0..3 {
+        let stream = n as u32;
+        let mut fs = FileSender::open(&l.files[n].0, None, false).unwrap();
+        say(
+            old,
+            &Message::StartFile {
+                stream,
+                item: id(n as u8),
+                destination: "me".into(),
+                path: format!("Documents/f{n}.bin"),
+                header: fs.header().clone(),
+                resumed_done: 0,
+            },
+        )
+        .await;
+        assert!(matches!(hear_past_holds(old).await, Message::Have { .. }));
+        for b in 0..fs.header().block_count {
+            for piece in split_into_pieces(stream, &fs.block_at(b).unwrap().encode()) {
+                say(old, &piece).await;
+            }
+            assert!(matches!(
+                hear_past_holds(old).await,
+                Message::Receipt { .. }
+            ));
+        }
+        let stamp = fs.header().stamp;
+        say(
+            old,
+            &Message::EndFile {
+                stream,
+                stamp_after: stamp,
+                changed: false,
+            },
+        )
+        .await;
+        let asked = hear_past_holds(old).await;
+        assert!(matches!(asked, Message::SendAgain { .. }), "{asked:?}");
+        say(
+            old,
+            &Message::GiveUp {
+                stream,
+                why: GiveUpWhy::AskedAgainTooOften,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear_past_holds(old).await,
+            Message::FileDone { stream, ok: false }
+        );
+    }
+}
+
+/// Brake follow-up (23 October 2026): an old laptop on move protocol 3 cannot be told of a pause
+/// (no `Hold`, no setting down), so a file it starts at the paused place is refused before anything
+/// is written there, and ends failed with that true reason and what to do, never "not checked".
+#[tokio::test]
+async fn an_older_old_laptop_is_told_no_for_a_paused_place_with_the_true_reason() {
+    let l = laptops(&[70_000; 4]);
+    let table = table(&l, Some(Flip::OnEveryWrite));
+    let control = pctwin_transfer::MoveControl::new();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001")
+        .with_control(control.clone())
+        .with_protocol(3);
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        brake_me(&mut old, &l).await;
+        assert_eq!(control.braked().as_deref(), Some("me"));
+        let fs = FileSender::open(&l.files[3].0, None, false).unwrap();
+        say(
+            &mut old,
+            &Message::StartFile {
+                stream: 3,
+                item: id(3),
+                destination: "me".into(),
+                path: "Documents/f3.bin".into(),
+                header: fs.header().clone(),
+                resumed_done: 0,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 3,
+                ok: false
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    match receiver.outcome(id(3)) {
+        Some(ReceiveOutcome::Failed(why)) => {
+            assert!(why.contains("paused the move"), "{why}");
+            assert!(why.contains("again"), "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!landed(&l, 3).exists());
+}
