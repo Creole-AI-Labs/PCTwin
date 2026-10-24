@@ -1107,6 +1107,20 @@ pub fn sweep_this_laptop(
     checkpoint: &mut dyn FnMut(&FrontierView<'_>),
     resume: Option<Frontier>,
 ) -> Sweep {
+    let mut reader = crate::acl::system_reader();
+    sweep(
+        this_laptop_facts(laptop),
+        reader.as_mut(),
+        stop,
+        checkpoint,
+        &SweepLimits::default(),
+        resume,
+    )
+}
+
+/// What [`sweep_this_laptop`] is told about this laptop: its people, drives, the signed-in
+/// person's special folders and what their records remember, and the shipped rules.
+pub fn this_laptop_facts(laptop: LaptopId) -> SweepFacts {
     let census = crate::census::census_this_laptop();
     let home = census
         .me()
@@ -1116,23 +1130,14 @@ pub fn sweep_this_laptop(
     let usage = crate::usage::read_usage(&home);
     let mut remembered: Vec<PathBuf> = usage.recent.into_iter().map(|(p, _)| p).collect();
     remembered.extend(usage.pinned);
-    let facts = SweepFacts {
+    SweepFacts {
         laptop,
         census,
         volumes: crate::volumes::volumes_this_laptop(),
         known_folders: crate::folders::find_special_folders(),
         remembered,
         rules: Rules::shipped(),
-    };
-    let mut reader = crate::acl::system_reader();
-    sweep(
-        facts,
-        reader.as_mut(),
-        stop,
-        checkpoint,
-        &SweepLimits::default(),
-        resume,
-    )
+    }
 }
 
 /// The sweep, from what it is told about the laptop.

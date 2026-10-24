@@ -166,12 +166,34 @@ impl Rules {
         Ok(Self { rows, system })
     }
 
+    /// Whether the row's name `a` names `b`: exactly (ignoring case where the system does), with
+    /// each `#` in `a` standing for a version number, one or more digits (`Python#` names
+    /// `Python312`, never `Python` or `PythonProjects`).
     fn same(&self, a: &str, b: &str) -> bool {
-        if self.system.ignores_case() {
-            a.to_lowercase() == b.to_lowercase()
+        let (a, b) = if self.system.ignores_case() {
+            (a.to_lowercase(), b.to_lowercase())
         } else {
-            a == b
+            (a.to_string(), b.to_string())
+        };
+        if !a.contains('#') {
+            return a == b;
         }
+        let mut rest = b.as_str();
+        for (i, piece) in a.split('#').enumerate() {
+            if i > 0 {
+                let digits =
+                    rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+                if digits == 0 {
+                    return false;
+                }
+                rest = &rest[digits..];
+            }
+            let Some(after) = rest.strip_prefix(piece) else {
+                return false;
+            };
+            rest = after;
+        }
+        rest.is_empty()
     }
 
     /// The row for a folder or file named `name` directly under a drive's root.

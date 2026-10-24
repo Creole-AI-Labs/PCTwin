@@ -74,6 +74,51 @@ fn a_broken_rules_file_is_refused_not_half_read() {
     assert!(Rules::parse("windows | root | Data | treasure\n", System::Windows).is_err());
 }
 
+/// Programs and developer tools installed at the top of the system drive (not in Program Files)
+/// are apps: counted, reinstalled fresh on the new laptop, never copied as program files. A `#`
+/// in a row's name stands for a version number (one or more digits).
+#[test]
+fn tool_folders_at_the_top_of_the_system_drive_are_apps() {
+    let win = Rules::parse(include_str!("../rules/places.txt"), System::Windows).unwrap();
+    for name in [
+        "msys64",
+        "cygwin64",
+        "Strawberry",
+        "Android",
+        "tools",
+        "vcpkg",
+        "Miniconda",
+        "miniconda3",
+        "Anaconda3",
+        "Python27",
+        "Python312",
+        "python314",
+        "Ruby33-x64",
+        "rtools44",
+        "Modules",
+        "hostedtoolcache",
+        "MinGW",
+        "Go",
+    ] {
+        let row = win
+            .at_root(name, true)
+            .unwrap_or_else(|| panic!("{name} is not named"));
+        assert_eq!(row.kind, Kind::App, "{name}");
+    }
+    // Only a version number stands for `#`: a person's own folders are not programs.
+    for name in [
+        "Python",
+        "PythonProjects",
+        "Python3 notes",
+        "Ruby",
+        "Projects",
+    ] {
+        assert!(win.at_root(name, true).is_none(), "{name}");
+    }
+    // At the top of another drive, a folder of that name may be anything.
+    assert!(win.at_root("msys64", false).is_none());
+}
+
 #[test]
 fn rules_find_system_app_junk_and_rebuildable_places() {
     let win = Rules::parse(include_str!("../rules/places.txt"), System::Windows).unwrap();
