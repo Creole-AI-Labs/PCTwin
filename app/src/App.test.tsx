@@ -31,7 +31,7 @@ afterEach(() => {
 describe("screens", () => {
   it("Welcome shows the free move first, in English, with nothing missing", () => {
     render(<App initialLanguage="en" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(screen.getByRole("button", { name: /Start a full move/ })).toBeTruthy();
     expect(screen.getByText("Free personal moves. No account needed.")).toBeTruthy();
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
@@ -43,7 +43,7 @@ describe("screens", () => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(title()).toBe("Which laptop is this?");
-    fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: /This is my old laptop/ }));
     expect(title()).toBe(l10n.getString("connect-title"));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
     expect(title()).toBe(l10n.getString("connect-prep-title"));
@@ -59,7 +59,7 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     expect(title()).toBe("Which laptop is this?");
     // The role chosen is kept through the new steps: the new laptop reaches its own pairing screen.
-    fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: /This is my new laptop/ }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-prep-continue") }));
     await act(async () => {});
@@ -69,7 +69,7 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-    expect(title()).toBe("Your setup.Your next laptop.");
+    expect(title()).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
   });
 
@@ -81,7 +81,7 @@ describe("screens", () => {
     expect(footer().getByRole("button", { name: l10n.getString("footer-help") })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: /This is my old laptop/ }));
     expect(footer().getByText(l10n.getString("footer-note-move"))).toBeTruthy();
     expect(footer().getByRole("button", { name: l10n.getString("connect-use-wifi") })).toBeTruthy();
     expect(within(screen.getByRole("main")).queryByRole("button", { name: l10n.getString("connect-use-wifi") })).toBeNull();
@@ -106,7 +106,7 @@ describe("screens", () => {
     expect(screen.getByText(/later version|first release/)).toBeTruthy();
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
@@ -141,7 +141,7 @@ describe("screens", () => {
     fireEvent.click(screen.getByText(l10n.getString("help-guide-find-title")));
     expect(screen.getByText(l10n.getString("help-guide-find-body"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
@@ -165,7 +165,7 @@ describe("screens", () => {
     expect(await screen.findByText(l10n.getString("ready-title"))).toBeTruthy();
     expect(screen.getByText("120")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("ready-done") }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
   it("Your receipts opens the history the app recorded, opens an entry's receipt again, and Back returns", async () => {
@@ -197,7 +197,7 @@ describe("screens", () => {
     tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
     render(<App initialLanguage="en" />);
     await act(async () => {});
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
   it("Quick Send opens its home, says plainly that nothing is connected yet, and Back returns", () => {
@@ -215,7 +215,7 @@ describe("screens", () => {
     expect(footer.queryByText(l10n.getString("footer-free"))).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
     expect(within(screen.getByRole("contentinfo")).getByText(l10n.getString("footer-free"))).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
@@ -241,7 +241,7 @@ describe("screens", () => {
     const steps = ["welcome", "role", "connect", "together", "pair"];
     const at = steps.indexOf(which);
     if (at >= 1) fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
-    if (at >= 2) fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    if (at >= 2) fireEvent.click(screen.getByRole("button", { name: /This is my new laptop/ }));
     if (at >= 3) fireEvent.click(screen.getByRole("button", { name: /Use Wi-Fi/ }));
     if (at >= 4) fireEvent.click(screen.getByRole("button", { name: /Continue to pairing/ }));
     await act(async () => {});

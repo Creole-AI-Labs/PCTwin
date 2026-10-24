@@ -75,7 +75,7 @@ describe("F01 Welcome with an unfinished move", () => {
 
   it("changes nothing else: same picture, headline and secondary choices, nothing paid, no accessibility violations", async () => {
     inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} unfinished onResume={nothing} />);
-    expect(heading().textContent).toBe("Your setup.Your next laptop.");
+    expect(heading().textContent).toBe("Send files,or move everything.");
     expect(document.querySelector(".illustration")).toBeTruthy();
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Resume your move", "Restore setup", "Rescue a laptop", "Quick Send"]);
     expect(screen.getByRole("main").textContent).not.toMatch(PAID);

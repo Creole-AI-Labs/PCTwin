@@ -11,10 +11,10 @@ footer-help = مساعدة
 
 ## F01 Welcome
 
-welcome-eyebrow = فصلك التالي جاهز.
-welcome-title-line1 = إعدادك الكامل.
-welcome-title-line2 = حاسوبك المحمول التالي.
-welcome-body = ملفاتك وتطبيقاتك وإعداداتك المألوفة تنتقل معك.
+welcome-eyebrow = PCTwin
+welcome-title-line1 = أرسل ملفات،
+welcome-title-line2 = أو انقل كل شيء.
+welcome-body = أرسل بضعة ملفات إلى حاسوب محمول قريب، أو انقل ملفاتك وتطبيقاتك وإعداداتك إلى حاسوبك المحمول الجديد.
 welcome-start = بدء نقل كامل
 
 ## F06 Old or new laptop
@@ -23,9 +23,9 @@ role-back = رجوع
 role-eyebrow = بدء نقل كامل
 role-title = أي حاسوب محمول هذا؟
 role-body = افتح PCTwin على الحاسوبين المحمولين، ثم حدّد أيهما هذا.
-role-old-title = حاسوبي المحمول القديم
+role-old-title = هذا حاسوبي المحمول القديم
 role-old-body = إرسال ملفاتي وتطبيقاتي وإعداداتي.
-role-new-title = حاسوبي المحمول الجديد
+role-new-title = هذا حاسوبي المحمول الجديد
 role-new-body = استلام إعدادي الكامل من حاسوب محمول آخر.
 role-note = لا يُنقل أي شيء قبل أن تراجع الخطة وتوافق عليها. يبقى حاسوبك المحمول القديم كما هو أثناء النقل.
 
@@ -1564,8 +1564,8 @@ qs-tally-badge = إرسال قريب
 
 ## Q01 Quick Send home
 
-qs-home-title = بضعة ملفات، مباشرةً.
-qs-home-body = أرسل بضعة ملفات إلى حاسوب محمول قريب.
+qs-home-title = أرسل ملفات إلى حاسوب محمول قريب.
+qs-home-body = أو استقبل ملفات منه.
 qs-send-title = إرسال الملفات
 qs-send-body = اختر ملفات أو مجلدات على هذا الحاسوب المحمول.
 qs-receive-title = استلام الملفات
@@ -1624,7 +1624,7 @@ qs-who-action = عرض رمز الإرسال
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = هناك من يريد أن يرسل إليك ملفات.
-qs-offer-body = تحقق مما يُرسل قبل أن تقبل.
+qs-offer-body = يريد { $label } أن يرسل إليك هذه الملفات. تحقق منها قبل أن تقبل.
 qs-offer-note = لا يحفظ PCTwin إلا الملفات التي تقبلها، ولا يفتحها أو يشغّلها أبدًا.
 qs-offer-accept = القبول واختيار مجلد
 qs-offer-decline = رفض هذه الملفات

@@ -11,10 +11,10 @@ footer-help = Help
 
 ## F01 Welcome
 
-welcome-eyebrow = Your next chapter, ready.
-welcome-title-line1 = Your setup.
-welcome-title-line2 = Your next laptop.
-welcome-body = Bring your files, apps and familiar settings along for the move.
+welcome-eyebrow = PCTwin
+welcome-title-line1 = Send files,
+welcome-title-line2 = or move everything.
+welcome-body = Send a few files to a laptop nearby, or bring your files, apps and settings to your new laptop.
 welcome-start = Start a full move
 
 ## F06 Old or new laptop
@@ -23,9 +23,9 @@ role-back = Back
 role-eyebrow = Start a full move
 role-title = Which laptop is this?
 role-body = Open PCTwin on both laptops. Then say which one this is.
-role-old-title = My old laptop
+role-old-title = This is my old laptop
 role-old-body = Send my files, apps and settings.
-role-new-title = My new laptop
+role-new-title = This is my new laptop
 role-new-body = Receive my setup from another laptop.
 role-note = Nothing moves until you review and approve the plan. Your old laptop stays unchanged during the move.
 
@@ -1252,8 +1252,8 @@ qs-tally-badge = Nearby send
 
 ## Q01 Quick Send home
 
-qs-home-title = A few files. Straight across.
-qs-home-body = Send a few files to a laptop nearby.
+qs-home-title = Send files to a laptop nearby.
+qs-home-body = Or receive files from one.
 qs-send-title = Send files
 qs-send-body = Choose files or folders on this laptop.
 qs-receive-title = Receive files
@@ -1312,7 +1312,7 @@ qs-who-action = Show my send code
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = Someone wants to send you files.
-qs-offer-body = Check what is being sent before you accept.
+qs-offer-body = { $label } wants to send you these files. Check them before you accept.
 qs-offer-note = PCTwin saves only the files you accept. It never opens or runs them.
 qs-offer-accept = Accept and choose a folder
 qs-offer-decline = Decline these files

@@ -11,10 +11,10 @@ footer-help = 帮助
 
 ## F01 Welcome
 
-welcome-eyebrow = 你的新篇章，准备好了。
-welcome-title-line1 = 你的配置。
-welcome-title-line2 = 你的下一台笔记本电脑。
-welcome-body = 迁移时，把你的文件、应用和熟悉的设置一起带上。
+welcome-eyebrow = PCTwin
+welcome-title-line1 = 发送文件，
+welcome-title-line2 = 或者全部搬过去。
+welcome-body = 把几个文件发送到附近的笔记本电脑，或者把你的文件、应用和设置搬到新的笔记本电脑上。
 welcome-start = 开始完整迁移
 
 ## F06 Old or new laptop
@@ -23,9 +23,9 @@ role-back = 返回
 role-eyebrow = 开始完整迁移
 role-title = 这是哪台笔记本电脑？
 role-body = 在两台笔记本电脑上都打开PCTwin，然后选择这是哪一台。
-role-old-title = 我的旧笔记本电脑
+role-old-title = 这是我的旧笔记本电脑
 role-old-body = 发送我的文件、应用和设置。
-role-new-title = 我的新笔记本电脑
+role-new-title = 这是我的新笔记本电脑
 role-new-body = 从另一台笔记本电脑接收我的配置。
 role-note = 在你查看并同意方案之前，什么都不会迁移。迁移期间，你的旧笔记本电脑保持原样。
 
@@ -1168,8 +1168,8 @@ qs-tally-badge = 附近发送
 
 ## Q01 Quick Send home
 
-qs-home-title = 几个文件，直接传过去。
-qs-home-body = 把几个文件发送到附近的笔记本电脑。
+qs-home-title = 把文件发送到附近的笔记本电脑。
+qs-home-body = 或者从附近的笔记本电脑接收文件。
 qs-send-title = 发送文件
 qs-send-body = 在这台笔记本电脑上选择文件或文件夹。
 qs-receive-title = 接收文件
@@ -1227,7 +1227,7 @@ qs-who-action = 显示我的配对码
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = 有人想给你发送文件。
-qs-offer-body = 接受之前，请检查要发送的内容。
+qs-offer-body = { $label } 想向你发送这些文件。接受之前，请先检查。
 qs-offer-note = PCTwin只保存你接受的文件，绝不会打开或运行它们。
 qs-offer-accept = 接受并选择文件夹
 qs-offer-decline = 拒绝这些文件

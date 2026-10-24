@@ -11,10 +11,10 @@ footer-help = Aide
 
 ## F01 Welcome
 
-welcome-eyebrow = Votre prochain chapitre vous attend.
-welcome-title-line1 = Votre configuration.
-welcome-title-line2 = Votre nouvel ordinateur portable.
-welcome-body = Emportez vos fichiers, vos applis et vos réglages habituels pour le transfert.
+welcome-eyebrow = PCTwin
+welcome-title-line1 = Envoyez des fichiers,
+welcome-title-line2 = ou transférez tout.
+welcome-body = Envoyez quelques fichiers à un ordinateur portable à proximité, ou emportez vos fichiers, vos applis et vos réglages sur votre nouvel ordinateur portable.
 welcome-start = Commencer un transfert complet
 
 ## F06 Old or new laptop
@@ -23,9 +23,9 @@ role-back = Retour
 role-eyebrow = Commencer un transfert complet
 role-title = Quel ordinateur portable est-ce ?
 role-body = Ouvrez PCTwin sur les deux ordinateurs portables. Puis indiquez lequel est celui-ci.
-role-old-title = Mon ancien ordinateur portable
+role-old-title = C’est mon ancien ordinateur portable
 role-old-body = Envoyer mes fichiers, applis et réglages.
-role-new-title = Mon nouvel ordinateur portable
+role-new-title = C’est mon nouvel ordinateur portable
 role-new-body = Recevoir ma configuration d’un autre ordinateur portable.
 role-note = Rien n’est transféré avant que vous ayez vérifié et approuvé le plan. Votre ancien ordinateur portable reste inchangé pendant le transfert.
 
@@ -1422,8 +1422,8 @@ qs-tally-badge = Envoi à proximité
 
 ## Q01 Quick Send home
 
-qs-home-title = Quelques fichiers, envoyés directement.
-qs-home-body = Envoyez quelques fichiers à un ordinateur portable à proximité.
+qs-home-title = Envoyez des fichiers à un portable proche.
+qs-home-body = Ou recevez-en d’un autre.
 qs-send-title = Envoyer des fichiers
 qs-send-body = Choisissez des fichiers ou des dossiers sur cet ordinateur portable.
 qs-receive-title = Recevoir des fichiers
@@ -1482,7 +1482,7 @@ qs-who-action = Afficher mon code d’envoi
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = Quelqu’un veut vous envoyer des fichiers.
-qs-offer-body = Vérifiez ce qui est envoyé avant d’accepter.
+qs-offer-body = { $label } veut vous envoyer ces fichiers. Vérifiez-les avant d’accepter.
 qs-offer-note = PCTwin enregistre seulement les fichiers que vous acceptez. Il ne les ouvre et ne les lance jamais.
 qs-offer-accept = Accepter et choisir un dossier
 qs-offer-decline = Refuser ces fichiers

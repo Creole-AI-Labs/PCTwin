@@ -11,10 +11,10 @@ footer-help = Ayuda
 
 ## F01 Welcome
 
-welcome-eyebrow = Tu próximo capítulo, listo.
-welcome-title-line1 = Tu configuración.
-welcome-title-line2 = Tu próximo portátil.
-welcome-body = Llévate tus archivos, aplicaciones y ajustes de siempre en el traslado.
+welcome-eyebrow = PCTwin
+welcome-title-line1 = Envía archivos
+welcome-title-line2 = o múdalo todo.
+welcome-body = Envía unos pocos archivos a un portátil cercano, o lleva tus archivos, aplicaciones y ajustes a tu portátil nuevo.
 welcome-start = Empezar un traslado completo
 
 ## F06 Old or new laptop
@@ -23,9 +23,9 @@ role-back = Atrás
 role-eyebrow = Empezar un traslado completo
 role-title = ¿Qué portátil es este?
 role-body = Abre PCTwin en los dos portátiles. Luego indica cuál es este.
-role-old-title = Mi portátil antiguo
+role-old-title = Este es mi portátil antiguo
 role-old-body = Enviar mis archivos, aplicaciones y ajustes.
-role-new-title = Mi portátil nuevo
+role-new-title = Este es mi portátil nuevo
 role-new-body = Recibir mi configuración desde otro portátil.
 role-note = Nada se traslada hasta que revises y apruebes el plan. Tu portátil antiguo no cambia durante el traslado.
 
@@ -1413,8 +1413,8 @@ qs-tally-badge = Envío cercano
 
 ## Q01 Quick Send home
 
-qs-home-title = Unos pocos archivos. Directos al otro lado.
-qs-home-body = Envía unos pocos archivos a un portátil cercano.
+qs-home-title = Envía archivos a un portátil cercano.
+qs-home-body = O recibe archivos de uno.
 qs-send-title = Enviar archivos
 qs-send-body = Elige archivos o carpetas de este portátil.
 qs-receive-title = Recibir archivos
@@ -1473,7 +1473,7 @@ qs-who-action = Mostrar mi código de envío
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = Alguien quiere enviarte archivos.
-qs-offer-body = Revisa lo que te envían antes de aceptar.
+qs-offer-body = { $label } quiere enviarte estos archivos. Revísalos antes de aceptar.
 qs-offer-note = PCTwin guarda solo los archivos que aceptas. Nunca los abre ni los pone en marcha.
 qs-offer-accept = Aceptar y elegir una carpeta
 qs-offer-decline = Rechazar estos archivos

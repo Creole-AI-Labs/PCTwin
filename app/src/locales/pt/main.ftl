@@ -11,10 +11,10 @@ footer-help = Ajuda
 
 ## F01 Welcome
 
-welcome-eyebrow = Seu próximo capítulo, pronto.
-welcome-title-line1 = Sua configuração completa.
-welcome-title-line2 = Seu próximo notebook.
-welcome-body = Leve seus arquivos, apps e as configurações de sempre na mudança.
+welcome-eyebrow = PCTwin
+welcome-title-line1 = Envie arquivos
+welcome-title-line2 = ou mude tudo de uma vez.
+welcome-body = Envie alguns arquivos para um notebook por perto, ou leve seus arquivos, apps e configurações para o seu notebook novo.
 welcome-start = Começar uma mudança completa
 
 ## F06 Old or new laptop
@@ -23,9 +23,9 @@ role-back = Voltar
 role-eyebrow = Começar uma mudança completa
 role-title = Qual notebook é este?
 role-body = Abra o PCTwin nos dois notebooks. Depois diga qual é este.
-role-old-title = Meu notebook antigo
+role-old-title = Este é o meu notebook antigo
 role-old-body = Enviar meus arquivos, apps e configurações.
-role-new-title = Meu notebook novo
+role-new-title = Este é o meu notebook novo
 role-new-body = Receber minha configuração completa de outro notebook.
 role-note = Nada é movido até você revisar e aprovar o plano. Seu notebook antigo continua como está durante a mudança.
 
@@ -1417,8 +1417,8 @@ qs-tally-badge = Envio por perto
 
 ## Q01 Quick Send home
 
-qs-home-title = Alguns arquivos. Direto para o outro.
-qs-home-body = Envie alguns arquivos para um notebook por perto.
+qs-home-title = Envie arquivos para um notebook por perto.
+qs-home-body = Ou receba arquivos de um.
 qs-send-title = Enviar arquivos
 qs-send-body = Escolha arquivos ou pastas neste notebook.
 qs-receive-title = Receber arquivos
@@ -1477,7 +1477,7 @@ qs-who-action = Ver meu código de envio
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = Alguém quer enviar arquivos para você.
-qs-offer-body = Confira o que está sendo enviado antes de aceitar.
+qs-offer-body = { $label } quer enviar estes arquivos para você. Confira antes de aceitar.
 qs-offer-note = O PCTwin salva só os arquivos que você aceitar. Ele nunca os abre nem os inicia.
 qs-offer-accept = Aceitar e escolher uma pasta
 qs-offer-decline = Recusar estes arquivos
