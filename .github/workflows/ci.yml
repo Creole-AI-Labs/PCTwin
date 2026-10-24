@@ -100,6 +100,52 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  motion:
+    # Motion smoothness in the engines the app really uses (Task List 1.10): Edge on Windows
+    # (WebView2 is Edge's engine), the processor slowed four times as on a slow laptop, and WebKit
+    # on a Mac (WKWebView's engine). Every frame of the opening and a screen change is timed.
+    name: Motion smoothness (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            engine: msedge
+          - os: macos-latest
+            engine: webkit
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: The Mac's engine
+        if: matrix.engine == 'webkit'
+        run: pnpm exec playwright install webkit
+      - name: Every frame timed
+        run: node perf/motion-frames.mjs --engine ${{ matrix.engine }} --out motion-frames.json
+      - name: Keep the figures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: motion-frames-${{ matrix.os }}
+          path: app/motion-frames.json
+          if-no-files-found: warn
+          retention-days: 14
+
   fuzz:
     # Everything that arrives from the other laptop or the person, fuzzed for a minute per
     # target with cargo-fuzz (libFuzzer, nightly compiler): a crash, hang or failed check fails CI.
