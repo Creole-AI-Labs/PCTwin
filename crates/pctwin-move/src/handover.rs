@@ -563,7 +563,11 @@ mod held_tests {
         std::fs::hard_link(outside.join("a.txt"), docs.join("second-name.txt")).unwrap();
         let first = held(&holding, &documents()).unwrap();
         assert_eq!(first.found.len(), 1, "only sub/a.txt");
-        assert!(first.found[0].path.ends_with(Path::new("sub").join("a.txt")));
+        assert!(
+            first.found[0]
+                .path
+                .ends_with(Path::new("sub").join("a.txt"))
+        );
         assert_eq!(first.not_plain.len(), 2, "{:?}", first.not_plain);
 
         let (_top2, holding2, outside2) = setup();
