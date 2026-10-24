@@ -363,7 +363,8 @@ jobs:
     # A stuck runner (an apt mirror once hung for over an hour) is stopped instead of waiting
     # for GitHub's six-hour limit. The Intel Mac is the slowest runner: with a cold cache (the
     # first nightly run) it needed more than an hour, so it gets 90 minutes.
-    timeout-minutes: ${{ matrix.os == 'macos-15-intel' && 90 || 60 }}
+    # Windows also builds the release installer and installs it for real; the Intel Mac is slow.
+    timeout-minutes: ${{ (matrix.os == 'macos-15-intel' || matrix.os == 'windows-latest') && 90 || 60 }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
