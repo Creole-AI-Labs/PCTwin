@@ -235,19 +235,21 @@ pub(crate) fn secure_token_on(name: &str, password: &str) -> Result<bool, Error>
     if !filevault_on() {
         return secure_token_status(name);
     }
-    let mut child = Command::new(SYSADMINCTL)
-        .args(["interactive", "-secureTokenOn", name, "-password", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
+    // Ended (with anything it started) and reaped whatever happens below, an error included.
+    let mut tool = crate::ToolRun::spawn(
+        Command::new(SYSADMINCTL)
+            .args(["interactive", "-secureTokenOn", name, "-password", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )?;
+    if let Some(mut stdin) = tool.stdin() {
         let mut line = format!("{password}\n").into_bytes();
         let written = stdin.write_all(&line);
         line.iter_mut().for_each(|b| *b = 0);
         written?;
     }
-    crate::wait_at_most(&mut child, SECURE_TOKEN_WAIT)?;
+    tool.wait_at_most(SECURE_TOKEN_WAIT)?;
     secure_token_status(name)
 }
 

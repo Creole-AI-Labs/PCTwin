@@ -710,52 +710,171 @@ pub fn launch_elevated_with(
     }
 }
 
-/// Waits for `child` to end, at most `limit`; past it the child is ended. `true` if it ended by
-/// itself. For a system tool that may show a window nobody answers (an unattended Mac, a CI
-/// runner): the move never waits on it for ever.
-pub fn wait_at_most(
-    child: &mut std::process::Child,
-    limit: std::time::Duration,
-) -> io::Result<bool> {
-    let until = std::time::Instant::now() + limit;
-    loop {
-        if child.try_wait()?.is_some() {
-            return Ok(true);
-        }
-        if std::time::Instant::now() >= until {
+/// A system tool run so that it, and anything it starts, can be ended together (on Unix in a
+/// process group of its own: a tool that hands its window to another process cannot leave that
+/// window open after PCTwin stopped waiting). Whatever way it is left, early return or error
+/// included, the whole group is ended and the tool reaped.
+pub struct ToolRun {
+    child: Option<std::process::Child>,
+}
+
+impl ToolRun {
+    /// Starts `command` in a process group of its own.
+    pub fn spawn(command: &mut std::process::Command) -> io::Result<Self> {
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(command, 0);
+        Ok(Self {
+            child: Some(command.spawn()?),
+        })
+    }
+
+    /// The tool's input, if it was made a pipe (once).
+    pub fn stdin(&mut self) -> Option<std::process::ChildStdin> {
+        self.child.as_mut()?.stdin.take()
+    }
+
+    /// The tool's process ID.
+    pub fn id(&self) -> Option<u32> {
+        self.child.as_ref().map(std::process::Child::id)
+    }
+
+    /// Waits for the tool to end, at most `limit`: `true` if it ended by itself. Either way its
+    /// whole group is then ended and it is reaped (a window it handed on never stays open).
+    pub fn wait_at_most(&mut self, limit: std::time::Duration) -> io::Result<bool> {
+        let until = std::time::Instant::now() + limit;
+        let ended = loop {
+            let Some(child) = self.child.as_mut() else {
+                break Ok(true);
+            };
+            match child.try_wait() {
+                Ok(Some(_)) => break Ok(true),
+                Ok(None) if std::time::Instant::now() >= until => break Ok(false),
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(e) => break Err(e),
+            }
+        };
+        self.end();
+        ended
+    }
+
+    /// Ends the tool's whole group, then the tool, and reaps it.
+    fn end(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            #[cfg(unix)]
+            if let Some(pid) = i32::try_from(child.id())
+                .ok()
+                .and_then(rustix::process::Pid::from_raw)
+            {
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            }
             let _ = child.kill();
             let _ = child.wait();
-            return Ok(false);
         }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+impl Drop for ToolRun {
+    fn drop(&mut self) {
+        self.end();
     }
 }
 
 #[cfg(test)]
 mod tests {
+    fn long_tool() -> std::process::Command {
+        if cfg!(windows) {
+            let mut c = std::process::Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null());
+            c
+        } else {
+            let mut c = std::process::Command::new("sleep");
+            c.arg("30");
+            c
+        }
+    }
+
     /// A tool that never ends is ended at the limit; one that ends by itself is waited for.
     #[test]
     fn a_tool_is_waited_for_at_most_its_limit() {
-        let long = if cfg!(windows) {
-            std::process::Command::new("ping")
-                .args(["-n", "30", "127.0.0.1"])
-                .stdout(std::process::Stdio::null())
-                .spawn()
-        } else {
-            std::process::Command::new("sleep").arg("30").spawn()
-        };
-        let mut long = long.unwrap();
+        let mut long = ToolRun::spawn(&mut long_tool()).unwrap();
         let started = std::time::Instant::now();
-        assert!(!wait_at_most(&mut long, std::time::Duration::from_millis(500)).unwrap());
+        assert!(
+            !long
+                .wait_at_most(std::time::Duration::from_millis(500))
+                .unwrap()
+        );
         assert!(started.elapsed() < std::time::Duration::from_secs(10));
-        let quick = if cfg!(windows) {
-            std::process::Command::new("cmd")
-                .args(["/c", "exit"])
-                .spawn()
+        let mut quick = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/c", "exit"]);
+            c
         } else {
-            std::process::Command::new("true").spawn()
+            std::process::Command::new("true")
         };
-        assert!(wait_at_most(&mut quick.unwrap(), std::time::Duration::from_secs(10)).unwrap());
+        let mut quick = ToolRun::spawn(&mut quick).unwrap();
+        assert!(
+            quick
+                .wait_at_most(std::time::Duration::from_secs(10))
+                .unwrap()
+        );
+    }
+
+    /// A tool that started another process (as a tool may hand its window on): at the limit
+    /// both are gone, not only the tool.
+    #[cfg(unix)]
+    #[test]
+    fn what_a_tool_started_is_ended_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("grandchild");
+        let mut tool = ToolRun::spawn(std::process::Command::new("sh").args([
+            "-c",
+            &format!("sleep 30 & echo $! > '{}'; wait", pidfile.display()),
+        ]))
+        .unwrap();
+        let mut grandchild = None;
+        for _ in 0..100 {
+            if let Some(pid) = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|t| t.trim().parse::<i32>().ok())
+            {
+                grandchild = rustix::process::Pid::from_raw(pid);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let grandchild = grandchild.expect("the tool started its sleeper");
+        assert!(rustix::process::test_kill_process(grandchild).is_ok());
+        assert!(
+            !tool
+                .wait_at_most(std::time::Duration::from_millis(300))
+                .unwrap()
+        );
+        // Reaped by the system once its parent is gone: wait a moment for it to vanish.
+        let mut gone = false;
+        for _ in 0..100 {
+            if rustix::process::test_kill_process(grandchild).is_err() {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(gone, "what the tool started is still running");
+    }
+
+    /// Left without waiting (an early return), a tool is still ended and reaped.
+    #[test]
+    fn a_tool_left_early_is_ended() {
+        let tool = ToolRun::spawn(&mut long_tool()).unwrap();
+        let pid = tool.id().unwrap();
+        drop(tool);
+        #[cfg(unix)]
+        {
+            let pid = rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()).unwrap();
+            assert!(rustix::process::test_kill_process(pid).is_err());
+        }
+        #[cfg(not(unix))]
+        let _ = pid;
     }
 
     use super::*;
