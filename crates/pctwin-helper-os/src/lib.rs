@@ -710,6 +710,24 @@ pub fn launch_elevated_with(
     }
 }
 
+/// After an account's record is made (`made`, its user ID): the rest of making it (`rest`: its
+/// home, its first-sign-in rule). If any of that fails, the account PCTwin itself just made is
+/// taken away again (`undo`, given that very user ID, never another account), so it is never
+/// left half-made for a retry to find "already there"; the first failure is what is reported.
+pub fn finish_or_undo(
+    made: u32,
+    rest: impl FnOnce() -> Result<(), Error>,
+    undo: impl FnOnce(u32) -> Result<(), Error>,
+) -> Result<u32, Error> {
+    match rest() {
+        Ok(()) => Ok(made),
+        Err(failed) => {
+            let _ = undo(made);
+            Err(failed)
+        }
+    }
+}
+
 /// A system tool run so that it, and anything it starts, can be ended together (on Unix in a
 /// process group of its own: a tool that hands its window to another process cannot leave that
 /// window open after PCTwin stopped waiting). Whatever way it is left, early return or error
@@ -781,6 +799,41 @@ impl Drop for ToolRun {
 
 #[cfg(test)]
 mod tests {
+    /// A later step of making an account fails: the account just made (by its own user ID) is
+    /// taken away and the failure reported; when every step works nothing is taken away.
+    #[test]
+    fn an_account_half_made_is_taken_away_again() {
+        let undone = std::cell::Cell::new(None);
+        let failed = finish_or_undo(
+            612,
+            || Err(Error::BadInput("its home could not be made")),
+            |uid| {
+                undone.set(Some(uid));
+                Ok(())
+            },
+        );
+        assert!(matches!(failed, Err(Error::BadInput(_))));
+        assert_eq!(undone.get(), Some(612));
+        undone.set(None);
+        let made = finish_or_undo(
+            613,
+            || Ok(()),
+            |uid| {
+                undone.set(Some(uid));
+                Ok(())
+            },
+        );
+        assert_eq!(made.unwrap(), 613);
+        assert_eq!(undone.get(), None);
+        // Taking it away failing too still reports the first failure.
+        let both = finish_or_undo(
+            614,
+            || Err(Error::BadInput("first")),
+            |_| Err(Error::BadInput("second")),
+        );
+        assert!(matches!(both, Err(Error::BadInput("first"))));
+    }
+
     fn long_tool() -> std::process::Command {
         if cfg!(windows) {
             let mut c = std::process::Command::new("ping");

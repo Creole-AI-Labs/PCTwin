@@ -213,12 +213,44 @@ pub(crate) fn add_standard_account(
         },
         code,
     })?;
-    run(CREATEHOMEDIR, &["-c", "-u", name])?;
-    run(
-        PWPOLICY,
-        &["-u", name, "-setpolicy", "newPasswordRequired=1"],
-    )?;
-    Ok(uid)
+    let home_was_there = std::path::Path::new(&path).exists();
+    crate::finish_or_undo(
+        uid,
+        || {
+            run(CREATEHOMEDIR, &["-c", "-u", name])?;
+            run(
+                PWPOLICY,
+                &["-u", name, "-setpolicy", "newPasswordRequired=1"],
+            )?;
+            Ok(())
+        },
+        |made| remove_made_account(name, made, home_was_there),
+    )
+}
+
+/// Takes away the account `name` PCTwin just made: only if its record still has the user ID
+/// `uid` it was made with (never another account of that name), and its home folder only if
+/// PCTwin's own step made it (it was not there before, and it is that account's).
+fn remove_made_account(name: &str, uid: u32, home_was_there: bool) -> Result<(), Error> {
+    use std::os::unix::fs::MetadataExt;
+    let path = format!("/Users/{name}");
+    let listed =
+        String::from_utf8_lossy(&run(DSCL, &[".", "-read", &path, "UniqueID"])?).into_owned();
+    let same = listed
+        .split_whitespace()
+        .last()
+        .and_then(|u| u.parse::<u32>().ok())
+        == Some(uid);
+    if !same {
+        return Err(Error::BadInput("the account is not the one PCTwin made"));
+    }
+    run(DSCL, &[".", "-delete", &path])?;
+    if !home_was_there
+        && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir() && m.uid() == uid)
+    {
+        std::fs::remove_dir_all(&path)?;
+    }
+    Ok(())
 }
 
 const SYSADMINCTL: &str = "/usr/sbin/sysadminctl";
