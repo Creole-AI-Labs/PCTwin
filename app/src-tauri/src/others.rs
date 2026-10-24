@@ -533,16 +533,48 @@ pub fn full_name(name: &str) -> String {
     }
 }
 
+/// The password window's text: `body` with `{name}`, `{account}` and `{password}` filled in, in
+/// one pass over `body` alone, so text that came from a name (a shown name holding
+/// "{password}", say) is never filled in again. Written into one buffer of exactly its size
+/// (never grown, so no copy of the password is left behind), cleared when dropped.
+fn password_text(
+    body: &str,
+    name: &str,
+    account: &str,
+    password: &str,
+) -> zeroize::Zeroizing<String> {
+    let values = [
+        ("{name}", name),
+        ("{account}", account),
+        ("{password}", password),
+    ];
+    let pieces = |put: &mut dyn FnMut(&str)| {
+        let mut rest = body;
+        loop {
+            let next = values
+                .iter()
+                .filter_map(|(key, value)| rest.find(key).map(|at| (at, *key, *value)))
+                .min_by_key(|(at, ..)| *at);
+            let Some((at, key, value)) = next else {
+                put(rest);
+                break;
+            };
+            put(&rest[..at]);
+            put(value);
+            rest = &rest[at + key.len()..];
+        }
+    };
+    let mut size = 0;
+    pieces(&mut |p| size += p.len());
+    let mut out = zeroize::Zeroizing::new(String::with_capacity(size));
+    pieces(&mut |p| out.push_str(p));
+    out
+}
+
 /// Shows a new account's temporary password once, in the system's own window (never in the
 /// screens, which are a web page), and forgets it.
 pub fn show_password(words: &PasswordWords, name: &str, account: &str, password: &str) {
-    let body = zeroize::Zeroizing::new(
-        words
-            .body
-            .replace("{name}", name)
-            .replace("{account}", account)
-            .replace("{password}", password),
-    );
+    let body = password_text(&words.body, name, account, password);
     let _ = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Info)
         .set_title(&words.title)
@@ -776,6 +808,27 @@ mod tests {
         let mut no_names = w("{name}: sign in as {account} with {password}");
         no_names.approve = "Approve.".into();
         assert!(!no_names.fine());
+    }
+
+    /// A shown name holding a place's name is shown as it is: the password appears once.
+    #[test]
+    fn text_from_a_name_is_never_filled_in_again() {
+        let body = "{name}: sign in as {account} with {password}";
+        assert_eq!(
+            password_text(body, "Bea", "bea", "abcd-efgh").as_str(),
+            "Bea: sign in as bea with abcd-efgh"
+        );
+        let tricky = password_text(body, "Bea {password} {account}", "bea", "abcd-efgh");
+        assert_eq!(
+            tricky.as_str(),
+            "Bea {password} {account}: sign in as bea with abcd-efgh"
+        );
+        assert_eq!(tricky.matches("abcd-efgh").count(), 1);
+        // The places in any order, and a value holding braces of its own.
+        assert_eq!(
+            password_text("{password} / {account} / {name}", "{name}", "a", "p").as_str(),
+            "p / a / {name}"
+        );
     }
 
     #[test]
