@@ -328,7 +328,11 @@ impl<'s> Session<'s> {
         }
         let (found, privacy_blocked) = match (self.scanner)(account) {
             Ok(scan) => {
-                self.system_only = scan.system_only;
+                // Every scan's places are kept together, each once: with several people, what one
+                // scan found is never lost to the next.
+                self.system_only.extend(scan.system_only);
+                self.system_only.sort();
+                self.system_only.dedup();
                 (scan.found, scan.privacy_blocked)
             }
             Err(why) => return send_answer(channel, &Answer::Refused(why)),

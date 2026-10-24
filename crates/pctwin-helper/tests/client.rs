@@ -134,3 +134,41 @@ fn the_new_laptop_s_steps_through_the_client() {
     client.bye().unwrap();
     helper.join().unwrap();
 }
+
+/// Several approved people: what each person's scan found only the administrators and the
+/// system may open is kept together, so every one of those places is answered yes, whichever
+/// scan found it.
+#[test]
+fn every_scan_s_system_only_places_are_kept() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let helper = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut scanner = |who: &str| -> Result<pctwin_helper::person::PersonScan, Refusal> {
+            Ok(pctwin_helper::person::PersonScan {
+                found: Vec::new(),
+                privacy_blocked: 0,
+                system_only: vec![PathBuf::from(format!("/lab/locked-{who}"))],
+            })
+        };
+        Session::new(
+            "tok".into(),
+            BTreeSet::from(["bea".to_string(), "cal".to_string()]),
+            &mut scanner,
+        )
+        .serve(&mut stream)
+        .unwrap();
+    });
+    let mut client = Client::open(TcpStream::connect(addr).unwrap(), "tok").unwrap();
+    client.scan_person("bea").unwrap();
+    client.scan_person("cal").unwrap();
+    client.scan_person("bea").unwrap();
+    let asked = [
+        PathBuf::from("/lab/locked-bea"),
+        PathBuf::from("/lab/locked-cal"),
+        PathBuf::from("/lab/elsewhere"),
+    ];
+    assert_eq!(client.system_only(&asked).unwrap(), vec![true, true, false]);
+    client.bye().unwrap();
+    helper.join().unwrap();
+}
