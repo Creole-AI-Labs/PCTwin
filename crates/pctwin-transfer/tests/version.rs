@@ -80,10 +80,10 @@ async fn sent_by(ours: Versions) -> Vec<u8> {
 }
 
 #[test]
-fn this_release_speaks_versions_two_to_four() {
-    // 3 sends the list in pages (PAGED_FROM); 4 adds Hold (HOLD_SINCE); 2 is kept for a laptop
-    // two versions behind.
-    assert_eq!(MOVE_PROTOCOL.oldest(), 2);
+fn this_release_speaks_versions_three_and_four() {
+    // 3 sends the list in pages (PAGED_FROM), kept for a laptop one version behind; 4 adds Hold
+    // (HOLD_SINCE). 2 was never released, and its one-document list had no memory bounds.
+    assert_eq!(MOVE_PROTOCOL.oldest(), 3);
     assert_eq!(MOVE_PROTOCOL.newest(), 4);
     assert_eq!(pctwin_transfer::PAGED_FROM, 3);
     assert_eq!(pctwin_transfer::HOLD_SINCE, 4);

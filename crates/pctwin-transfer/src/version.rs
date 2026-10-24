@@ -24,12 +24,13 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// first released one. Version 2 added sending damaged blocks again (receipts say whether a block
 /// was written, and `SendAgain`); version 1 was never released, so nothing needs it. Version 3
 /// sends the old laptop's list in pages (the scan inventory version 2), so no laptop is too big
-/// to send; version 2's one JSON document is kept for a laptop one version behind. Version 4
-/// added pausing and stopping told to the other laptop ([`HOLD_SINCE`], [`STOP_SINCE`]); with a
-/// laptop on version 2 or 3 a pause holds only the old laptop, and a stop looks to the other like
-/// a lost connection.
+/// to send. Version 4 added pausing and stopping told to the other laptop ([`HOLD_SINCE`],
+/// [`STOP_SINCE`]); with a laptop on version 3 a pause holds only the old laptop, and a stop
+/// looks to the other like a lost connection. No version was released before 4, so the oldest
+/// spoken is 3, one version back: version 2's one JSON document had none of the paged list's
+/// memory bounds, and a laptop saying it speaks only 2 could otherwise force it.
 pub const MOVE_PROTOCOL: Versions = Versions {
-    oldest: 2,
+    oldest: 3,
     newest: 4,
 };
 

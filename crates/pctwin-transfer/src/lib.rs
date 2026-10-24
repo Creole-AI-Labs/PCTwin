@@ -76,8 +76,7 @@ pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use cause::{Cause, Failure, Side};
 pub use fit::{Fit, KEEP_FREE, PlaceFit, TimeRange};
 pub use inventory::{
-    INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, PAGED_FROM, receive_inventory,
-    send_inventory,
+    INVENTORY_PIECE_WAIT, InventoryFrame, PAGED_FROM, receive_inventory, send_inventory,
 };
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label, shown_path};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};

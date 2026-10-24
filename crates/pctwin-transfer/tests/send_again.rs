@@ -499,7 +499,7 @@ fn the_new_messages_read_back_as_written() {
 #[test]
 fn this_release_speaks_the_move_protocol_that_can_send_again() {
     // Sending again arrived in version 2; every later version keeps it.
-    assert_eq!(pctwin_transfer::MOVE_PROTOCOL.oldest(), 2);
+    assert!(pctwin_transfer::MOVE_PROTOCOL.oldest() >= 2);
     assert!(pctwin_transfer::MOVE_PROTOCOL.newest() >= 2);
 }
 
