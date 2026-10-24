@@ -227,22 +227,39 @@ fn start_decision(
         v
     };
     // Windows itself adds PROCESSOR_ARCHITECTURE to a process it starts on some machines (found
-    // on Windows on Arm CI runners): allowed when it names an architecture, nothing else.
-    let windows_own = |(k, v): &(std::ffi::OsString, std::ffi::OsString)| {
-        k.to_string_lossy()
-            .eq_ignore_ascii_case("PROCESSOR_ARCHITECTURE")
-            && ["AMD64", "ARM64", "x86", "IA64", "ARM"]
-                .iter()
-                .any(|a| v.to_string_lossy().eq_ignore_ascii_case(a))
-    };
-    let have: Vec<(std::ffi::OsString, std::ffi::OsString)> =
-        have.iter().filter(|p| !windows_own(p)).cloned().collect();
+    // on Windows on Arm CI runners): allowed once, and only naming the architecture this program
+    // was built for, which is what Windows gives it (second review: any other value restarts).
+    let mut own_seen = false;
+    let have: Vec<(std::ffi::OsString, std::ffi::OsString)> = have
+        .iter()
+        .filter(|(k, v)| {
+            let own = !own_seen
+                && k.to_string_lossy()
+                    .eq_ignore_ascii_case("PROCESSOR_ARCHITECTURE")
+                && v.as_os_str() == own_architecture();
+            own_seen |= own;
+            !own
+        })
+        .cloned()
+        .collect();
     if norm(&have) == norm(want) {
         Start::Run
     } else if restarted {
         Start::Refuse
     } else {
         Start::Restart
+    }
+}
+
+/// The PROCESSOR_ARCHITECTURE Windows gives a program built for this architecture.
+#[cfg(any(windows, test))]
+fn own_architecture() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "AMD64",
+        "aarch64" => "ARM64",
+        "x86" => "x86",
+        // Nothing else is built for Windows: never matches a value Windows gives.
+        _ => "",
     }
 }
 
@@ -493,7 +510,7 @@ mod tests {
         assert_eq!(start_decision(&same, &want, true), Start::Run);
         // Windows' own PROCESSOR_ARCHITECTURE, naming an architecture: still clean.
         let mut arm = same.clone();
-        arm.push(pair("PROCESSOR_ARCHITECTURE", "ARM64"));
+        arm.push(pair("PROCESSOR_ARCHITECTURE", own_architecture()));
         assert_eq!(start_decision(&arm, &want, true), Start::Run);
         // Anything planted (a profiler, a changed SystemRoot, one value missing): start again
         // clean, and if that was already the clean start, never run.
@@ -512,6 +529,25 @@ mod tests {
                 pair("SystemRoot", r"C:\Windows"),
                 pair("TEMP", r"C:\Windows\Temp"),
                 pair("PROCESSOR_ARCHITECTURE", r"C:\Evil"),
+            ],
+            // Another architecture than this program's, or Windows' own value twice.
+            vec![
+                pair("SystemRoot", r"C:\Windows"),
+                pair("TEMP", r"C:\Windows\Temp"),
+                pair(
+                    "PROCESSOR_ARCHITECTURE",
+                    if own_architecture() == "x86" {
+                        "AMD64"
+                    } else {
+                        "x86"
+                    },
+                ),
+            ],
+            vec![
+                pair("SystemRoot", r"C:\Windows"),
+                pair("TEMP", r"C:\Windows\Temp"),
+                pair("PROCESSOR_ARCHITECTURE", own_architecture()),
+                pair("processor_architecture", own_architecture()),
             ],
         ] {
             assert_eq!(
