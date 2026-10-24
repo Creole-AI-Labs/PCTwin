@@ -109,6 +109,12 @@ function Start-Helper([string]$pipe, [string]$log) {
 }
 
 Write-Host '== 1. one helper at a time; only the mover''s account may call it =='
+# Stops a program and everything it started (the helper on Windows runs as a clean copy
+# of itself; stopping only the first would leave the copy behind).
+function Stop-Tree($proc) {
+    if ($proc) { & taskkill.exe /T /F /PID $proc.Id 2>&1 | Out-Null }
+}
+
 $pipe1 = "pctwin-helper-$(Hex 16)"
 $first = Start-Helper $pipe1 (Join-Path $admin 'helper-1')
 Start-Sleep -Seconds 2
@@ -116,7 +122,7 @@ $second = Start-Helper "pctwin-helper-$(Hex 16)" (Join-Path $admin 'helper-secon
 if ((Wait-Exit $second 'the second helper') -eq 0) { throw 'a second helper ran while one was running' }
 $carl = Start-As 'pctwincarl' $labmove @('hello', $token, $pipe1) (Join-Path $admin 'carl.out.txt') (Join-Path $admin 'carl.err.txt')
 if ((Wait-Exit $carl 'Carl calling the helper') -eq 0) { throw "another account was served by the mover's helper" }
-Stop-Process -Id $first.Id -Force -ErrorAction SilentlyContinue
+Stop-Tree $first
 foreach ($n in 1..2) { if (Get-LocalUser -Name "pctwinnew$n" -ErrorAction SilentlyContinue) { throw "Carl's call made an account" } }
 
 Write-Host '== 2. the move of everyone =='
@@ -151,8 +157,8 @@ try {
     if ((Wait-Exit $run 'the move') -ne 0) { throw 'the move failed' }
     $null = Wait-Exit $helper 'the helper'
 } catch {
-    Stop-Process -Id $run.Id -Force -ErrorAction SilentlyContinue
-    Stop-Process -Id $helper.Id -Force -ErrorAction SilentlyContinue
+    Stop-Tree $run
+    Stop-Tree $helper
     Start-Sleep -Seconds 2
     throw
 } finally {

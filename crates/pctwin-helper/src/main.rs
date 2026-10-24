@@ -147,13 +147,27 @@ fn main() -> ExitCode {
 #[cfg(windows)]
 fn run(args: &Args) -> Result<(), String> {
     use pctwin_helper_os::{Account, PipeName, PipeServer, Sid, caller_of};
+    use std::sync::atomic::{AtomicBool, Ordering};
     if args.dir.is_some() {
         return Err("--dir is not used on Windows".into());
     }
     let mover = Sid::parse(&args.mover).map_err(|e| e.to_string())?;
     let name = PipeName::parse(&args.channel).map_err(|e| e.to_string())?;
     let pipe = PipeServer::create(&name, &mover).map_err(|e| e.to_string())?;
+    // The mover connects within seconds of the helper starting. Nobody in time (the app went
+    // away, or the copy that started this one was stopped): it ends, and never holds the
+    // one-helper lock with nobody behind it (found by the two-accounts lab).
+    let connected = std::sync::Arc::new(AtomicBool::new(false));
+    let watch = std::sync::Arc::clone(&connected);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(CONNECT_WAITS_SECS));
+        if !watch.load(Ordering::Acquire) {
+            eprintln!("pctwin-helper: nobody connected in time");
+            std::process::exit(1);
+        }
+    });
     pipe.accept().map_err(|e| e.to_string())?;
+    connected.store(true, Ordering::Release);
     let caller = caller_of(&pipe).map_err(|e| e.to_string())?;
     if caller.account != Account::Sid(mover.clone()) {
         return Err("a connection from another account was refused".into());
@@ -177,6 +191,10 @@ fn run(args: &Args) -> Result<(), String> {
 }
 
 /// The first argument of the helper restarted with a clean environment.
+/// Windows: how long the helper waits for the mover to connect.
+#[cfg(windows)]
+const CONNECT_WAITS_SECS: u64 = 120;
+
 #[cfg(windows)]
 const CLEAN_START: &str = "--clean-start";
 
@@ -208,7 +226,18 @@ fn start_decision(
         v.sort();
         v
     };
-    if norm(have) == norm(want) {
+    // Windows itself adds PROCESSOR_ARCHITECTURE to a process it starts on some machines (found
+    // on Windows on Arm CI runners): allowed when it names an architecture, nothing else.
+    let windows_own = |(k, v): &(std::ffi::OsString, std::ffi::OsString)| {
+        k.to_string_lossy()
+            .eq_ignore_ascii_case("PROCESSOR_ARCHITECTURE")
+            && ["AMD64", "ARM64", "x86", "IA64", "ARM"]
+                .iter()
+                .any(|a| v.to_string_lossy().eq_ignore_ascii_case(a))
+    };
+    let have: Vec<(std::ffi::OsString, std::ffi::OsString)> =
+        have.iter().filter(|p| !windows_own(p)).cloned().collect();
+    if norm(&have) == norm(want) {
         Start::Run
     } else if restarted {
         Start::Refuse
@@ -462,6 +491,10 @@ mod tests {
         ];
         assert_eq!(start_decision(&same, &want, false), Start::Run);
         assert_eq!(start_decision(&same, &want, true), Start::Run);
+        // Windows' own PROCESSOR_ARCHITECTURE, naming an architecture: still clean.
+        let mut arm = same.clone();
+        arm.push(pair("PROCESSOR_ARCHITECTURE", "ARM64"));
+        assert_eq!(start_decision(&arm, &want, true), Start::Run);
         // Anything planted (a profiler, a changed SystemRoot, one value missing): start again
         // clean, and if that was already the clean start, never run.
         for bad in [
@@ -475,6 +508,11 @@ mod tests {
                 pair("TEMP", r"C:\Windows\Temp"),
             ],
             vec![pair("SystemRoot", r"C:\Windows")],
+            vec![
+                pair("SystemRoot", r"C:\Windows"),
+                pair("TEMP", r"C:\Windows\Temp"),
+                pair("PROCESSOR_ARCHITECTURE", r"C:\Evil"),
+            ],
         ] {
             assert_eq!(
                 start_decision(&bad, &want, false),
