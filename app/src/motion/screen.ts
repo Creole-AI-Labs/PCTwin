@@ -21,7 +21,18 @@ import { motionMode } from "./preference";
 import { DISTANCE, DURATION, STAGGER_MS, STAGGER_ROWS, at } from "./tokens";
 
 /** Rows that settle when a screen arrives (first five only). Codes and QR are never among them. */
-export const ROWS = [".choice", ".kit-row", ".plan-item", ".help-row", ".mv-guide", ".qs-route-row", ".qs-rowlink", ".frame-step", ".history-item", ".people-row"].join(", ");
+export const ROWS = [
+  ".choice",
+  ".kit-row",
+  ".plan-item",
+  ".plan-folder",
+  ".help-row",
+  ".mv-guide",
+  ".mv-report tbody tr",
+  ".qs-route-row",
+  ".qs-rows > *",
+  ".frame-step",
+].join(", ");
 
 /** Codes, QR and compared numbers (MC12, MC13): a screen showing one arrives without any motion. */
 export const STILL = ".kit-code-box, .kit-code-input, .pair-tile, .pair-numbers, [data-motion-still]";

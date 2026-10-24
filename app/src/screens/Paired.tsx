@@ -1,6 +1,7 @@
 import { Localized } from "@fluent/react";
 import { Badge, Button } from "../components/kit";
 import { ArrowForward, Check } from "../icons";
+import Accent from "../motion/Accent";
 import FrameFooter from "./FrameFooter";
 import { Heading, PairStrip } from "./PairParts";
 
@@ -10,7 +11,14 @@ export default function Paired({ onContinue }: { onContinue?: () => void }) {
     <>
       <PairStrip step={2} />
       <div className="pair-paired-badge">
-        <Badge tone="good" icon={<Check />}>
+        <Badge
+          tone="good"
+          icon={
+            <Accent>
+              <Check />
+            </Accent>
+          }
+        >
           <Localized id="pair-done-eyebrow">
             <span />
           </Localized>

@@ -127,3 +127,9 @@
     opacity: 0;
   }
 }
+
+/* ---------- Pairing (MC14): the accent that follows a confirmed pairing ---------- */
+
+.motion-accent {
+  display: inline-flex;
+}
