@@ -13,6 +13,8 @@
 # Needs root through password-free sudo (as on CI runners) and iproute2 with netem.
 # Usage: run.sh <folder with pctwin-lab and pctwin-labmove> <work folder>
 set -euo pipefail
+# A step that fails names itself (a setup command can fail without a word of its own).
+trap 'echo "two-machines: stopped at line $LINENO: $BASH_COMMAND (exit $?)" >&2' ERR
 bin="$(cd "$1" && pwd)"
 work="$2"
 me="$(id -un)"
