@@ -1,0 +1,38 @@
+/*
+ * Motion: presentation only. Timings come from src/motion/tokens.ts (--motion-*), which already
+ * reads zero when the mode is reduced or off. Only transform and opacity ever animate.
+ */
+
+/* Reduced and off: no transitions, no keyframes, no smooth scrolling, no press scale. Every word,
+   control, state and focus ring stays exactly as it is. */
+:root:is([data-motion="reduced"], [data-motion="off"]) *,
+:root:is([data-motion="reduced"], [data-motion="off"]) *::before,
+:root:is([data-motion="reduced"], [data-motion="off"]) *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  animation: none !important;
+}
+
+:root:is([data-motion="reduced"], [data-motion="off"]) :is(.button, .kit-button):active {
+  transform: none;
+}
+
+/* The Motion choice sits beside the language choice: the app's only settings place for now. */
+.app-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.app-settings select {
+  min-height: var(--control-small);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--colour-line);
+  border-radius: 8px;
+  background: var(--colour-paper);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}

@@ -4,6 +4,9 @@ import ReactDOM from "react-dom/client";
 import { localization } from "../i18n";
 import "../styles.css";
 import Gallery from "./Gallery";
+import { applyToDocument } from "../motion/preference";
+
+applyToDocument();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

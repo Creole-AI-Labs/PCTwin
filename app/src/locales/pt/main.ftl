@@ -5,6 +5,16 @@ app-name = PCTwin
 brand-home =
     .aria-label = Página inicial do PCTwin
 language-label = Idioma
+motion-label = Movimento
+motion-system = Movimento: como o sistema
+motion-reduced = Movimento: reduzido
+motion-off = Movimento: desligado
+
+# The opening (Wordplay); its tagline is the home headline.
+opening-label = O PCTwin está abrindo
+opening-status = Abrindo o PCTwin.
+opening-skip = Pular a intro
+opening-tagline = Envie arquivos ou mude tudo de uma vez.
 
 footer-free = Mudanças pessoais grátis. Não precisa de conta.
 footer-help = Ajuda

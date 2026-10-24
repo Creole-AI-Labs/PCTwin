@@ -5,6 +5,16 @@ app-name = PCTwin
 brand-home =
     .aria-label = PCTwin होम
 language-label = भाषा
+motion-label = एनिमेशन
+motion-system = एनिमेशन: सिस्टम के अनुसार
+motion-reduced = एनिमेशन: कम
+motion-off = एनिमेशन: बंद
+
+# The opening (Wordplay); its tagline is the home headline.
+opening-label = PCTwin खुल रहा है
+opening-status = PCTwin खुल रहा है।
+opening-skip = परिचय छोड़ें
+opening-tagline = फ़ाइलें भेजें, या सब कुछ ले जाएँ।
 
 footer-free = निजी स्थानांतरण मुफ़्त हैं। किसी अकाउंट की ज़रूरत नहीं।
 footer-help = मदद

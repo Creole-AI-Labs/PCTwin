@@ -20,6 +20,8 @@ import QuickHost from "./screens/QuickHost";
 import HistoryHost from "./screens/HistoryHost";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
+import MotionChoice from "./motion/MotionChoice";
+import { applyToDocument } from "./motion/preference";
 import "./styles.css";
 
 /** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), pairing (C03 to C05), then the move; and Quick Send's home. */
@@ -78,6 +80,11 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     };
   }, []);
 
+  // The motion setting and its timings, on the page before anything moves.
+  useEffect(() => {
+    applyToDocument();
+  }, []);
+
   useEffect(() => {
     document.documentElement.lang = language;
     document.documentElement.dir = directionOf(language);
@@ -132,18 +139,21 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 </Localized>
               </button>
             </Localized>
-            <label className="language">
-              <Localized id="language-label">
-                <span className="visually-hidden">Language</span>
-              </Localized>
-              <select value={language} onChange={(e) => { choose(e.target.value as LanguageCode); }}>
-                {LANGUAGES.map((l) => (
-                  <option key={l.code} value={l.code} lang={l.code}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="app-settings">
+              <label className="language">
+                <Localized id="language-label">
+                  <span className="visually-hidden">Language</span>
+                </Localized>
+                <select value={language} onChange={(e) => { choose(e.target.value as LanguageCode); }}>
+                  {LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code} lang={l.code}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <MotionChoice />
+            </div>
           </header>
           <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
             {screen.id === "welcome" && <Welcome

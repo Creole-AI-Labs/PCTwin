@@ -62,11 +62,8 @@
   --type-pairing: 2.286rem; /* 32px */
   --type-progress: 2.714rem; /* 38px */
 
-  /* Motion */
-  --motion-feedback: 120ms;
-  --motion-page: 180ms;
-  --motion-resize: 260ms;
-  --motion-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Motion: the --motion-* timings, distances and easings are set on this element by
+     src/motion/tokens.ts (the one place they live), at half the Wordplay pack's speed. */
 }
 
 /* Dark theme, from the mockups (used when the person chooses it in Settings). */
@@ -88,14 +85,8 @@
   --colour-focus: #86a7ff;
 }
 
-/* Reduced motion from the system: no transitions or decorative animation. */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion-feedback: 0ms;
-    --motion-page: 0ms;
-    --motion-resize: 0ms;
-  }
-}
+/* Reduced motion from the system, and the in-app Motion choice: src/motion/preference.ts sets
+   every --motion-* duration to 0ms and data-motion="reduced" or "off" on this element. */
 
 /* More contrast from the system: stronger lines and supporting text. */
 @media (prefers-contrast: more) {
