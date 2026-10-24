@@ -1767,3 +1767,122 @@ async fn a_hand_over_after_a_stop_never_carries_an_unfinished_file() {
         assert!(!is_temp(&f.held), "{:?}", f.held);
     }
 }
+
+/// Task List 1.8, sleep: the move is part way and the laptop sleeps for an hour (paused by the
+/// person first, or not): both its clocks jump (the time the engine's waits run on, and the
+/// calendar). Then the move either finishes with every file whole or ends honestly (each file that
+/// did not arrive said so): never a file said arrived that did not, never a hang. How each side
+/// ended.
+async fn sleeps_an_hour_mid_move(paused: bool) -> (Ended, Ended) {
+    let mut w = world();
+    // A file big enough to be part way when the laptop sleeps.
+    let big = item(
+        FolderRole::Documents,
+        &["video.bin"],
+        ItemKind::File,
+        6 * 1024 * 1024,
+        Inclusion::Included,
+    );
+    let bytes: Vec<u8> = (0..big.size_bytes).map(|i| (i * 31 % 251) as u8).collect();
+    write(&source_in(w.old.path(), &big), &bytes);
+    w.record.items.push(big.clone());
+    w.record.validate().unwrap();
+    let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
+    let (mut old, mut new) = mem_pair();
+    let mut steps = person(true);
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let sleep = async {
+        // Part way: some of the file confirmed, not all.
+        while old_live.meter.snapshot().reading.bytes_confirmed < 1024 * 1024 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        if paused {
+            old_live.control.pause();
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        // An hour asleep: both clocks move on together.
+        pctwin_pairing::clock::move_calendar(Duration::from_secs(3600));
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        if paused {
+            old_live.control.carry_on();
+        }
+    };
+    let ((sent, received), ()) = no_hang(async {
+        tokio::join!(
+            async {
+                tokio::join!(
+                    pctwin_move::send(&mut old, &w.record, plan, &old_live),
+                    pctwin_move::receive(
+                        &mut new, &mut steps, &w.table, &w.journal, "1001", &new_live
+                    ),
+                )
+            },
+            sleep
+        )
+    })
+    .await;
+    // Whatever each side came to, nothing is said to have arrived that did not.
+    let landed_ok = |item: &Item, expect: &[u8]| {
+        let at = w
+            .new
+            .path()
+            .join(folder_name(item.place.role))
+            .join(shown_path(&item.path));
+        std::fs::read(at).is_ok_and(|b| b == expect)
+    };
+    let source_of = |item: &Item| std::fs::read(source_in(w.old.path(), item)).unwrap();
+    if let Ok(sent) = &sent {
+        for line in &sent.files {
+            let item = w.record.items.iter().find(|i| i.id == line.item).unwrap();
+            if line.outcome == Some(SendOutcome::Arrived) {
+                assert!(
+                    landed_ok(item, &source_of(item)),
+                    "{:?} said arrived",
+                    item.path
+                );
+            }
+        }
+    }
+    if let Ok(received) = &received {
+        for line in &received.files {
+            let item = w.record.items.iter().find(|i| i.id == line.item).unwrap();
+            if matches!(line.outcome, Some(ReceiveOutcome::Finished(_))) {
+                assert!(
+                    landed_ok(item, &source_of(item)),
+                    "{:?} said copied",
+                    item.path
+                );
+            }
+        }
+        // It carried on: every file finished, the big one whole.
+        if received.ended == pctwin_move::Ended::Finished {
+            assert!(landed_ok(&big, &bytes));
+        }
+    }
+    // One way or the other, the move came to an end on both laptops (no hang), and said how.
+    let ended = |r: Result<Ended, &MoveError>| r.unwrap_or(Ended::LinkLost);
+    (
+        ended(sent.as_ref().map(|s| s.ended)),
+        ended(received.as_ref().map(|r| r.ended)),
+    )
+}
+
+/// The person paused before the laptop slept an hour: it carries on, every file whole.
+#[tokio::test(start_paused = true)]
+async fn a_laptop_paused_then_asleep_an_hour_carries_on_with_every_file_whole() {
+    assert_eq!(
+        sleeps_an_hour_mid_move(true).await,
+        (Ended::Finished, Ended::Finished)
+    );
+}
+
+/// The laptop slept an hour in the middle of sending, unpaused: whatever it comes to (it carries
+/// on, or ends as a lost connection), nothing is said to have arrived that did not, and it ends.
+#[tokio::test(start_paused = true)]
+async fn a_laptop_asleep_an_hour_mid_send_carries_on_or_ends_honestly() {
+    let ends = sleeps_an_hour_mid_move(false).await;
+    assert!(
+        matches!(ends.1, Ended::Finished | Ended::LinkLost),
+        "{ends:?}"
+    );
+}
