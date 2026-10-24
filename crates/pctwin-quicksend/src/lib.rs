@@ -108,10 +108,17 @@ impl Offer {
     /// that a move would take (links are not followed; what cannot be read is listed as left
     /// out). Two chosen things with the same name are kept apart ("notes (2).txt").
     pub fn of(chosen: &[PathBuf]) -> Result<Self, QuickError> {
+        Self::of_again(chosen, LaptopId::generate()?)
+    }
+
+    /// The offer [`of`](Self::of) made again for the same `chosen` things under the `laptop` ID
+    /// of an earlier offer ([`laptop`](Self::laptop)), so every file has the ID it had then: the
+    /// receiver knows which it already holds, whole or partway. With
+    /// [`only_missing`](Self::only_missing), "Send the missing pieces".
+    pub fn of_again(chosen: &[PathBuf], laptop: LaptopId) -> Result<Self, QuickError> {
         if chosen.is_empty() {
             return Err(QuickError::NothingChosen);
         }
-        let laptop = LaptopId::generate()?;
         let owner = Owner::Shared;
         let place = place();
         let mut record = Record::new(laptop);
@@ -182,6 +189,37 @@ impl Offer {
     /// The files offered, in path order.
     pub fn files(&self) -> Vec<OfferedFile> {
         files_of(&self.record)
+    }
+
+    /// The ID this offer's files are made under, to offer the missing pieces later with
+    /// [`of_again`](Self::of_again).
+    pub fn laptop(&self) -> LaptopId {
+        self.record.source_laptop
+    }
+
+    /// Only what `receipt` (of the earlier send of this very offer) says did not arrive: files
+    /// that failed or were not accepted (as "Send the missing pieces" lists them). What arrived,
+    /// or was already there, or is there needing action, is kept and not offered again. A file
+    /// the receiver holds partway is continued there from the blocks it has.
+    pub fn only_missing(mut self, receipt: &Receipt) -> Self {
+        let missing: BTreeSet<&str> = receipt
+            .lines
+            .iter()
+            .filter(|l| matches!(l.outcome, Outcome::Failed { .. } | Outcome::Declined))
+            .map(|l| l.path.as_str())
+            .collect();
+        // A file the receipt does not list at all (it is new since) is offered too.
+        let listed: BTreeSet<&str> = receipt.lines.iter().map(|l| l.path.as_str()).collect();
+        let keep = |i: &Item| {
+            i.kind != ItemKind::File || {
+                let p = shown_path(&i.path);
+                missing.contains(p.as_str()) || !listed.contains(p.as_str())
+            }
+        };
+        self.record.items.retain(|i| keep(i));
+        let ids: BTreeSet<ItemId> = self.record.items.iter().map(|i| i.id).collect();
+        self.jobs.retain(|j| ids.contains(&j.item));
+        self
     }
 
     /// For tests that play a sender breaking the rules: the record and the send jobs.
@@ -403,6 +441,9 @@ impl Incoming {
             .with_protocol(self.version)
             .with_meter(live.meter.clone())
             .with_control(live.control.clone());
+        // A file of this offer received partway before (a send stopped or cut off, then "Send
+        // the missing pieces") continues from the blocks this laptop's journal says it has.
+        receiver.restore()?;
         if !wanted.is_empty() {
             stopped_is_fine(receiver.run(ch).await)?;
         }

@@ -537,3 +537,147 @@ async fn a_stopped_send_ends_with_a_receipt_and_nothing_is_called_arrived() {
     }
     assert!(!new.path().join("letter.txt").exists());
 }
+
+/// A channel that counts the bytes it sends and, after `stop_after` messages, stops `live` (the
+/// receiver's person pressing stop part way through).
+struct Counting {
+    inner: Mem,
+    sent: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    messages: u64,
+    stop_after: Option<(u64, pctwin_move::Live)>,
+}
+
+impl Channel for Counting {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        self.sent
+            .fetch_add(data.len() as u64, std::sync::atomic::Ordering::SeqCst);
+        self.messages += 1;
+        if let Some((n, live)) = &self.stop_after
+            && self.messages >= *n
+        {
+            live.control.stop();
+        }
+        self.inner.send(data).await
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+/// Bytes that do not compress (a photo's), so what crosses is what is sent.
+fn noise(len: usize, seed: u32) -> Vec<u8> {
+    let mut x = seed.wrapping_mul(2_654_435_761) | 1;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+/// "Send the missing pieces" (Task List; Q19): a send stopped part way is followed by an offer of
+/// only what did not arrive, from the receipt. The receiver keeps what arrived, and a file it
+/// holds partway is continued from its own record of the blocks it has: they are not sent again.
+#[tokio::test]
+async fn the_missing_pieces_are_offered_and_sent_once_more_and_nothing_else() {
+    let old = tempfile::tempdir().unwrap();
+    let new = tempfile::tempdir().unwrap();
+    let big = noise(6 * 1024 * 1024, 7);
+    write(&old.path().join("Holiday/beach.jpg"), &big);
+    write(&old.path().join("letter.txt"), b"Dear Ada");
+    let picked = vec![old.path().join("Holiday"), old.path().join("letter.txt")];
+    let offer = Offer::of(&picked).unwrap();
+    let laptop = offer.laptop();
+    let j = journal(new.path());
+
+    // The first send, stopped by the receiver's person part way through the big file.
+    let stop = pctwin_move::Live::default();
+    let (a, b) = pair();
+    let (mut a, mut b) = (
+        Counting {
+            inner: a,
+            sent: Default::default(),
+            messages: 0,
+            stop_after: None,
+        },
+        Counting {
+            inner: b,
+            sent: Default::default(),
+            messages: 0,
+            stop_after: Some((12, stop.clone())),
+        },
+    );
+    let (first, _) = no_hang(async {
+        tokio::join!(
+            async { pctwin_quicksend::send(&mut a, offer).await.unwrap() },
+            async {
+                let incoming = receive_offer(&mut b).await.unwrap();
+                incoming
+                    .accept_live(&mut b, new.path(), None, &j, "me", &stop)
+                    .await
+            }
+        )
+    })
+    .await;
+    assert!(
+        matches!(outcome(&first, "Holiday/beach.jpg"), Outcome::Failed { .. }),
+        "{first:?}"
+    );
+
+    // The follow-up: only what is missing, from the receipt.
+    let again = Offer::of_again(&picked, laptop)
+        .unwrap()
+        .only_missing(&first);
+    let offered: Vec<String> = again.files().into_iter().map(|f| f.path).collect();
+    let arrived_first = matches!(outcome(&first, "letter.txt"), Outcome::Arrived { .. });
+    assert!(offered.contains(&"Holiday/beach.jpg".to_string()));
+    assert_eq!(offered.contains(&"letter.txt".to_string()), !arrived_first);
+    let (a, b) = pair();
+    let mut a = Counting {
+        inner: a,
+        sent: Default::default(),
+        messages: 0,
+        stop_after: None,
+    };
+    let crossed = a.sent.clone();
+    let mut b = Counting {
+        inner: b,
+        sent: Default::default(),
+        messages: 0,
+        stop_after: None,
+    };
+    let (second, got) = no_hang(async {
+        tokio::join!(
+            async { pctwin_quicksend::send(&mut a, again).await.unwrap() },
+            async {
+                let incoming = receive_offer(&mut b).await.unwrap();
+                incoming
+                    .accept(&mut b, new.path(), None, &j, "me")
+                    .await
+                    .unwrap()
+            }
+        )
+    })
+    .await;
+    assert!(matches!(
+        outcome(&second, "Holiday/beach.jpg"),
+        Outcome::Arrived { .. }
+    ));
+    assert!(matches!(
+        outcome(&got, "Holiday/beach.jpg"),
+        Outcome::Arrived { .. }
+    ));
+    assert_eq!(
+        std::fs::read(new.path().join("Holiday/beach.jpg")).unwrap(),
+        big
+    );
+    // Blocks the receiver already had were not sent again.
+    let sent_again = crossed.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        sent_again < big.len() as u64,
+        "{sent_again} bytes crossed again for a file of {}",
+        big.len()
+    );
+}
