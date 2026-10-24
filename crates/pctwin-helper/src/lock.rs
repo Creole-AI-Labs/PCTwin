@@ -51,6 +51,12 @@ pub fn one_helper(path: &Path) -> Result<File, String> {
     }
 }
 
+/// `O_NOFOLLOW` on this system.
+#[cfg(unix)]
+fn libc_nofollow() -> i32 {
+    rustix::fs::OFlags::NOFOLLOW.bits() as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,10 +70,4 @@ mod tests {
         drop(first);
         assert!(one_helper(&path).is_ok());
     }
-}
-
-/// `O_NOFOLLOW` on this system.
-#[cfg(unix)]
-fn libc_nofollow() -> i32 {
-    rustix::fs::OFlags::NOFOLLOW.bits() as i32
 }
