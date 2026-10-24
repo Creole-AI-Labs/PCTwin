@@ -78,13 +78,20 @@ pub fn places() -> BTreeMap<String, String> {
     .collect()
 }
 
-/// `pctwin-handover`, beside this program.
+/// `pctwin-handover`, beside this program (as the system resolves it, no link left), and only if
+/// nobody but the administrators can change it or the folders it is in: it runs with an
+/// administrator's rights (Windows, hand-over now) or as each person who signs in (the entries
+/// made for the hand-over at sign-in), so a program the mover could replace would run as them.
 fn handover_program() -> Result<PathBuf, Refusal> {
-    std::env::current_exe()
+    let program = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
         .ok()
         .and_then(|e| e.parent().map(Path::to_path_buf))
         .map(|d| d.join(format!("pctwin-handover{}", std::env::consts::EXE_SUFFIX)))
-        .ok_or(Refusal::Unreadable)
+        .ok_or(Refusal::Unreadable)?;
+    pctwin_helper_os::only_administrators_can_change(&program)
+        .map_err(|e| logged(Refusal::Unreadable, "the hand-over program", &e))?;
+    Ok(program)
 }
 
 /// The real system: the holding area, people's homes, and the hand-over program.
@@ -153,8 +160,13 @@ impl NewLaptop for System {
             command.arg("--into").arg(format!("{label}={into}"));
         }
         // Windows: the hand-over runs with the administrator's rights, so first nobody else may
-        // change the held folder (the mover and the person lose their access to it), and nothing
-        // in it can be swapped for a link while it is read.
+        // change the held folder (the mover and the person lose their access to it). The lock
+        // alone cannot be the whole guard: it walks the folder once, a handle opened before it
+        // keeps its access, and a folder made while it runs keeps the mover's. So the hand-over
+        // itself trusts nothing in the folder: it walks it and opens every file through folder
+        // handles, never through a link, refuses a file with a second name, and reads a file
+        // only if it is still the very one it found (`pctwin_move::handover`). What the mover can
+        // still put there is a plain file of its own, which was the mover's to hand over anyway.
         #[cfg(windows)]
         {
             // Started with an administrator's rights: nothing of the starter's environment.
@@ -195,18 +207,71 @@ impl NewLaptop for System {
         let out = command
             .output()
             .map_err(|e| logged(Refusal::Unreadable, "starting the hand-over", &e))?;
-        let mut counted = Counted::default();
-        for line in String::from_utf8_lossy(&out.stdout).lines() {
-            match line.split('\t').next() {
-                Some("landed") => counted.landed += 1,
-                Some("kept") => counted.kept += 1,
-                _ => counted.failed += 1,
-            }
-        }
+        let counted = tally(&out.stdout, out.status.success()).map_err(|why| {
+            logged(
+                why,
+                "the hand-over",
+                &String::from_utf8_lossy(&out.stderr).trim(),
+            )
+        })?;
         // Emptied once everything is in the person's folders; else kept for another try.
         if out.status.success() && counted.kept == 0 && counted.failed == 0 {
             let _ = std::fs::remove_dir_all(folder);
         }
         Ok(counted)
+    }
+}
+
+/// What a hand-over's output (`stdout`, one line per file) says, given whether it ended well
+/// (`ended_well`). A hand-over that failed without naming a file it did not hand over (it could
+/// not start, open its journal or read the holding area, or it stopped part way) is a failure,
+/// never "nothing to do": what it did not say is not known to have landed.
+fn tally(stdout: &[u8], ended_well: bool) -> Result<Counted, Refusal> {
+    let mut counted = Counted::default();
+    for line in String::from_utf8_lossy(stdout).lines() {
+        match line.split('\t').next() {
+            Some("landed") => counted.landed += 1,
+            Some("kept") => counted.kept += 1,
+            _ => counted.failed += 1,
+        }
+    }
+    if !ended_well && counted.kept == 0 && counted.failed == 0 {
+        return Err(Refusal::Unreadable);
+    }
+    Ok(counted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_hand_over_that_failed_is_a_failure() {
+        // Crashed, or its journal would not open: nothing said, and it ended badly.
+        assert_eq!(tally(b"", false), Err(Refusal::Unreadable));
+        // Some landed, then it stopped without saying what became of the rest.
+        assert_eq!(
+            tally(b"landed\ta\nlanded\tb\n", false),
+            Err(Refusal::Unreadable)
+        );
+        // Ended badly and said why, file by file: those counts.
+        assert_eq!(
+            tally(b"landed\ta\nkept\tb\nnot-plain\tc\n", false),
+            Ok(Counted {
+                landed: 1,
+                kept: 1,
+                failed: 1
+            })
+        );
+        // Ended well: nothing held, or everything landed.
+        assert_eq!(tally(b"", true), Ok(Counted::default()));
+        assert_eq!(
+            tally(b"landed\ta\n", true),
+            Ok(Counted {
+                landed: 1,
+                kept: 0,
+                failed: 0
+            })
+        );
     }
 }

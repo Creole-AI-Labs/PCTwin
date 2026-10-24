@@ -10,6 +10,9 @@ publish.workspace = true
 
 [dependencies]
 blake3 = "1.8"
+# The hand-over walks the holding area and opens what it hands over through folder handles,
+# never following a link out of it (the crate under cap-std, which the safety gate opens with).
+cap-primitives = "4.0.3"
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-helper = { path = "../pctwin-helper" }
 pctwin-journal = { path = "../pctwin-journal" }

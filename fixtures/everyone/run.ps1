@@ -54,7 +54,10 @@ foreach ($old in @('C:\pctwin-lab', 'C:\Users\Public\Documents\pctwin-shared')) 
 New-Item -ItemType Directory -Force 'C:\pctwin-lab' | Out-Null
 $admin = Join-Path $Work 'admin'
 $moverDir = Join-Path $Work 'mover'
-$tools = Join-Path $Work 'tools'
+# The tools in a folder only administrators can change (inside Program Files), as an installed
+# PCTwin is: the helper refuses a hand-over program anyone else could replace.
+$tools = Join-Path $env:ProgramFiles 'PCTwin-lab'
+if (Test-Path $tools) { Remove-Item -Recurse -Force $tools }
 New-Item -ItemType Directory -Force $admin, $moverDir, $tools | Out-Null
 # The administrator's folder holds the key and the evidence; the mover's what the mover can read.
 icacls $admin /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' | Out-Null

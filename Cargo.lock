@@ -3611,6 +3611,7 @@ name = "pctwin-move"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "cap-primitives",
  "pctwin-gate",
  "pctwin-helper",
  "pctwin-journal",

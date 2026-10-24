@@ -54,8 +54,17 @@ make_user() {
 for u in "$mover" "${people[@]}"; do make_user "$u"; done
 for n in 1 2 3; do remove_user "pctwinnew$n"; done
 
-# The helper runs the hand-over program from its own folder, as in the app.
-sudo install -m 0755 "$bin/pctwin-labmove" "$bin/pctwin-helper" "$bin/pctwin-handover" /usr/local/bin/
+# The helper runs the hand-over program from its own folder, as in the app, and only from a folder
+# root alone can change, all the way up (as an installed PCTwin is): the tools are installed in
+# one, and found by name through links to them.
+tools=/opt/pctwin-lab-tools
+if [ "$(uname)" = Darwin ]; then tools=/Library/PCTwin-lab-tools; fi
+sudo rm -rf "$tools"
+sudo install -d -m 0755 -o root "$tools"
+sudo install -m 0755 -o root "$bin/pctwin-labmove" "$bin/pctwin-helper" "$bin/pctwin-handover" "$tools/"
+for t in pctwin-labmove pctwin-helper pctwin-handover; do
+  sudo ln -sf "$tools/$t" "/usr/local/bin/$t"
+done
 sudo rm -rf "$work" /srv/pctwin-* /Users/Shared/pctwin-* 2>/dev/null || true
 # The lab's own folder outside any home, open to everyone like the drive's top; each person's
 # folder in it is theirs alone.

@@ -1900,6 +1900,12 @@ pub fn file_identity(file: &std::fs::File) -> io::Result<FileId> {
     Ok(identity(file)?.0)
 }
 
+/// As [`file_identity`], with how many names the file has on its drive (hard links), read from
+/// the same handle.
+pub fn file_identity_and_links(file: &std::fs::File) -> io::Result<(FileId, u64)> {
+    identity(file)
+}
+
 #[cfg(windows)]
 fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
     let info = winapi_util::file::information(file)?;
