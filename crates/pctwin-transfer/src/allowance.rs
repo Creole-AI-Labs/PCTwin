@@ -11,6 +11,20 @@ const MOVE_ROOM: u64 = 64 * 1024 * 1024;
 /// Most attempts at one file: a file that keeps changing while it is read is sent again a few
 /// times, then reported, so it cannot be started over and over.
 pub const MAX_ATTEMPTS: u32 = 4;
+/// Most starts of one file, counted whether or not anything of them arrived: a start cut off on
+/// a lossy link is not an attempt ([`MAX_ATTEMPTS`]), but an old laptop cannot start a file over
+/// and over without sending it (each start is a journal entry and a temporary file here).
+pub const MAX_STARTS_PER_FILE: u32 = 32;
+/// Starts a whole move may make beyond two for each of its files (see [`max_starts_per_move`]).
+const MOVE_START_ROOM: u64 = 4096;
+
+/// Most starts a move of `files` planned files agrees to in all, however they are spread: two
+/// for each file and [`MOVE_START_ROOM`] more, for the starts a dropped connection cuts off.
+pub fn max_starts_per_move(files: usize) -> u64 {
+    (files as u64)
+        .saturating_mul(2)
+        .saturating_add(MOVE_START_ROOM)
+}
 
 /// Where one approved file lands on the new laptop: the label of an approved destination and the
 /// path inside it. Both laptops work it out from the approved plan with the same function (the
@@ -72,6 +86,8 @@ pub enum Refusal {
         "it kept changing while it was being copied; close the program using it and move it again"
     )]
     KeptChanging,
+    #[error("the old laptop started it over too many times, so it was not copied; move it again")]
+    StartedTooOften,
 }
 
 /// One approved file: its approved size and where it lands, held at a fixed size: the
@@ -105,6 +121,8 @@ struct Progress {
     /// The largest size it was started with.
     largest: u64,
     attempts: u32,
+    /// Every start agreed to, never given back (see [`MAX_STARTS_PER_FILE`]).
+    starts: u32,
     live: bool,
     landed: bool,
 }
@@ -128,6 +146,8 @@ pub struct Allowance {
     /// Each file's attempts so far.
     started: HashMap<ItemId, Progress>,
     started_total: u64,
+    /// Every start agreed to in this move, never given back (see [`max_starts_per_move`]).
+    starts: u64,
     /// How long a partly copied file of this move waits for the rest, as the person chose.
     partial_keep: PartialKeep,
     /// Each folder that moves as one whole, by destination: where it was planned (as the old
@@ -265,6 +285,7 @@ impl Allowance {
             mark_floor: None,
             started: HashMap::new(),
             started_total: 0,
+            starts: 0,
             partial_keep: PartialKeep::default(),
             wholes: HashMap::new(),
         })
@@ -358,6 +379,11 @@ impl Allowance {
         if progress.attempts >= MAX_ATTEMPTS {
             return Err(Refusal::KeptChanging);
         }
+        if progress.starts >= MAX_STARTS_PER_FILE
+            || self.starts >= max_starts_per_move(self.files.len())
+        {
+            return Err(Refusal::StartedTooOften);
+        }
         let room = match self.room {
             SizeRoom::Growth => approved.saturating_add((approved / 10).max(MIN_FILE_ROOM)),
             SizeRoom::NoGrowth => approved,
@@ -390,11 +416,13 @@ impl Allowance {
             }
         }
         self.started_total = total;
+        self.starts += 1;
         self.started.insert(
             item,
             Progress {
                 largest: before.max(size),
                 attempts: progress.attempts + 1,
+                starts: progress.starts + 1,
                 live: true,
                 landed: false,
             },
@@ -411,7 +439,8 @@ impl Allowance {
     }
 
     /// The attempt at `item` ended before anything of it arrived (a start cut off on a lossy
-    /// link): not an attempt at all, so a file is never called "kept changing" for drops.
+    /// link): not an attempt at all, so a file is never called "kept changing" for drops. The
+    /// start itself still counts toward [`MAX_STARTS_PER_FILE`] and the move's limit.
     pub fn ended_unstarted(&mut self, item: ItemId) {
         if let Some(p) = self.started.get_mut(&item) {
             p.live = false;

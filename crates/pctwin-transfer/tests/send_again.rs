@@ -5207,3 +5207,184 @@ async fn a_whole_is_never_written_into_a_folder_planted_after_it_was_placed() {
         }
     }
 }
+
+/// Fresh-context review of TRANSFER (24 October 2026): an old laptop that starts the same file
+/// over and over without sending a block is refused once the file's starts run out, so it cannot
+/// make the new laptop write a journal entry and a temporary file for ever.
+#[tokio::test]
+async fn a_file_started_over_and_over_without_blocks_is_refused_in_the_end() {
+    let l = laptops(&[70_000]);
+    let table = table(&l, None);
+    let dir = tempfile::tempdir().unwrap();
+    let journal = pctwin_journal::Journal::open(&dir.path().join("journal.redb")).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+    let (mut old, mut new) = mem_pair();
+    let header = FileSender::open(&l.files[0].0, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        for n in 0..=pctwin_transfer::MAX_STARTS_PER_FILE {
+            say(
+                &mut old,
+                &Message::StartFile {
+                    stream: 0,
+                    item: id(0),
+                    destination: "me".into(),
+                    path: "Documents/f0.bin".into(),
+                    header: header.clone(),
+                    resumed_done: 0,
+                },
+            )
+            .await;
+            let heard = hear_past_holds(&mut old).await;
+            if n < pctwin_transfer::MAX_STARTS_PER_FILE {
+                assert!(matches!(heard, Message::Have { .. }), "{n}: {heard:?}");
+            } else {
+                assert_eq!(
+                    heard,
+                    Message::FileDone {
+                        stream: 0,
+                        ok: false
+                    }
+                );
+            }
+        }
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    match receiver.outcome(id(0)) {
+        Some(ReceiveOutcome::Failed(why)) => {
+            assert_eq!(why.cause(), Cause::RefusedBySafetyCheck, "{why}");
+        }
+        other => panic!("{other:?}"),
+    }
+    let entries = journal.entries().unwrap();
+    assert!(
+        entries.len() <= pctwin_transfer::MAX_STARTS_PER_FILE as usize,
+        "{} journal entries",
+        entries.len()
+    );
+    assert_eq!(files_under(l.new.path()), Vec::<PathBuf>::new());
+}
+
+/// Fresh-context review of TRANSFER (24 October 2026): a part-copy kept at a paused place (see
+/// above) is still an open file here, so it counts toward [`MAX_OPEN_FILES`]: with one kept, the
+/// old laptop can open one file fewer elsewhere.
+#[tokio::test]
+async fn a_part_copy_kept_at_a_paused_place_counts_as_an_open_file() {
+    let l = laptops(&[70_000; 4]);
+    let elsewhere = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let tiny = l._old.path().join("tiny.bin");
+    std::fs::write(&tiny, b"tiny").unwrap();
+    let mut table = table(&l, Some(Flip::OnEveryWrite));
+    table
+        .approve("other", Approved::MyFolders, elsewhere.path())
+        .unwrap();
+    let mut jobs = jobs(&l);
+    let mut sizes: Vec<u64> = l.files.iter().map(|f| f.1.len() as u64).collect();
+    for k in 0..MAX_OPEN_FILES {
+        jobs.push(SendJob {
+            size: 0,
+            item: id(10 + k as u8),
+            source: tiny.clone(),
+            destination: "other".into(),
+            path: format!("Documents/g{k}.bin"),
+            compressible: false,
+            tier: Tier::Rest,
+        });
+        sizes.push(4);
+    }
+    let files: Vec<(&SendJob, u64)> = jobs.iter().zip(sizes).collect();
+    let control = pctwin_transfer::MoveControl::new();
+    let mut receiver = ReceiverSession::new(
+        &table,
+        common::approved_jobs(&files),
+        common::journal(),
+        "1001",
+    )
+    .with_control(control.clone());
+    let (mut old, mut new) = mem_pair();
+    let tiny_header = FileSender::open(&tiny, None, false)
+        .unwrap()
+        .header()
+        .clone();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // File 3 is part way when the drive of "me" pauses the move, and is given up on there.
+        let mut late = FileSender::open(&l.files[3].0, None, false).unwrap();
+        say(
+            &mut old,
+            &Message::StartFile {
+                stream: 9,
+                item: id(3),
+                destination: "me".into(),
+                path: "Documents/f3.bin".into(),
+                header: late.header().clone(),
+                resumed_done: 0,
+            },
+        )
+        .await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        for piece in split_into_pieces(9, &late.block_at(0).unwrap().encode()) {
+            say(&mut old, &piece).await;
+        }
+        assert!(matches!(hear(&mut old).await, Message::Receipt { .. }));
+        brake_me(&mut old, &l).await;
+        say(
+            &mut old,
+            &Message::GiveUp {
+                stream: 9,
+                why: GiveUpWhy::ReadTooOften,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear_past_holds(&mut old).await,
+            Message::FileDone {
+                stream: 9,
+                ok: false
+            }
+        );
+        // Its part-copy is kept, so only MAX_OPEN_FILES - 1 more open elsewhere.
+        for k in 0..MAX_OPEN_FILES {
+            let stream = 100 + k as u32;
+            say(
+                &mut old,
+                &Message::StartFile {
+                    stream,
+                    item: id(10 + k as u8),
+                    destination: "other".into(),
+                    path: format!("Documents/g{k}.bin"),
+                    header: tiny_header.clone(),
+                    resumed_done: 0,
+                },
+            )
+            .await;
+            let heard = hear_past_holds(&mut old).await;
+            if k + 1 < MAX_OPEN_FILES {
+                assert!(matches!(heard, Message::Have { .. }), "{k}: {heard:?}");
+            } else {
+                assert_eq!(heard, Message::FileDone { stream, ok: false });
+            }
+        }
+        control.carry_on();
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(script, receiver.run(&mut new))
+    })
+    .await
+    .expect("hung");
+    r.unwrap();
+    match receiver.outcome(id(10 + (MAX_OPEN_FILES - 1) as u8)) {
+        Some(ReceiveOutcome::Failed(why)) => assert!(why.contains("too many files"), "{why}"),
+        other => panic!("{other:?}"),
+    }
+}

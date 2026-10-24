@@ -71,7 +71,10 @@ mod session;
 mod undo;
 mod version;
 
-pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom, WholePlace};
+pub use allowance::{
+    Allowance, LandingPlace, MAX_ATTEMPTS, MAX_STARTS_PER_FILE, Refusal, SizeRoom, WholePlace,
+    max_starts_per_move,
+};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use cause::{Cause, Failure, Side};
 pub use fit::{Fit, KEEP_FREE, PlaceFit, TimeRange};

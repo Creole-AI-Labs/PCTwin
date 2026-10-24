@@ -225,7 +225,8 @@ impl Cause {
             | Refusal::NotWherePlanned
             | Refusal::OverTotal
             | Refusal::AlreadyMoved
-            | Refusal::AlreadyStarted => Self::RefusedBySafetyCheck,
+            | Refusal::AlreadyStarted
+            | Refusal::StartedTooOften => Self::RefusedBySafetyCheck,
             Refusal::GrewTooMuch { .. } | Refusal::Grew { .. } | Refusal::KeptChanging => {
                 Self::ChangedDuringMove
             }

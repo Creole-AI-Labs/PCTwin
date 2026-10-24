@@ -2545,6 +2545,12 @@ impl<'d> ReceiverSession<'d> {
             .map_or(Step::Waiting, |o| outcome_step(&o))
     }
 
+    /// Files open here: being received, picked up after a restart, or kept part way at a paused
+    /// place. Never more than [`MAX_OPEN_FILES`].
+    fn open_files(&self) -> usize {
+        self.streams.len() + self.restored.len() + self.parked.len()
+    }
+
     /// An attempt let go because another start took its place: its partial file is removed with
     /// it (already failed if it had failed), and its file is counted as it now stands.
     fn started_again(&mut self, old: Incoming<'d>) {
@@ -2619,7 +2625,7 @@ impl<'d> ReceiverSession<'d> {
         for e in self.journal.unfinished().map_err(record)? {
             // No more open at once than any move may hold; the rest stay as they are in the
             // journal, for a later start.
-            if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
+            if self.open_files() >= MAX_OPEN_FILES {
                 break;
             }
             let State::Staged { temp } = &e.state else {
@@ -3079,7 +3085,7 @@ impl<'d> ReceiverSession<'d> {
                         Cause::RefusedBySafetyCheck,
                         "the new laptop has no place to continue from",
                     ))
-                } else if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
+                } else if self.open_files() >= MAX_OPEN_FILES {
                     Err(Failure::new(
                         Cause::RefusedBySafetyCheck,
                         "the old laptop started too many files at once",
@@ -3232,8 +3238,13 @@ impl<'d> ReceiverSession<'d> {
                 if let Some(s) = self.streams.remove(&stream) {
                     // Clearing its part-copy would change a drive that holds the move paused:
                     // it is kept as it is until the person carries on.
+                    // Kept files count as open ([`MAX_OPEN_FILES`]), so there are never more than
+                    // that; past it (never, while every start is counted) it is cleared.
                     match s.assembly {
-                        Some(a) if self.control.is_braked(&s.destination) => {
+                        Some(a)
+                            if self.control.is_braked(&s.destination)
+                                && self.parked.len() < MAX_OPEN_FILES =>
+                        {
                             self.parked.push((s.destination.clone(), a));
                         }
                         a => drop(a),
@@ -3352,11 +3363,7 @@ impl<'d> ReceiverSession<'d> {
         // found identical to the file already at its name once it arrived (delivered: the old
         // laptop is told only that it arrived).
         let there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
-        let ok = there
-            || matches!(
-                outcome,
-                ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
-            );
+        let ok = on_this_laptop(&outcome);
         self.allowance.ended(s.item, ok);
         let landed = (ok && !there).then(|| (s.destination.clone(), s.size));
         self.end(s.item, stream, outcome, landed);
@@ -4336,15 +4343,7 @@ fn land(
                         .map_err(record)?;
                 // Kept whatever the show came to: the journal has it, and recovery or the person
                 // finishes it. Reported copied only once shown.
-                let finished = claimed.keep();
-                return Ok(match end {
-                    crate::naming::ShowEnd::Shown => ReceiveOutcome::Finished(finished),
-                    crate::naming::ShowEnd::Gone(why)
-                    | crate::naming::ShowEnd::Left(why)
-                    | crate::naming::ShowEnd::Later(why) => {
-                        ReceiveOutcome::NeedsAction { finished, why }
-                    }
-                });
+                return Ok(shown_line(end, claimed.keep()));
             } else {
                 journal
                     .committed(
@@ -4362,10 +4361,42 @@ fn land(
         // Gone the moment it got its name: never reported copied.
         Ok(None) => fail(Failure::new(Cause::RemovedAfterCopy, REMOVED_AT_ONCE)),
         // Could not look just now: recovery finishes it (the journal has its name).
-        Err(e) => Ok(ReceiveOutcome::Failed(Failure::new(
-            Cause::of_io(&e, Side::New),
-            format!("{e}; {FINISHED_LATER}"),
-        ))),
+        Err(e) => Ok(named_unconfirmed(claimed.finished().clone(), &e)),
+    }
+}
+
+/// Whether a file that ended as `outcome` is on this laptop (copied, even if it still needs
+/// action, or the same file already there): the old laptop is told it arrived, and it is never
+/// started again.
+fn on_this_laptop(outcome: &ReceiveOutcome) -> bool {
+    matches!(
+        outcome,
+        ReceiveOutcome::Finished(_)
+            | ReceiveOutcome::NeedsAction { .. }
+            | ReceiveOutcome::AlreadyThere(_)
+    )
+}
+
+/// The line of a file filled in under its name, by how showing it ended (`finished`: where it
+/// is). Shown: copied. Left or waiting: on this laptop, but the person must be told. Gone from
+/// its name before it could be shown: not on this laptop, so never said to be there.
+fn shown_line(end: crate::naming::ShowEnd, finished: Finished) -> ReceiveOutcome {
+    use crate::naming::ShowEnd;
+    match end {
+        ShowEnd::Shown => ReceiveOutcome::Finished(finished),
+        ShowEnd::Gone(why) => ReceiveOutcome::Failed(Failure::new(Cause::RemovedAfterCopy, why)),
+        ShowEnd::Left(why) | ShowEnd::Later(why) => ReceiveOutcome::NeedsAction { finished, why },
+    }
+}
+
+/// The line of a file checked and at its name, whose last look (`e`) failed before it was
+/// committed: the journal has its name, and recovery finishes it at the next start. It is on this
+/// laptop, so it is never started again here (which would fail the journal's entry and land a
+/// second copy under another name): it needs action until then.
+fn named_unconfirmed(finished: Finished, e: &std::io::Error) -> ReceiveOutcome {
+    ReceiveOutcome::NeedsAction {
+        finished,
+        why: format!("{e}; {FINISHED_LATER}"),
     }
 }
 
@@ -4569,6 +4600,61 @@ mod originals_limits {
 mod outcomes {
     use super::*;
     use pctwin_record::{LaptopId, Record};
+
+    fn finished() -> Finished {
+        Finished {
+            final_path: "Documents/a.txt".into(),
+            sent_path: "Documents/a.txt".into(),
+            changes: Vec::new(),
+            mark_not_kept: None,
+            time_not_kept: false,
+            checked_from: None,
+        }
+    }
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a copy found gone from its name before
+    /// it could be shown is not on this laptop, so its line says it failed, with why, and the old
+    /// laptop is told it did not arrive; never "on the new laptop".
+    #[test]
+    fn a_copy_gone_before_it_was_shown_failed_and_did_not_arrive() {
+        use crate::naming::ShowEnd;
+        let gone = shown_line(ShowEnd::Gone("removed".into()), finished());
+        match &gone {
+            ReceiveOutcome::Failed(why) => assert_eq!(why.cause(), Cause::RemovedAfterCopy),
+            other => panic!("{other:?}"),
+        }
+        assert!(!on_this_laptop(&gone));
+        // Shown, left or waiting to be shown: it is here.
+        assert_eq!(
+            shown_line(ShowEnd::Shown, finished()),
+            ReceiveOutcome::Finished(finished())
+        );
+        for end in [ShowEnd::Left("x".into()), ShowEnd::Later("x".into())] {
+            let line = shown_line(end, finished());
+            assert!(
+                matches!(line, ReceiveOutcome::NeedsAction { .. }),
+                "{line:?}"
+            );
+            assert!(on_this_laptop(&line));
+        }
+    }
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a file checked and at its name whose
+    /// last look failed is finished by recovery (the journal has its name). It is on this laptop
+    /// and needs action, and the old laptop is told it arrived, so it is never started again here.
+    #[test]
+    fn a_file_at_its_name_whose_last_look_failed_needs_action_and_arrived() {
+        let e = std::io::Error::other("the drive went away");
+        let line = named_unconfirmed(finished(), &e);
+        match &line {
+            ReceiveOutcome::NeedsAction { finished: f, why } => {
+                assert_eq!(f, &finished());
+                assert!(why.contains(FINISHED_LATER), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(on_this_laptop(&line));
+    }
 
     /// A receiver for a plan with nothing in it: only its own record-keeping is under test.
     fn with_receiver(test: impl FnOnce(&mut ReceiverSession<'_>)) {

@@ -506,8 +506,9 @@ struct ControlInner {
     /// pause and a carrying on (back to back) still sees that something changed.
     changes: AtomicU64,
     wake: Notify,
-    /// The approved place whose drive is not keeping files correctly, when that paused the move.
-    braked: std::sync::Mutex<Option<String>>,
+    /// The approved places whose drives are not keeping files correctly, when that paused the
+    /// move, in the order they did (each once; at most one per approved place).
+    braked: std::sync::Mutex<Vec<String>>,
 }
 
 /// The person's stop and pause for a running move (see the module docs). Cheap to clone; set it
@@ -544,7 +545,7 @@ impl MoveControl {
     /// any brake: the person has chosen to carry on.
     pub fn carry_on(&self) {
         if let Ok(mut b) = self.0.braked.lock() {
-            *b = None;
+            b.clear();
         }
         self.0.pause.store(false, Ordering::Release);
         self.changed();
@@ -552,17 +553,20 @@ impl MoveControl {
 
     /// Pauses the move because the drive of the approved place `destination` is not keeping
     /// files correctly (Quarantine Design, step 4); the screen says so and offers another place
-    /// or stopping (X07). Files already checked are fine.
+    /// or stopping (X07). Files already checked are fine. A second place that pauses it too is
+    /// held as well: neither takes another write until the person carries on.
     pub(crate) fn brake(&self, destination: &str) {
-        if let Ok(mut b) = self.0.braked.lock() {
-            *b = Some(destination.to_string());
+        if let Ok(mut b) = self.0.braked.lock()
+            && !b.iter().any(|d| d == destination)
+        {
+            b.push(destination.to_string());
         }
         self.pause();
     }
 
-    /// The approved place whose drive paused the move, if one did.
+    /// The approved place whose drive paused the move first, if one did (the screen names it).
     pub fn braked(&self) -> Option<String> {
-        self.0.braked.lock().ok().and_then(|b| b.clone())
+        self.0.braked.lock().ok().and_then(|b| b.first().cloned())
     }
 
     /// Whether the approved place `destination` paused the move and still holds it: nothing more
@@ -573,7 +577,7 @@ impl MoveControl {
             .braked
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        b.as_deref() == Some(destination)
+        b.iter().any(|d| d == destination)
     }
 
     /// Counts the change, then wakes every waiter (after the count, so none misses it).
@@ -628,6 +632,24 @@ mod tests {
     use super::*;
 
     const MB: u64 = 1_000_000;
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a second place whose drive pauses the
+    /// move is held as well, never in place of the first; carrying on ends both.
+    #[test]
+    fn a_second_braked_place_is_held_as_well_as_the_first() {
+        let c = MoveControl::new();
+        c.brake("me");
+        c.brake("photos");
+        c.brake("me");
+        assert!(c.is_braked("me"));
+        assert!(c.is_braked("photos"));
+        assert!(!c.is_braked("music"));
+        assert_eq!(c.braked().as_deref(), Some("me"));
+        assert!(c.paused());
+        c.carry_on();
+        assert!(!c.is_braked("me") && !c.is_braked("photos"));
+        assert_eq!(c.braked(), None);
+    }
 
     /// A new laptop's meter with the plan `sizes` loaded, each in group "me".
     fn planned(sizes: &[u64]) -> (MoveMeter, Vec<Group>) {

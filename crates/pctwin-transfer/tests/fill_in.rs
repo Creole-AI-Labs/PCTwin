@@ -704,7 +704,9 @@ fn a_file_replaced_before_it_is_shown_is_reported_in_the_same_move() {
 }
 
 /// PCTwin's file is removed from its name just after the copy is committed, before it is shown:
-/// the person is told in the same move, and the journal keeps the same words for good.
+/// the person is told in the same move, and the journal keeps the same words for good. It is not
+/// on the new laptop, so its line says it failed (fresh-context review of TRANSFER, 24 October
+/// 2026), never that it needs action there.
 #[test]
 fn a_file_removed_before_it_is_shown_is_reported_and_noted() {
     let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -717,7 +719,8 @@ fn a_file_removed_before_it_is_shown_is_reported_and_noted() {
         .unwrap();
     assert!(status.success());
     let said = std::fs::read_to_string(work.path().join("outcome.txt")).unwrap();
-    assert!(said.starts_with("Some(NeedsAction"), "{said}");
+    assert!(said.starts_with("Some(Failed"), "{said}");
+    assert!(said.contains("RemovedAfterCopy"), "{said}");
     assert!(said.contains("removed from its name"), "{said}");
     let journal = Journal::open(&jdir.join("j.redb")).unwrap();
     let id = journal.entries().unwrap()[0].id;

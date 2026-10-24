@@ -440,3 +440,54 @@ fn a_file_is_changed_since_the_scan_by_its_size_or_its_changed_time() {
     let stranger = item(9, 100, ItemKind::File, Inclusion::Included);
     assert!(!a.changed_since_scan(stranger.id, at(1, None)));
 }
+
+/// Fresh-context review of TRANSFER (24 October 2026): a start that ends before anything of it
+/// arrived is not counted as an attempt (a lossy link), but an old laptop that starts a file over
+/// and over without sending anything still meets a hard limit, so the journal and the temporary
+/// files cannot be churned without end.
+#[test]
+fn a_file_started_over_and_over_with_nothing_sent_is_refused_in_the_end() {
+    let f = item(1, MIB, ItemKind::File, Inclusion::Included);
+    let r = record(vec![f.clone()]);
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
+    for _ in 0..pctwin_transfer::MAX_STARTS_PER_FILE {
+        assert_eq!(
+            a.admit(f.id, "documents", &shown_path(&f.path), MIB),
+            Ok(())
+        );
+        a.ended_unstarted(f.id);
+    }
+    assert_eq!(
+        a.admit(f.id, "documents", &shown_path(&f.path), MIB),
+        Err(Refusal::StartedTooOften)
+    );
+}
+
+/// The same limit for the whole move: however the starts are spread over the plan's files, no
+/// more than the move's limit are ever agreed to.
+#[test]
+fn a_move_agrees_to_only_so_many_starts_in_all() {
+    let files: Vec<Item> = (0..=u8::MAX)
+        .map(|n| item(n, 10, ItemKind::File, Inclusion::Included))
+        .collect();
+    let r = record(files.clone());
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
+    let limit = pctwin_transfer::max_starts_per_move(files.len());
+    assert!(
+        limit < files.len() as u64 * u64::from(pctwin_transfer::MAX_STARTS_PER_FILE),
+        "the test must reach the move's limit before every file's own"
+    );
+    let mut agreed = 0u64;
+    for f in &files {
+        for _ in 0..pctwin_transfer::MAX_STARTS_PER_FILE {
+            match a.admit(f.id, "documents", &shown_path(&f.path), 10) {
+                Ok(()) => {
+                    agreed += 1;
+                    a.ended_unstarted(f.id);
+                }
+                Err(e) => assert_eq!(e, Refusal::StartedTooOften),
+            }
+        }
+    }
+    assert_eq!(agreed, limit);
+}
