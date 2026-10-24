@@ -94,7 +94,7 @@ pub use state::{
 pub use sweep::{
     BlindReason, BlindSpot, Fate, FoundPlace, FoundSoFar, Frontier, FrontierView,
     HARD_LINK_CHECK_MIN, ProfileLine, SHALLOW_DEPTH, Space, SpaceLine, Sweep, SweepFacts,
-    SweepLimits, TopLine, UNEXPLAINED_FLOOR, VolumeReport, blind_reason_for, sweep,
+    SweepLimits, TopLine, UNEXPLAINED_FLOOR, VolumeReport, blind_reason_for, sweep, sweep_people,
     sweep_this_laptop, this_laptop_facts,
 };
 pub use usage::{

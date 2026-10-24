@@ -1149,7 +1149,49 @@ pub fn sweep(
     limits: &SweepLimits,
     resume: Option<Frontier>,
 ) -> Sweep {
+    sweep_walking(
+        facts,
+        BTreeSet::new(),
+        access,
+        stop,
+        checkpoint,
+        limits,
+        resume,
+    )
+}
+
+/// The administrator helper's sweep for several approved `people` at once: one walk of the
+/// drives, in which each of them is placed and listed as a sweep made as that person would (their
+/// home, and what only they may open elsewhere, are theirs and listed; the census's own person is
+/// one of them), and everyone else's things stay unlisted as in any sweep. Each person's items
+/// carry their own owner, so each answer is taken from it by owner alone.
+pub fn sweep_people(
+    facts: SweepFacts,
+    people: &BTreeSet<String>,
+    access: &mut dyn AccessReader,
+    stop: &AtomicBool,
+    checkpoint: &mut dyn FnMut(&FrontierView<'_>),
+    limits: &SweepLimits,
+) -> Sweep {
+    let walked = people
+        .iter()
+        .filter(|p| **p != facts.census.me)
+        .cloned()
+        .collect();
+    sweep_walking(facts, walked, access, stop, checkpoint, limits, None)
+}
+
+fn sweep_walking(
+    facts: SweepFacts,
+    walked: BTreeSet<String>,
+    access: &mut dyn AccessReader,
+    stop: &AtomicBool,
+    checkpoint: &mut dyn FnMut(&FrontierView<'_>),
+    limits: &SweepLimits,
+    resume: Option<Frontier>,
+) -> Sweep {
     let mut s = Sweeper {
+        walked,
         state: match resume {
             Some(f) => {
                 let mut state = f.state;
@@ -1201,6 +1243,10 @@ pub fn sweep(
 
 struct Sweeper<'a> {
     state: State,
+    /// Besides the census's own person, the people whose things this sweep lists as theirs, as
+    /// it lists that person's (the administrator helper's one sweep for every approved person:
+    /// see [`sweep_people`]). Empty for the mover's own sweep.
+    walked: BTreeSet<String>,
     facts: &'a SweepFacts,
     access: &'a mut dyn AccessReader,
     limits: &'a SweepLimits,
@@ -1324,9 +1370,14 @@ impl Sweeper<'_> {
         };
         let exact = home.as_ref().is_some_and(|h| same_place(h, &mount));
         let shown = Some(mount.to_string_lossy().into_owned());
-        if kind == PersonKind::Me {
+        let walked = id.as_deref().is_some_and(|id| self.walks(id));
+        if kind == PersonKind::Me || walked {
             let me = Owner::Person {
-                account_id: self.state.census.me.clone(),
+                account_id: if walked {
+                    id.clone().unwrap_or_default()
+                } else {
+                    self.state.census.me.clone()
+                },
             };
             let storage = self.storage(volume);
             let (role, rule) = if exact {
@@ -1337,7 +1388,15 @@ impl Sweeper<'_> {
             let p = self.new_place(
                 volume,
                 shown,
-                Placement::new(Whose::Mover, rule),
+                Placement::new(
+                    match &me {
+                        Owner::Person { account_id } if walked => Whose::Person {
+                            account_id: account_id.clone(),
+                        },
+                        _ => Whose::Mover,
+                    },
+                    rule,
+                ),
                 Fate::Moves,
                 PlaceMeta {
                     record_place: Some(Place { role, storage }),
@@ -1502,6 +1561,12 @@ impl Sweeper<'_> {
 
     fn several(&self) -> bool {
         self.state.census.people_count() >= 2
+    }
+
+    /// Whether `id`'s things are listed as theirs in this sweep, besides the census's own
+    /// person's (see [`Sweeper::walked`]).
+    fn walks(&self, id: &str) -> bool {
+        self.walked.contains(id)
     }
 
     fn new_place(
@@ -2295,6 +2360,14 @@ impl Sweeper<'_> {
                 }),
             ),
             (Whose::Shared { .. }, k) => (Fate::Moves, space_of(k), false, Some(Owner::Shared)),
+            (Whose::Person { account_id }, k) if self.walks(account_id) => (
+                Fate::Moves,
+                space_of(k),
+                false,
+                Some(Owner::Person {
+                    account_id: account_id.clone(),
+                }),
+            ),
             (Whose::Person { .. } | Whose::FromOldAccount { .. } | Whose::Undecided, _) => {
                 (Fate::NotYours, Space::OtherPeople, true, None)
             }
@@ -2391,8 +2464,13 @@ impl Sweeper<'_> {
             },
         );
         let base = job.rel.len() + 1;
-        match home {
-            HomeOf::Mover => {
+        let walked = match &home {
+            HomeOf::Mover => Some(self.state.census.me.clone()),
+            HomeOf::Person(id) if self.walks(id) => Some(id.clone()),
+            _ => None,
+        };
+        match walked {
+            Some(owner) => {
                 let storage = self.storage(job.volume);
                 let p = self.new_place(
                     job.volume,
@@ -2404,9 +2482,7 @@ impl Sweeper<'_> {
                             role: FolderRole::Home,
                             storage,
                         }),
-                        owner: Some(Owner::Person {
-                            account_id: self.state.census.me.clone(),
-                        }),
+                        owner: Some(Owner::Person { account_id: owner }),
                         space: Space::People,
                         private: false,
                         items: 0,
@@ -2417,7 +2493,7 @@ impl Sweeper<'_> {
                 let child = self.child(job, name, Zone::Itemise { base, place: p }, None);
                 self.enqueue(child);
             }
-            _ => {
+            None => {
                 let p = self.new_place(
                     job.volume,
                     None,
@@ -2529,6 +2605,17 @@ impl Sweeper<'_> {
         };
         if owner.as_deref() == Some(self.state.census.me.as_str()) {
             let placement = Placement::new(Whose::Mover, Rule::InsideHome);
+            let p = self.start_place(job.volume, path, placement);
+            self.enter_place(job, name, p, 0);
+            return;
+        }
+        if let Some(id) = owner.as_deref().filter(|id| self.walks(id)) {
+            let placement = Placement::new(
+                Whose::Person {
+                    account_id: id.to_string(),
+                },
+                Rule::InsideHome,
+            );
             let p = self.start_place(job.volume, path, placement);
             self.enter_place(job, name, p, 0);
             return;

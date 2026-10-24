@@ -20,7 +20,7 @@ use std::collections::BTreeSet;
 use std::process::ExitCode;
 
 use pctwin_helper::Session;
-use pctwin_helper::person::scan_person;
+use pctwin_helper::person::{ScanOnce, scan_people};
 use pctwin_record::LaptopId;
 
 struct Args {
@@ -151,7 +151,11 @@ fn run(args: &Args) -> Result<(), String> {
         return Err("a connection from another account was refused".into());
     }
     let laptop = args.laptop;
-    let mut scanner = move |account: &str| scan_person(laptop, account);
+    // One sweep for every approved person, on the first ScanPerson.
+    let mut once = ScanOnce::new(args.approve.clone(), move |people: &BTreeSet<String>| {
+        scan_people(laptop, people)
+    });
+    let mut scanner = move |account: &str| once.scan(account);
     let mut stream = pipe.stream();
     let mut maker = pctwin_helper::account::create_account;
     let mut system = pctwin_helper::newlaptop::System {
@@ -193,7 +197,10 @@ fn serve_unix(
     approve: BTreeSet<String>,
     laptop: LaptopId,
 ) -> Result<(), String> {
-    let mut scanner = move |account: &str| scan_person(laptop, account);
+    let mut once = ScanOnce::new(approve.clone(), move |people: &BTreeSet<String>| {
+        scan_people(laptop, people)
+    });
+    let mut scanner = move |account: &str| once.scan(account);
     let mut maker = pctwin_helper::account::create_account;
     let mut system = pctwin_helper::newlaptop::System {
         mover: pctwin_helper_os::Account::Uid(mover),

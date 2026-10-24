@@ -126,3 +126,33 @@ fn the_approved_person_s_own_files_are_found_where_they_are() {
         ]
     );
 }
+
+/// The helper sweeps the drives once per session, for every approved person together, on the
+/// first ScanPerson, and answers every ScanPerson from that one sweep, each person only their own
+/// (a family laptop with four people is never swept four times).
+#[test]
+fn every_approved_person_is_answered_from_one_sweep() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let sweeps = std::cell::Cell::new(0);
+    let approved = BTreeSet::from(["bea".to_string(), "cal".to_string(), "dan".to_string()]);
+    let mut once = pctwin_helper::person::ScanOnce::new(approved.clone(), |people| {
+        sweeps.set(sweeps.get() + 1);
+        assert_eq!(people, &approved, "one sweep for everyone approved");
+        people
+            .iter()
+            .map(|p| {
+                let scan = pctwin_helper::person::PersonScan {
+                    privacy_blocked: p.len() as u64,
+                    ..Default::default()
+                };
+                (p.clone(), Ok(scan))
+            })
+            .collect::<BTreeMap<_, _>>()
+    });
+    assert_eq!(sweeps.get(), 0, "nothing is swept before it is asked for");
+    for p in ["cal", "bea", "dan", "bea"] {
+        assert_eq!(once.scan(p).unwrap().privacy_blocked, p.len() as u64);
+    }
+    assert_eq!(sweeps.get(), 1);
+    assert!(once.scan("eve").is_err(), "nobody else is answered");
+}

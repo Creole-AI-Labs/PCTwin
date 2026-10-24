@@ -388,6 +388,103 @@ fn what_the_person_used_most_recently_comes_first_then_what_they_pinned() {
     s.record.validate().unwrap();
 }
 
+/// The administrator helper's sweep for several approved people at once (one walk of the drive
+/// for a whole family, not one per person): each person's own things are exactly what a sweep
+/// made as that person finds, in their home and outside it; another person's (approved or not)
+/// are never listed as theirs.
+#[test]
+fn one_sweep_for_several_people_finds_each_ones_things_as_their_own_sweep_does() {
+    const CAL: &str = "S-1-5-21-111-222-333-1003";
+    let lab = lab();
+    let cal_home = lab.c.join("Users").join("cal");
+    std::fs::create_dir_all(&cal_home).unwrap();
+    write(&lab.ada.join("Documents/ada.txt"), 10);
+    write(&lab.bea.join("Documents/bea.txt"), 20);
+    write(&lab.bea.join("Pictures/2019/beach.jpg"), 30);
+    write(&cal_home.join("notes/cal.txt"), 40);
+    write(&lab.d.join("Family/holiday.jpg"), 50);
+    write(&lab.d.join("Family/BeaOnly/bea-outside.txt"), 60);
+    write(&lab.d.join("Family/CalOnly/cal-outside.txt"), 70);
+    let mut answers = Answers::default();
+    for (name, who) in [("BeaOnly", BEA), ("CalOnly", CAL)] {
+        answers.0.insert(
+            name.into(),
+            AccessFact::Known(
+                access_from_sddl(&format!("O:{who}D:P(A;;FA;;;BA)(A;OICI;FA;;;{who})")).unwrap(),
+            ),
+        );
+    }
+    // The helper's census: the approved people (Bea, Cal) take the mover's place by turns; the
+    // mover (Ada) is another person to them.
+    let census_as = |me: &str| {
+        let mut c = census(&lab, true);
+        c.residents
+            .push(resident(CAL, PersonKind::Other, &cal_home));
+        for r in &mut c.residents {
+            r.kind = if r.account_id.as_deref() == Some(me) {
+                PersonKind::Me
+            } else {
+                PersonKind::Other
+            };
+        }
+        c.me = me.into();
+        c
+    };
+    let facts_as = |me: &str| {
+        let mut f = facts(&lab, true);
+        f.census = census_as(me);
+        f.known_folders = Vec::new();
+        f
+    };
+    let theirs = |s: &Sweep, who: &str| -> std::collections::BTreeSet<String> {
+        s.record
+            .items
+            .iter()
+            .filter(|i| i.kind == pctwin_record::ItemKind::File)
+            .filter(|i| {
+                i.owner
+                    == Owner::Person {
+                        account_id: who.into(),
+                    }
+            })
+            .map(shown)
+            .collect()
+    };
+    let stop = AtomicBool::new(false);
+    let together = pctwin_scan::sweep_people(
+        facts_as(BEA),
+        &std::collections::BTreeSet::from([BEA.to_string(), CAL.to_string()]),
+        &mut answers,
+        &stop,
+        &mut |_| {},
+        &SweepLimits::default(),
+    );
+    for who in [BEA, CAL] {
+        let alone = run(facts_as(who), &mut answers);
+        assert_eq!(theirs(&together, who), theirs(&alone, who), "{who}");
+        assert!(!theirs(&alone, who).is_empty(), "{who}");
+    }
+    assert!(
+        theirs(&together, CAL)
+            .iter()
+            .any(|p| p.ends_with("cal-outside.txt"))
+    );
+    assert!(
+        theirs(&together, BEA)
+            .iter()
+            .any(|p| p.ends_with("bea-outside.txt"))
+    );
+    // The mover's things are not theirs to list.
+    assert!(theirs(&together, ADA).is_empty());
+    assert!(
+        !together
+            .record
+            .items
+            .iter()
+            .any(|i| shown(i).contains("ada.txt"))
+    );
+}
+
 #[test]
 fn one_walker_on_a_hard_disk_and_up_to_four_on_an_ssd() {
     assert_eq!(DiskKind::Hdd.walkers(4), 1);

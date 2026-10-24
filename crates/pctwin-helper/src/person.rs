@@ -1,7 +1,9 @@
 //! `ScanPerson`: an approved person's files, found by the same sweep that finds the mover's,
-//! run as if that person were the one moving. Only what the sweep places as theirs is kept;
+//! run as if that person were the one moving. One sweep serves every approved person of the
+//! session ([`ScanOnce`], [`scan_people`]): the drives are walked once, not once per person. Only what the sweep places as theirs is kept;
 //! shared things are already the mover's to move. Their names and places stay in the helper.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -149,4 +151,103 @@ pub fn system_only(sweep: &Sweep) -> Vec<PathBuf> {
         .filter_map(|p| p.path.as_ref().map(PathBuf::from))
         .take(MAX_SYSTEM_ONLY)
         .collect()
+}
+
+/// Every approved person's files from one sweep of this laptop (the helper runs with an
+/// administrator's rights): each approved person is placed and listed as a sweep made as them
+/// would (see `pctwin_scan::sweep_people`), and each answer holds only that person's own files.
+/// A person with no home here is refused, as one by one.
+pub fn scan_people(
+    laptop: LaptopId,
+    accounts: &BTreeSet<String>,
+) -> BTreeMap<String, Result<PersonScan, Refusal>> {
+    let census = pctwin_scan::census_this_laptop();
+    let people: BTreeSet<String> = accounts
+        .iter()
+        .filter(|a| census_as(census.clone(), a).is_some())
+        .cloned()
+        .collect();
+    let mut out: BTreeMap<String, Result<PersonScan, Refusal>> = accounts
+        .iter()
+        .filter(|a| !people.contains(*a))
+        .map(|a| (a.clone(), Err(Refusal::NoHome)))
+        .collect();
+    let Some(first) = people.iter().next() else {
+        return out;
+    };
+    let Some(census) = census_as(census, first) else {
+        return out;
+    };
+    let facts = SweepFacts {
+        laptop,
+        census,
+        volumes: pctwin_scan::volumes_this_laptop(),
+        // The system's list of special folders is the signed-in account's, not these people's:
+        // their homes are placed by the "inside a home" rule instead.
+        known_folders: Vec::new(),
+        remembered: Vec::new(),
+        rules: Rules::shipped(),
+    };
+    let mut reader = pctwin_scan::system_reader();
+    let stop = AtomicBool::new(false);
+    let swept = pctwin_scan::sweep_people(
+        facts,
+        &people,
+        reader.as_mut(),
+        &stop,
+        &mut |_| {},
+        &SweepLimits::default(),
+    );
+    let privacy_blocked = swept
+        .blind_spots
+        .iter()
+        .filter(|b| b.reason == pctwin_scan::BlindReason::MacPrivacy)
+        .map(|b| b.count)
+        .sum();
+    let shared = system_only(&swept);
+    for person in &people {
+        out.insert(
+            person.clone(),
+            Ok(PersonScan {
+                found: entries_of(&swept, person),
+                privacy_blocked,
+                system_only: shared.clone(),
+            }),
+        );
+    }
+    out
+}
+
+/// The session's scanner: the first `ScanPerson` sweeps once for every approved person (with
+/// `all`, [`scan_people`] in the helper), and every `ScanPerson` is answered from that sweep, held
+/// in the helper's own memory for the session. Nobody but an approved person is answered.
+pub struct ScanOnce<F> {
+    approved: BTreeSet<String>,
+    all: F,
+    found: Option<BTreeMap<String, Result<PersonScan, Refusal>>>,
+}
+
+impl<F> ScanOnce<F>
+where
+    F: FnMut(&BTreeSet<String>) -> BTreeMap<String, Result<PersonScan, Refusal>>,
+{
+    pub fn new(approved: BTreeSet<String>, all: F) -> Self {
+        Self {
+            approved,
+            all,
+            found: None,
+        }
+    }
+
+    /// `account`'s files, from the session's one sweep (made now if this is the first ask).
+    pub fn scan(&mut self, account: &str) -> Result<PersonScan, Refusal> {
+        if !self.approved.contains(account) {
+            return Err(Refusal::NotApproved);
+        }
+        let found = match &mut self.found {
+            Some(found) => found,
+            none => none.insert((self.all)(&self.approved)),
+        };
+        found.get(account).cloned().unwrap_or(Err(Refusal::NoHome))
+    }
 }
