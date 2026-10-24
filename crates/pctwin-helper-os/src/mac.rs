@@ -205,15 +205,23 @@ pub(crate) fn add_standard_account(
         return Err(Error::AlreadyExists);
     }
     let uid = next_uid()?;
-    os_od_create_user(name, full_name, uid, password).map_err(|(call, code)| Error::Os {
-        call: match call {
-            "password" => "Open Directory: setting the password",
-            "record" => "Open Directory: making the account",
-            _ => "Open Directory",
-        },
-        code,
-    })?;
     let home_was_there = std::path::Path::new(&path).exists();
+    if let Err((call, code)) = os_od_create_user(name, full_name, uid, password) {
+        // A step after the record was made failed: the record is PCTwin's own (none was at the
+        // name, and making one at a taken name fails), taken away again even if its user ID was
+        // not set yet.
+        if crate::od_step_left_a_record(call) {
+            let _ = remove_account(name, uid, home_was_there, true);
+        }
+        return Err(Error::Os {
+            call: match call {
+                "password" => "Open Directory: setting the password",
+                "record" => "Open Directory: making the account",
+                _ => "Open Directory",
+            },
+            code,
+        });
+    }
     crate::finish_or_undo(
         uid,
         || {
@@ -224,29 +232,29 @@ pub(crate) fn add_standard_account(
             )?;
             Ok(())
         },
-        |made| remove_made_account(name, made, home_was_there),
+        |made| remove_account(name, made, home_was_there, false),
     )
 }
 
 /// Takes away the account `name` PCTwin just made: only if its record still has the user ID
-/// `uid` it was made with (never another account of that name), and its home folder only if
+/// `uid` it was made with, or (`unset_is_ours`: made in this very call, failing before its user
+/// ID was set) has none, never another account of that name; and its home folder only if
 /// PCTwin's own step made it (it was not there before, and it is that account's).
-fn remove_made_account(name: &str, uid: u32, home_was_there: bool) -> Result<(), Error> {
+fn remove_account(
+    name: &str,
+    uid: u32,
+    home_was_there: bool,
+    unset_is_ours: bool,
+) -> Result<(), Error> {
     use std::os::unix::fs::MetadataExt;
     let path = format!("/Users/{name}");
-    let listed =
-        String::from_utf8_lossy(&run(DSCL, &[".", "-read", &path, "UniqueID"])?).into_owned();
-    let same = listed
-        .split_whitespace()
-        .last()
-        .and_then(|u| u.parse::<u32>().ok())
-        == Some(uid);
-    if !same {
+    let record = String::from_utf8_lossy(&run(DSCL, &[".", "-read", &path])?).into_owned();
+    if !crate::is_the_made_account(crate::listed_uid(&record), uid, unset_is_ours) {
         return Err(Error::BadInput("the account is not the one PCTwin made"));
     }
     run(DSCL, &[".", "-delete", &path])?;
-    if !home_was_there
-        && std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_dir() && m.uid() == uid)
+    if std::fs::symlink_metadata(&path)
+        .is_ok_and(|m| crate::is_the_made_home(home_was_there, m.is_dir(), m.uid(), uid))
     {
         std::fs::remove_dir_all(&path)?;
     }

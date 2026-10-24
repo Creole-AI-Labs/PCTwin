@@ -101,23 +101,73 @@ fn run(program: &str, args: &[&str], input: Option<&[u8]>) -> Result<(), Error> 
 
 /// Linux: a standard account with its home folder (`useradd`), its password set through
 /// `chpasswd`'s input (never a command line), then marked to be changed at the first sign-in
-/// (`chage -d 0`). Returns its user ID.
+/// (`chage -d 0`). Returns its user ID. If a step after `useradd` fails, the account it made is
+/// taken away again by its user ID (and its home, only if `useradd` made it), never left
+/// half-made.
 pub(crate) fn add_standard_account(
     name: &str,
     full_name: &str,
     password: &str,
 ) -> Result<u32, Error> {
+    let home_was_there = default_home(name).exists();
     run(
         USERADD,
         &["--create-home", "--comment", full_name, "--", name],
         None,
     )?;
-    let mut line = format!("{name}:{password}\n").into_bytes();
-    let set = run(CHPASSWD, &[], Some(&line));
-    line.iter_mut().for_each(|b| *b = 0);
-    set?;
-    run(CHAGE, &["-d", "0", "--", name], None)?;
-    uid_of(name)
+    let uid = uid_of(name)?;
+    crate::finish_or_undo(
+        uid,
+        || {
+            let mut line = format!("{name}:{password}\n").into_bytes();
+            let set = run(CHPASSWD, &[], Some(&line));
+            line.iter_mut().for_each(|b| *b = 0);
+            set?;
+            run(CHAGE, &["-d", "0", "--", name], None)
+        },
+        |made| remove_made_account(name, made, home_was_there),
+    )
+}
+
+/// Where `useradd` makes `name`'s home: its default base folder (`useradd -D`, `HOME=`), or
+/// `/home`.
+fn default_home(name: &str) -> std::path::PathBuf {
+    let base = Command::new(USERADD)
+        .arg("-D")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .and_then(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .find_map(|l| l.strip_prefix("HOME=").map(str::to_string))
+        })
+        .filter(|b| b.starts_with('/'))
+        .unwrap_or_else(|| "/home".to_string());
+    std::path::Path::new(&base).join(name)
+}
+
+const USERDEL: &str = "/usr/sbin/userdel";
+
+/// Takes away the account `name` PCTwin just made: only if it still has the user ID `uid` it was
+/// made with (never another account of that name), and its home folder only if `useradd` made it
+/// (it was not there before, and it is that account's).
+fn remove_made_account(name: &str, uid: u32, home_was_there: bool) -> Result<(), Error> {
+    use std::os::unix::fs::MetadataExt;
+    if !crate::is_the_made_account(uid_of(name).ok(), uid, false) {
+        return Err(Error::BadInput("the account is not the one PCTwin made"));
+    }
+    let home = crate::holding::passwd_entry(uid).map(|(_, home)| home).ok();
+    run(USERDEL, &["--", name], None)?;
+    if let Some(home) = home
+        && std::fs::symlink_metadata(&home)
+            .is_ok_and(|m| crate::is_the_made_home(home_was_there, m.is_dir(), m.uid(), uid))
+        && home == default_home(name)
+    {
+        std::fs::remove_dir_all(&home)?;
+    }
+    Ok(())
 }
 
 /// The user ID the system gave `name`, from its own list of accounts.

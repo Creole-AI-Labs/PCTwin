@@ -710,22 +710,109 @@ pub fn launch_elevated_with(
     }
 }
 
-/// After an account's record is made (`made`, its user ID): the rest of making it (`rest`: its
-/// home, its first-sign-in rule). If any of that fails, the account PCTwin itself just made is
-/// taken away again (`undo`, given that very user ID, never another account), so it is never
-/// left half-made for a retry to find "already there"; the first failure is what is reported.
-pub fn finish_or_undo(
-    made: u32,
+/// After an account's record is made (`made`, its user ID or SID): the rest of making it
+/// (`rest`: its password, its home, its first-sign-in rule). If any of that fails, the account
+/// PCTwin itself just made is taken away again (`undo`, given that very ID, never another
+/// account), so it is never left half-made for a retry to find "already there"; the first
+/// failure is what is reported.
+pub fn finish_or_undo<T: Clone>(
+    made: T,
     rest: impl FnOnce() -> Result<(), Error>,
-    undo: impl FnOnce(u32) -> Result<(), Error>,
-) -> Result<u32, Error> {
+    undo: impl FnOnce(T) -> Result<(), Error>,
+) -> Result<T, Error> {
     match rest() {
         Ok(()) => Ok(made),
         Err(failed) => {
-            let _ = undo(made);
+            let _ = undo(made.clone());
             Err(failed)
         }
     }
+}
+
+/// Whether the account record now at the name PCTwin just made (its user ID as the system lists
+/// it, `None` when it has none) is the one made with `made`, so it may be taken away.
+/// `unset_is_ours`: the record was made in this very call, and making it failed before its user
+/// ID was set (it can only be that record: none was at the name before, and making one at a taken
+/// name fails).
+#[cfg(any(unix, test))]
+pub(crate) fn is_the_made_account(listed: Option<u32>, made: u32, unset_is_ours: bool) -> bool {
+    match listed {
+        Some(uid) => uid == made,
+        None => unset_is_ours,
+    }
+}
+
+/// Whether a home folder may be taken away with the account PCTwin just made (`made`): only if
+/// PCTwin's own step made it (it was not there before), it is a folder, and it is that account's.
+#[cfg(any(unix, test))]
+pub(crate) fn is_the_made_home(was_there: bool, is_folder: bool, owner: u32, made: u32) -> bool {
+    !was_there && is_folder && owner == made
+}
+
+/// macOS: whether an Open Directory step that failed (`step`, as `os_od_create_user` names it)
+/// came after the user record was made, so a record of PCTwin's own is left to take away.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn od_step_left_a_record(step: &str) -> bool {
+    matches!(step, "attribute" | "password" | "save")
+}
+
+/// macOS: the user ID in a user record as `dscl . -read` prints it whole, `None` when it has none.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn listed_uid(record: &str) -> Option<u32> {
+    record
+        .lines()
+        .find_map(|l| l.strip_prefix("UniqueID:"))
+        .and_then(|u| u.trim().parse().ok())
+}
+
+/// Windows: the SID of the account PCTwin just made, to take it away by after a later step
+/// failed: the one the failed step read, or else the one the system gives the name just made.
+#[cfg(any(windows, test))]
+pub(crate) fn made_sid(
+    read: Option<String>,
+    by_name: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    read.or_else(by_name)
+}
+
+/// Refuses `program` unless only the administrators can change it, or the folders it is in: on
+/// Windows it must be inside Program Files (only administrators can change anything there); on
+/// macOS and Linux it, and every folder above it, must be root's, and nobody else may write to
+/// them. `program` is resolved first, so no link is left in it. For a program that runs with an
+/// administrator's rights, or as each person who signs in: one the mover could replace would run
+/// as them.
+pub fn only_administrators_can_change(program: &Path) -> Result<(), Error> {
+    #[cfg(windows)]
+    return win::only_from_program_files(program);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let real = std::fs::canonicalize(program)?;
+        let mut at = Some(real.as_path());
+        while let Some(path) = at {
+            let meta = std::fs::symlink_metadata(path)?;
+            if !root_only(meta.uid(), meta.mode()) {
+                return Err(Error::NotPrivate(format!(
+                    "{} can be changed by an account other than root",
+                    path.display()
+                )));
+            }
+            at = path.parent();
+        }
+        Ok(())
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = program;
+        Err(Error::NotSupported("checking who can change a program"))
+    }
+}
+
+/// Whether a file or folder owned by `owner` with the permission bits `mode` can be changed by
+/// root alone: root's, and no write for its group or anyone else.
+#[cfg(any(unix, test))]
+pub(crate) fn root_only(owner: u32, mode: u32) -> bool {
+    owner == 0 && mode & 0o022 == 0
 }
 
 /// A system tool run so that it, and anything it starts, can be ended together (on Unix in a
@@ -832,6 +919,78 @@ mod tests {
             |_| Err(Error::BadInput("second")),
         );
         assert!(matches!(both, Err(Error::BadInput("first"))));
+        // A Windows account goes by its SID, taken away by that SID.
+        let by_sid = std::cell::RefCell::new(None);
+        let failed = finish_or_undo(
+            "S-1-5-21-1-2-3-1001".to_string(),
+            || Err(Error::BadInput("its password could not be marked")),
+            |sid| {
+                *by_sid.borrow_mut() = Some(sid);
+                Ok(())
+            },
+        );
+        assert!(failed.is_err());
+        assert_eq!(by_sid.borrow().as_deref(), Some("S-1-5-21-1-2-3-1001"));
+    }
+
+    /// Only the very account and home PCTwin just made are ever taken away.
+    #[test]
+    fn only_what_pctwin_made_is_taken_away() {
+        // The record at the name: taken away only if it has the user ID it was made with, or,
+        // made in this very call, before its user ID was set.
+        assert!(is_the_made_account(Some(612), 612, false));
+        assert!(!is_the_made_account(Some(613), 612, false));
+        assert!(!is_the_made_account(Some(613), 612, true));
+        assert!(!is_the_made_account(None, 612, false));
+        assert!(is_the_made_account(None, 612, true));
+        // The home: only one PCTwin's step made, a folder, and that account's.
+        assert!(is_the_made_home(false, true, 612, 612));
+        assert!(!is_the_made_home(true, true, 612, 612));
+        assert!(!is_the_made_home(false, false, 612, 612));
+        assert!(!is_the_made_home(false, true, 0, 612));
+        // macOS: a record is left only by a step after it was made.
+        for step in ["attribute", "password", "save"] {
+            assert!(od_step_left_a_record(step), "{step}");
+        }
+        for step in ["session", "node", "record"] {
+            assert!(!od_step_left_a_record(step), "{step}");
+        }
+        assert_eq!(
+            listed_uid("RecordName: bea\nUniqueID: 612\nUserShell: /bin/zsh\n"),
+            Some(612)
+        );
+        assert_eq!(listed_uid("RecordName: bea\nUserShell: /bin/zsh\n"), None);
+        // Windows: the SID the failed step read, else the one the new name has.
+        assert_eq!(
+            made_sid(Some("S-1-5-21-1".into()), || Some("S-1-5-21-2".into())).as_deref(),
+            Some("S-1-5-21-1")
+        );
+        assert_eq!(
+            made_sid(None, || Some("S-1-5-21-2".into())).as_deref(),
+            Some("S-1-5-21-2")
+        );
+        assert_eq!(made_sid(None, || None), None);
+    }
+
+    /// A program anyone but root (or, on Windows, the administrators) can change is refused.
+    #[test]
+    fn a_program_others_can_change_is_refused() {
+        assert!(root_only(0, 0o755));
+        assert!(root_only(0, 0o700));
+        assert!(!root_only(0, 0o775));
+        assert!(!root_only(0, 0o757));
+        assert!(!root_only(0, 0o1777));
+        assert!(!root_only(501, 0o755));
+        // A program in a temporary folder: the user's own, and on Unix in a folder anyone may
+        // write to.
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("pctwin-handover");
+        std::fs::write(&program, b"").unwrap();
+        assert!(only_administrators_can_change(&program).is_err());
+        assert!(only_administrators_can_change(&dir.path().join("missing")).is_err());
+        // A system program, root's all the way up.
+        #[cfg(unix)]
+        assert!(only_administrators_can_change(Path::new("/bin/sh")).is_ok());
     }
 
     fn long_tool() -> std::process::Command {

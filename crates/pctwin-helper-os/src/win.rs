@@ -415,7 +415,56 @@ pub(crate) fn add_standard_account(
     // The password's copy here is cleared whatever happened.
     password_w.iter_mut().for_each(|c| *c = 0);
     added.map_err(net_error)?;
-    os_expire_password(&name_w).map_err(net_error)
+    // The account is made (NetUserAdd refuses a name that is taken, so it is PCTwin's own). If
+    // marking its password fails, it is taken away again by its SID, never left half-made.
+    let (sid, expired) = os_expire_password(&name_w);
+    let (read, failed) = match (sid, expired) {
+        (Some(sid), Ok(())) => return Ok(sid),
+        // ERROR_NONE_MAPPED: the account's SID could not be read.
+        (None, Ok(())) => (None, net_error(1332)),
+        (sid, Err(status)) => (sid, net_error(status)),
+    };
+    if let Some(sid) = crate::made_sid(read, || sid_of_name(name).ok()) {
+        let _ = remove_account(&sid);
+    }
+    Err(failed)
+}
+
+/// PowerShell, by its full path in the system folder.
+fn powershell() -> Result<PathBuf, Error> {
+    system_program(r"WindowsPowerShell\v1.0\powershell.exe")
+}
+
+/// Runs one PowerShell command (built only from checked SIDs and account names), its output.
+fn run_powershell(command: &str) -> Result<String, Error> {
+    let out = clean_command(&powershell()?)?
+        .args(["-NoProfile", "-NonInteractive", "-Command", command])
+        .stdin(std::process::Stdio::null())
+        .output()?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(Error::Os {
+            call: "a system tool",
+            code: i64::from(out.status.code().unwrap_or(-1)),
+        })
+    }
+}
+
+/// The SID the system gives the local account `name` (checked to be a plain account name first,
+/// so nothing else can be said to the shell).
+fn sid_of_name(name: &str) -> Result<String, Error> {
+    if !crate::is_account_name(name) {
+        return Err(Error::BadInput("an account name"));
+    }
+    let sid = run_powershell(&format!("(Get-LocalUser -Name '{name}').SID.Value"))?;
+    crate::Sid::parse(&sid).map(|s| s.as_str().to_string())
+}
+
+/// Takes away the local account PCTwin just made, by its SID (checked first), never by a name.
+fn remove_account(sid: &str) -> Result<(), Error> {
+    let sid = crate::Sid::parse(sid)?;
+    run_powershell(&format!("Remove-LocalUser -SID '{}'", sid.as_str())).map(|_| ())
 }
 
 fn net_error(status: u32) -> Error {
@@ -450,15 +499,17 @@ fn os_net_user_add(name: &[u16], password: &[u16], comment: &[u16]) -> Result<()
 }
 
 /// Marks `name`'s password expired (it must be changed at the next sign-in), read back first so
-/// nothing else of the account is reset, and returns its SID as text.
-fn os_expire_password(name: &[u16]) -> Result<String, u32> {
+/// nothing else of the account is reset. Returns its SID as text, when it could be read (before
+/// the change, so a failed change still says which account to take away), and how the change
+/// went.
+fn os_expire_password(name: &[u16]) -> (Option<String>, Result<(), u32>) {
     assert!(name.ends_with(&[0]));
     let mut buffer: *mut u8 = std::ptr::null_mut();
     // SAFETY: `name` is NUL-terminated; NetUserGetInfo allocates a USER_INFO_4 at `buffer`,
     // which is read and changed only while it lives and freed exactly once below, whatever
-    // happens. Its password field is null as read, so NetUserSetInfo leaves the password as it
-    // is; the SID it holds points inside the same allocation and is turned into text (the
-    // text's own allocation freed once) before the buffer is freed.
+    // happens. The SID it holds points inside the same allocation and is turned into text (the
+    // text's own allocation freed once) before the buffer is changed or freed. Its password
+    // field is set to null, so NetUserSetInfo leaves the password as it is.
     #[expect(
         unsafe_code,
         reason = "NetUserGetInfo, NetUserSetInfo and ConvertSidToStringSidW have no safe binding"
@@ -466,27 +517,23 @@ fn os_expire_password(name: &[u16]) -> Result<String, u32> {
     let r = unsafe {
         let got = NetUserGetInfo(PCWSTR::null(), PCWSTR(name.as_ptr()), 4, &mut buffer);
         if got != 0 {
-            return Err(got);
+            return (None, Err(got));
         }
         let info = &mut *buffer.cast::<USER_INFO_4>();
+        let mut text = PWSTR::null();
+        let sid = match ConvertSidToStringSidW(info.usri4_user_sid, &mut text) {
+            Ok(()) => {
+                let s = String::from_utf16_lossy(text.as_wide());
+                LocalFree(Some(HLOCAL(text.0.cast())));
+                Some(s)
+            }
+            Err(_) => None,
+        };
         info.usri4_password_expired = 1;
         info.usri4_password = PWSTR::null();
         let set = NetUserSetInfo(PCWSTR::null(), PCWSTR(name.as_ptr()), 4, buffer, None);
-        let mut text = PWSTR::null();
-        let sid = if set == 0 {
-            match ConvertSidToStringSidW(info.usri4_user_sid, &mut text) {
-                Ok(()) => {
-                    let s = String::from_utf16_lossy(text.as_wide());
-                    LocalFree(Some(HLOCAL(text.0.cast())));
-                    Ok(s)
-                }
-                Err(_) => Err(1332), // ERROR_NONE_MAPPED
-            }
-        } else {
-            Err(set)
-        };
         NetApiBufferFree(Some(buffer.cast()));
-        sid
+        (sid, if set == 0 { Ok(()) } else { Err(set) })
     };
     r
 }
@@ -882,7 +929,7 @@ pub fn program_folder() -> Result<PathBuf, Error> {
 /// Program Files only administrators can change a file. The request's path is already the one
 /// the system resolved (no link, junction or short name left), and is compared with Program
 /// Files as the system resolves it, as found from the machine's registry (never the environment).
-fn only_from_program_files(program: &std::path::Path) -> Result<(), Error> {
+pub(crate) fn only_from_program_files(program: &std::path::Path) -> Result<(), Error> {
     let root = std::fs::canonicalize(system_folder(SystemFolder::ProgramFiles)?)?;
     let real = std::fs::canonicalize(program)?;
     let inside = real
