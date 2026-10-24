@@ -110,16 +110,30 @@ fn a_resume_from_another_pairing_fails() {
     assert!(resume(&mut old, &mut stranger, now).is_err());
 }
 
+/// A copied resume message 1 works only once, and only for the laptop that sent it: copies are
+/// answered but can never be confirmed, so they never spend the attempt number (exit-gate review,
+/// 24 October 2026: an on-path copier could otherwise use up the 64 numbers and force a new
+/// pairing); once the genuine resume is confirmed, its number is spent and a copy is refused.
 #[test]
 fn a_copied_resume_message_works_only_once() {
     let now = Instant::now();
     let (mut old, mut new, _, _) = approved(&PLAN, &PLAN, now);
-    let (_opening, r1) = new.open(now).unwrap();
-    assert!(old.accept(&r1, now).is_ok());
+    let (opening, r1) = new.open(now).unwrap();
+    let copies: Vec<_> = (0..(MAX_RESUMES + 5))
+        .map(|_| old.accept(&r1, now).unwrap().0)
+        .collect();
+    let (accepting, r2) = old.accept(&r1, now).unwrap();
+    let (_new_end, r3) = opening.receive(&r2, now).unwrap();
+    accepting.confirm(&r3, now).unwrap();
+    for copy in copies {
+        assert!(copy.confirm(&r3, now).is_err());
+    }
     assert_eq!(
         old.accept(&r1, now).map(|_| ()).unwrap_err(),
         PairingError::LaneRefused
     );
+    // Every other number is still there for a real reconnection.
+    assert!(resume(&mut old, &mut new, now).is_ok());
 }
 
 #[test]

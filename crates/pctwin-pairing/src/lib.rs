@@ -919,13 +919,36 @@ const RESUMES: Purpose = Purpose {
     limit: MAX_RESUMES,
 };
 
+/// The attempt numbers spent, shared between the openings and the connections under way.
+#[derive(Clone, Default)]
+struct Spent(std::sync::Arc<std::sync::Mutex<BTreeSet<u32>>>);
+
+impl Spent {
+    fn has(&self, n: u32) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&n)
+    }
+
+    /// Spends `n`; false if it was spent already.
+    fn spend(&self, n: u32) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(n)
+    }
+}
+
 /// New connections opened from a paired session's secret, numbered from 1, each number used once.
 struct Openings {
     secret: Zeroizing<[u8; 32]>,
     /// Whether this laptop opens (the new laptop) or accepts (the old laptop).
     opens: bool,
     next: u32,
-    used: BTreeSet<u32>,
+    /// Numbers spent: each by a connection whose confirmation (message 3) proved it, shared with
+    /// the openings under way so the first to confirm a number spends it.
+    used: Spent,
     purpose: &'static Purpose,
     expires: Option<Deadline>,
 }
@@ -941,7 +964,7 @@ impl Openings {
             secret,
             opens,
             next: 1,
-            used: BTreeSet::new(),
+            used: Spent::default(),
             purpose,
             expires,
         }
@@ -998,7 +1021,7 @@ impl Openings {
             .split_at_checked(LANE_NUMBER_LEN)
             .ok_or(PairingError::Malformed)?;
         let number = u32::from_be_bytes(number.try_into().map_err(|_| PairingError::Malformed)?);
-        if !(1..=self.purpose.limit).contains(&number) || self.used.contains(&number) {
+        if !(1..=self.purpose.limit).contains(&number) || self.used.has(number) {
             return Err(PairingError::LaneRefused);
         }
         let psk = derive_numbered_psk(self.purpose, &self.secret, number)?;
@@ -1013,9 +1036,10 @@ impl Openings {
         if read != 0 {
             return Err(PairingError::Malformed);
         }
-        // The message proved the keys: this number is spent, even if the connection never
-        // completes, so a copy of the message cannot open a second one.
-        self.used.insert(number);
+        // The message proved the keys, but a copy of it proves them as well: the number is spent
+        // only once the connection is confirmed (message 3, which only the laptop that started
+        // it can seal), so a replayed message 1 never uses up the numbers; and a number is
+        // confirmed once, so a copy can never open a second connection.
         let written = hs
             .write_message(&[], &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
@@ -1025,6 +1049,7 @@ impl Openings {
             LaneAccepting {
                 transport,
                 confirm,
+                used: self.used.clone(),
                 lane: number,
                 deadline: Deadline::after(now, REPLY_TIMEOUT),
                 purpose: self.purpose,
@@ -1083,6 +1108,7 @@ impl LaneOpening {
 pub struct LaneAccepting {
     transport: TransportState,
     confirm: ConfirmKeys,
+    used: Spent,
     lane: u32,
     deadline: Deadline,
     purpose: &'static Purpose,
@@ -1106,6 +1132,9 @@ impl LaneAccepting {
         expected.extend_from_slice(&self.lane.to_be_bytes());
         if body != &expected[..] {
             return Err(PairingError::HandshakeFailed);
+        }
+        if !self.used.spend(self.lane) {
+            return Err(PairingError::LaneRefused);
         }
         Ok(Transport(self.transport))
     }
