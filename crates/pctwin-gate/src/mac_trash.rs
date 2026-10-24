@@ -84,8 +84,7 @@ fn private_folder(st: &rustix::fs::Stat, dev: rustix::fs::Dev, uid: u32) -> bool
         && st.st_mode & 0o022 == 0
 }
 
-/// Opens folder `name` in `dir` (the last part of `name` never followed if it is a link; a part
-/// before it, `.Trashes`, was seen to be a real folder by the caller), making it first if it is
+/// Opens folder `name` in `dir` (never followed if it is a link), making it first if it is
 /// missing, with read, write and search for its owner alone. `None` unless it is a private
 /// folder of `uid`'s on drive `dev`.
 fn private_folder_in(
@@ -192,18 +191,24 @@ fn on_drive(
     if rustix::fs::fstat(&m)?.st_dev != dev {
         return Ok(None);
     }
-    // `.Trashes` must be macOS's own: a real folder on this drive (it is write-only for everyone,
-    // with the sticky mark, so only its owner and each person's own folder inside matter).
-    match rustix::fs::statat(&m, ".Trashes", AtFlags::SYMLINK_NOFOLLOW) {
+    // `.Trashes` must be macOS's own: a real folder on this drive. No one may read it (it is
+    // write-only for everyone, with the sticky mark), so it is opened once for passing through
+    // only (macOS's O_SEARCH), never followed if it is a link, and checked by its handle: from
+    // then on the person's folder is reached from that very folder, so nothing put in its place
+    // after it was checked can be passed through instead. A Mac too old to open a folder that
+    // way has no Trash PCTwin may use: the copy is kept.
+    let Some(trashes) = open_to_pass_through(&m, ".Trashes")? else {
+        return Ok(None);
+    };
+    match rustix::fs::fstat(&trashes) {
         Ok(st)
             if FileType::from_raw_mode(st.st_mode) == FileType::Directory && st.st_dev == dev => {}
         _ => return Ok(None),
     }
-    // `.Trashes` cannot be opened (no one may read it), only passed through: the person's folder
-    // in it is reached from the top of the drive. Their folder itself is opened, never followed
-    // if it is a link, and checked to be theirs alone on this very drive.
+    // The person's folder in it is opened, never followed if it is a link, and checked to be
+    // theirs alone on this very drive.
     let mine = uid.to_string();
-    let Some(fd) = private_folder_in(&m, &format!(".Trashes/{mine}"), dev, uid)? else {
+    let Some(fd) = private_folder_in(&trashes, &mine, dev, uid)? else {
         return Ok(None);
     };
     let top = top.trim_end_matches('/');
@@ -212,6 +217,31 @@ fn on_drive(
         prefix: "",
         shown: format!("{top}/.Trashes/{mine}"),
     }))
+}
+
+/// macOS's `O_SEARCH` (`O_EXEC | O_DIRECTORY`): a folder opened only to pass through, which
+/// needs the right to pass through it and not to read it (macOS 13 and later).
+const SEARCH: u32 = 0x4000_0000;
+
+/// Opens the folder `name` in `dir` only to pass through it, never following `name` if it is a
+/// link. `None` when it is not a folder, is a link, may not be passed through, or this Mac cannot
+/// open a folder that way.
+fn open_to_pass_through(dir: &OwnedFd, name: &str) -> std::io::Result<Option<OwnedFd>> {
+    let flags =
+        OFlags::from_bits_retain(SEARCH) | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    match rustix::fs::openat(dir, name, flags, Mode::empty()) {
+        Ok(fd) => Ok(Some(fd)),
+        Err(
+            Errno::ACCESS
+            | Errno::PERM
+            | Errno::NOENT
+            | Errno::LOOP
+            | Errno::NOTDIR
+            | Errno::INVAL
+            | Errno::NOTSUP,
+        ) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Whether the copy `file` is in the Trash folder `trash` (an absolute path the journal
