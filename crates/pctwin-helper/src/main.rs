@@ -99,26 +99,15 @@ fn main() -> ExitCode {
     // before its own mode is set.
     #[cfg(unix)]
     rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
-    let mut raw: Vec<String> = std::env::args().skip(1).collect();
+    let raw: Vec<String> = std::env::args().skip(1).collect();
     // Windows: the helper runs with an administrator's rights, so it runs only with the minimal
     // environment worked out from Windows itself; everything it starts then inherits only that
     // (found by the fresh-context review: PowerShell, whoami, cmd and reg inherited the starter's).
     #[cfg(windows)]
-    {
-        let restarted = raw.first().is_some_and(|a| a == CLEAN_START);
-        if restarted {
-            raw.remove(0);
-        }
-        let have: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
-        match pctwin_helper_os::minimal_env().map(|want| start_decision(&have, &want, restarted)) {
-            Ok(Start::Run) => {}
-            Ok(Start::Restart) => return restart_clean(&raw),
-            Ok(Start::Refuse) | Err(_) => {
-                eprintln!("pctwin-helper: its environment could not be made clean");
-                return ExitCode::FAILURE;
-            }
-        }
-    }
+    let raw = match clean_start(raw) {
+        Ok(raw) => raw,
+        Err(code) => return code,
+    };
     // On a Mac, launchd starts the daemon with no arguments (its property list names the program
     // only, as Service Management requires): that, or --daemon, is daemon mode (found by the
     // fresh-context review: the daemon could never have started).
@@ -188,7 +177,7 @@ fn run(args: &Args) -> Result<(), String> {
 }
 
 /// The first argument of the helper restarted with a clean environment.
-#[cfg(any(windows, test))]
+#[cfg(windows)]
 const CLEAN_START: &str = "--clean-start";
 
 /// What the helper does with the environment it was started with.
@@ -225,6 +214,25 @@ fn start_decision(
         Start::Refuse
     } else {
         Start::Restart
+    }
+}
+
+/// Windows: carries on with `raw` when the environment is exactly the minimal one; otherwise
+/// starts again clean (and ends as that copy ends), or refuses.
+#[cfg(windows)]
+fn clean_start(mut raw: Vec<String>) -> Result<Vec<String>, ExitCode> {
+    let restarted = raw.first().is_some_and(|a| a == CLEAN_START);
+    if restarted {
+        raw.remove(0);
+    }
+    let have: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+    match pctwin_helper_os::minimal_env().map(|want| start_decision(&have, &want, restarted)) {
+        Ok(Start::Run) => Ok(raw),
+        Ok(Start::Restart) => Err(restart_clean(&raw)),
+        Ok(Start::Refuse) | Err(_) => {
+            eprintln!("pctwin-helper: its environment could not be made clean");
+            Err(ExitCode::FAILURE)
+        }
     }
 }
 
