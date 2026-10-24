@@ -3,6 +3,7 @@ import { Badge, Banner, Button, ResultChip, Row } from "../components/kit";
 import { ArrowForward, Attention, Check, Info } from "../icons";
 import { labelText, type Label } from "../pairing";
 import { fileName, formatWhen, missingLines, receiptState, tally, useBytes, type OfferedFile, type Outcome, type Receipt, type ReceiptLine } from "../quicksend";
+import Seal from "../motion/Seal";
 import FrameFooter from "./FrameFooter";
 import { Folder, Heading, Name, QsActions, QsRowList, QsStrip, Tile } from "./QsParts";
 
@@ -152,7 +153,13 @@ export default function QuickReceipt({
 
       <section className={`qs-statuscard ${whole ? "qs-statuscard-good" : "qs-statuscard-warn"}`} role="status">
         <h2>
-          {whole ? <Check /> : <Attention />}
+          {whole ? (
+            <Seal verified={!stopped}>
+              <Check />
+            </Seal>
+          ) : (
+            <Attention />
+          )}
           <Localized id={whole ? "qs-receipt-box-title" : "qs-receipt-partial-title"}>
             <span />
           </Localized>

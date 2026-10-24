@@ -1,5 +1,6 @@
 ﻿import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
+import { useSettle } from "../motion/screen";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
 import { FAILED_NEW, LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
@@ -28,6 +29,8 @@ function cleanCode(text: string): string {
 export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("searching");
+  // Pairing steps arrive without travel; a step showing a code or numbers does not move at all.
+  useSettle(phase, { calm: true });
   const [nearby, setNearby] = useState<Nearby[]>([]);
   const [chosen, setChosen] = useState<Nearby | null>(null);
   const [hadList, setHadList] = useState(false);

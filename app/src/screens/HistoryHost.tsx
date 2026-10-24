@@ -1,5 +1,6 @@
 import { useLocalization } from "@fluent/react";
 import { useEffect, useState } from "react";
+import { useSettle } from "../motion/screen";
 import { historyExport, historyList, historyOpen, type HistoryEntryRaw, type QsReceipt } from "../bridge";
 import type { ReportItem } from "../move";
 import { labelText } from "../pairing";
@@ -19,6 +20,7 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
   const { l10n } = useLocalization();
   const [entries, setEntries] = useState<HistoryEntryRaw[]>([]);
   const [view, setView] = useState<View>({ kind: "list" });
+  useSettle(view.kind);
   const [exported, setExported] = useState<ExportResult | undefined>(undefined);
 
   useEffect(() => {

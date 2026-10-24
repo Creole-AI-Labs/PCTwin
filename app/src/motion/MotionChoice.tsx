@@ -1,6 +1,5 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { PREFERENCES, useMotion, type MotionPreference } from "./preference";
-import "./motion.css";
 
 /**
  * The in-app Motion choice: follow the system (the default), reduced, or off. It sits beside the

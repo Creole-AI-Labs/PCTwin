@@ -2,6 +2,7 @@ import { useLocalization } from "@fluent/react";
 import { Badge, Banner, Button, Metrics, Row, RowList, Section } from "../components/kit";
 import { Attention, Check } from "../icons";
 import { KINDS, formatBytes, pageLocale, type MoveOutcome } from "../move";
+import Seal from "../motion/Seal";
 import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
@@ -49,7 +50,14 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
           detail={body}
           end={
             complete ? (
-              <Badge tone="good" icon={<Check className="mv-icon" />}>
+              <Badge
+                tone="good"
+                icon={
+                  <Seal verified={!stopped}>
+                    <Check className="mv-icon" />
+                  </Seal>
+                }
+              >
                 {l10n.getString("progress-state-verified")}
               </Badge>
             ) : (

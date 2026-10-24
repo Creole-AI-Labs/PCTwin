@@ -1,5 +1,6 @@
 import { useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
+import { useSettle } from "../motion/screen";
 import {
   helpCode,
   listenMove,
@@ -198,6 +199,8 @@ export default function MoveHost({
 }) {
   const { l10n } = useLocalization();
   const [view, setView] = useState<View>({ kind: "wait", stage: old ? "scanning" : "waiting" });
+  // Each step of the move settles in like a new screen; one that ends or loses the link arrives without travel.
+  useSettle(view.kind, { calm: view.kind === "end" || view.kind === "link-ended" || view.kind === "reconnecting" });
   const [approval, setApproval] = useState<Approval | null>(null);
   const [planChanged, setPlanChanged] = useState(false);
   // The folders the person unticked on the plan: they stay on the old laptop.

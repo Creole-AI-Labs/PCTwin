@@ -1,5 +1,5 @@
 import { LocalizationProvider, Localized } from "@fluent/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { LANGUAGES, directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
 import { recoveryCheck, recoveryRun, thingsReady, type ReadyNote } from "./bridge";
@@ -25,6 +25,7 @@ import Opening from "./motion/Opening";
 import { openingKind, type OpeningKind } from "./motion/openingRule";
 import { applyToDocument } from "./motion/preference";
 import { restoreReveal } from "./motion/play";
+import { installScreenMotion, settleScreen } from "./motion/screen";
 import "./styles.css";
 
 /** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), pairing (C03 to C05), then the move; and Quick Send's home. */
@@ -90,7 +91,19 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   // The motion setting and its timings, on the page before anything moves.
   useEffect(() => {
     applyToDocument();
+    installScreenMotion();
   }, []);
+
+  // Screen to screen: the new screen settles in (Back reverses the direction, right to left mirrors
+  // it). Pairing arrives without travel: codes stay still. The first screen is the opening's.
+  const arrived = useRef(false);
+  useLayoutEffect(() => {
+    if (!arrived.current) {
+      arrived.current = true;
+      return;
+    }
+    settleScreen(main.current, { calm: screen.id === "pair" });
+  }, [screen]);
 
   useEffect(() => {
     if (opening === "restore") restoreReveal(frame.current);
@@ -137,6 +150,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 type="button"
                 className="brand"
                 aria-label="PCTwin home"
+                data-nav="back"
                 // During a move, home is reached by the move's own buttons only.
                 aria-disabled={screen.id === "move" ? true : undefined}
                 onClick={() => {

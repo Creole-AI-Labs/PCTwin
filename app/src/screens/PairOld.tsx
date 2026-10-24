@@ -1,5 +1,6 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from "react";
+import { useSettle } from "../motion/screen";
 import { Badge, Banner, Button, CodeDisplay, TextField } from "../components/kit";
 import { ArrowForward, Check, Info, Laptop, Lock, Shield, Wifi } from "../icons";
 import {
@@ -44,6 +45,8 @@ const NOTICE_TEXT: Record<Notice, string> = {
 export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("starting");
+  // Pairing steps arrive without travel; a step showing a code or numbers does not move at all.
+  useSettle(phase, { calm: true });
   const phaseNow = useRef<Phase>("starting");
   useEffect(() => {
     phaseNow.current = phase;

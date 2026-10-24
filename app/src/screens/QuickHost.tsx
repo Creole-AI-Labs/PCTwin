@@ -1,5 +1,6 @@
 import { useLocalization } from "@fluent/react";
 import { useEffect, useRef, useState } from "react";
+import { useSettle } from "../motion/screen";
 import {
   listenQuickSend,
   qsAnswer,
@@ -68,6 +69,8 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
   const { l10n } = useLocalization();
   const sender = mode === "send";
   const [view, setView] = useState<View>({ kind: sender ? "pick" : "pair" });
+  // Each step settles in like a new screen; a problem arrives without travel.
+  useSettle(view.kind, { calm: view.kind === "problem" });
   const [items, setItems] = useState<PickedItem[]>([]);
   const [offered, setOffered] = useState<OfferedFile[]>([]);
   const [checked, setChecked] = useState(false);
