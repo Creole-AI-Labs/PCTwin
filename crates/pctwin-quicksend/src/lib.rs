@@ -202,19 +202,17 @@ impl Offer {
     /// or was already there, or is there needing action, is kept and not offered again. A file
     /// the receiver holds partway is continued there from the blocks it has.
     pub fn only_missing(mut self, receipt: &Receipt) -> Self {
-        let missing: BTreeSet<&str> = receipt
+        // By the file's ID, never by how its name shows (two names can show alike).
+        let missing: BTreeSet<ItemId> = receipt
             .lines
             .iter()
             .filter(|l| matches!(l.outcome, Outcome::Failed { .. } | Outcome::Declined))
-            .map(|l| l.path.as_str())
+            .map(|l| l.id)
             .collect();
         // A file the receipt does not list at all (it is new since) is offered too.
-        let listed: BTreeSet<&str> = receipt.lines.iter().map(|l| l.path.as_str()).collect();
+        let listed: BTreeSet<ItemId> = receipt.lines.iter().map(|l| l.id).collect();
         let keep = |i: &Item| {
-            i.kind != ItemKind::File || {
-                let p = shown_path(&i.path);
-                missing.contains(p.as_str()) || !listed.contains(p.as_str())
-            }
+            i.kind != ItemKind::File || missing.contains(&i.id) || !listed.contains(&i.id)
         };
         self.record.items.retain(|i| keep(i));
         let ids: BTreeSet<ItemId> = self.record.items.iter().map(|i| i.id).collect();
@@ -265,6 +263,9 @@ pub enum Outcome {
 /// One line of a receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptLine {
+    /// The file, by its ID in the send (what "Send the missing pieces" goes by: two names that
+    /// show alike are never taken for one another).
+    pub id: ItemId,
     /// The file's path in the send.
     pub path: String,
     pub outcome: Outcome,
@@ -330,6 +331,7 @@ pub async fn send_live(
                     }
                 };
                 ReceiptLine {
+                    id: f.id,
                     path: f.path,
                     outcome,
                 }
@@ -476,6 +478,7 @@ impl Incoming {
                         received(receiver.outcome(f.id).as_ref())
                     };
                     ReceiptLine {
+                        id: f.id,
                         path: f.path,
                         outcome,
                     }
@@ -621,6 +624,62 @@ mod tests {
 
     async fn read(msg: Vec<u8>, offer: &[OfferedFile]) -> Result<BTreeSet<ItemId>, QuickError> {
         read_accepted(&mut Answer(Some(msg)), offer).await
+    }
+
+    /// Exit-gate review (24 October 2026): "Send the missing pieces" goes by each file's ID, so
+    /// two files whose names show alike (names that are not text, on Linux) are never taken for
+    /// one another: only the one that did not arrive is offered again.
+    #[test]
+    fn the_missing_pieces_are_found_by_id_never_by_a_name_that_shows_alike() {
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut record = Record::new(laptop);
+        let file = |raw: &[u8]| {
+            let path = ItemPath::new(vec![ItemName::from_unix_bytes(raw)]).unwrap();
+            Item {
+                id: ItemId::derive(&laptop, &Owner::Shared, &place(), &path),
+                kind: ItemKind::File,
+                owner: Owner::Shared,
+                place: place(),
+                path,
+                size_bytes: 1,
+                modified_ns: None,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: None,
+                inclusion: Inclusion::Included,
+            }
+        };
+        // Two names that are not text, shown alike.
+        let (a, b) = (file(&[b'n', 0xFF]), file(&[b'n', 0xFE]));
+        assert_eq!(shown_path(&a.path), shown_path(&b.path));
+        assert_ne!(a.id, b.id);
+        record.items = vec![a.clone(), b.clone()];
+        let offer = Offer {
+            record,
+            jobs: Vec::new(),
+        };
+        let receipt = Receipt {
+            lines: vec![
+                ReceiptLine {
+                    id: a.id,
+                    path: shown_path(&a.path),
+                    outcome: Outcome::Arrived {
+                        landed_as: "n".into(),
+                    },
+                },
+                ReceiptLine {
+                    id: b.id,
+                    path: shown_path(&b.path),
+                    outcome: Outcome::Failed {
+                        cause: Cause::NotVerified,
+                        why: "no".into(),
+                    },
+                },
+            ],
+        };
+        let again = offer.only_missing(&receipt);
+        let ids: Vec<ItemId> = again.files().iter().map(|f| f.id).collect();
+        assert_eq!(ids, [b.id]);
     }
 
     /// Exit-gate review (24 October 2026): a stranger's file on a drive that cannot keep the

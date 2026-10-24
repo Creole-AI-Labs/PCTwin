@@ -483,6 +483,9 @@ pub async fn quicksend_send<R: Runtime>(
                     let _ = app.emit(RECEIPT_EVENT, view);
                 }
                 Err(e) => {
+                    // No receipt for this send: the missing pieces of an earlier one are never
+                    // offered as if they were this one's.
+                    lock(&state.last).take();
                     let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
                 }
             }
@@ -684,12 +687,14 @@ mod tests {
         let r = Receipt {
             lines: vec![
                 pctwin_quicksend::ReceiptLine {
+                    id: ItemId::from_hex(&"0".repeat(32)).unwrap(),
                     path: "a.txt".into(),
                     outcome: Outcome::Arrived {
                         landed_as: "a.txt".into(),
                     },
                 },
                 pctwin_quicksend::ReceiptLine {
+                    id: ItemId::from_hex(&"0".repeat(32)).unwrap(),
                     path: "b.txt".into(),
                     outcome: Outcome::NeedsAction {
                         landed_as: "b.txt".into(),
@@ -697,6 +702,7 @@ mod tests {
                     },
                 },
                 pctwin_quicksend::ReceiptLine {
+                    id: ItemId::from_hex(&"0".repeat(32)).unwrap(),
                     path: "c.txt".into(),
                     outcome: Outcome::Declined,
                 },
@@ -712,6 +718,7 @@ mod tests {
         // A stranger's file whose mark the drive could not keep: the screens' own words.
         let unmarked = Receipt {
             lines: vec![pctwin_quicksend::ReceiptLine {
+                id: ItemId::from_hex(&"0".repeat(32)).unwrap(),
                 path: "a.exe".into(),
                 outcome: Outcome::NeedsAction {
                     landed_as: "a.exe".into(),
@@ -748,6 +755,7 @@ mod tests {
         assert_eq!(files[0].path, "invoice[U+202E]fdp.exe");
         let r = Receipt {
             lines: vec![pctwin_quicksend::ReceiptLine {
+                id: ItemId::from_hex(&"0".repeat(32)).unwrap(),
                 path: "invoice\u{202E}fdp.exe".into(),
                 outcome: Outcome::Arrived {
                     landed_as: "invoice\u{202E}fdp.exe".into(),
