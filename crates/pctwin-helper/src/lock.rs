@@ -85,14 +85,14 @@ mod tests {
     fn a_pipe_planted_at_the_lock_is_refused_without_waiting() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helper.lock");
-        rustix::fs::mknodat(
-            rustix::fs::CWD,
-            &path,
-            rustix::fs::FileType::Fifo,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-            0,
-        )
-        .unwrap();
+        // `mkfifo` is on every Mac and Linux (rustix has no mknodat on Apple systems).
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&path)
+                .status()
+                .unwrap()
+                .success()
+        );
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(one_helper(&path).is_err());
