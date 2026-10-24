@@ -1089,6 +1089,7 @@ mod tests {
                 download_mark: None,
                 item: ItemId::from_hex(&"01".repeat(16)).unwrap(),
                 source_laptop: pctwin_record::LaptopId::from_hex(&"02".repeat(16)).unwrap(),
+                scope: Default::default(),
                 destination: "me".into(),
                 path: "a.txt".into(),
                 size: 1,

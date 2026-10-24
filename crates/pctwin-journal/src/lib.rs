@@ -259,6 +259,11 @@ pub enum DownloadMark {
 pub struct PlannedWrite {
     pub item: ItemId,
     pub source_laptop: LaptopId,
+    /// Which move this write belongs to, chosen on this laptop ([`Scope`]): the old laptop's ID
+    /// comes from what it says, so a write is matched to earlier ones (started again, picked up
+    /// after a restart) only within the same scope, never across moves.
+    #[serde(default)]
+    pub scope: Scope,
     /// The approved destination's label.
     pub destination: String,
     /// The path inside it, as the old laptop sent it.
@@ -1115,7 +1120,31 @@ impl std::fmt::Debug for Journal {
 }
 
 fn open_key(write: &PlannedWrite) -> String {
-    format!("{}/{}", write.source_laptop.to_hex(), write.item.to_hex())
+    let scope: String = write.scope.0.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{scope}/{}/{}",
+        write.source_laptop.to_hex(),
+        write.item.to_hex()
+    )
+}
+
+/// The move a journal entry belongs to. A move picks a new random one on this laptop; Quick Send
+/// uses [`Scope::QUICK_SEND`], so a send made again can pick up the files of an earlier one by the
+/// sender's ID ("Send the missing pieces"). Entries from before scopes have all zeros.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Scope(pub [u8; 16]);
+
+impl Scope {
+    /// Every Quick Send received on this laptop.
+    pub const QUICK_SEND: Scope = Scope(*b"pctwin-quicksend");
+
+    /// A new scope for one move: random, so no other move's entries share it.
+    pub fn for_a_move() -> Result<Self, JournalError> {
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes)
+            .map_err(|_| damaged("the system's random number source failed"))?;
+        Ok(Self(bytes))
+    }
 }
 
 impl Journal {

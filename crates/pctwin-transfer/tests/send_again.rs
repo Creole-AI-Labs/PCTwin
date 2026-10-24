@@ -23,6 +23,9 @@ use pctwin_transfer::{
     split_into_pieces,
 };
 use proptest::prelude::*;
+
+/// One move's scope in the journal, before and after the app restarts.
+const SAME_MOVE: pctwin_journal::Scope = pctwin_journal::Scope(*b"the same move...");
 use tokio::sync::mpsc;
 
 mod common;
@@ -948,7 +951,8 @@ async fn after_the_new_laptop_restarts_a_file_out_of_rounds_fails_with_the_true_
     let table = table(&l, Some(Flip::OnRead { at: 0 }));
     let mut sender = SenderSession::new(jobs(&l), 1);
     {
-        let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+        let mut receiver =
+            ReceiverSession::new(&table, plan(&l), &journal, "1001").with_scope(SAME_MOVE);
         let (mut a, b) = mem_pair();
         let mut b = CutAfterSecondRound {
             inner: Some(b),
@@ -963,7 +967,8 @@ async fn after_the_new_laptop_restarts_a_file_out_of_rounds_fails_with_the_true_
         // The app on the new laptop quits here.
     }
     pctwin_transfer::recover(&journal, &table).unwrap();
-    let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+    let mut receiver =
+        ReceiverSession::new(&table, plan(&l), &journal, "1001").with_scope(SAME_MOVE);
     receiver.restore().unwrap();
     let (mut a, mut b) = mem_pair();
     let (s, r) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
@@ -3392,7 +3397,8 @@ async fn a_restart_after_one_or_two_rounds_keeps_the_true_reason() {
         let table = table(&l, Some(Flip::OnRead { at: 0 }));
         let mut sender = SenderSession::new(jobs(&l), 1);
         {
-            let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+            let mut receiver =
+                ReceiverSession::new(&table, plan(&l), &journal, "1001").with_scope(SAME_MOVE);
             let (mut a, b) = mem_pair();
             let mut b = CutAfterRound {
                 inner: Some(b),
@@ -3407,7 +3413,8 @@ async fn a_restart_after_one_or_two_rounds_keeps_the_true_reason() {
             assert_eq!(b.asked, after);
         }
         pctwin_transfer::recover(&journal, &table).unwrap();
-        let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
+        let mut receiver =
+            ReceiverSession::new(&table, plan(&l), &journal, "1001").with_scope(SAME_MOVE);
         receiver.restore().unwrap();
         let (mut a, mut b) = mem_pair();
         let (s, r) = tokio::time::timeout(Duration::from_secs(60), async {

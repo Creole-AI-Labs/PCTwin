@@ -96,6 +96,7 @@ fn entry(id: u64, state: State) -> Entry {
             download_mark: None,
             item: ItemId::from_hex(&format!("{id:02x}{}", "0".repeat(30))).unwrap(),
             source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+            scope: Default::default(),
             destination: "me".into(),
             path: format!("d/f{id}.txt"),
             size: SIZE,

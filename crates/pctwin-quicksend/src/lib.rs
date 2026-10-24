@@ -438,6 +438,7 @@ impl Incoming {
             .map_err(|e| QuickError::Destination(e.to_string()))?;
         write_accepted(ch, &wanted).await?;
         let mut receiver = ReceiverSession::new(&table, allowance, journal, account)
+            .with_scope(pctwin_journal::Scope::QUICK_SEND)
             .with_protocol(self.version)
             .with_meter(live.meter.clone())
             .with_control(live.control.clone());

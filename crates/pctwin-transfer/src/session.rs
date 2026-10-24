@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, GateError, IncomingPath};
 use pctwin_journal::{
-    Actor, FileId, Journal, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
+    Actor, FileId, Journal, JournalError, Landed, Ledger, Permission, PlannedWrite, Scope, State,
 };
 use pctwin_record::ItemId;
 
@@ -2376,6 +2376,9 @@ pub struct ReceiverSession<'d> {
     /// place: kept as they are, since nothing more is written there until the person carries on,
     /// then cleared (or when the move ends).
     parked: Vec<(String, Assembly<'d>)>,
+    /// Which move this is in the journal: a new random one unless set
+    /// ([`with_scope`](Self::with_scope)). Only entries of this scope are picked up again.
+    scope: Scope,
     /// Files picked up again after the app restarted, waiting for the old laptop to continue them.
     restored: BTreeMap<ItemId, Incoming<'d>>,
     /// How each file's last attempt ended, kept per file (never per stream), so nothing started
@@ -2445,6 +2448,7 @@ impl<'d> ReceiverSession<'d> {
             copy_sources: 0,
             streams: BTreeMap::new(),
             parked: Vec::new(),
+            scope: new_scope(),
             restored: BTreeMap::new(),
             ended: BTreeMap::new(),
             continued: 0,
@@ -2481,6 +2485,13 @@ impl<'d> ReceiverSession<'d> {
     /// a pause here holds nothing and is not shown as held.
     pub fn with_protocol(mut self, version: u16) -> Self {
         self.version = version;
+        self
+    }
+
+    /// Belongs to `scope` in the journal, to pick up files of an earlier session of the same
+    /// scope ([`restore`](Self::restore)); a move leaves its own random one.
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
         self
     }
 
@@ -2607,7 +2618,8 @@ impl<'d> ReceiverSession<'d> {
                 continue;
             };
             let w = &e.write;
-            if w.source_laptop != self.allowance.source_laptop()
+            if w.scope != self.scope
+                || w.source_laptop != self.allowance.source_laptop()
                 || self.restored.contains_key(&w.item)
                 || self.streams.values().any(|s| s.item == w.item)
             {
@@ -3953,6 +3965,7 @@ impl<'d> ReceiverSession<'d> {
             download_mark: header.mark,
             item,
             source_laptop: self.allowance.source_laptop(),
+            scope: self.scope,
             destination: destination.to_string(),
             path: path.to_string(),
             size: header.size,
@@ -4046,6 +4059,24 @@ const BRAKE_WINDOW: usize = 20;
 
 /// Quarantine Design, step 3: the words for a file that would not come right.
 const READ_DIFFERENTLY: &str = "This file read differently each time on your old laptop, so its drive may be failing. Your original is untouched.";
+/// A new random scope for one move. Should the system's random source fail, one made from this
+/// moment and this process instead: still never another move's.
+fn new_scope() -> Scope {
+    Scope::for_a_move().unwrap_or_else(|_| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut h = blake3::Hasher::new();
+        h.update(b"pctwin/journal-scope\0");
+        h.update(&now.to_be_bytes());
+        h.update(&std::process::id().to_be_bytes());
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&h.finalize().as_bytes()[..16]);
+        Scope(bytes)
+    })
+}
+
 const PAUSED_THERE: &str = "the drive it was going to paused the move, so it was not copied. Once that drive is working, send it again. Your original is untouched";
 const NOT_STORED_HERE: &str =
     "This laptop could not store this file correctly. Your original is untouched.";

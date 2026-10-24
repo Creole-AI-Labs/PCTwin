@@ -21,6 +21,7 @@ fn planned(n: u8) -> PlannedWrite {
         download_mark: None,
         item: item(n),
         source_laptop: laptop(),
+        scope: Default::default(),
         destination: "me".into(),
         path: format!("Documents/f{n}.txt"),
         size: 1000 + u64::from(n),

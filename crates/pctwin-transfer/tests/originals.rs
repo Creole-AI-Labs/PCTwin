@@ -190,6 +190,7 @@ fn planned(source_file: Option<FileId>, modified: Option<i64>, size: u64) -> Pla
         download_mark: None,
         item: id(1),
         source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+        scope: Default::default(),
         destination: "me".into(),
         path: "a".into(),
         size,
