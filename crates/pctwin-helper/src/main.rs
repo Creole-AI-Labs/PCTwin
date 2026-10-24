@@ -99,7 +99,26 @@ fn main() -> ExitCode {
     // before its own mode is set.
     #[cfg(unix)]
     rustix::process::umask(rustix::fs::Mode::from_raw_mode(0o077));
-    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut raw: Vec<String> = std::env::args().skip(1).collect();
+    // Windows: the helper runs with an administrator's rights, so it runs only with the minimal
+    // environment worked out from Windows itself; everything it starts then inherits only that
+    // (found by the fresh-context review: PowerShell, whoami, cmd and reg inherited the starter's).
+    #[cfg(windows)]
+    {
+        let restarted = raw.first().is_some_and(|a| a == CLEAN_START);
+        if restarted {
+            raw.remove(0);
+        }
+        let have: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
+        match pctwin_helper_os::minimal_env().map(|want| start_decision(&have, &want, restarted)) {
+            Ok(Start::Run) => {}
+            Ok(Start::Restart) => return restart_clean(&raw),
+            Ok(Start::Refuse) | Err(_) => {
+                eprintln!("pctwin-helper: its environment could not be made clean");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     // On a Mac, launchd starts the daemon with no arguments (its property list names the program
     // only, as Service Management requires): that, or --daemon, is daemon mode (found by the
     // fresh-context review: the daemon could never have started).
@@ -166,6 +185,71 @@ fn run(args: &Args) -> Result<(), String> {
         .with_new_laptop(&mut system)
         .serve(&mut stream)
         .map_err(|e| e.to_string())
+}
+
+/// The first argument of the helper restarted with a clean environment.
+#[cfg(any(windows, test))]
+const CLEAN_START: &str = "--clean-start";
+
+/// What the helper does with the environment it was started with.
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum Start {
+    /// Exactly the minimal environment: carry on.
+    Run,
+    /// Anything else: start again, once, with only the minimal environment.
+    Restart,
+    /// Already restarted and still not clean: never run (nothing loops; a planted
+    /// --clean-start only makes the helper refuse).
+    Refuse,
+}
+
+/// `have` is clean when it holds exactly `want` (names compared as Windows does, without case).
+#[cfg(any(windows, test))]
+fn start_decision(
+    have: &[(std::ffi::OsString, std::ffi::OsString)],
+    want: &[(std::ffi::OsString, std::ffi::OsString)],
+    restarted: bool,
+) -> Start {
+    let norm = |pairs: &[(std::ffi::OsString, std::ffi::OsString)]| {
+        let mut v: Vec<(String, std::ffi::OsString)> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string_lossy().to_uppercase(), v.clone()))
+            .collect();
+        v.sort();
+        v
+    };
+    if norm(have) == norm(want) {
+        Start::Run
+    } else if restarted {
+        Start::Refuse
+    } else {
+        Start::Restart
+    }
+}
+
+/// Starts this program again, as it was started, with only the minimal environment, and ends
+/// as it ends.
+#[cfg(windows)]
+fn restart_clean(raw: &[String]) -> ExitCode {
+    let run = || -> Result<i32, String> {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let status = pctwin_helper_os::clean_command(&exe)
+            .map_err(|e| e.to_string())?
+            .arg(CLEAN_START)
+            .args(raw)
+            .status()
+            .map_err(|e| e.to_string())?;
+        Ok(status.code().unwrap_or(1))
+    };
+    match run() {
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+        Err(why) => {
+            eprintln!("pctwin-helper: starting again with a clean environment: {why}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -311,6 +395,43 @@ fn daemon() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_helper_runs_only_with_exactly_the_minimal_environment() {
+        let pair = |k: &str, v: &str| (std::ffi::OsString::from(k), std::ffi::OsString::from(v));
+        let want = vec![
+            pair("SystemRoot", r"C:\Windows"),
+            pair("TEMP", r"C:\Windows\Temp"),
+        ];
+        // The same, names in any case and any order: run.
+        let same = vec![
+            pair("TEMP", r"C:\Windows\Temp"),
+            pair("SYSTEMROOT", r"C:\Windows"),
+        ];
+        assert_eq!(start_decision(&same, &want, false), Start::Run);
+        assert_eq!(start_decision(&same, &want, true), Start::Run);
+        // Anything planted (a profiler, a changed SystemRoot, one value missing): start again
+        // clean, and if that was already the clean start, never run.
+        for bad in [
+            vec![
+                pair("SystemRoot", r"C:\Windows"),
+                pair("TEMP", r"C:\Windows\Temp"),
+                pair("COR_PROFILER", "x"),
+            ],
+            vec![
+                pair("SystemRoot", r"C:\Evil"),
+                pair("TEMP", r"C:\Windows\Temp"),
+            ],
+            vec![pair("SystemRoot", r"C:\Windows")],
+        ] {
+            assert_eq!(
+                start_decision(&bad, &want, false),
+                Start::Restart,
+                "{bad:?}"
+            );
+            assert_eq!(start_decision(&bad, &want, true), Start::Refuse, "{bad:?}");
+        }
+    }
 
     fn args(list: &[&str]) -> Result<Args, String> {
         parse(list.iter().map(|s| s.to_string()))
