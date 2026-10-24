@@ -1345,6 +1345,8 @@ progress-state-placing = जगह पर रखा जा रहा है
 progress-state-existing = पहले से मौजूद
 outcome-stopped-title = आपका स्थानांतरण बंद कर दिया गया।
 outcome-stopped-body = स्थानांतरण आपने बंद किया। उससे पहले जो कॉपी और जाँचा गया था, वह रखा गया है। बाकी कॉपी नहीं हुआ।
+outcome-broke-title = आपका स्थानांतरण समय से पहले खत्म हो गया।
+outcome-broke-body = लैपटॉप के बीच कुछ गड़बड़ हुई, इसलिए स्थानांतरण आगे नहीं चल सका। उससे पहले जो कॉपी और जाँचा गया था, वह रखा गया है। बाकी कॉपी नहीं हुआ।
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $total } में से { $done } आइटम कॉपी और जाँचे गए।
 outcome-files-memory =

@@ -575,8 +575,8 @@ function parsePersonOutcome(value: unknown): PersonOutcome | null {
 }
 
 export function parseMoveOutcome(value: unknown): MoveOutcome | null {
-  const f = exactly(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "checkedFromMemory", "afterMove"]);
-  if (!f || !isCount(f.notCopied) || !isCount(f.bytesChecked) || typeof f.stopped !== "boolean" || !isCount(f.checkedFromMemory)) return null;
+  const f = exactly(value, ["people", "byStatus", "notCopied", "bytesChecked", "stopped", "brokeOff", "checkedFromMemory", "afterMove"]);
+  if (!f || !isCount(f.notCopied) || !isCount(f.bytesChecked) || typeof f.stopped !== "boolean" || typeof f.brokeOff !== "boolean" || !isCount(f.checkedFromMemory)) return null;
   const by = exactly(f.byStatus, ITEM_STATUSES);
   if (!by || !ITEM_STATUSES.every((s) => isCount(by[s]))) return null;
   const byStatus = Object.fromEntries(ITEM_STATUSES.map((s) => [s, by[s]])) as MoveOutcome["byStatus"];
@@ -584,7 +584,7 @@ export function parseMoveOutcome(value: unknown): MoveOutcome | null {
   if (!people) return null;
   const afterMove = parseAfterMove(f.afterMove);
   if (!afterMove) return null;
-  return { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, checkedFromMemory: f.checkedFromMemory, afterMove };
+  return { people, byStatus, notCopied: f.notCopied, bytesChecked: f.bytesChecked, stopped: f.stopped, brokeOff: f.brokeOff, checkedFromMemory: f.checkedFromMemory, afterMove };
 }
 
 /** The after-move check: every kind, each with whole counts, and never more copied than planned. */

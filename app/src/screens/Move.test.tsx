@@ -633,6 +633,14 @@ describe("a dropped connection during the move (C09, C10)", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-stopped-title"));
   });
 
+  it("a move that ended early on its own says so, never that the person stopped it", async () => {
+    await host(false);
+    send("move-finished", { ...outcomes[0], stopped: true, brokeOff: true });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(text("outcome-broke-title"));
+    expect(screen.getByText(text("outcome-broke-body"))).toBeTruthy();
+    expect(screen.queryByText(text("outcome-stopped-body"))).toBeNull();
+  });
+
   it("has no accessibility violations while waiting, nor with the dialog open", async () => {
     await host(false);
     send("move-link", nothingNew);

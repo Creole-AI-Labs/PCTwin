@@ -1524,6 +1524,8 @@ progress-state-placing = جارٍ وضعه في مكانه
 progress-state-existing = موجود مسبقًا
 outcome-stopped-title = تم إيقاف عملية النقل.
 outcome-stopped-body = لقد أوقفت عملية النقل. ما نُسخ وتم التحقق منه قبل ذلك محفوظ. والباقي لم يُنسخ.
+outcome-broke-title = انتهت عملية النقل مبكرًا.
+outcome-broke-body = حدثت مشكلة بين الحاسوبين المحمولين، فلم تتمكن عملية النقل من الاستمرار. ما نُسخ وتم التحقق منه قبل ذلك محفوظ. والباقي لم يُنسخ.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = العناصر التي نُسخت وتم التحقق منها: { $done } من { $total }.
 outcome-files-memory =

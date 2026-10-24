@@ -1220,6 +1220,8 @@ progress-state-placing = Putting in place
 progress-state-existing = Already there
 outcome-stopped-title = Your move was stopped.
 outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
+outcome-broke-title = Your move ended early.
+outcome-broke-body = Something went wrong between the laptops, so the move could not go on. What was copied and checked before then is kept. The rest was not copied.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $done } of { $total } items copied and checked.
 outcome-files-memory =

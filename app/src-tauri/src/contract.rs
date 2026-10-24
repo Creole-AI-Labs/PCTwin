@@ -383,6 +383,7 @@ fn outcomes() -> Vec<MoveOutcome> {
         not_copied: 0,
         bytes_checked: 1_100_000,
         stopped: false,
+        broke_off: false,
         checked_from_memory: 3,
         after_move: crate::moving::AfterMove {
             photos: crate::moving::KindCount {

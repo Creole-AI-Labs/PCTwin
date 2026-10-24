@@ -989,6 +989,9 @@ pub struct MoveOutcome {
     pub not_copied: u64,
     pub bytes_checked: u64,
     pub stopped: bool,
+    /// The move ended early because something went wrong between the laptops (not a person's
+    /// stop): R01 says so, never "you stopped the move".
+    pub broke_off: bool,
     pub checked_from_memory: u64,
     /// The after-move check: the mover's photos, videos, music and documents in the plan, and how
     /// many of each are copied and checked.
@@ -1130,6 +1133,9 @@ fn cut_off(f: &pctwin_transfer::Failure, ended: Ended) -> bool {
         Ended::Finished => false,
         Ended::StoppedHere | Ended::StoppedThere => f.cause() == Cause::Stopped,
         Ended::LinkLost => f.cause() == Cause::MoveEnded && f.why() == pctwin_move::LINK_LOST,
+        Ended::Broke => {
+            f.cause() == Cause::MoveEnded && f.why().starts_with(pctwin_move::BROKE_OFF)
+        }
     }
 }
 
@@ -1140,6 +1146,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
     let stopped = received.ended != Ended::Finished;
     let mut outcome = MoveOutcome {
         stopped,
+        broke_off: received.ended == Ended::Broke,
         ..MoveOutcome::default()
     };
     let mut report = Vec::new();
@@ -1323,6 +1330,7 @@ fn sent_outcome(sent: &Sent, record: &Record, mover: &str) -> (MoveOutcome, Vec<
     let stopped = sent.ended != Ended::Finished;
     let mut outcome = MoveOutcome {
         stopped,
+        broke_off: sent.ended == Ended::Broke,
         ..MoveOutcome::default()
     };
     let mut report = Vec::new();
@@ -2652,6 +2660,33 @@ mod tests {
         assert_eq!(report.len(), 2);
         assert_eq!(report[1].reason, Some(Reason::NotEnoughSpace));
         assert_eq!(crate::history::move_state(&outcome), ("stopped", 2));
+    }
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a move that could not go on (a message
+    /// out of place) keeps its report as a lost connection does, and R01 is told it ended early
+    /// on its own, not that the person stopped it.
+    #[test]
+    fn a_move_that_broke_off_keeps_every_result_and_says_it_ended_early() {
+        let a = item(person("1000"), FolderRole::Documents, &["a.txt"], 10);
+        let b = item(person("1000"), FolderRole::Documents, &["b.txt"], 10);
+        let cut = ReceiveOutcome::Failed(Failure::new(
+            Cause::MoveEnded,
+            format!("{} (something unexpected)", pctwin_move::BROKE_OFF),
+        ));
+        let r = received(
+            vec![
+                (a, Some(finished("a.txt", CheckedFrom::Drive))),
+                (b, Some(cut)),
+            ],
+            Ended::Broke,
+        );
+        let (outcome, report) = received_outcome(&r, "1000");
+        assert!(outcome.stopped && outcome.broke_off);
+        assert_eq!(outcome.by_status.copied, 1);
+        assert_eq!(outcome.not_copied, 1);
+        assert_eq!(report.len(), 1);
+        let finished_move = received_outcome(&received(Vec::new(), Ended::Finished), "1000").0;
+        assert!(!finished_move.broke_off);
     }
 
     #[test]

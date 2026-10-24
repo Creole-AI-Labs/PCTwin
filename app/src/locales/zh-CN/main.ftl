@@ -1141,6 +1141,8 @@ progress-state-placing = 正在放到位
 progress-state-existing = 已存在
 outcome-stopped-title = 你的迁移已停止。
 outcome-stopped-body = 你停止了迁移。在此之前已复制并检查的内容会保留，其余的没有复制。
+outcome-broke-title = 你的迁移提前结束了。
+outcome-broke-body = 两台笔记本电脑之间出了问题，迁移无法继续。在此之前已复制并检查的内容会保留，其余的没有复制。
 outcome-files-summary = { $total }个项目中，已复制并检查{ $done }个。
 outcome-files-memory =
     { NUMBER($count) ->

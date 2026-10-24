@@ -1388,6 +1388,8 @@ progress-state-placing = Mise en place
 progress-state-existing = Déjà présent
 outcome-stopped-title = Votre transfert a été arrêté.
 outcome-stopped-body = Vous avez arrêté le transfert. Ce qui avait été copié et vérifié avant est gardé. Le reste n’a pas été copié.
+outcome-broke-title = Votre transfert s’est arrêté tôt.
+outcome-broke-body = Un problème est survenu entre les ordinateurs portables, le transfert n’a donc pas pu continuer. Ce qui avait été copié et vérifié avant est gardé. Le reste n’a pas été copié.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = Éléments copiés et vérifiés : { $done } sur { $total }.
 outcome-files-memory =

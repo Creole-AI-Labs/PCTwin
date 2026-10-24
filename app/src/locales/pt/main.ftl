@@ -1383,6 +1383,8 @@ progress-state-placing = Colocando no lugar
 progress-state-existing = Já estava lá
 outcome-stopped-title = Sua mudança foi interrompida.
 outcome-stopped-body = Você parou a mudança. O que foi copiado e verificado antes disso é mantido. O resto não foi copiado.
+outcome-broke-title = Sua mudança terminou antes da hora.
+outcome-broke-body = Algo deu errado entre os notebooks, então a mudança não pôde continuar. O que foi copiado e verificado antes disso é mantido. O resto não foi copiado.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $done } de { $total } itens copiados e verificados.
 outcome-files-memory =

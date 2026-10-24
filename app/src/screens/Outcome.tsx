@@ -22,6 +22,12 @@ const DONE = ["copied", "reinstalled", "converted"] as const;
 export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOutcome; onReport: () => void; onHome?: () => void }) {
   const { l10n } = useLocalization();
   const { byStatus, stopped, notCopied } = outcome;
+  // A move that ended early on its own (something went wrong between the laptops) never says the person stopped it.
+  const [titleId, bodyId] = outcome.brokeOff
+    ? ["outcome-broke-title", "outcome-broke-body"]
+    : stopped
+      ? ["outcome-stopped-title", "outcome-stopped-body"]
+      : ["outcome-title", "outcome-body"];
   const needsAction = byStatus["needs-action"];
   const done = DONE.reduce((n, s) => n + byStatus[s], 0);
   // Everything the person approved: what ended some way (less what they left out themselves), plus what never started.
@@ -36,8 +42,8 @@ export default function Outcome({ outcome, onReport, onHome }: { outcome: MoveOu
   return (
     <>
       <TopStrip labelId="outcome-eyebrow" />
-      <Heading id={stopped ? "outcome-stopped-title" : "outcome-title"} />
-      <p className="subhead">{l10n.getString(stopped ? "outcome-stopped-body" : "outcome-body")}</p>
+      <Heading id={titleId} />
+      <p className="subhead">{l10n.getString(bodyId)}</p>
       <Metrics
         items={[
           { value: formatBytes(outcome.bytesChecked, pageLocale()), label: l10n.getString("outcome-metric-size") },

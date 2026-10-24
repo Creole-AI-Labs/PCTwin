@@ -18,6 +18,7 @@
         "planned": 0
       }
     },
+    "brokeOff": false,
     "byStatus": {
       "converted": 0,
       "copied": 30,

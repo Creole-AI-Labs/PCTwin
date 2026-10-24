@@ -1886,3 +1886,248 @@ async fn a_laptop_asleep_an_hour_mid_send_carries_on_or_ends_honestly() {
         "{ends:?}"
     );
 }
+
+/// The old laptop's end of the connection, which says one thing out of place: right after the
+/// last of the first file it starts is sent, a `FileDone` (only the new laptop ever says that).
+struct StrayAfter {
+    inner: Mem,
+    /// The first file started, and its stream.
+    first: Option<(ItemId, u32)>,
+    said: bool,
+}
+
+impl Channel for StrayAfter {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        use pctwin_transfer::Message;
+        let heard = Message::decode(data).ok();
+        self.inner.send(data).await?;
+        match heard {
+            Some(Message::StartFile { stream, item, .. }) if self.first.is_none() => {
+                self.first = Some((item, stream));
+            }
+            Some(Message::EndFile { stream, .. })
+                if self.first.is_some_and(|(_, s)| s == stream) && !self.said =>
+            {
+                self.said = true;
+                let stray = Message::FileDone { stream, ok: true };
+                self.inner.send(&stray.encode()).await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+/// Fresh-context review of TRANSFER (24 October 2026): one message out of place halfway through
+/// ends the move, but never loses the report of what already landed: the file that landed is
+/// copied (and on the disk), and every file the end cut off failed, with why.
+#[tokio::test]
+async fn a_message_out_of_place_mid_move_keeps_the_report_of_what_landed() {
+    let w = world();
+    let plan = send_plan(&w.record, |i| Some(source_in(w.old.path(), i)), landing);
+    let (old, new) = mem_pair();
+    let mut old = StrayAfter {
+        inner: old,
+        first: None,
+        said: false,
+    };
+    let mut steps = person(true);
+    let (quiet, quiet_old) = (Live::default(), Live::default());
+    let (_, received) = no_hang(async {
+        tokio::join!(
+            pctwin_move::send(&mut old, &w.record, plan, &quiet_old),
+            async {
+                // The new laptop lets the connection go when its side ends, as a real one does.
+                let mut new = new;
+                pctwin_move::receive(&mut new, &mut steps, &w.table, &w.journal, "1001", &quiet)
+                    .await
+            }
+        )
+    })
+    .await;
+    let received = received.expect("the report is kept");
+    let (first, _) = old.first.expect("a file was started");
+    assert_eq!(received.ended, Ended::Broke);
+    assert_eq!(received.files.len(), FILES.len());
+    let mut cut = 0;
+    for (line, (role, path, bytes)) in received.files.iter().zip(FILES) {
+        let landed = w.new.path().join(folder_name(role)).join(path.join("/"));
+        match &line.outcome {
+            Some(ReceiveOutcome::Finished(_)) => {
+                assert_eq!(std::fs::read(&landed).unwrap(), bytes);
+            }
+            Some(ReceiveOutcome::Failed(why)) => {
+                assert_ne!(
+                    line.item, first,
+                    "the first file landed before the stray message"
+                );
+                assert_eq!(why.cause(), Cause::MoveEnded, "{why}");
+                assert!(why.why().starts_with(pctwin_move::BROKE_OFF), "{why}");
+                assert!(!landed.exists(), "{landed:?}");
+                cut += 1;
+            }
+            other => panic!("{path:?} ended {other:?}"),
+        }
+    }
+    assert!(
+        matches!(
+            received
+                .files
+                .iter()
+                .find(|f| f.item == first)
+                .map(|f| &f.outcome),
+            Some(Some(ReceiveOutcome::Finished(_)))
+        ),
+        "the first file is reported copied"
+    );
+    assert!(
+        cut > 0,
+        "the stray message came before the last file landed"
+    );
+}
+
+/// Another person's files, with no place when the plan is approved, held in a place made after
+/// the approval (as in the test above), the person answering each approval with `second` after
+/// the first. Every file but the first is `size` in the plan (if given). What the move came to, and every
+/// preview the person was shown.
+async fn held_after_approval(
+    size: Option<u64>,
+    second: Result<(), Stop>,
+) -> (
+    Result<pctwin_move::Received, MoveError>,
+    Vec<Preview>,
+    World,
+) {
+    use pctwin_move::landing::LandingRules;
+    let mut w = world();
+    if let Some(size) = size {
+        for i in w
+            .record
+            .items
+            .iter_mut()
+            .filter(|i| i.kind == ItemKind::File)
+            .skip(1)
+        {
+            i.size_bytes = size;
+        }
+    }
+    let before = LandingRules {
+        mover: "2000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+        left_out: Default::default(),
+        chosen: Default::default(),
+    };
+    struct Counting {
+        rules: LandingRules,
+        shown: Vec<Preview>,
+        second: Result<(), Stop>,
+    }
+    impl Steps for Counting {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, preview: &Preview) -> Result<(), Stop> {
+            self.shown.push(preview.clone());
+            if self.shown.len() == 1 {
+                Ok(())
+            } else {
+                self.second
+            }
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    let holding = w.new.path().join("holding-1000");
+    std::fs::create_dir_all(&holding).unwrap();
+    let mut steps = Counting {
+        rules: before,
+        shown: Vec::new(),
+        second,
+    };
+    let (mut old, new) = mem_pair();
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let mut table = std::mem::take(&mut w.table);
+    let (_, received) = no_hang(async {
+        tokio::join!(
+            send_greeted(
+                &mut old,
+                &w.record,
+                "2000",
+                &[],
+                |i| Some(source_in(w.old.path(), i)),
+                &old_live,
+                std::sync::Arc::new(pctwin_transfer::FsOpener),
+            ),
+            async {
+                let mut new = new;
+                receive_greeted(
+                    &mut new,
+                    &mut steps,
+                    |s, table| {
+                        table.approve_holding("for-1", "1001", &holding).unwrap();
+                        let mut rules = s.rules.clone();
+                        rules.held.insert("1000".into(), "for-1".into());
+                        s.rules = rules.clone();
+                        rules
+                    },
+                    &mut table,
+                    &w.journal,
+                    "1001",
+                    &new_live,
+                )
+                .await
+            },
+        )
+    })
+    .await;
+    (received, steps.shown, w)
+}
+
+/// Fresh-context review of TRANSFER (24 October 2026): what the person approved is what is sent.
+/// Another person's files have no place when the plan is approved, so the preview could not count
+/// where they land; once their place is made, if it does not fit where the person saw it fit,
+/// the person sees the plan as it will run and approves it again. Here they stop, and nothing is
+/// written.
+#[tokio::test]
+async fn a_plan_that_no_longer_fits_once_everyone_is_placed_is_approved_again() {
+    let huge = 1u64 << 50;
+    let (received, shown, w) = held_after_approval(Some(huge), Err(Stop::NotApproved)).await;
+    assert!(
+        matches!(received, Err(MoveError::Stopped(Stop::NotApproved))),
+        "{:?}",
+        received.map(|r| r.ended)
+    );
+    assert_eq!(shown.len(), 2, "approved again");
+    assert!(shown[0].fit.places.iter().all(|p| p.fits() != Some(false)));
+    assert!(shown[1].fit.places.iter().any(|p| p.fits() == Some(false)));
+    assert!(shown[1].bytes >= huge, "{:?}", shown[1]);
+    assert!(w.journal.entries().unwrap().is_empty());
+}
+
+/// And when everyone's place still fits, nothing is asked again: the files land.
+#[tokio::test]
+async fn a_plan_that_still_fits_once_everyone_is_placed_is_not_asked_again() {
+    let (received, shown, _w) = held_after_approval(None, Ok(())).await;
+    assert_eq!(shown.len(), 1);
+    let received = received.unwrap();
+    assert_eq!(received.ended, Ended::Finished);
+    assert!(
+        received
+            .files
+            .iter()
+            .all(|f| matches!(f.outcome, Some(ReceiveOutcome::Finished(_)))),
+        "{:?}",
+        received.files
+    );
+}

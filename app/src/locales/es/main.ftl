@@ -1379,6 +1379,8 @@ progress-state-placing = Colocando
 progress-state-existing = Ya estaba
 outcome-stopped-title = Tu traslado se paró.
 outcome-stopped-body = Paraste el traslado. Se conserva lo que se copió y comprobó hasta entonces. El resto no se copió.
+outcome-broke-title = Tu traslado terminó antes de tiempo.
+outcome-broke-body = Algo falló entre los portátiles, así que el traslado no pudo continuar. Se conserva lo que se copió y comprobó hasta entonces. El resto no se copió.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $done } de { $total } elementos copiados y comprobados.
 outcome-files-memory =

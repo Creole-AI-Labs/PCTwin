@@ -266,6 +266,8 @@ export type MoveOutcome = {
   /** Bytes written and read back. */
   bytesChecked: number;
   stopped: boolean;
+  /** It ended early because something went wrong between the laptops, not because a person stopped it (absent in the screens' own samples). */
+  brokeOff?: boolean;
   /** Copied files checked from this laptop's memory, not the drive. */
   checkedFromMemory: number;
   /** The after-move check (absent in the screens' own samples that predate it). */

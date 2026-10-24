@@ -43,9 +43,9 @@ use pctwin_record::{
 };
 use pctwin_transfer::{
     Allowance, Cause, Channel, Failure, Fit, FsOpener, LandingPlace, MOVE_PROTOCOL, MoveControl,
-    MoveMeter, Opener, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier,
-    TimeRange, TransferError, agree_version, answer_link_test, measure_link, plan_order_with,
-    receive_inventory, send_inventory,
+    MoveMeter, Opener, PlaceFit, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
+    SenderSession, Tier, TimeRange, TransferError, agree_version, answer_link_test, measure_link,
+    plan_order_with, receive_inventory, send_inventory,
 };
 
 use reconnect::{LinkState, Reconnect};
@@ -237,6 +237,10 @@ pub enum Ended {
     /// other again without pairing again (the time or the tries to reconnect ran out, or the old
     /// laptop could not listen for the new one). What moved is kept.
     LinkLost,
+    /// After the plan was approved, the move could not go on: the other laptop sent something it
+    /// should not have, or it stopped answering. What moved is kept, and every file it cut off
+    /// failed with why ([`BROKE_OFF`]).
+    Broke,
 }
 
 /// What a file cut off by a stop is reported as: failed, never copied.
@@ -246,13 +250,44 @@ pub const STOPPED: &str = "the move was stopped";
 /// because the move ended, never copied.
 pub const LINK_LOST: &str = "the connection between the laptops was lost before it finished";
 
-/// What a file with no outcome of its own is reported as when the move ended as `ended`: nothing
-/// for a finished move (every file has one then).
-fn cut_off(ended: Ended) -> Option<Failure> {
+/// What a file cut off by a move that could not go on ([`Ended::Broke`]) is reported as, before
+/// what went wrong: failed because the move ended, never copied.
+pub const BROKE_OFF: &str = "the move ended early because of a problem between the laptops";
+
+/// What a file with no outcome of its own is reported as when the move ended as `ended` (`why`:
+/// what went wrong, for [`Ended::Broke`]): nothing for a finished move (every file has one then).
+fn cut_off(ended: Ended, why: Option<&str>) -> Option<Failure> {
     match ended {
         Ended::Finished => None,
         Ended::StoppedHere | Ended::StoppedThere => Some(Failure::new(Cause::Stopped, STOPPED)),
         Ended::LinkLost => Some(Failure::new(Cause::MoveEnded, LINK_LOST)),
+        Ended::Broke => Some(Failure::new(
+            Cause::MoveEnded,
+            match why {
+                Some(why) => format!("{BROKE_OFF} ({why})"),
+                None => BROKE_OFF.to_string(),
+            },
+        )),
+    }
+}
+
+/// How a run of the files after the approval came out, with every file's result kept: an error
+/// that ends it (a message out of place, a laptop that stopped answering) ends the move as
+/// [`Ended::Broke`], with what went wrong, rather than losing the report of what already landed.
+/// Only this laptop's own record failing (nothing more can be recorded), or a dropped connection
+/// where there is no way back (the test lab's way), still fails the move.
+fn kept(ran: Result<Ended, MoveError>) -> Result<(Ended, Option<String>), MoveError> {
+    match ran {
+        Ok(ended) => Ok((ended, None)),
+        Err(MoveError::Transfer(e))
+            if !matches!(
+                e,
+                TransferError::Record(_) | TransferError::ConnectionDropped
+            ) =>
+        {
+            Ok((Ended::Broke, Some(e.to_string())))
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -430,8 +465,8 @@ async fn run_sender<C: Channel, B: Comeback>(
         .with_protocol(version)
         .with_meter(live.meter.clone())
         .with_control(live.control.clone());
-    let ended = keep_sending(&mut sender, link, on_drop, live).await?;
-    let cut = cut_off(ended);
+    let (ended, why) = kept(keep_sending(&mut sender, link, on_drop, live).await)?;
+    let cut = cut_off(ended, why.as_deref());
     Ok(Sent {
         files: items
             .into_iter()
@@ -572,6 +607,8 @@ pub trait Steps {
 
     /// The person approves `record`, the plan as it will run, with every person placed, seeing
     /// `preview`: whether it fits and about how long it takes. Only the new laptop ever approves.
+    /// With the app's way of moving ([`receive_by_rules`]) it is asked again, before anything is
+    /// written, if once every person's place is made a place is shorter of space than it showed.
     fn approve(
         &mut self,
         record: &Record,
@@ -767,6 +804,8 @@ pub struct ApprovedPlan {
     version: u16,
     /// The old laptop's list as it arrived, for the plan's fingerprint ([`resume::plan_print`]).
     listed: blake3::Hasher,
+    /// How far short of space the preview the person approved was ([`most_short`]).
+    short: u64,
 }
 
 /// How one received file ended on the new laptop (`None`: it has no outcome).
@@ -841,14 +880,7 @@ async fn receive_plan_told<C: Channel, S: Steps>(
     }
     let shown = preview(&record, |i| steps.landing(i), table, speed);
     steps.approve(&record, &shown).await?;
-    let out: std::collections::HashSet<ItemId> = steps.left_out(&record).into_iter().collect();
-    for item in &mut record.items {
-        if out.contains(&item.id) && item.inclusion == Inclusion::Included {
-            item.inclusion = Inclusion::LeftOut {
-                reason: LeftOutReason::ChosenByUser,
-            };
-        }
-    }
+    leave_out(steps, &mut record);
     let approval = record.approve()?;
     let allowance = Allowance::from_record(&record, &approval, |i| steps.landing(i))?;
     Ok(ApprovedPlan {
@@ -857,7 +889,35 @@ async fn receive_plan_told<C: Channel, S: Steps>(
         allowance,
         version,
         listed,
+        short: most_short(&shown),
     })
+}
+
+/// Marks the files the person chose, at their approval, to leave out (see [`Steps::left_out`]).
+/// Whether any was.
+fn leave_out<S: Steps>(steps: &S, record: &mut Record) -> bool {
+    let out: std::collections::HashSet<ItemId> = steps.left_out(record).into_iter().collect();
+    let mut changed = false;
+    for item in &mut record.items {
+        if out.contains(&item.id) && item.inclusion == Inclusion::Included {
+            item.inclusion = Inclusion::LeftOut {
+                reason: LeftOutReason::ChosenByUser,
+            };
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// How far short of space the worst place in `shown` is (0: every place fits, or is not known).
+fn most_short(shown: &Preview) -> u64 {
+    shown
+        .fit
+        .places
+        .iter()
+        .map(PlaceFit::short_by)
+        .max()
+        .unwrap_or(0)
 }
 
 impl ApprovedPlan {
@@ -902,8 +962,8 @@ impl ApprovedPlan {
             .with_protocol(self.version)
             .with_meter(live.meter.clone())
             .with_control(live.control.clone());
-        let ended = keep_receiving(&mut receiver, link, on_drop, live).await?;
-        let cut = cut_off(ended);
+        let (ended, why) = kept(keep_receiving(&mut receiver, link, on_drop, live).await)?;
+        let cut = cut_off(ended, why.as_deref());
         let files = self
             .record
             .items
@@ -956,6 +1016,19 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
         let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
         let rules = rules(steps, table);
+        // The places made after the approval (another person's holding place, a folder the person
+        // chose) hold files the preview could not count where they now land. The files are the
+        // ones approved (another person's with their place chosen, their files and size shown),
+        // but if where they land now leaves a place shorter of space than the person saw, they
+        // see the plan as it will run and approve it again (or stop, with nothing written).
+        let placed = preview(&approved.record, |i| rules.landing(i), table, measured);
+        if most_short(&placed) > approved.short {
+            steps.approve(&approved.record, &placed).await?;
+            approved.short = most_short(&placed);
+            if leave_out(steps, &mut approved.record) {
+                approved.approval = approved.record.approve()?;
+            }
+        }
         // A folder that moves as one whole never lands merged into one already here, nor into
         // another of this move: where each is stored is decided here, once every place is known.
         let wholes = landing::place_wholes(&approved.record.items, &rules, |destination, path| {
