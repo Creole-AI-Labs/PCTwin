@@ -71,7 +71,7 @@ mod session;
 mod undo;
 mod version;
 
-pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom};
+pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom, WholePlace};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
 pub use cause::{Cause, Failure, Side};
 pub use fit::{Fit, KEEP_FREE, PlaceFit, TimeRange};
@@ -732,6 +732,20 @@ impl<'d> Assembly<'d> {
         Self::start_with(destination, path, header, Some(tag))
     }
 
+    /// As [`start_tagged`](Self::start_tagged), inside a folder that moves as one whole: its top
+    /// folder made by this move (see [`pctwin_gate::Fresh`]).
+    pub fn start_tagged_fresh(
+        destination: &'d Destination,
+        path: &IncomingPath,
+        header: Header,
+        tag: &str,
+        fresh: Option<pctwin_gate::Fresh<'_>>,
+    ) -> Result<Self, TransferError> {
+        check_header(&header)?;
+        let file = destination.create_file_tagged_fresh(path, header.size, tag, fresh)?;
+        Self::started(file, header)
+    }
+
     fn start_with(
         destination: &'d Destination,
         path: &IncomingPath,
@@ -739,10 +753,14 @@ impl<'d> Assembly<'d> {
         tag: Option<&str>,
     ) -> Result<Self, TransferError> {
         check_header(&header)?;
-        let mut file = match tag {
+        let file = match tag {
             Some(tag) => destination.create_file_tagged(path, header.size, tag)?,
             None => destination.create_file(path, header.size)?,
         };
+        Self::started(file, header)
+    }
+
+    fn started(mut file: IncomingFile<'d>, header: Header) -> Result<Self, TransferError> {
         // Reserve the whole size now, so a full disk shows at the start. Callers check the size
         // against the approved plan first. A drive that cannot reserve still copies.
         file.reserve()?;

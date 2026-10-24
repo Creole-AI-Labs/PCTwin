@@ -955,19 +955,20 @@ pub async fn receive_by_rules<C: Channel, S: Steps, R: Redial>(
         greeting::wait_for_list(link).await?;
         let (version, measured) = (link.greeting().version, link.greeting().bytes_per_second);
         let mut approved = receive_plan_told(link, version, Some(measured), steps, table).await?;
-        let mut rules = rules(steps, table);
-        // A folder that moves as one whole never lands merged into one already here.
-        rules.keep_wholes_apart(&approved.record.items, |destination, path| {
-            let Ok(dest) = table.get(destination) else {
-                return false;
-            };
-            pctwin_gate::IncomingPath::parse(path).is_ok_and(|p| dest.has(&p))
+        let rules = rules(steps, table);
+        // A folder that moves as one whole never lands merged into one already here, nor into
+        // another of this move: where each is stored is decided here, once every place is known.
+        let wholes = landing::place_wholes(&approved.record.items, &rules, |destination, path| {
+            let dest = table.get(destination).ok()?;
+            let met = dest.meet(&pctwin_gate::IncomingPath::parse(path).ok()?);
+            Some((met.key, met.taken))
         });
         // What this laptop accepts is made from the very rules the old laptop is sent, now that
         // every place is known (another person's holding place is made only after the
         // approval): both laptops place every file by one function, by construction.
         approved.allowance =
-            Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?;
+            Allowance::from_record(&approved.record, &approved.approval, |i| rules.landing(i))?
+                .with_wholes(wholes);
         landing::send_rules(link, &rules).await?;
         // The plan is approved and the rules said: both laptops make their resume keys for
         // exactly this plan, and the old laptop says where it waits for this one's return.

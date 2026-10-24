@@ -1260,6 +1260,7 @@ report-more-details = और जानकारी
 # Added 23 October 2026: what the report says beside a line's result (changed since the scan).
 report-note-changed-since-scan = स्कैन के बाद बदला: इसे अभी जैसा है, वैसा ही कॉपी किया गया।
 report-note-no-longer-there = अब वहाँ नहीं है: भेजे जाने से पहले इसे पुराने लैपटॉप पर हटाया, नाम बदला या मिटाया गया।
+report-note-time-not-kept = तारीख़ नहीं रखी गई: यह ड्राइव इसके आख़िरी बदलाव की तारीख़ नहीं रख सकती, इसलिए यह कॉपी होने की तारीख़ दिखाती है।
 
 # Evidence: how a copied item was checked.
 evidence-read-back = ड्राइव से वापस पढ़कर जाँचा गया।

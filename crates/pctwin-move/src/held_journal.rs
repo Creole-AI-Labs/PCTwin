@@ -130,6 +130,22 @@ fn split(id: u64) -> (Option<usize>, u64) {
 }
 
 impl Ledger for SplitLedger<'_> {
+    fn folders_made_in(
+        &self,
+        scope: pctwin_journal::Scope,
+        destination: &str,
+    ) -> Result<Vec<String>, JournalError> {
+        match self.place_for(destination)? {
+            None => self.mine.folders_made_in(scope, destination),
+            Some(n) => {
+                let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+                let (_, journal) = held
+                    .get(n)
+                    .ok_or_else(|| JournalError::Damaged("no such holding place".into()))?;
+                journal.folders_made_in(scope, destination)
+            }
+        }
+    }
     fn temp_tag(&self, id: u64) -> String {
         self.on(id, |l, i| Ok(l.temp_tag(i)))
             .unwrap_or_else(|_| self.mine.temp_tag(id))

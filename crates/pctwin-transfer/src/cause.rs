@@ -196,6 +196,7 @@ impl Cause {
                 | PathError::NulCharacter => Self::RefusedBySafetyCheck,
             },
             GateError::Conflict
+            | GateError::WholeTaken
             | GateError::TooManyClashes
             | GateError::NoSafeName
             | GateError::NameRejected => Self::NameNotAllowed,

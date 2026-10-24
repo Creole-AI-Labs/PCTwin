@@ -5161,3 +5161,49 @@ async fn an_older_old_laptop_is_told_no_for_a_paused_place_with_the_true_reason(
     }
     assert!(!landed(&l, 3).exists());
 }
+
+/// Exit-gate review (24 October 2026): a folder that moves as one whole is never written into a
+/// folder someone else made, even one put there after this laptop placed the whole: the file is
+/// refused before anything is made inside it, with why. Its own folder, made by its first file,
+/// takes the rest.
+#[tokio::test]
+async fn a_whole_is_never_written_into_a_folder_planted_after_it_was_placed() {
+    for planted in [true, false] {
+        let l = laptops(&[70_000, 70_000]);
+        let table = table(&l, None);
+        let plan = plan(&l).with_wholes(vec![pctwin_transfer::WholePlace {
+            destination: "me".into(),
+            planned: "Documents".into(),
+            stored: Some("Documents".into()),
+        }]);
+        if planted {
+            std::fs::create_dir_all(l.new.path().join("Documents")).unwrap();
+        }
+        let mut sender = SenderSession::new(jobs(&l), 1);
+        let mut receiver = ReceiverSession::new(&table, plan, common::journal(), "1001");
+        move_all(&mut sender, &mut receiver).await;
+        for n in 0..2 {
+            let got = receiver.outcome(id(n as u8));
+            if planted {
+                match got {
+                    Some(ReceiveOutcome::Failed(why)) => {
+                        assert!(why.contains("already there"), "{why}")
+                    }
+                    other => panic!("file {n}: {other:?}"),
+                }
+            } else {
+                assert!(matches!(got, Some(ReceiveOutcome::Finished(_))), "{got:?}");
+                assert_eq!(std::fs::read(landed(&l, n)).unwrap(), l.files[n].1);
+            }
+        }
+        if planted {
+            assert_eq!(
+                std::fs::read_dir(l.new.path().join("Documents"))
+                    .unwrap()
+                    .count(),
+                0,
+                "nothing was made in the folder already there"
+            );
+        }
+    }
+}

@@ -1135,6 +1135,7 @@ report-more-details = More details
 # Added 23 October 2026: what the report says beside a line's result (changed since the scan).
 report-note-changed-since-scan = Changed since the scan: it was copied as it is now.
 report-note-no-longer-there = No longer there: it was moved, renamed or deleted on the old laptop before it could be sent.
+report-note-time-not-kept = Date not kept: this drive cannot store the date it was last changed, so it shows the date it was copied.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Checked by reading it back from the drive.

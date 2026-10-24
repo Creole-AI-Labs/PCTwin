@@ -1296,6 +1296,7 @@ report-more-details = Mais detalhes
 # Added 23 October 2026: what the report says beside a line's result (changed since the scan).
 report-note-changed-since-scan = Mudou desde a verificação: foi copiado como está agora.
 report-note-no-longer-there = Não está mais lá: foi movido, renomeado ou apagado no notebook antigo antes de poder ser enviado.
+report-note-time-not-kept = Data não mantida: esta unidade não consegue guardar a data da última alteração, por isso mostra a data em que foi copiado.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Verificado lendo a cópia de volta do disco.

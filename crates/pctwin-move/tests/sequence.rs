@@ -760,7 +760,6 @@ async fn files_land_where_the_new_laptop_s_rules_put_them() {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     struct ByRules {
         rules: LandingRules,
@@ -858,7 +857,6 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     struct Late {
         rules: LandingRules,
@@ -949,7 +947,6 @@ async fn the_movers_journal_names_none_of_another_persons_files() {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     struct Held {
         rules: LandingRules,
@@ -1052,7 +1049,6 @@ async fn a_folder_sent_to_a_chosen_place_lands_there_or_fails_never_elsewhere() 
             held: Default::default(),
             left_out: Default::default(),
             chosen: Default::default(),
-            wholes: Default::default(),
         };
         rules.chosen.insert(FolderRole::Pictures);
         struct Chose {
@@ -1281,6 +1277,24 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
         write(&source_in(w.old.path(), &f), bytes);
         w.record.items.push(f);
     }
+    // A second library on the old laptop already named like the first one's new name here (A).
+    let second = "Photos Library (2).photoslibrary";
+    w.record.items.push(item(
+        FolderRole::Pictures,
+        &[second],
+        ItemKind::Package,
+        0,
+        Inclusion::Included,
+    ));
+    let other = item(
+        FolderRole::Pictures,
+        &[second, "originals", "b.heic"],
+        ItemKind::File,
+        5,
+        Inclusion::Included,
+    );
+    write(&source_in(w.old.path(), &other), b"boats");
+    w.record.items.push(other.clone());
     w.record.validate().unwrap();
     // The new laptop's own library, already there.
     let theirs = w
@@ -1301,7 +1315,6 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     struct Mine {
         rules: LandingRules,
@@ -1353,11 +1366,8 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
         assert_eq!(line.outcome, Some(SendOutcome::Arrived), "{:?}", line.item);
     }
     let ours = "Photos Library (2).photoslibrary".to_string();
-    assert_eq!(
-        said.wholes.values().collect::<Vec<_>>(),
-        [&ours],
-        "the old laptop was told the name it lands under"
-    );
+    // Decided on this laptop alone: the old laptop was told nothing of the name it lands under.
+    assert!(!serde_json::to_string(&said).unwrap().contains("(2)"));
     for (path, bytes) in inside {
         let id = w
             .record
@@ -1375,6 +1385,17 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
         let landed = w.new.path().join("Pictures").join(&ours).join(&rest);
         assert_eq!(std::fs::read(landed).unwrap(), bytes);
     }
+    // The second library lands apart from both: never merged into the first one's new place.
+    let line = received.files.iter().find(|f| f.item == other.id).unwrap();
+    let Some(ReceiveOutcome::Finished(done)) = &line.outcome else {
+        panic!("the second library ended {:?}", line.outcome);
+    };
+    assert_eq!(
+        done.final_path,
+        "Photos Library (2) (2).photoslibrary/originals/b.heic"
+    );
+    let first_new = w.new.path().join("Pictures").join(&ours);
+    assert!(!first_new.join("originals/b.heic").exists());
     // The library already there is exactly as it was, and holds nothing of the move.
     assert_eq!(std::fs::read(&theirs).unwrap(), b"the new laptop's own");
     let there: Vec<_> = std::fs::read_dir(w.new.path().join("Pictures").join(lib))

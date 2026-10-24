@@ -477,6 +477,8 @@ pub enum GateError {
     Path(#[from] PathError),
     #[error("a file is in the way of a folder with the same name")]
     Conflict,
+    #[error("a folder of that name is already there, so this whole folder was not put into it")]
+    WholeTaken,
     #[error("too many files already use this name")]
     TooManyClashes,
     #[error("the file should be {announced} bytes but {received} arrived")]
@@ -1146,7 +1148,7 @@ impl Destination {
         path: &IncomingPath,
         announced: u64,
     ) -> Result<IncomingFile<'d>, GateError> {
-        self.create_with(path, announced, None)
+        self.create_with(path, announced, None, None)
     }
 
     /// As [`create_file`](Self::create_file), under the temporary name [`temp_name`]`(tag)`, which
@@ -1159,10 +1161,24 @@ impl Destination {
         announced: u64,
         tag: &str,
     ) -> Result<IncomingFile<'d>, GateError> {
+        self.create_file_tagged_fresh(path, announced, tag, None)
+    }
+
+    /// As [`create_file_tagged`](Self::create_file_tagged), inside a folder that moves as one
+    /// whole: the folder `fresh` names must be made now, by this very call, or be one this move
+    /// made before (`fresh.ours`, by its stored path); a folder of that name that is anyone
+    /// else's is never written into ([`GateError::WholeTaken`]), nothing is created there.
+    pub fn create_file_tagged_fresh<'d>(
+        &'d self,
+        path: &IncomingPath,
+        announced: u64,
+        tag: &str,
+        fresh: Option<Fresh<'_>>,
+    ) -> Result<IncomingFile<'d>, GateError> {
         if !is_plain_tag(tag) {
             return Err(GateError::BadTag);
         }
-        self.create_with(path, announced, Some(tag))
+        self.create_with(path, announced, Some(tag), fresh)
     }
 
     fn create_with<'d>(
@@ -1170,6 +1186,7 @@ impl Destination {
         path: &IncomingPath,
         announced: u64,
         tag: Option<&str>,
+        fresh: Option<Fresh<'_>>,
     ) -> Result<IncomingFile<'d>, GateError> {
         let (file_name, folders) = path
             .components()
@@ -1182,11 +1199,16 @@ impl Destination {
         let mut shown = Vec::new();
         let mut created = Vec::new();
         let mut dir = self.root.try_clone()?;
-        for folder in folders {
+        for (n, folder) in folders.iter().enumerate() {
             // Each name follows the rules of the drive it is made on.
             let converted = convert_name(folder, self.profile_of(&dir).name_rules());
             changes.extend(converted.changes.iter().copied());
-            let (opened, made) = open_or_create_folder(&dir, &converted.name)?;
+            let top = fresh.as_ref().is_some_and(|f| f.depth == n + 1);
+            let (opened, made) = if top {
+                open_fresh_folder(&dir, &converted.name, &shown, fresh.as_ref())?
+            } else {
+                open_or_create_folder(&dir, &converted.name)?
+            };
             dir = opened;
             shown.push(converted.name);
             if made {
@@ -1527,6 +1549,7 @@ impl Destination {
             kept_if_dropped: true,
             held: Some(held),
             mark_not_kept: None,
+            time_not_kept: false,
             checked_from: None,
             mark: None,
             show: None,
@@ -1603,28 +1626,61 @@ impl Destination {
 
     /// Whether anything (a file, a folder, a link) is already where something sent as `path`
     /// would be stored, names converted exactly as for writing. Nothing is created and no link is
-    /// followed out of the approved folder.
+    /// followed out of the approved folder. A place that cannot be looked at counts as taken.
     pub fn has(&self, path: &IncomingPath) -> bool {
-        let Some((last, folders)) = path.components().split_last() else {
-            return false;
-        };
-        let Ok(mut dir) = self.root.try_clone() else {
-            return false;
-        };
-        for folder in folders {
-            let name = convert_name(folder, self.profile_of(&dir).name_rules()).name;
-            match dir.symlink_metadata(&name) {
-                Ok(m) if m.is_dir() => {}
-                Ok(_) => return true,
-                Err(_) => return false,
+        self.meet(path).taken
+    }
+
+    /// What a folder that moves as one whole (a package, a project's history) meets at `path`:
+    /// its name as this place would store it, folded to one case where the drive does not tell
+    /// case apart (two wholes whose keys are equal would be one folder here), and whether
+    /// anything is already there. A place that cannot be looked at (not readable, not a folder
+    /// on the way) counts as taken: never assumed free.
+    pub fn meet(&self, path: &IncomingPath) -> Look {
+        let mut key = Vec::new();
+        let mut taken = None;
+        let mut dir = self.root.try_clone().ok();
+        let mut profile = self.profile_of(&self.root);
+        let fold = |s: &str, apart: bool| -> String {
+            if apart {
+                s.to_string()
+            } else {
+                s.chars()
+                    .flat_map(char::to_uppercase)
+                    .flat_map(char::to_lowercase)
+                    .collect()
             }
-            match dir.open_dir(&name) {
-                Ok(d) => dir = d,
-                Err(_) => return false,
+        };
+        let parts = path.components();
+        for (n, part) in parts.iter().enumerate() {
+            if let Some(d) = &dir {
+                profile = self.profile_of(d);
+            }
+            let name = convert_name(part, profile.name_rules()).name;
+            key.push(fold(&name, profile.tells_case_apart()));
+            let Some(d) = dir.take() else {
+                continue;
+            };
+            let last = n + 1 == parts.len();
+            match d.symlink_metadata(&name) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => taken = Some(false),
+                Err(_) => taken = Some(true),
+                Ok(_) if last => taken = Some(true),
+                Ok(m) if !m.is_dir() => taken = Some(true),
+                Ok(_) => match d.open_dir(&name) {
+                    Ok(next) => dir = Some(next),
+                    Err(_) => taken = Some(true),
+                },
+            }
+            if taken.is_some() {
+                // Below a missing folder nothing is there; below an unreadable one nothing is known.
+                continue;
             }
         }
-        let name = convert_name(last, self.profile_of(&dir).name_rules()).name;
-        dir.symlink_metadata(&name).is_ok()
+        Look {
+            key: key.join("/"),
+            taken: taken.unwrap_or(true),
+        }
     }
 
     /// Opens a stored file to read, by its stored path (as [`find`](Self::find) or
@@ -2559,6 +2615,61 @@ impl Destinations {
     }
 }
 
+/// The folder at the top of something that moves as one whole: made by the call that creates a
+/// file in it, or one this move made before (by its stored path).
+pub struct Fresh<'a> {
+    /// How many folders down the path the whole's top folder is (1: the first).
+    pub depth: usize,
+    /// Whether this move made the folder at this stored path before (it is its own).
+    pub ours: &'a dyn Fn(&str) -> bool,
+}
+
+/// What [`Destination::meet`] finds at a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Look {
+    /// The path as this place would store it, one case where the drive does not tell case apart.
+    pub key: String,
+    /// Whether anything is there already (or it could not be looked at).
+    pub taken: bool,
+}
+
+/// Opens the top folder of a whole (see [`Fresh`]) in `parent`, below the stored folders
+/// `above`: made now, exclusively, or one this move made before; never anyone else's.
+fn open_fresh_folder(
+    parent: &Dir,
+    name: &str,
+    above: &[String],
+    fresh: Option<&Fresh<'_>>,
+) -> Result<(Dir, bool), GateError> {
+    let (dir, made) = open_or_create_folder(parent, name)?;
+    if made {
+        return Ok((dir, true));
+    }
+    let mut stored = above.to_vec();
+    stored.push(name.to_string());
+    if fresh.is_some_and(|f| (f.ours)(&stored.join("/"))) {
+        Ok((dir, false))
+    } else {
+        Err(GateError::WholeTaken)
+    }
+}
+
+/// Whether two file dates are the same as a drive keeps them (within 2 seconds).
+fn near(a: std::time::SystemTime, b: std::time::SystemTime) -> bool {
+    let gap = a.duration_since(b).or_else(|_| b.duration_since(a));
+    gap.is_ok_and(|g| g <= std::time::Duration::from_secs(2))
+}
+
+/// Whether setting a file's modified time failed because the drive will not hold that time (a
+/// date FAT or exFAT cannot store), rather than because the file could not be written.
+pub(crate) fn is_refused_time(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData | io::ErrorKind::Unsupported
+    ) || e.raw_os_error() == Some(if cfg!(windows) { 87 } else { 22 })
+        || (cfg!(unix) && e.raw_os_error() == Some(75))
+}
+
 /// Opens the folder `name` in `parent`, creating it if there is none; says whether it was
 /// created here (a folder that was already there is the person's own).
 fn open_or_create_folder(parent: &Dir, name: &str) -> Result<(Dir, bool), GateError> {
@@ -2647,6 +2758,10 @@ pub struct Finished {
     /// must say plainly that the system no longer knows it came from the internet. `None` when
     /// every marker was kept (or there was none).
     pub mark_not_kept: Option<DownloadMark>,
+    /// The drive would not take the date it was last changed on the old laptop (FAT and exFAT
+    /// refuse dates before 1980 or far ahead): the copy is there, with the date it was copied,
+    /// and the report says so.
+    pub time_not_kept: bool,
     /// How its contents were checked before it got its name: read back from the drive, or from
     /// this laptop's memory (and why), for the report's "more details". `None` for a file checked
     /// before a restart and proven again by recovery.
@@ -2968,9 +3083,23 @@ impl<'d> IncomingFile<'d> {
                 mark_not_kept = Some(mark);
             }
         }
+        // A date the drive refuses never fails the file: it is kept, and the report says so.
+        let mut time_not_kept = false;
         if let Some(time) = self.modified {
-            file.set_modified(time)?;
-            file.sync_all()?;
+            match file.set_modified(time) {
+                Ok(()) => {
+                    file.sync_all()?;
+                    // Some drives take a date they cannot hold and keep another (one clamped to
+                    // what they can store): read back, so the report never says it was kept when
+                    // it was not. Within 2 seconds is the date (FAT keeps every other second).
+                    time_not_kept = !file
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|got| near(got, time));
+                }
+                Err(e) if is_refused_time(&e) => time_not_kept = true,
+                Err(e) => return Err(e.into()),
+            }
         }
         let dir = self.dir.try_clone()?;
         let temp = self.temp_name.take().ok_or(GateError::Conflict)?;
@@ -2985,6 +3114,7 @@ impl<'d> IncomingFile<'d> {
             kept_if_dropped: false,
             held: Some(file),
             mark_not_kept,
+            time_not_kept,
             checked_from: Some(checked_from),
             mark: self.mark,
             show: None,
@@ -3017,6 +3147,7 @@ pub struct Sealed<'d> {
     held: Option<std::fs::File>,
     /// The marker that could not be kept on this drive, if any.
     mark_not_kept: Option<DownloadMark>,
+    time_not_kept: bool,
     /// Where its read-back read from (`None`: checked before a restart).
     checked_from: Option<CheckedFrom>,
     /// The download marker the file carries, for a copy filled in under its real name.
@@ -3198,8 +3329,21 @@ impl<'d> Sealed<'d> {
                         fill::same_start_of(&mut target, held, progress.written).unwrap_or(false)
                     });
                 if ours {
+                    let written = progress.written;
+                    // Let go first: the removal opens it again, for deletion, excluding writers.
+                    let expect = identity(&target).map(|(id, _)| id);
                     drop(target);
-                    if self.dir.remove_file(&name).is_ok() {
+                    let held = self.held.as_mut();
+                    let removed = match (expect, held) {
+                        (Ok(expect), Some(held)) => {
+                            fill::remove_proven(&self.dir, &name, expect, |file| {
+                                fill::same_start_of(file, held, written)
+                            })
+                            .unwrap_or(false)
+                        }
+                        _ => false,
+                    };
+                    if removed {
                         let _ = sync_folder(&self.dir);
                         let _ = steps.cleared();
                     }
@@ -3411,6 +3555,7 @@ impl<'d> Sealed<'d> {
                 sent_path: std::mem::take(&mut self.sent_path),
                 changes,
                 mark_not_kept: self.mark_not_kept,
+                time_not_kept: self.time_not_kept,
                 checked_from: self.checked_from,
             },
             _destination: std::marker::PhantomData,

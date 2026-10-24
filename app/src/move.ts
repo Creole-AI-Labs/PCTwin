@@ -137,7 +137,7 @@ export type Outcome =
  * What the report adds beside a line's result (the shell's `ReportNote`): it changed on the old
  * laptop after the scan and was sent as it is now, or it was gone before it could be sent.
  */
-export const REPORT_NOTES = ["changed-since-scan", "no-longer-there"] as const;
+export const REPORT_NOTES = ["changed-since-scan", "no-longer-there", "time-not-kept"] as const;
 export type ReportNote = (typeof REPORT_NOTES)[number];
 
 /** One line of the detailed report (R02). Names and paths are the person's own text. */

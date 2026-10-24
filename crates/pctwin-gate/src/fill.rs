@@ -491,6 +491,44 @@ pub(crate) fn put_mark(
 mod tests {
     use super::*;
 
+    /// A file is removed only while its name still holds the very file proven: another file put
+    /// at the name since (a swap between a check and a removal) is never removed, and stays
+    /// exactly where it is; one whose proof fails at the moment of removal stays too.
+    #[test]
+    fn only_the_very_file_proven_is_removed_never_one_swapped_in_at_its_name() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        std::fs::write(root.path().join("mine.bin"), b"mine").unwrap();
+        let mine = identity(&std::fs::File::open(root.path().join("mine.bin")).unwrap())
+            .unwrap()
+            .0;
+        // Swapped: another file now has the name.
+        std::fs::rename(root.path().join("mine.bin"), root.path().join("aside.bin")).unwrap();
+        std::fs::write(root.path().join("mine.bin"), b"theirs").unwrap();
+        assert!(!remove_proven(&dir, "mine.bin", mine, |_| Ok(true)).unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join("mine.bin")).unwrap(),
+            b"theirs"
+        );
+        // The very file, but not proven at the moment of removal: kept, under its name.
+        let aside = identity(&std::fs::File::open(root.path().join("aside.bin")).unwrap())
+            .unwrap()
+            .0;
+        assert!(!remove_proven(&dir, "aside.bin", aside, |_| Ok(false)).unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join("aside.bin")).unwrap(),
+            b"mine"
+        );
+        // Proven: removed, and nothing else in the folder touched.
+        assert!(remove_proven(&dir, "aside.bin", aside, |_| Ok(true)).unwrap());
+        let left: Vec<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left, ["mine.bin"]);
+    }
+
     #[test]
     fn fresh_tags_are_even_seconds_in_months_without_clock_changes() {
         assert_eq!(days_from_civil(1970, 1, 1), 0);
@@ -700,8 +738,15 @@ impl crate::Destination {
         if !still_ours(&dir, name, &held, &progress)? {
             return Ok(FillRemoval::NotProven);
         }
+        let prove = |file: &mut std::fs::File| -> io::Result<bool> {
+            Ok(proven_fill(file, fill)? && same_start_of(file, &mut source, len)?)
+        };
+        // Let go first: the removal opens it again, for deletion, excluding every writer.
+        let expect = identity(&held)?.0;
         drop(held);
-        dir.remove_file(name)?;
+        if !remove_proven(&dir, name, expect, prove)? {
+            return Ok(FillRemoval::NotProven);
+        }
         crate::sync_folder(&dir)?;
         Ok(FillRemoval::Removed)
     }
@@ -751,6 +796,93 @@ fn read_full(r: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
         }
     }
     Ok(got)
+}
+
+/// Removes the file at `name` in `dir` only if it is still the very file `expect` and `prove` holds
+/// for it as it is at the moment of removal, never by its name alone (another file could take the
+/// name between a check and a removal by name). Windows: opened for deletion (no other program may
+/// write it or take its name meanwhile), proven on that handle, and deleted through it. Linux and
+/// macOS: first moved to a private name no other program uses (refusing to replace anything),
+/// proven there, and only then unlinked; a file that is not proven there is moved back. Whether
+/// it was removed.
+pub(crate) fn remove_proven(
+    dir: &Dir,
+    name: &str,
+    expect: FileId,
+    prove: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+) -> io::Result<bool> {
+    #[cfg(windows)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        use fs_at::os::windows::FileExt;
+        const DELETE: u32 = 0x0001_0000;
+        const FILE_READ_DATA: u32 = 0x0001;
+        const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const SYNCHRONIZE: u32 = 0x0010_0000;
+        const FILE_SHARE_READ: u32 = 0x0001;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        let mut options = OpenOptions::new();
+        options
+            .access_mode(
+                DELETE
+                    | FILE_READ_DATA
+                    | FILE_READ_ATTRIBUTES
+                    | FILE_WRITE_ATTRIBUTES
+                    | SYNCHRONIZE,
+            )
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        let mut file = match dir.open_with(name, &options) {
+            Ok(f) => f.into_std(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        if !file.metadata()?.is_file() || identity(&file)? != (expect, 1) || !prove(&mut file)? {
+            return Ok(false);
+        }
+        file.delete_by_handle().map_err(|(_, e)| e)?;
+        Ok(true)
+    }
+    #[cfg(unix)]
+    {
+        use rustix::fs::{RenameFlags, renameat_with};
+        let private = crate::unix_undo::private_name()?;
+        match renameat_with(dir, name, dir, &private, RenameFlags::NOREPLACE) {
+            Ok(()) => {}
+            Err(rustix::io::Errno::NOENT) => return Ok(false),
+            Err(e) => return Err(e.into()),
+        }
+        let back = |dir: &Dir| {
+            // Put back where it was, never over anything that took the name meanwhile.
+            let _ = renameat_with(dir, &private, dir, name, RenameFlags::NOREPLACE);
+        };
+        let mut file = match dir.open(&private) {
+            Ok(f) => f.into_std(),
+            Err(e) => {
+                back(dir);
+                return Err(e);
+            }
+        };
+        let proven = file.metadata()?.is_file()
+            && identity(&file)?.0 == expect
+            && prove(&mut file).unwrap_or(false);
+        if !proven {
+            back(dir);
+            return Ok(false);
+        }
+        dir.remove_file(&private)?;
+        Ok(true)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let mut file = dir.open(name)?.into_std();
+        if identity(&file)?.0 != expect || !prove(&mut file)? {
+            return Ok(false);
+        }
+        dir.remove_file(name)?;
+        Ok(true)
+    }
 }
 
 /// One of PCTwin's own plain files in `dir`, made only for its attributes and removed at once
@@ -888,7 +1020,12 @@ impl crate::Destination {
         }
         step("shown")?;
         if let Some(ns) = show.modified_ns.and_then(|ns| u64::try_from(ns).ok()) {
-            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(ns))?;
+            // A date this drive will not hold never fails a checked, committed file.
+            match file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(ns)) {
+                Ok(()) => {}
+                Err(e) if crate::is_refused_time(&e) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
         step("modified")?;
         if show.fill.tag.born.is_some() {

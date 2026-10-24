@@ -1062,6 +1062,7 @@ report-more-details = 更多详情
 # Added 23 October 2026: what the report says beside a line's result (changed since the scan).
 report-note-changed-since-scan = 扫描后有改动：已按现在的样子复制。
 report-note-no-longer-there = 已不在原处：发送之前，它已在旧笔记本电脑上被移动、改名或删除。
+report-note-time-not-kept = 日期未保留：这个磁盘无法保存它的最后修改日期，所以显示的是复制的日期。
 
 evidence-read-back = 已从硬盘读回进行检查。
 evidence-memory = 通过这台笔记本电脑的内存检查，而不是硬盘。

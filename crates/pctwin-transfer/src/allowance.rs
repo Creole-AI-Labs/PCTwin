@@ -130,9 +130,96 @@ pub struct Allowance {
     started_total: u64,
     /// How long a partly copied file of this move waits for the rest, as the person chose.
     partial_keep: PartialKeep,
+    /// Each folder that moves as one whole, by destination: where it was planned (as the old
+    /// laptop announces its files) and where it is stored on this laptop (`None`: no name could
+    /// be given, so its files are not received). Only this laptop knows; nothing of it crosses.
+    wholes: HashMap<String, Vec<WholePlace>>,
+}
+
+/// Where one folder that moves as one whole lands on this laptop (see
+/// [`Allowance::with_wholes`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WholePlace {
+    pub destination: String,
+    /// Its path as planned, the one the old laptop announces its files under.
+    pub planned: String,
+    /// Its path as stored here: the planned one, or a name of its own beside what was already
+    /// there; `None` when no name could be given.
+    pub stored: Option<String>,
+}
+
+/// Where the path `path` is below the folder `top` (`Some("")` at the folder itself).
+fn below<'a>(path: &'a str, top: &str) -> Option<&'a str> {
+    if path == top {
+        Some("")
+    } else {
+        path.strip_prefix(top).and_then(|r| r.strip_prefix('/'))
+    }
 }
 
 impl Allowance {
+    /// With where each folder that moves as one whole lands here (decided on this laptop before
+    /// anything is received: see `pctwin_move::landing::place_wholes`).
+    pub fn with_wholes(mut self, wholes: Vec<WholePlace>) -> Self {
+        for w in wholes {
+            self.wholes
+                .entry(w.destination.clone())
+                .or_default()
+                .push(w);
+        }
+        self
+    }
+
+    fn whole_at(
+        &self,
+        destination: &str,
+        path: &str,
+        stored: bool,
+    ) -> Option<(&WholePlace, String)> {
+        self.wholes.get(destination)?.iter().find_map(|w| {
+            let top = if stored {
+                w.stored.as_deref()?
+            } else {
+                &w.planned
+            };
+            below(path, top).map(|rest| (w, rest.to_string()))
+        })
+    }
+
+    /// Where a file announced at `path` in `destination` is stored here: inside a whole given a
+    /// name of its own, the same path below that name. `None` when it is inside a whole that
+    /// could be given no name here (it is not received).
+    pub fn stored_path(&self, destination: &str, path: &str) -> Option<String> {
+        match self.whole_at(destination, path, false) {
+            None => Some(path.to_string()),
+            Some((w, rest)) => {
+                let top = w.stored.as_deref()?;
+                Some(if rest.is_empty() {
+                    top.to_string()
+                } else {
+                    format!("{top}/{rest}")
+                })
+            }
+        }
+    }
+
+    /// The path a file stored at `stored` in `destination` was announced at (the reverse of
+    /// [`stored_path`](Self::stored_path)), to check it against the plan after a restart.
+    pub fn planned_path(&self, destination: &str, stored: &str) -> String {
+        match self.whole_at(destination, stored, true) {
+            Some((w, rest)) if rest.is_empty() => w.planned.clone(),
+            Some((w, rest)) => format!("{}/{rest}", w.planned),
+            None => stored.to_string(),
+        }
+    }
+
+    /// For a file stored at `stored` inside a whole: how many folders down its top folder is,
+    /// which must be made by this move (see `pctwin_gate::Fresh`).
+    pub fn whole_depth(&self, destination: &str, stored: &str) -> Option<usize> {
+        let (w, _) = self.whole_at(destination, stored, true)?;
+        w.stored.as_deref().map(|t| t.split('/').count())
+    }
+
     /// The allowance for `record`, only if `approval` is for exactly this revision. `landing`
     /// says where each included file lands; it must be the very function the old laptop uses to
     /// say where it sends them. A file it gives no place (`None`) is not received at all. A move
@@ -179,6 +266,7 @@ impl Allowance {
             started: HashMap::new(),
             started_total: 0,
             partial_keep: PartialKeep::default(),
+            wholes: HashMap::new(),
         })
     }
 

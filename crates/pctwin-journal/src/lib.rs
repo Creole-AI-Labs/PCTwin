@@ -2354,9 +2354,34 @@ pub trait Ledger {
     ) -> Result<(), JournalError>;
     fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError>;
     fn unfinished(&self) -> Result<Vec<Entry>, JournalError>;
+    /// The folders writes of `scope` made in `destination` (stored paths). A ledger that keeps no
+    /// record of folders knows none.
+    fn folders_made_in(
+        &self,
+        scope: Scope,
+        destination: &str,
+    ) -> Result<Vec<String>, JournalError> {
+        let _ = (scope, destination);
+        Ok(Vec::new())
+    }
 }
 
 impl Ledger for Journal {
+    fn folders_made_in(
+        &self,
+        scope: Scope,
+        destination: &str,
+    ) -> Result<Vec<String>, JournalError> {
+        let mut out = Vec::new();
+        for m in self.made_folders()? {
+            if m.destination == destination
+                && self.entry(m.entry)?.is_some_and(|e| e.write.scope == scope)
+            {
+                out.push(m.folder);
+            }
+        }
+        Ok(out)
+    }
     fn temp_tag(&self, id: u64) -> String {
         Journal::temp_tag(self, id)
     }

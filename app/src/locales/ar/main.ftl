@@ -1431,6 +1431,7 @@ report-more-details = مزيد من التفاصيل
 # Added 23 October 2026: what the report says beside a line's result (changed since the scan).
 report-note-changed-since-scan = تغيّر منذ الفحص: نُسخ كما هو الآن.
 report-note-no-longer-there = لم يعد موجودًا: نُقل أو أُعيدت تسميته أو حُذف على الحاسوب المحمول القديم قبل أن يُرسل.
+report-note-time-not-kept = لم يُحفظ التاريخ: لا يستطيع هذا القرص حفظ تاريخ آخر تغيير له، لذا يظهر تاريخ نسخه.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = تم التحقق بقراءته مرة أخرى من محرك الأقراص.

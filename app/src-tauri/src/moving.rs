@@ -1082,6 +1082,8 @@ pub enum ReportNote {
     ChangedSinceScan,
     /// It was gone from the old laptop by the time it was to be sent.
     NoLongerThere,
+    /// The drive would not take the date it was last changed, so it shows the date it was copied.
+    TimeNotKept,
 }
 
 impl ReportNote {
@@ -1167,7 +1169,7 @@ fn received_outcome(received: &Received, mover: &str) -> (MoveOutcome, Vec<Repor
                     None,
                     Some(Evidence::of(f.checked_from)),
                     Some(f.final_path.clone()),
-                    changed,
+                    changed.or(f.time_not_kept.then_some(ReportNote::TimeNotKept)),
                 )
             }
             Some(ReceiveOutcome::AlreadyThere(p)) => {
@@ -1990,7 +1992,6 @@ fn new_places(fallback: BTreeMap<FolderRole, String>) -> Result<NewSide, MovePro
         held: BTreeMap::new(),
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     let shown = found
         .iter()
@@ -2458,6 +2459,7 @@ mod tests {
             sent_path: path.into(),
             changes: Vec::new(),
             mark_not_kept: None,
+            time_not_kept: false,
             checked_from: Some(from),
         })
     }
@@ -3102,7 +3104,6 @@ mod tests {
             held: BTreeMap::new(),
             left_out: Default::default(),
             chosen: Default::default(),
-            wholes: Default::default(),
         }
     }
 

@@ -478,3 +478,196 @@ fn whether_anything_is_already_at_a_path_is_told_without_creating_anything() {
     // A file where a folder on the way would be: something is there.
     assert!(dest.has(&path("Pictures/Album.photoslibrary/database/x/deeper")));
 }
+
+/// Two wholes meet as this place would store them: the same name in another case is one folder
+/// here where the drive does not tell case apart, and two where it does.
+#[test]
+fn a_whole_is_met_by_its_stored_name_in_this_drives_case() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let upper = dest.meet(&path("Apps/X.app"));
+    let lower = dest.meet(&path("Apps/x.app"));
+    assert!(!upper.taken && !lower.taken);
+    assert_eq!(
+        upper.key == lower.key,
+        !dest.profile().tells_case_apart(),
+        "{upper:?} {lower:?}"
+    );
+    write(&dest, "Apps/X.app/Contents/Info.plist", b"1").unwrap();
+    assert!(dest.meet(&path("Apps/X.app")).taken);
+    assert_eq!(
+        dest.meet(&path("Apps/x.app")).taken,
+        !dest.profile().tells_case_apart()
+    );
+}
+
+/// A place that cannot be looked at is never taken to be free.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_cannot_be_read_counts_as_taken() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    write(&dest, "Locked/inside.txt", b"1").unwrap();
+    let locked = root.path().join("Locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root reads anything; the proof runs as an ordinary account.
+    let readable = std::fs::read_dir(&locked).is_ok();
+    let taken = dest.has(&path("Locked/Photos.photoslibrary"));
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if !readable {
+        assert!(taken, "an unreadable folder was taken for free");
+    }
+}
+
+/// The top folder of a whole is made by this move or not written into: one already there that
+/// is not this move's own is refused, with nothing made inside it.
+#[test]
+fn a_whole_is_never_written_into_a_folder_someone_else_made() {
+    use pctwin_gate::Fresh;
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let theirs = |_: &str| false;
+    // Planted after the plan was made.
+    std::fs::create_dir_all(root.path().join("Pictures/Photos.photoslibrary")).unwrap();
+    let got = dest.create_file_tagged_fresh(
+        &path("Pictures/Photos.photoslibrary/originals/a.jpg"),
+        1,
+        "t1",
+        Some(Fresh {
+            depth: 2,
+            ours: &theirs,
+        }),
+    );
+    assert!(matches!(got, Err(GateError::WholeTaken)), "{:?}", got.err());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("Pictures/Photos.photoslibrary"))
+            .unwrap()
+            .count(),
+        0
+    );
+    // A fresh one is made; then the next file of the same whole finds it as this move's own.
+    let made = std::sync::Mutex::new(Vec::<String>::new());
+    let ours = |p: &str| made.lock().unwrap().iter().any(|m| m == p);
+    let first = dest
+        .create_file_tagged_fresh(
+            &path("Pictures/Album.photoslibrary/originals/a.jpg"),
+            1,
+            "t2",
+            Some(Fresh {
+                depth: 2,
+                ours: &ours,
+            }),
+        )
+        .unwrap();
+    made.lock()
+        .unwrap()
+        .extend(first.created_folders().iter().cloned());
+    assert!(
+        made.lock()
+            .unwrap()
+            .contains(&"Pictures/Album.photoslibrary".to_string())
+    );
+    drop(first);
+    dest.create_file_tagged_fresh(
+        &path("Pictures/Album.photoslibrary/database/p.db"),
+        1,
+        "t3",
+        Some(Fresh {
+            depth: 2,
+            ours: &ours,
+        }),
+    )
+    .unwrap();
+}
+
+/// Exit-gate review (24 October 2026): a date the drive will not hold (here centuries before any
+/// system's file dates begin) never fails the file: it lands, and says when its date was not
+/// kept.
+#[test]
+fn a_date_the_drive_refuses_never_fails_the_file() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    // Far ahead of what ext4 (2446) or FAT (2107) store; Windows itself holds dates to 30828.
+    let ancient = std::time::UNIX_EPOCH + std::time::Duration::from_secs(28_000 * 365 * 24 * 3600);
+    let mut file = dest.create_file(&path("Docs/old.txt"), 3).unwrap();
+    file.write_all(b"abc").unwrap();
+    file.keep_modified_time(ancient);
+    let done = common::finish(file).expect("the file lands whatever its date");
+    assert_eq!(
+        std::fs::read(root.path().join("Docs/old.txt")).unwrap(),
+        b"abc"
+    );
+    let kept = std::fs::metadata(root.path().join("Docs/old.txt"))
+        .unwrap()
+        .modified()
+        .is_ok_and(|t| t == ancient);
+    // Kept exactly, or said not kept: never a different date passed off as the original.
+    assert!(
+        kept || done.time_not_kept,
+        "a date neither kept nor said: {done:?}"
+    );
+}
+
+/// A junction made by `mklink /J` at `link`, to `to` (both real paths).
+#[cfg(windows)]
+fn junction(link: &std::path::Path, to: &std::path::Path) {
+    let native = |p: &std::path::Path| p.components().collect::<std::path::PathBuf>();
+    let ok = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(native(link))
+        .arg(native(to))
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(ok, "mklink /J failed");
+}
+
+/// Exit-gate review (24 October 2026): a junction (a mount-point reparse point) inside the
+/// approved folder is never walked through, whether it stands for a folder on the way, the top
+/// folder of a whole, or the very name a file is given: nothing is written where it leads, and
+/// what is there is untouched.
+#[cfg(windows)]
+#[test]
+fn a_junction_is_never_walked_through_on_the_way_at_a_whole_or_at_the_name() {
+    use pctwin_gate::Fresh;
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    std::fs::write(outside.path().join("keep.txt"), b"the person's").unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    std::fs::create_dir_all(root.path().join("Docs")).unwrap();
+    junction(&root.path().join("Docs").join("Link"), outside.path());
+    junction(
+        &root.path().join("Docs").join("Album.photoslibrary"),
+        outside.path(),
+    );
+    junction(&root.path().join("Docs").join("a.txt"), outside.path());
+    let dest = Destination::open(root.path()).unwrap();
+    // On the way.
+    assert!(write(&dest, "Docs/Link/x.txt", b"x").is_err());
+    // At a whole's top: met as taken, and never written into.
+    assert!(dest.meet(&path("Docs/Album.photoslibrary")).taken);
+    let theirs = |_: &str| false;
+    let got = dest.create_file_tagged_fresh(
+        &path("Docs/Album.photoslibrary/originals/a.jpg"),
+        1,
+        "j1",
+        Some(Fresh {
+            depth: 2,
+            ours: &theirs,
+        }),
+    );
+    assert!(got.is_err());
+    // At the name: the file takes another name beside it.
+    let landed = write(&dest, "Docs/a.txt", b"mine").unwrap();
+    assert_ne!(landed, "Docs/a.txt");
+    // Nothing reached where the junctions lead.
+    let there: Vec<_> = std::fs::read_dir(outside.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(there, ["keep.txt"]);
+    assert_eq!(
+        std::fs::read(outside.path().join("keep.txt")).unwrap(),
+        b"the person's"
+    );
+}

@@ -579,7 +579,6 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         held,
         left_out: Default::default(),
         chosen: Default::default(),
-        wholes: Default::default(),
     };
     let plan = pctwin_move::send_plan_where(
         &record,

@@ -2380,6 +2380,8 @@ pub struct ReceiverSession<'d> {
     /// place: kept as they are, since nothing more is written there until the person carries on,
     /// then cleared (or when the move ends).
     parked: Vec<(String, Assembly<'d>)>,
+    /// The folders this move made, by destination and stored path (see `made_here`).
+    made: std::cell::RefCell<Option<HashMap<String, HashSet<String>>>>,
     /// Which move this is in the journal: a new random one unless set
     /// ([`with_scope`](Self::with_scope)). Only entries of this scope are picked up again.
     scope: Scope,
@@ -2452,6 +2454,7 @@ impl<'d> ReceiverSession<'d> {
             copy_sources: 0,
             streams: BTreeMap::new(),
             parked: Vec::new(),
+            made: std::cell::RefCell::new(None),
             scope: new_scope(),
             restored: BTreeMap::new(),
             ended: BTreeMap::new(),
@@ -2639,9 +2642,10 @@ impl<'d> ReceiverSession<'d> {
                 continue;
             }
             // Only what the approved plan says, where it says: the journal's word is checked too.
+            let planned = self.allowance.planned_path(&w.destination, &w.path);
             if let Err(refusal) = self
                 .allowance
-                .admit(w.item, &w.destination, &w.path, w.size)
+                .admit(w.item, &w.destination, &planned, w.size)
             {
                 self.journal
                     .failed(e.id, &refusal.to_string())
@@ -2968,6 +2972,16 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 }
+                // Inside a folder that moves as one whole: where this laptop stores that whole
+                // (the old laptop's path, or the same below a name of its own here).
+                let Some(here_path) = self.allowance.stored_path(&destination, &path) else {
+                    self.refuse(
+                        item,
+                        Failure::new(Cause::NameNotAllowed, NO_PLACE_FOR_WHOLE),
+                    );
+                    replies.push(Message::FileDone { stream, ok: false });
+                    return Ok((replies, false));
+                };
                 // A place whose drive paused the move takes no new file either: set down before
                 // anything here is created or changed (see `set_down`).
                 if self.control.is_braked(&destination) {
@@ -3084,7 +3098,7 @@ impl<'d> ReceiverSession<'d> {
                 // (no keyed fingerprints) no laptop is: an older one would get this laptop's own
                 // fingerprint, so every file is simply sent.
                 let same = if self.allowance.offers_what_is_here() && self.version >= KEYED_SINCE {
-                    self.same_file(&destination, &path, size)
+                    self.same_file(&destination, &here_path, size)
                 } else {
                     None
                 };
@@ -3103,7 +3117,7 @@ impl<'d> ReceiverSession<'d> {
                     }
                     _ => (None, None),
                 };
-                let (assembly, entry) = match self.start(item, &destination, &path, header) {
+                let (assembly, entry) = match self.start(item, &destination, &here_path, header) {
                     Ok(started) => started,
                     Err(Start::Record(e)) => return Err(record(e)),
                     Err(Start::Refused(why)) => {
@@ -3113,7 +3127,7 @@ impl<'d> ReceiverSession<'d> {
                         return Ok((replies, false));
                     }
                 };
-                let unsaid = self.unsaid_same(&destination, &path, size);
+                let unsaid = self.unsaid_same(&destination, &here_path, size);
                 // Every start is answered: nothing like it is here, or (once its fingerprint is
                 // worked out off the main loop) the fingerprint of the same-size file that is.
                 match same.map(|(_, f)| f).or(copy_file) {
@@ -3741,6 +3755,7 @@ impl<'d> ReceiverSession<'d> {
                         sent_path: kept,
                         changes: Vec::new(),
                         mark_not_kept: None,
+                        time_not_kept: false,
                         checked_from: None,
                     },
                     why,
@@ -4005,15 +4020,27 @@ impl<'d> ReceiverSession<'d> {
             partial_keep: self.allowance.partial_keep(),
         };
         let entry = self.journal.plan(&write).map_err(Start::Record)?;
-        let assembly =
-            match Assembly::start_tagged(dest, &parsed, header, &self.journal.temp_tag(entry)) {
-                Ok(a) => a,
-                Err(e) => {
-                    let why = Failure::of(&e, Side::New);
-                    self.journal.failed(entry, &why).map_err(Start::Record)?;
-                    return Err(Start::Refused(why));
-                }
-            };
+        // Inside a folder that moves as one whole, its top folder must be made by this move (now,
+        // or by an earlier file of it): never one someone else made or put there since the plan.
+        let ours = |stored: &str| self.made_here(destination, stored);
+        let fresh = self
+            .allowance
+            .whole_depth(destination, path)
+            .map(|depth| pctwin_gate::Fresh { depth, ours: &ours });
+        let assembly = match Assembly::start_tagged_fresh(
+            dest,
+            &parsed,
+            header,
+            &self.journal.temp_tag(entry),
+            fresh,
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                let why = Failure::of(&e, Side::New);
+                self.journal.failed(entry, &why).map_err(Start::Record)?;
+                return Err(Start::Refused(why));
+            }
+        };
         let made: Vec<(String, Option<FileId>)> = assembly
             .created_folders()
             .iter()
@@ -4028,7 +4055,29 @@ impl<'d> ReceiverSession<'d> {
         self.journal
             .staged(entry, &assembly.temp_path(), &made)
             .map_err(Start::Record)?;
+        if let Ok(mut known) = self.made.try_borrow_mut()
+            && let Some(here) = known.as_mut().and_then(|k| k.get_mut(destination))
+        {
+            here.extend(made.into_iter().map(|(f, _)| f));
+        }
         Ok((assembly, entry))
+    }
+
+    /// Whether this move made the folder `stored` in `destination`: by its own entries in the
+    /// journal (of this move's scope), read once per destination, and kept up as files start.
+    fn made_here(&self, destination: &str, stored: &str) -> bool {
+        let Ok(mut known) = self.made.try_borrow_mut() else {
+            return false;
+        };
+        let known = known.get_or_insert_with(HashMap::new);
+        let here = known.entry(destination.to_string()).or_insert_with(|| {
+            self.journal
+                .folders_made_in(self.scope, destination)
+                .unwrap_or_default()
+                .into_iter()
+                .collect()
+        });
+        here.contains(stored)
     }
 }
 
@@ -4101,6 +4150,7 @@ fn new_scope() -> Scope {
     })
 }
 
+const NO_PLACE_FOR_WHOLE: &str = "its folder could be given no name of its own on this laptop beside one already there, so it was not copied. Your original is untouched";
 const PAUSED_THERE: &str = "the drive it was going to paused the move, so it was not copied. Once that drive is working, send it again. Your original is untouched";
 const NOT_STORED_HERE: &str =
     "This laptop could not store this file correctly. Your original is untouched.";

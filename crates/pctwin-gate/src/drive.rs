@@ -440,7 +440,7 @@ impl DriveProfile {
     }
 
     /// Whether names that differ only in capital letters are different names here.
-    pub(crate) fn tells_case_apart(&self) -> bool {
+    pub fn tells_case_apart(&self) -> bool {
         self.case_apart
     }
 
