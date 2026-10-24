@@ -36,7 +36,7 @@ use crate::measure::{is_cloud_only, is_icloud_stub_name};
 use crate::rules::{Kind, Rules};
 use crate::scan::{
     Counts, Package, Stamp, category, count, count_library, is_clutter, item_name, left_out,
-    package_kind, scan_managed_folder,
+    package_kind,
 };
 use crate::volumes::{Volume, VolumeKind};
 use crate::whose::{Facts, HomeOf, People, Placement, Rule, Whose, place as place_by_ladder};
@@ -546,6 +546,10 @@ enum Zone {
     Count { place: usize },
     /// Counted into one record item.
     Collapse { item: usize, place: usize },
+    /// Inside a folder that moves as one whole (a package, a project's history): every file
+    /// listed as it is, below the place's package item, with no rule or package looked for
+    /// inside and nothing counted by kind (the whole was counted once, as itself).
+    Unit { base: usize, place: usize },
     /// Another person's home, or one from an old account: counted in one go by a walker, so no
     /// name below it is ever kept, queued or saved. A stopped count goes on from where it got to,
     /// kept by position only (see [`WholeCursor`]).
@@ -555,6 +559,19 @@ enum Zone {
     /// The homes inside an older copy of Windows: each is placed by its owner, like a folder
     /// among today's homes that no account explains.
     OldProfiles { place: usize },
+}
+
+/// How a folder that starts a place is gone into (see `enter_folder`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum How {
+    /// Listed item by item.
+    Itemise,
+    /// Counted into one item that moves.
+    Collapse,
+    /// Moved as one whole, as its files.
+    Unit,
+    /// Counted into one item left out: it can be made again.
+    LeftOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1698,12 +1715,13 @@ impl Sweeper<'_> {
             // Its items' paths start from the special folder itself (as every place's do from
             // its own folder): what the old laptop sends them from.
             self.roots.borrow_mut().insert(place, found.path.clone());
-            let scan = scan_managed_folder(
+            let scan = crate::scan::scan_managed_folder_with(
                 &self.facts.laptop,
                 &owner,
                 &rplace,
                 &found.path,
                 found.managed_by,
+                &self.facts.rules,
             );
             for item in scan.items {
                 if item.kind == ItemKind::File
@@ -1713,7 +1731,7 @@ impl Sweeper<'_> {
                         self.count_bytes(v, place, item.size_bytes, None);
                     }
                 } else if item.kind != ItemKind::File && item.size_bytes > 0 {
-                    // A package: one item.
+                    // One counted item (what can be made again).
                     if let Some(v) = volume {
                         self.count_bytes(v, place, item.size_bytes, None);
                     }
@@ -1868,7 +1886,7 @@ impl Sweeper<'_> {
                         break;
                     };
                     let path = for_listing(&self.abs(job.volume, &job.rel));
-                    let keys = matches!(job.zone, Zone::Itemise { .. });
+                    let keys = matches!(job.zone, Zone::Itemise { .. } | Zone::Unit { .. });
                     let whole =
                         matches!(job.zone, Zone::Whole { .. }).then(|| job.whole_at.clone());
                     ticket += 1;
@@ -2001,6 +2019,7 @@ impl Sweeper<'_> {
             Zone::Explore { inside } => self.explore(&job, entries, inside),
             Zone::Profiles => self.profiles(&job, entries),
             Zone::Itemise { base, place } => self.itemise(&job, entries, base, place),
+            Zone::Unit { base, place } => self.unit(&job, entries, base, place),
             Zone::AppData { home, place } => self.app_data(&job, entries, home, place),
             Zone::Count { place } => self.count(&job, entries, place),
             Zone::Collapse { item, place } => self.collapse(&job, entries, item, place),
@@ -2065,6 +2084,7 @@ impl Sweeper<'_> {
             .into_owned();
         let place = match &job.zone {
             Zone::Itemise { place, .. }
+            | Zone::Unit { place, .. }
             | Zone::AppData { place, .. }
             | Zone::Count { place }
             | Zone::Collapse { place, .. } => Some(*place),
@@ -2312,40 +2332,10 @@ impl Sweeper<'_> {
         fact
     }
 
-    /// Goes into a folder that starts place `p`: listed into the record, counted as one item
-    /// (rebuildable and keep-whole places), or only counted.
+    /// Goes into a folder that starts place `p`: listed into the record, moved as one whole
+    /// (keep-whole places), counted as one item left out (rebuildable places), or only counted.
     fn enter_place(&mut self, job: &Job, name: &ItemName, p: usize, base: usize) {
-        let collapse = matches!(
-            self.state.places[p].placement.kind,
-            Some(Kind::Rebuildable | Kind::KeepWhole)
-        );
-        if self.state.meta[p].private {
-            // Another person's folder outside the homes (or one whose access this person may not
-            // even read): never walked, never named; a blind spot on its drive.
-            let reason = self.private_reason(p);
-            self.blind(job.volume, None, reason);
-            return;
-        }
-        if self.state.meta[p].owner.is_none() {
-            let child = self.child(job, name, Zone::Count { place: p }, None);
-            self.enqueue(child);
-            return;
-        }
-        let item = self.make_item(job, name, p, base, ItemKind::Folder, 0, Inclusion::Included);
-        let Some(item) = item else {
-            let child = self.child(job, name, Zone::Count { place: p }, None);
-            self.enqueue(child);
-            return;
-        };
-        let i = self.push_item(item, p);
-        self.state.meta[p].root_item = Some(i);
-        let zone = if collapse {
-            Zone::Collapse { item: i, place: p }
-        } else {
-            Zone::Itemise { base, place: p }
-        };
-        let child = self.child(job, name, zone, Some(i));
-        self.enqueue(child);
+        self.enter_folder(job, name, p, base, How::Itemise);
     }
 
     /// Starts a place for something outside everyone's home.
@@ -2919,7 +2909,8 @@ impl Sweeper<'_> {
             }
         }
         if let Some(row) = self.facts.rules.anywhere(&text) {
-            // node_modules, .git and the like: one item, keeping its surroundings' owner.
+            // node_modules, .git and the like, keeping its surroundings' owner: a project's
+            // history moves as one whole; what can be made again is one item, left out.
             let placement = place_with(row, &around, &self.state.census);
             let mut meta = self.state.meta[here].clone();
             meta.space = space_of(Some(row.kind));
@@ -2933,41 +2924,36 @@ impl Sweeper<'_> {
                 Fate::Moves,
                 meta,
             );
-            self.enter_place_at(job, name, p, base, true);
+            self.enter_folder(job, name, p, base, How::Collapse);
             return;
         }
         if let Some(package) = package_kind(&text) {
-            if let Some(item) = self.make_item(
-                job,
-                name,
-                here,
-                base,
-                package.item_kind(),
-                0,
-                Inclusion::Included,
-            ) {
+            // A package moves as one whole, as its files, in a place of its own (so one too big
+            // to list is left out alone, not the folder around it).
+            if self.state.meta[here].owner.is_some() {
                 match package {
                     Package::PhotosLibrary => count_library(path, &mut self.state.counts),
                     Package::Document => self.state.counts.documents += 1,
                     Package::App | Package::Other => {}
                 }
-                let i = self.push_item(item, here);
-                let child = self.child(
-                    job,
-                    name,
-                    Zone::Collapse {
-                        item: i,
-                        place: here,
-                    },
-                    None,
-                );
-                self.enqueue(child);
             }
+            let mut meta = self.state.meta[here].clone();
+            meta.items = 0;
+            meta.collapsed = None;
+            meta.root_item = None;
+            let p = self.new_place(
+                job.volume,
+                Some(path.to_string_lossy().into_owned()),
+                around,
+                Fate::Moves,
+                meta,
+            );
+            self.enter_folder(job, name, p, base, How::Unit);
             return;
         }
         if fresh {
             // The folder starts its own (narrower) place.
-            self.enter_place_at(job, name, here, base, false);
+            self.enter_folder(job, name, here, base, How::Itemise);
             return;
         }
         // In the mover's home, each top folder is its own place ("code", "Projects").
@@ -2983,7 +2969,7 @@ impl Sweeper<'_> {
                 Fate::Moves,
                 meta,
             );
-            self.enter_place_at(job, name, p, base, false);
+            self.enter_folder(job, name, p, base, How::Itemise);
             return;
         }
         let item = self.make_item(
@@ -3038,16 +3024,13 @@ impl Sweeper<'_> {
         })
     }
 
-    /// Goes into a folder that starts place `p`, below `base`.
-    fn enter_place_at(
-        &mut self,
-        job: &Job,
-        name: &ItemName,
-        p: usize,
-        base: usize,
-        collapse: bool,
-    ) {
+    /// Goes into a folder that starts place `p`, below `base`: what the rules file says of the
+    /// place decides first (a project's history moves as one whole; what can be made again is
+    /// counted as one item and left out), else `how`.
+    fn enter_folder(&mut self, job: &Job, name: &ItemName, p: usize, base: usize, how: How) {
         if self.state.meta[p].private {
+            // Another person's folder (or one whose access this person may not even read):
+            // never walked, never named; a blind spot on its drive.
             let reason = self.private_reason(p);
             self.blind(job.volume, None, reason);
             return;
@@ -3057,25 +3040,110 @@ impl Sweeper<'_> {
             self.enqueue(child);
             return;
         }
-        let Some(item) =
-            self.make_item(job, name, p, base, ItemKind::Folder, 0, Inclusion::Included)
-        else {
+        let how = match self.state.places[p].placement.kind {
+            Some(Kind::KeepWhole) => How::Unit,
+            Some(Kind::Rebuildable) => How::LeftOut,
+            _ => how,
+        };
+        let (kind, inclusion) = match how {
+            How::Unit => (ItemKind::Package, Inclusion::Included),
+            How::LeftOut => (ItemKind::Folder, left_out(LeftOutReason::Rebuildable)),
+            How::Itemise | How::Collapse => (ItemKind::Folder, Inclusion::Included),
+        };
+        let Some(mut item) = self.make_item(job, name, p, base, kind, 0, inclusion) else {
             let child = self.child(job, name, Zone::Count { place: p }, None);
             self.enqueue(child);
             return;
         };
+        if how == How::LeftOut {
+            item.portability = Portability::Rebuildable;
+            // Counted, never moved: it is made again on the new laptop.
+            self.state.places[p].fate = Fate::Counted;
+        }
         let i = self.push_item(item, p);
         self.state.meta[p].root_item = Some(i);
-        let zone = if collapse {
-            Zone::Collapse { item: i, place: p }
-        } else {
-            Zone::Itemise { base, place: p }
+        let zone = match how {
+            How::Collapse | How::LeftOut => Zone::Collapse { item: i, place: p },
+            How::Unit => Zone::Unit { base, place: p },
+            How::Itemise => Zone::Itemise { base, place: p },
         };
         let child = self.child(job, name, zone, Some(i));
         self.enqueue(child);
     }
 
+    /// The files of a folder that moves as one whole (see [`Zone::Unit`]): each listed as a file
+    /// that moves, every folder inside as a folder, nothing inside looked at for rules, packages
+    /// or kinds.
+    fn unit(&mut self, job: &Job, entries: Vec<Entry>, base: usize, place: usize) {
+        if let Some(item) = self.state.meta[place].collapsed {
+            // Grown too big to list: counted as one item from here on, and left out.
+            self.collapse(job, entries, item, place);
+            return;
+        }
+        for entry in entries {
+            let name = item_name(&entry.name);
+            let path = self.abs(job.volume, &job.rel).join(&entry.name);
+            if self.skipped(job, &entry, &path)
+                || self.known_paths.iter().any(|k| same_place(k, &path))
+            {
+                continue;
+            }
+            match entry.kind {
+                None => {
+                    if let Some(item) = self.make_item(
+                        job,
+                        &name,
+                        place,
+                        base,
+                        ItemKind::File,
+                        0,
+                        left_out(LeftOutReason::Unreadable),
+                    ) {
+                        self.push_item(item, place);
+                    }
+                    self.blind(
+                        job.volume,
+                        Some(path.to_string_lossy().into_owned()),
+                        BlindReason::NoPermission,
+                    );
+                }
+                Some(EntryKind::Link) => self.state.links += 1,
+                Some(EntryKind::File) => self.file_as(job, &entry, &name, place, base, false),
+                Some(EntryKind::Dir) => {
+                    let item = self
+                        .make_item(
+                            job,
+                            &name,
+                            place,
+                            base,
+                            ItemKind::Folder,
+                            0,
+                            Inclusion::Included,
+                        )
+                        .map(|i| self.push_item(i, place));
+                    let child = self.child(job, &name, Zone::Unit { base, place }, item);
+                    self.enqueue(child);
+                }
+            }
+        }
+        self.maybe_collapse(place);
+    }
+
     fn file(&mut self, job: &Job, entry: &Entry, name: &ItemName, place: usize, base: usize) {
+        self.file_as(job, entry, name, place, base, true);
+    }
+
+    /// A file, listed; counted by its kind (photo, video, music, document) unless it is inside a
+    /// whole that was counted as itself (`by_kind` false: a Photos Library's own files).
+    fn file_as(
+        &mut self,
+        job: &Job,
+        entry: &Entry,
+        name: &ItemName,
+        place: usize,
+        base: usize,
+        by_kind: bool,
+    ) {
         let text = name.display().to_string();
         let stub = is_icloud_stub_name(&text);
         let cloud_only = stub || entry.cloud_only;
@@ -3094,7 +3162,9 @@ impl Sweeper<'_> {
         } else {
             text.clone()
         };
-        count(category(&category_name), &mut self.state.counts);
+        if by_kind {
+            count(category(&category_name), &mut self.state.counts);
+        }
         let inclusion = if cloud_only {
             left_out(LeftOutReason::CloudOnly)
         } else {

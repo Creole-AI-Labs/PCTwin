@@ -2103,3 +2103,74 @@ fn what_is_found_so_far_only_grows() {
     let last = seen.last().unwrap();
     assert!(last.mover_bytes >= 40 * 100, "{last:?}");
 }
+
+/// Gap found 24 October 2026: a Mac package (a Photos Library, a Pages document, a bundle the
+/// person made) and a project's history (`.git`) were each one folder item carrying the bytes
+/// inside it, shown as moving; but a move sends only files, so none of it was ever sent and it
+/// had no result. Now everything the sweep includes is in a file the move sends (each with its
+/// own result), and a folder item holds no bytes of its own. A folder the rules file calls
+/// rebuildable (`node_modules`) is left out with that reason, as one counted item.
+#[test]
+fn everything_shown_as_moving_is_in_a_file_the_move_sends() {
+    let lab = lab();
+    let docs = lab.ada.join("Documents");
+    write(&docs.join("Album.photoslibrary/originals/A/beach.jpg"), 10);
+    write(&docs.join("Album.photoslibrary/database/Photos.sqlite"), 4);
+    write(&docs.join("Trip.pages/Index.zip"), 7);
+    write(&docs.join("Tool.app/Contents/MacOS/Tool"), 6);
+    write(&docs.join("proj/main.rs"), 5);
+    write(&docs.join("proj/.git/objects/ab/cdef"), 20);
+    write(&docs.join("proj/.git/HEAD"), 2);
+    write(&docs.join("proj/node_modules/pad/index.js"), 9);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    assert!(s.finished);
+
+    let mine: Vec<&Item> = s
+        .record
+        .items
+        .iter()
+        .filter(|i| i.place.role == FolderRole::Documents)
+        .collect();
+    let moving = |i: &&&Item| i.inclusion == Inclusion::Included;
+    // Every byte shown as moving is in a file.
+    let in_files: u64 = mine
+        .iter()
+        .filter(moving)
+        .filter(|i| i.kind == pctwin_record::ItemKind::File)
+        .map(|i| i.size_bytes)
+        .sum();
+    assert_eq!(in_files, 10 + 4 + 7 + 6 + 5 + 20 + 2, "{mine:#?}");
+    for i in mine.iter().filter(moving) {
+        if i.kind != pctwin_record::ItemKind::File {
+            assert_eq!(i.size_bytes, 0, "{} holds bytes no file carries", shown(i));
+        }
+    }
+    for path in [
+        "Album.photoslibrary/originals/A/beach.jpg",
+        "Trip.pages/Index.zip",
+        "Tool.app/Contents/MacOS/Tool",
+        "proj/.git/objects/ab/cdef",
+    ] {
+        let f = find(&s, FolderRole::Documents, path);
+        assert_eq!(f.kind, pctwin_record::ItemKind::File, "{path}");
+        assert_eq!(f.inclusion, Inclusion::Included, "{path}");
+    }
+    // Each package and history is marked as one whole, so it lands as one, never merged.
+    for path in ["Album.photoslibrary", "Trip.pages", "Tool.app", "proj/.git"] {
+        assert_eq!(
+            find(&s, FolderRole::Documents, path).kind,
+            pctwin_record::ItemKind::Package,
+            "{path}"
+        );
+    }
+    let nm = find(&s, FolderRole::Documents, "proj/node_modules");
+    assert_eq!(nm.size_bytes, 9);
+    assert_eq!(
+        nm.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::Rebuildable
+        }
+    );
+    assert!(!mine.iter().any(|i| shown(i).contains("pad/")));
+    s.record.validate().unwrap();
+}

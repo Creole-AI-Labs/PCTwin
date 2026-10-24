@@ -1107,6 +1107,7 @@ codes!(
         ItemKind::Folder = 1,
         ItemKind::App = 2,
         ItemKind::Setting = 3,
+        ItemKind::Package = 4,
     ]
 );
 codes!(
@@ -1189,6 +1190,7 @@ codes!(
         LeftOutReason::CloudOnly = 4,
         LeftOutReason::System = 5,
         LeftOutReason::TooManyFiles = 6,
+        LeftOutReason::Rebuildable = 7,
     ]
 );
 

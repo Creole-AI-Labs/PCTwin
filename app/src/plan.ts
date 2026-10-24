@@ -48,7 +48,7 @@ export const FOLDER_ROLES = ["home", "desktop", "documents", "downloads", "pictu
 export type FolderRole = (typeof FOLDER_ROLES)[number];
 
 /** Why an item is left out (`LeftOutReason`). */
-export const LEFT_OUT_REASONS = ["chosen-by-user", "work-managed", "device-bound", "unreadable", "cloud-only", "system", "too-many-files"] as const;
+export const LEFT_OUT_REASONS = ["chosen-by-user", "work-managed", "device-bound", "unreadable", "cloud-only", "system", "too-many-files", "rebuildable"] as const;
 export type LeftOutReason = (typeof LEFT_OUT_REASONS)[number];
 
 export type CloudProvider = "one-drive" | "i-cloud" | "dropbox" | "google-drive" | "other";

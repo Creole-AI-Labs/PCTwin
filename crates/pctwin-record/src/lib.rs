@@ -461,6 +461,11 @@ pub enum ItemKind {
     Folder,
     App,
     Setting,
+    /// A folder that moves as one whole (a Mac package such as a Photos Library or a Pages
+    /// document, or a project's history such as `.git`): its files are listed under it and sent
+    /// like any other, and on the new laptop they land inside one folder of its own, never merged
+    /// into a folder already there. It carries no bytes itself. Move protocol 4 and later.
+    Package,
 }
 
 /// Why an item is left out of the move.
@@ -477,6 +482,10 @@ pub enum LeftOutReason {
     /// moved (it comes with the record that lists any number of items). Move protocol 4 and
     /// later; an older new laptop is asked to update.
     TooManyFiles,
+    /// It can be made again on the new laptop (downloaded packages, build output such as
+    /// `node_modules`), so it is counted as one item and not copied (the rules file's
+    /// "rebuildable"). Move protocol 4 and later.
+    Rebuildable,
 }
 
 /// Whether an item is part of the move.

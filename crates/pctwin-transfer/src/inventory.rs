@@ -114,19 +114,24 @@ pub async fn send_inventory(
     }
     // An older new laptop knows no order: it is sent the list it always read.
     let ordered = version >= crate::PERSONAL_SINCE;
-    // Nor a folder too big to list: it would refuse the list part way, so it is asked to update
-    // before anything is sent.
-    if !ordered
-        && record.items.iter().any(|i| {
-            i.inclusion
-                == (Inclusion::LeftOut {
-                    reason: LeftOutReason::TooManyFiles,
-                })
-        })
-    {
+    // Nor what only move protocol 4 can say (a folder too big to list, one that can be made
+    // again, a folder that moves as one): it would refuse the list part way, so it is asked to
+    // update before anything is sent.
+    if !ordered && record.items.iter().any(needs_protocol_4) {
         return Err(TransferError::VersionGap(VersionGap::OtherLaptopOlder));
     }
     send_paged(ch, record, ordered).await
+}
+
+/// Whether `item` says something only move protocol 4's list carries.
+fn needs_protocol_4(item: &pctwin_record::Item) -> bool {
+    item.kind == pctwin_record::ItemKind::Package
+        || matches!(
+            item.inclusion,
+            Inclusion::LeftOut {
+                reason: LeftOutReason::TooManyFiles | LeftOutReason::Rebuildable
+            }
+        )
 }
 
 /// The scan inventory version 2 (`pctwin_record::inventory`): the manifest, then each page, each
