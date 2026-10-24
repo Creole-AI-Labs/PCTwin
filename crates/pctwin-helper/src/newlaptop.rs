@@ -157,6 +157,11 @@ impl NewLaptop for System {
         // in it can be swapped for a link while it is read.
         #[cfg(windows)]
         {
+            // Started with an administrator's rights: nothing of the starter's environment.
+            command.env_clear().envs(
+                pctwin_helper_os::minimal_env()
+                    .map_err(|e| logged(Refusal::Unreadable, "the hand-over's environment", &e))?,
+            );
             let (Account::Sid(mover), Account::Sid(person)) = (&self.mover, account) else {
                 return Err(Refusal::NoHome);
             };

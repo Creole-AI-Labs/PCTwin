@@ -33,7 +33,7 @@ fn check_key(key: &str) -> Result<(), Error> {
 
 #[cfg(windows)]
 fn run(program: &Path, args: &[&str]) -> Result<String, Error> {
-    let out = std::process::Command::new(program)
+    let out = crate::win::clean_command(program)?
         .args(args)
         .stdin(std::process::Stdio::null())
         .output()?;

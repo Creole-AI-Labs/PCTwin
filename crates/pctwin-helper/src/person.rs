@@ -88,6 +88,20 @@ pub fn scan_person(laptop: LaptopId, account: &str) -> Result<PersonScan, Refusa
         remembered: Vec::new(),
         rules: Rules::shipped(),
     };
+    // With an administrator's rights: on Windows, PowerShell by its system path and with nothing
+    // of the starter's environment.
+    #[cfg(windows)]
+    let mut reader = match (
+        pctwin_helper_os::system_folder(pctwin_helper_os::SystemFolder::Windows),
+        pctwin_helper_os::minimal_env(),
+    ) {
+        (Ok(windows), Ok(env)) => pctwin_scan::system_reader_clean(
+            windows.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+            env,
+        ),
+        _ => return Err(Refusal::Unreadable),
+    };
+    #[cfg(not(windows))]
     let mut reader = pctwin_scan::system_reader();
     let stop = AtomicBool::new(false);
     let swept = pctwin_scan::sweep(

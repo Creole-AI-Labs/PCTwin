@@ -30,6 +30,23 @@ pub trait AccessReader {
 }
 
 /// The reader for this system.
+/// The elevated helper's reader on Windows: PowerShell at `powershell` (a full path the caller
+/// found from the system itself) with only `env`, nothing passed on from whoever started the
+/// helper. Elsewhere, the same as [`system_reader`].
+pub fn system_reader_clean(
+    powershell: std::path::PathBuf,
+    env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> Box<dyn AccessReader + Send> {
+    if cfg!(windows) {
+        Box::new(WindowsAcl {
+            clean: Some((powershell, env)),
+            ..WindowsAcl::default()
+        })
+    } else {
+        system_reader()
+    }
+}
+
 pub fn system_reader() -> Box<dyn AccessReader + Send> {
     if cfg!(windows) {
         Box::new(WindowsAcl::default())
@@ -145,6 +162,12 @@ impl AccessReader for UnixAccess {
 struct WindowsAcl {
     /// Set in the helper's environment on top of this process's (tests: what a parent passes on).
     env: Vec<(String, String)>,
+    /// The elevated helper's reader: PowerShell by its full path, with only this environment
+    /// (nothing passed on from whoever started the helper).
+    clean: Option<(
+        std::path::PathBuf,
+        Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    )>,
     helper: Option<Helper>,
     broken: Option<String>,
     /// Times the helper had to be started again in a row (a slow answer, or it stopped).
@@ -194,13 +217,21 @@ impl WindowsAcl {
             return Err(why.clone());
         }
         if self.helper.is_none() {
-            let exe = std::env::var_os("SystemRoot")
-                .map(|r| {
-                    std::path::PathBuf::from(r)
-                        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
-                })
-                .unwrap_or_else(|| "powershell".into());
-            let mut command = Command::new(exe);
+            let mut command = match &self.clean {
+                Some((exe, env)) => {
+                    let mut c = Command::new(exe);
+                    c.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
+                    c
+                }
+                None => Command::new(
+                    std::env::var_os("SystemRoot")
+                        .map(|r| {
+                            std::path::PathBuf::from(r)
+                                .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+                        })
+                        .unwrap_or_else(|| "powershell".into()),
+                ),
+            };
             command
                 .args(["-NoProfile", "-NonInteractive", "-Command", ACL_SCRIPT])
                 .envs(self.env.iter().map(|(k, v)| (k, v)))
@@ -330,6 +361,35 @@ mod tests {
         let file = folder.join("a.txt");
         std::fs::write(&file, b"x").unwrap();
         for p in [&folder, &file] {
+            let read = reader.read(p, None);
+            assert!(
+                matches!(read, AccessFact::Known(_)),
+                "{}: {read:?}",
+                p.display()
+            );
+        }
+    }
+
+    /// The elevated helper's reader: PowerShell by its full path with only a minimal
+    /// environment (nothing of the starter's) still reads every permission.
+    #[test]
+    fn the_clean_reader_reads_permissions_with_only_a_minimal_environment() {
+        let windows = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        let env: Vec<(std::ffi::OsString, std::ffi::OsString)> = vec![
+            ("SystemRoot".into(), windows.clone().into_os_string()),
+            ("windir".into(), windows.clone().into_os_string()),
+        ];
+        let mut reader = WindowsAcl {
+            clean: Some((
+                windows.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+                env,
+            )),
+            ..WindowsAcl::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        for p in [dir.path(), file.as_path()] {
             let read = reader.read(p, None);
             assert!(
                 matches!(read, AccessFact::Known(_)),
