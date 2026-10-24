@@ -164,10 +164,25 @@ if ! $mac; then
     exit 1
   fi
 fi
+# A bounded wait: a move that does not end in 25 minutes is stopped on both sides, and its log
+# (where it got to, stage by stage) and the helper's are kept and shown like a failure's.
+waited=0
+while kill -0 "$engine" 2>/dev/null && [ "$waited" -lt 1500 ]; do
+  sleep 5
+  waited=$((waited + 5))
+done
+if kill -0 "$engine" 2>/dev/null; then
+  echo "the move did not finish in 25 minutes: stopping it" >&2
+  sudo pkill -u "$(uid "$mover")" -f "^pctwin-labmove everyone" 2>/dev/null || true
+  sudo kill "$helper" 2>/dev/null || true
+  sudo pkill -f "^pctwin-helper --session $token" 2>/dev/null || true
+  sleep 2
+fi
 if ! wait "$engine"; then
-  # The move's own words, kept with the evidence and shown here.
+  # The move's own words, kept with the evidence and shown here, with the helper's.
   sudo cp "$work/mover/log.txt" "$admin/mover-log.txt" 2>/dev/null || true
   sudo cat "$work/mover/log.txt" >&2 || true
+  sudo cat "$admin/helper-3.txt" >&2 || true
   # What was there to reach: the channel folder and the helper, still running or not.
   sudo ls -la "$channels" >&2 || true
   ps -o pid,user,stat,args -p "$helper" >&2 || true

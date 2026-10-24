@@ -73,6 +73,25 @@ pub struct Everyone {
     /// A hostile mover: links to the system's own files planted in each holding folder before
     /// the hand-over, which must never follow them.
     pub hostile: bool,
+    /// Lab only (never the app): drives left out of the mover's sweep, by mount, such as a CI
+    /// runner's work drive, which holds the runner's own build and nothing planted
+    /// (`--leave-out-volume D:\`, several separated by commas).
+    pub leave_out: Vec<PathBuf>,
+}
+
+/// Whether the drive mounted at `mount` is one of `leave_out` (written either way round, with
+/// or without a closing separator; ignoring case on Windows).
+pub fn leaves_out(leave_out: &[PathBuf], mount: &std::path::Path) -> bool {
+    let norm = |p: &std::path::Path| {
+        let t = p.to_string_lossy();
+        let t = t.trim_end_matches(['\\', '/']);
+        if cfg!(windows) {
+            t.to_lowercase()
+        } else {
+            t.to_string()
+        }
+    };
+    leave_out.iter().any(|l| norm(l) == norm(mount))
 }
 
 /// What the run came to: the mover's report, and the lab's evidence.
@@ -264,8 +283,19 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     let stage = |what: &str| eprintln!("[{:>6.1} s] {what}", began.elapsed().as_secs_f64());
     stage("finding the mover's things");
     let laptop = args.laptop;
+    let leave_out = args.leave_out.clone();
     let mut sweep = tokio::task::spawn_blocking(move || {
-        pctwin_scan::sweep_this_laptop(laptop, &AtomicBool::new(false), &mut |_| {}, None)
+        let mut facts = pctwin_scan::this_laptop_facts(laptop);
+        facts.volumes.retain(|v| !leaves_out(&leave_out, &v.mount));
+        let mut reader = pctwin_scan::system_reader();
+        pctwin_scan::sweep(
+            facts,
+            reader.as_mut(),
+            &AtomicBool::new(false),
+            &mut |_| {},
+            &pctwin_scan::SweepLimits::default(),
+            None,
+        )
     })
     .await
     .map_err(err)?;
@@ -541,6 +571,7 @@ pub fn parse(args: &[String]) -> Result<Everyone, String> {
             "--session",
             "--channel",
             "--dir",
+            "--leave-out-volume",
         ]
         .contains(k)
         {
@@ -554,6 +585,10 @@ pub fn parse(args: &[String]) -> Result<Everyone, String> {
         journal: PathBuf::from(need("--journal")?),
         new_names: need("--new-names")?.to_string(),
         hostile: map.get("--hostile") == Some(&"yes"),
+        leave_out: map
+            .get("--leave-out-volume")
+            .map(|v| v.split(',').map(PathBuf::from).collect())
+            .unwrap_or_default(),
     })
 }
 

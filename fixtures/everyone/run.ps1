@@ -132,9 +132,13 @@ $look = Start-As $mover 'powershell.exe' @('-NoProfile', '-NonInteractive', '-Co
 if ((Wait-Exit $look 'the mover looking into the helper') -eq 0) { throw "the mover opened the helper's process" }
 
 $newHome = Join-Path $moverDir 'new-home'
-$run = Start-As $mover $labmove @('everyone', (Join-Path $moverDir 'report.json'), '--laptop', $laptop,
+# Lab only: the runner's work drive (D: on hosted Windows runners) holds the runner's own build
+# and nothing planted (every planted file is on C:), so the mover's sweep leaves it out.
+$leaveOut = @()
+if (Test-Path 'D:\') { $leaveOut = @('--leave-out-volume', 'D:\') }
+$run = Start-As $mover $labmove (@('everyone', (Join-Path $moverDir 'report.json'), '--laptop', $laptop,
     '--new-home', $newHome, '--journal', (Join-Path $moverDir 'journal.redb'), '--new-names', 'pctwinnew',
-    '--hostile', 'yes', '--session', $token, '--channel', $pipe3) (Join-Path $admin 'evidence.json') (Join-Path $moverDir 'log.txt')
+    '--hostile', 'yes', '--session', $token, '--channel', $pipe3) + $leaveOut) (Join-Path $admin 'evidence.json') (Join-Path $moverDir 'log.txt')
 # The mover's own engine, while it carries other people's things, is closed to the mover too:
 # reading it lists no modules.
 Start-Sleep -Seconds 5
@@ -166,9 +170,9 @@ if ((Get-Acl $etc).Owner -ne $etcOwner) { throw 'the planted junction changed wh
 Write-Host '== 5. no administrator anywhere =='
 $none = Join-Path $moverDir 'none'
 New-Item -ItemType Directory -Force $none | Out-Null
-$run = Start-As $mover $labmove @('everyone', (Join-Path $none 'report.json'), '--laptop', $laptop,
+$run = Start-As $mover $labmove (@('everyone', (Join-Path $none 'report.json'), '--laptop', $laptop,
     '--new-home', (Join-Path $none 'new-home'), '--journal', (Join-Path $none 'journal.redb'),
-    '--new-names', 'pctwinnone') (Join-Path $admin 'evidence-none.json') (Join-Path $none 'log.txt')
+    '--new-names', 'pctwinnone') + $leaveOut) (Join-Path $admin 'evidence-none.json') (Join-Path $none 'log.txt')
 if ((Wait-Exit $run 'the move with no administrator') -ne 0) {
     Get-Content (Join-Path $none 'log.txt') -ErrorAction SilentlyContinue | Write-Host
     throw 'the move with no administrator failed'

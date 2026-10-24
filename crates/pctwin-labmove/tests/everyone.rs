@@ -163,3 +163,41 @@ fn an_invented_item_fails() {
     evidence["received"] = json!([{ "owner": "1000", "source": "/no/such/file.txt" }]);
     fails(&key, &evidence, &visible(), "no such file");
 }
+
+/// The lab, never the app, may leave out a drive (a CI runner's work drive, which holds the
+/// runner's own build and nothing planted): asked for by name, ignoring how its mount is written.
+#[test]
+fn the_lab_leaves_out_only_the_drives_it_names() {
+    let args: Vec<String> = [
+        "--laptop",
+        "00112233445566778899aabbccddeeff",
+        "--new-home",
+        "n",
+        "--journal",
+        "j",
+        "--new-names",
+        "x",
+        "--leave-out-volume",
+        r"D:\",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let e = pctwin_labmove::everyone::parse(&args).unwrap();
+    assert_eq!(e.leave_out, vec![std::path::PathBuf::from(r"D:\")]);
+    let without: Vec<String> = args[..8].to_vec();
+    assert!(
+        pctwin_labmove::everyone::parse(&without)
+            .unwrap()
+            .leave_out
+            .is_empty()
+    );
+    assert!(pctwin_labmove::everyone::leaves_out(
+        &e.leave_out,
+        std::path::Path::new(r"D:\")
+    ));
+    assert!(!pctwin_labmove::everyone::leaves_out(
+        &e.leave_out,
+        std::path::Path::new(r"C:\")
+    ));
+}
