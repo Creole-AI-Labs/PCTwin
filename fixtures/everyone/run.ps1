@@ -140,8 +140,11 @@ if ((Wait-Exit $look 'the mover looking into the helper') -eq 0) { throw "the mo
 $newHome = Join-Path $moverDir 'new-home'
 # Lab only: the runner's work drive (D: on hosted Windows runners) holds the runner's own build
 # and nothing planted (every planted file is on C:), so the mover's sweep leaves it out.
-$leaveOut = @()
-if (Test-Path 'D:\') { $leaveOut = @('--leave-out-volume', 'D:\') }
+# Written without a closing backslash: Start-As quotes each argument, and a backslash before the
+# closing quote would swallow it ("D:\" became D:" and matched no drive, so D: was swept).
+# The runner's own folders that no rules row names (nothing is planted in them) are left out too.
+$leaveOut = @('--leave-out-folder', 'C:\actionarchivecache,C:\agent,C:\cobertura-2.1.1,C:\Julia')
+if (Test-Path 'D:\') { $leaveOut += @('--leave-out-volume', 'D:') }
 $run = Start-As $mover $labmove (@('everyone', (Join-Path $moverDir 'report.json'), '--laptop', $laptop,
     '--new-home', $newHome, '--journal', (Join-Path $moverDir 'journal.redb'), '--new-names', 'pctwinnew',
     '--hostile', 'yes', '--session', $token, '--channel', $pipe3) + $leaveOut) (Join-Path $admin 'evidence.json') (Join-Path $moverDir 'log.txt')

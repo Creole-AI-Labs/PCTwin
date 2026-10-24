@@ -185,6 +185,21 @@ fn the_lab_leaves_out_only_the_drives_it_names() {
     .collect();
     let e = pctwin_labmove::everyone::parse(&args).unwrap();
     assert_eq!(e.leave_out, vec![std::path::PathBuf::from(r"D:\")]);
+    assert!(e.leave_out_folders.is_empty());
+    let mut more = args.clone();
+    more.extend([
+        "--leave-out-folder".to_string(),
+        "/opt/agent,/srv/runner".to_string(),
+    ]);
+    assert_eq!(
+        pctwin_labmove::everyone::parse(&more)
+            .unwrap()
+            .leave_out_folders,
+        vec![
+            std::path::PathBuf::from("/opt/agent"),
+            std::path::PathBuf::from("/srv/runner")
+        ]
+    );
     let without: Vec<String> = args[..8].to_vec();
     assert!(
         pctwin_labmove::everyone::parse(&without)

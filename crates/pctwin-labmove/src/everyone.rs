@@ -77,6 +77,63 @@ pub struct Everyone {
     /// runner's work drive, which holds the runner's own build and nothing planted
     /// (`--leave-out-volume D:\`, several separated by commas).
     pub leave_out: Vec<PathBuf>,
+    /// Lab only (never the app): folders of the runner's own, found by the mover's sweep but
+    /// nobody's in the lab (`--leave-out-folder C:\\agent,C:\\Julia`): their things are left
+    /// out of the move.
+    pub leave_out_folders: Vec<PathBuf>,
+}
+
+/// Permission reads, counted and timed, for the stage log.
+struct CountedReads {
+    inner: Box<dyn pctwin_scan::AccessReader + Send>,
+    reads: u64,
+    unknown: u64,
+    spent: Duration,
+}
+
+impl pctwin_scan::AccessReader for CountedReads {
+    fn read(
+        &mut self,
+        path: &std::path::Path,
+        unix: Option<pctwin_scan::UnixMode>,
+    ) -> pctwin_scan::AccessFact {
+        let started = Instant::now();
+        let fact = self.inner.read(path, unix);
+        self.spent += started.elapsed();
+        self.reads += 1;
+        if !matches!(fact, pctwin_scan::AccessFact::Known(_)) {
+            self.unknown += 1;
+        }
+        fact
+    }
+}
+
+/// Lab only: leaves out of `sweep`'s record every item of a place at or inside one of
+/// `folders`. How many were left out.
+pub fn leave_out_folders(sweep: &mut pctwin_scan::Sweep, folders: &[PathBuf]) -> usize {
+    if folders.is_empty() {
+        return 0;
+    }
+    let inside = |p: &std::path::Path| {
+        folders
+            .iter()
+            .any(|f| leaves_out(std::slice::from_ref(f), p) || p.starts_with(f))
+    };
+    let gone: std::collections::BTreeSet<usize> = sweep
+        .item_roots
+        .iter()
+        .filter(|(_, root)| inside(root))
+        .map(|(p, _)| *p)
+        .collect();
+    let place_of: HashMap<_, _> = sweep.placed_by.iter().copied().collect();
+    let before = sweep.record.items.len();
+    sweep
+        .record
+        .items
+        .retain(|i| place_of.get(&i.id).is_none_or(|p| !gone.contains(p)));
+    let ids: std::collections::BTreeSet<_> = sweep.record.items.iter().map(|i| i.id).collect();
+    sweep.record.personal.retain(|id| ids.contains(id));
+    before - sweep.record.items.len()
 }
 
 /// Whether the drive mounted at `mount` is one of `leave_out` (written either way round, with
@@ -281,17 +338,35 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     // Where the move got to, to the log (stderr), so a run that never ends still says where.
     let began = Instant::now();
     let stage = |what: &str| eprintln!("[{:>6.1} s] {what}", began.elapsed().as_secs_f64());
+    // The helper first, as the app does: it waits only a short while for its mover, never
+    // through the mover's own sweep.
+    stage("connecting to the helper");
+    let helper: Option<Helper> = match &args.helper {
+        Some(h) => {
+            let h = h.clone_args();
+            let client = tokio::task::spawn_blocking(move || connect(&h))
+                .await
+                .map_err(err)??;
+            Some(Arc::new(Mutex::new(client)))
+        }
+        None => None,
+    };
     stage("finding the mover's things");
     let laptop = args.laptop;
     let leave_out = args.leave_out.clone();
-    let mut sweep = tokio::task::spawn_blocking(move || {
+    let (mut sweep, reads) = tokio::task::spawn_blocking(move || {
         let mut facts = pctwin_scan::this_laptop_facts(laptop);
         facts.volumes.retain(|v| !leaves_out(&leave_out, &v.mount));
-        let mut reader = pctwin_scan::system_reader();
+        let mut reader = CountedReads {
+            inner: pctwin_scan::system_reader(),
+            reads: 0,
+            unknown: 0,
+            spent: Duration::ZERO,
+        };
         let usage = pctwin_scan::usage_of(&facts.census);
         let mut found = pctwin_scan::sweep(
             facts,
-            reader.as_mut(),
+            &mut reader,
             &AtomicBool::new(false),
             &mut |_| {},
             &pctwin_scan::SweepLimits::default(),
@@ -299,10 +374,25 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         );
         // As the app does: the mover's own essentials move first.
         pctwin_scan::order_by_use(&mut found, &usage);
-        found
+        let reads = (reader.reads, reader.unknown, reader.spent);
+        (found, reads)
     })
     .await
     .map_err(err)?;
+    stage(&format!(
+        "permissions read {} times ({} unknown), taking {:.1} s",
+        reads.0,
+        reads.1,
+        reads.2.as_secs_f64()
+    ));
+    // Lab only: the runner's own folders the lab names are not the mover's (nothing is planted
+    // in them): their things are left out of the move.
+    let left = leave_out_folders(&mut sweep, &args.leave_out_folders);
+    if left > 0 {
+        stage(&format!(
+            "left out {left} items in the runner's own folders"
+        ));
+    }
     stage(&format!(
         "found: {} places, {} items, {} blind spots",
         sweep.places.len(),
@@ -336,17 +426,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     let mut record = sweep.record.clone();
     let by_path = sources(&sweep);
 
-    // The helper: each other person scanned, if the administrator approved them.
-    let helper: Option<Helper> = match &args.helper {
-        Some(h) => {
-            let h = h.clone_args();
-            let client = tokio::task::spawn_blocking(move || connect(&h))
-                .await
-                .map_err(err)??;
-            Some(Arc::new(Mutex::new(client)))
-        }
-        None => None,
-    };
+    // The helper was connected to first (see above).
     let mut scanned: Vec<(String, Scanned)> = Vec::new();
     let mut declined = Vec::new();
     if let Some(helper) = &helper {
@@ -380,6 +460,11 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
             .filter(|(_, yes)| *yes)
             .map(|(p, _)| p)
             .collect();
+        stage(&format!(
+            "the helper says {} of {} unreadable places are the system's",
+            system_only.len(),
+            sweep.unreadable_places.len()
+        ));
         sweep.name_system_only(&system_only);
     }
     let handles = add_people(&mut record, &people);
@@ -416,9 +501,11 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         for (n, (person, _)) in scanned.iter().enumerate() {
             let mut client = helper.lock().map_err(err)?;
             let name = format!("{}{}", args.new_names, n + 1);
+            stage(&format!("making account {name}"));
             let account = client
                 .create_account(&name, &format!("PCTwin lab {}", n + 1))
                 .map_err(|e| format!("making an account: {e}"))?;
+            stage(&format!("holding place for {}", account.account));
             let holding = client
                 .hold_for(&account.account)
                 .map_err(|e| format!("holding: {e}"))?;
@@ -499,6 +586,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         let mut client = helper.lock().map_err(err)?;
         for m in &made {
             let account = m["account"].as_str().unwrap_or_default();
+            stage(&format!("handing over to {account}"));
             let done = client
                 .hand_over_now(account)
                 .map_err(|e| format!("handing over: {e}"))?;
@@ -518,6 +606,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         client.bye().map_err(err)?;
     }
 
+    stage("writing the report");
     let mover = for_the_mover(&received, &me);
     let mut report = report_json(&sweep, &mover, &declined, &hand_over);
     // macOS: the helper was kept out of some of someone's places; the app shows how to give it
@@ -604,6 +693,7 @@ pub fn parse(args: &[String]) -> Result<Everyone, String> {
             "--channel",
             "--dir",
             "--leave-out-volume",
+            "--leave-out-folder",
         ]
         .contains(k)
         {
@@ -619,6 +709,10 @@ pub fn parse(args: &[String]) -> Result<Everyone, String> {
         hostile: map.get("--hostile") == Some(&"yes"),
         leave_out: map
             .get("--leave-out-volume")
+            .map(|v| v.split(',').map(PathBuf::from).collect())
+            .unwrap_or_default(),
+        leave_out_folders: map
+            .get("--leave-out-folder")
             .map(|v| v.split(',').map(PathBuf::from).collect())
             .unwrap_or_default(),
     })
