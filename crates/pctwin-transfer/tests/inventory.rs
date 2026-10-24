@@ -887,3 +887,27 @@ async fn a_sender_that_keeps_sending_pages_is_stopped_at_the_memory_limit() {
     let why = refused(got);
     assert!(why.contains("more memory than PCTwin allows"), "{why}");
 }
+
+/// The person's own essentials cross in order with the list from move protocol 4, so the new
+/// laptop shows (and the person approves) the order the move sends in. An older new laptop is
+/// sent none: the list it reads is the one it always read.
+#[tokio::test]
+async fn the_personal_order_crosses_from_protocol_4_and_never_before() {
+    let mut sent = record(5);
+    sent.personal = vec![sent.items[3].id, sent.items[0].id];
+    for (version, crosses) in [(4u16, true), (3, false), (JSON, false)] {
+        let (mut old, mut new) = pair();
+        let (s, r) = tokio::join!(
+            send_inventory(&mut old, &sent, version),
+            receive_inventory(&mut new, version)
+        );
+        s.unwrap();
+        let got = r.unwrap();
+        assert_eq!(got.items, sent.items, "protocol {version}");
+        if crosses {
+            assert_eq!(got.personal, sent.personal, "protocol {version}");
+        } else {
+            assert!(got.personal.is_empty(), "protocol {version}");
+        }
+    }
+}

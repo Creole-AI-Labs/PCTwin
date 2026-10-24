@@ -34,7 +34,10 @@ use std::io::Read;
 use std::time::Duration;
 
 use pctwin_record::inventory::MAX_MANIFEST_BYTES;
-use pctwin_record::{EncodedInventory, InventoryReader, MAX_PAGE_BYTES, Record, encode_inventory};
+use pctwin_record::{
+    EncodedInventory, InventoryReader, MAX_PAGE_BYTES, Record, encode_inventory,
+    encode_inventory_ordered,
+};
 
 use crate::{Channel, PIECE_MAX, TransferError};
 
@@ -116,24 +119,37 @@ pub async fn send_inventory(
     record: &Record,
     version: u16,
 ) -> Result<(), TransferError> {
+    // An older new laptop knows no order: it is sent the list it always read.
+    let ordered = version >= crate::PERSONAL_SINCE;
     if version >= PAGED_FROM {
-        send_paged(ch, record).await
-    } else {
+        send_paged(ch, record, ordered).await
+    } else if record.personal.is_empty() {
         send_within(ch, record, MAX_INVENTORY_BYTES).await
+    } else {
+        let mut plain = record.clone();
+        plain.personal.clear();
+        send_within(ch, &plain, MAX_INVENTORY_BYTES).await
     }
 }
 
 /// The scan inventory version 2 (`pctwin_record::inventory`): the manifest, then each page, each
 /// announced by its index and length and sent in full pieces but the last.
-async fn send_paged(ch: &mut impl Channel, record: &Record) -> Result<(), TransferError> {
+async fn send_paged(
+    ch: &mut impl Channel,
+    record: &Record,
+    ordered: bool,
+) -> Result<(), TransferError> {
     if !undecided(record) || record.revision != 1 || record.previous.is_some() {
         return Err(refused(
             "it already says where people or shared things go, which only the new laptop decides",
         ));
     }
-    let EncodedInventory { manifest, pages } =
+    let encoded = if ordered {
+        encode_inventory_ordered(&record.source_laptop, &record.items, &record.personal)
+    } else {
         encode_inventory(&record.source_laptop, &record.items)
-            .map_err(|e| refused(&e.to_string()))?;
+    };
+    let EncodedInventory { manifest, pages } = encoded.map_err(|e| refused(&e.to_string()))?;
     send_blob(ch, MANIFEST, &manifest).await?;
     for (n, page) in pages.iter().enumerate() {
         let n = u32::try_from(n).map_err(|_| refused("it has too many pages"))?;
@@ -220,9 +236,11 @@ async fn receive_paged(ch: &mut impl Channel) -> Result<Record, TransferError> {
     }
     drop(bytes);
     let laptop = reader.laptop();
+    let personal = reader.personal().to_vec();
     reader.finish().map_err(|e| refused(&e.to_string()))?;
     let mut record = Record::new(laptop);
     record.items = items;
+    record.personal = personal;
     record.validate().map_err(|e| refused(&e.to_string()))?;
     Ok(record)
 }

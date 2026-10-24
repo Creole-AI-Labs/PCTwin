@@ -288,14 +288,18 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         let mut facts = pctwin_scan::this_laptop_facts(laptop);
         facts.volumes.retain(|v| !leaves_out(&leave_out, &v.mount));
         let mut reader = pctwin_scan::system_reader();
-        pctwin_scan::sweep(
+        let usage = pctwin_scan::usage_of(&facts.census);
+        let mut found = pctwin_scan::sweep(
             facts,
             reader.as_mut(),
             &AtomicBool::new(false),
             &mut |_| {},
             &pctwin_scan::SweepLimits::default(),
             None,
-        )
+        );
+        // As the app does: the mover's own essentials move first.
+        pctwin_scan::order_by_use(&mut found, &usage);
+        found
     })
     .await
     .map_err(err)?;

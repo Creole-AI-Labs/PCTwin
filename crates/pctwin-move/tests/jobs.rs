@@ -221,3 +221,29 @@ fn only_files_are_sent() {
     assert_eq!(sent, [letter.id]);
     assert!(plan.not_sent.is_empty(), "{:?}", plan.not_sent);
 }
+
+/// The person's own essentials (the record's personal order) move first, in that order, after
+/// only what they asked for and before the general essentials; the send plan is in the same
+/// order, so what the plan shows first is what goes first.
+#[test]
+fn the_personal_order_moves_first_in_its_own_order() {
+    let inc = Inclusion::Included;
+    let mut record = Record::new(laptop());
+    record.items = vec![
+        item(FolderRole::Documents, &["cv.docx"], ItemKind::File, 5, inc),
+        item(FolderRole::Music, &["song.mp3"], ItemKind::File, 7, inc),
+        item(FolderRole::Pictures, &["beach.jpg"], ItemKind::File, 9, inc),
+        item(FolderRole::Videos, &["clip.mp4"], ItemKind::File, 3, inc),
+    ];
+    let (song, beach) = (record.items[1].id, record.items[2].id);
+    record.personal = vec![beach, song];
+    let order = pctwin_move::move_order(&record);
+    assert_eq!(order[0], (beach, Tier::Personal));
+    assert_eq!(order[1], (song, Tier::Personal));
+    // The general essentials (Documents) come next.
+    assert_eq!(order[2].0, record.items[0].id);
+    assert!(order[2..].iter().all(|(_, t)| *t != Tier::Personal));
+    let plan = send_plan(&record, |_| Some(PathBuf::from("x")), landing);
+    let jobs: Vec<ItemId> = plan.jobs.iter().map(|j| j.item).collect();
+    assert_eq!(&jobs[..2], &[beach, song]);
+}

@@ -43,7 +43,7 @@ use pctwin_record::{
 use pctwin_transfer::{
     Allowance, Cause, Channel, Failure, Fit, FsOpener, LandingPlace, MOVE_PROTOCOL, MoveControl,
     MoveMeter, Opener, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, Tier,
-    TimeRange, TransferError, agree_version, answer_link_test, measure_link, plan_order,
+    TimeRange, TransferError, agree_version, answer_link_test, measure_link, plan_order_with,
     receive_inventory, send_inventory,
 };
 
@@ -114,7 +114,15 @@ impl SendPlan {
 /// first, then their essentials, then the rest. The send and the plan's "we'll move these first"
 /// preview both read this one order, so the preview cannot say otherwise than the move does.
 pub fn move_order(record: &Record) -> Vec<(ItemId, Tier)> {
-    plan_order(&record.items, &[], &BTreeMap::new(), 0)
+    // The person's own essentials in the record's order: first first (the queue puts the larger
+    // "when" first within a tier, so the first gets the largest).
+    let personal: BTreeMap<ItemId, i64> = record
+        .personal
+        .iter()
+        .enumerate()
+        .map(|(rank, id)| (*id, -(rank as i64)))
+        .collect();
+    plan_order_with(&record.items, &[], &personal, &BTreeMap::new(), 0)
 }
 
 /// Whether an item of this tier moves before the rest (asked for, personal or essential).
@@ -379,6 +387,15 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
         Ok((rules, port))
     })
     .await?;
+    // An older new laptop was sent no personal order, so none is used here either: the order
+    // its person saw is the order sent.
+    let mut plain = None;
+    if version < pctwin_transfer::PERSONAL_SINCE && !record.personal.is_empty() {
+        let mut r = record.clone();
+        r.personal.clear();
+        plain = Some(r);
+    }
+    let record = plain.as_ref().unwrap_or(record);
     let plan = send_plan_where(record, source, |i| rules.landing(i));
     let on_drop = match port {
         Some(_) => OnDrop::Resumes(back),

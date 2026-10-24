@@ -1,6 +1,8 @@
 //! The scan inventory, version 2 (Engineering Plan 9.11, decided 16 October 2026): what the scan
 //! found, in a small manifest and pages, so no laptop is too big to send and neither laptop has to
-//! hold the whole list at once.
+//! hold the whole list at once. Version 3 (move protocol 4, 24 October 2026) is the same with the
+//! person's own essentials, in order, at the end of the manifest (only the order: see
+//! [`encode_inventory_ordered`]).
 //!
 //! - The **manifest** holds the format, the old laptop's ID, how many items and pages follow, and
 //!   the owners and places, each stored once.
@@ -43,8 +45,14 @@ use crate::{
     LaptopId, LeftOutReason, ManagedBy, Owner, Place, Portability, RawName, RecordError, Storage,
 };
 
-/// The inventory format this app writes and reads.
-pub const INVENTORY_FORMAT: u32 = 2;
+/// The inventory format this app writes and reads: 3 (move protocol 4) also carries the
+/// person's own essentials in order (see [`encode_inventory_ordered`]); 2 (move protocol 3), which
+/// is otherwise the same, is still written for a laptop one version behind and still read.
+pub const INVENTORY_FORMAT: u32 = 3;
+/// The format before the personal order, written for move protocol 3.
+const UNORDERED_FORMAT: u32 = 2;
+/// What each ID of the personal order takes in the reader: the ID in its list and in its set.
+const PERSONAL_COST: u64 = 64;
 /// Most items in one page.
 pub const PAGE_ITEMS: usize = 10_000;
 /// Most bytes in one encoded page.
@@ -318,14 +326,37 @@ pub fn encode_inventory(
     laptop: &LaptopId,
     items: &[Item],
 ) -> Result<EncodedInventory, RecordError> {
-    encode_counted(laptop, items).map(|(encoded, _)| encoded)
+    encode_counted(laptop, items, None).map(|(encoded, _)| encoded)
+}
+
+/// [`encode_inventory`] in format 3 (move protocol 4), with the person's own essentials in the
+/// order they move, first first (`personal`: items of `items`, each once, at most
+/// [`MAX_PERSONAL`](crate::MAX_PERSONAL)). Only the order crosses, never when anything was used.
+pub fn encode_inventory_ordered(
+    laptop: &LaptopId,
+    items: &[Item],
+    personal: &[ItemId],
+) -> Result<EncodedInventory, RecordError> {
+    encode_counted(laptop, items, Some(personal)).map(|(encoded, _)| encoded)
 }
 
 /// [`encode_inventory`], with what the reader will hold, in all, after each page.
 fn encode_counted(
     laptop: &LaptopId,
     items: &[Item],
+    personal: Option<&[ItemId]>,
 ) -> Result<(EncodedInventory, Vec<u64>), RecordError> {
+    if let Some(order) = personal {
+        let ids: HashSet<ItemId> = items.iter().map(|i| i.id).collect();
+        let mut seen = HashSet::new();
+        if order.len() > crate::MAX_PERSONAL
+            || order
+                .iter()
+                .any(|id| !ids.contains(id) || !seen.insert(*id))
+        {
+            return Err(RecordError::BadPersonalOrder);
+        }
+    }
     // Owners and places, each stored once, in the order first met.
     let mut owners: Vec<&Owner> = Vec::new();
     let mut places: Vec<&Place> = Vec::new();
@@ -379,7 +410,11 @@ fn encode_counted(
 
     let mut m = Writer(Vec::new());
     m.0.extend_from_slice(MAGIC);
-    m.u32(INVENTORY_FORMAT);
+    m.u32(if personal.is_some() {
+        INVENTORY_FORMAT
+    } else {
+        UNORDERED_FORMAT
+    });
     m.0.extend_from_slice(&laptop.0);
     m.u64(items.len() as u64);
     m.u32(u32::try_from(pages.len()).map_err(|_| bad("too many pages"))?);
@@ -390,6 +425,12 @@ fn encode_counted(
     m.u32(u32::try_from(places.len()).map_err(|_| bad("too many places"))?);
     for p in &places {
         m.place(p)?;
+    }
+    if let Some(order) = personal {
+        m.u32(u32::try_from(order.len()).map_err(|_| bad("too long a personal order"))?);
+        for id in order {
+            m.0.extend_from_slice(&id.0);
+        }
     }
     if m.0.len() > MAX_MANIFEST_BYTES {
         return Err(bad("the manifest is too large"));
@@ -659,6 +700,8 @@ pub struct InventoryReader {
     /// What the folders and items read so far hold, as [`MAX_HELD`] counts it.
     held: u64,
     ids: HashSet<ItemId>,
+    /// The person's own essentials, first first (format 3; empty from format 2).
+    personal: Vec<ItemId>,
     hash: Fingerprinter,
 }
 
@@ -687,7 +730,7 @@ impl InventoryReader {
         if format > INVENTORY_FORMAT {
             return Err(RecordError::NewerFormat { found: format });
         }
-        if format != INVENTORY_FORMAT {
+        if format != INVENTORY_FORMAT && format != UNORDERED_FORMAT {
             return Err(bad("an inventory format this app does not read"));
         }
         let mut id = [0u8; 16];
@@ -715,6 +758,25 @@ impl InventoryReader {
         let mut places = Vec::new();
         for _ in 0..places_n {
             places.push(r.place()?);
+        }
+        // The person's own essentials, first first: each an item the pages must hold, once.
+        let mut personal = Vec::new();
+        let mut held = 0;
+        if format == INVENTORY_FORMAT {
+            let n = r.u32()? as usize;
+            if n > crate::MAX_PERSONAL || n > items as usize {
+                return Err(bad("a personal order longer than the inventory allows"));
+            }
+            let mut seen = HashSet::with_capacity(n);
+            for _ in 0..n {
+                let mut one = [0u8; 16];
+                one.copy_from_slice(r.take(16)?);
+                if !seen.insert(one) {
+                    return Err(bad("an item twice in the personal order"));
+                }
+                personal.push(ItemId(one));
+            }
+            hold(&mut 0, &mut held, n as u64 * PERSONAL_COST)?;
         }
         if !r.rest.is_empty() {
             return Err(bad("the manifest has bytes after its end"));
@@ -750,10 +812,17 @@ impl InventoryReader {
             folder_keys: HashSet::new(),
             next_page: 0,
             items_read: 0,
-            held: 0,
+            held,
             ids: HashSet::new(),
+            personal,
             hash: Fingerprinter::new(manifest),
         })
+    }
+
+    /// The person's own essentials in the order they move, first first: checked against the
+    /// pages by [`finish`](Self::finish).
+    pub fn personal(&self) -> &[ItemId] {
+        &self.personal
     }
 
     /// The old laptop the inventory is from.
@@ -933,6 +1002,9 @@ impl InventoryReader {
         }
         if self.owner_used.contains(&false) || self.place_used.contains(&false) {
             return Err(bad("an owner or a place nothing uses"));
+        }
+        if self.personal.iter().any(|id| !self.ids.contains(id)) {
+            return Err(RecordError::BadPersonalOrder);
         }
         Ok(self.hash.finish())
     }
@@ -1254,7 +1326,7 @@ mod tests {
                 inclusion: Inclusion::Included,
             });
         }
-        let (enc, held_after) = encode_counted(&laptop, &items).unwrap();
+        let (enc, held_after) = encode_counted(&laptop, &items, None).unwrap();
         assert!(enc.pages.len() >= 3);
         let mut reader = InventoryReader::start(&enc.manifest).unwrap();
         for (page, written) in enc.pages.iter().zip(&held_after) {

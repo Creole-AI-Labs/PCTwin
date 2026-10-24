@@ -351,6 +351,43 @@ fn every_item_listed_leads_back_to_its_file_known_folders_included() {
     assert!(files >= 4, "{files}");
 }
 
+/// The person's own essentials (Product Spec "personal essentials"): what their records say they
+/// used most recently, then what they keep pinned, become the record's personal order, first
+/// first; only items of the record, each once; everything else keeps its place.
+#[test]
+fn what_the_person_used_most_recently_comes_first_then_what_they_pinned() {
+    let lab = lab();
+    write(&lab.ada.join("Documents/cv.docx"), 40);
+    write(&lab.ada.join("Documents/old.txt"), 40);
+    write(&lab.ada.join("code/site/index.html"), 50);
+    write(&lab.d.join("Photos/beach.jpg"), 200);
+    let mut s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let usage = pctwin_scan::Usage {
+        recent: vec![
+            (lab.ada.join("Documents/cv.docx"), Some(100)),
+            (lab.d.join("Photos/beach.jpg"), Some(200)),
+            // Opened recently, but not anything the sweep found: never in the order.
+            (lab.ada.join("gone.txt"), Some(300)),
+        ],
+        pinned: vec![lab.ada.join("code")],
+    };
+    pctwin_scan::order_by_use(&mut s, &usage);
+    let named: Vec<String> = s
+        .record
+        .personal
+        .iter()
+        .map(|id| shown(s.record.items.iter().find(|i| i.id == *id).unwrap()))
+        .collect();
+    assert_eq!(named[0], "Photos/beach.jpg");
+    assert_eq!(named[1], "cv.docx");
+    assert!(
+        named[2..].iter().any(|n| n.ends_with("index.html")),
+        "{named:?}"
+    );
+    assert!(!named.iter().any(|n| n.contains("old.txt")), "{named:?}");
+    s.record.validate().unwrap();
+}
+
 #[test]
 fn one_walker_on_a_hard_disk_and_up_to_four_on_an_ssd() {
     assert_eq!(DiskKind::Hdd.walkers(4), 1);

@@ -493,3 +493,46 @@ fn a_hand_made_approval_of_an_unapprovable_record_is_refused() {
         Err(RecordError::DeviceBoundIncluded)
     ));
 }
+
+/// The person's own essentials (Product Spec "personal essentials", decided 24 October 2026):
+/// only their order crosses, as a list of the record's own items, first first. It is part of the
+/// plan the person approves, and a record that names items it does not hold is refused.
+#[test]
+fn the_personal_order_is_part_of_the_plan_and_names_only_its_own_items() {
+    let (a, b) = (ada_file("a.txt"), ada_file("b.txt"));
+    let mut record = record_with(vec![a.clone(), b.clone()]);
+    let plain = record.fingerprint();
+    record.personal = vec![b.id, a.id];
+    record.validate().unwrap();
+    assert_ne!(
+        record.fingerprint(),
+        plain,
+        "the order is approved with the plan"
+    );
+    let back = Record::from_json(&record.to_json()).unwrap();
+    assert_eq!(back.personal, vec![b.id, a.id]);
+
+    let mut twice = record.clone();
+    twice.personal = vec![a.id, a.id];
+    assert!(twice.validate().is_err());
+    let mut stranger = record.clone();
+    stranger.personal = vec![ada_file("not-here.txt").id];
+    assert!(stranger.validate().is_err());
+    let mut many = record_with(vec![a.clone()]);
+    many.personal = vec![a.id; pctwin_record::MAX_PERSONAL + 1];
+    assert!(many.validate().is_err());
+}
+
+/// The order is added without changing what was there: a record with no order is written,
+/// fingerprinted and read exactly as before (format 1, the saved example and every fingerprint
+/// unchanged), and the field appears only when there is an order.
+#[test]
+fn a_record_without_a_personal_order_is_written_exactly_as_before() {
+    let mut record = record_with(vec![ada_file("a.txt")]);
+    let json = String::from_utf8(record.to_json()).unwrap();
+    assert!(!json.contains("\"personal\":"), "{json}");
+    assert_eq!(FORMAT, 1);
+    record.personal = vec![record.items[0].id];
+    let json = String::from_utf8(record.to_json()).unwrap();
+    assert!(json.contains("\"personal\":"), "{json}");
+}

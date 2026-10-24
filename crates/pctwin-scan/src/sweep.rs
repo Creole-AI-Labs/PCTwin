@@ -1108,26 +1108,26 @@ pub fn sweep_this_laptop(
     resume: Option<Frontier>,
 ) -> Sweep {
     let mut reader = crate::acl::system_reader();
-    sweep(
-        this_laptop_facts(laptop),
+    let facts = this_laptop_facts(laptop);
+    let usage = crate::usage::usage_of(&facts.census);
+    let mut found = sweep(
+        facts,
         reader.as_mut(),
         stop,
         checkpoint,
         &SweepLimits::default(),
         resume,
-    )
+    );
+    // The person's own essentials move first, in the order their records give.
+    crate::usage::order_by_use(&mut found, &usage);
+    found
 }
 
 /// What [`sweep_this_laptop`] is told about this laptop: its people, drives, the signed-in
 /// person's special folders and what their records remember, and the shipped rules.
 pub fn this_laptop_facts(laptop: LaptopId) -> SweepFacts {
     let census = crate::census::census_this_laptop();
-    let home = census
-        .me()
-        .and_then(|r| r.home.clone())
-        .or_else(dirs::home_dir)
-        .unwrap_or_default();
-    let usage = crate::usage::read_usage(&home);
+    let usage = crate::usage::usage_of(&census);
     let mut remembered: Vec<PathBuf> = usage.recent.into_iter().map(|(p, _)| p).collect();
     remembered.extend(usage.pinned);
     SweepFacts {

@@ -8,8 +8,11 @@ use crate::folders::is_within;
 /// At most this many recent files are read, newest first.
 const MAX_RECENT: usize = 5000;
 
-/// What the old laptop records about what this person uses. Read only on the old laptop, used only
-/// to set the order of the move, and never sent anywhere.
+/// What the old laptop records about what this person uses. Read only on the old laptop and used
+/// only to set the order of the move. These records never leave the old laptop: only the order
+/// they give (which of the person's things move first, in what order, never when or how anything
+/// was used) crosses, to the person's own new laptop over the sealed pairing link, as part of the
+/// plan they approve (decided 24 October 2026). Never uploaded, never sent to AI.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Usage {
     /// Files opened recently, with when (nanoseconds since 1970) when known.
@@ -262,6 +265,51 @@ pub fn personal_essentials(
         }
     }
     out
+}
+
+/// The record's personal order from `usage` (see [`Record::personal`]): the items of the sweep's
+/// record whose file the person opened recently, most recent first, then the items inside a
+/// folder they pinned; each item once, at most [`MAX_PERSONAL`]. Paths are matched exactly,
+/// through where the sweep found each place.
+///
+/// [`Record::personal`]: pctwin_record::Record::personal
+/// [`MAX_PERSONAL`]: pctwin_record::MAX_PERSONAL
+pub fn order_by_use(sweep: &mut crate::Sweep, usage: &Usage) {
+    let place_of: BTreeMap<ItemId, usize> = sweep.placed_by.iter().copied().collect();
+    let mut used: Vec<(i64, ItemId)> = Vec::new();
+    for item in &sweep.record.items {
+        let Some(root) = place_of.get(&item.id).and_then(|p| sweep.item_roots.get(p)) else {
+            continue;
+        };
+        let mut path = root.clone();
+        for part in item.path.parts() {
+            path.push(part.on_disk());
+        }
+        let when = usage
+            .recent
+            .iter()
+            .filter(|(p, _)| crate::folders::same_place(p, &path))
+            .map(|(_, when)| when.unwrap_or(0))
+            .max();
+        let pinned = usage.pinned.iter().any(|f| is_within(&path, f));
+        // A pinned folder's things without a time come after everything dated.
+        if let Some(when) = when.or(pinned.then_some(i64::MIN)) {
+            used.push((when, item.id));
+        }
+    }
+    used.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    used.truncate(pctwin_record::MAX_PERSONAL);
+    sweep.record.personal = used.into_iter().map(|(_, id)| id).collect();
+}
+
+/// The signed-in person's usage records (see [`read_usage`]), found through `census`.
+pub fn usage_of(census: &crate::Census) -> Usage {
+    let home = census
+        .me()
+        .and_then(|r| r.home.clone())
+        .or_else(dirs::home_dir)
+        .unwrap_or_default();
+    read_usage(&home)
 }
 
 /// Most entries read from a Quick Access list (it holds a few hundred at most).

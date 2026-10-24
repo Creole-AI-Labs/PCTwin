@@ -23,6 +23,7 @@ pub mod inventory;
 pub use inventory::{
     EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_HELD, MAX_PAGE_BYTES, MAX_PAGE_HELD,
     MAX_PATH_BYTES, MAX_PATH_DEPTH, PAGE_ITEMS, decode_inventory, encode_inventory,
+    encode_inventory_ordered,
 };
 use sha2::{Digest, Sha256};
 
@@ -61,6 +62,8 @@ pub enum RecordError {
     Random,
     #[error("this inventory cannot be read: {0}")]
     BadInventory(&'static str),
+    #[error("the order of the person's own essentials names an item twice or one not in the plan")]
+    BadPersonalOrder,
 }
 
 /// Writes fixed-size IDs as lowercase hex.
@@ -540,7 +543,19 @@ pub struct Record {
     pub previous: Option<Fingerprint>,
     pub items: Vec<Item>,
     pub mapping: Mapping,
+    /// The person's own essentials, first first: items of this record they used most recently
+    /// or keep pinned, which move before the rest (Product Spec "personal essentials", decided
+    /// 24 October 2026). Only this order is kept and crosses to their own new laptop, over the
+    /// sealed pairing link: never when or how anything was used, and never to anyone else. It is
+    /// part of the plan the person approves (it counts in the fingerprint). At most
+    /// [`MAX_PERSONAL`]. Written only when there is one, so a record without it is written and
+    /// fingerprinted exactly as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub personal: Vec<ItemId>,
 }
+
+/// Most items in the personal order (the most recently used are kept).
+pub const MAX_PERSONAL: usize = 10_000;
 
 /// The person's approval of one revision of the plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -564,6 +579,7 @@ impl Record {
                 people: BTreeMap::new(),
                 shared: SharedTarget::SharedFolder,
             },
+            personal: Vec::new(),
         }
     }
 
@@ -645,6 +661,18 @@ impl Record {
             if let Owner::Person { account_id } = &item.owner {
                 people.insert(account_id.as_str());
             }
+        }
+        // The personal order names only this record's own items, each once.
+        if self.personal.len() > MAX_PERSONAL {
+            return Err(RecordError::BadPersonalOrder);
+        }
+        let mut ordered = HashSet::new();
+        if self
+            .personal
+            .iter()
+            .any(|id| !ids.contains(id) || !ordered.insert(*id))
+        {
+            return Err(RecordError::BadPersonalOrder);
         }
         let mut existing = HashSet::new();
         let mut created = HashSet::new();

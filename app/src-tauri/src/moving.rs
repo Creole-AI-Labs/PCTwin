@@ -3025,6 +3025,12 @@ mod tests {
         assert!(view.first.contains(&FolderRole::Desktop));
         assert!(view.first.contains(&FolderRole::Documents));
         assert!(!view.first.contains(&FolderRole::Music));
+
+        // The mover's own essentials (the old laptop's personal order) go first, and the plan
+        // says so: their song's group leads.
+        record.personal = vec![record.items[0].id];
+        let view = plan_view(&record, &preview(), &rules(), &shown);
+        assert_eq!(view.first.first(), Some(&FolderRole::Music));
     }
 
     #[test]

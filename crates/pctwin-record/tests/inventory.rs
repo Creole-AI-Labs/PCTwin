@@ -301,10 +301,11 @@ fn the_same_item_twice_across_pages_is_refused() {
 #[test]
 fn a_newer_format_says_so() {
     let mut enc = encode_inventory(&laptop(), &awkward()).unwrap();
-    enc.manifest[8..12].copy_from_slice(&3u32.to_be_bytes());
+    let newer = pctwin_record::INVENTORY_FORMAT + 1;
+    enc.manifest[8..12].copy_from_slice(&newer.to_be_bytes());
     assert!(matches!(
         refused(&enc),
-        RecordError::NewerFormat { found: 3 }
+        RecordError::NewerFormat { found } if found == newer
     ));
 }
 
@@ -880,4 +881,55 @@ fn pages_read_into_one_list_give_the_same_items_and_a_refusal_adds_none() {
     bad.push(0);
     assert!(reader.page_into(&bad, &mut some).is_err());
     assert_eq!(some, kept);
+}
+
+/// Format 3 (move protocol 4): the manifest also carries the person's own essentials in order,
+/// as items of the inventory, first first; format 2 (move protocol 3) carries none and reads as
+/// before.
+#[test]
+fn the_personal_order_crosses_in_format_3_and_never_in_format_2() {
+    let items = awkward();
+    let files: Vec<ItemId> = items.iter().rev().take(3).map(|i| i.id).collect();
+    let enc = pctwin_record::encode_inventory_ordered(&laptop(), &items, &files).unwrap();
+    let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+    let mut back = Vec::new();
+    for page in &enc.pages {
+        back.extend(reader.page(page).unwrap());
+    }
+    assert_eq!(reader.personal(), files.as_slice());
+    assert_eq!(back, items);
+    reader.finish().unwrap();
+
+    let old = encode_inventory(&laptop(), &items).unwrap();
+    let reader = InventoryReader::start(&old.manifest).unwrap();
+    assert!(reader.personal().is_empty());
+    assert_ne!(old.manifest, enc.manifest);
+}
+
+/// The order is read as from a stranger: an item it names that the pages never hold, or one named
+/// twice, is refused; so is an order longer than any honest laptop sends.
+#[test]
+fn a_personal_order_naming_what_is_not_there_is_refused() {
+    let items = awkward();
+    let first = items[0].id;
+    let stranger: Vec<u8> = (0..16u8).map(|b| 0xf0 | b).collect();
+    assert!(pctwin_record::encode_inventory_ordered(&laptop(), &items, &[first, first]).is_err());
+    // Made honestly, then its last listed ID swapped for one the pages never hold.
+    let mut enc = pctwin_record::encode_inventory_ordered(&laptop(), &items, &[first]).unwrap();
+    let n = enc.manifest.len();
+    enc.manifest[n - 16..].copy_from_slice(&stranger);
+    let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+    for page in &enc.pages {
+        reader.page(page).unwrap();
+    }
+    assert!(reader.finish().is_err());
+    // Twice in a manifest is refused as soon as the manifest is read.
+    let mut enc =
+        pctwin_record::encode_inventory_ordered(&laptop(), &items, &[first, items[1].id]).unwrap();
+    let n = enc.manifest.len();
+    let last = enc.manifest[n - 32..n - 16].to_vec();
+    enc.manifest[n - 16..].copy_from_slice(&last);
+    assert!(InventoryReader::start(&enc.manifest).is_err());
+    let too_many = vec![first; pctwin_record::MAX_PERSONAL + 1];
+    assert!(pctwin_record::encode_inventory_ordered(&laptop(), &items, &too_many).is_err());
 }

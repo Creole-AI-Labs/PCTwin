@@ -98,9 +98,9 @@ pub use sweep::{
     sweep_this_laptop, this_laptop_facts,
 };
 pub use usage::{
-    Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials,
+    Usage, bookmarks_from_gtk, order_by_use, parse_iso_utc_ns, personal_essentials,
     pinned_from_finder_favourites, pinned_from_quick_access, read_usage, recent_from_lnk_dir,
-    recent_from_mdfind, recent_from_xbel,
+    recent_from_mdfind, recent_from_xbel, usage_of,
 };
 pub use volumes::{DiskKind, Volume, VolumeKind, logical_disks, volume_kind, volumes_this_laptop};
 pub use whose::{Facts as PlaceFacts, HomeOf, People, Placement, Rule, Whose, place};

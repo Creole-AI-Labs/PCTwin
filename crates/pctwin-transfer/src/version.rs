@@ -62,6 +62,12 @@ pub const KEYED_SINCE: u16 = 4;
 /// tells the old laptop of the pause. Version 4 has not been released, so it carries this too.
 pub const SET_DOWN_SINCE: u16 = 4;
 
+/// The first move protocol version whose list (the scan inventory version 3) carries the
+/// person's own essentials in the order they move, so the plan the new laptop shows is the
+/// order the old laptop sends in. Only the order crosses, never when anything was used. Version
+/// 4 has not been released, so it carries this too.
+pub const PERSONAL_SINCE: u16 = 4;
+
 /// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).
 const KIND: u8 = 34;
 const LEN: usize = 5;
