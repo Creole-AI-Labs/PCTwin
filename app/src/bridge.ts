@@ -248,7 +248,7 @@ export const listenPairingNew = (handler: (event: NewEvent) => void): Promise<Un
 /* ---------- The move (src-tauri/src/moving.rs) ---------- */
 
 /** Why a move command was refused (`MoveProblem`). */
-export const MOVE_PROBLEMS = ["not-paired", "busy", "not-moving", "plan-changed", "failed"] as const;
+export const MOVE_PROBLEMS = ["not-paired", "busy", "not-moving", "plan-changed", "failed", "too-many-files"] as const;
 export type MoveProblem = { kind: (typeof MOVE_PROBLEMS)[number] };
 
 /** What the move is at before files move (`Stage`): `administrator` while the system's approval prompt is up (M25). */

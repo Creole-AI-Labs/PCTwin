@@ -1410,6 +1410,7 @@ qs-label-other = O outro notebook
 qs-wait-title = Aguardando os arquivos.
 qs-wait-body = Os notebooks estão pareados. Você vai ver o que está sendo oferecido antes de receber qualquer coisa.
 qs-pick-failed = Não foi possível abrir o seletor. Tente de novo.
+qs-pick-too-many = São mais arquivos do que um único envio comporta. Desmarque algumas pastas ou envie-as em partes.
 qs-problem-lost-title = A conexão com o outro notebook foi perdida.
 qs-problem-failed-title = Desta vez não foi possível enviar os arquivos.
 qs-problem-body = O que já foi recebido e verificado fica onde está. Pareie os notebooks de novo para tentar outra vez.

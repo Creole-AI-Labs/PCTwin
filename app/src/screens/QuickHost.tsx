@@ -15,6 +15,7 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  toMoveProblem,
   type QsFolder,
   type QsProblem,
   type QsReceipt,
@@ -79,6 +80,7 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
   const [confirmed, setConfirmed] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [tooMany, setTooMany] = useState(false);
   const [dragging, setDragging] = useState(false);
   const live = useRef(true);
   const me: Label = { kind: "named", name: l10n.getString("qs-label-this") };
@@ -168,15 +170,28 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
             onAllowAccess={() => undefined}
             onContinue={() => {
               const ids = items.filter((i) => i.included && !i.problem).map((i) => i.id);
-              qsOffer(ids).then((files) => {
-                setOffered(files);
-                setChecked(false);
-                setView({ kind: "review", files });
-              }, fail);
+              setTooMany(false);
+              qsOffer(ids).then(
+                (files) => {
+                  setOffered(files);
+                  setChecked(false);
+                  setView({ kind: "review", files });
+                },
+                (error: unknown) => {
+                  // Said before anything is sent, on the page where the choice can change.
+                  if (toMoveProblem(error).kind === "too-many-files") setTooMany(true);
+                  else fail();
+                },
+              );
             }}
             onBack={onHome}
           />
           {failed && <Banner tone="attention">{l10n.getString("qs-pick-failed")}</Banner>}
+          {tooMany && (
+            <div role="alert">
+              <Banner tone="attention">{l10n.getString("qs-pick-too-many")}</Banner>
+            </div>
+          )}
         </>
       );
     case "review":

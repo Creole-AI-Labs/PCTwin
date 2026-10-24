@@ -86,6 +86,26 @@ describe("sending", () => {
   });
 });
 
+describe("too many files for one send", () => {
+  it("is said plainly on the choosing page, before anything is sent", async () => {
+    replies.quicksend_pick = () => [{ id: "p1", name: "Everything", kind: "folder", included: true, bytes: null, files: null }];
+    replies.quicksend_offer = () => {
+      throw { kind: "too-many-files" };
+    };
+    inApp(<QuickHost mode="send" onHome={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-add-files")) }));
+    await waitFor(() => {
+      expect(screen.getByText("Everything")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-choose-continue")) }));
+    await waitFor(() => {
+      expect(screen.getAllByRole("alert").some((a) => a.textContent?.includes(text("qs-pick-too-many")))).toBe(true);
+    });
+    expect(heading()).toBe(text("qs-choose-title"));
+    expect(tauri.invoke).not.toHaveBeenCalledWith("quicksend_send", expect.anything());
+  });
+});
+
 describe("sending the missing pieces (Q19)", () => {
   it("from a sender's receipt with things that did not arrive, offers only those again and checks them as any send", async () => {
     replies.quicksend_offer_missing = () => offeredExamples.slice(0, 1);

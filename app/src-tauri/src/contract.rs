@@ -130,6 +130,7 @@ fn move_problems() -> Vec<MoveProblem> {
         MoveProblem::NotMoving,
         MoveProblem::PlanChanged,
         MoveProblem::Failed,
+        MoveProblem::TooManyFiles,
     ]
 }
 

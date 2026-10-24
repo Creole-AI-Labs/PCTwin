@@ -487,6 +487,8 @@ pctwin_types::listed_enum! {
         PlanChanged,
         /// The new laptop's folders could not be got ready.
         Failed,
+        /// What was chosen holds more files than one send can carry (Quick Send): choose less.
+        TooManyFiles,
     }
 }
 

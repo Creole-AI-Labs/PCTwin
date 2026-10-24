@@ -1246,6 +1246,7 @@ qs-label-other = The other laptop
 qs-wait-title = Waiting for the files.
 qs-wait-body = The laptops are paired. You will see what is offered before anything is received.
 qs-pick-failed = The picker could not open. Try again.
+qs-pick-too-many = That is more files than one send can carry. Untick some folders, or send them in parts.
 qs-problem-lost-title = The connection to the other laptop was lost.
 qs-problem-failed-title = The files could not be sent this time.
 qs-problem-body = Anything already received and checked stays where it is. Pair the laptops again to try once more.

@@ -1164,6 +1164,7 @@ qs-label-other = 另一台笔记本电脑
 qs-wait-title = 正在等待文件。
 qs-wait-body = 两台笔记本电脑已配对。接收任何内容之前，你会先看到对方提供了什么。
 qs-pick-failed = 无法打开选择窗口。请重试。
+qs-pick-too-many = 文件太多，一次发送装不下。请取消勾选一些文件夹，或分几次发送。
 qs-problem-lost-title = 与另一台笔记本电脑的连接已断开。
 qs-problem-failed-title = 这次未能发送文件。
 qs-problem-body = 已接收并检查的内容会保留在原处。重新配对两台笔记本电脑即可再试一次。

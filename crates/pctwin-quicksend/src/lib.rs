@@ -57,7 +57,13 @@ pub enum QuickError {
     Destination(String),
     #[error("the other laptop did not answer the offer in time")]
     NotAnswered,
+    #[error("there are more files ({files} so far) than one send can carry")]
+    TooMany { files: usize },
 }
+
+/// Past this many items an offer stops counting (one send carries fewer still: see
+/// [`QuickError::TooMany`]), so choosing a vast folder never fills this laptop's memory.
+const MOST_OFFERED_ITEMS: usize = 1_000_000;
 
 /// How long the sender waits for the receiver's person to answer the offer before it ends,
 /// honestly, as not answered.
@@ -122,6 +128,13 @@ impl Offer {
     /// receiver knows which it already holds, whole or partway. With
     /// [`only_missing`](Self::only_missing), "Send the missing pieces".
     pub fn of_again(chosen: &[PathBuf], laptop: LaptopId) -> Result<Self, QuickError> {
+        Self::of_within(chosen, laptop, pctwin_record::MAX_HELD)
+    }
+
+    /// As [`of_again`](Self::of_again), refusing an offer whose list the receiver could not hold
+    /// within `held` bytes (the receiver's limit for one list: [`pctwin_record::MAX_HELD`]), said
+    /// plainly before anything is sent ([`QuickError::TooMany`]).
+    fn of_within(chosen: &[PathBuf], laptop: LaptopId, held: u64) -> Result<Self, QuickError> {
         if chosen.is_empty() {
             return Err(QuickError::NothingChosen);
         }
@@ -181,11 +194,25 @@ impl Offer {
                     }
                     record.items.push(found);
                 }
+                if record.items.len() > MOST_OFFERED_ITEMS {
+                    return Err(QuickError::TooMany {
+                        files: record.items.len(),
+                    });
+                }
             } else {
                 return Err(QuickError::NotThere(path.clone()));
             }
         }
         record.validate()?;
+        if !pctwin_record::fits_one_move(&record.items, held)? {
+            return Err(QuickError::TooMany {
+                files: record
+                    .items
+                    .iter()
+                    .filter(|i| i.kind == ItemKind::File)
+                    .count(),
+            });
+        }
         // Sent as a move sends: in the order a move plans, each landing inside the chosen folder.
         // What a folder holds that cannot be read is left out by the record and not sent.
         let jobs = pctwin_move::send_plan(&record, |i| sources.get(&i.id).cloned(), landing).jobs;
@@ -744,6 +771,32 @@ mod tests {
             Outcome::Arrived {
                 landed_as: "Holiday/beach.jpg".into()
             }
+        );
+    }
+
+    /// Exit-gate review (24 October 2026): a folder holding more files than the receiver can take
+    /// in one list is refused when the offer is made, before anything is sent, saying how many.
+    #[test]
+    fn an_offer_of_more_files_than_one_send_carries_is_refused_before_sending() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("Big");
+        std::fs::create_dir_all(&folder).unwrap();
+        for n in 0..40 {
+            std::fs::write(folder.join(format!("{n}.txt")), b"x").unwrap();
+        }
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let fits = Offer::of_within(
+            std::slice::from_ref(&folder),
+            laptop,
+            pctwin_record::MAX_HELD,
+        );
+        assert_eq!(fits.unwrap().files().len(), 40);
+        // A receiver that could hold far less: refused, saying how many.
+        let too_many = Offer::of_within(&[folder], laptop, 1);
+        assert!(
+            matches!(too_many, Err(QuickError::TooMany { files: 40 })),
+            "{:?}",
+            too_many.err()
         );
     }
 

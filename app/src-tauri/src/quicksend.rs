@@ -410,7 +410,7 @@ pub async fn quicksend_offer(
     let offer = tauri::async_runtime::spawn_blocking(move || Offer::of(&paths))
         .await
         .map_err(|_| MoveProblem::Failed)?
-        .map_err(|_| MoveProblem::Failed)?;
+        .map_err(|e| offer_problem(&e))?;
     let files = offered(offer.files());
     *lock(&qs.offer) = Some(offer);
     Ok(files)
@@ -435,10 +435,19 @@ pub async fn quicksend_offer_missing(
     })
     .await
     .map_err(|_| MoveProblem::Failed)?
-    .map_err(|_| MoveProblem::Failed)?;
+    .map_err(|e| offer_problem(&e))?;
     let files = offered(offer.files());
     *lock(&qs.offer) = Some(offer);
     Ok(files)
+}
+
+/// Why an offer could not be made, as the screens say it: too many files is said as that, before
+/// anything is sent.
+fn offer_problem(e: &pctwin_quicksend::QuickError) -> MoveProblem {
+    match e {
+        pctwin_quicksend::QuickError::TooMany { .. } => MoveProblem::TooManyFiles,
+        _ => MoveProblem::Failed,
+    }
 }
 
 /// The sender: sends the offer over the paired link (Q11 Start).
@@ -820,6 +829,18 @@ mod tests {
         }
         assert!(lock(&qs.folder).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_offer_of_too_many_files_is_said_as_that() {
+        assert_eq!(
+            offer_problem(&pctwin_quicksend::QuickError::TooMany { files: 2_000_000 }),
+            MoveProblem::TooManyFiles
+        );
+        assert_eq!(
+            offer_problem(&pctwin_quicksend::QuickError::NothingChosen),
+            MoveProblem::Failed
+        );
     }
 
     fn tempfile_dir() -> PathBuf {

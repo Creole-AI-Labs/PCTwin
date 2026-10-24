@@ -13,5 +13,8 @@
   },
   {
     "kind": "failed"
+  },
+  {
+    "kind": "too-many-files"
   }
 ]

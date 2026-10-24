@@ -1406,6 +1406,7 @@ qs-label-other = El otro portátil
 qs-wait-title = Esperando los archivos.
 qs-wait-body = Los portátiles están emparejados. Verás lo que se ofrece antes de recibir nada.
 qs-pick-failed = No se pudo abrir el selector. Inténtalo de nuevo.
+qs-pick-too-many = Son más archivos de los que caben en un solo envío. Desmarca algunas carpetas o envíalas por partes.
 qs-problem-lost-title = Se perdió la conexión con el otro portátil.
 qs-problem-failed-title = Esta vez no se pudieron enviar los archivos.
 qs-problem-body = Lo que ya se recibió y comprobó se queda donde está. Vuelve a emparejar los portátiles para intentarlo otra vez.
