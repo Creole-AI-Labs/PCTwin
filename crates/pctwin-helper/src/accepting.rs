@@ -572,10 +572,11 @@ mod tests {
         let mut root = call(addr, 0);
         writeln!(root, "open").unwrap();
         let mut end = [0u8; 1];
-        again
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .unwrap();
-        assert!(matches!(again.read(&mut end), Ok(0) | Err(_)));
+        // Let go at once: on a Mac, a connection the door has already cut refuses even a wait to
+        // be set ("invalid argument"), which is the same answer.
+        if again.set_read_timeout(Some(Duration::from_secs(5))).is_ok() {
+            assert!(matches!(again.read(&mut end), Ok(0) | Err(_)));
+        }
         let mut mover = call(addr, 502);
         writeln!(mover, "open").unwrap();
         assert_eq!(first.join().unwrap().unwrap(), 502);
