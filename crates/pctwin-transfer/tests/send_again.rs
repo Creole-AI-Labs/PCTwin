@@ -4826,10 +4826,21 @@ async fn a_drive_that_pauses_the_move_takes_nothing_more_of_the_files_on_their_w
         assert_eq!(failed, 3, "paused at the third, nothing more ended there");
         // Ended by the person's stop, never run on to the end.
         assert!(received.is_err());
-        assert_ne!(
-            sender.outcome(id(FILES as u8 - 1)),
-            Some(&SendOutcome::Arrived)
-        );
+        // A file set down and never picked up again is never counted as arrived, on either
+        // laptop: the new laptop has no ending for it (the report says it did not arrive), and
+        // the old laptop never heard it arrived.
+        for n in 0..FILES {
+            if receiver.outcome(id(n as u8)).is_none() {
+                assert!(
+                    !matches!(
+                        sender.outcome(id(n as u8)),
+                        Some(SendOutcome::Arrived | SendOutcome::AlreadyThere)
+                    ),
+                    "file {n}: {:?}",
+                    sender.outcome(id(n as u8))
+                );
+            }
+        }
     }
 }
 

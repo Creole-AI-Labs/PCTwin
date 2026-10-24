@@ -225,4 +225,32 @@ mod tests {
         // Both open files can be tried again; the removed one cannot.
         assert_eq!(to_try_again(&received), BTreeSet::from([open.id, mine.id]));
     }
+
+    /// A file the new laptop set down partway when its place's drive paused the move, and never
+    /// picked up again (the person stopped), has no ending: it is reported as failed, never as
+    /// copied, for the mover and for anyone else.
+    #[test]
+    fn a_file_set_down_and_never_picked_up_is_failed_never_copied() {
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut record = Record::new(laptop);
+        let (mine, bea) = (item("1000", "ada.txt"), item("1001", "bea.txt"));
+        record.items = vec![mine.clone(), bea.clone()];
+        let received = Received {
+            record,
+            files: [&mine, &bea]
+                .iter()
+                .map(|i| ReceivedFile {
+                    item: i.id,
+                    outcome: None,
+                    changed_since_scan: false,
+                })
+                .collect(),
+            ended: Ended::StoppedHere,
+        };
+        let report = for_the_mover(&received, "1000");
+        assert_eq!(report.own.len(), 1);
+        assert_eq!(report.own[0].result, FileResult::Failed);
+        let b = &report.people["1001"];
+        assert_eq!((b.copied, b.failed, b.bytes_copied), (0, 1, 0));
+    }
 }
