@@ -24,7 +24,8 @@ env:
 jobs:
   ui:
     # Also on Windows: the screen tests once failed there alone (16 October 2026), while Linux passed.
-    name: Screens (type check, lint, unit tests, build) (${{ matrix.os }})
+    # The Linux run keeps the exact name main's protection requires; the Windows run is named apart.
+    name: ${{ matrix.os == 'ubuntu-latest' && 'Screens (type check, lint, unit tests, build)' || format('Screens (type check, lint, unit tests, build) ({0})', matrix.os) }}
     strategy:
       fail-fast: false
       matrix:
