@@ -1,6 +1,7 @@
 //! Headless move for the test lab. Run the two sides as two user accounts:
 //!
 //!     pctwin-labmove send    <handoff> <report.json> [--lab <folder> <account>]
+//!         (PCTWIN_LAB_BIND=<address:port> to listen on one address, as on two machines)
 //!     pctwin-labmove receive <handoff> <report.json> <journal> [--lab <folder> <account>]
 //!     pctwin-labmove check   <before.json> <source-after.json> <dest.json> <sent.json> <received.json> [--only <made.json>]
 //!     pctwin-labmove fill-profile [seed] [ordinary files] [big file bytes]
@@ -58,7 +59,10 @@ fn write(report: &Report, out: &str) -> Result<(), String> {
 async fn run(args: &[String]) -> Result<bool, String> {
     match args {
         [side, handoff, out, rest @ ..] if side == "send" => {
-            let r = send(folders(rest)?, handoff.as_ref(), "0.0.0.0:0").await?;
+            // PCTWIN_LAB_BIND: the address to listen on (two machines on a virtual network, where
+            // loopback is not shared); by default every address, reached through loopback.
+            let bind = std::env::var("PCTWIN_LAB_BIND").unwrap_or_else(|_| "0.0.0.0:0".into());
+            let r = send(folders(rest)?, handoff.as_ref(), &bind).await?;
             write(&r, out)?;
             Ok(true)
         }
