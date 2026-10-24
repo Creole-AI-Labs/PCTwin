@@ -232,3 +232,29 @@ fn resumes_are_limited() {
         PairingError::LaneRefused
     );
 }
+
+/// Exit-gate review (24 October 2026): the laptop's own clock (`Instant`) stops while a Mac sleeps,
+/// so a time limit read on it alone would still be open after a night asleep. Every limit is also
+/// kept on the calendar clock: resume keys a day old by the calendar are refused, whatever the
+/// laptop's own clock says, and so is a confirmation left waiting through a sleep.
+#[test]
+fn a_limit_passed_while_the_laptop_slept_is_passed() {
+    let at = Instant::now();
+    let (_old, mut new, _, _) = approved(&PLAN, &PLAN, at);
+    // A night asleep: the calendar moves on, the laptop's own clock does not.
+    pctwin_pairing::clock::move_calendar(RESUME_LIFETIME + Duration::from_secs(60));
+    assert!(matches!(new.open(at), Err(PairingError::Expired)));
+
+    // A pairing left waiting for the person's choice through a sleep.
+    let code = PairingCode::generate().unwrap();
+    let now = Instant::now();
+    let (sender, msg1) = SenderSession::start(&code, now);
+    let (receiver, msg2) = ReceiverSession::respond(&code, &msg1, now).unwrap();
+    let (sender_waiting, msg3) = sender.receive(&msg2, now).unwrap();
+    let (waiting, msg4) = receiver.receive(&msg3, now).unwrap();
+    let choosing = sender_waiting.receive_reveal(&msg4, now).unwrap();
+    pctwin_pairing::clock::move_calendar(
+        pctwin_pairing::CONFIRMATION_TIMEOUT + Duration::from_secs(1),
+    );
+    assert!(choosing.choose(waiting.match_number(), now).is_err());
+}

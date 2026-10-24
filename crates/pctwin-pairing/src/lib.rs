@@ -56,8 +56,9 @@
 //! - Session tags are public, so anyone who sees message 1 can spend that code's single attempt
 //!   with a junk reply (and repeated junk replies trigger the lockout). Binding attempts to one
 //!   network connection belongs to the transport layer.
-//! - Time is supplied by the caller. `Instant` does not count suspend on every platform, so the
-//!   app must rotate the code when the laptop wakes from sleep.
+//! - Time is supplied by the caller. `Instant` does not count suspend on every platform (macOS
+//!   pauses it in sleep), so every deadline is also kept on the calendar clock, and is passed
+//!   when either clock passes it; the app also rotates the code when the laptop wakes.
 //! - Starting a session panics if the operating system's random source fails, as SPAKE2 does.
 
 use std::collections::BTreeSet;
@@ -72,6 +73,54 @@ use sha2::{Digest, Sha256};
 use snow::{Builder, HandshakeState, TransportState};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
+/// A time limit kept on both clocks: the caller's `Instant` (which macOS pauses while the laptop
+/// sleeps) and the calendar clock (which counts sleep). It is passed when either has passed it, so
+/// a laptop that slept through a limit never finds it still open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Deadline {
+    mono: Instant,
+    wall: SystemTime,
+}
+
+impl Deadline {
+    fn after(now: Instant, wait: Duration) -> Self {
+        Self {
+            mono: now + wait,
+            wall: wall_now() + wait,
+        }
+    }
+
+    fn passed(&self, now: Instant) -> bool {
+        now > self.mono || wall_now() > self.wall
+    }
+}
+
+/// The calendar clock, as deadlines read it (moved forward on this thread by
+/// [`clock::move_calendar`] in tests).
+fn wall_now() -> SystemTime {
+    SystemTime::now() + clock::shift()
+}
+
+/// For tests: the calendar clock moved forward, as it is after a sleep, on this thread only.
+#[doc(hidden)]
+pub mod clock {
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    thread_local! {
+        static SHIFT: Cell<Duration> = const { Cell::new(Duration::ZERO) };
+    }
+
+    /// Moves this thread's calendar clock forward by `by`, as a sleep does.
+    pub fn move_calendar(by: Duration) {
+        SHIFT.with(|s| s.set(s.get() + by));
+    }
+
+    pub(crate) fn shift() -> Duration {
+        SHIFT.with(Cell::get)
+    }
+}
 
 /// Version of the pairing protocol carried in every message.
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -372,7 +421,7 @@ pub struct SenderSession {
     id: [u8; SESSION_ID_LEN],
     spake: Spake2<Ed25519Group>,
     spake_a: Vec<u8>,
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl SenderSession {
@@ -399,7 +448,7 @@ impl SenderSession {
                 id,
                 spake,
                 spake_a,
-                deadline: now + CODE_LIFETIME + ROTATION_GRACE,
+                deadline: Deadline::after(now, CODE_LIFETIME + ROTATION_GRACE),
             },
             msg1,
         )
@@ -412,7 +461,7 @@ impl SenderSession {
         msg2: &[u8],
         now: Instant,
     ) -> Result<(SenderAwaitingReveal, Vec<u8>), PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg2, KIND_SPAKE_B_NOISE_1)?;
@@ -458,7 +507,7 @@ impl SenderSession {
                 handshake_hash,
                 confirm,
                 commitment,
-                deadline: now + CONFIRMATION_TIMEOUT,
+                deadline: Deadline::after(now, CONFIRMATION_TIMEOUT),
             },
             msg3,
         ))
@@ -472,13 +521,13 @@ pub struct SenderAwaitingReveal {
     handshake_hash: Vec<u8>,
     confirm: ConfirmKeys,
     commitment: [u8; COMMIT_LEN],
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl SenderAwaitingReveal {
     /// When the sender stops waiting for the reveal.
     pub fn deadline(&self) -> Instant {
-        self.deadline
+        self.deadline.mono
     }
 
     /// Handles message 4 at time `now`. Returns the three numbers to offer the person. Junk,
@@ -489,7 +538,7 @@ impl SenderAwaitingReveal {
         msg4: &[u8],
         now: Instant,
     ) -> Result<SenderChoosing, Rejected<Self>> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(Rejected::end(PairingError::Expired));
         }
         let payload = match parse_frame(msg4, KIND_REVEAL) {
@@ -528,7 +577,7 @@ pub struct SenderChoosing {
     confirm: ConfirmKeys,
     correct: u8,
     choices: [u8; 3],
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl SenderChoosing {
@@ -539,7 +588,7 @@ impl SenderChoosing {
 
     /// When the sender stops waiting for the person's pick.
     pub fn deadline(&self) -> Instant {
-        self.deadline
+        self.deadline.mono
     }
 
     /// Records the person's pick at time `now`. The right number unlocks the sender and returns
@@ -547,7 +596,7 @@ impl SenderChoosing {
     /// deadline, cancels pairing. To cancel without picking (for example when none of the three
     /// numbers matches the receiver), drop this value.
     pub fn choose(self, picked: u8, now: Instant) -> Result<(Paired, Vec<u8>), PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         if picked != self.correct {
@@ -568,7 +617,7 @@ pub struct ReceiverSession {
     hs: HandshakeState,
     psk: Zeroizing<[u8; 32]>,
     nonce: Zeroizing<[u8; NONCE_LEN]>,
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl ReceiverSession {
@@ -615,7 +664,7 @@ impl ReceiverSession {
                 hs,
                 psk,
                 nonce,
-                deadline: now + REPLY_TIMEOUT,
+                deadline: Deadline::after(now, REPLY_TIMEOUT),
             },
             frame(KIND_SPAKE_B_NOISE_1, &payload),
         ))
@@ -630,7 +679,7 @@ impl ReceiverSession {
         msg3: &[u8],
         now: Instant,
     ) -> Result<(ReceiverAwaitingApproval, Vec<u8>), Rejected<Self>> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(Rejected::end(PairingError::Expired));
         }
         let payload = match parse_frame(msg3, KIND_NOISE_2) {
@@ -659,7 +708,7 @@ impl ReceiverSession {
                 lane_secret,
                 confirm,
                 match_number,
-                deadline: now + CONFIRMATION_TIMEOUT,
+                deadline: Deadline::after(now, CONFIRMATION_TIMEOUT),
             },
             frame(KIND_REVEAL, &reveal),
         ))
@@ -672,7 +721,7 @@ pub struct ReceiverAwaitingApproval {
     lane_secret: Zeroizing<[u8; 32]>,
     confirm: ConfirmKeys,
     match_number: u8,
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl ReceiverAwaitingApproval {
@@ -683,14 +732,14 @@ impl ReceiverAwaitingApproval {
 
     /// When the receiver stops waiting for the approval.
     pub fn deadline(&self) -> Instant {
-        self.deadline
+        self.deadline.mono
     }
 
     /// Handles message 5 at time `now`. Succeeds only for a genuine approval from this session
     /// carrying the receiver's own number. Junk, truncated or forged messages hand the waiting
     /// state back; a wrong number, a malformed approval or a missed deadline ends the pairing.
     pub fn receive_approval(self, msg5: &[u8], now: Instant) -> Result<Paired, Rejected<Self>> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(Rejected::end(PairingError::Expired));
         }
         let payload = match parse_frame(msg5, KIND_APPROVE) {
@@ -809,7 +858,7 @@ impl LaneKeys {
             secret,
             self.lanes.opens,
             &RESUMES,
-            Some(now + RESUME_LIFETIME),
+            Some(Deadline::after(now, RESUME_LIFETIME)),
         )))
     }
 }
@@ -878,7 +927,7 @@ struct Openings {
     next: u32,
     used: BTreeSet<u32>,
     purpose: &'static Purpose,
-    expires: Option<Instant>,
+    expires: Option<Deadline>,
 }
 
 impl Openings {
@@ -886,7 +935,7 @@ impl Openings {
         secret: Zeroizing<[u8; 32]>,
         opens: bool,
         purpose: &'static Purpose,
-        expires: Option<Instant>,
+        expires: Option<Deadline>,
     ) -> Self {
         Self {
             secret,
@@ -900,7 +949,7 @@ impl Openings {
 
     fn check_time(&self, now: Instant) -> Result<(), PairingError> {
         match self.expires {
-            Some(expires) if now > expires => Err(PairingError::Expired),
+            Some(expires) if expires.passed(now) => Err(PairingError::Expired),
             _ => Ok(()),
         }
     }
@@ -928,7 +977,7 @@ impl Openings {
                 hs,
                 psk,
                 lane: number,
-                deadline: now + REPLY_TIMEOUT,
+                deadline: Deadline::after(now, REPLY_TIMEOUT),
                 purpose: self.purpose,
             },
             frame(self.purpose.kinds[0], &payload),
@@ -977,7 +1026,7 @@ impl Openings {
                 transport,
                 confirm,
                 lane: number,
-                deadline: now + REPLY_TIMEOUT,
+                deadline: Deadline::after(now, REPLY_TIMEOUT),
                 purpose: self.purpose,
             },
             frame(self.purpose.kinds[1], &buf[..written]),
@@ -990,7 +1039,7 @@ pub struct LaneOpening {
     hs: HandshakeState,
     psk: Zeroizing<[u8; 32]>,
     lane: u32,
-    deadline: Instant,
+    deadline: Deadline,
     purpose: &'static Purpose,
 }
 
@@ -1007,7 +1056,7 @@ impl LaneOpening {
         msg2: &[u8],
         now: Instant,
     ) -> Result<(Transport, Vec<u8>), PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg2, self.purpose.kinds[1])?;
@@ -1035,7 +1084,7 @@ pub struct LaneAccepting {
     transport: TransportState,
     confirm: ConfirmKeys,
     lane: u32,
-    deadline: Instant,
+    deadline: Deadline,
     purpose: &'static Purpose,
 }
 
@@ -1048,7 +1097,7 @@ impl LaneAccepting {
     /// Handles lane message 3 at time `now`. Only a confirmation sealed under this lane's fresh
     /// keys and naming this lane makes it usable; a copied lane message 1 cannot produce one.
     pub fn confirm(self, msg3: &[u8], now: Instant) -> Result<Transport, PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg3, self.purpose.kinds[2])?;
