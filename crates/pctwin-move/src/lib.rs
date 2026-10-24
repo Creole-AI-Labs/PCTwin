@@ -504,7 +504,7 @@ async fn keep_sending<C: Channel, B: Comeback>(
         // long as its keys last. The waits are the new laptop's own, so this screen says "nothing
         // new" when that one would.
         drop(now_on.take());
-        let since = std::time::Instant::now();
+        let since = tokio::time::Instant::now();
         let mut next = policy.ended(Done::of(&live.meter) != before);
         let came_back = back.returned();
         tokio::pin!(came_back);
@@ -1012,7 +1012,7 @@ async fn keep_receiving<C: Channel, R: Redial>(
         if !matches!(ran, Err(TransferError::ConnectionDropped)) {
             return ended(ran);
         }
-        let since = std::time::Instant::now();
+        let since = tokio::time::Instant::now();
         let mut next = policy.ended(Done::of(&live.meter) != before);
         let mut link = loop {
             live.connection.set(LinkState::Waiting {

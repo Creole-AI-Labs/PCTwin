@@ -437,7 +437,7 @@ fn landed_true(w: &World, received: &Received) -> usize {
 }
 
 /// Waits (polling) until `live`'s connection is waiting for the other laptop.
-async fn until_waiting(live: &Live) -> (bool, std::time::Instant) {
+async fn until_waiting(live: &Live) -> (bool, tokio::time::Instant) {
     loop {
         if let LinkState::Waiting { nothing_new, since } = live.connection.state() {
             return (nothing_new, since);

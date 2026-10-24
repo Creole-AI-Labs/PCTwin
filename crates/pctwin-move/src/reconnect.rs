@@ -5,7 +5,8 @@
 //! never gives up on its own: only the person stops a move.
 
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use tokio::sync::Notify;
 

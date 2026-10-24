@@ -206,7 +206,9 @@ impl Comeback for NetComeback {
     async fn open(&mut self, plan: &[u8; 32]) -> Option<u16> {
         let mut keys = self.keys.take()?;
         let here = self.here?;
-        let resumes = keys.resume_keys(plan, std::time::Instant::now()).ok()?;
+        let resumes = keys
+            .resume_keys(plan, tokio::time::Instant::now().into_std())
+            .ok()?;
         let host = pctwin_link::Host::bind(listen_at(here), self.config)
             .await
             .ok()?;
@@ -251,7 +253,7 @@ pub struct NetRedial {
     /// The old laptop's address on the main connection.
     peer: SocketAddr,
     config: LinkConfig,
-    resumes: Option<(ResumeKeys, SocketAddr, std::time::Instant)>,
+    resumes: Option<(ResumeKeys, SocketAddr, tokio::time::Instant)>,
 }
 
 impl NetRedial {
@@ -273,8 +275,8 @@ impl Redial for NetRedial {
         let Some(mut keys) = self.keys.take() else {
             return false;
         };
-        let now = std::time::Instant::now();
-        let Ok(resumes) = keys.resume_keys(plan, now) else {
+        let now = tokio::time::Instant::now();
+        let Ok(resumes) = keys.resume_keys(plan, now.into_std()) else {
             return false;
         };
         let mut at = self.peer;
@@ -288,7 +290,7 @@ impl Redial for NetRedial {
             return Err(Redialed::Over);
         };
         // Known here, even while the old laptop cannot be reached to say so.
-        if std::time::Instant::now() > *until {
+        if tokio::time::Instant::now() > *until {
             return Err(Redialed::Over);
         }
         match pctwin_link::open_resume(*at, keys, self.config).await {

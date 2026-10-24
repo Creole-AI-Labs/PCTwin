@@ -53,6 +53,13 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
+/// Now, as the timers that wait in this crate see it: tokio's clock, which is the system's own
+/// unless a test pauses it to move time as a laptop's sleep does. Read as the system's type, which
+/// pairing takes.
+fn now() -> Instant {
+    tokio::time::Instant::now().into_std()
+}
+
 /// The keys for extra lanes (see [`Link::take_lane_keys`]).
 pub use pctwin_pairing::{LaneKeys, ResumeKeys};
 use pctwin_pairing::{
@@ -366,7 +373,7 @@ impl Host {
     /// Records an expired-code answer for `ip`; true if it already had one within
     /// [`EXPIRED_WINDOW`].
     fn expired_again(&self, ip: IpAddr) -> bool {
-        let now = Instant::now();
+        let now = now();
         let mut map = self.expired.lock().unwrap_or_else(PoisonError::into_inner);
         map.retain(|_, at| now.duration_since(*at) < EXPIRED_WINDOW);
         let key = penalty_key(ip);
@@ -416,7 +423,7 @@ impl Host {
     }
 
     fn is_penalised(&self, ip: IpAddr) -> bool {
-        let now = Instant::now();
+        let now = now();
         let map = self
             .penalised
             .lock()
@@ -428,7 +435,7 @@ impl Host {
         if self.config.silence_penalty.is_zero() {
             return;
         }
-        let now = Instant::now();
+        let now = now();
         let mut map = self
             .penalised
             .lock()
@@ -542,12 +549,10 @@ pub async fn connect(
     keep_alive(&stream);
     write_frame(&mut stream, KIND_HELLO, &[code.parity()], wait).await?;
     let msg1 = read_from_host(&mut stream, wait).await?;
-    let (receiver, msg2) = ReceiverSession::respond(code, &msg1, Instant::now())?;
+    let (receiver, msg2) = ReceiverSession::respond(code, &msg1, now())?;
     write_frame(&mut stream, KIND_PAIRING, &msg2, wait).await?;
     let msg3 = read_from_host(&mut stream, wait).await?;
-    let (waiting, reveal) = receiver
-        .receive(&msg3, Instant::now())
-        .map_err(PairingError::from)?;
+    let (waiting, reveal) = receiver.receive(&msg3, now()).map_err(PairingError::from)?;
     write_frame(&mut stream, KIND_PAIRING, &reveal, wait).await?;
     Ok(GuestPending {
         waiting,
@@ -578,14 +583,11 @@ impl GuestPending {
 
     /// Waits until the deadline for the old laptop's approval.
     pub async fn approval(mut self) -> Result<Link, LinkError> {
-        let wait = self
-            .waiting
-            .deadline()
-            .saturating_duration_since(Instant::now());
+        let wait = self.waiting.deadline().saturating_duration_since(now());
         let approval = read_from_host(&mut self.stream, wait).await?;
         let paired = self
             .waiting
-            .receive_approval(&approval, Instant::now())
+            .receive_approval(&approval, now())
             .map_err(PairingError::from)?;
         let mut link = Link::new(paired, self.stream, self.host, self.send_timeout);
         link.send(PAIRED_CONFIRM).await?;
@@ -778,14 +780,14 @@ async fn open_numbered(
         .map_err(|_| LinkError::Unreachable)?
         .map_err(|_| LinkError::Unreachable)?;
     keep_alive(&stream);
-    let (opening, msg1) = start(Instant::now())?;
+    let (opening, msg1) = start(now())?;
     write_frame(&mut stream, kind, &msg1, wait).await?;
     let msg2 = match read_timed(&mut stream, wait).await? {
         (k, body) if k == kind => body,
         (KIND_BUSY, _) => return Err(LinkError::Busy),
         _ => return Err(LinkError::Unexpected),
     };
-    let (transport, msg3) = opening.receive(&msg2, Instant::now())?;
+    let (transport, msg3) = opening.receive(&msg2, now())?;
     write_frame(&mut stream, kind, &msg3, wait).await?;
     Ok(Link {
         transport,
@@ -1041,7 +1043,7 @@ impl LaneListener {
             id,
             paired,
             ip,
-            since: Instant::now(),
+            since: now(),
             let_go: Arc::clone(&let_go),
         });
         let first = FIRST_WORD.min(self.host.config.step_timeout);
@@ -1120,7 +1122,7 @@ impl LaneListener {
         let checked = {
             let mut held = self.keys_now();
             let keys = &mut *held;
-            let now = Instant::now();
+            let now = now();
             match (kind, keys.resumes.as_mut()) {
                 (KIND_LANE, _) if paired => Some(keys.lanes.accept_lane(msg1, now)),
                 // A lane from an address not (yet) the paired laptop's: lanes follow a resume,
@@ -1153,7 +1155,7 @@ impl LaneListener {
                     (k, body) if k == kind => body,
                     _ => return Err(LinkError::Unexpected),
                 };
-                let transport = accepting.confirm(&msg3, Instant::now())?;
+                let transport = accepting.confirm(&msg3, now())?;
                 Ok((kind, transport, stream))
             }
             .await;
@@ -1162,9 +1164,7 @@ impl LaneListener {
     }
 
     fn is_penalised(&self, ip: IpAddr) -> bool {
-        self.penalised
-            .get(&ip)
-            .is_some_and(|&until| Instant::now() < until)
+        self.penalised.get(&ip).is_some_and(|&until| now() < until)
     }
 
     /// Refuses this exact address for a while (bounded, like the pairing host's).
@@ -1173,7 +1173,7 @@ impl LaneListener {
         if penalty.is_zero() {
             return;
         }
-        let now = Instant::now();
+        let now = now();
         self.penalised.retain(|_, until| now < *until);
         if self.penalised.len() < MAX_PENALISED {
             self.penalised.insert(ip, now + penalty);
@@ -1199,7 +1199,7 @@ fn lock(sender: &Mutex<RotatingSender>) -> MutexGuard<'_, RotatingSender> {
 
 fn current_status(sender: &Mutex<RotatingSender>) -> Result<SenderStatus, LinkError> {
     let mut s = lock(sender);
-    s.tick(Instant::now())?;
+    s.tick(now())?;
     Ok(s.status())
 }
 
@@ -1218,7 +1218,7 @@ async fn serve(
     };
     let msg1 = {
         let mut s = lock(sender);
-        s.tick(Instant::now())?;
+        s.tick(now())?;
         s.message_1_for(parity).map(<[u8]>::to_vec)
     };
     let Some(msg1) = msg1 else {
@@ -1232,7 +1232,7 @@ async fn serve(
         // A reply must answer the message 1 this device was given.
         return Err(LinkError::Unexpected.into());
     }
-    let received = lock(sender).receive(&msg2, Instant::now());
+    let received = lock(sender).receive(&msg2, now());
     let (waiting, msg3) = match received {
         Ok(done) => done,
         // The code this device holds ran out of grace during the handshake.
@@ -1256,7 +1256,7 @@ async fn serve(
     write_frame(&mut stream, KIND_PAIRING, &msg3, wait).await?;
     let reveal = read_from_guest(&mut stream, KIND_PAIRING, wait).await?;
     let choosing = waiting
-        .receive_reveal(&reveal, Instant::now())
+        .receive_reveal(&reveal, now())
         .map_err(PairingError::from)?;
     Ok((choosing, stream))
 }
@@ -1400,7 +1400,7 @@ mod tests {
         // Loopback stands in for an address outside the local network.
         host.allowed = |_| false;
         let addr = host.local_addr().unwrap();
-        let sender = Mutex::new(RotatingSender::new(Instant::now()).unwrap());
+        let sender = Mutex::new(RotatingSender::new(now()).unwrap());
         let serving = async { host.next_peer(&sender).await };
         let outsider = async {
             let mut raw = TcpStream::connect(addr).await.unwrap();
