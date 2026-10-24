@@ -188,14 +188,22 @@ if ((Wait-Exit $run 'the move with no administrator') -ne 0) {
 }
 $planted = Get-Content (Join-Path $admin 'planted.json') -Raw | ConvertFrom-Json
 $moverSid = Sid $mover
+$locked = 0
 foreach ($p in $planted.planted) {
     if ($p.owner -ne $moverSid -and $p.owner -ne 'shared' -and $p.expect -eq 'moves') { $p.expect = 'stays' }
+    # Windows: an ordinary account cannot read who owns a folder it may not open, so without the
+    # helper an administrators-only place cannot be told from another person's and is counted,
+    # never named (unlike a Mac or Linux, where the owner shows). It must stay, and be counted.
+    if ($p.expect -eq 'blind') { $p.expect = 'stays'; $locked++ }
 }
 $planted | ConvertTo-Json -Depth 5 | Out-File -Encoding utf8 (Join-Path $admin 'planted-none.json')
 python (Join-Path $here 'plant.py') key (Join-Path $admin 'planted-none.json') $mover (Join-Path $none 'new-home') (Join-Path $admin 'evidence-none.json') (Join-Path $admin 'key-none.json')
 & $labmove check-everyone (Join-Path $admin 'key-none.json') (Join-Path $admin 'evidence-none.json') (Join-Path $none 'report.json') (Join-Path $none 'log.txt')
 if ($LASTEXITCODE -ne 0) { throw 'the move with no administrator found problems' }
 $e = Get-Content (Join-Path $admin 'evidence-none.json') -Raw | ConvertFrom-Json
+$unreadable = (@($e.blind_spots) | Where-Object { $_.reason -eq 'access-not-readable' } | Measure-Object -Property count -Sum).Sum
+if ($locked -gt 0 -and $unreadable -lt 1) { throw 'without an administrator, the places the mover could not read are not counted' }
+if ($unreadable -gt 0 -and $e.top_line.line -eq 'everything') { throw 'the report says everything moved, though places could not be read' }
 if (-not $e.others -or (@($e.declined) | Sort-Object) -join ',' -ne (@($e.others) | Sort-Object) -join ',') {
     throw 'without an administrator, the others must be listed, and none scanned'
 }
