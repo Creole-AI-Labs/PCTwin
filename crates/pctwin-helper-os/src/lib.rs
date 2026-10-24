@@ -710,8 +710,54 @@ pub fn launch_elevated_with(
     }
 }
 
+/// Waits for `child` to end, at most `limit`; past it the child is ended. `true` if it ended by
+/// itself. For a system tool that may show a window nobody answers (an unattended Mac, a CI
+/// runner): the move never waits on it for ever.
+pub fn wait_at_most(
+    child: &mut std::process::Child,
+    limit: std::time::Duration,
+) -> io::Result<bool> {
+    let until = std::time::Instant::now() + limit;
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// A tool that never ends is ended at the limit; one that ends by itself is waited for.
+    #[test]
+    fn a_tool_is_waited_for_at_most_its_limit() {
+        let long = if cfg!(windows) {
+            std::process::Command::new("ping")
+                .args(["-n", "30", "127.0.0.1"])
+                .stdout(std::process::Stdio::null())
+                .spawn()
+        } else {
+            std::process::Command::new("sleep").arg("30").spawn()
+        };
+        let mut long = long.unwrap();
+        let started = std::time::Instant::now();
+        assert!(!wait_at_most(&mut long, std::time::Duration::from_millis(500)).unwrap());
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        let quick = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/c", "exit"])
+                .spawn()
+        } else {
+            std::process::Command::new("true").spawn()
+        };
+        assert!(wait_at_most(&mut quick.unwrap(), std::time::Duration::from_secs(10)).unwrap());
+    }
+
     use super::*;
 
     #[test]

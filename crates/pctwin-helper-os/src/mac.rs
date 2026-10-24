@@ -229,6 +229,12 @@ const SYSADMINCTL: &str = "/usr/sbin/sysadminctl";
 /// if the system says it is on (a prompt answered wrongly is never taken as done).
 pub(crate) fn secure_token_on(name: &str, password: &str) -> Result<bool, Error> {
     use std::io::Write;
+    // With FileVault off there is nothing to unlock: no window is shown, and the token is as the
+    // system says. With it on, the window waits at most a few minutes for the administrator, so
+    // a Mac nobody is watching (or a CI runner) never holds the move on it for ever.
+    if !filevault_on() {
+        return secure_token_status(name);
+    }
     let mut child = Command::new(SYSADMINCTL)
         .args(["interactive", "-secureTokenOn", name, "-password", "-"])
         .stdin(Stdio::piped())
@@ -241,8 +247,24 @@ pub(crate) fn secure_token_on(name: &str, password: &str) -> Result<bool, Error>
         line.iter_mut().for_each(|b| *b = 0);
         written?;
     }
-    child.wait()?;
+    crate::wait_at_most(&mut child, SECURE_TOKEN_WAIT)?;
     secure_token_status(name)
+}
+
+/// The longest the Mac's own window for a Secure Token waits for the administrator.
+const SECURE_TOKEN_WAIT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Whether FileVault is on, as `fdesetup status` says ("FileVault is On."). Unknown is taken as
+/// on (the window is then shown, for a limited time).
+fn filevault_on() -> bool {
+    match Command::new("/usr/bin/fdesetup")
+        .arg("status")
+        .stdin(Stdio::null())
+        .output()
+    {
+        Ok(out) => !String::from_utf8_lossy(&out.stdout).contains("FileVault is Off"),
+        Err(_) => true,
+    }
 }
 
 /// Whether the account `name` has a Secure Token, as the system says.
