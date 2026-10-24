@@ -1384,3 +1384,366 @@ async fn a_whole_folder_is_sent_as_its_files_and_lands_beside_one_already_there(
         .collect();
     assert_eq!(there, ["database"]);
 }
+
+/// A ledger that stops working at one step (`at`), as PCTwin stopping there would leave it.
+struct StopsAt<'l> {
+    inner: &'l dyn pctwin_journal::Ledger,
+    at: &'static str,
+}
+
+impl StopsAt<'_> {
+    fn check(&self, step: &str) -> Result<(), pctwin_journal::JournalError> {
+        if step == self.at {
+            Err(pctwin_journal::JournalError::Damaged("stopped here".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl pctwin_journal::Ledger for StopsAt<'_> {
+    fn temp_tag(&self, id: u64) -> String {
+        self.inner.temp_tag(id)
+    }
+    fn plan(&self, w: &pctwin_journal::PlannedWrite) -> Result<u64, pctwin_journal::JournalError> {
+        self.check("plan")?;
+        self.inner.plan(w)
+    }
+    fn staged(
+        &self,
+        id: u64,
+        temp: &str,
+        made: &[(String, Option<pctwin_journal::FileId>)],
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.check("staged")?;
+        self.inner.staged(id, temp, made)
+    }
+    fn verified(
+        &self,
+        id: u64,
+        fp: [u8; 32],
+        file: Option<pctwin_journal::FileId>,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.check("verified")?;
+        self.inner.verified(id, fp, file)
+    }
+    fn verified_as(
+        &self,
+        id: u64,
+        fp: [u8; 32],
+        file: Option<pctwin_journal::FileId>,
+        checked: Option<pctwin_journal::CheckedFrom>,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.check("verified")?;
+        self.inner.verified_as(id, fp, file, checked)
+    }
+    fn applied(&self, id: u64, final_path: &str) -> Result<(), pctwin_journal::JournalError> {
+        self.check("applied")?;
+        self.inner.applied(id, final_path)
+    }
+    fn filling(
+        &self,
+        id: u64,
+        final_path: &str,
+        tag: pctwin_journal::FillTag,
+        proof: pctwin_journal::Proof,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.check("filling")?;
+        self.inner.filling(id, final_path, tag, proof)
+    }
+    fn fill_made(
+        &self,
+        id: u64,
+        made: pctwin_journal::FileId,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.fill_made(id, made)
+    }
+    fn filled(&self, id: u64) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.filled(id)
+    }
+    fn fill_cleared(
+        &self,
+        id: u64,
+        left: Option<&str>,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.fill_cleared(id, left)
+    }
+    fn committed_showing(
+        &self,
+        id: u64,
+        landed: pctwin_journal::Landed,
+        show: &pctwin_journal::Show,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.check("committed")?;
+        self.inner.committed_showing(id, landed, show)
+    }
+    fn shown(
+        &self,
+        id: u64,
+        left: Option<&str>,
+        file: Option<pctwin_journal::FileId>,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.shown(id, left, file)
+    }
+    fn committed(
+        &self,
+        id: u64,
+        landed: pctwin_journal::Landed,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.check("committed")?;
+        self.inner.committed(id, landed)
+    }
+    fn existing(&self, id: u64, stored_path: &str) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.existing(id, stored_path)
+    }
+    fn failed(&self, id: u64, why: &str) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.failed(id, why)
+    }
+    fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: pctwin_journal::Landed,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.inner
+            .kept_aside(id, why, kept_path, fingerprint, landed)
+    }
+    fn checkpoint(
+        &self,
+        id: u64,
+        blocks: &[(u64, [u8; 32])],
+        durable: bool,
+    ) -> Result<(), pctwin_journal::JournalError> {
+        self.inner.checkpoint(id, blocks, durable)
+    }
+    fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, pctwin_journal::JournalError> {
+        self.inner.blocks(id)
+    }
+    fn unfinished(&self) -> Result<Vec<pctwin_journal::Entry>, pctwin_journal::JournalError> {
+        self.inner.unfinished()
+    }
+}
+
+/// Every file in the world is another person's ("1000"), held for account "1001" in `holding`
+/// under the label `for-1`; the move stops at the journal step `at`.
+async fn held_move_stopping_at(w: &mut World, holding: &Path, at: &'static str) {
+    use pctwin_move::held_journal::{HeldPlaces, SplitLedger};
+    use pctwin_move::landing::LandingRules;
+    let rules = LandingRules {
+        mover: "2000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+        left_out: Default::default(),
+        chosen: Default::default(),
+        wholes: Default::default(),
+    };
+    struct Held {
+        rules: LandingRules,
+    }
+    impl Steps for Held {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+            Ok(())
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    std::fs::create_dir_all(holding).unwrap();
+    let mut steps = Held { rules };
+    let places = HeldPlaces::default();
+    let split = SplitLedger::new(&w.journal, places.clone());
+    let ledger = StopsAt { inner: &split, at };
+    let (mut old, new) = mem_pair();
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let mut table = std::mem::take(&mut w.table);
+    let (_, received) = no_hang(async {
+        tokio::join!(
+            send_greeted(
+                &mut old,
+                &w.record,
+                "2000",
+                &[],
+                |i| Some(source_in(w.old.path(), i)),
+                &old_live,
+                std::sync::Arc::new(pctwin_transfer::FsOpener),
+            ),
+            async {
+                // Stopped: this end goes away, as a stopped PCTwin's would, so the old laptop
+                // stops waiting.
+                let mut new = new;
+                let received = receive_greeted(
+                    &mut new,
+                    &mut steps,
+                    |s, table| {
+                        table.approve_holding("for-1", "1001", holding).unwrap();
+                        places.hold("for-1", holding);
+                        let mut rules = s.rules.clone();
+                        rules.held.insert("1000".into(), "for-1".into());
+                        rules
+                    },
+                    &mut table,
+                    &ledger,
+                    "1001",
+                    &new_live,
+                )
+                .await;
+                drop(new);
+                received
+            },
+        )
+    })
+    .await;
+    // PCTwin stopped: the move did not finish.
+    assert!(received.is_err(), "the move should have stopped at {at}");
+}
+
+/// Every file under `dir`, by its path below it.
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_under(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
+fn is_temp(p: &Path) -> bool {
+    p.file_name()
+        .is_some_and(|n| pctwin_gate::is_temp_name(&n.to_string_lossy()))
+}
+
+/// PCTwin stops between a write into another person's holding place and its naming. At the next
+/// start, recovery finds that holding place's journal (remembered with no file name), proves the
+/// copy again and names it, with counts only coming back; the mover's own journal still names
+/// none of their files.
+#[tokio::test]
+async fn a_held_write_stopped_before_its_naming_is_finished_by_recovery() {
+    use pctwin_move::held_journal::{HELD_JOURNAL, HeldPlace, recover_held, unfinished_held};
+    let mut w = world();
+    let holding = w.new.path().join("holding-1000");
+    held_move_stopping_at(&mut w, &holding, "committed").await;
+    let place = HeldPlace {
+        label: "for-1".into(),
+        account: "1001".into(),
+        folder: holding.clone(),
+    };
+    let before = files_under(&holding);
+    assert!(before.iter().any(|p| is_temp(p)), "{before:?}");
+    assert!(unfinished_held(std::slice::from_ref(&place)) >= 1);
+    let done = recover_held(std::slice::from_ref(&place));
+    assert!(done.put_in_place >= 1, "{done:?}");
+    assert_eq!(done.left_to_hand_over, 0);
+    // What is still unfinished is only what was part copied, kept to carry on.
+    assert_eq!(
+        unfinished_held(std::slice::from_ref(&place)),
+        done.kept_to_continue
+    );
+    // Every file now under its own name is whole; the temporary files left are only those kept.
+    let after = files_under(&holding);
+    let named: Vec<&PathBuf> = after
+        .iter()
+        .filter(|p| !is_temp(p) && !p.ends_with(HELD_JOURNAL))
+        .collect();
+    assert_eq!(named.len() as u64, done.put_in_place, "{after:?}");
+    for f in named {
+        let bytes = std::fs::read(f).unwrap();
+        assert!(
+            FILES.iter().any(|(_, _, b)| *b == bytes.as_slice()),
+            "{f:?}"
+        );
+    }
+    assert_eq!(
+        after.iter().filter(|p| is_temp(p)).count() as u64,
+        done.kept_to_continue,
+        "{after:?}"
+    );
+    // Run again: nothing more is named or failed.
+    let again = recover_held(&[place]);
+    assert_eq!((again.put_in_place, again.not_finished), (0, 0));
+    drop(w.journal);
+    let mine = std::fs::read(w._jdir.path().join("journal.redb")).unwrap();
+    for name in FILES.iter().flat_map(|(_, path, _)| path.iter()) {
+        assert!(
+            !mine.windows(name.len()).any(|x| x == name.as_bytes()),
+            "the mover's journal names {name}"
+        );
+    }
+}
+
+/// A holding place the mover may no longer open (handed over, or locked for it) is left to its
+/// hand-over; one that is gone is nothing to do.
+#[test]
+fn a_holding_place_the_mover_cannot_open_is_left_to_its_hand_over() {
+    use pctwin_move::held_journal::{HELD_JOURNAL, HeldPlace, recover_held};
+    let dir = tempfile::tempdir().unwrap();
+    let gone = HeldPlace {
+        label: "for-1".into(),
+        account: "1001".into(),
+        folder: dir.path().join("gone"),
+    };
+    assert_eq!(
+        recover_held(std::slice::from_ref(&gone)),
+        Default::default()
+    );
+    // Something other than a journal at the journal's name is never opened.
+    let odd = dir.path().join("odd");
+    std::fs::create_dir_all(odd.join(HELD_JOURNAL)).unwrap();
+    let odd = HeldPlace {
+        folder: odd,
+        ..gone
+    };
+    assert_eq!(recover_held(&[odd]).left_to_hand_over, 1);
+}
+
+/// A hand-over after PCTwin stopped mid-move, before any recovery: a temporary file the move
+/// left is never handed over (the person never gets half a file); it is listed as unfinished.
+#[tokio::test]
+async fn a_hand_over_after_a_stop_never_carries_an_unfinished_file() {
+    let mut w = world();
+    let holding = w.new.path().join("holding-1000");
+    held_move_stopping_at(&mut w, &holding, "committed").await;
+    let left: Vec<PathBuf> = files_under(&holding)
+        .into_iter()
+        .filter(|p| is_temp(p))
+        .collect();
+    assert!(!left.is_empty());
+    let home = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let journal = Journal::open(&jdir.path().join("handover.journal")).unwrap();
+    let places = std::collections::BTreeMap::from([
+        ("documents".to_string(), "Documents".to_string()),
+        ("pictures".to_string(), "Pictures".to_string()),
+    ]);
+    let done = pctwin_move::handover::hand_over(&holding, home.path(), &places, &journal, "1001")
+        .await
+        .unwrap();
+    assert_eq!(done.unfinished.len(), left.len(), "{:?}", done.unfinished);
+    for f in files_under(home.path()) {
+        assert!(!is_temp(&f), "{f:?} handed over");
+        assert!(
+            !f.to_string_lossy().contains(".pctwin-"),
+            "{f:?} handed over"
+        );
+    }
+    for f in &done.files {
+        assert!(!is_temp(&f.held), "{:?}", f.held);
+    }
+}

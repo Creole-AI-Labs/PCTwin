@@ -57,6 +57,7 @@ rustix = { version = "1.1.5", features = ["process"] }
 pctwin-pairing = { path = "../../crates/pctwin-pairing" }
 # The real permission check on a mock runtime (tests/permissions.rs). Tests only; no new crate.
 tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon", "test"] }
+tempfile = "3"
 tokio = { version = "1.53.2", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 
 [lints]

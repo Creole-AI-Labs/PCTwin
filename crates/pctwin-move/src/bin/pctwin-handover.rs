@@ -216,7 +216,7 @@ fn main() -> ExitCode {
         };
         println!("{word}\t{}", f.held.display());
     }
-    note.failed += u64::try_from(done.not_plain.len()).unwrap_or(u64::MAX);
+    note.failed += u64::try_from(done.not_plain.len() + done.unfinished.len()).unwrap_or(u64::MAX);
     // For the person, once they are signed in: a note PCTwin shows when it opens, and PCTwin
     // opened for them (only at their own sign-in, never as the administrator).
     if args.account == "self"
@@ -226,6 +226,11 @@ fn main() -> ExitCode {
         if write_note(&path, note).is_ok() {
             open_pctwin();
         }
+    }
+    // A stopped move's unfinished file: never handed over, so it is not handed over now.
+    for p in &done.unfinished {
+        all = false;
+        println!("unfinished\t{}", p.display());
     }
     for p in &done.not_plain {
         all = false;

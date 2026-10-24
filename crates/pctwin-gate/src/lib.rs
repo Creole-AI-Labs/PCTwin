@@ -2315,7 +2315,7 @@ fn is_plain_tag(tag: &str) -> bool {
 }
 
 /// Whether `name` is one of PCTwin's temporary names.
-fn is_temp_name(name: &str) -> bool {
+pub fn is_temp_name(name: &str) -> bool {
     name.strip_prefix(".pctwin-")
         .and_then(|rest| rest.strip_suffix(".part"))
         .is_some_and(is_plain_tag)

@@ -1555,6 +1555,16 @@ impl<R: Runtime> AppSteps<R> {
                 table
                     .approve_holding(&label, &account, &place)
                     .map_err(|_| MoveProblem::Failed)?;
+                // Remembered before anything lands there, so a restart can pick it up; a place
+                // that cannot be remembered is not used.
+                crate::recovery::remember_held(
+                    &self.app,
+                    pctwin_move::held_journal::HeldPlace {
+                        label: label.clone(),
+                        account: account.clone(),
+                        folder: place.clone(),
+                    },
+                )?;
                 self.held_places.hold(&label, &place);
                 Ok(account)
             });

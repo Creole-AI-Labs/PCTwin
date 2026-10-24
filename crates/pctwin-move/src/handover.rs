@@ -106,12 +106,14 @@ pub struct HandedOver {
     pub outcome: Option<ReceiveOutcome>,
 }
 
-/// What the hand-over came to, and what in the holding area was not a plain file (left as it
-/// was, never followed).
+/// What the hand-over came to, what in the holding area was not a plain file (left as it was,
+/// never followed), and what was a move's unfinished file (a temporary file a stopped move left,
+/// part-copied or not yet named): never handed over, so the person never gets half a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandOver {
     pub files: Vec<HandedOver>,
     pub not_plain: Vec<PathBuf>,
+    pub unfinished: Vec<PathBuf>,
 }
 
 /// The two ends of the hand-over, in this process.
@@ -175,15 +177,16 @@ struct Found {
 }
 
 /// Every plain file under `dir` (at `path`, `below` the holding area), with its path parts;
-/// anything else found is listed in `not_plain` and never entered. Every folder is entered
-/// through its parent's handle, never through a link.
+/// anything else found is listed in `not_plain` and never entered, and a move's temporary file
+/// (unfinished: part-copied, or not yet named) in `unfinished`, never read. Every folder is
+/// entered through its parent's handle, never through a link.
 fn walk(
     dir: &File,
     path: &Path,
     below: &mut Vec<OsString>,
     parts: &mut Vec<ItemName>,
     files: &mut Vec<Found>,
-    not_plain: &mut Vec<PathBuf>,
+    left: &mut Left,
 ) -> io::Result<()> {
     for entry in cap::read_base_dir(dir)? {
         let name = entry?.file_name();
@@ -192,10 +195,12 @@ fn walk(
         parts.push(name_of(&name));
         below.push(name.clone());
         if meta.file_type().is_symlink() {
-            not_plain.push(at);
+            left.not_plain.push(at);
         } else if meta.is_dir() {
             let sub = cap::open_dir_nofollow(dir, Path::new(&name))?;
-            walk(&sub, &at, below, parts, files, not_plain)?;
+            walk(&sub, &at, below, parts, files, left)?;
+        } else if meta.is_file() && pctwin_gate::is_temp_name(&name.to_string_lossy()) {
+            left.unfinished.push(at);
         } else if meta.is_file() {
             match open_plain(dir, Path::new(&name))? {
                 Some((file, id)) => files.push(Found {
@@ -205,10 +210,10 @@ fn walk(
                     parts: parts.clone(),
                     size: file.metadata()?.len(),
                 }),
-                None => not_plain.push(at),
+                None => left.not_plain.push(at),
             }
         } else {
-            not_plain.push(at);
+            left.not_plain.push(at);
         }
         below.pop();
         parts.pop();
@@ -255,10 +260,19 @@ impl Opener for HeldOpener {
     }
 }
 
+/// What a walk of the holding area leaves: what is not a plain file, and a move's unfinished
+/// files.
+#[derive(Default)]
+struct Left {
+    not_plain: Vec<PathBuf>,
+    unfinished: Vec<PathBuf>,
+}
+
 /// What the walk of the holding area found, and the opener that reads only that.
 struct Held {
     found: Vec<Found>,
     not_plain: Vec<PathBuf>,
+    unfinished: Vec<PathBuf>,
     opener: HeldOpener,
 }
 
@@ -266,7 +280,7 @@ struct Held {
 fn held(holding: &Path, places: &BTreeMap<String, String>) -> io::Result<Held> {
     let root = cap::open_ambient_dir(holding, cap_primitives::ambient_authority())?;
     let mut found = Vec::new();
-    let mut not_plain = Vec::new();
+    let mut left = Left::default();
     for (label, folder) in places {
         let meta = match cap::stat(&root, Path::new(label), cap::FollowSymlinks::No) {
             Ok(m) => m,
@@ -275,20 +289,13 @@ fn held(holding: &Path, places: &BTreeMap<String, String>) -> io::Result<Held> {
         };
         let at = holding.join(label);
         if meta.file_type().is_symlink() || !meta.is_dir() {
-            not_plain.push(at);
+            left.not_plain.push(at);
             continue;
         }
         let dir = cap::open_dir_nofollow(&root, Path::new(label))?;
         let mut below = vec![OsString::from(label)];
         let mut parts = vec![ItemName::from_text(folder)];
-        walk(
-            &dir,
-            &at,
-            &mut below,
-            &mut parts,
-            &mut found,
-            &mut not_plain,
-        )?;
+        walk(&dir, &at, &mut below, &mut parts, &mut found, &mut left)?;
     }
     let files = found
         .iter()
@@ -296,7 +303,8 @@ fn held(holding: &Path, places: &BTreeMap<String, String>) -> io::Result<Held> {
         .collect();
     Ok(Held {
         found,
-        not_plain,
+        not_plain: left.not_plain,
+        unfinished: left.unfinished,
         opener: HeldOpener { root, files },
     })
 }
@@ -327,6 +335,7 @@ pub async fn hand_over(
     let Held {
         found,
         mut not_plain,
+        unfinished,
         opener,
     } = held(holding, places)?;
     let mut record = Record::new(laptop);
@@ -361,6 +370,7 @@ pub async fn hand_over(
         return Ok(HandOver {
             files: Vec::new(),
             not_plain,
+            unfinished,
         });
     }
     // Each item's path starts with its place's folder in the home: the gate makes it if missing.
@@ -413,7 +423,11 @@ pub async fn hand_over(
             outcome: receiver.outcome(i.id),
         })
         .collect();
-    Ok(HandOver { files, not_plain })
+    Ok(HandOver {
+        files,
+        not_plain,
+        unfinished,
+    })
 }
 
 #[cfg(test)]

@@ -248,6 +248,118 @@ impl Ledger for SplitLedger<'_> {
     }
 }
 
+/// One holding place of a move, as the new laptop remembers it to pick its writes up after a
+/// restart: its destination label, the account it is held for, and its folder. None of it names
+/// a file (the folder is the helper's `<staging>/<random>/p<n>`), so it may be kept in the mover's
+/// own app data.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HeldPlace {
+    pub label: String,
+    pub account: String,
+    pub folder: PathBuf,
+}
+
+/// What picking up the holding places' writes came to, counted only (their names stay in their
+/// journals).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HeldTidied {
+    /// Finished and proven copies now in place in a holding folder.
+    pub put_in_place: u64,
+    /// Part-copied files kept.
+    pub kept_to_continue: u64,
+    /// Writes that could not be finished (their temporary files removed).
+    pub not_finished: u64,
+    /// Writes left as they were, because their place could not be looked at.
+    pub left_for_later: u64,
+    /// Holding places left to their hand-over: the mover may no longer open them (they were
+    /// handed over or locked for it), or they are gone.
+    pub left_to_hand_over: u64,
+}
+
+fn count(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
+}
+
+/// How a holding place's journal is reached now.
+enum Reach {
+    /// Its journal, to pick up from.
+    Open(Journal),
+    /// Nothing was ever written there, or the folder is gone (emptied by its hand-over).
+    Nothing,
+    /// The mover may not open it any more (it was handed over or locked for it), or another
+    /// PCTwin has it open: left to the hand-over.
+    Left,
+}
+
+fn reach(place: &HeldPlace) -> Reach {
+    let at = place.folder.join(HELD_JOURNAL);
+    match std::fs::symlink_metadata(&at) {
+        Ok(meta) if meta.is_file() => match Journal::open(&at) {
+            Ok(journal) => Reach::Open(journal),
+            Err(_) => Reach::Left,
+        },
+        // A link or anything else at the journal's name is never opened.
+        Ok(_) => Reach::Left,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Reach::Nothing,
+        // Not even looked at: the folder is closed to the mover now.
+        Err(_) => Reach::Left,
+    }
+}
+
+/// How many writes the holding places' journals have not finished, of those the mover may still
+/// open (a count only).
+pub fn unfinished_held(places: &[HeldPlace]) -> u64 {
+    places
+        .iter()
+        .map(|p| match reach(p) {
+            Reach::Open(journal) => count(
+                journal.unfinished().map_or(0, |u| u.len())
+                    + journal.unshown().map_or(0, |u| u.len()),
+            ),
+            _ => 0,
+        })
+        .sum()
+}
+
+/// Picks up what a stopped move left in each holding place the mover may still open, by the
+/// same rules as the mover's own journal (pctwin-transfer's recovery): a finished and proven copy
+/// is named, a part-copied one kept, anything else failed and its temporary file removed, and
+/// writing only into that holding folder. A place the mover may no longer open is left to its
+/// hand-over, which never hands over a temporary file. Only counts come back: the names and the
+/// reasons, which name files, stay in the person's journal.
+pub fn recover_held(places: &[HeldPlace]) -> HeldTidied {
+    let mut done = HeldTidied::default();
+    for place in places {
+        let journal = match reach(place) {
+            Reach::Open(journal) => journal,
+            Reach::Nothing => continue,
+            Reach::Left => {
+                done.left_to_hand_over += 1;
+                continue;
+            }
+        };
+        let mut table = pctwin_gate::Destinations::new();
+        if table
+            .approve_holding(&place.label, &place.account, &place.folder)
+            .is_err()
+        {
+            done.left_to_hand_over += 1;
+            continue;
+        }
+        match pctwin_transfer::recover(&journal, &table) {
+            Ok(r) => {
+                done.put_in_place += count(r.committed.len() + r.shown.len());
+                done.kept_to_continue += count(r.resumable.len());
+                done.not_finished += count(r.failed.len());
+                done.left_for_later += count(r.left.len());
+            }
+            Err(_) => done.left_to_hand_over += 1,
+        }
+    }
+    done
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
