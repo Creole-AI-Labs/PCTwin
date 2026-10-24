@@ -72,7 +72,8 @@ pub mod signin;
 mod win;
 #[cfg(windows)]
 pub use win::{
-    PipeClient, PipeName, PipeServer, SystemFolder, caller_of, program_folder, system_folder,
+    PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder, caller_of, clean_command,
+    minimal_env, program_folder, system_folder,
 };
 
 #[cfg(unix)]

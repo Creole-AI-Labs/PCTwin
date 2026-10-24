@@ -624,7 +624,7 @@ fn listed_profile(sid: &str) -> Result<std::path::PathBuf, Error> {
     Sid::parse(sid)?;
     let key = format!(r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}");
     let system = system_folder(SystemFolder::Windows)?;
-    let out = std::process::Command::new(system.join("System32").join("reg.exe"))
+    let out = clean_command(&system.join("System32").join("reg.exe"))?
         .args(["query", &key, "/v", "ProfileImagePath"])
         .output()?;
     let text = String::from_utf8_lossy(&out.stdout);
@@ -784,6 +784,43 @@ pub fn system_folder(which: SystemFolder) -> Result<PathBuf, Error> {
     Ok(path)
 }
 
+/// The few environment values a system program needs, every one worked out from Windows' own
+/// folder ([`system_folder`]), never passed on from whoever started the helper: the helper runs
+/// with an administrator's rights, and a value such as `COR_PROFILER` or `SystemRoot` set by an
+/// ordinary program could otherwise make a system program it starts load that program's code
+/// (found by the fresh-context review).
+pub fn minimal_env() -> Result<Vec<(OsString, OsString)>, Error> {
+    let windows = system_folder(SystemFolder::Windows)?;
+    let Some(std::path::Component::Prefix(drive)) = windows.components().next() else {
+        return Err(Error::NotSupported("the Windows folder has no drive"));
+    };
+    let system32 = windows.join("System32");
+    let path = std::env::join_paths([
+        system32.clone(),
+        windows.clone(),
+        system32.join("Wbem"),
+        system32.join(r"WindowsPowerShell\v1.0"),
+    ])
+    .map_err(|_| Error::NotSupported("a search path"))?;
+    let temp = windows.join("Temp");
+    Ok(vec![
+        ("SystemRoot".into(), windows.clone().into_os_string()),
+        ("windir".into(), windows.clone().into_os_string()),
+        ("SystemDrive".into(), drive.as_os_str().to_os_string()),
+        ("ComSpec".into(), system32.join("cmd.exe").into_os_string()),
+        ("PATH".into(), path),
+        ("TEMP".into(), temp.clone().into_os_string()),
+        ("TMP".into(), temp.into_os_string()),
+    ])
+}
+
+/// A command for `program` with nothing of this process's environment but [`minimal_env`].
+pub fn clean_command(program: &std::path::Path) -> Result<std::process::Command, Error> {
+    let mut command = std::process::Command::new(program);
+    command.env_clear().envs(minimal_env()?);
+    Ok(command)
+}
+
 /// A program in Windows' own `System32`.
 pub(crate) fn system_program(name: &str) -> Result<PathBuf, Error> {
     Ok(system_folder(SystemFolder::Windows)?
@@ -793,6 +830,31 @@ pub(crate) fn system_program(name: &str) -> Result<PathBuf, Error> {
 
 /// System and administrators only, protected from what the folder above allows.
 pub(crate) const ADMIN_ONLY: &str = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)";
+
+/// A folder `name` inside [`program_folder`], made administrators-only from its first moment
+/// (system and administrators only, not inherited), or one that is there already: only
+/// administrators can make anything in `Program Files\PCTwin`, so it was made by one. Nothing in
+/// it can be opened by an ordinary account, not even to read (the helper's one-helper lock).
+pub fn admin_only_folder(name: &str) -> Result<PathBuf, Error> {
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err(Error::BadInput("a folder name"));
+    }
+    let path = program_folder()?.join(name);
+    match create_folder_with_access(&path, ADMIN_ONLY) {
+        Ok(()) => Ok(path),
+        Err(Error::NameTaken) => {
+            let meta = std::fs::symlink_metadata(&path)?;
+            if !meta.is_dir() || meta.file_type().is_symlink() {
+                return Err(Error::NotPrivate(format!(
+                    "{} is not a plain folder",
+                    path.display()
+                )));
+            }
+            Ok(path)
+        }
+        Err(e) => Err(e),
+    }
+}
 
 /// `Program Files\PCTwin`, made administrators-only if it is missing. Only administrators can
 /// make anything in Program Files, so one that exists was made by an administrator (the

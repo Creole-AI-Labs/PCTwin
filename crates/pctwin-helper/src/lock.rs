@@ -6,22 +6,24 @@
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-/// Where the lock is: a folder only the system and administrators can make things in, so no one
-/// else can take the lock first and keep every move from starting. On Windows that is
-/// `Program Files\PCTwin` (found by asking Windows, never the environment), not ProgramData,
-/// where every account may make folders.
+/// Where the lock is: a folder no ordinary account can open anything in, so no one else can hold
+/// the lock (even shared, for reading) and keep every move from starting (found by the
+/// fresh-context review). On Windows, `Program Files\PCTwin\helper`, administrators-only from its
+/// first moment (found by asking Windows, never the environment); the installer's own folder
+/// lets every account read. On a Mac, PCTwin's root-owned folder in /Library/Application Support
+/// (its /private/var/run is writable by the daemon group without the sticky bit).
 pub fn lock_path() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
-        pctwin_helper_os::program_folder()
+        pctwin_helper_os::admin_only_folder("helper")
             .map(|dir| dir.join("helper.lock"))
             .map_err(|e| format!("the lock's folder: {e}"))
     }
-    // The system's own run folder, root's alone: /run on Linux; a Mac has none, and its /var is
-    // a link, so the real /private/var/run (found by the two-accounts lab).
     #[cfg(target_os = "macos")]
     {
-        Ok(PathBuf::from("/private/var/run/pctwin-helper.lock"))
+        Ok(PathBuf::from(
+            "/Library/Application Support/PCTwin/helper.lock",
+        ))
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -34,12 +36,12 @@ pub fn one_helper(path: &Path) -> Result<File, String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("the lock's folder: {e}"))?;
     }
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(path)
-        .map_err(|e| format!("the lock: {e}"))?;
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    // Never through a link planted at the lock's name.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut options, libc_nofollow());
+    let file = options.open(path).map_err(|e| format!("the lock: {e}"))?;
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(std::fs::TryLockError::WouldBlock) => {
@@ -62,4 +64,10 @@ mod tests {
         drop(first);
         assert!(one_helper(&path).is_ok());
     }
+}
+
+/// `O_NOFOLLOW` on this system.
+#[cfg(unix)]
+fn libc_nofollow() -> i32 {
+    rustix::fs::OFlags::NOFOLLOW.bits() as i32
 }
