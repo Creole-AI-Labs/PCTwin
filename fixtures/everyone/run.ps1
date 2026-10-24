@@ -175,7 +175,9 @@ try {
 
 python (Join-Path $here 'plant.py') key (Join-Path $admin 'planted.json') $mover $newHome (Join-Path $admin 'evidence.json') (Join-Path $admin 'key.json')
 if ($LASTEXITCODE -ne 0) { throw 'the key could not be written' }
-& $labmove check-everyone (Join-Path $admin 'key.json') (Join-Path $admin 'evidence.json') (Join-Path $moverDir 'report.json') (Join-Path $moverDir 'log.txt')
+# What the mover can read must name nobody else's files: the report, the program's output and
+# the mover's change journal, byte for byte.
+& $labmove check-everyone (Join-Path $admin 'key.json') (Join-Path $admin 'evidence.json') (Join-Path $moverDir 'report.json') (Join-Path $moverDir 'log.txt') (Join-Path $moverDir 'journal.redb')
 if ($LASTEXITCODE -ne 0) { throw 'the move of everyone found problems' }
 if ((Get-Acl $etc).Owner -ne $etcOwner) { throw 'the planted junction changed who owns the system''s folder' }
 

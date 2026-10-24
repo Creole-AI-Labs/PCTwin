@@ -1337,6 +1337,9 @@ struct AppSteps<R: Runtime> {
     live_control: pctwin_transfer::MoveControl,
     /// The places the person chose for some folders, approved in the table with the rules.
     chosen: BTreeMap<FolderRole, pctwin_gate::Destination>,
+    /// Other people's holding places, so their writes are journaled there, never in the mover's
+    /// journal.
+    held_places: pctwin_move::held_journal::HeldPlaces,
 }
 
 impl<R: Runtime> AppSteps<R> {
@@ -1467,6 +1470,7 @@ impl<R: Runtime> AppSteps<R> {
                 table
                     .approve_holding(&label, &account, &place)
                     .map_err(|_| MoveProblem::Failed)?;
+                self.held_places.hold(&label, &place);
                 Ok(account)
             });
             // A person whose place could not be made is not received: their things are
@@ -1954,6 +1958,9 @@ async fn run_new<R: Runtime>(
     // is received): a finished copy is put in place, a part-copied one kept to carry on.
     pctwin_transfer::recover(&journal, &table)
         .map_err(|e| TransferError::Protocol(e.to_string()))?;
+    // Other people's writes go to the journal in their holding folder, never into this one.
+    let held_places = pctwin_move::held_journal::HeldPlaces::default();
+    let ledger = pctwin_move::held_journal::SplitLedger::new(&journal, held_places.clone());
     let mut steps = AppSteps {
         app: app.clone(),
         moving,
@@ -1967,6 +1974,7 @@ async fn run_new<R: Runtime>(
         held_for: Vec::new(),
         live_control: live.control.clone(),
         chosen: BTreeMap::new(),
+        held_places: held_places.clone(),
     };
     // The pairing's keys, for the way back after a drop once the plan is approved.
     let mut redial =
@@ -1977,7 +1985,7 @@ async fn run_new<R: Runtime>(
     })
     .await?;
     let here = pctwin_move::Here {
-        journal: &journal,
+        journal: &ledger,
         account: &me,
     };
     let received = pctwin_move::receive_by_rules(

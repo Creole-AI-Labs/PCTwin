@@ -532,6 +532,8 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     )]);
     let mut held = BTreeMap::new();
     let mut made = Vec::new();
+    // Other people's writes are journaled in their holding folders, never in the mover's journal.
+    let held_places = pctwin_move::held_journal::HeldPlaces::default();
     if let Some(helper) = &helper {
         for (n, (person, _)) in scanned.iter().enumerate() {
             let mut client = helper.lock().map_err(err)?;
@@ -548,6 +550,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
             table
                 .approve_holding(&label, &account.account, &holding)
                 .map_err(err)?;
+            held_places.hold(&label, &holding);
             held.insert(person.clone(), label);
             targets.insert(
                 person.clone(),
@@ -590,6 +593,7 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         None => Arc::new(pctwin_transfer::FsOpener),
     };
     let journal = Journal::open(&args.journal).map_err(err)?;
+    let ledger = pctwin_move::held_journal::SplitLedger::new(&journal, held_places);
     let mut steps = EveryoneSteps {
         targets,
         rules: rules.clone(),
@@ -599,9 +603,12 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
     let (here, there) = (Live::default(), Live::default());
     let (sent, received) = tokio::join!(
         pctwin_move::send_with(&mut a, &record, plan, &here, opener),
-        pctwin_move::receive(&mut b, &mut steps, &table, &journal, &me, &there),
+        pctwin_move::receive(&mut b, &mut steps, &table, &ledger, &me, &there),
     );
     let (sent, received) = (sent.map_err(err)?, received.map_err(err)?);
+    // Closed before the hand-over, which removes the holding folders with their journals.
+    drop(ledger);
+    drop(journal);
     stage("moved; handing over");
 
     let mut planted_links = Vec::new();

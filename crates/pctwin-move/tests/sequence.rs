@@ -928,6 +928,108 @@ async fn another_persons_files_land_in_a_holding_place_made_after_the_approval()
     }
 }
 
+/// Another person's writes are journaled in their holding folder, never in the mover's journal:
+/// read as the mover reads it, byte for byte, the mover's journal file names none of their files,
+/// while the journal beside their files records every one (decided 21 October 2026: others'
+/// files pass through PCTwin's engine, never shown to the mover).
+#[tokio::test]
+async fn the_movers_journal_names_none_of_another_persons_files() {
+    use pctwin_move::held_journal::{HELD_JOURNAL, HeldPlaces, SplitLedger};
+    use pctwin_move::landing::LandingRules;
+    let mut w = world();
+    let rules = LandingRules {
+        mover: "2000".into(),
+        roles: ROLES
+            .iter()
+            .map(|(r, _)| (*r, Storage::SystemDrive))
+            .collect(),
+        fallback: Default::default(),
+        held: Default::default(),
+        left_out: Default::default(),
+        chosen: Default::default(),
+    };
+    struct Held {
+        rules: LandingRules,
+    }
+    impl Steps for Held {
+        async fn person(&mut self, _: &Record, _: &str) -> Result<PersonTarget, Stop> {
+            Ok(PersonTarget::ExistingAccount {
+                account_id: "1001".into(),
+            })
+        }
+        async fn approve(&mut self, _: &Record, _: &Preview) -> Result<(), Stop> {
+            Ok(())
+        }
+        fn landing(&self, item: &Item) -> Option<LandingPlace> {
+            self.rules.landing(item)
+        }
+    }
+    let holding = w.new.path().join("holding-1000");
+    std::fs::create_dir_all(&holding).unwrap();
+    let mut steps = Held { rules };
+    let places = HeldPlaces::default();
+    let ledger = SplitLedger::new(&w.journal, places.clone());
+    let (mut old, mut new) = mem_pair();
+    let (old_live, new_live) = (Live::default(), Live::default());
+    let mut table = std::mem::take(&mut w.table);
+    let hold = holding.clone();
+    let (sent, received) = no_hang(async {
+        tokio::join!(
+            send_greeted(
+                &mut old,
+                &w.record,
+                "2000",
+                &[],
+                |i| Some(source_in(w.old.path(), i)),
+                &old_live,
+                std::sync::Arc::new(pctwin_transfer::FsOpener),
+            ),
+            receive_greeted(
+                &mut new,
+                &mut steps,
+                |s, table| {
+                    table.approve_holding("for-1", "1001", &hold).unwrap();
+                    places.hold("for-1", &hold);
+                    let mut rules = s.rules.clone();
+                    rules.held.insert("1000".into(), "for-1".into());
+                    rules
+                },
+                &mut table,
+                &ledger,
+                "1001",
+                &new_live
+            ),
+        )
+    })
+    .await;
+    sent.unwrap();
+    for (line, (role, path, bytes)) in received.unwrap().files.iter().zip(FILES) {
+        assert!(
+            matches!(line.outcome, Some(ReceiveOutcome::Finished(_))),
+            "{:?}",
+            line.outcome
+        );
+        let landed = holding.join(role_label(role)).join(path.join("/"));
+        assert_eq!(std::fs::read(landed).unwrap(), bytes);
+    }
+    // Closed, as after the move, so the files are read as anyone would read them.
+    drop(ledger);
+    drop(w.journal);
+    let has = |bytes: &[u8], name: &str| {
+        bytes
+            .windows(name.len())
+            .any(|window| window == name.as_bytes())
+    };
+    let mine = std::fs::read(w._jdir.path().join("journal.redb")).unwrap();
+    for name in FILES.iter().flat_map(|(_, path, _)| path.iter()) {
+        assert!(!has(&mine, name), "the mover's journal names {name}");
+    }
+    let theirs = std::fs::read(holding.join(HELD_JOURNAL)).unwrap();
+    for name in FILES.iter().flat_map(|(_, path, _)| path.iter()) {
+        assert!(has(&theirs, name), "the holding journal misses {name}");
+    }
+}
+
 /// M05: the person sent one folder to a place they chose on the new laptop. Once the plan is
 /// approved, the chosen place is approved and the rules send that folder there; the rest land as
 /// usual. A chosen place that could not be approved leaves its files failed, never put

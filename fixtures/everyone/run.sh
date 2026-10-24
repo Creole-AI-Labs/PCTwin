@@ -217,12 +217,14 @@ wait "$helper"
 
 python3 "$here/plant.py" key "$admin/planted.json" "$mover" "$work/mover/new-home" \
   "$admin/evidence.json" "$admin/key.json"
-# The administrator reads what the mover can read, to check it names nobody else's files.
+# The administrator reads what the mover can read, to check it names nobody else's files: the
+# report, the program's output and the mover's change journal, byte for byte.
 sudo cp "$work/mover/report.json" "$admin/mover-report.json"
 sudo cp "$work/mover/log.txt" "$admin/mover-log.txt"
+sudo cp "$work/mover/journal.redb" "$admin/mover-journal.redb"
 sudo chown "$(id -u)" "$admin"/mover-*
 sudo pctwin-labmove check-everyone "$admin/key.json" "$admin/evidence.json" \
-  "$admin/mover-report.json" "$admin/mover-log.txt"
+  "$admin/mover-report.json" "$admin/mover-log.txt" "$admin/mover-journal.redb"
 
 # The planted links pointed at the system's own files: they still belong to the system.
 for f in /etc /etc/passwd; do
