@@ -956,6 +956,12 @@ plan-hand-work-managed =
         [many] { $count } d’éléments sont gérés par votre entreprise ou votre école et ne sont pas inclus. Cochez leurs dossiers pour les inclure.
        *[other] { $count } éléments sont gérés par votre entreprise ou votre école et ne sont pas inclus. Cochez leurs dossiers pour les inclure.
     }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+        [one] { $count } dossier contient plus de fichiers qu’un seul transfert ne peut en emporter, il n’est donc pas déplacé. Après ce transfert, envoyez-le à part avec Envoi rapide, ou copiez-le avec une clé USB.
+        [many] { $count } de dossiers contiennent plus de fichiers qu’un seul transfert ne peut en emporter, ils ne sont donc pas déplacés. Après ce transfert, envoyez chacun à part avec Envoi rapide, ou copiez-les avec une clé USB.
+       *[other] { $count } dossiers contiennent plus de fichiers qu’un seul transfert ne peut en emporter, ils ne sont donc pas déplacés. Après ce transfert, envoyez chacun à part avec Envoi rapide, ou copiez-les avec une clé USB.
+    }
 plan-blocked-someone-unmapped = Une personne de l’ancien ordinateur portable n’a pas encore de compte choisi sur le nouveau. Choisissez où vont les fichiers de chaque personne, puis revenez.
 plan-blocked-account-used-twice = Deux personnes se retrouveraient dans le même compte sur le nouvel ordinateur portable. Donnez à chacune son propre compte.
 plan-blocked-invalid = Ce plan ne peut pas être approuvé tel quel. Revenez en arrière et vérifiez vos choix.

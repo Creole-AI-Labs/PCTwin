@@ -965,3 +965,43 @@ async fn the_record_built_from_pages_names_the_inventory_that_crossed() {
     // Kept through every revision the new laptop makes.
     assert_eq!(got.next_revision().inventory, Some(crossed));
 }
+
+/// A folder too big to list is a reason only move protocol 4 knows: an older new laptop is
+/// asked to update, never sent a list it would refuse part way, and nothing is sent at all.
+#[tokio::test]
+async fn a_folder_too_big_to_list_asks_an_older_new_laptop_to_update() {
+    let mut r = record(3);
+    r.items[1].kind = ItemKind::Folder;
+    r.items[1].inclusion = Inclusion::LeftOut {
+        reason: pctwin_record::LeftOutReason::TooManyFiles,
+    };
+    for version in [JSON, PAGED] {
+        let (mut old, new) = pair();
+        let got = send_inventory(&mut old, &r, version).await;
+        assert!(
+            matches!(
+                got,
+                Err(TransferError::VersionGap(
+                    pctwin_transfer::VersionGap::OtherLaptopOlder
+                ))
+            ),
+            "{got:?}"
+        );
+        // Nothing was sent: the new laptop finds the line closed before any message.
+        drop(old);
+        let mut new = new;
+        let heard = receive_inventory(&mut new, version).await;
+        assert!(
+            matches!(heard, Err(TransferError::ConnectionDropped)),
+            "{heard:?}"
+        );
+    }
+    // Protocol 4 carries it.
+    let (mut old, mut new) = pair();
+    let (s, got) = tokio::join!(
+        send_inventory(&mut old, &r, pctwin_transfer::PERSONAL_SINCE),
+        receive_inventory(&mut new, pctwin_transfer::PERSONAL_SINCE)
+    );
+    s.unwrap();
+    assert_eq!(got.unwrap().items, r.items);
+}

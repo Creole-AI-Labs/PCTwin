@@ -749,6 +749,10 @@ plan-hand-work-managed =
     { NUMBER($count) ->
        *[other] 有{ $count }个项目由你的工作单位或学校管理，已被排除。勾选所在的文件夹即可包括它们。
     }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+       *[other] 有{ $count }个文件夹里的文件太多，一次搬家装不下，所以不会搬过去。这次搬家后，请用快速发送单独发送每个文件夹，或用 USB 闪存盘复制。
+    }
 plan-blocked-someone-unmapped = 旧笔记本电脑上有人还没有选择新电脑上的账户。请选择每个人的文件放到哪里，然后再回来。
 plan-blocked-account-used-twice = 有两个人会被放进新笔记本电脑上的同一个账户。请为每个人分配各自的账户。
 plan-blocked-invalid = 这个方案目前无法同意。请返回检查你的选择。

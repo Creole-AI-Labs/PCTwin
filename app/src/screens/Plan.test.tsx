@@ -631,6 +631,13 @@ describe("M23 plan review and approval", () => {
     });
   });
 
+  it("a folder with more files than one move can carry is said before approval, with a way on", () => {
+    inApp(view({ ...sample.plan, leftOut: [{ reason: "too-many-files", count: 1 }] }, null));
+    expect(screen.getByText(withText(text("plan-hand-body", { count: 1 })))).toBeTruthy();
+    expect(screen.getByText(withText(text("plan-hand-too-many-files", { count: 1 })))).toBeTruthy();
+    noMissingStrings();
+  });
+
   it("with nothing to do by hand it says so", () => {
     inApp(view({ ...sample.plan, leftOut: [{ reason: "system", count: 4 }] }, null));
     expect(screen.getByText(text("plan-hand-none"))).toBeTruthy();

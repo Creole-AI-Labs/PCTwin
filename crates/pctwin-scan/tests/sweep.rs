@@ -1017,8 +1017,80 @@ fn a_very_big_folder_is_counted_as_one_item() {
     );
     let huge = find(&s, FolderRole::Other, "Huge");
     assert_eq!(huge.size_bytes, 120);
+    // Said plainly, not moved as if it were one file: it is left out, with its reason.
+    assert_eq!(
+        huge.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::TooManyFiles
+        }
+    );
     assert!(!s.record.items.iter().any(|i| shown(i).starts_with("Huge/")));
     assert_eq!(s.volumes[1].unexplained_bytes, 0);
+}
+
+/// A laptop whose list is more than one move can hold: its biggest folder is counted as one item
+/// and left out, with its reason, until the rest fits; everything else is listed as before.
+#[test]
+fn a_laptop_past_one_move_leaves_out_its_biggest_folder_until_the_rest_fits() {
+    let lab = lab();
+    for i in 0..40 {
+        write(&lab.d.join(format!("Big/{i}.bin")), 10);
+    }
+    for i in 0..3 {
+        write(&lab.d.join(format!("Small/{i}.bin")), 10);
+    }
+    let stop = AtomicBool::new(false);
+    let run_at = |move_held: u64| {
+        sweep(
+            sized(facts(&lab, false), 0),
+            &mut Answers::default(),
+            &stop,
+            &mut |_| {},
+            &SweepLimits {
+                move_held,
+                ..SweepLimits::default()
+            },
+            None,
+        )
+    };
+    let whole = run_at(pctwin_record::MAX_HELD);
+    assert!(whole.record.items.iter().any(|i| shown(i) == "Big/0.bin"));
+    // The least that holds the list once Big is one item.
+    let without: Vec<Item> = whole
+        .record
+        .items
+        .iter()
+        .filter(|i| !shown(i).starts_with("Big/"))
+        .cloned()
+        .collect();
+    let (mut low, mut high) = (0u64, pctwin_record::MAX_HELD);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if pctwin_record::fits_one_move(&without, mid).unwrap() {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    assert!(!pctwin_record::fits_one_move(&whole.record.items, low).unwrap());
+
+    let s = run_at(low);
+    let big = find(&s, FolderRole::Other, "Big");
+    assert_eq!(big.size_bytes, 400);
+    assert_eq!(
+        big.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::TooManyFiles
+        }
+    );
+    assert!(!s.record.items.iter().any(|i| shown(i).starts_with("Big/")));
+    for i in 0..3 {
+        let small = find(&s, FolderRole::Other, &format!("Small/{i}.bin"));
+        assert_eq!(small.inclusion, Inclusion::Included);
+    }
+    assert!(pctwin_record::fits_one_move(&s.record.items, low).unwrap());
+    assert_eq!(s.placed_by.len(), s.record.items.len());
+    s.record.validate().unwrap();
 }
 
 #[test]

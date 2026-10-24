@@ -804,6 +804,11 @@ plan-hand-work-managed =
         [one] { $count } item is managed by your work or school and is left out. Tick its folder to include it.
        *[other] { $count } items are managed by your work or school and are left out. Tick their folders to include them.
     }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+        [one] { $count } folder holds more files than one move can carry, so it is not moving. After this move, send it on its own with Quick Send, or copy it with a USB drive.
+       *[other] { $count } folders hold more files than one move can carry, so they are not moving. After this move, send each on its own with Quick Send, or copy them with a USB drive.
+    }
 plan-blocked-someone-unmapped = Someone on the old laptop has no account chosen on the new one yet. Choose where each person's files go, then come back.
 plan-blocked-account-used-twice = Two people would end up in one account on the new laptop. Give each person their own.
 plan-blocked-invalid = This plan cannot be approved as it is. Go back and check what you chose.

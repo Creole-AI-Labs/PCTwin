@@ -947,6 +947,12 @@ plan-hand-work-managed =
         [many] { $count } de elementos los gestiona tu trabajo o centro de estudios y quedan fuera. Marca sus carpetas para incluirlos.
        *[other] { $count } elementos los gestiona tu trabajo o centro de estudios y quedan fuera. Marca sus carpetas para incluirlos.
     }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+        [one] { $count } carpeta tiene más archivos de los que cabe en una sola mudanza, así que no se mueve. Después de esta mudanza, envíala por separado con Envío rápido o cópiala con una memoria USB.
+        [many] { $count } de carpetas tienen más archivos de los que caben en una sola mudanza, así que no se mueven. Después de esta mudanza, envía cada una por separado con Envío rápido o cópialas con una memoria USB.
+       *[other] { $count } carpetas tienen más archivos de los que caben en una sola mudanza, así que no se mueven. Después de esta mudanza, envía cada una por separado con Envío rápido o cópialas con una memoria USB.
+    }
 plan-blocked-someone-unmapped = Alguien del portátil antiguo aún no tiene cuenta elegida en el nuevo. Elige adónde van los archivos de cada persona y vuelve.
 plan-blocked-account-used-twice = Dos personas acabarían en la misma cuenta del portátil nuevo. Dale a cada persona la suya.
 plan-blocked-invalid = Este plan no se puede aprobar tal como está. Vuelve atrás y revisa lo que elegiste.

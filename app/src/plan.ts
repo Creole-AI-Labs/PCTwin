@@ -48,7 +48,7 @@ export const FOLDER_ROLES = ["home", "desktop", "documents", "downloads", "pictu
 export type FolderRole = (typeof FOLDER_ROLES)[number];
 
 /** Why an item is left out (`LeftOutReason`). */
-export const LEFT_OUT_REASONS = ["chosen-by-user", "work-managed", "device-bound", "unreadable", "cloud-only", "system"] as const;
+export const LEFT_OUT_REASONS = ["chosen-by-user", "work-managed", "device-bound", "unreadable", "cloud-only", "system", "too-many-files"] as const;
 export type LeftOutReason = (typeof LEFT_OUT_REASONS)[number];
 
 export type CloudProvider = "one-drive" | "i-cloud" | "dropbox" | "google-drive" | "other";
@@ -406,7 +406,7 @@ export function approvalHolds(plan: PlanView, approval: Approval | null): boolea
 }
 
 /** What the plan lists that needs the person to do something by hand, from the left-out reasons. */
-export const BY_HAND: readonly LeftOutReason[] = ["cloud-only", "unreadable", "work-managed"];
+export const BY_HAND: readonly LeftOutReason[] = ["cloud-only", "unreadable", "work-managed", "too-many-files"];
 
 export function leftOutByHand(plan: PlanView): LeftOut[] {
   return plan.leftOut.filter((l) => l.count > 0 && BY_HAND.includes(l.reason));

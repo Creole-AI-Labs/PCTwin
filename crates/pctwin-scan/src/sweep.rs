@@ -72,6 +72,9 @@ pub struct SweepLimits {
     /// A pause after each folder of a nameless count. Zero, except in tests, where it lets a stop
     /// or a save land while such a count is under way.
     pub count_pause: Duration,
+    /// The most one move's list may hold on the new laptop ([`pctwin_record::MAX_HELD`]; smaller
+    /// in tests). Past it, the biggest folders are counted as one item each and left out.
+    pub move_held: u64,
 }
 
 impl Default for SweepLimits {
@@ -82,6 +85,7 @@ impl Default for SweepLimits {
             most_walkers: 4,
             place_items: 250_000,
             count_pause: Duration::ZERO,
+            move_held: pctwin_record::MAX_HELD,
         }
     }
 }
@@ -3134,8 +3138,79 @@ impl Sweeper<'_> {
         self.state.removed.extend(inside);
         let item = &mut self.state.record.items[root];
         item.size_bytes = total;
-        item.inclusion = Inclusion::Included;
+        item.inclusion = Inclusion::LeftOut {
+            reason: LeftOutReason::TooManyFiles,
+        };
         self.state.meta[place].collapsed = Some(root);
+    }
+
+    /// A list more than one move can hold ([`SweepLimits::move_held`]): the folder places with
+    /// the most items are counted as one item each and left out, biggest first, until the rest
+    /// fits. Each is said plainly on the plan, never moved part way. A list wrong in some other
+    /// way is left for the record's own checks. `items` and `placed` are the finished list and
+    /// each item's place, side by side.
+    fn fit_one_move(&mut self, items: &mut Vec<Item>, placed: &mut Vec<(ItemId, usize)>) {
+        while !pctwin_record::fits_one_move(items, self.limits.move_held).unwrap_or(true) {
+            let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
+            for (_, p) in placed.iter() {
+                *counts.entry(*p).or_default() += 1;
+            }
+            let biggest = counts
+                .into_iter()
+                .filter(|(p, n)| {
+                    let meta = &self.state.meta[*p];
+                    *n > 1 && meta.root_item.is_some() && meta.collapsed.is_none()
+                })
+                .max_by_key(|(p, n)| (*n, std::cmp::Reverse(*p)));
+            let Some((place, _)) = biggest else {
+                return;
+            };
+            self.state.meta[place].collapsed = self.state.meta[place].root_item;
+            let root_id = self.state.meta[place]
+                .root_item
+                .map(|r| self.state.record.items[r].id);
+            let Some(at) = items.iter().position(|i| Some(i.id) == root_id) else {
+                continue;
+            };
+            let folder = items[at].clone();
+            let depth = folder.path.parts().len();
+            // Everything at or below the place's folder goes, not only what the place itself
+            // listed: a place found inside it is part of what is left out.
+            let within = |item: &Item, p: usize| {
+                item.id != folder.id
+                    && (p == place
+                        || (item.owner == folder.owner
+                            && item.place == folder.place
+                            && item.path.parts().len() > depth
+                            && item.path.parts()[..depth] == *folder.path.parts()))
+            };
+            let mut total = 0u64;
+            let mut keep = vec![true; items.len()];
+            for (n, (item, (_, p))) in items.iter().zip(placed.iter()).enumerate() {
+                if within(item, *p) {
+                    if item.inclusion == Inclusion::Included {
+                        total = total.saturating_add(item.size_bytes);
+                    }
+                    keep[n] = false;
+                }
+            }
+            let mut n = 0;
+            items.retain(|_| {
+                n += 1;
+                keep[n - 1]
+            });
+            let mut n = 0;
+            placed.retain(|_| {
+                n += 1;
+                keep[n - 1]
+            });
+            if let Some(item) = items.iter_mut().find(|i| i.id == folder.id) {
+                item.size_bytes = item.size_bytes.saturating_add(total);
+                item.inclusion = Inclusion::LeftOut {
+                    reason: LeftOutReason::TooManyFiles,
+                };
+            }
+        }
     }
 
     fn app_data(&mut self, job: &Job, entries: Vec<Entry>, home: usize, place: usize) {
@@ -3470,6 +3545,7 @@ impl Sweeper<'_> {
                 keep_placed.push(placed);
             }
         }
+        self.fit_one_move(&mut keep, &mut keep_placed);
         let mut record = self.state.record.clone();
         record.items = keep;
         let blind_spots: Vec<BlindSpot> = self

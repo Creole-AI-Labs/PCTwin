@@ -951,6 +951,12 @@ plan-hand-work-managed =
         [many] { $count } de itens são gerenciados pela sua empresa ou escola e ficam de fora. Marque as pastas deles para incluí-los.
        *[other] { $count } itens são gerenciados pela sua empresa ou escola e ficam de fora. Marque as pastas deles para incluí-los.
     }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+        [one] { $count } pasta tem mais arquivos do que cabem em uma só mudança, por isso não vai ser movida. Depois desta mudança, envie-a sozinha com o Envio rápido ou copie-a com um pen drive USB.
+        [many] { $count } de pastas têm mais arquivos do que cabem em uma só mudança, por isso não vão ser movidas. Depois desta mudança, envie cada uma sozinha com o Envio rápido ou copie-as com um pen drive USB.
+       *[other] { $count } pastas têm mais arquivos do que cabem em uma só mudança, por isso não vão ser movidas. Depois desta mudança, envie cada uma sozinha com o Envio rápido ou copie-as com um pen drive USB.
+    }
 plan-blocked-someone-unmapped = Alguém no notebook antigo ainda não tem uma conta escolhida no novo. Escolha para onde vão os arquivos de cada pessoa e depois volte.
 plan-blocked-account-used-twice = Duas pessoas acabariam na mesma conta no notebook novo. Dê a cada pessoa a sua própria conta.
 plan-blocked-invalid = Este plano não pode ser aprovado como está. Volte e confira o que você escolheu.

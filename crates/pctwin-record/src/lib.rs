@@ -23,7 +23,7 @@ pub mod inventory;
 pub use inventory::{
     EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_HELD, MAX_PAGE_BYTES, MAX_PAGE_HELD,
     MAX_PATH_BYTES, MAX_PATH_DEPTH, PAGE_ITEMS, decode_inventory, encode_inventory,
-    encode_inventory_ordered,
+    encode_inventory_ordered, fits_one_move,
 };
 use sha2::{Digest, Sha256};
 
@@ -62,6 +62,8 @@ pub enum RecordError {
     Random,
     #[error("this inventory cannot be read: {0}")]
     BadInventory(&'static str),
+    #[error("this laptop's list takes more memory than one move may hold")]
+    TooBigForOneMove,
     #[error("the order of the person's own essentials names an item twice or one not in the plan")]
     BadPersonalOrder,
 }
@@ -471,6 +473,10 @@ pub enum LeftOutReason {
     Unreadable,
     CloudOnly,
     System,
+    /// A folder with more files than one move's list can name: counted as one item and not
+    /// moved (it comes with the record that lists any number of items). Move protocol 4 and
+    /// later; an older new laptop is asked to update.
+    TooManyFiles,
 }
 
 /// Whether an item is part of the move.

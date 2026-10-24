@@ -35,11 +35,11 @@ use std::time::Duration;
 
 use pctwin_record::inventory::MAX_MANIFEST_BYTES;
 use pctwin_record::{
-    EncodedInventory, InventoryReader, MAX_PAGE_BYTES, Record, encode_inventory,
-    encode_inventory_ordered,
+    EncodedInventory, Inclusion, InventoryReader, LeftOutReason, MAX_PAGE_BYTES, Record,
+    encode_inventory, encode_inventory_ordered,
 };
 
-use crate::{Channel, PIECE_MAX, TransferError};
+use crate::{Channel, PIECE_MAX, TransferError, VersionGap};
 
 /// The largest record accepted, as JSON before compression (about 1.3 million items).
 pub const MAX_INVENTORY_BYTES: u64 = 512 * 1024 * 1024;
@@ -121,6 +121,18 @@ pub async fn send_inventory(
 ) -> Result<(), TransferError> {
     // An older new laptop knows no order: it is sent the list it always read.
     let ordered = version >= crate::PERSONAL_SINCE;
+    // Nor a folder too big to list: it would refuse the list part way, so it is asked to update
+    // before anything is sent.
+    if !ordered
+        && record.items.iter().any(|i| {
+            i.inclusion
+                == (Inclusion::LeftOut {
+                    reason: LeftOutReason::TooManyFiles,
+                })
+        })
+    {
+        return Err(TransferError::VersionGap(VersionGap::OtherLaptopOlder));
+    }
     if version >= PAGED_FROM {
         send_paged(ch, record, ordered).await
     } else if record.personal.is_empty() {

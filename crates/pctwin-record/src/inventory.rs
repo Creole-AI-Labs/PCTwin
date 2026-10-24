@@ -326,7 +326,7 @@ pub fn encode_inventory(
     laptop: &LaptopId,
     items: &[Item],
 ) -> Result<EncodedInventory, RecordError> {
-    encode_counted(laptop, items, None).map(|(encoded, _)| encoded)
+    encode_counted(laptop, items, None, MAX_HELD).map(|(encoded, _)| encoded)
 }
 
 /// [`encode_inventory`] in format 3 (move protocol 4), with the person's own essentials in the
@@ -337,14 +337,28 @@ pub fn encode_inventory_ordered(
     items: &[Item],
     personal: &[ItemId],
 ) -> Result<EncodedInventory, RecordError> {
-    encode_counted(laptop, items, Some(personal)).map(|(encoded, _)| encoded)
+    encode_counted(laptop, items, Some(personal), MAX_HELD).map(|(encoded, _)| encoded)
 }
 
-/// [`encode_inventory`], with what the reader will hold, in all, after each page.
+/// Whether `items` fit in what one move's list may hold on the new laptop, `limit` (the move
+/// uses [`MAX_HELD`]), with room left for a full personal order. `Ok(false)` only for a list too
+/// big; a list that is wrong in another way is an error.
+pub fn fits_one_move(items: &[Item], limit: u64) -> Result<bool, RecordError> {
+    let room = crate::MAX_PERSONAL as u64 * PERSONAL_COST;
+    match encode_counted(&LaptopId([0; 16]), items, None, limit.saturating_sub(room)) {
+        Ok(_) => Ok(true),
+        Err(RecordError::TooBigForOneMove) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// [`encode_inventory`], with what the reader will hold, in all, after each page (its personal
+/// order counted first, as the reader counts it), refusing a list that holds more than `limit`.
 fn encode_counted(
     laptop: &LaptopId,
     items: &[Item],
     personal: Option<&[ItemId]>,
+    limit: u64,
 ) -> Result<(EncodedInventory, Vec<u64>), RecordError> {
     if let Some(order) = personal {
         let ids: HashSet<ItemId> = items.iter().map(|i| i.id).collect();
@@ -390,8 +404,12 @@ fn encode_counted(
     let mut folders = Folders {
         index: HashMap::new(),
         count: 0,
-        held: 0,
+        held: personal.map_or(0, |p| p.len() as u64 * PERSONAL_COST),
+        limit,
     };
+    if folders.held > limit {
+        return Err(RecordError::TooBigForOneMove);
+    }
     let mut pages: Vec<Vec<u8>> = Vec::new();
     let mut held_after = Vec::new();
     let mut start = 0;
@@ -454,6 +472,8 @@ struct Folders {
     index: HashMap<FolderKey, (u32, u64)>,
     count: u32,
     held: u64,
+    /// The most the reader may hold: [`MAX_HELD`] for a move.
+    limit: u64,
 }
 
 /// One page from the front of `items`: as many as fit in [`PAGE_ITEMS`], [`MAX_PAGE_BYTES`] and
@@ -550,10 +570,8 @@ fn encode_page(
             }
             break;
         }
-        if known.held + cost > MAX_HELD {
-            return Err(bad(
-                "an inventory that takes more memory than PCTwin allows",
-            ));
+        if known.held + cost > known.limit {
+            return Err(RecordError::TooBigForOneMove);
         }
         page_held += cost;
         known.held += cost;
@@ -1170,6 +1188,7 @@ codes!(
         LeftOutReason::Unreadable = 3,
         LeftOutReason::CloudOnly = 4,
         LeftOutReason::System = 5,
+        LeftOutReason::TooManyFiles = 6,
     ]
 );
 
@@ -1326,7 +1345,7 @@ mod tests {
                 inclusion: Inclusion::Included,
             });
         }
-        let (enc, held_after) = encode_counted(&laptop, &items, None).unwrap();
+        let (enc, held_after) = encode_counted(&laptop, &items, None, MAX_HELD).unwrap();
         assert!(enc.pages.len() >= 3);
         let mut reader = InventoryReader::start(&enc.manifest).unwrap();
         for (page, written) in enc.pages.iter().zip(&held_after) {
@@ -1433,9 +1452,92 @@ mod tests {
                 index: HashMap::new(),
                 count: 0,
                 held: before,
+                limit: MAX_HELD,
             };
             let got = encode_page(0, std::slice::from_ref(&item), &[0], &[0], &mut known);
             assert_eq!(got.is_ok(), fits, "{got:?}");
         }
+    }
+
+    /// A short list of plain files in Documents, each with its real ID.
+    fn plain(laptop: &LaptopId, n: u32) -> Vec<Item> {
+        (0..n)
+            .map(|i| {
+                let owner = Owner::Person {
+                    account_id: "1000".into(),
+                };
+                let place = Place {
+                    role: FolderRole::Documents,
+                    storage: Storage::SystemDrive,
+                };
+                let path = ItemPath::new(vec![
+                    ItemName::from_text("Projects"),
+                    ItemName::from_text(&format!("report {i}.docx")),
+                ])
+                .unwrap();
+                Item {
+                    id: ItemId::derive(laptop, &owner, &place, &path),
+                    kind: ItemKind::File,
+                    owner,
+                    place,
+                    path,
+                    size_bytes: 1,
+                    modified_ns: None,
+                    portability: Portability::Portable,
+                    managed_by: ManagedBy::Personal,
+                    download_bytes: None,
+                    inclusion: Inclusion::Included,
+                }
+            })
+            .collect()
+    }
+
+    /// The writer counts the person's own order as the reader does, so a list the old laptop
+    /// sends just within the limit is never refused by the new laptop for its order.
+    #[test]
+    fn the_writer_counts_the_personal_order_as_the_reader_does() {
+        let laptop = LaptopId([9; 16]);
+        let items = plain(&laptop, 50);
+        let personal: Vec<ItemId> = items.iter().take(20).map(|i| i.id).collect();
+        let (enc, held_after) = encode_counted(&laptop, &items, Some(&personal), MAX_HELD).unwrap();
+        let mut reader = InventoryReader::start(&enc.manifest).unwrap();
+        for page in &enc.pages {
+            drop(reader.page(page).unwrap());
+        }
+        assert_eq!(Some(&reader.held), held_after.last());
+    }
+
+    /// A folder with too many files to list crosses with its reason, so the new laptop can say
+    /// before anything moves that it is not moving.
+    #[test]
+    fn a_folder_too_big_to_list_crosses_with_its_reason() {
+        let laptop = LaptopId([9; 16]);
+        let mut items = plain(&laptop, 3);
+        items[1].kind = ItemKind::Folder;
+        items[1].size_bytes = 5_000_000;
+        items[1].inclusion = Inclusion::LeftOut {
+            reason: LeftOutReason::TooManyFiles,
+        };
+        let enc = encode_inventory_ordered(&laptop, &items, &[]).unwrap();
+        let (_, back, _) = decode_inventory(&enc).unwrap();
+        assert_eq!(back, items);
+    }
+
+    /// A list past what one move may hold is told apart from a list that is wrong, so the old
+    /// laptop can make it fit; the check leaves room for a full personal order.
+    #[test]
+    fn a_list_past_what_one_move_holds_is_told_apart() {
+        let laptop = LaptopId([9; 16]);
+        let items = plain(&laptop, 100);
+        let (_, held) = encode_counted(&laptop, &items, None, MAX_HELD).unwrap();
+        let need = *held.last().unwrap();
+        let room = crate::MAX_PERSONAL as u64 * PERSONAL_COST;
+        assert!(fits_one_move(&items, need + room).unwrap());
+        assert!(!fits_one_move(&items, need + room - 1).unwrap());
+        assert!(matches!(
+            encode_counted(&laptop, &items, None, need - 1),
+            Err(RecordError::TooBigForOneMove)
+        ));
+        assert!(fits_one_move(&items, MAX_HELD).unwrap());
     }
 }
