@@ -949,6 +949,7 @@ async fn the_movers_journal_names_none_of_another_persons_files() {
         held: Default::default(),
         left_out: Default::default(),
         chosen: Default::default(),
+        wholes: Default::default(),
     };
     struct Held {
         rules: LandingRules,
