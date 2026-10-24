@@ -17,7 +17,7 @@
 
 use std::collections::BTreeSet;
 use std::io::{self, Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -111,42 +111,97 @@ pub enum NotAccepted {
 }
 
 impl NotAccepted {
-    /// What an accept error means for the door: the system's own codes for "this caller" and
-    /// "too many open" are kept apart from a door that is gone.
+    /// What an accept error means for the door. Only a listener that is really gone ends it (a
+    /// bad or closed handle, not a socket, one that cannot accept); the system running short (too
+    /// many files open, no memory or buffers) waits and goes on; anything else is taken as this
+    /// caller's alone, and the door stays open.
     pub fn of(e: &io::Error) -> Self {
-        match e.kind() {
-            io::ErrorKind::Interrupted
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::WouldBlock
-            | io::ErrorKind::TimedOut
-            | io::ErrorKind::UnexpectedEof
-            | io::ErrorKind::BrokenPipe
-            | io::ErrorKind::NotConnected
-            | io::ErrorKind::PermissionDenied => Self::Caller(e.to_string()),
-            _ if is_busy(e) => Self::Busy,
-            _ => Self::Closed(e.to_string()),
+        if dead_listener(e) {
+            return Self::Closed(e.to_string());
+        }
+        if short_of(e) || e.kind() == io::ErrorKind::OutOfMemory {
+            return Self::Busy;
+        }
+        Self::Caller(e.to_string())
+    }
+}
+
+/// The listener itself is gone: EBADF, EINVAL, ENOTSOCK (and the Windows socket codes for them).
+fn dead_listener(e: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        e.raw_os_error().is_some_and(|c| {
+            [Errno::BADF, Errno::INVAL, Errno::NOTSOCK]
+                .iter()
+                .any(|d| d.raw_os_error() == c)
+        })
+    }
+    #[cfg(windows)]
+    {
+        // WSAEBADF, WSAEINVAL, WSAENOTSOCK.
+        e.raw_os_error()
+            .is_some_and(|c| [10009, 10022, 10038].contains(&c))
+    }
+}
+
+/// The system is short of something for now: EMFILE, ENFILE, ENOBUFS, ENOMEM.
+fn short_of(e: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        use rustix::io::Errno;
+        e.raw_os_error().is_some_and(|c| {
+            [Errno::MFILE, Errno::NFILE, Errno::NOBUFS, Errno::NOMEM]
+                .iter()
+                .any(|d| d.raw_os_error() == c)
+        })
+    }
+    #[cfg(windows)]
+    {
+        // WSAEMFILE, WSAENOBUFS.
+        e.raw_os_error()
+            .is_some_and(|c| [10024, 10055].contains(&c))
+    }
+}
+
+/// Most callers being opened at once; more are let go at once (they never hold a thread).
+pub const MOST_IN_FLIGHT: usize = 16;
+
+/// Callers let go are logged at most once this often, with how many there were since.
+const LOG_EVERY: Duration = Duration::from_secs(1);
+/// After this many callers let go in a row with none taken, the door pauses a moment.
+const PAUSE_AFTER: u32 = 32;
+const CALLER_PAUSE: Duration = Duration::from_millis(50);
+
+/// The callers let go, said at most once a second.
+#[derive(Default)]
+struct LetGo {
+    since: u64,
+    last: Option<Instant>,
+    in_a_row: u32,
+}
+
+impl LetGo {
+    fn one(&mut self, why: &str) {
+        self.since += 1;
+        self.in_a_row += 1;
+        if self.last.is_none_or(|t| t.elapsed() >= LOG_EVERY) {
+            eprintln!(
+                "pctwin-helper: {} caller(s) let go, the latest: {why}",
+                self.since
+            );
+            self.since = 0;
+            self.last = Some(Instant::now());
+        }
+        if self.in_a_row >= PAUSE_AFTER {
+            self.in_a_row = 0;
+            std::thread::sleep(CALLER_PAUSE);
         }
     }
 }
 
-/// Too many files open, for this process or the whole system.
-fn is_busy(e: &io::Error) -> bool {
-    #[cfg(unix)]
-    {
-        e.raw_os_error().is_some_and(|c| {
-            c == rustix::io::Errno::MFILE.raw_os_error()
-                || c == rustix::io::Errno::NFILE.raw_os_error()
-        })
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = e;
-        false
-    }
-}
-
-/// A caller's state: it moves once, from waiting, to opened or to cut off.
+/// A caller's state: it moves once, from waiting, to done (its opening finished in time) or to
+/// cut off.
 const WAITING: u8 = 0;
 const OPENED: u8 = 1;
 const CUT: u8 = 2;
@@ -157,10 +212,32 @@ const CUT: u8 = 2;
 /// at once. A caller whose time runs out is cut off and can never be served. `log` hears why a
 /// caller was let go (for the helper's own log).
 pub fn first_opening<S, O>(
+    accept: impl FnMut() -> Result<Accepted<S>, NotAccepted> + Send + 'static,
+    open: impl Fn(&mut Deadlined<S>, u32) -> Result<O, NotOpened> + Send + Sync + 'static,
+    time: Duration,
+    log: impl Fn(u32, &NotOpened) + Send + Sync + 'static,
+) -> Result<(S, u32, O), String>
+where
+    S: Timed + Send + 'static,
+    O: Send + 'static,
+{
+    door(accept, open, time, log, Arc::default())
+}
+
+/// How many callers are being opened, and how many watches over their time are running.
+#[derive(Debug, Default)]
+struct Counts {
+    opening: AtomicUsize,
+    watching: AtomicUsize,
+}
+
+/// [`first_opening`], counting in `counts`.
+fn door<S, O>(
     mut accept: impl FnMut() -> Result<Accepted<S>, NotAccepted> + Send + 'static,
     open: impl Fn(&mut Deadlined<S>, u32) -> Result<O, NotOpened> + Send + Sync + 'static,
     time: Duration,
     log: impl Fn(u32, &NotOpened) + Send + Sync + 'static,
+    counts: Arc<Counts>,
 ) -> Result<(S, u32, O), String>
 where
     S: Timed + Send + 'static,
@@ -172,11 +249,15 @@ where
     let won = Arc::new(AtomicBool::new(false));
     let waiting: Arc<Mutex<BTreeSet<u32>>> = Arc::default();
     std::thread::spawn(move || {
+        let mut let_go = LetGo::default();
         loop {
             let caller = match accept() {
-                Ok(c) => c,
+                Ok(c) => {
+                    let_go.in_a_row = 0;
+                    c
+                }
                 Err(NotAccepted::Caller(why)) => {
-                    eprintln!("pctwin-helper: a caller was let go: {why}");
+                    let_go.one(&why);
                     continue;
                 }
                 Err(NotAccepted::Busy) => {
@@ -194,17 +275,44 @@ where
                 cut();
                 continue;
             }
-            // At most one caller waiting per account.
+            // At most a few callers being opened at once, and one per account.
+            if counts.opening.load(Ordering::Acquire) >= MOST_IN_FLIGHT {
+                cut();
+                let_go.one("too many callers at once");
+                continue;
+            }
             let fresh = waiting.lock().map(|mut w| w.insert(uid)).unwrap_or(false);
             if !fresh {
                 cut();
                 continue;
             }
+            counts.opening.fetch_add(1, Ordering::AcqRel);
+            counts.watching.fetch_add(1, Ordering::AcqRel);
             let state = Arc::new(AtomicU8::new(WAITING));
             let watch = Arc::clone(&state);
-            std::thread::spawn(move || {
-                std::thread::sleep(time);
-                // Cut off only a caller still waiting; one already opened is left be.
+            let watched = Arc::clone(&counts);
+            // The watch over a caller's time ends as soon as its opening does (it is woken
+            // then), so a caller that fails at once holds nothing for the rest of its time.
+            let watcher = std::thread::spawn(move || {
+                // Counted while it runs, whichever way it ends.
+                struct Done(Arc<Counts>);
+                impl Drop for Done {
+                    fn drop(&mut self) {
+                        self.0.watching.fetch_sub(1, Ordering::AcqRel);
+                    }
+                }
+                let _done = Done(watched);
+                loop {
+                    if watch.load(Ordering::Acquire) != WAITING {
+                        return;
+                    }
+                    let left = until.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    std::thread::park_timeout(left);
+                }
+                // Cut off only a caller still waiting; one whose opening finished is left be.
                 if watch
                     .compare_exchange(WAITING, CUT, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok()
@@ -212,24 +320,27 @@ where
                     cut();
                 }
             });
-            let (tx, open, log, won, waiting) = (
+            let (tx, open, log, won, waiting, counts) = (
                 tx.clone(),
                 Arc::clone(&open),
                 Arc::clone(&log),
                 Arc::clone(&won),
                 Arc::clone(&waiting),
+                Arc::clone(&counts),
             );
             std::thread::spawn(move || {
                 let mut stream = Deadlined::new(stream, until);
                 let opened = open(&mut stream, uid);
-                // Opened in time, or not at all: a caller already cut off never counts.
+                // Finished in time, or not at all: a caller already cut off never counts.
                 let in_time = Instant::now() <= until
                     && state
                         .compare_exchange(WAITING, OPENED, Ordering::AcqRel, Ordering::Acquire)
                         .is_ok();
+                watcher.thread().unpark();
                 if let Ok(mut w) = waiting.lock() {
                     w.remove(&uid);
                 }
+                counts.opening.fetch_sub(1, Ordering::AcqRel);
                 match opened {
                     // The first opening in time is served; any other is let go.
                     Ok(o) if in_time && !won.swap(true, Ordering::AcqRel) => {
@@ -257,7 +368,7 @@ mod tests {
     /// A door on a local port: each connection says its account first ("uid 501"), standing
     /// for the system's word on who called. One that closes before saying it is that caller's
     /// failure, as a failed peer-credential read is in the daemon.
-    fn door(listener: TcpListener) -> impl FnMut() -> Result<Accepted<TcpStream>, NotAccepted> {
+    fn door_of(listener: TcpListener) -> impl FnMut() -> Result<Accepted<TcpStream>, NotAccepted> {
         move || {
             let (s, _) = listener.accept().map_err(|e| NotAccepted::of(&e))?;
             s.set_read_timeout(Some(Duration::from_secs(5)))
@@ -329,12 +440,104 @@ mod tests {
         let heard = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::clone(&heard);
         let first = std::thread::spawn(move || {
-            first_opening(door(listener), opener(late), time, move |uid, _| {
+            first_opening(door_of(listener), opener(late), time, move |uid, _| {
                 log.lock().unwrap().push(uid)
             })
             .map(|(_, uid, ())| uid)
         });
         (first, heard)
+    }
+
+    /// A flood of callers from one account, each sending nonsense at once: each is let go as
+    /// soon as it fails, nothing of it is held for the rest of its time, never more than a few
+    /// are being opened at once, and the mover is served straight after.
+    #[test]
+    fn a_flood_of_instant_failures_holds_nothing_and_the_mover_is_served() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let time = Duration::from_secs(5);
+        let counts = Arc::new(Counts::default());
+        let seen = Arc::clone(&counts);
+        let first = std::thread::spawn(move || {
+            door(
+                door_of(listener),
+                opener(Duration::ZERO),
+                time,
+                |_, _| {},
+                seen,
+            )
+            .map(|(_, uid, ())| uid)
+        });
+        let started = Instant::now();
+        let mut most = 0;
+        for _ in 0..200 {
+            let mut c = call(addr, 501);
+            let _ = writeln!(c, "nonsense");
+            most = most.max(counts.opening.load(Ordering::Acquire));
+        }
+        // Every one has ended, its watch included, long before its time would have run out.
+        let settle = Instant::now() + Duration::from_secs(3);
+        while (counts.opening.load(Ordering::Acquire) > 0
+            || counts.watching.load(Ordering::Acquire) > 0)
+            && Instant::now() < settle
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(counts.opening.load(Ordering::Acquire), 0);
+        assert_eq!(counts.watching.load(Ordering::Acquire), 0);
+        assert!(most <= MOST_IN_FLIGHT, "{most} at once");
+        let mut mover = call(addr, 502);
+        writeln!(mover, "open").unwrap();
+        assert_eq!(first.join().unwrap().unwrap(), 502);
+        assert!(
+            started.elapsed() < time,
+            "served after {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// Only a listener that is really gone ends the door; the system running short waits; any
+    /// other failure is one caller's.
+    #[test]
+    fn accept_failures_end_the_door_only_when_it_is_gone() {
+        let kind = |k: io::ErrorKind| NotAccepted::of(&io::Error::from(k));
+        for k in [
+            io::ErrorKind::Interrupted,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::Other,
+        ] {
+            assert!(matches!(kind(k), NotAccepted::Caller(_)), "{k:?}");
+        }
+        assert!(matches!(
+            kind(io::ErrorKind::OutOfMemory),
+            NotAccepted::Busy
+        ));
+        #[cfg(unix)]
+        {
+            use rustix::io::Errno;
+            let code = |e: Errno| NotAccepted::of(&io::Error::from_raw_os_error(e.raw_os_error()));
+            for e in [Errno::MFILE, Errno::NFILE, Errno::NOBUFS, Errno::NOMEM] {
+                assert!(matches!(code(e), NotAccepted::Busy), "{e:?}");
+            }
+            for e in [Errno::PROTO, Errno::CONNABORTED, Errno::INTR] {
+                assert!(matches!(code(e), NotAccepted::Caller(_)), "{e:?}");
+            }
+            for e in [Errno::BADF, Errno::INVAL, Errno::NOTSOCK] {
+                assert!(matches!(code(e), NotAccepted::Closed(_)), "{e:?}");
+            }
+        }
+        #[cfg(windows)]
+        {
+            let code = |c: i32| NotAccepted::of(&io::Error::from_raw_os_error(c));
+            assert!(matches!(code(10024), NotAccepted::Busy));
+            assert!(matches!(code(10055), NotAccepted::Busy));
+            assert!(matches!(code(10053), NotAccepted::Caller(_)));
+            for c in [10009, 10022, 10038] {
+                assert!(matches!(code(c), NotAccepted::Closed(_)), "{c}");
+            }
+        }
     }
 
     #[test]
