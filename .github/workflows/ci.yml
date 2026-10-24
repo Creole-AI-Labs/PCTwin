@@ -485,6 +485,46 @@ jobs:
                 echo "$list" | grep -E " (\./)?$f\$" || { echo "missing: $f" >&2; echo "$list" >&2; exit 1; }
               done ;;
           esac
+      # Windows: the installer, run for real. A silent install puts the app and both helpers in
+      # Program Files and adds no firewall rule (only a person's yes adds it); the hook's own
+      # rule command, run here, makes a rule for PCTwin's program only, inbound TCP, private
+      # networks only; uninstalling takes the rule and the files away.
+      - name: The installer installs, asks before any firewall rule, and uninstalls clean
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rule = 'PCTwin (private networks)'
+          function Rule-Count { @(Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue).Count }
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          $p = Start-Process $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the installer ended with $($p.ExitCode)" }
+          $dir = Join-Path $env:ProgramFiles 'PCTwin'
+          $app = Get-ChildItem $dir -Filter '*.exe' | Where-Object { $_.Name -notmatch '^(pctwin-helper|pctwin-handover|uninstall)' } | Select-Object -First 1
+          foreach ($f in 'pctwin-helper.exe', 'pctwin-handover.exe') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "not installed: $f" }
+          }
+          if (-not $app) { throw 'the app was not installed' }
+          if ((Rule-Count) -ne 0) { throw 'a silent install added a firewall rule' }
+          # The hook's own add command, as the installer runs it after a yes.
+          $line = Select-String -Path app/src-tauri/windows/hooks.nsh -Pattern 'firewall add rule' | Select-Object -First 1
+          $cmd = ($line.Line -replace '^.*advfirewall', 'advfirewall' -replace "'\s*$", '')
+          $cmd = $cmd -replace '\$\{PCTWIN_FIREWALL_RULE\}', $rule -replace '\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe', $app.FullName
+          cmd /c "netsh $cmd"
+          if ($LASTEXITCODE -ne 0) { throw "netsh $cmd failed" }
+          $r = Get-NetFirewallRule -DisplayName $rule
+          if (@($r).Count -ne 1) { throw 'expected exactly one rule' }
+          if ($r.Direction -ne 'Inbound' -or $r.Action -ne 'Allow' -or "$($r.Profile)" -ne 'Private') { throw "wrong rule: $($r | Out-String)" }
+          $port = $r | Get-NetFirewallPortFilter
+          if ($port.Protocol -ne 'TCP') { throw "wrong protocol: $($port.Protocol)" }
+          $prog = $r | Get-NetFirewallApplicationFilter
+          if ($prog.Program -ne $app.FullName) { throw "wrong program: $($prog.Program)" }
+          $u = Start-Process (Join-Path $dir 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "the uninstaller ended with $($u.ExitCode)" }
+          # The uninstaller copies itself away and finishes there: wait for the files to go.
+          foreach ($n in 1..60) { if (-not (Test-Path (Join-Path $dir 'pctwin-helper.exe'))) { break }; Start-Sleep -Seconds 1 }
+          if ((Rule-Count) -ne 0) { throw 'uninstalling left the firewall rule' }
+          if (Test-Path (Join-Path $dir 'pctwin-helper.exe')) { throw 'uninstalling left the helper' }
       # The Mac app as built must carry the Local Network keys (src-tauri/Info.plist, merged by
       # `tauri build`). Per Apple TN3179 (developer.apple.com/documentation/technotes/
       # tn3179-understanding-local-network-privacy), without them the system's question may lack
