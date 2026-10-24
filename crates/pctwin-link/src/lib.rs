@@ -630,6 +630,10 @@ pub struct Link {
 
 impl Link {
     fn new(paired: Paired, stream: TcpStream, peer: SocketAddr, send_timeout: Duration) -> Self {
+        // Every message goes at once (TCP_NODELAY): a move sends a few small messages for each
+        // file and waits for the answer, so holding one back to batch it with the next (Nagle's
+        // rule, with the other side's delayed acknowledgement) cost tens of milliseconds a file.
+        let _ = stream.set_nodelay(true);
         let (transport, lanes) = paired.into_parts();
         Self {
             transport,
@@ -694,6 +698,12 @@ impl Link {
         let sent = write_frame(&mut self.stream, KIND_DATA, &sealed, self.send_timeout).await;
         self.broken = sent.is_err();
         sent
+    }
+
+    /// Whether each message goes out at once rather than being held back to be sent with the
+    /// next (TCP_NODELAY).
+    pub fn sends_at_once(&self) -> bool {
+        self.stream.nodelay().unwrap_or(false)
     }
 
     /// Receives and opens one message. Waits as long as it takes. Cancelling it (for example

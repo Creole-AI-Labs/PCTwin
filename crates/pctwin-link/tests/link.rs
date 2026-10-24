@@ -122,6 +122,9 @@ async fn two_laptops_pair_over_a_real_connection_and_exchange_sealed_data() {
         pending_guest.approval()
     );
     let (mut host_link, mut guest_link) = (host_link.unwrap(), guest_link.unwrap());
+    // Each small message goes at once, never held back to be sent with the next (a move sends a
+    // few small messages for every file: held back, each waited on the other side's reply).
+    assert!(host_link.sends_at_once() && guest_link.sends_at_once());
 
     host_link.send(b"hello from the old laptop").await.unwrap();
     assert_eq!(
