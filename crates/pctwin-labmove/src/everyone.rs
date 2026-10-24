@@ -309,6 +309,22 @@ pub async fn everyone(args: Everyone) -> Result<Ran, String> {
         sweep.record.items.len(),
         sweep.blind_spots.len()
     ));
+    // The largest places that move (the mover's own and shared ones, which the mover may see),
+    // so a run that moves more than it should names them.
+    let mut moving: Vec<&pctwin_scan::FoundPlace> = sweep
+        .places
+        .iter()
+        .filter(|p| p.fate == pctwin_scan::Fate::Moves && p.path.is_some())
+        .collect();
+    moving.sort_by(|a, b| b.bytes.cmp(&a.bytes).then(b.files.cmp(&a.files)));
+    for p in moving.iter().take(15) {
+        stage(&format!(
+            "moves: {} ({} files, {} bytes)",
+            p.path.as_deref().unwrap_or_default(),
+            p.files,
+            p.bytes
+        ));
+    }
     let me = sweep.census.me.clone();
     let others: Vec<String> = sweep
         .census

@@ -99,6 +99,10 @@ fn tool_folders_at_the_top_of_the_system_drive_are_apps() {
         "hostedtoolcache",
         "MinGW",
         "Go",
+        "actions-runner",
+        "CodeQL",
+        "Julia-1.10.4",
+        "selenium",
     ] {
         let row = win
             .at_root(name, true)

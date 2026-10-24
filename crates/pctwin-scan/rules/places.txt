@@ -68,6 +68,10 @@ windows | sysroot | Modules | app
 windows | sysroot | hostedtoolcache | app
 windows | sysroot | SeleniumWebDrivers | app
 windows | sysroot | npm | app
+windows | sysroot | actions-runner | app
+windows | sysroot | CodeQL | app
+windows | sysroot | Julia-#.#.# | app
+windows | sysroot | selenium | app
 windows | sysroot | pagefile.sys | system
 windows | sysroot | hiberfil.sys | system
 windows | sysroot | swapfile.sys | system
