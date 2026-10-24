@@ -491,6 +491,31 @@ pub(crate) fn put_mark(
 mod tests {
     use super::*;
 
+    /// CI, 24 October 2026: macOS's exFAT driver refuses a rename that never replaces (ENOTSUP),
+    /// and recovery then could not clear its own proven leftover. On such a drive the file is
+    /// opened again by its name, proven there and removed; a file not proven is still left.
+    #[cfg(unix)]
+    #[test]
+    fn a_drive_that_refuses_a_no_replace_rename_still_removes_only_a_proven_file() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), cap_std::ambient_authority()).unwrap();
+        let refuses = |_: &Dir, _: &str, _: &str| Err(rustix::io::Errno::NOTSUP);
+        std::fs::write(root.path().join("left.bin"), b"part").unwrap();
+        let id = identity(&std::fs::File::open(root.path().join("left.bin")).unwrap())
+            .unwrap()
+            .0;
+        // Not proven: left.
+        assert!(!remove_proven_unix(&dir, "left.bin", id, |_| Ok(false), &refuses).unwrap());
+        assert!(root.path().join("left.bin").exists());
+        // Another file at the name: left.
+        std::fs::write(root.path().join("other.bin"), b"x").unwrap();
+        assert!(!remove_proven_unix(&dir, "other.bin", id, |_| Ok(true), &refuses).unwrap());
+        assert!(root.path().join("other.bin").exists());
+        // Proven: removed, never refused for the drive's rename.
+        assert!(remove_proven_unix(&dir, "left.bin", id, |_| Ok(true), &refuses).unwrap());
+        assert!(!root.path().join("left.bin").exists());
+    }
+
     /// A file is removed only while its name still holds the very file proven: another file put
     /// at the name since (a swap between a check and a removal) is never removed, and stays
     /// exactly where it is; one whose proof fails at the moment of removal stays too.
@@ -847,32 +872,9 @@ pub(crate) fn remove_proven(
     #[cfg(unix)]
     {
         use rustix::fs::{RenameFlags, renameat_with};
-        let private = crate::unix_undo::private_name()?;
-        match renameat_with(dir, name, dir, &private, RenameFlags::NOREPLACE) {
-            Ok(()) => {}
-            Err(rustix::io::Errno::NOENT) => return Ok(false),
-            Err(e) => return Err(e.into()),
-        }
-        let back = |dir: &Dir| {
-            // Put back where it was, never over anything that took the name meanwhile.
-            let _ = renameat_with(dir, &private, dir, name, RenameFlags::NOREPLACE);
-        };
-        let mut file = match dir.open(&private) {
-            Ok(f) => f.into_std(),
-            Err(e) => {
-                back(dir);
-                return Err(e);
-            }
-        };
-        let proven = file.metadata()?.is_file()
-            && identity(&file)?.0 == expect
-            && prove(&mut file).unwrap_or(false);
-        if !proven {
-            back(dir);
-            return Ok(false);
-        }
-        dir.remove_file(&private)?;
-        Ok(true)
+        remove_proven_unix(dir, name, expect, prove, &|dir, from, to| {
+            renameat_with(dir, from, dir, to, RenameFlags::NOREPLACE)
+        })
     }
     #[cfg(not(any(windows, unix)))]
     {
@@ -883,6 +885,72 @@ pub(crate) fn remove_proven(
         dir.remove_file(name)?;
         Ok(true)
     }
+}
+
+/// How [`remove_proven`] moves a file aside on Linux and macOS: a rename that never replaces
+/// anything (a seam, so a drive that refuses such a rename can be played in a test).
+#[cfg(unix)]
+type NoReplace<'a> = &'a dyn Fn(&Dir, &str, &str) -> rustix::io::Result<()>;
+
+/// [`remove_proven`] on Linux and macOS: moved to a private name with `rename` (never replacing),
+/// proven there, then unlinked. A drive that cannot rename without replacing (macOS's exFAT and
+/// FAT drivers refuse it) is not refused: there the file is opened again by its name, proven on
+/// that very open, and removed at once, as the gate removes on such drives everywhere else.
+#[cfg(unix)]
+fn remove_proven_unix(
+    dir: &Dir,
+    name: &str,
+    expect: FileId,
+    prove: impl FnOnce(&mut std::fs::File) -> io::Result<bool>,
+    rename: NoReplace<'_>,
+) -> io::Result<bool> {
+    use rustix::io::Errno;
+    let private = crate::unix_undo::private_name()?;
+    match rename(dir, name, &private) {
+        Ok(()) => {}
+        Err(Errno::NOENT) => return Ok(false),
+        Err(e)
+            if e == Errno::NOTSUP
+                || e == Errno::OPNOTSUPP
+                || e == Errno::NOSYS
+                || e == Errno::INVAL =>
+        {
+            let mut file = match dir.open(name) {
+                Ok(f) => f.into_std(),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+                Err(e) => return Err(e),
+            };
+            if !file.metadata()?.is_file()
+                || identity(&file)?.0 != expect
+                || !prove(&mut file).unwrap_or(false)
+            {
+                return Ok(false);
+            }
+            dir.remove_file(name)?;
+            return Ok(true);
+        }
+        Err(e) => return Err(e.into()),
+    }
+    let back = |dir: &Dir| {
+        // Put back where it was, never over anything that took the name meanwhile.
+        let _ = rename(dir, &private, name);
+    };
+    let mut file = match dir.open(&private) {
+        Ok(f) => f.into_std(),
+        Err(e) => {
+            back(dir);
+            return Err(e);
+        }
+    };
+    let proven = file.metadata()?.is_file()
+        && identity(&file)?.0 == expect
+        && prove(&mut file).unwrap_or(false);
+    if !proven {
+        back(dir);
+        return Ok(false);
+    }
+    dir.remove_file(&private)?;
+    Ok(true)
 }
 
 /// One of PCTwin's own plain files in `dir`, made only for its attributes and removed at once
