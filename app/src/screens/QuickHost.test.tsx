@@ -90,6 +90,8 @@ describe("too many files for one send", () => {
   it("is said plainly on the choosing page, before anything is sent", async () => {
     replies.quicksend_pick = () => [{ id: "p1", name: "Everything", kind: "folder", included: true, bytes: null, files: null }];
     replies.quicksend_offer = () => {
+      // The engine's refusal arrives as Tauri gives it: a plain object, not an Error.
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw { kind: "too-many-files" };
     };
     inApp(<QuickHost mode="send" onHome={vi.fn()} />);
@@ -99,7 +101,7 @@ describe("too many files for one send", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-choose-continue")) }));
     await waitFor(() => {
-      expect(screen.getAllByRole("alert").some((a) => a.textContent?.includes(text("qs-pick-too-many")))).toBe(true);
+      expect(screen.getAllByRole("alert").some((a) => a.textContent.includes(text("qs-pick-too-many")))).toBe(true);
     });
     expect(heading()).toBe(text("qs-choose-title"));
     expect(tauri.invoke).not.toHaveBeenCalledWith("quicksend_send", expect.anything());
