@@ -152,3 +152,4 @@ export interface WaitingState {
   /** Seconds since the other laptop was last heard from; null if it was not heard from this time (the line is left out). */
   lastSeenSeconds: number | null;
 }
+// Test only.
