@@ -187,18 +187,24 @@ if ! $mac; then
     exit 1
   fi
 fi
-# (45, not 25: a hosted Mac runner carries about 400 GB and 4 million files of developer tools,
-# and the sweep still lists every file even in places it never moves; the faster sweep is a
-# Task List follow-up. Seen in CI run 40119696543: still sweeping, steadily, at 25 minutes.)
-# A bounded wait: a move that does not end in 45 minutes is stopped on both sides, and its log
-# (where it got to, stage by stage) and the helper's are kept and shown like a failure's.
-waited=0
-while kill -0 "$engine" 2>/dev/null && [ "$waited" -lt 2700 ]; do
+# A move is stopped when it stops making progress, not after a set time: a hosted Mac runner
+# carries about 400 GB and 4 million files of developer tools, the sweep still lists every file
+# even in places it never moves (the faster sweep is a Task List follow-up), and the mover's
+# sweep and then the helper's each took from 5 to 28 minutes on the same runner image (CI runs
+# 40193890072 and 40208026741). Both say how far they have got about once a minute (the mover's
+# log and the helper's), so 10 minutes with neither log growing is a move that is stuck. It is
+# then stopped on both sides, and both logs (where it got to, stage by stage) are kept and shown
+# like a failure's. The job's own time limit bounds the whole run.
+size_of() { sudo stat -c %s "$1" 2>/dev/null || sudo stat -f %z "$1" 2>/dev/null || echo 0; }
+stalled=0
+last=""
+while kill -0 "$engine" 2>/dev/null && [ "$stalled" -lt 600 ]; do
   sleep 5
-  waited=$((waited + 5))
+  now="$(size_of "$work/mover/log.txt") $(size_of "$admin/helper-3.txt")"
+  if [ "$now" = "$last" ]; then stalled=$((stalled + 5)); else stalled=0; last="$now"; fi
 done
 if kill -0 "$engine" 2>/dev/null; then
-  echo "the move did not finish in 45 minutes: stopping it" >&2
+  echo "the move made no progress for 10 minutes (neither its log nor the helper's grew): stopping it" >&2
   sudo pkill -u "$(uid "$mover")" -f "^pctwin-labmove everyone" 2>/dev/null || true
   sudo kill "$helper" 2>/dev/null || true
   sudo pkill -f "^pctwin-helper --session $token" 2>/dev/null || true

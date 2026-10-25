@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 use pctwin_record::{Inclusion, Item, ItemKind, LaptopId, Owner};
 use pctwin_scan::{Census, PersonKind, Rules, Sweep, SweepFacts, SweepLimits};
@@ -116,7 +117,7 @@ pub fn scan_person(laptop: LaptopId, account: &str) -> Result<PersonScan, Refusa
         facts,
         reader.as_mut(),
         &stop,
-        &mut |_| {},
+        &mut progress(),
         &SweepLimits::default(),
         None,
     );
@@ -131,6 +132,27 @@ pub fn scan_person(laptop: LaptopId, account: &str) -> Result<PersonScan, Refusa
         privacy_blocked,
         system_only: system_only(&swept),
     })
+}
+
+/// About once a minute while the helper sweeps, how far it has got, on the helper's own output
+/// (counts only, never a name or a place): a sweep of a big drive takes many minutes with no
+/// answer to send yet, and this says whether it is still moving or where it stopped.
+fn progress() -> impl FnMut(&pctwin_scan::FrontierView<'_>) {
+    let began = Instant::now();
+    let mut said = began;
+    move |view| {
+        if said.elapsed() >= Duration::from_secs(60) {
+            said = Instant::now();
+            let so_far = view.found_so_far();
+            eprintln!(
+                "pctwin-helper: [{:>6.1} s] sweeping: {} files, {} bytes so far, {} folders waiting",
+                began.elapsed().as_secs_f64(),
+                so_far.files,
+                so_far.bytes,
+                view.pending()
+            );
+        }
+    }
 }
 
 /// At most this many system-only places are told (each a folder's path, so the answer stays
@@ -195,7 +217,7 @@ pub fn scan_people(
         &people,
         reader.as_mut(),
         &stop,
-        &mut |_| {},
+        &mut progress(),
         &SweepLimits::default(),
     );
     let privacy_blocked = swept
