@@ -34,7 +34,12 @@ fn journal() -> &'static Journal {
 fn setup() -> Option<(tempfile::TempDir, Destination)> {
     #[cfg(target_os = "macos")]
     trash();
-    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    // ".noindex": Spotlight never opens these files, so it is never seen as another program
+    // having one open (undo leaves such a file for another try).
+    let root = tempfile::Builder::new()
+        .suffix(".noindex")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
     std::fs::create_dir(root.path().join("Docs")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     put(&root, "Docs/probe.txt", b"probe");

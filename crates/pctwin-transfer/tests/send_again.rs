@@ -1923,7 +1923,9 @@ impl Moved {
     }
 
     /// The one way a file that did not change may end otherwise today: the new laptop refused a
-    /// start it counted as a fresh attempt (its continuation is its own change).
+    /// start it counted as a fresh attempt (its continuation is its own change), as "kept
+    /// changing" once enough of them carried a block, or as started too often once the starts
+    /// cut off before any block reached the cap of starts (`MAX_STARTS_PER_FILE`) first.
     fn assert_refused_as_new_attempts(&self, n: usize) {
         assert_eq!(
             self.sent[n],
@@ -1934,7 +1936,10 @@ impl Moved {
             "file {n}"
         );
         match &self.got[n] {
-            Some(ReceiveOutcome::Failed(why)) => assert!(why.contains("kept changing"), "{why}"),
+            Some(ReceiveOutcome::Failed(why)) => assert!(
+                why.contains("kept changing") || why.contains("started it over too many times"),
+                "{why}"
+            ),
             other => panic!("file {n}: {other:?}"),
         }
     }
@@ -3937,9 +3942,10 @@ proptest! {
                 if sizes.len() > 1 && m.sent[n] != Some(SendOutcome::Arrived) && !identical {
                     // With several files sharing a connection's progress, a file can get no
                     // block on a connection, and the new laptop then counts its next start as a
-                    // fresh attempt until it refuses it as "kept changing". That is the new
-                    // laptop's continuation, its own change in the Task List; it is the only
-                    // way such a file may end otherwise, and nothing is read for it after.
+                    // fresh attempt until it refuses it as "kept changing" (or as started too
+                    // often). That is the new laptop's continuation, its own change in the Task
+                    // List; it is the only way such a file may end otherwise, and nothing is
+                    // read for it after.
                     m.assert_refused_as_new_attempts(n);
                 } else {
                     m.assert_arrived_one(n, identical);
