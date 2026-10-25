@@ -1,11 +1,17 @@
 name: Security
 
+# Called by CI (ci.yml) for pull requests, the merge queue and pushes to main, so its results
+# count in "All checks"; it also runs weekly on its own, and by hand.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
+    inputs:
+      codeql:
+        description: The languages CodeQL scans, as a JSON list (an empty list scans none).
+        type: string
+        default: '["rust","javascript-typescript","actions"]'
   schedule:
     - cron: "17 3 * * 1" # weekly, Monday 03:17 UTC, to catch newly published advisories
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -72,6 +78,15 @@ jobs:
           persist-credentials: false
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
+          command: check
+          arguments: --all-features
+          rust-version: "1.99.0"
+      # The fuzz targets are their own workspace with their own lockfile: the same rules
+      # (deny.toml is found from there).
+      - name: The same for the fuzz workspace
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: fuzz/Cargo.toml
           command: check
           arguments: --all-features
           rust-version: "1.99.0"
@@ -253,7 +268,7 @@ jobs:
   codeql:
     name: Code scanning (CodeQL, ${{ matrix.language }})
     # Code scanning is free on public repositories; this job switches on when the repo goes public.
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && inputs.codeql != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -261,7 +276,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [rust, javascript-typescript, actions]
+        language: ${{ fromJSON(inputs.codeql || '["rust","javascript-typescript","actions"]') }}
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:

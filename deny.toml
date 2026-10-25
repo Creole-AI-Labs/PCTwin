@@ -49,6 +49,12 @@ allow = [
 [licenses.private]
 ignore = true
 
+# The fuzz workspace (fuzz/, never shipped) is checked with this file too. libFuzzer's runtime
+# carries LLVM's own permissive licence (NCSA) besides MIT or Apache-2.0; allowed for that crate only.
+[[licenses.exceptions]]
+crate = "libfuzzer-sys"
+allow = ["NCSA"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
