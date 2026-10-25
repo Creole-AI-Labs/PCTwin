@@ -33,7 +33,7 @@ describe("screens", () => {
     render(<App initialLanguage="en" />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(screen.getByRole("button", { name: /Start a full move/ })).toBeTruthy();
-    expect(screen.getByText("Free personal moves. No account needed.")).toBeTruthy();
+    expect(screen.getByText("Free. No account needed.")).toBeTruthy();
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
@@ -110,7 +110,7 @@ describe("screens", () => {
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
-  it("a move that stopped part way is picked up first: tidy up, then pair again as the new laptop", async () => {
+  it("a move that stopped part way shows Resume your move on Home; Resume opens the pick-up: tidy up, then pair again as the new laptop", async () => {
     const l10n = localization("en");
     tauri.invoke.mockImplementation((command: string) =>
       Promise.resolve(
@@ -122,6 +122,11 @@ describe("screens", () => {
       ),
     );
     render(<App initialLanguage="en" />);
+    const resume = await screen.findByRole("button", { name: l10n.getString("resume-open") });
+    // Home stays in front, with the four cards; the pick-up opens only when asked.
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
+    expect(screen.getByRole("button", { name: /Quick Send/ })).toBeTruthy();
+    fireEvent.click(resume);
     expect(await screen.findByText(l10n.getString("pickup-title"))).toBeTruthy();
     expect(screen.getByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("pickup-unfinished-body", { count: 3 }).replace(/[⁦-⁩]/g, ""))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pickup-tidy") }));
@@ -193,6 +198,50 @@ describe("screens", () => {
     });
   });
 
+  it("My history on Home opens the history, and Back returns to Home", async () => {
+    const l10n = localization("en");
+    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "history_list" ? [] : command === "recovery_check" ? { unfinished: 0 } : undefined));
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /My history/ }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("history-title"));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
+  });
+
+  it("the header keeps language and motion behind one control showing the language's short name; Escape closes it", () => {
+    render(<App initialLanguage="en" />);
+    const header = within(screen.getByRole("banner"));
+    expect(header.getByText("This laptop")).toBeTruthy();
+    const settings = header.getByRole("button", { name: "Language and motion" });
+    expect(settings.textContent).toBe("EN");
+    expect(settings.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("combobox", { name: "Language" })).toBeNull();
+    fireEvent.click(settings);
+    expect(settings.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy();
+    const motion = screen.getByRole<HTMLSelectElement>("combobox", { name: "Motion" });
+    expect([...motion.options].map((o) => o.textContent)).toEqual(["Motion: follow system", "Motion: reduced", "Motion: off"]);
+    fireEvent.change(motion, { target: { value: "off" } });
+    expect(motion.value).toBe("off");
+    fireEvent.keyDown(motion, { key: "Escape" });
+    expect(screen.queryByRole("combobox", { name: "Motion" })).toBeNull();
+    expect(document.activeElement).toBe(settings);
+    // Choosing a language shows its short name on the control.
+    fireEvent.click(settings);
+    act(() => {
+      fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "fr" } });
+    });
+    expect(document.querySelector(".header-settings > button")?.textContent).toBe("FR");
+  });
+
+  it("Help in the header opens the help page, as the footer's does", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    fireEvent.click(within(screen.getByRole("banner")).getByRole("button", { name: "Help" }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("help-home-title"));
+  });
+
   it("with nothing to pick up, the app opens on Welcome", async () => {
     tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
     render(<App initialLanguage="en" />);
@@ -227,7 +276,9 @@ describe("screens", () => {
     for (const control of [...screen.getAllByRole("button"), ...screen.queryAllByRole("link")]) {
       expect(control.textContent).not.toMatch(paid);
     }
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a full move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
+    expect(within(screen.getByRole("main")).getAllByRole("button").map((b) => b.querySelector("strong")?.textContent)).toEqual(["Quick Send", "Start a full move", "Restore setup", "Rescue a laptop", "My history"]);
+    expect(within(screen.getByRole("banner")).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["PCTwin home", "Language and motion", "Help"]);
+    expect(within(screen.getByRole("contentinfo")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Help"]);
   });
 
   it("in a build without the full move switched on, Start a full move opens its coming-soon page and Back returns", () => {
@@ -287,6 +338,7 @@ describe("languages", () => {
 
   it("Arabic lays the page out right to left; the choice is remembered on this laptop", () => {
     render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: "Language and motion" }));
     act(() => {
       fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "ar" } });
     });

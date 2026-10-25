@@ -137,3 +137,50 @@ export function MoveIllustration({ className }: Props) {
     </svg>
   );
 }
+
+/* Home (F01) and its header: drawn from the Home and Quick Send mockup's own line icons. */
+
+function line(d: string, className?: string, size = 20) {
+  return (
+    <svg {...base} width={size} height={size} strokeWidth={1.7} className={className}>
+      <path d={d} />
+    </svg>
+  );
+}
+
+/** Quick Send: a paper plane. */
+export function Send({ className }: Props) {
+  return line("m22 2-7 20-4-9-9-4 20-7ZM11 13l11-11", `flip ${className ?? ""}`);
+}
+
+/** Start a full move: two arrows passing each other. */
+export function MoveBoth({ className }: Props) {
+  return line("M3 6h7M7 2l4 4-4 4m14 8h-7m3-4-4 4 4 4M4 14v5h5M20 10V5h-5", className);
+}
+
+/** Restore setup: a clock turning back. */
+export function Restore({ className }: Props) {
+  return line("M3 10a9 9 0 1 1 1 8M3 4v6h6m3-4v6l4 2", className);
+}
+
+/** Rescue a laptop: a shield with a cross. */
+export function Rescue({ className }: Props) {
+  return line("M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7l-9-4Zm0 4v8m-4-4h8", className);
+}
+
+/** A row that opens: points along the reading direction. */
+export function Chevron({ className }: Props) {
+  return line("m9 5 7 7-7 7", `flip ${className ?? ""}`, 16);
+}
+
+export function Clock({ className }: Props) {
+  return line("M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 4v5l3 2", className, 16);
+}
+
+export function Globe({ className }: Props) {
+  return line("M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 0c5 5 5 13 0 18-5-5-5-13 0-18ZM3 12h18", className, 16);
+}
+
+export function Question({ className }: Props) {
+  return line("M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18ZM9 9a3 3 0 1 1 4 3v2m-1 3h.01", className, 16);
+}

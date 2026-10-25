@@ -16,16 +16,40 @@ opening-status = PCTwin खुल रहा है।
 opening-skip = परिचय छोड़ें
 opening-tagline = फ़ाइलें भेजें, या सब कुछ ले जाएँ।
 
-footer-free = निजी स्थानांतरण मुफ़्त हैं। किसी अकाउंट की ज़रूरत नहीं।
+footer-free = मुफ़्त। किसी अकाउंट की ज़रूरत नहीं।
 footer-help = मदद
 
-## F01 Welcome
+## F01 Home
 
-welcome-eyebrow = PCTwin
 welcome-title-line1 = फ़ाइलें भेजें,
 welcome-title-line2 = या सब कुछ ले जाएँ।
 welcome-body = आस-पास के किसी लैपटॉप पर कुछ फ़ाइलें भेजें, या अपनी फ़ाइलें, ऐप्स और सेटिंग्स अपने नए लैपटॉप पर ले जाएँ।
 welcome-start = पूरा स्थानांतरण शुरू करें
+
+## F01 Home: the cards, My history, a move to resume, files waiting
+
+home-quick-send-body = फ़ाइलें भेजें या पाएँ
+home-move-body = अपना सेटअप ले जाएँ
+home-restore-body = उसे वापस लाएँ
+home-rescue-body = ज़रूरी चीज़ें बचाएँ
+home-history = मेरा इतिहास
+home-history-body = आपके स्थानांतरण, भेजी गई फ़ाइलें और रसीदें
+home-resume-body = आपकी प्रगति सहेजी गई है।
+home-resume-action = फिर शुरू करें
+    .aria-label = अपना स्थानांतरण फिर से शुरू करें
+home-waiting =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल { $to } के लिए रुकी है
+       *[other] { $count } फ़ाइलें { $to } के लिए रुकी हैं
+    }
+
+## Header: this laptop, the language and motion control, Help
+
+header-this-laptop = यह लैपटॉप
+header-settings =
+    .aria-label = भाषा और एनिमेशन
+header-help =
+    .aria-label = मदद
 
 ## F06 Old or new laptop
 
