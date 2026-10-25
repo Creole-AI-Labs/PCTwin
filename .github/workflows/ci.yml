@@ -19,6 +19,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # The network guard (Harden-Runner) only watches in this workflow's jobs, which read and hold
+  # no secrets: its agent drops allowed sites' other addresses on some runners, failing
+  # checkouts at random (step-security/harden-runner#708; decided 25 October 2026). Set back to
+  # block when that issue is closed. Jobs that sign, publish or write keep block.
+  EGRESS_POLICY: audit
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -41,7 +46,7 @@ jobs:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -156,7 +161,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -236,7 +241,7 @@ jobs:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         if: runner.os == 'Linux'
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -678,8 +683,8 @@ jobs:
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
           # Windows a blocking policy also blocks the certificate revocation check, so the
-          # toolchain download fails. Block on Linux; elsewhere only watch.
-          egress-policy: ${{ runner.os == 'Linux' && 'block' || 'audit' }}
+          # toolchain download fails. On Linux as EGRESS_POLICY says; elsewhere only watch.
+          egress-policy: ${{ runner.os == 'Linux' && env.EGRESS_POLICY || 'audit' }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -812,8 +817,8 @@ jobs:
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
           # Windows a blocking policy also blocks the certificate revocation check, so the
-          # toolchain download fails. Block on Linux; elsewhere only watch.
-          egress-policy: ${{ runner.os == 'Linux' && 'block' || 'audit' }}
+          # toolchain download fails. On Linux as EGRESS_POLICY says; elsewhere only watch.
+          egress-policy: ${{ runner.os == 'Linux' && env.EGRESS_POLICY || 'audit' }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -881,8 +886,8 @@ jobs:
         with:
           # The guard's start-up step runs on every system whatever the `if` says, and on
           # Windows a blocking policy also blocks the certificate revocation check, so the
-          # toolchain download fails. Block on Linux; elsewhere only watch.
-          egress-policy: ${{ runner.os == 'Linux' && 'block' || 'audit' }}
+          # toolchain download fails. On Linux as EGRESS_POLICY says; elsewhere only watch.
+          egress-policy: ${{ runner.os == 'Linux' && env.EGRESS_POLICY || 'audit' }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -956,7 +961,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443

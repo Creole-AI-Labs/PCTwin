@@ -10,6 +10,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # The network guard (Harden-Runner) only watches in this workflow's jobs, which read and hold
+  # no secrets: its agent drops allowed sites' other addresses on some runners, failing
+  # checkouts at random (step-security/harden-runner#708; decided 25 October 2026). Set back to
+  # block when that issue is closed. Jobs that sign, publish or write keep block.
+  EGRESS_POLICY: audit
+
 jobs:
   cargo-deny:
     name: Rust dependencies (advisories, licences, bans, sources)
@@ -17,7 +24,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -75,7 +82,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -134,7 +141,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -193,7 +200,7 @@ jobs:
     steps:
       - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          egress-policy: ${{ env.EGRESS_POLICY }}
           allowed-endpoints: >
             github.com:443
             api.github.com:443
