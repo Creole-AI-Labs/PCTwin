@@ -185,6 +185,7 @@ jobs:
           scan-args: |-
             --config=osv-scanner.toml
             --lockfile=Cargo.lock
+            --lockfile=fuzz/Cargo.lock
             --lockfile=app/pnpm-lock.yaml
 
   zizmor:
