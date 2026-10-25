@@ -2,8 +2,9 @@ import { Localized, useLocalization } from "@fluent/react";
 import { PREFERENCES, useMotion, type MotionPreference } from "./preference";
 
 /**
- * The in-app Motion choice: follow the system (the default), reduced, or off. It sits beside the
- * language choice in the header, the app's only settings place for now. Changing it applies at once.
+ * The in-app Motion choice: follow the system (the default), reduced, or off. It sits under the
+ * language choice, in the panel the header's language control opens (the app's only settings place
+ * for now). Changing it applies at once.
  */
 export default function MotionChoice() {
   const { l10n } = useLocalization();

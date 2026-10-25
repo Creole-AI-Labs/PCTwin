@@ -16,16 +16,41 @@ opening-status = Abriendo PCTwin.
 opening-skip = Saltar la intro
 opening-tagline = Envía archivos o múdalo todo.
 
-footer-free = Traslados personales gratis. Sin cuenta.
+footer-free = Gratis. Sin cuenta.
 footer-help = Ayuda
 
-## F01 Welcome
+## F01 Home
 
-welcome-eyebrow = PCTwin
 welcome-title-line1 = Envía archivos
 welcome-title-line2 = o múdalo todo.
 welcome-body = Envía unos pocos archivos a un portátil cercano, o lleva tus archivos, aplicaciones y ajustes a tu portátil nuevo.
 welcome-start = Empezar un traslado completo
+
+## F01 Home: the cards, My history, a move to resume, files waiting
+
+home-quick-send-body = Enviar o recibir archivos
+home-move-body = Traslada tu configuración
+home-restore-body = Recupérala
+home-rescue-body = Salva lo importante
+home-history = Mi historial
+home-history-body = Tus traslados, envíos y recibos
+home-resume-body = Tu progreso está guardado.
+home-resume-action = Reanudar
+    .aria-label = Reanudar tu traslado
+home-waiting =
+    { NUMBER($count) ->
+        [one] { $count } archivo esperando a { $to }
+        [many] { $count } de archivos esperando a { $to }
+       *[other] { $count } archivos esperando a { $to }
+    }
+
+## Header: this laptop, the language and motion control, Help
+
+header-this-laptop = Este portátil
+header-settings =
+    .aria-label = Idioma y movimiento
+header-help =
+    .aria-label = Ayuda
 
 ## F06 Old or new laptop
 

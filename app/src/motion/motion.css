@@ -18,13 +18,13 @@
   transform: none;
 }
 
-/* The Motion choice sits beside the language choice: the app's only settings place for now. */
+/* The Motion choice sits under the language choice, in the header's language control: the app's
+   only settings place for now. */
 .app-settings {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--space-2);
+  gap: 1px;
 }
 
 .app-settings select {

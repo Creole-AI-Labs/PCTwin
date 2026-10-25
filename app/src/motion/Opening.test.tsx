@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { localization } from "../i18n";
@@ -143,8 +143,11 @@ describe("when the opening plays", () => {
   it("never hides a real problem: a move to pick up ends it at once", async () => {
     tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 3 } : undefined));
     start();
-    expect(await screen.findByText(l10n.getString("pickup-title"))).toBeTruthy();
-    expect(opening()).toBeNull();
+    // Home shows Resume your move at once, and the opening gives way to it.
+    expect(await screen.findByRole("button", { name: l10n.getString("resume-open") })).toBeTruthy();
+    await waitFor(() => {
+      expect(opening()).toBeNull();
+    });
     expect(frame().hasAttribute("inert")).toBe(false);
   });
 });

@@ -11,7 +11,6 @@ import ConnectionRoute from "./ConnectionRoute";
 import MeetLaptop from "./MeetLaptop";
 import PutTogether from "./PutTogether";
 import WaitingForLaptop from "./WaitingForLaptop";
-import Welcome from "./Welcome";
 
 const l10n = localization("en");
 const text = (id: string, vars?: Record<string, string | number | Date>) => l10n.getString(id, vars);
@@ -49,39 +48,6 @@ const noStringsMissing = () => {
 };
 const heading = () => screen.getByRole("heading", { level: 1 });
 const nothing = () => undefined;
-
-/* ---------------------------------------------------------------- F01 Resume your move */
-
-describe("F01 Welcome with an unfinished move", () => {
-  it("is unchanged when no move is waiting: Start a full move, no Resume", () => {
-    inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} />);
-    expect(screen.getByRole("button", { name: text("welcome-start") })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: text("resume-open") })).toBeNull();
-  });
-
-  it("the primary button reads Resume your move, not Start a full move, and reopens the saved move", () => {
-    const onStart = vi.fn();
-    const onResume = vi.fn();
-    inApp(<Welcome onStart={onStart} onSoon={nothing} onQuick={nothing} unfinished onResume={onResume} />);
-    const button = screen.getByRole("button", { name: text("resume-open") });
-    expect(screen.queryByRole("button", { name: text("welcome-start") })).toBeNull();
-    button.focus();
-    expect(document.activeElement).toBe(button);
-    fireEvent.click(button);
-    expect(onResume).toHaveBeenCalledTimes(1);
-    expect(onStart).not.toHaveBeenCalled();
-    noStringsMissing();
-  });
-
-  it("changes nothing else: same picture, headline and secondary choices, nothing paid, no accessibility violations", async () => {
-    inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} unfinished onResume={nothing} />);
-    expect(heading().textContent).toBe("Send files,or move everything.");
-    expect(document.querySelector(".illustration")).toBeTruthy();
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Resume your move", "Restore setup", "Rescue a laptop", "Quick Send"]);
-    expect(screen.getByRole("main").textContent).not.toMatch(PAID);
-    expect(await violations()).toEqual([]);
-  });
-});
 
 /* ---------------------------------------------------------------- C01 */
 

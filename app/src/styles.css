@@ -110,7 +110,7 @@ button {
   flex: none;
   overflow: hidden;
   width: 27px;
-  height: 22px;
+  height: 20px;
 }
 
 .brand-mark img {
@@ -119,6 +119,69 @@ button {
   left: -22.5px;
   width: 71px;
   max-width: none;
+}
+
+/* Header, end side: "This laptop", the language and motion control, Help. */
+.header-badge {
+  max-width: 150px;
+  overflow: hidden;
+  margin-inline-end: var(--space-1);
+  color: var(--colour-muted);
+  font-size: 0.714rem; /* 10px */
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-width: var(--control-small);
+  height: var(--control-small);
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--colour-muted);
+}
+
+.header-icon:hover,
+.header-icon[aria-expanded="true"] {
+  background: var(--colour-soft);
+}
+
+.header-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.header-language {
+  padding: 0 6px;
+  font-size: 0.714rem; /* 10px */
+}
+
+.header-settings {
+  position: relative;
+}
+
+.header-settings-panel {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  inset-inline-end: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 200px;
+  padding: var(--space-3);
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  box-shadow: 0 12px 32px -12px #1b2f5b40;
+}
+
+.header-settings-panel select {
+  width: 100%;
 }
 
 .language select {
@@ -182,18 +245,6 @@ h1 {
   font-weight: 650;
   line-height: 1.25;
   letter-spacing: -0.65px;
-}
-
-h1.welcome {
-  max-width: 310px;
-  margin-top: var(--space-3);
-  font-size: var(--type-welcome);
-  line-height: 1.13;
-  letter-spacing: -1.2px;
-}
-
-h1.welcome span {
-  display: block;
 }
 
 .subhead {
@@ -264,17 +315,264 @@ h1.welcome span {
   background: var(--colour-soft);
 }
 
-/* Welcome: picture and secondary choices */
-.illustration {
-  display: block;
-  width: min(100%, 250px);
-  height: auto;
-  margin: var(--space-2) auto var(--space-3);
+/* F01 Home, from the Home and Quick Send mockup (revision 3) at its 480 x 620 window. */
+.app-main:has(> .home) {
+  padding-block: var(--space-5);
 }
 
-/* The welcome line breaks after "settings", as in the mockup. */
-.welcome-subhead {
-  max-width: 280px;
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.home-headline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  align-items: center;
+  gap: 6px;
+  min-height: 78px;
+}
+
+.home-headline.compact {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.home-title {
+  font-size: var(--type-welcome);
+  font-weight: 650;
+  line-height: 1.08;
+  letter-spacing: -0.9px;
+}
+
+.home-title span {
+  display: block;
+}
+
+.home-headline.compact .home-title {
+  font-size: var(--type-subheading);
+  line-height: 1.15;
+  letter-spacing: -0.5px;
+}
+
+.home-art svg {
+  display: block;
+  width: 132px;
+  height: auto;
+}
+
+.home-subline {
+  margin-top: -6px;
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+  line-height: 1.5;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.home-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+  min-height: 107px;
+  padding: 14px;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  text-align: start;
+  transition:
+    border-color var(--motion-feedback),
+    background var(--motion-feedback);
+}
+
+.home-card:hover {
+  border-color: #b9c9f1;
+  background: #fbfcff;
+}
+
+.home-card-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--colour-soft);
+  color: var(--colour-blue);
+}
+
+.home-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.home-card-text,
+.home-history-text,
+.home-resume-text {
+  min-width: 0;
+}
+
+.home-card strong,
+.home-card small,
+.home-history strong,
+.home-history small,
+.home-resume strong,
+.home-resume small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.home-card strong {
+  font-size: var(--type-body);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.home-card small {
+  margin-top: 2px;
+  color: var(--colour-muted);
+  font-size: var(--type-tertiary);
+  line-height: 1.35;
+}
+
+.home-card.filled {
+  border-color: var(--colour-blue);
+  background: var(--colour-blue);
+  color: #fff;
+}
+
+.home-card.filled:hover {
+  border-color: var(--colour-blue-hover);
+  background: var(--colour-blue-hover);
+}
+
+.home-card.filled .home-card-icon {
+  background: #ffffff1c;
+  color: #fff;
+}
+
+.home-card.filled small {
+  color: #eef2ff;
+}
+
+.home-history {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 54px;
+  padding: 11px 13px;
+  border: 1px solid var(--colour-line);
+  border-radius: var(--radius-content);
+  background: var(--colour-paper);
+  color: var(--colour-ink);
+  text-align: start;
+}
+
+.home-history:hover {
+  border-color: #b9c9f1;
+  background: #fbfcff;
+}
+
+.home-history > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--colour-blue);
+}
+
+.home-history-text {
+  flex: 1;
+}
+
+.home-history strong,
+.home-resume strong {
+  font-size: var(--type-supporting);
+  font-weight: 600;
+}
+
+.home-history small,
+.home-resume small {
+  margin-top: 2px;
+  font-size: 0.714rem; /* 10px */
+  line-height: 1.4;
+}
+
+.home-history small {
+  color: var(--colour-muted);
+}
+
+.home-history .chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--colour-muted);
+}
+
+.home-resume {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 12px 13px;
+  border: 1px solid #eedcb9;
+  border-radius: var(--radius-content);
+  background: var(--colour-attention-surface);
+  color: var(--colour-attention-text);
+}
+
+.home-resume-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.home-resume-text {
+  flex: 1;
+}
+
+.home-resume strong {
+  color: var(--colour-ink);
+}
+
+.home-resume-button {
+  flex: none;
+  min-height: 36px;
+  padding: 7px var(--space-3);
+  border-radius: 8px;
+  background: var(--colour-blue);
+  color: #fff;
+  font-size: var(--type-tertiary);
+  font-weight: 600;
+}
+
+.home-resume-button:hover {
+  background: var(--colour-blue-hover);
+}
+
+.home-waiting {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  min-height: 36px;
+  padding: var(--space-1) 0;
+  background: transparent;
+  color: var(--colour-blue);
+  font-size: var(--type-tertiary);
+  text-align: start;
+}
+
+:root[data-theme="dark"] .home-card.filled,
+:root[data-theme="dark"] .home-resume-button {
+  color: #111b35;
 }
 
 /* "Open PCTwin on both laptops." then the role line, as in the mockup. */
@@ -448,8 +746,23 @@ h1.welcome span {
   .app-main {
     padding: var(--content-padding-narrow);
   }
-  .secondary-actions {
-    flex-wrap: wrap;
+  .app-main:has(> .home) {
+    padding-block: var(--space-4);
+  }
+  /* The picture gives way to the headline in a narrow window. */
+  .home-headline {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .home-art {
+    display: none;
+  }
+  .home-card {
+    min-height: 96px;
+    padding: var(--space-3);
+  }
+  .header-badge {
+    display: none;
   }
 }
 
@@ -457,7 +770,10 @@ h1.welcome span {
 @media (forced-colors: active) {
   .button,
   .choice,
-  .note {
+  .note,
+  .home-card,
+  .home-history,
+  .home-resume {
     border: 1px solid CanvasText;
   }
   .button-primary {

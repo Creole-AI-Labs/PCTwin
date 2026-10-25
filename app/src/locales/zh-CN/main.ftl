@@ -16,16 +16,39 @@ opening-status = 正在打开 PCTwin。
 opening-skip = 跳过开场
 opening-tagline = 发送文件，或者全部搬过去。
 
-footer-free = 个人迁移免费，无需账户。
+footer-free = 免费。无需账户。
 footer-help = 帮助
 
-## F01 Welcome
+## F01 Home
 
-welcome-eyebrow = PCTwin
 welcome-title-line1 = 发送文件，
 welcome-title-line2 = 或者全部搬过去。
 welcome-body = 把几个文件发送到附近的笔记本电脑，或者把你的文件、应用和设置搬到新的笔记本电脑上。
 welcome-start = 开始完整迁移
+
+## F01 Home: the cards, My history, a move to resume, files waiting
+
+home-quick-send-body = 发送或接收文件
+home-move-body = 迁移你的设置
+home-restore-body = 把它还原回来
+home-rescue-body = 保住重要的内容
+home-history = 我的记录
+home-history-body = 你的迁移、发送和收据
+home-resume-body = 进度已保存。
+home-resume-action = 继续
+    .aria-label = 恢复你的迁移
+home-waiting =
+    { NUMBER($count) ->
+       *[other] { $count } 个文件正在等待 { $to }
+    }
+
+## Header: this laptop, the language and motion control, Help
+
+header-this-laptop = 这台电脑
+header-settings =
+    .aria-label = 语言和动画
+header-help =
+    .aria-label = 帮助
 
 ## F06 Old or new laptop
 

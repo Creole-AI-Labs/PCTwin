@@ -16,16 +16,40 @@ opening-status = Opening PCTwin.
 opening-skip = Skip intro
 opening-tagline = Send files, or move everything.
 
-footer-free = Free personal moves. No account needed.
+footer-free = Free. No account needed.
 footer-help = Help
 
-## F01 Welcome
+## F01 Home
 
-welcome-eyebrow = PCTwin
 welcome-title-line1 = Send files,
 welcome-title-line2 = or move everything.
 welcome-body = Send a few files to a laptop nearby, or bring your files, apps and settings to your new laptop.
 welcome-start = Start a full move
+
+## F01 Home: the cards, My history, a move to resume, files waiting
+
+home-quick-send-body = Send or receive files
+home-move-body = Move your setup
+home-restore-body = Bring it back
+home-rescue-body = Save what matters
+home-history = My history
+home-history-body = Your moves, sends and receipts
+home-resume-body = Your progress is saved.
+home-resume-action = Resume
+    .aria-label = Resume your move
+home-waiting =
+    { NUMBER($count) ->
+        [one] { $count } file waiting for { $to }
+       *[other] { $count } files waiting for { $to }
+    }
+
+## Header: this laptop, the language and motion control, Help
+
+header-this-laptop = This laptop
+header-settings =
+    .aria-label = Language and motion
+header-help =
+    .aria-label = Help
 
 ## F06 Old or new laptop
 
