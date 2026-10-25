@@ -166,6 +166,9 @@ fn label_name(label: &Label) -> Option<&str> {
     }
 }
 
+/// Over the real network: a lost goodbye or update (multicast is never certain; seen once on a
+/// macOS Intel runner, 25 October 2026) fails this, and the list logic itself is proven without
+/// the network by the `Nearby` tests in the crate.
 #[test]
 fn an_old_laptop_that_stops_during_the_search_drops_out_of_the_list() {
     let label = unique("leaves mid-search");
@@ -245,6 +248,9 @@ fn found_addresses_are_on_this_network_and_never_loopback() {
     }
 }
 
+/// Over the real network: a lost goodbye or update (multicast is never certain; seen once on a
+/// macOS Intel runner, 25 October 2026) fails this, and the list logic itself is proven without
+/// the network by the `Nearby` tests in the crate.
 #[test]
 fn an_old_laptop_whose_announcement_turns_invalid_drops_out_of_the_list() {
     let label = unique("turns invalid");
