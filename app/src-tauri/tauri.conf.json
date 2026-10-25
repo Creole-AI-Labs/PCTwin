@@ -47,6 +47,9 @@
       "nsis": {
         "installMode": "perMachine",
         "installerHooks": "./windows/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "windows/header.bmp",
+        "sidebarImage": "windows/sidebar.bmp",
         "languages": ["English", "French", "Spanish", "Portuguese", "PortugueseBR", "Arabic", "SimpChinese"]
       }
     }
