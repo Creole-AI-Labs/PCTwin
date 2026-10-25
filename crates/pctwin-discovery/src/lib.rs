@@ -547,7 +547,7 @@ impl Discovery {
     pub fn browse(&self, wait: Duration) -> Result<Vec<Found>, DiscoveryError> {
         let events = self.daemon.browse(SERVICE_TYPE)?;
         let deadline = Instant::now() + wait;
-        let mut by_instance: HashMap<String, Found> = HashMap::new();
+        let mut nearby = Nearby::default();
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
@@ -555,32 +555,53 @@ impl Discovery {
             }
             match events.recv_timeout(left) {
                 Ok(ServiceEvent::ServiceResolved(info)) => {
-                    let fullname = info.get_fullname().to_string();
-                    match read_announcement(&info) {
-                        Some(found) => {
-                            by_instance.insert(fullname, found);
-                        }
-                        // An instance whose announcement turned invalid is no longer listed.
-                        None => {
-                            by_instance.remove(&fullname);
-                        }
-                    }
+                    nearby.seen(info.get_fullname().to_string(), read_announcement(&info))
                 }
-                Ok(ServiceEvent::ServiceRemoved(_, fullname)) => {
-                    by_instance.remove(&fullname);
-                }
+                Ok(ServiceEvent::ServiceRemoved(_, fullname)) => nearby.gone(&fullname),
                 Ok(_) => {}
                 Err(_) => break,
             }
         }
         let _ = self.daemon.stop_browse(SERVICE_TYPE);
-        let mut found: Vec<Found> = by_instance.into_values().collect();
+        Ok(nearby.list())
+    }
+}
+
+/// The old laptops a search has seen so far, by the name each announcement is made under; what
+/// the network said last about each one counts.
+#[derive(Default)]
+struct Nearby {
+    by_instance: HashMap<String, Found>,
+}
+
+impl Nearby {
+    /// `instance` announced itself: listed as `found`, or no longer listed when its announcement
+    /// is not one PCTwin would make (`None`), even if it was listed before.
+    fn seen(&mut self, instance: String, found: Option<Found>) {
+        match found {
+            Some(found) => {
+                self.by_instance.insert(instance, found);
+            }
+            None => {
+                self.by_instance.remove(&instance);
+            }
+        }
+    }
+
+    /// `instance` said goodbye (or its announcement ran out): no longer listed.
+    fn gone(&mut self, instance: &str) {
+        self.by_instance.remove(instance);
+    }
+
+    /// The list, each one flagged when another shows the same label.
+    fn list(&self) -> Vec<Found> {
+        let mut found: Vec<Found> = self.by_instance.values().cloned().collect();
         let keys: Vec<String> = found.iter().map(|f| f.label.comparison_key()).collect();
         for f in &mut found {
             let key = f.label.comparison_key();
             f.same_label_nearby = keys.iter().filter(|k| **k == key).count() > 1;
         }
-        Ok(found)
+        found
     }
 }
 
@@ -662,6 +683,62 @@ impl Drop for Announcement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn laptop(name: &str, port: u16) -> Found {
+        Found {
+            label: Label::named(name).unwrap(),
+            addrs: vec![SocketAddr::from(([192, 168, 1, 20], port))],
+            same_label_nearby: false,
+            pairing_versions: PAIRING_VERSIONS.to_vec(),
+        }
+    }
+
+    fn ports(found: &[Found]) -> Vec<u16> {
+        let mut p: Vec<u16> = found.iter().map(|f| f.addrs[0].port()).collect();
+        p.sort_unstable();
+        p
+    }
+
+    #[test]
+    fn a_laptop_that_says_goodbye_during_the_search_is_not_listed() {
+        let mut nearby = Nearby::default();
+        nearby.seen("pctwin-a".into(), Some(laptop("Ada's laptop", 4000)));
+        nearby.seen("pctwin-b".into(), Some(laptop("Bo's laptop", 4001)));
+        nearby.gone("pctwin-a");
+        assert_eq!(ports(&nearby.list()), [4001]);
+    }
+
+    #[test]
+    fn a_laptop_whose_announcement_turns_invalid_is_not_listed() {
+        let mut nearby = Nearby::default();
+        nearby.seen("pctwin-a".into(), Some(laptop("Ada's laptop", 4000)));
+        nearby.seen("pctwin-a".into(), None);
+        assert!(nearby.list().is_empty());
+        // Invalid first, then a valid one: listed again; the last word counts.
+        nearby.seen("pctwin-a".into(), Some(laptop("Ada's laptop", 4002)));
+        assert_eq!(ports(&nearby.list()), [4002]);
+    }
+
+    #[test]
+    fn a_goodbye_from_a_laptop_never_listed_changes_nothing() {
+        let mut nearby = Nearby::default();
+        nearby.seen("pctwin-a".into(), Some(laptop("Ada's laptop", 4000)));
+        nearby.gone("pctwin-z");
+        nearby.seen("pctwin-y".into(), None);
+        assert_eq!(ports(&nearby.list()), [4000]);
+    }
+
+    #[test]
+    fn a_label_shown_twice_flags_both_and_one_leaving_clears_it() {
+        let mut nearby = Nearby::default();
+        nearby.seen("pctwin-a".into(), Some(laptop("Same name", 4000)));
+        nearby.seen("pctwin-b".into(), Some(laptop("same NAME", 4001)));
+        assert!(nearby.list().iter().all(|f| f.same_label_nearby));
+        nearby.gone("pctwin-b");
+        let left = nearby.list();
+        assert_eq!(ports(&left), [4000]);
+        assert!(!left[0].same_label_nearby);
+    }
 
     #[test]
     fn the_pairing_versions_are_announced_and_read_back() {
