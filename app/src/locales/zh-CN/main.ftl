@@ -784,6 +784,8 @@ soon-restore-title = 还原配置
 soon-restore-body = 用你在迁移后保存的配置，重建一台笔记本电脑。这项功能将在以后的版本中推出。
 soon-rescue-title = 救援笔记本电脑
 soon-rescue-body = 把无法启动的笔记本电脑的硬盘连接到一台正常的电脑上，找回其中的文件。这项功能将在以后的版本中推出。
+soon-move-title = 完整迁移
+soon-move-body = 把旧笔记本电脑上的一切搬到新电脑上：文件、应用和设置。这项功能将在以后的版本中推出。现在，你可以先用快速发送来发送文件。
 
 ## X01 Move progress, compact
 

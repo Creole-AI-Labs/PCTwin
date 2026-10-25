@@ -984,6 +984,8 @@ soon-restore-title = Restaurar configuración
 soon-restore-body = Rehaz un portátil a partir de la configuración que guardaste tras un traslado. Llegará en una versión posterior.
 soon-rescue-title = Rescatar un portátil
 soon-rescue-body = Recupera los archivos de un portátil que no arranca conectando su disco a uno que funcione. Llegará en una versión posterior.
+soon-move-title = Traslado completo
+soon-move-body = Pasa todo de tu portátil antiguo a uno nuevo: tus archivos, aplicaciones y ajustes. Llegará en una versión posterior. Mientras tanto, usa el Envío rápido para enviar archivos.
 
 ## X01 Move progress, compact
 

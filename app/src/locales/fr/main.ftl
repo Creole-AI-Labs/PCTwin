@@ -993,6 +993,8 @@ soon-restore-title = Restaurer une configuration
 soon-restore-body = Reconstruire un ordinateur portable à partir d’une configuration enregistrée après un transfert. Cette fonction arrive dans une prochaine version.
 soon-rescue-title = Sauver un ordinateur portable
 soon-rescue-body = Récupérer les fichiers d’un ordinateur portable qui ne démarre plus, en branchant son disque sur un ordinateur qui fonctionne. Cette fonction arrive dans une prochaine version.
+soon-move-title = Transfert complet
+soon-move-body = Transférez tout de votre ancien ordinateur portable vers le nouveau : vos fichiers, vos applications et vos réglages. Cette fonction arrive dans une prochaine version. En attendant, utilisez l’Envoi rapide pour envoyer des fichiers.
 
 ## X01 Move progress, compact
 
