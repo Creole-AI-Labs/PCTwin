@@ -108,3 +108,4 @@ mod tests {
         assert!(serde_json::from_str::<ItemStatus>("\"done\"").is_err());
     }
 }
+// Test only.
