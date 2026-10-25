@@ -13,14 +13,16 @@
 //! figures; they never make one up. A time left can be very long (a slow link and a big move):
 //! the screens cap what they show (for example "more than a day") rather than print it whole.
 //!
-//! A [`MoveControl`] is the person's stop. A session checks it before each block it sends and
-//! ends its run with [`TransferError::Stopped`](crate::TransferError::Stopped) as soon as it is
-//! set, from any thread, however long it was waiting.
+//! A [`MoveControl`] is the person's stop and pause. A session checks it before each block it
+//! sends. A stop ends its run with [`TransferError::Stopped`](crate::TransferError::Stopped) as
+//! soon as it is set, from any thread, however long it was waiting. A pause holds the move at a
+//! block boundary without ending the run, and the other laptop is told (see
+//! [`Message::Hold`](crate::Message::Hold)).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use tokio::time::Instant;
 
 use pctwin_record::ItemId;
 use serde::Serialize;
@@ -139,6 +141,11 @@ pub struct MeterReading {
     pub bytes_in_progress: u64,
     /// New laptop: the file being read back and checked right now, if one is.
     pub checking: Option<ItemId>,
+    /// The move is held by this laptop's pause, and the other laptop has been told (or, with a
+    /// laptop one version back that cannot be told, this one holds itself: the old laptop only).
+    pub paused_here: bool,
+    /// The move is held by the other laptop's pause, as it said.
+    pub paused_there: bool,
 }
 
 /// How long the move has left, as the engine works it out (see the module docs).
@@ -152,6 +159,8 @@ pub enum TimeLeft {
     About { seconds: u64 },
     /// Nothing has moved for a while: waiting for the other laptop, a drive or the network.
     Waiting,
+    /// Paused, here or on the other laptop. The speed is measured again once it carries on.
+    Paused,
     /// Every file is through.
     Done,
 }
@@ -207,6 +216,8 @@ struct Inner {
     bytes_checked: AtomicU64,
     bytes_already_there: AtomicU64,
     bytes_planned: AtomicU64,
+    paused_here: AtomicBool,
+    paused_there: AtomicBool,
     files: Mutex<Files>,
     /// The readings the speed is measured from. Taken by readers only, never by the move.
     pace: Mutex<Pace>,
@@ -261,6 +272,8 @@ impl MoveMeter {
             bytes_through: files.bytes_through,
             bytes_in_progress: files.bytes_in_progress,
             checking: files.checking,
+            paused_here: i.paused_here.load(Ordering::Acquire),
+            paused_there: i.paused_there.load(Ordering::Acquire),
         };
         (reading, files.loaded)
     }
@@ -289,8 +302,16 @@ impl MoveMeter {
         let done = reading
             .bytes_confirmed
             .saturating_add(reading.bytes_written);
-        let measured = self.pace().measure(now, done);
         let through = loaded && reading.files.left() == 0;
+        let paused = reading.paused_here || reading.paused_there;
+        let measured = {
+            let mut pace = self.pace();
+            if paused {
+                // Paused time is not measured: the speed starts again from nothing after it.
+                pace.reset();
+            }
+            pace.measure(now, done)
+        };
         let bytes_left = (loaded && (reading.bytes_planned > 0 || through)).then(|| {
             reading
                 .bytes_planned
@@ -299,6 +320,8 @@ impl MoveMeter {
         });
         let time_left = if through {
             TimeLeft::Done
+        } else if paused {
+            TimeLeft::Paused
         } else if measured.stalled {
             TimeLeft::Waiting
         } else {
@@ -343,8 +366,20 @@ impl MoveMeter {
         ] {
             a.store(0, Ordering::Release);
         }
+        i.paused_here.store(false, Ordering::Release);
+        i.paused_there.store(false, Ordering::Release);
         *self.files() = Files::default();
         self.pace().reset();
+    }
+
+    /// The move is (or is no longer) held by this laptop's pause.
+    pub(crate) fn paused_here(&self, paused: bool) {
+        self.0.paused_here.store(paused, Ordering::Release);
+    }
+
+    /// The other laptop said its person paused (or carried on).
+    pub(crate) fn paused_there(&self, paused: bool) {
+        self.0.paused_there.store(paused, Ordering::Release);
     }
 
     /// One more planned file of `bytes` in the group named `name`, waiting; returns its place.
@@ -428,6 +463,12 @@ impl MoveMeter {
     /// attempt).
     pub(crate) fn written(&self, group: Group, bytes: u64) {
         self.0.bytes_written.fetch_add(bytes, Ordering::AcqRel);
+        self.progress(group, bytes);
+    }
+
+    /// `bytes` more of `group`'s file through in this attempt (written on the new laptop,
+    /// confirmed on the old one), so the time left counts down inside a big file.
+    pub(crate) fn progress(&self, group: Group, bytes: u64) {
         let mut files = self.files();
         let was = files.written.get(&group.file).copied().unwrap_or(0);
         let now = was.saturating_add(bytes);
@@ -460,11 +501,19 @@ impl MoveMeter {
 #[derive(Debug, Default)]
 struct ControlInner {
     stop: AtomicBool,
+    pause: AtomicBool,
+    /// Every stop, pause and carrying on counts one more, so a waiter that looked before a
+    /// pause and a carrying on (back to back) still sees that something changed.
+    changes: AtomicU64,
     wake: Notify,
+    /// The approved places whose drives are not keeping files correctly, when that paused the
+    /// move, in the order they did (each once; at most one per approved place).
+    braked: std::sync::Mutex<Vec<String>>,
 }
 
-/// The person's stop for a running move (see the module docs). Cheap to clone; set it from any
-/// thread. Once set it stays set: a session given it stops every run at once.
+/// The person's stop and pause for a running move (see the module docs). Cheap to clone; set it
+/// from any thread. A stop stays set: a session given it stops every run at once. A pause lasts
+/// until [`carry_on`](Self::carry_on), across connections.
 #[derive(Debug, Clone, Default)]
 pub struct MoveControl(Arc<ControlInner>);
 
@@ -477,15 +526,93 @@ impl MoveControl {
     /// [`TransferError::Stopped`](crate::TransferError::Stopped).
     pub fn stop(&self) {
         self.0.stop.store(true, Ordering::Release);
-        self.0.wake.notify_waiters();
+        self.changed();
     }
 
     pub fn stopped(&self) -> bool {
         self.0.stop.load(Ordering::Acquire)
     }
 
-    /// Returns once the move is stopped.
-    pub(crate) async fn wait_stopped(&self) {
+    /// Pauses the move at the next block boundary: no new block is sent, those already in flight
+    /// (at most the in-flight limit) finish, and the other laptop is told. The run does not end;
+    /// [`carry_on`](Self::carry_on) picks up exactly where it held.
+    pub fn pause(&self) {
+        self.0.pause.store(true, Ordering::Release);
+        self.changed();
+    }
+
+    /// Ends this laptop's pause (the other laptop's own pause, if it made one, still holds), and
+    /// any brake: the person has chosen to carry on.
+    pub fn carry_on(&self) {
+        if let Ok(mut b) = self.0.braked.lock() {
+            b.clear();
+        }
+        self.0.pause.store(false, Ordering::Release);
+        self.changed();
+    }
+
+    /// Pauses the move because the drive of the approved place `destination` is not keeping
+    /// files correctly (Quarantine Design, step 4); the screen says so and offers another place
+    /// or stopping (X07). Files already checked are fine. A second place that pauses it too is
+    /// held as well: neither takes another write until the person carries on.
+    pub(crate) fn brake(&self, destination: &str) {
+        if let Ok(mut b) = self.0.braked.lock()
+            && !b.iter().any(|d| d == destination)
+        {
+            b.push(destination.to_string());
+        }
+        self.pause();
+    }
+
+    /// The approved place whose drive paused the move first, if one did (the screen names it).
+    pub fn braked(&self) -> Option<String> {
+        self.0.braked.lock().ok().and_then(|b| b.first().cloned())
+    }
+
+    /// Whether the approved place `destination` paused the move and still holds it: nothing more
+    /// is written there until the person carries on.
+    pub(crate) fn is_braked(&self, destination: &str) -> bool {
+        let b = self
+            .0
+            .braked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        b.iter().any(|d| d == destination)
+    }
+
+    /// Counts the change, then wakes every waiter (after the count, so none misses it).
+    fn changed(&self) {
+        self.0.changes.fetch_add(1, Ordering::AcqRel);
+        self.0.wake.notify_waiters();
+    }
+
+    /// How many stops, pauses and carryings on there have been: look before deciding to wait,
+    /// then wait with [`wait_change`](Self::wait_change).
+    pub(crate) fn changes(&self) -> u64 {
+        self.0.changes.load(Ordering::Acquire)
+    }
+
+    /// Whether this laptop's person has paused the move.
+    pub fn paused(&self) -> bool {
+        self.0.pause.load(Ordering::Acquire)
+    }
+
+    /// Returns once there was a stop, pause or carrying on after `seen` (from
+    /// [`changes`](Self::changes)): at once if there was one already, even a pause and a
+    /// carrying on that left the move as it was.
+    pub(crate) async fn wait_change(&self, seen: u64) {
+        loop {
+            // Made before looking, as in `wait_stopped`.
+            let woken = self.0.wake.notified();
+            if self.changes() != seen {
+                return;
+            }
+            woken.await;
+        }
+    }
+
+    /// Returns once the move is stopped (at once if it already is).
+    pub async fn wait_stopped(&self) {
         loop {
             // Made before looking: a stop made after this wakes it even before it is first
             // awaited (tokio's `notify_waiters` guarantee), so no stop is missed.
@@ -505,6 +632,24 @@ mod tests {
     use super::*;
 
     const MB: u64 = 1_000_000;
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a second place whose drive pauses the
+    /// move is held as well, never in place of the first; carrying on ends both.
+    #[test]
+    fn a_second_braked_place_is_held_as_well_as_the_first() {
+        let c = MoveControl::new();
+        c.brake("me");
+        c.brake("photos");
+        c.brake("me");
+        assert!(c.is_braked("me"));
+        assert!(c.is_braked("photos"));
+        assert!(!c.is_braked("music"));
+        assert_eq!(c.braked().as_deref(), Some("me"));
+        assert!(c.paused());
+        c.carry_on();
+        assert!(!c.is_braked("me") && !c.is_braked("photos"));
+        assert_eq!(c.braked(), None);
+    }
 
     /// A new laptop's meter with the plan `sizes` loaded, each in group "me".
     fn planned(sizes: &[u64]) -> (MoveMeter, Vec<Group>) {
@@ -676,6 +821,74 @@ mod tests {
         assert_eq!(s.time_left, TimeLeft::Waiting);
         let s = seconds(&m, g[0], &mut at, 1, MB);
         assert!(matches!(s.time_left, TimeLeft::About { .. }), "{s:?}");
+    }
+
+    #[test]
+    fn a_pause_here_or_there_says_paused_and_the_speed_is_measured_again_after_it() {
+        let (m, g) = planned(&[100 * MB]);
+        m.step(g[0], Step::Waiting, Step::Copying);
+        let mut at = Instant::now();
+        seconds(&m, g[0], &mut at, 10, MB);
+        for (here, there) in [(true, false), (false, true), (true, true)] {
+            m.paused_here(here);
+            m.paused_there(there);
+            // A long pause is paused, never "waiting" and never a time.
+            let s = seconds(&m, g[0], &mut at, 30, 0);
+            assert_eq!(s.time_left, TimeLeft::Paused, "{here} {there}");
+        }
+        m.paused_here(false);
+        m.paused_there(false);
+        // Carried on: nothing from before the pause counts, so not known until measured again.
+        let s = seconds(&m, g[0], &mut at, 4, 4 * MB);
+        assert_eq!(s.time_left, TimeLeft::NotKnownYet);
+        let s = seconds(&m, g[0], &mut at, 1, 4 * MB);
+        assert_eq!(s.bytes_per_second, Some(4 * MB));
+        // 30 MB written of 100: 70 MB left at 4 MB a second.
+        assert_eq!(s.time_left, TimeLeft::About { seconds: 18 });
+        // Done is done, paused or not.
+        m.paused_here(true);
+        m.step(g[0], Step::Copying, Step::Copied);
+        assert_eq!(m.snapshot_at(at).time_left, TimeLeft::Done);
+        assert_eq!(
+            serde_json::to_value(TimeLeft::Paused).unwrap(),
+            serde_json::json!({ "kind": "paused" })
+        );
+    }
+
+    #[test]
+    fn a_pause_and_a_carrying_on_back_to_back_still_wake_a_waiter_that_looked_before() {
+        use futures_util::FutureExt;
+        let c = MoveControl::new();
+        let seen = c.changes();
+        assert!(
+            c.wait_change(seen).now_or_never().is_none(),
+            "nothing changed yet"
+        );
+        // Paused and carried on before the waiter looks again: the move is as it was, but it
+        // changed, so the waiter is not left asleep.
+        c.pause();
+        c.carry_on();
+        assert!(!c.paused());
+        assert!(c.wait_change(seen).now_or_never().is_some());
+        // A waiter already asleep is woken by each of them, from another thread.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        for act in [MoveControl::pause, MoveControl::carry_on, MoveControl::stop] {
+            let seen = c.changes();
+            let other = c.clone();
+            let t = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(20));
+                act(&other);
+            });
+            // Generous: it is woken within moments; this only turns a missed wake into a failure.
+            let woken = rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(60), c.wait_change(seen)).await
+            });
+            assert!(woken.is_ok(), "a waiter was left asleep");
+            t.join().unwrap();
+        }
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Headless move for the test lab. Run the two sides as two user accounts:
 //!
 //!     pctwin-labmove send    <handoff> <report.json> [--lab <folder> <account>]
+//!         (PCTWIN_LAB_BIND=<address:port> to listen on one address, as on two machines)
 //!     pctwin-labmove receive <handoff> <report.json> <journal> [--lab <folder> <account>]
 //!     pctwin-labmove check   <before.json> <source-after.json> <dest.json> <sent.json> <received.json> [--only <made.json>]
 //!     pctwin-labmove fill-profile [seed] [ordinary files] [big file bytes]
@@ -8,6 +9,11 @@
 //!     pctwin-labmove probe <out.json>
 //!     pctwin-labmove pack <lab folder> <account> <package folder>
 //!     pctwin-labmove send <handoff> <report.json> --package <package folder>
+//!     pctwin-labmove everyone <report.json> --laptop <id> --new-home <folder> --journal <file>
+//!         --new-names <prefix> [--session <token> --channel <name> [--dir <folder>]]
+//!     pctwin-labmove everyone ... [--hostile yes]
+//!     pctwin-labmove hello <token> <channel> [folder]
+//!     pctwin-labmove check-everyone <key.json> <evidence.json> <what the mover can read>...
 //!
 //! `fill-profile` builds a lab laptop into the signed-in person's real special folders, wherever
 //! they are; `snapshot-profile` records those folders the way reports name them. `probe` compares
@@ -53,7 +59,10 @@ fn write(report: &Report, out: &str) -> Result<(), String> {
 async fn run(args: &[String]) -> Result<bool, String> {
     match args {
         [side, handoff, out, rest @ ..] if side == "send" => {
-            let r = send(folders(rest)?, handoff.as_ref(), "0.0.0.0:0").await?;
+            // PCTWIN_LAB_BIND: the address to listen on (two machines on a virtual network, where
+            // loopback is not shared); by default every address, reached through loopback.
+            let bind = std::env::var("PCTWIN_LAB_BIND").unwrap_or_else(|_| "0.0.0.0:0".into());
+            let r = send(folders(rest)?, handoff.as_ref(), &bind).await?;
             write(&r, out)?;
             Ok(true)
         }
@@ -149,6 +158,45 @@ async fn run(args: &[String]) -> Result<bool, String> {
             let held = pctwin_labmove::pack(root.as_ref(), account, out.as_ref())?;
             println!("packed {held} files");
             Ok(true)
+        }
+        [side, report, rest @ ..] if side == "everyone" => {
+            // The mover's report to their own file; the lab's evidence on standard output, which
+            // the lab keeps where only an administrator can read it.
+            let ran =
+                pctwin_labmove::everyone::everyone(pctwin_labmove::everyone::parse(rest)?).await?;
+            std::fs::write(
+                report,
+                serde_json::to_vec_pretty(&ran.report).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&ran.evidence).map_err(|e| e.to_string())?
+            );
+            Ok(true)
+        }
+        [side, token, channel, rest @ ..] if side == "hello" => {
+            let dir = match rest {
+                [] => None,
+                [dir] => Some(std::path::Path::new(dir)),
+                _ => return Err("hello <token> <channel> [folder]".into()),
+            };
+            pctwin_labmove::everyone::hello(token, channel, dir)?;
+            Ok(true)
+        }
+        [side, key, evidence, visible @ ..] if side == "check-everyone" => {
+            let key: serde_json::Value = read(key)?;
+            let evidence: serde_json::Value = read(evidence)?;
+            let mut seen = Vec::new();
+            for v in visible {
+                let text = std::fs::read(v).map_err(|e| format!("{v}: {e}"))?;
+                seen.push((v.clone(), String::from_utf8_lossy(&text).into_owned()));
+            }
+            let problems = pctwin_labmove::everyone::check(&key, &evidence, &seen);
+            for p in &problems {
+                println!("PROBLEM: {p}");
+            }
+            Ok(problems.is_empty())
         }
         [side, out] if side == "probe" => {
             let (found, problems) = probe()?;

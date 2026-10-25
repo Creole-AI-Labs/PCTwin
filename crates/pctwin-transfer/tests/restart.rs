@@ -10,7 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use pctwin_gate::{Approved, Destinations, temp_name};
-use pctwin_journal::{Actor, Journal, Permission, PlannedWrite, State};
+use pctwin_journal::{Actor, Journal, Permission, PlannedWrite, Scope, State};
+
+/// The move the world's earlier session belonged to, in the journal.
+const EARLIER: Scope = Scope(*b"an earlier move!");
 use pctwin_record::{ItemId, LaptopId};
 use pctwin_transfer::{
     Channel, ChannelError, MoveMeter, ReceiverSession, SendJob, SenderSession, StepCounts, Tier,
@@ -127,9 +130,9 @@ const LAPTOP: &str = "00112233445566778899aabbccddeeff";
 const SIZE: usize = 100 * 128 * 1024 - 7;
 
 fn world() -> World {
-    let old = tempfile::tempdir().unwrap();
-    let mine = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut table = Destinations::new();
     table
@@ -152,6 +155,7 @@ fn world() -> World {
 impl World {
     fn job(&self) -> SendJob {
         SendJob {
+            size: 0,
             item: id(1),
             source: self.source.clone(),
             destination: "me".into(),
@@ -163,8 +167,9 @@ impl World {
     fn plan(&self) -> pctwin_transfer::Allowance {
         common::approved(&[(id(1), SIZE as u64, "me", "Videos/big.bin")])
     }
+    /// The receiver after a restart: the same move, so the same scope as what it left behind.
     fn receiver(&self) -> ReceiverSession<'_> {
-        ReceiverSession::new(&self.table, self.plan(), &self.journal, "1001")
+        ReceiverSession::new(&self.table, self.plan(), &self.journal, "1001").with_scope(EARLIER)
     }
     fn block_size(&self) -> u64 {
         block_size_for(SIZE as u64)
@@ -199,6 +204,7 @@ impl World {
                 download_mark: None,
                 item: id(1),
                 source_laptop: LaptopId::from_hex(laptop).unwrap(),
+                scope: EARLIER,
                 destination: "me".into(),
                 path: "Videos/big.bin".into(),
                 size: SIZE as u64,
@@ -322,7 +328,8 @@ async fn a_file_no_longer_in_the_approved_plan_is_not_picked_up_again() {
     let claims: Vec<(u64, [u8; 32])> = (0..10).map(|b| (b, w.hash(b))).collect();
     let entry = w.left_behind(&(0..10).collect::<Vec<_>>(), &claims);
     let other_plan = common::approved(&[(id(2), 10, "me", "Videos/big.bin")]);
-    let mut receiver = ReceiverSession::new(&w.table, other_plan, &w.journal, "1001");
+    let mut receiver =
+        ReceiverSession::new(&w.table, other_plan, &w.journal, "1001").with_scope(EARLIER);
     assert_eq!(receiver.restore().unwrap(), 0);
     assert!(matches!(
         w.journal.entry(entry).unwrap().unwrap().state,
@@ -344,7 +351,8 @@ async fn a_partial_file_somewhere_the_plan_does_not_say_is_not_picked_up_again()
     for elsewhere in [("me", "Documents/big.bin"), ("other", "Videos/big.bin")] {
         let entry = w.left_behind(&(0..10).collect::<Vec<_>>(), &claims);
         let plan = common::approved(&[(id(1), SIZE as u64, elsewhere.0, elsewhere.1)]);
-        let mut receiver = ReceiverSession::new(&w.table, plan, &w.journal, "1001");
+        let mut receiver =
+            ReceiverSession::new(&w.table, plan, &w.journal, "1001").with_scope(EARLIER);
         assert_eq!(receiver.restore().unwrap(), 0, "{elsewhere:?}");
         assert!(matches!(
             w.journal.entry(entry).unwrap().unwrap().state,
@@ -420,7 +428,7 @@ async fn a_file_from_another_old_laptop_or_another_folder_is_left_alone() {
     // Another folder under the same label: not touched either.
     let w2 = world();
     let ours = w2.left_behind(&blocks, &claims);
-    let other = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("me", Approved::MyFolders, other.path())
@@ -638,6 +646,7 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
                 download_mark: None,
                 item: *item,
                 source_laptop: LaptopId::from_hex(LAPTOP).unwrap(),
+                scope: EARLIER,
                 destination: "me".into(),
                 path: path.clone(),
                 size: *size,
@@ -661,7 +670,8 @@ async fn no_more_partly_received_files_are_picked_up_than_may_be_open_at_once() 
         .iter()
         .map(|(item, size, path)| (*item, *size, "me", path.as_str()))
         .collect();
-    let mut receiver = ReceiverSession::new(&w.table, common::approved(&plan), &w.journal, "1001");
+    let mut receiver = ReceiverSession::new(&w.table, common::approved(&plan), &w.journal, "1001")
+        .with_scope(EARLIER);
     assert_eq!(
         receiver.restore().unwrap(),
         pctwin_transfer::MAX_OPEN_FILES as u64
@@ -849,7 +859,7 @@ async fn with_a_marker_floor_a_file_continued_after_a_restart_still_lands_marked
     w.left_behind(&landed, &claims);
     recover(&w.journal, &w.table).unwrap();
     let plan = w.plan().with_mark_floor(DownloadMark::Internet);
-    let mut receiver = ReceiverSession::new(&w.table, plan, &w.journal, "1001");
+    let mut receiver = ReceiverSession::new(&w.table, plan, &w.journal, "1001").with_scope(EARLIER);
     assert_eq!(receiver.restore().unwrap(), 1);
     let mut sender = SenderSession::new(vec![w.job()], 1);
     send_all(&mut sender, &mut receiver).await;
@@ -912,4 +922,37 @@ async fn after_a_restart_the_meter_counts_the_picked_up_file_as_copying_until_it
     copied.copied = 1;
     assert_eq!(meter.reading().files, copied);
     assert_eq!(meter.reading().bytes_checked, SIZE as u64);
+}
+
+/// Review of scan record v2 (24 October 2026): the old laptop's ID comes from what it says, so a
+/// later move that names the same ID and the same file (by chance, or by someone who knows it)
+/// never touches another move's entries: it does not pick up the earlier move's part-copy, does
+/// not end it as "started again", and leaves its checkpoints; the earlier move still can.
+#[tokio::test]
+async fn a_move_naming_the_same_old_laptop_never_touches_another_move_s_entries() {
+    let w = world();
+    let landed: Vec<u64> = (0..40).collect();
+    let claims: Vec<(u64, [u8; 32])> = landed.iter().map(|b| (*b, w.hash(*b))).collect();
+    let entry = w.left_behind(&landed, &claims);
+    recover(&w.journal, &w.table).unwrap();
+    let before = w.journal.entry(entry).unwrap().unwrap().state;
+    assert!(matches!(before, State::Staged { .. }), "{before:?}");
+
+    // Another move (its own scope), the same old laptop's ID and the same file.
+    let mut other = ReceiverSession::new(&w.table, w.plan(), &w.journal, "1001");
+    assert_eq!(other.restore().unwrap(), 0);
+    let mut sender = SenderSession::new(vec![w.job()], 1);
+    send_all(&mut sender, &mut other).await;
+    assert_eq!(
+        sender.blocks_sent(),
+        100,
+        "nothing taken from the other move"
+    );
+    assert_eq!(w.journal.entry(entry).unwrap().unwrap().state, before);
+    assert_eq!(w.journal.blocks(entry).unwrap(), claims);
+
+    // The earlier move, picked up again, still finds its own.
+    std::fs::remove_file(w.mine.path().join("Videos/big.bin")).unwrap();
+    let mut again = w.receiver();
+    assert_eq!(again.restore().unwrap(), 1);
 }

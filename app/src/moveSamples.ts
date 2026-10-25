@@ -15,8 +15,7 @@ export function counts(partial: Partial<Counts>): Counts {
 }
 
 const old: Label = { kind: "named", name: "Ada’s old laptop" };
-const next: Label = { kind: "picked", colour: "blue", animal: "fox" };
-const laptops = { old, new: next };
+const laptops = { old };
 
 /** Copying, mid-move: some done, some being checked, some waiting. */
 export const running: MoveProgress = {
@@ -79,7 +78,7 @@ export const withFailures: MoveProgress = {
 };
 
 export const linkLost: MoveProgress = { ...running, notice: { kind: "link-lost" } };
-export const lowBattery: MoveProgress = { ...running, notice: { kind: "low-battery", label: "Blue Fox" } };
+export const lowBattery: MoveProgress = { ...running, notice: { kind: "low-battery", paused: false } };
 
 export const pausing: MoveProgress = { ...running, state: "pausing", counts: counts({ done: 4210, copying: 1, waiting: 1789 }) };
 export const paused: MoveProgress = { ...running, state: "paused", counts: counts({ done: 4211, waiting: 1789 }), current: undefined, speed: undefined, minutesLeft: undefined };
@@ -102,6 +101,17 @@ export const finishedClean: MoveOutcome = {
 };
 
 export const finishedMemory: MoveOutcome = { ...finishedClean, checkedFromMemory: 6000 };
+
+/** A mixed move with its after-move check: two photos short, no music in the plan. */
+export const finishedChecked: MoveOutcome = {
+  ...finishedMixed,
+  afterMove: {
+    photos: { planned: 4210, copied: 4208 },
+    videos: { planned: 96, copied: 96 },
+    music: { planned: 0, copied: 0 },
+    documents: { planned: 1312, copied: 1312 },
+  },
+};
 
 export const finishedStopped: MoveOutcome = {
   byStatus: { ...noStatuses(), copied: 3100 },

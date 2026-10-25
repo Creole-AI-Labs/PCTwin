@@ -1,5 +1,5 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import axe from "axe-core";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { violations } from "./testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { LANGUAGES, directionOf, localization, pickLanguage } from "./i18n";
@@ -28,17 +28,11 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** axe-core on the rendered page. Colour contrast needs real layout, so it is checked in the built app instead. */
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
-
 describe("screens", () => {
   it("Welcome shows the free move first, in English, with nothing missing", () => {
     render(<App initialLanguage="en" />);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
-    expect(screen.getByRole("button", { name: /Start a move/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
+    expect(screen.getByRole("button", { name: /Start a full move/ })).toBeTruthy();
     expect(screen.getByText("Free personal moves. No account needed.")).toBeTruthy();
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
@@ -47,9 +41,9 @@ describe("screens", () => {
     const l10n = localization("en");
     const title = () => screen.getByRole("heading", { level: 1 }).textContent;
     render(<App initialLanguage="en" />);
-    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(title()).toBe("Which laptop is this?");
-    fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: /This is my old laptop/ }));
     expect(title()).toBe(l10n.getString("connect-title"));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
     expect(title()).toBe(l10n.getString("connect-prep-title"));
@@ -65,16 +59,17 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     expect(title()).toBe("Which laptop is this?");
     // The role chosen is kept through the new steps: the new laptop reaches its own pairing screen.
-    fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: /This is my new laptop/ }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-use-wifi") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("connect-prep-continue") }));
     await act(async () => {});
-    expect(title()).toBe(l10n.getString("pair-new-searching-title"));
+    // The shell here gives no search reply, so the search fails, and the page says so.
+    expect(title()).toBe(l10n.getString("pair-new-search-failed-title"));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("pair-back") }));
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-    expect(title()).toBe("Your setup.Your next laptop.");
+    expect(title()).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
   });
 
@@ -84,9 +79,9 @@ describe("screens", () => {
     const footer = () => within(screen.getByRole("contentinfo"));
     expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
     expect(footer().getByRole("button", { name: l10n.getString("footer-help") })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(footer().getByText(l10n.getString("footer-free"))).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /My old laptop/ }));
+    fireEvent.click(screen.getByRole("button", { name: /This is my old laptop/ }));
     expect(footer().getByText(l10n.getString("footer-note-move"))).toBeTruthy();
     expect(footer().getByRole("button", { name: l10n.getString("connect-use-wifi") })).toBeTruthy();
     expect(within(screen.getByRole("main")).queryByRole("button", { name: l10n.getString("connect-use-wifi") })).toBeNull();
@@ -111,8 +106,98 @@ describe("screens", () => {
     expect(screen.getByText(/later version|first release/)).toBeTruthy();
     expect(await violations()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: /Back/ }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
+  it("a move that stopped part way is picked up first: tidy up, then pair again as the new laptop", async () => {
+    const l10n = localization("en");
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(
+        command === "recovery_check"
+          ? { unfinished: 3 }
+          : command === "recovery_run"
+            ? { putInPlace: 2, keptToContinue: 1, notFinished: 0, leftForLater: 0 }
+            : undefined,
+      ),
+    );
+    render(<App initialLanguage="en" />);
+    expect(await screen.findByText(l10n.getString("pickup-title"))).toBeTruthy();
+    expect(screen.getByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("pickup-unfinished-body", { count: 3 }).replace(/[⁦-⁩]/g, ""))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("pickup-tidy") }));
+    expect(await screen.findByText(l10n.getString("pickup-done"))).toBeTruthy();
+    expect(tauri.invoke).toHaveBeenCalledWith("recovery_run");
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("ended-pair-again") }));
+    await act(async () => {});
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
+    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
+  it("Help in the footer opens the help page, whose guides open in place, and Back returns", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    fireEvent.click(within(screen.getByRole("contentinfo")).getByRole("button", { name: l10n.getString("footer-help") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("help-home-title"));
+    fireEvent.click(screen.getByText(l10n.getString("help-guide-find-title")));
+    expect(screen.getByText(l10n.getString("help-guide-find-body"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
+    expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
+  });
+
+  it("Quick Send's Send opens the file choice (nothing is picked by itself), and Back returns to its home", () => {
+    const l10n = localization("en");
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-send-title")) }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-choose-title"));
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string).filter((c) => c.startsWith("quicksend_pick"))).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
+  });
+
+  it("a person whose things were handed over at their sign-in sees them counted once, then Welcome", async () => {
+    const l10n = localization("en");
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(command === "things_ready" ? { landed: 120, kept: 2, failed: 0 } : command === "recovery_check" ? { unfinished: 0 } : undefined),
+    );
+    render(<App initialLanguage="en" />);
+    expect(await screen.findByText(l10n.getString("ready-title"))).toBeTruthy();
+    expect(screen.getByText("120")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: l10n.getString("ready-done") }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
+  });
+
+  it("Your receipts opens the history the app recorded, opens an entry's receipt again, and Back returns", async () => {
+    const l10n = localization("en");
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(
+        command === "history_list"
+          ? [{ id: "e1", kind: "receive", when: "2026-10-22T00:05:00Z", other: null, state: "finished", stepsLeft: 0 }]
+          : command === "history_open"
+            ? { kind: "receipt", receipt: { side: "receiver", stopped: false, lines: [{ path: "a.jpg", outcome: { kind: "arrived", landedAs: "a.jpg" } }] } }
+            : command === "recovery_check"
+              ? { unfinished: 0 }
+              : undefined,
+      ),
+    );
+    render(<App initialLanguage="en" />);
+    fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("history-title"));
+    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-label-other") }).replace(/[⁦-⁩]/g, ""));
+    expect(row).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("history-open-receipt")) }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-receipt-title"));
+    });
+  });
+
+  it("with nothing to pick up, the app opens on Welcome", async () => {
+    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "recovery_check" ? { unfinished: 0 } : undefined));
+    render(<App initialLanguage="en" />);
+    await act(async () => {});
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
   it("Quick Send opens its home, says plainly that nothing is connected yet, and Back returns", () => {
@@ -121,13 +206,8 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     expect(screen.queryByText("Coming soon")).toBeNull();
-    // Send, Receive and history are real cards; until the bridge exists each one says so and changes nothing.
-    for (const id of ["qs-send-title", "qs-receive-title", "qs-history-title"]) {
-      fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString(id)) }));
-      expect(screen.getByRole("status").textContent).toContain(l10n.getString("qs-soon-note"));
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
-    }
-    expect(tauri.invoke).not.toHaveBeenCalled();
+    // Nothing reaches the shell but the start-up looks (a move that stopped part way, a hand-over note).
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check", "things_ready"]);
     // The window footer carries the free-sending note and the main action, also while the notice is showing.
     const footer = within(screen.getByRole("contentinfo"));
     expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();
@@ -135,7 +215,7 @@ describe("screens", () => {
     expect(footer.queryByText(l10n.getString("footer-free"))).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: l10n.getString("frame-back") }));
     expect(within(screen.getByRole("contentinfo")).getByText(l10n.getString("footer-free"))).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Your setup.Your next laptop.");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
     expect(warnings.filter((w) => /missing|not found/i.test(w))).toEqual([]);
   });
 
@@ -147,12 +227,12 @@ describe("screens", () => {
     for (const control of [...screen.getAllByRole("button"), ...screen.queryAllByRole("link")]) {
       expect(control.textContent).not.toMatch(paid);
     }
-    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["PCTwin", "Start a full move", "Restore setup", "Rescue a laptop", "Quick Send", "Help"]);
   });
 
   it("a new screen takes keyboard focus", () => {
     render(<App initialLanguage="en" />);
-    fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
     expect(document.activeElement?.tagName).toBe("MAIN");
   });
 
@@ -160,8 +240,8 @@ describe("screens", () => {
     render(<App initialLanguage="en" />);
     const steps = ["welcome", "role", "connect", "together", "pair"];
     const at = steps.indexOf(which);
-    if (at >= 1) fireEvent.click(screen.getByRole("button", { name: /Start a move/ }));
-    if (at >= 2) fireEvent.click(screen.getByRole("button", { name: /My new laptop/ }));
+    if (at >= 1) fireEvent.click(screen.getByRole("button", { name: /Start a full move/ }));
+    if (at >= 2) fireEvent.click(screen.getByRole("button", { name: /This is my new laptop/ }));
     if (at >= 3) fireEvent.click(screen.getByRole("button", { name: /Use Wi-Fi/ }));
     if (at >= 4) fireEvent.click(screen.getByRole("button", { name: /Continue to pairing/ }));
     await act(async () => {});
@@ -184,8 +264,8 @@ describe("languages", () => {
       const start = l10n.getString("welcome-start");
       expect(start).not.toBe("welcome-start");
       expect(start).not.toBe("");
-      if (code === "en") expect(start).toBe("Start a move");
-      else expect(start).not.toBe("Start a move");
+      if (code === "en") expect(start).toBe("Start a full move");
+      else expect(start).not.toBe("Start a full move");
       // An id no language has is never shown as blank: the id itself comes back.
       expect(l10n.getString("no-such-message-anywhere", undefined, "fallback text")).toBe("fallback text");
     }

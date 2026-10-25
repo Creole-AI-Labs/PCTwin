@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { Badge, Row, RowList } from "../components/kit";
 import { Check, Laptop } from "../icons";
 import { labelText, type Label } from "../pairing";
-import { fileName, useBytes } from "../quicksend";
+import { extensionOf, fileName, shownSafely, useBytes } from "../quicksend";
 import { TopStrip } from "./FrameParts";
 import "./quicksend.css";
 
@@ -113,11 +113,23 @@ export function Name({ children }: { children: string }) {
 /** The folder part of a path in the send ("Holiday/beach.jpg" -> "Holiday"), or null at the top. */
 export function folderOf(path: string): string | null {
   const at = path.lastIndexOf("/");
-  return at > 0 ? path.slice(0, at) : null;
+  return at > 0 ? shownSafely(path.slice(0, at)) : null;
 }
 
 /** Offered files as rows: icon tile, name, folder and size, and optionally a word saying it is included. */
-export function FileRows({ files, limit, included = false }: { files: readonly { path: string; size: number }[]; limit?: number; included?: boolean }) {
+export function FileRows({
+  files,
+  limit,
+  included = false,
+  types = false,
+}: {
+  files: readonly { path: string; size: number }[];
+  limit?: number;
+  included?: boolean;
+  /** Each file's real type by its name, shown apart from the name (the offer screen). */
+  types?: boolean;
+}) {
+  const { l10n } = useLocalization();
   const bytes = useBytes();
   const shown = limit === undefined ? files : files.slice(0, limit);
   return (
@@ -136,6 +148,12 @@ export function FileRows({ files, limit, included = false }: { files: readonly {
             detail={
               <>
                 <bdi>{bytes(f.size)}</bdi>
+                {types && extensionOf(f.path) !== null && (
+                  <>
+                    {" · "}
+                    <bdi dir="ltr">{l10n.getString("qs-file-type", { ext: extensionOf(f.path) ?? "" })}</bdi>
+                  </>
+                )}
                 {folder && (
                   <>
                     {" · "}

@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use pctwin_gate::{Approved, Destinations};
 use pctwin_record::ItemId;
 use pctwin_transfer::{
-    Block, Channel, ChannelError, FileSender, Header, Message, ReceiveOutcome, ReceiverSession,
-    SendJob, SendOutcome, SenderSession, Tier, block_size_for, split_into_pieces,
+    Block, Cause, Channel, ChannelError, FileSender, Header, Message, ReceiveOutcome,
+    ReceiverSession, SendJob, SendOutcome, SenderSession, Tier, block_size_for, split_into_pieces,
 };
 use tokio::sync::{Mutex, mpsc};
 
@@ -145,7 +145,7 @@ fn bytes_to_move() -> u64 {
 }
 
 fn laptops() -> Laptops {
-    let old = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let files: Vec<(PathBuf, Vec<u8>)> = FILES
         .iter()
         .enumerate()
@@ -158,8 +158,8 @@ fn laptops() -> Laptops {
         .collect();
     Laptops {
         _old: old,
-        new_mine: tempfile::tempdir().unwrap(),
-        new_shared: tempfile::tempdir().unwrap(),
+        new_mine: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+        new_shared: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
         files,
     }
 }
@@ -175,6 +175,7 @@ fn table(l: &Laptops) -> Destinations {
 
 fn jobs(l: &Laptops) -> Vec<SendJob> {
     let job = |n: u8, destination: &str, path: &str| SendJob {
+        size: 0,
         item: id(n),
         source: l.files[n as usize].0.clone(),
         destination: destination.into(),
@@ -764,10 +765,10 @@ async fn the_new_laptop_starts_only_what_the_approved_plan_allows() {
     // Nothing was created or reserved for either.
     assert!(everything_under(l.new_mine.path()).is_empty());
     assert!(
-        matches!(receiver.outcome(id(2)), Some(ReceiveOutcome::Failed(why)) if why.contains("grew"))
+        matches!(receiver.outcome(id(2)), Some(ReceiveOutcome::Failed(why)) if why.contains("grew") && why.cause() == Cause::ChangedDuringMove)
     );
     assert!(
-        matches!(receiver.outcome(id(9)), Some(ReceiveOutcome::Failed(why)) if why.contains("plan"))
+        matches!(receiver.outcome(id(9)), Some(ReceiveOutcome::Failed(why)) if why.contains("plan") && why.cause() == Cause::RefusedBySafetyCheck)
     );
 }
 
@@ -1278,13 +1279,25 @@ async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
     let (mut old, mut new) = mem_pair();
     let script = async {
         assert_eq!(hear(&mut old).await, Message::Ready);
-        // Started on several streams without ever finishing: each replaces the one before,
-        // and after a few tries the file is refused.
+        // Started on several streams without ever finishing, a block of it arriving each time:
+        // each replaces the one before, and after a few tries the file is refused. (A start
+        // that received nothing is no attempt: see `starts_that_received_nothing_are_not_attempts`.)
         let mut answers = Vec::new();
         for k in 0..(pctwin_transfer::MAX_ATTEMPTS + 2) {
-            let (start, _) = small_start(&l, 10 + k);
+            let stream = 10 + k;
+            let (start, blocks) = small_start(&l, stream);
             say(&mut old, &start).await;
-            answers.push(hear(&mut old).await);
+            let answer = hear(&mut old).await;
+            if matches!(answer, Message::Have { .. }) {
+                for piece in split_into_pieces(stream, &blocks[0].encode()) {
+                    say(&mut old, &piece).await;
+                }
+                assert!(matches!(
+                    hear(&mut old).await,
+                    Message::Receipt { written: true, .. }
+                ));
+            }
+            answers.push(answer);
         }
         let started = answers
             .iter()
@@ -1303,7 +1316,8 @@ async fn a_second_start_of_a_file_replaces_the_first_and_nothing_piles_up() {
     r.unwrap();
     assert!(matches!(
         receiver.outcome(id(0)),
-        Some(ReceiveOutcome::Failed(why)) if why.contains("kept changing")
+        Some(ReceiveOutcome::Failed(why))
+            if why.contains("kept changing") && why.cause() == Cause::ChangedDuringMove
     ));
 }
 
@@ -1517,15 +1531,19 @@ async fn a_file_found_already_there_is_spent_too() {
         assert_eq!(hear(&mut old).await, Message::Ready);
         let (start, _) = small_start(&l, 0);
         say(&mut old, &start).await;
-        assert!(matches!(
-            hear(&mut old).await,
-            Message::Have {
-                same_size: Some(_),
-                ..
-            }
-        ));
-        say(&mut old, &Message::Skip { stream: 0 }).await;
-        // The skip is answered: it is already there.
+        // The new laptop sends a key of its own, never its file's fingerprint; the old laptop
+        // answers with its file's fingerprint under that key.
+        let Message::Have {
+            same_size: Some(key),
+            ..
+        } = hear(&mut old).await
+        else {
+            panic!("a same-size file is here");
+        };
+        assert_ne!(key, *blake3::hash(&l.files[0].1).as_bytes());
+        let print = *blake3::keyed_hash(&key, &l.files[0].1).as_bytes();
+        say(&mut old, &Message::Print { stream: 0, print }).await;
+        // Judged by the new laptop itself: it is already there.
         assert_eq!(
             hear(&mut old).await,
             Message::FileDone {
@@ -1548,6 +1566,49 @@ async fn a_file_found_already_there_is_spent_too() {
     let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
     r.unwrap();
     assert_eq!(files_under(l.new_mine.path()), 1);
+}
+
+/// A print that is not the new laptop's own file's, or a bare skip, is never taken as "already
+/// there": the answer is no, nothing is recorded as the file's end, and it can be sent.
+#[tokio::test]
+async fn a_wrong_print_or_a_bare_skip_is_never_already_there() {
+    let l = laptops();
+    let table = table(&l);
+    let there = l.new_mine.path().join("Documents");
+    std::fs::create_dir_all(&there).unwrap();
+    std::fs::write(there.join("small.bin"), &l.files[0].1).unwrap();
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        for (stream, lie) in [(0, true), (1, false)] {
+            let (start, _) = small_start(&l, stream);
+            say(&mut old, &start).await;
+            assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+            if lie {
+                // The plain fingerprint, as a laptop on an older version would compare it.
+                let print = *blake3::hash(&l.files[0].1).as_bytes();
+                say(&mut old, &Message::Print { stream, print }).await;
+            } else {
+                say(&mut old, &Message::Skip { stream }).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::FileDone { stream, ok: false }
+            );
+        }
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
+    r.unwrap();
+    assert!(
+        !matches!(
+            receiver.outcome(id(0)),
+            Some(ReceiveOutcome::AlreadyThere(_))
+        ),
+        "{:?}",
+        receiver.outcome(id(0))
+    );
 }
 
 #[tokio::test]
@@ -1608,7 +1669,7 @@ async fn a_refused_block_stops_the_old_laptop_sending_that_file() {
 async fn a_stream_started_again_with_another_file_ends_the_first_in_the_journal_at_once() {
     let l = laptops();
     let table = table(&l);
-    let jdir = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = pctwin_journal::Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
     let big = FileSender::open(&l.files[2].0, None, true)
@@ -1733,7 +1794,7 @@ async fn an_old_laptop_cannot_choose_where_an_approved_file_lands() {
     // another approved place. Only the approved plan says where a file lands.
     let l = laptops();
     let table = table(&l);
-    let jdir = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = pctwin_journal::Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut receiver = ReceiverSession::new(&table, plan(&l), &journal, "1001");
     let (mut old, mut new) = mem_pair();
@@ -2013,4 +2074,71 @@ async fn a_start_announced_elsewhere_changes_nothing_already_under_way() {
     assert_eq!(receiver.continued(), 0);
     assert_eq!(receiver.partway(), 1);
     assert!(!l.new_mine.path().join("Startup").exists());
+}
+
+/// A start cut off before anything of the file arrived is no attempt: an old laptop on a lossy
+/// link that starts a file over and over (more times than any file may be attempted) still gets
+/// it through, never "it kept changing".
+#[tokio::test]
+async fn starts_that_received_nothing_are_not_attempts() {
+    let l = laptops();
+    let table = table(&l);
+    let mut receiver = ReceiverSession::new(&table, plan(&l), common::journal(), "1001");
+    let (mut old, mut new) = mem_pair();
+    let script = async {
+        assert_eq!(hear(&mut old).await, Message::Ready);
+        // Started again and again on new streams, nothing of it ever sent.
+        for stream in 10..20u32 {
+            let (start, _) = small_start(&l, stream);
+            say(&mut old, &start).await;
+            assert!(
+                matches!(hear(&mut old).await, Message::Have { .. }),
+                "start {stream} accepted"
+            );
+        }
+        // Then the whole file.
+        let (start, blocks) = small_start(&l, 0);
+        let Message::StartFile { header, .. } = &start else {
+            unreachable!()
+        };
+        let stamp = header.stamp;
+        say(&mut old, &start).await;
+        assert!(matches!(hear(&mut old).await, Message::Have { .. }));
+        for (b, block) in blocks.iter().enumerate() {
+            for piece in split_into_pieces(0, &block.encode()) {
+                say(&mut old, &piece).await;
+            }
+            assert_eq!(
+                hear(&mut old).await,
+                Message::Receipt {
+                    stream: 0,
+                    block: b as u64,
+                    written: true,
+                }
+            );
+        }
+        say(
+            &mut old,
+            &Message::EndFile {
+                stream: 0,
+                stamp_after: stamp,
+                changed: false,
+            },
+        )
+        .await;
+        assert_eq!(
+            hear(&mut old).await,
+            Message::FileDone {
+                stream: 0,
+                ok: true
+            }
+        );
+        say(&mut old, &Message::AllSent).await;
+    };
+    let ((), r) = common::no_hang(async { tokio::join!(script, receiver.run(&mut new)) }).await;
+    r.unwrap();
+    assert!(matches!(
+        receiver.outcome(id(0)),
+        Some(ReceiveOutcome::Finished(_))
+    ));
 }

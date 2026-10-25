@@ -145,6 +145,70 @@ fn kind_from_name(name: &str) -> InterfaceKind {
     }
 }
 
+/// Words in a Windows adapter's description that name a VPN, for adapters whose connection is
+/// only called "Ethernet 3" (Cisco AnyConnect, Palo Alto GlobalProtect, Fortinet, Pulse and
+/// others): the description says what it is when the name does not.
+const VPN_DESCRIPTION_WORDS: &[&str] = &[
+    "vpn",
+    "anyconnect",
+    "secure mobility",
+    "pangp",
+    "globalprotect",
+    "fortinet",
+    "fortissl",
+    "juniper",
+    "pulse secure",
+    "check point",
+    "sonicwall",
+    "wireguard",
+    "tap-windows",
+    "wintun",
+    "virtual miniport",
+];
+/// Words in a description that name a virtual machine's or the system's own adapter.
+const VIRTUAL_DESCRIPTION_WORDS: &[&str] = &[
+    "hyper-v virtual ethernet",
+    "vmware virtual",
+    "virtualbox host-only",
+    "wan miniport",
+    "microsoft wi-fi direct virtual",
+    "bluetooth device",
+];
+
+/// What a connection is, from its name and, where the system gives one (Windows), its adapter's
+/// description: the name decides when it is plain; a connection whose name says nothing
+/// ("Ethernet 3") is judged by what the description says.
+pub fn kind_of(name: &str, description: Option<&str>) -> InterfaceKind {
+    let by_name = kind_from_name(name);
+    let Some(d) = description.map(str::to_lowercase) else {
+        return by_name;
+    };
+    if by_name != InterfaceKind::Network || name.to_lowercase().contains("vethernet") {
+        return by_name;
+    }
+    if VPN_DESCRIPTION_WORDS.iter().any(|w| d.contains(w)) {
+        InterfaceKind::Vpn
+    } else if VIRTUAL_DESCRIPTION_WORDS.iter().any(|w| d.contains(w)) {
+        InterfaceKind::Virtual
+    } else {
+        InterfaceKind::Network
+    }
+}
+
+/// A Hyper-V switch that carries the laptop's real network: a `vEthernet` connection that is not
+/// WSL's or the Default Switch's, holding an address a home or office network gives.
+fn is_external_switch(i: &Interface) -> bool {
+    let n = i.name.to_lowercase();
+    let lan = match i.ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            a == 10 || (a == 192 && b == 168)
+        }
+        IpAddr::V6(_) => false,
+    };
+    n.contains("vethernet") && !n.contains("wsl") && !n.contains("default switch") && lan
+}
+
 /// An address that means the laptop is actually on a network: not loopback, not a self-assigned
 /// link-local address (what a laptop gets when no network answered), not unspecified.
 fn is_usable_address(ip: IpAddr) -> bool {
@@ -270,7 +334,11 @@ pub fn diagnose(e: &Evidence, role: Role) -> Diagnosis {
                 suggest_phone_hotspot: false,
             };
         }
-        if !live.iter().any(|i| i.kind == InterfaceKind::Network) {
+        // A Hyper-V external switch, whatever it is named, carries the laptop's real network:
+        // it holds the address the home or office network gave (WSL's and the Default Switch's
+        // own private networks never count).
+        let through_switch = live.iter().any(|i| is_external_switch(i));
+        if !through_switch && !live.iter().any(|i| i.kind == InterfaceKind::Network) {
             // Only VPN or virtual connections: probably not on a real network.
             return Diagnosis {
                 findings: vec![likely(Cause::NotConnected)],
@@ -345,7 +413,7 @@ pub mod probe {
     use super::{Evidence, Interface, NetworkProfile, Role};
 
     /// A service type used only for this check, so other laptops never list it.
-    const CHECK_SERVICE: &str = "_pctwin-check._tcp.local.";
+    pub const CHECK_SERVICE: &str = "_pctwin-check._tcp.local.";
     /// Longest wait for the Windows profile check.
     pub const WINDOWS_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -353,9 +421,22 @@ pub mod probe {
     /// whether it is Wi-Fi when the system can tell ([`wifi_adapters`]).
     pub fn interfaces() -> Option<Vec<Interface>> {
         let wifi = wifi_adapters();
+        let described = descriptions();
         if_addrs::get_if_addrs().ok().map(|list| {
             list.iter()
                 .map(|i| Interface {
+                    kind: if i.ip().is_loopback() {
+                        crate::InterfaceKind::Loopback
+                    } else {
+                        crate::kind_of(
+                            &i.name,
+                            described
+                                .iter()
+                                .flatten()
+                                .find(|(n, _)| *n == i.name)
+                                .map(|(_, d)| d.as_str()),
+                        )
+                    },
                     wifi: wifi.as_ref().map(|names| names.contains(&i.name)),
                     index: i.index,
                     prefix_len: Some(match &i.addr {
@@ -450,6 +531,23 @@ pub mod probe {
     /// language); a Mac's hardware ports (`networksetup -listallhardwareports`: the port called
     /// Wi-Fi, or AirPort on older systems, and its device such as `en0`); Linux's
     /// `/sys/class/net/<name>/wireless`. `None` when the system could not be asked.
+    /// Each connection's adapter description where the system gives one (Windows), bounded like
+    /// the other Windows checks.
+    pub fn descriptions() -> Option<Vec<(String, String)>> {
+        #[cfg(windows)]
+        {
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(windows::descriptions());
+            });
+            rx.recv_timeout(WINDOWS_PROBE_TIMEOUT).ok().flatten()
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
     pub fn wifi_adapters() -> Option<Vec<String>> {
         if cfg!(windows) {
             let (tx, rx) = mpsc::channel();
@@ -540,6 +638,20 @@ pub mod probe {
         struct Adapter {
             name: String,
             ndis_physical_medium: u32,
+            #[serde(default)]
+            interface_description: Option<String>,
+        }
+
+        /// Each connection's adapter description, by connection name.
+        pub fn descriptions() -> Option<Vec<(String, String)>> {
+            let wmi = wmi::WMIConnection::with_namespace_path("ROOT\\StandardCimv2").ok()?;
+            let found: Vec<Adapter> = wmi.query().ok()?;
+            Some(
+                found
+                    .into_iter()
+                    .filter_map(|a| Some((a.name, a.interface_description?)))
+                    .collect(),
+            )
         }
 
         /// The connection names (the same names the address list gives) of every Wi-Fi adapter.

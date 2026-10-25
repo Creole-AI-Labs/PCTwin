@@ -5,27 +5,37 @@ app-name = PCTwin
 brand-home =
     .aria-label = PCTwin home
 language-label = Language
+motion-label = Motion
+motion-system = Motion: follow system
+motion-reduced = Motion: reduced
+motion-off = Motion: off
+
+# The opening (Wordplay); its tagline is the home headline.
+opening-label = PCTwin is opening
+opening-status = Opening PCTwin.
+opening-skip = Skip intro
+opening-tagline = Send files, or move everything.
 
 footer-free = Free personal moves. No account needed.
 footer-help = Help
 
 ## F01 Welcome
 
-welcome-eyebrow = Your next chapter, ready.
-welcome-title-line1 = Your setup.
-welcome-title-line2 = Your next laptop.
-welcome-body = Bring your files, apps and familiar settings along for the move.
-welcome-start = Start a move
+welcome-eyebrow = PCTwin
+welcome-title-line1 = Send files,
+welcome-title-line2 = or move everything.
+welcome-body = Send a few files to a laptop nearby, or bring your files, apps and settings to your new laptop.
+welcome-start = Start a full move
 
 ## F06 Old or new laptop
 
 role-back = Back
-role-eyebrow = Start a move
+role-eyebrow = Start a full move
 role-title = Which laptop is this?
 role-body = Open PCTwin on both laptops. Then say which one this is.
-role-old-title = My old laptop
+role-old-title = This is my old laptop
 role-old-body = Send my files, apps and settings.
-role-new-title = My new laptop
+role-new-title = This is my new laptop
 role-new-body = Receive my setup from another laptop.
 role-note = Nothing moves until you review and approve the plan. Your old laptop stays unchanged during the move.
 
@@ -122,13 +132,19 @@ check-status-connected = Available
 check-status-not-needed = Not needed
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = Not known
-check-speed-unknown = PCTwin could not measure the connection this time. Check again in a moment.
+check-speed-unknown = PCTwin could not measure the connection this time. Files still move; only the time estimate is missing.
 check-space-unknown = PCTwin could not read the free space on the new laptop.
 check-power-unknown = PCTwin could not tell whether { $label } is plugged in.
 check-internet-unknown = PCTwin could not tell whether this laptop is online. That is fine: copying files does not need the internet.
 check-again = Check again
 check-estimate-note = The time estimate is not a fixed promise.
 check-continue = Choose what to move
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = Before the move starts
+check-before-lids-title = Keep both lids open
+check-before-lids-body = A closed lid can put a laptop to sleep, which pauses the move.
+check-before-near-title = Stay near the Wi-Fi router
+check-before-near-body = Keep both laptops close to it while your things move.
 
 ## C09 Waiting for your other laptop
 
@@ -150,6 +166,8 @@ reconnect-expired = Too long has passed to reconnect by itself. Pair again, and 
 reconnect-unavailable = { $label } cannot be reached. Check that it is on, awake, has PCTwin open and is on the same Wi-Fi.
 reconnect-try-now = Retry connection
 reconnect-pair-again = Pair again
+# Shown with Stop when the tries to reconnect keep bringing nothing (the Task List's reconnect loop).
+reconnect-nothing-new = Nothing new has arrived for a while. PCTwin keeps trying by itself, or you can stop the move. Everything copied and checked so far stays.
 reconnect-details = Reconnecting safely
 reconnect-details-body = Only these two laptops can reconnect, and each time they use a new private connection.
 
@@ -171,6 +189,11 @@ ended-home = Return home
 
 pair-back = Back
 pair-try-again = Try again
+pair-more-details = More details
+pair-heads-up-title = Your laptop may ask you a question.
+pair-heads-up-local-network = Your Mac will ask whether PCTwin can find devices on your local network. Choose Allow, so your two laptops can find each other.
+pair-heads-up-firewall = Windows may ask whether PCTwin can accept connections. Choose Allow, so your new laptop can reach this one.
+pair-heads-up-continue = Continue
 
 ## C03 Old laptop: show the code
 
@@ -204,8 +227,9 @@ pair-old-wait-body =
         [one] That try did not work. A new code appears in { $seconds } second.
        *[other] That try did not work. A new code appears in { $seconds } seconds.
     }
-pair-old-locked-title = Pairing stopped.
-pair-old-locked-body = There were too many wrong tries, so pairing stopped to keep this laptop safe. Nothing was shared. Start again when you are ready.
+pair-old-locked-title = Someone on this network tried wrong codes.
+pair-old-locked-body = After five wrong codes, pairing stopped to keep this laptop safe. Nothing was shared. If it was you, choose Start again for a new code.
+pair-old-locked-hotspot = If you don’t know who it was, connect both laptops to your phone’s hotspot instead, then choose Start again.
 pair-old-start-again = Start again
 pair-old-timed-out = No number was chosen in time, so here is a new code.
 pair-old-declined = The numbers did not match, so nothing was shared. Here is a new code.
@@ -231,12 +255,18 @@ pair-choose-checking = Checking…
 pair-new-eyebrow = New laptop
 pair-new-searching-title = Looking for your old laptop…
 pair-new-searching-body = Keep PCTwin open on your old laptop, on the same Wi-Fi as this one.
+pair-new-search-failed-title = Could not look for your old laptop.
 pair-new-list-title = Which one is your old laptop?
 pair-new-list-body = Choose the name your old laptop shows on its screen.
 pair-new-same-label = Another laptop nearby has this name. Check the old laptop’s screen.
+pair-new-needs-update = This laptop has an older PCTwin. Update PCTwin on it, then search again.
 pair-new-none-title = No old laptop found.
 pair-new-none-body = Check that PCTwin is open on your old laptop and showing a code, and that both laptops are on the same Wi-Fi. Then search again.
 pair-new-search-again = Search again
+pair-old-same-role = Another laptop nearby is also set up as the old laptop. One of the two must be the new laptop.
+pair-old-switch = This is the new laptop
+pair-new-none-same-role = Did the other laptop also choose New laptop? Then choose Old laptop on it, or switch this one.
+pair-new-switch = This is the old laptop
 pair-new-code-title = Enter the code.
 pair-new-code-body = Type the code shown on { $label }.
 pair-new-code-label = Six-digit code
@@ -255,7 +285,8 @@ pair-new-number-waiting = Waiting for your old laptop…
 
 pair-done-eyebrow = All set
 pair-done-title = Your laptops are paired.
-pair-done-body = Your two laptops are connected. Choosing what to move comes next, and it is still being built, so nothing has moved yet.
+pair-done-body = Your two laptops are connected. Next, your old laptop finds your files, and you approve what moves on the new laptop. Nothing moves before you approve.
+pair-done-continue = Continue
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -275,7 +306,10 @@ pairing-different-version = The two laptops have different versions of PCTwin. U
 pairing-name-invalid = That name cannot be used. Try a shorter name with letters and numbers.
 pairing-no-network = This laptop is not on a Wi-Fi or wired network. Connect it, then try again.
 pairing-choose-network = This laptop is on more than one network. Choose the one your new laptop is on:
+pairing-local-network-refused = Your Mac may be stopping PCTwin from finding laptops on this network. If your Mac just asked, choose Allow, then try again. If not, open System Settings, choose Privacy & Security, then Local Network, switch on PCTwin, and try again.
+pairing-local-network-refused-details = A VPN, or a firewall or filter app, can also stop laptops finding each other. If one is on, turn it off while you pair, then try again.
 pairing-failed = Pairing did not work this time. Nothing was shared. Try again.
+pairing-failed-new = Pairing did not work this time. Nothing was shared. Type the new code from the old laptop’s screen.
 
 ## M06 Match people to their profiles (Who’s moving?)
 
@@ -359,7 +393,7 @@ help-code =
 help-contains-title = What it includes
 help-contains-problem = The kind of problem and how far the task got.
 help-contains-step = The step of the move where it happened.
-help-contains-versions = The PCTwin version, and which system each laptop runs, such as Windows or macOS.
+help-contains-versions = The PCTwin version, and which system this laptop runs, such as Windows or macOS.
 help-never-title = What it never includes
 help-chip-included = Included
 help-chip-excluded = Never included
@@ -375,6 +409,22 @@ help-share-text = My PCTwin problem code is { $code }.
 help-failed = A problem code could not be made. Try again. If it still does not work, describe the problem in your own words instead.
 help-try-again = Try again
 help-copy-failed = The code could not be copied. Select it above and copy it yourself.
+help-home-eyebrow = Help
+help-home-title = Help for the task in front of you.
+help-home-body = Short guides for the things that most often get in the way. They work without the internet.
+help-home-more = More help on getpctwin.com
+help-guide-find-title = The laptops can’t find each other
+help-guide-find-body = Put both laptops on the same Wi-Fi, not a guest network. Turn off any VPN while you pair. If it still does not work, switch on your phone’s hotspot and join both laptops to it.
+help-guide-mac-network-title = Your Mac asks about the local network
+help-guide-mac-network-body = Choose Allow, so PCTwin can find your other laptop. If you chose Don’t Allow, open System Settings, then Privacy & Security, then Local Network, and switch on PCTwin.
+help-guide-firewall-title = Windows asks about the firewall
+help-guide-firewall-body = Allow PCTwin on private networks, such as your home Wi-Fi. PCTwin only talks to your other laptop, on your own network.
+help-guide-stopped-title = A move stopped part way
+help-guide-stopped-body = Nothing copied and checked is lost, and your old laptop was not changed. Pair the laptops again: files already on the new laptop are found and not copied twice.
+help-guide-others-title = Moving other people’s things
+help-guide-others-body = Tick them on Who’s moving? on the old laptop. An administrator approves it once on each laptop. You never see their files. A new account’s temporary password is shown once, in the laptop’s own window; they choose their own at their first sign-in.
+help-guide-code-title = Asking someone for help
+help-guide-code-body = On any problem page, choose Get help. PCTwin makes a short code that says what went wrong, with no names, files or passwords in it, for you to send by WhatsApp or any app.
 
 ## Label words (the name each laptop shows while pairing)
 
@@ -705,8 +755,47 @@ dest-format = A file in these folders is too big for the way { $place } is set u
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $folder } on { $drive }
 plan-group-to = Goes to { $place }
+plan-group-move = Move { $folder }
+plan-place-change = Choose another place
+plan-place-usual = Use the usual place
+plan-place-free = { $size } free there
+plan-place-no-room = There isn't enough free space there. Choose another place, or untick this folder.
+plan-place-no-safe-name = PCTwin can't safely save files on that drive. Choose another place.
+plan-place-cannot-open = PCTwin couldn't open that folder. Choose another place.
 plan-version = Plan version { $revision }
 plan-details = More details
+plan-preview-title = Before you start
+plan-preview-fits = There is enough free space on this laptop.
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = We’ll move these first, so your new laptop is ready to use sooner: { $places }.
+plan-preview-short = This laptop needs { $size } more free space. Free some space before you start, or the move stops when the drive is full.
+plan-preview-space-unknown = PCTwin could not read how much free space this laptop has.
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] About { $minutes } minute.
+       *[other] About { $minutes } minutes.
+    }
+plan-preview-time = About { $low } to { $high } minutes.
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } file gets a slightly different name, because this laptop does not allow its name. The report lists it.
+       *[other] { $count } files get a slightly different name, because this laptop does not allow their names. The report lists each one.
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } file is too big for this laptop’s drive and will not be copied.
+       *[other] { $count } files are too big for this laptop’s drive and will not be copied.
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } file has a name or folder this laptop does not allow, and will not be copied.
+       *[other] { $count } files have a name or folder this laptop does not allow, and will not be copied.
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } file would start by itself when someone signs in on this laptop. Check that you expect it.
+       *[other] { $count } files would start by themselves when someone signs in on this laptop. Check that you expect them.
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = Reference { $reference }
 # $count is how many files are affected in each line below.
@@ -724,6 +813,11 @@ plan-hand-work-managed =
     { NUMBER($count) ->
         [one] { $count } item is managed by your work or school and is left out. Tick its folder to include it.
        *[other] { $count } items are managed by your work or school and are left out. Tick their folders to include them.
+    }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+        [one] { $count } folder holds more files than one move can carry, so it is not moving. After this move, send it on its own with Quick Send, or copy it with a USB drive.
+       *[other] { $count } folders hold more files than one move can carry, so they are not moving. After this move, send each on its own with Quick Send, or copy them with a USB drive.
     }
 plan-blocked-someone-unmapped = Someone on the old laptop has no account chosen on the new one yet. Choose where each person's files go, then come back.
 plan-blocked-account-used-twice = Two people would end up in one account on the new laptop. Give each person their own.
@@ -776,7 +870,8 @@ progress-needs-action =
     }
 progress-see-needs-action = See what needs you
 progress-interrupted = The connection to the other laptop dropped. PCTwin is trying to reconnect. Nothing copied and checked is lost.
-progress-low-battery = { $label } is low on battery. Plug it in so the move is not interrupted.
+progress-low-battery = This laptop is low on battery. Plug it in so the move is not interrupted.
+progress-battery-paused = This laptop’s battery is almost empty, so the move is paused safely. Plug it in, then carry on. Nothing is lost.
 progress-old-safe = Your old laptop stays unchanged.
 progress-pause = Pause move
 progress-compact = Keep it compact
@@ -799,6 +894,17 @@ progress-state-verified = Checked
 progress-state-checking = Checking
 progress-state-paused = Paused
 progress-checked-note = An item counts as copied only after it is checked.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = Tip
+tips-pause = Pause tips
+tips-resume = Show more tips
+tips-next = Next tip
+tip-battery = This laptop is on battery. Plug it in if you can, so a long move is not cut short.
+tip-closer = The connection is slow. Moving the laptops closer to the Wi-Fi router can speed it up.
+tip-lids = Keep this laptop’s lid open. A closed lid can put it to sleep, which pauses the move.
+tip-keep-using = You can keep using this laptop. PCTwin only reads from it.
+tip-pause = You can pause the move at any time and carry on later.
+tip-power-cut = If the power goes off, turn both laptops on and open PCTwin. It carries on from where it stopped, and nothing copied and checked is lost.
 
 ## F09 Mini panel
 
@@ -859,10 +965,170 @@ outcome-title = Welcome to your next laptop.
 outcome-body = Here is what happened to everything you approved.
 outcome-files-title = Selected files
 outcome-status-partial = Partly done
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = Checked after the move
+outcome-kind-photos = Photos
+outcome-kind-videos = Videos
+outcome-kind-music = Music
+outcome-kind-documents = Documents
+outcome-kind-count = { $copied } of { $planned } copied and checked
 outcome-next-title = What to do next
 outcome-old-safe = Anything not finished stays listed here. Nothing was removed from your old laptop.
 outcome-report = View complete report
 outcome-home = Return home
+outcome-person-copied =
+    { NUMBER($count) ->
+        [one] { $count } file copied.
+       *[other] { $count } files copied.
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+        [one] { $count } did not finish.
+       *[other] { $count } did not finish.
+    }
+outcome-person-at-sign-in = They are in place when { $name } next signs in on this laptop.
+move-fallback-folder = From your old laptop
+move-stop = Stop the move
+move-before-open = While you wait: before you leave this laptop
+move-get-help = Get help
+pickup-eyebrow = Your move
+pickup-title = Pick up safely.
+pickup-body = A move on this laptop stopped part way, perhaps because the laptop restarted or lost power. Tidy up first, then pair the laptops again to carry on.
+pickup-unfinished-title = Unfinished copies
+pickup-unfinished-body =
+    { NUMBER($count) ->
+        [one] { $count } file was being copied when the move stopped.
+       *[other] { $count } files were being copied when the move stopped.
+    }
+pickup-unfinished-badge = To tidy
+pickup-tidy = Tidy up
+pickup-tidying = Tidying up. Finished copies are checked and put in place; nothing of yours is changed.
+pickup-done = All tidy. Pair the laptops again to carry on: what is already here is found and not copied twice.
+pickup-failed = Tidying up did not work this time. Nothing of yours was changed. Try again, or close PCTwin on this laptop and open it again first.
+pickup-put-in-place = put in place
+pickup-kept = kept to carry on
+pickup-not-finished =
+    { NUMBER($count) ->
+        [one] { $count } file could not be finished. The next move copies it again.
+       *[other] { $count } files could not be finished. The next move copies them again.
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+        [one] { $count } file is on a drive that is not connected now. Connect it and tidy up again.
+       *[other] { $count } files are on a drive that is not connected now. Connect it and tidy up again.
+    }
+pickup-later = Not now
+ready-eyebrow = Welcome
+ready-title = Your things are ready.
+ready-body = Your things from your old laptop were moved to this one, and are now in your own folders.
+ready-landed = files in your folders
+ready-where-title = Where they are
+ready-where-body = In Documents, Pictures, Music, Videos and your other usual folders, as on your old laptop.
+ready-kept =
+    { NUMBER($count) ->
+        [one] { $count } file was kept aside, because a file of that name was already here. Both are kept.
+       *[other] { $count } files were kept aside, because files of those names were already here. Both are kept.
+    }
+ready-failed =
+    { NUMBER($count) ->
+        [one] { $count } file could not be put in your folders. Ask the person who did the move to move it again.
+       *[other] { $count } files could not be put in your folders. Ask the person who did the move to move them again.
+    }
+ready-done = Done
+move-status-kept = Kept
+move-wait-eyebrow = Your move
+move-wait-scanning-title = Finding your files.
+move-wait-scanning-body = Your old laptop is looking through your folders. It only reads them: nothing is opened, changed or removed.
+move-found = Found so far: { $size } of your things.
+move-wait-approval-title = Waiting for your new laptop.
+move-wait-approval-body = Your files are ready to go. Check the plan on your new laptop and approve it to start.
+move-wait-list-title = Waiting for your old laptop.
+move-wait-list-body = Your old laptop is finding your files. When it has finished, the plan appears here for you to approve. This can take a few minutes.
+move-wait-starting-title = Starting the move.
+move-wait-starting-body = The plan is approved. Copying starts in a moment.
+move-wait-admin-title = Waiting for an administrator.
+move-wait-admin-body = This laptop is asking for an administrator’s approval to move the other people’s things too. Answer the window your laptop opened.
+move-others-not-approved = The administrator did not approve it, so only your things move this time. The other people’s things stay where they are.
+move-others-failed = PCTwin could not start what it needs to move the other people’s things, so only your things move this time. Nothing of theirs was changed.
+move-others-not-here = Moving other people’s things from this laptop is not ready yet in this version, so only your things move.
+move-others-allow-in-settings = First, an administrator needs to allow PCTwin in System Settings, Login Items. That page is open now. Only your things move this time; once PCTwin is allowed there, your next move can take the other people’s things too.
+approve-prompt = PCTwin will read the files of { $names } to move them to the new laptop. An administrator of this laptop approves this move only.
+who-here-title = Who’s moving?
+who-here-body = Your things always move. Tick anyone else on this laptop whose things should move too. PCTwin never shows you their files.
+who-here-you = { $name } (you)
+who-here-you-hint = Always moving
+who-here-approval = Moving someone else’s things needs an administrator’s approval, once, for everyone you tick. Your laptop will ask in its own window.
+who-here-not-here = Moving other people’s things from this laptop is not ready yet in this version. Only your things move.
+place-title = Where do their things go?
+place-body = Other people’s things came from the old laptop too. Choose an account on this laptop for each person, a new account for them, or leave them out. You never see their files.
+place-size =
+    { NUMBER($count) ->
+        [one] { $count } file, { $size }
+       *[other] { $count } files, { $size }
+    }
+place-select = Where { $name }’s things go
+place-note = New accounts, and keeping their things safe until they sign in, need an administrator’s approval once, after you approve the plan. Each new account’s temporary password is shown once, in your laptop’s own window.
+place-todo =
+    { NUMBER($count) ->
+        [one] Choose where { $count } more person’s things go.
+       *[other] Choose where { $count } more people’s things go.
+    }
+fda-title = Your Mac is keeping some folders private.
+fda-body =
+    { NUMBER($count) ->
+        [one] { $count } of your places could not be looked in, because of your Mac’s privacy settings. Let PCTwin in, then check again, so nothing of yours is missed.
+       *[other] { $count } of your places could not be looked in, because of your Mac’s privacy settings. Let PCTwin in, then check again, so nothing of yours is missed.
+    }
+fda-step-1 = Open System Settings, then Privacy & Security.
+fda-step-2 = Choose Full Disk Access.
+fda-step-3 = Switch on PCTwin. Your Mac may ask for your password.
+fda-open = Open these settings
+fda-note = PCTwin only reads your folders to copy them. It never changes anything on this laptop.
+fda-again = Check again
+fda-without = Go on without them
+password-title = PCTwin: a new account
+password-body =
+    { $name } now has an account on this laptop.
+    
+    Sign-in name: { $account }
+    Temporary password: { $password }
+    
+    Give these to { $name }. At their first sign-in they choose their own password. Write it down now: PCTwin does not keep it.
+move-ended-eyebrow = Your move
+move-ended-kept-title = Already copied
+move-ended-kept-body = Everything copied and checked before this happened stays on the new laptop.
+move-ended-old-title = Your old laptop
+move-ended-old-body = Nothing on it was changed or removed.
+move-ended-old-badge = Unchanged
+move-ended-next = To try again, pair the laptops again. Files already copied and checked are found and not copied twice.
+move-lost-title = The connection to your other laptop was lost.
+move-lost-body = The laptops stopped reaching each other, so the move could not go on. Check that both are switched on, awake and near each other.
+move-not-approved-title = The move did not start.
+move-not-approved-old = The plan was not approved on the new laptop, so nothing was copied.
+move-not-approved-new = You did not approve the plan, so nothing was copied.
+move-failed-title = Something went wrong.
+move-failed-body = The move could not go on. If it happens again, More details below says what went wrong.
+move-peer-system-windows = Windows
+move-peer-system-mac = Mac
+move-peer-system-linux = Linux
+move-peer-system-other = Another system
+move-update-here-title = Update PCTwin on this laptop
+move-update-here-body = This laptop has an older PCTwin than the other laptop, so they can't move files together. Update PCTwin here, then start again. Nothing was copied.
+move-update-there-title = Update PCTwin on the other laptop
+move-update-there-body = The other laptop has an older PCTwin than this one, so they can't move files together. Update PCTwin there, then start again. Nothing was copied.
+move-refused-title = The move could not start.
+move-refused-not-paired = Your laptops are no longer paired. Pair them again to start the move.
+move-refused-busy = A move is already running on this laptop.
+move-refused-not-moving = There is no move running on this laptop.
+move-refused-plan-changed = The plan changed before it was approved. Pair the laptops again to see the new plan.
+move-refused-failed = This laptop’s folders could not be made ready for the move. Pair the laptops again to try once more.
+drive-problem-title = The move needs your attention.
+drive-problem-body = Copies saved in { $place } did not match the originals when PCTwin checked them, several times. The drive may be failing, full or unplugged, so copying there is paused.
+drive-problem-kept-title = Already copied and checked
+drive-problem-waiting-title = Still to copy to { $place }
+drive-problem-badge = Paused
+drive-problem-fix = Check that the drive is plugged in and has free space, then carry on. Nothing you chose is left out to get past this. You can also stop the move.
+drive-problem-carry-on = Carry on
 
 ## R02 Your move, item by item (detailed report)
 
@@ -876,10 +1142,17 @@ report-from = From: { $path }
 report-to = To: { $path }
 report-none = No items have this result.
 report-more-details = More details
+# Added 23 October 2026: what the report says beside a line's result (changed since the scan).
+report-note-changed-since-scan = Changed since the scan: it was copied as it is now.
+report-note-no-longer-there = No longer there: it was moved, renamed or deleted on the old laptop before it could be sent.
+report-note-time-not-kept = Date not kept: this drive cannot store the date it was last changed, so it shows the date it was copied.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Checked by reading it back from the drive.
 evidence-memory = Checked from this laptop’s memory, not the drive.
+evidence-already-there = Already on the new laptop: the same file was there, so it was not copied again.
+evidence-recovered = Checked before the laptop restarted, and checked again after.
+evidence-new-laptop = Checked by the new laptop.
 evidence-memory-explain = The copy was read back and matched, but through this laptop’s memory, so what was read may have come from memory rather than the drive. A fault in the drive itself might not show here, so opening the file once is a good check.
 evidence-not-checked = Not checked, because it did not finish.
 # Why a copied file was checked from memory, one line under the explanation above (the gate's WhyMemory).
@@ -905,6 +1178,7 @@ reason-online-only = This file is stored online only, so it was not on the old l
 reason-manual-install = This app must come from its maker’s website. Download and install it there.
 reason-restart = The new laptop must restart to finish. Restart it when you are ready.
 reason-finish-by-hand = PCTwin cannot do this step for you. Follow the steps shown for it in this report.
+reason-parts-missing = Some files inside this folder did not arrive, so it is not complete on the new laptop. They are listed in this report with why. Send them again, or copy the folder another way.
 
 ## Item results (every item ends with one of these)
 
@@ -946,6 +1220,8 @@ progress-state-placing = Putting in place
 progress-state-existing = Already there
 outcome-stopped-title = Your move was stopped.
 outcome-stopped-body = You stopped the move. What was copied and checked before then is kept. The rest was not copied.
+outcome-broke-title = Your move ended early.
+outcome-broke-body = Something went wrong between the laptops, so the move could not go on. What was copied and checked before then is kept. The rest was not copied.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = { $done } of { $total } items copied and checked.
 outcome-files-memory =
@@ -967,6 +1243,15 @@ code-label = Six-digit code
 
 qs-eyebrow = Quick Send
 qs-eyebrow-receiving = Receiving on this laptop
+qs-label-this = This laptop
+qs-label-other = The other laptop
+qs-wait-title = Waiting for the files.
+qs-wait-body = The laptops are paired. You will see what is offered before anything is received.
+qs-pick-failed = The picker could not open. Try again.
+qs-pick-too-many = That is more files than one send can carry. Untick some folders, or send them in parts.
+qs-problem-lost-title = The connection to the other laptop was lost.
+qs-problem-failed-title = The files could not be sent this time.
+qs-problem-body = Anything already received and checked stays where it is. Pair the laptops again to try once more.
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = From { $from } to { $to }
@@ -981,8 +1266,8 @@ qs-tally-badge = Nearby send
 
 ## Q01 Quick Send home
 
-qs-home-title = A few files. Straight across.
-qs-home-body = Send a few files to a laptop nearby.
+qs-home-title = Send files to a laptop nearby.
+qs-home-body = Or receive files from one.
 qs-send-title = Send files
 qs-send-body = Choose files or folders on this laptop.
 qs-receive-title = Receive files
@@ -1020,6 +1305,7 @@ qs-choose-continue = Check these files
 qs-check-title = Check what you are sharing.
 qs-check-body = Look over these files before they leave this laptop.
 qs-check-included = Included
+qs-file-type = Type: .{ $ext }
 qs-check-shared-note = The other laptop sees these files’ names, sizes and dates.
 qs-check-changed = { $name } changed since you chose it. Check it again.
 qs-check-ack = I have checked these files
@@ -1041,7 +1327,7 @@ qs-who-action = Show my send code
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = Someone wants to send you files.
-qs-offer-body = Check what is being sent before you accept.
+qs-offer-body = { $label } wants to send you these files. Check them before you accept.
 qs-offer-note = PCTwin saves only the files you accept. It never opens or runs them.
 qs-offer-accept = Accept and choose a folder
 qs-offer-decline = Decline these files
@@ -1158,6 +1444,8 @@ qs-receipt-arrived =
 qs-receipt-size = { $size } matched the original
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = Not all of this folder arrived and was checked.
+qs-receipt-needs-action = { $path } is there, but not finished. What to do is under More details.
+qs-receipt-mark-not-kept = { $path } is there, but this drive could not mark it as downloaded from another laptop. Open it with care.
 qs-receipt-status-verified = Checked
 qs-receipt-status-unfinished = Unfinished
 qs-receipt-not-completed = Not completed.
@@ -1293,3 +1581,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = Start a new send
 history-open-name = { $what }: { $title }
+
+## R05 Undo: what undo will do on each drive, said before the person starts, and how a copy ended
+
+undo-here-removes = Undo removes the copies PCTwin made that you haven't changed. Anything you changed is kept.
+undo-here-to-trash = Undo moves the copies PCTwin made that you haven't changed to the Trash. Anything you changed is kept, and nothing is deleted.
+undo-here-keeps-fat = Undo will keep every copy on { $drive }. This drive uses FAT or exFAT, which reuses the numbers that tell files apart, so PCTwin can't be sure which files are its own. You can delete them yourself.
+undo-here-keeps-other = Undo will keep every copy on { $drive }. PCTwin can't move or remove files safely on this kind of drive. You can delete them yourself.
+undo-here-more = More details
+undo-here-more-trash = A Mac can't show PCTwin that no other app is still writing to a file, so PCTwin never deletes one. It moves each copy into the Trash on the same drive. You can put it back from the Trash.
+undo-here-more-fat = On FAT and exFAT drives, a new file can get the number a removed file had. PCTwin only acts on files it can prove are its own and unchanged, so it keeps these.
+undo-done-trashed = Moved to the Trash as “{ $name }”. You can put it back from the Trash.
+undo-kept-fat = Kept. This drive (FAT or exFAT) reuses the numbers that tell files apart, so PCTwin can't be sure this is its copy. If you don't need it, you can delete it yourself.
+undo-kept-no-trash = Kept. PCTwin couldn't put this copy in the Trash on its drive. If you don't need it, you can delete it yourself.

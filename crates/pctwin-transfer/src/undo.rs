@@ -14,6 +14,12 @@
 //!   one name, unchanged since (size, modified time, then the whole fingerprint read now)
 //!   ([`pctwin_gate::Destination::remove_if_unchanged`]).
 //!
+//! On macOS a proven copy is not removed: it goes to the Trash on its own drive
+//! ([`UndoOutcome::Trashed`], decided 20 October 2026), so nothing is deleted. On FAT and exFAT
+//! drives every copy is kept ([`FILE_NUMBERS_REUSED`]): their file numbers are given again to new
+//! files, so PCTwin cannot tell its own. [`undo_preview`] says what undo will do in each place
+//! before the person starts.
+//!
 //! A copy changed since, another file under its name, a file another program is using, a file
 //! stored online only or a file with a second name is kept, with the reason. Each removal is
 //! recorded in the journal before it happens, so undo cut short carries on safely. Then the
@@ -65,6 +71,9 @@ impl UndoReport {
 
 /// The plain reason for a file changed since the move.
 pub const CHANGED_SINCE: &str = "you changed this since the move, so it was kept";
+/// The plain reason for a copy whose contents look as they were, but whose details changed
+/// since the move (a tag, a download mark, its permissions, the system indexing it).
+pub const DETAILS_CHANGED: &str = "its details changed since the move (not what is in it, as far as PCTwin can tell), so it was kept to be safe";
 /// The plain reason for a file (or its folder) moved or renamed since the move.
 pub const MOVED_SINCE: &str = "it is no longer where the move put it (moved, renamed or removed since), so it was left as it is";
 /// The plain reason when the old laptop could not confirm the original (not connected, or no
@@ -223,19 +232,25 @@ fn undo_all(
     // Files that were in use get one more try, once everything else is done.
     for at in in_use {
         let id = report.files[at].entry;
-        if let Some(entry) = journal.entry(id)? {
+        if let Some(entry) = journal.entry(id)?.and_then(as_copy) {
             report.files[at].outcome = undo_file(journal, table, originals, options, &entry)?;
         }
     }
     undo_folders(journal, table, report)
 }
 
-/// Committed files, newest first.
+/// The copies the move left on the disk, newest first: committed files, and the damaged copies
+/// kept beside their real names (each seen as the committed copy it is).
 fn committed(journal: &Journal) -> Result<Vec<Entry>, JournalError> {
-    let mut entries = journal.entries()?;
-    entries.retain(|e| matches!(e.state, State::Committed { .. }));
+    let mut entries: Vec<Entry> = journal.entries()?.into_iter().filter_map(as_copy).collect();
     entries.reverse();
     Ok(entries)
+}
+
+/// `entry` as the copy it left on the disk, if it left one.
+fn as_copy(mut entry: Entry) -> Option<Entry> {
+    entry.state = entry.state.copy_on_disk()?.clone();
+    Some(entry)
 }
 
 /// Whether undo is finished with this file (only "not done this time" is tried again).
@@ -374,9 +389,12 @@ fn undo_file(
             PartWay::Ended(outcome) => return done(&permit, outcome),
             PartWay::BackForNow(why) => return not_done(why.into()),
             PartWay::Unresolved(why) => return not_done(why),
-            // A put-back finished with the copy itself under its name: it starts over, as if
-            // never tried (never "changed since" for having been put back).
-            PartWay::StillThere if matches!(stage, Undo::Putting { .. }) => {
+            // A put-back (or a move into the Trash) finished with the copy itself under its
+            // name: it starts over, as if never tried (never "changed since" for having been put
+            // back). Only a new removal may follow a Done, so the start over is recorded first.
+            PartWay::StillThere
+                if matches!(stage, Undo::Putting { .. } | Undo::Trashing { .. }) =>
+            {
                 journal.record_undo(
                     &permit,
                     entry.id,
@@ -439,6 +457,7 @@ fn outcome_of(removed: Removed) -> Result<UndoOutcome, String> {
         Removed::Removed => UndoOutcome::Deleted,
         Removed::Gone => kept(MOVED_SINCE),
         Removed::NotThatFile | Removed::Changed => kept(CHANGED_SINCE),
+        Removed::DetailsChanged => kept(DETAILS_CHANGED),
         Removed::Linked => kept(SECOND_NAME),
         Removed::CloudOnly => kept(ONLINE_ONLY),
         Removed::Unsupported => kept(NO_SAFE_REMOVAL),
@@ -451,11 +470,43 @@ fn outcome_of(removed: Removed) -> Result<UndoOutcome, String> {
             at,
             why: SAVED_AGAIN.into(),
         },
+        Removed::Trashed { at } => UndoOutcome::Trashed { at },
+        Removed::NumbersReused => kept(FILE_NUMBERS_REUSED),
+        Removed::NoTrash => kept(NO_TRASH),
         Removed::InUse => return Err(IN_USE.into()),
         // Final, not "try again": nothing will prove it later (macOS, a drive without leases),
         // so the copy is kept for the person to look at, and undo does not ask about it again.
         Removed::CannotCheck => kept(CANNOT_CHECK),
     })
+}
+
+/// Why a copy on a FAT or exFAT drive was kept: those drives give a file's number again to new
+/// files, so PCTwin cannot tell its own copy from another file.
+pub const FILE_NUMBERS_REUSED: &str = "this drive (FAT or exFAT) reuses the numbers that tell files apart, so PCTwin can't be sure this is its copy and kept it. If you don't need it, you can delete it yourself";
+/// Why a copy on a Mac was kept: there is no Trash on its drive PCTwin may use, or the Mac
+/// refused the move into it.
+pub const NO_TRASH: &str = "PCTwin couldn't put this copy in the Trash on its drive, so it was kept. If you don't need it, you can delete it yourself";
+
+/// What undo will do in each place a move wrote to, said before the person starts: for each
+/// destination (its label) with files from this move, [`pctwin_gate::UndoHere`]. A place that
+/// cannot be reached now is left out (undo says so for each file).
+pub fn undo_preview(
+    journal: &Journal,
+    table: &Destinations,
+) -> Result<Vec<(String, pctwin_gate::UndoHere)>, JournalError> {
+    let mut labels: Vec<String> = committed(journal)?
+        .into_iter()
+        .map(|e| e.write.destination)
+        .collect();
+    labels.sort();
+    labels.dedup();
+    Ok(labels
+        .into_iter()
+        .filter_map(|label| {
+            let here = table.get(&label).ok()?.undo_here();
+            Some((label, here))
+        })
+        .collect())
 }
 
 /// Why a copy whose name was taken while undo had moved it aside was kept, under a new name.
@@ -611,6 +662,13 @@ fn stage_of(file: FileId, dir_id: FileId, step: pctwin_gate::Step<'_>) -> Undo {
             to: to.into(),
             complete,
         },
+        Step::Trashing { private, trash, to } => Undo::Trashing {
+            file,
+            dir_id,
+            private: private.into(),
+            trash: trash.into(),
+            to: to.into(),
+        },
     }
 }
 
@@ -697,7 +755,9 @@ struct HiddenFile {
 /// The hidden file a stage before Done is about (for telling one part-way removal from another).
 fn hidden_file(stage: &Undo) -> Option<HiddenFile> {
     let name = match stage {
-        Undo::Removing { private, .. } | Undo::Putting { private, .. } => private,
+        Undo::Removing { private, .. }
+        | Undo::Putting { private, .. }
+        | Undo::Trashing { private, .. } => private,
         Undo::Salvaging { temp, .. } => temp,
         Undo::Done { .. } => return None,
     };
@@ -789,7 +849,7 @@ fn within<T: Send + 'static>(
     let Some(busy) = Busy::claim(key) else {
         return Ok(Within::Busy);
     };
-    let deadline = std::time::Instant::now() + wait;
+    let deadline = tokio::time::Instant::now() + wait;
     let (lending, lent) = right.lend();
     let (asks, asked) = mpsc::channel::<Ask<T>>();
     std::thread::Builder::new()
@@ -813,7 +873,7 @@ fn within<T: Send + 'static>(
         })
         .map_err(|e| JournalError::Storage(e.to_string()))?;
     loop {
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
         match asked.recv_timeout(left) {
             Ok(Ask::Record(stage, answer)) => {
                 let _ = answer.send(journal.record_undo(right, id, &stage));
@@ -895,6 +955,19 @@ fn on_the_disk(
             Undo::Salvaging {
                 temp, to, complete, ..
             } => dest.resolve_salvaging(right, final_path, dir_id, temp, to, *complete, &mut cx),
+            Undo::Trashing {
+                private, trash, to, ..
+            } => dest.resolve_trashing(
+                right,
+                final_path,
+                file,
+                dir_id,
+                private,
+                trash,
+                to,
+                check_for(entry),
+                &mut cx,
+            ),
             Undo::Done { .. } => return Ok(PartWay::StillThere),
         };
         if let Some(e) = failed_record.take() {
@@ -925,6 +998,8 @@ fn on_the_disk(
             Ok(Resolution::SavedAgain { at }) => kept_at(at, SAVED_AGAIN),
             Ok(Resolution::SavedMaybeIncomplete { at }) => kept_at(at, SAVED_MAYBE_INCOMPLETE),
             Ok(Resolution::FolderMissing) => PartWay::Unresolved(FOLDER_MISSING.into()),
+            Ok(Resolution::Trashed { at }) => PartWay::Ended(UndoOutcome::Trashed { at }),
+            Ok(Resolution::NoTrash) => PartWay::Ended(kept(NO_TRASH)),
         })
     }
 }
@@ -933,9 +1008,10 @@ fn on_the_disk(
 #[cfg(unix)]
 fn stage_file(stage: &Undo) -> Option<FileId> {
     match stage {
-        Undo::Removing { file, .. } | Undo::Putting { file, .. } | Undo::Salvaging { file, .. } => {
-            Some(*file)
-        }
+        Undo::Removing { file, .. }
+        | Undo::Putting { file, .. }
+        | Undo::Salvaging { file, .. }
+        | Undo::Trashing { file, .. } => Some(*file),
         Undo::Done { .. } => None,
     }
 }
@@ -953,7 +1029,11 @@ pub fn close_undo(
 ) -> Result<pctwin_journal::ClosedToken, pctwin_journal::CloseError> {
     use pctwin_journal::Resolved;
     journal.close_undo(&mut |ticket, pending| {
-        let Some(entry) = journal.entry(pending.id).map_err(std::io::Error::other)? else {
+        let Some(entry) = journal
+            .entry(pending.id)
+            .map_err(std::io::Error::other)?
+            .and_then(as_copy)
+        else {
             return Ok(Resolved::Unresolved {
                 why: "the journal has no record of it".into(),
             });
@@ -966,6 +1046,7 @@ pub fn close_undo(
             .map_err(std::io::Error::other)?;
         Ok(match part_way {
             PartWay::Ended(UndoOutcome::Deleted | UndoOutcome::Removed) => Resolved::Removed,
+            PartWay::Ended(UndoOutcome::Trashed { at }) => Resolved::Trashed { at },
             PartWay::Ended(UndoOutcome::AlreadyGone) => Resolved::AlreadyGone,
             PartWay::Ended(UndoOutcome::KeptAt { at, why }) => Resolved::KeptAt { at, why },
             PartWay::Ended(UndoOutcome::Kept { why } | UndoOutcome::NotDone { why }) => {
@@ -986,7 +1067,8 @@ mod tests {
     use super::*;
     use pctwin_journal::{Actor, Landed, Permission, PlannedWrite, UndoRight};
     use std::sync::mpsc;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use tokio::time::Instant;
 
     fn journal() -> (tempfile::TempDir, Journal) {
         let dir = tempfile::tempdir().unwrap();
@@ -1008,6 +1090,7 @@ mod tests {
                 download_mark: None,
                 item: ItemId::from_hex(&"01".repeat(16)).unwrap(),
                 source_laptop: pctwin_record::LaptopId::from_hex(&"02".repeat(16)).unwrap(),
+                scope: Default::default(),
                 destination: "me".into(),
                 path: "a.txt".into(),
                 size: 1,

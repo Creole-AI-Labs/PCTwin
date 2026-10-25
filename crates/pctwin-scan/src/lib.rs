@@ -39,8 +39,11 @@ mod drives;
 mod folders;
 mod health;
 mod laptop;
+mod mail;
+mod marks;
 mod measure;
 mod people;
+mod recognise;
 mod rules;
 mod scan;
 mod state;
@@ -48,9 +51,10 @@ mod sweep;
 mod usage;
 mod volumes;
 mod whose;
+mod worth;
 
 pub use access::{Access, AccessFact, UnixGroups, access_from_mode, access_from_sddl};
-pub use acl::{AccessReader, UnixMode, mac_groups_from_dscl, system_reader};
+pub use acl::{AccessReader, UnixMode, mac_groups_from_dscl, system_reader, system_reader_clean};
 pub use census::{
     Account, Census, CensusFacts, FoundBy, PersonKind, Resident, SystemKind, accounts_from_dscl,
     accounts_from_get_local_user, accounts_from_passwd, census_from, census_this_laptop,
@@ -69,25 +73,35 @@ pub use health::{
 pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
 };
+pub use mail::{
+    MailAccounts, apple_mail_accounts_in, mail_accounts, outlook_accounts_in,
+    thunderbird_accounts_in,
+};
+pub use marks::{MarkSample, has_download_mark, sample_folder};
 pub use measure::{
-    Measure, Size, cloud_only_mac, cloud_only_windows, is_icloud_stub_name, measure,
+    Measure, Size, cloud_only_mac, cloud_only_windows, is_cloud_only, is_icloud_stub_name, measure,
 };
 pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
+pub use recognise::{Recognised, Recogniser, TableError, What};
 pub use rules::{Kind, Row, Rules, RulesError, System, Where};
-pub use scan::{Counts, Scan, Stamp, scan_folder, scan_managed_folder};
-pub use state::{Changes, DoneFolder, STATE_FORMAT, ScanState, StateError, changes_between};
+pub use scan::{Category, Counts, Scan, Stamp, category, scan_folder, scan_managed_folder};
+pub use state::{
+    Changes, DoneFolder, NextOwner, STATE_FORMAT, ScanState, StateError, changes_between,
+};
 pub use sweep::{
-    BlindReason, BlindSpot, Fate, FoundPlace, Frontier, FrontierView, HARD_LINK_CHECK_MIN,
-    SHALLOW_DEPTH, Space, SpaceLine, Sweep, SweepFacts, SweepLimits, TopLine, UNEXPLAINED_FLOOR,
-    VolumeReport, blind_reason_for, sweep, sweep_this_laptop,
+    BlindReason, BlindSpot, Fate, FoundPlace, FoundSoFar, Frontier, FrontierView,
+    HARD_LINK_CHECK_MIN, ProfileLine, SHALLOW_DEPTH, Space, SpaceLine, Sweep, SweepFacts,
+    SweepLimits, TopLine, UNEXPLAINED_FLOOR, VolumeReport, blind_reason_for, sweep, sweep_people,
+    sweep_this_laptop, this_laptop_facts,
 };
 pub use usage::{
-    Usage, bookmarks_from_gtk, parse_iso_utc_ns, personal_essentials,
+    Usage, bookmarks_from_gtk, order_by_use, parse_iso_utc_ns, personal_essentials,
     pinned_from_finder_favourites, pinned_from_quick_access, read_usage, recent_from_lnk_dir,
-    recent_from_mdfind, recent_from_xbel,
+    recent_from_mdfind, recent_from_xbel, usage_of,
 };
 pub use volumes::{DiskKind, Volume, VolumeKind, logical_disks, volume_kind, volumes_this_laptop};
 pub use whose::{Facts as PlaceFacts, HomeOf, People, Placement, Rule, Whose, place};
+pub use worth::{COPY_MIN_FILES, Worth, look_like_copies, only_on_this_laptop, worth};

@@ -18,6 +18,13 @@ use std::collections::{BTreeMap, HashSet};
 
 use pctwin_types::format::{Format, FormatError};
 use serde::{Deserialize, Serialize};
+pub mod inventory;
+
+pub use inventory::{
+    EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_HELD, MAX_PAGE_BYTES, MAX_PAGE_HELD,
+    MAX_PATH_BYTES, MAX_PATH_DEPTH, PAGE_ITEMS, decode_inventory, encode_inventory,
+    encode_inventory_ordered, fits_one_move,
+};
 use sha2::{Digest, Sha256};
 
 /// The record format this app writes and reads.
@@ -53,6 +60,12 @@ pub enum RecordError {
     StaleApproval,
     #[error("the system's random number source failed")]
     Random,
+    #[error("this inventory cannot be read: {0}")]
+    BadInventory(&'static str),
+    #[error("this laptop's list takes more memory than one move may hold")]
+    TooBigForOneMove,
+    #[error("the order of the person's own essentials names an item twice or one not in the plan")]
+    BadPersonalOrder,
 }
 
 /// Writes fixed-size IDs as lowercase hex.
@@ -128,6 +141,41 @@ impl ItemId {
     }
 }
 
+/// Feeds what is written to a hash.
+struct HashWriter<'a>(&'a mut Sha256);
+
+impl std::io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A record's JSON, shown a piece at a time (see [`Record::json_text`]).
+pub struct JsonText<'a>(&'a Record);
+
+impl std::fmt::Display for JsonText<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// Passes each piece of JSON on as text: JSON is UTF-8, and the writer splits it only
+        /// between whole characters.
+        struct Text<'a, 'b>(&'a mut std::fmt::Formatter<'b>);
+        impl std::io::Write for Text<'_, '_> {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let text = std::str::from_utf8(buf).map_err(std::io::Error::other)?;
+                self.0.write_str(text).map_err(std::io::Error::other)?;
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        serde_json::to_writer(Text(f), self.0).map_err(|_| std::fmt::Error)
+    }
+}
+
 /// The one serialised form everything is hashed and saved in.
 fn canonical<T: Serialize>(value: &T) -> Vec<u8> {
     // Every type here serialises to JSON without failing: no maps with non-text keys, no floats.
@@ -146,17 +194,42 @@ pub enum RawName {
 }
 
 impl RawName {
+    /// The text shown (what `String::from_utf8_lossy` or `from_utf16_lossy` gives), made in one
+    /// allocation of exactly its length: no growing, no copy, nothing let go along the way. The
+    /// scan inventory counts what a name holds by its length, and blocks let go between the ones
+    /// kept leave gaps an allocator may never give back (measured on macOS, 21 October 2026).
     fn lossy(&self) -> String {
+        const SHOWN: char = char::REPLACEMENT_CHARACTER;
         match self {
-            Self::Unix(b) => String::from_utf8_lossy(b).into_owned(),
-            Self::Windows(w) => String::from_utf16_lossy(w),
+            Self::Unix(b) => {
+                let len: usize = b
+                    .utf8_chunks()
+                    .map(|c| c.valid().len() + if c.invalid().is_empty() { 0 } else { 3 })
+                    .sum();
+                let mut text = String::with_capacity(len);
+                for c in b.utf8_chunks() {
+                    text.push_str(c.valid());
+                    if !c.invalid().is_empty() {
+                        text.push(SHOWN);
+                    }
+                }
+                text
+            }
+            Self::Windows(w) => {
+                let units = || char::decode_utf16(w.iter().copied());
+                let len: usize = units().map(|c| c.map_or(3, char::len_utf8)).sum();
+                let mut text = String::with_capacity(len);
+                text.extend(units().map(|c| c.unwrap_or(SHOWN)));
+                text
+            }
         }
     }
 
+    /// Whether the exact form is valid text, checked without making the text.
     fn is_valid_text(&self) -> bool {
         match self {
             Self::Unix(b) => std::str::from_utf8(b).is_ok(),
-            Self::Windows(w) => String::from_utf16(w).is_ok(),
+            Self::Windows(w) => char::decode_utf16(w.iter().copied()).all(|c| c.is_ok()),
         }
     }
 }
@@ -191,6 +264,11 @@ impl ItemName {
 
     pub fn from_windows_wide(wide: &[u16]) -> Self {
         Self::from_raw(RawName::Windows(wide.to_vec()))
+    }
+
+    /// A name from exact Windows units, kept as they are given (no copy).
+    pub(crate) fn from_windows_units(wide: Vec<u16>) -> Self {
+        Self::from_raw(RawName::Windows(wide))
     }
 
     fn from_raw(raw: RawName) -> Self {
@@ -255,6 +333,11 @@ impl From<ItemName> for NameWire {
     }
 }
 
+/// Whether `t` cannot be one part of a path: empty, `.`, `..`, or holding `/` or a NUL.
+pub(crate) fn breaks_part_rules(t: &str) -> bool {
+    t.is_empty() || t == "." || t == ".." || t.contains(['/', '\0'])
+}
+
 /// Where an item sits inside its [`Place`], one name per folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "Vec<ItemName>", into = "Vec<ItemName>")]
@@ -263,11 +346,7 @@ pub struct ItemPath(Vec<ItemName>);
 impl ItemPath {
     /// Refuses an empty path and any part that is empty, `.`, `..`, or holds `/` or a NUL.
     pub fn new(parts: Vec<ItemName>) -> Result<Self, RecordError> {
-        let bad = |n: &ItemName| {
-            let t = n.display();
-            t.is_empty() || t == "." || t == ".." || t.contains(['/', '\0'])
-        };
-        if parts.is_empty() || parts.iter().any(bad) {
+        if parts.is_empty() || parts.iter().any(|n| breaks_part_rules(n.display())) {
             return Err(RecordError::BadName);
         }
         Ok(Self(parts))
@@ -382,6 +461,11 @@ pub enum ItemKind {
     Folder,
     App,
     Setting,
+    /// A folder that moves as one whole (a Mac package such as a Photos Library or a Pages
+    /// document, or a project's history such as `.git`): its files are listed under it and sent
+    /// like any other, and on the new laptop they land inside one folder of its own, never merged
+    /// into a folder already there. It carries no bytes itself. Move protocol 4 and later.
+    Package,
 }
 
 /// Why an item is left out of the move.
@@ -394,6 +478,14 @@ pub enum LeftOutReason {
     Unreadable,
     CloudOnly,
     System,
+    /// A folder with more files than one move's list can name: counted as one item and not
+    /// moved (it comes with the record that lists any number of items). Move protocol 4 and
+    /// later; an older new laptop is asked to update.
+    TooManyFiles,
+    /// It can be made again on the new laptop (downloaded packages, build output such as
+    /// `node_modules`), so it is counted as one item and not copied (the rules file's
+    /// "rebuildable"). Move protocol 4 and later.
+    Rebuildable,
 }
 
 /// Whether an item is part of the move.
@@ -414,6 +506,10 @@ pub struct Item {
     pub place: Place,
     pub path: ItemPath,
     pub size_bytes: u64,
+    /// When it was last changed at the scan, in nanoseconds since 1970, when the system gives it.
+    /// With its size, what the move compares to tell a file changed since the scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ns: Option<i64>,
     pub portability: Portability,
     pub managed_by: ManagedBy,
     /// How much a rebuild downloads, when known.
@@ -462,7 +558,26 @@ pub struct Record {
     pub previous: Option<Fingerprint>,
     pub items: Vec<Item>,
     pub mapping: Mapping,
+    /// The person's own essentials, first first: items of this record they used most recently
+    /// or keep pinned, which move before the rest (Product Spec "personal essentials", decided
+    /// 24 October 2026). Only this order is kept and crosses to their own new laptop, over the
+    /// sealed pairing link: never when or how anything was used, and never to anyone else. It is
+    /// part of the plan the person approves (it counts in the fingerprint). At most
+    /// [`MAX_PERSONAL`]. Written only when there is one, so a record without it is written and
+    /// fingerprinted exactly as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub personal: Vec<ItemId>,
+    /// On the new laptop, a record built from the old laptop's paged list (scan inventory version
+    /// 2 and later): the fingerprint of that list, taken over its bytes exactly as they crossed
+    /// (Scan record version 2, point 6). It counts in this record's own fingerprint, so the plan
+    /// the person approves names the very list that arrived, never a re-encoding of it. Written
+    /// only when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<Fingerprint>,
 }
+
+/// Most items in the personal order (the most recently used are kept).
+pub const MAX_PERSONAL: usize = 10_000;
 
 /// The person's approval of one revision of the plan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -486,6 +601,8 @@ impl Record {
                 people: BTreeMap::new(),
                 shared: SharedTarget::SharedFolder,
             },
+            personal: Vec::new(),
+            inventory: None,
         }
     }
 
@@ -493,8 +610,24 @@ impl Record {
         self.format
     }
 
+    /// The record as JSON, whole, in memory. Only for a record known to be small (a test, or
+    /// move protocol 2, which caps it): a record received in pages can be far larger than any
+    /// one text should be, so it is written with [`write_json`](Self::write_json) and
+    /// fingerprinted by [`fingerprint`](Self::fingerprint), both a piece at a time.
     pub fn to_json(&self) -> Vec<u8> {
         canonical(self)
+    }
+
+    /// Writes the record as JSON to `out` a piece at a time (the same bytes as
+    /// [`to_json`](Self::to_json)), never holding the whole text.
+    pub fn write_json(&self, out: impl std::io::Write) -> std::io::Result<()> {
+        serde_json::to_writer(out, self).map_err(std::io::Error::other)
+    }
+
+    /// The record's JSON as something that can be written into a text (a saved scan holds it as
+    /// one), a piece at a time.
+    pub fn json_text(&self) -> JsonText<'_> {
+        JsonText(self)
     }
 
     /// Loads a saved record. The format is checked first, so a newer record is refused safely even
@@ -510,20 +643,30 @@ impl Record {
         Ok(record)
     }
 
-    /// The fingerprint of this exact revision: every field counts.
+    /// The fingerprint of this exact revision: every field counts. Taken over the same bytes as
+    /// [`to_json`](Self::to_json), fed to the hash as they are made, so the whole text is never
+    /// held.
     pub fn fingerprint(&self) -> Fingerprint {
         let mut h = Sha256::new();
         h.update(b"pctwin/v1/record\0");
-        h.update(self.to_json());
+        // Every type here serialises to JSON without failing (see `canonical`), and the hash
+        // never refuses bytes.
+        serde_json::to_writer(HashWriter(&mut h), self).expect("records always serialise");
         Fingerprint(h.finalize().into())
     }
 
-    /// The next revision, linked to this one. Change it, then approve it again.
+    /// The next revision, linked to this one, as a copy. Change it, then approve it again. A
+    /// received record can be large: when this one is not needed afterwards, use
+    /// [`into_next_revision`](Self::into_next_revision), which makes no copy.
     pub fn next_revision(&self) -> Self {
-        let mut next = self.clone();
-        next.revision = self.revision + 1;
-        next.previous = Some(self.fingerprint());
-        next
+        self.clone().into_next_revision()
+    }
+
+    /// The next revision, linked to this one, made from this one in place (no copy).
+    pub fn into_next_revision(mut self) -> Self {
+        self.previous = Some(self.fingerprint());
+        self.revision += 1;
+        self
     }
 
     /// The rules every record keeps.
@@ -541,6 +684,18 @@ impl Record {
             if let Owner::Person { account_id } = &item.owner {
                 people.insert(account_id.as_str());
             }
+        }
+        // The personal order names only this record's own items, each once.
+        if self.personal.len() > MAX_PERSONAL {
+            return Err(RecordError::BadPersonalOrder);
+        }
+        let mut ordered = HashSet::new();
+        if self
+            .personal
+            .iter()
+            .any(|id| !ids.contains(id) || !ordered.insert(*id))
+        {
+            return Err(RecordError::BadPersonalOrder);
         }
         let mut existing = HashSet::new();
         let mut created = HashSet::new();
@@ -590,6 +745,102 @@ impl Record {
             Ok(())
         } else {
             Err(RecordError::StaleApproval)
+        }
+    }
+}
+
+#[cfg(test)]
+mod name_room {
+    use super::*;
+
+    /// A record with names of every kind, an owner and a mapping.
+    fn awkward() -> Record {
+        let laptop = LaptopId([3; 16]);
+        let mut r = Record::new(laptop);
+        for (i, name) in [
+            ItemName::from_text("Résumé \"final\" \\ notes\n.txt"),
+            ItemName::from_unix_bytes(&[b'a', 0xFF, b'b']),
+            ItemName::from_windows_wide(&[0xD800, 0x61, 0x4E2D]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let owner = Owner::Person {
+                account_id: format!("S-1-5-21-{i}"),
+            };
+            let place = Place {
+                role: FolderRole::Documents,
+                storage: Storage::SystemDrive,
+            };
+            let path = ItemPath::new(vec![ItemName::from_text("文件"), name]).unwrap();
+            r.items.push(Item {
+                id: ItemId::derive(&laptop, &owner, &place, &path),
+                kind: ItemKind::File,
+                owner,
+                place,
+                path,
+                size_bytes: 7,
+                modified_ns: None,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: Some(3),
+                inclusion: Inclusion::Included,
+            });
+        }
+        r.mapping.people.insert(
+            "S-1-5-21-0".into(),
+            PersonTarget::NewAccount { name: "Ada".into() },
+        );
+        r
+    }
+
+    /// The fingerprint, the JSON written a piece at a time, and the JSON shown as text are all
+    /// the very bytes of the whole JSON, so nothing changes for records already saved or approved.
+    #[test]
+    fn written_a_piece_at_a_time_it_is_the_same_bytes_and_the_same_fingerprint() {
+        let r = awkward();
+        let whole = r.to_json();
+        let mut h = Sha256::new();
+        h.update(b"pctwin/v1/record\0");
+        h.update(&whole);
+        assert_eq!(r.fingerprint(), Fingerprint(h.finalize().into()));
+        let mut written = Vec::new();
+        r.write_json(&mut written).unwrap();
+        assert_eq!(written, whole);
+        assert_eq!(r.json_text().to_string().into_bytes(), whole);
+        let next = r.clone().into_next_revision();
+        assert_eq!(next, r.next_revision());
+        assert_eq!(next.previous, Some(r.fingerprint()));
+        assert_eq!(next.revision, r.revision + 1);
+    }
+
+    /// The text of a name that is not valid text holds exactly its length, as the scan
+    /// inventory counts it, and reads as the standard lossy conversion does.
+    #[test]
+    fn the_text_of_a_name_kept_exactly_holds_only_its_length() {
+        let mut bytes = vec![0xFF];
+        bytes.extend(std::iter::repeat_n(b'a', 1364));
+        let mut wide = vec![0xD800];
+        wide.extend(std::iter::repeat_n(0x61, 3999));
+        for name in [
+            ItemName::from_unix_bytes(&bytes),
+            ItemName::from_windows_wide(&wide),
+        ] {
+            assert!(name.exact().is_some());
+            assert_eq!(name.text.capacity(), name.text.len());
+        }
+        let odd: [&[u8]; 4] = [b"a\xFF\xFEb", b"\xE2\x82", b"ok\xF0\x9F\x98", b"\xC3"];
+        for b in odd {
+            let name = ItemName::from_unix_bytes(b);
+            assert_eq!(name.display(), String::from_utf8_lossy(b));
+            assert_eq!(name.text.capacity(), name.text.len());
+        }
+        let units: [&[u16]; 3] = [&[0xD800, 0x61], &[0x61, 0xDC00, 0xD83D, 0xDE00], &[0xDBFF]];
+        for w in units {
+            let name = ItemName::from_windows_wide(w);
+            assert_eq!(name.display(), String::from_utf16_lossy(w));
+            assert_eq!(name.text.capacity(), name.text.len());
+            assert_eq!(name.exact().is_some(), String::from_utf16(w).is_err());
         }
     }
 }

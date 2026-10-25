@@ -14,9 +14,11 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 pctwin-gate = { path = "../crates/pctwin-gate" }
+pctwin-move = { path = "../crates/pctwin-move" }
 pctwin-pairing = { path = "../crates/pctwin-pairing" }
 pctwin-record = { path = "../crates/pctwin-record" }
 pctwin-transfer = { path = "../crates/pctwin-transfer" }
+serde_json = "1"
 
 [workspace]
 members = ["."]
@@ -31,6 +33,13 @@ bench = false
 [[bin]]
 name = "inventory_frames"
 path = "fuzz_targets/inventory_frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inventory_v2"
+path = "fuzz_targets/inventory_v2.rs"
 test = false
 doc = false
 bench = false
@@ -59,6 +68,13 @@ bench = false
 [[bin]]
 name = "typed_digits"
 path = "fuzz_targets/typed_digits.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "landing_messages"
+path = "fuzz_targets/landing_messages.rs"
 test = false
 doc = false
 bench = false

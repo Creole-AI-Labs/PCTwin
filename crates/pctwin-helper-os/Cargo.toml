@@ -1,0 +1,54 @@
+[package]
+name = "pctwin-helper-os"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "The few system calls PCTwin's administrator helper needs: start it with the system's own prompt, a private channel only the mover can reach, and who is calling. The second and last place PCTwin calls the system unsafely."
+
+# Not the workspace lints: the workspace forbids unsafe code outright, and a few of these calls
+# have no safe binding (Windows: ShellExecuteExW, named-pipe security and caller identity; macOS:
+# SMAppService). Each sits in one short function named in scripts/unsafe-fence.sh. Everything
+# else matches the workspace.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
+[dependencies]
+getrandom = "0.4.3"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_NetManagement",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs", "net", "process", "system"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "0.14.11"
+nix = { version = "0.31.3", features = ["socket"] }
+objc2 = "0.6.5"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSError"] }
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2", "objc2-foundation"] }
+objc2-open-directory = { version = "0.3.2", default-features = false, features = ["std", "CFOpenDirectory", "CFOpenDirectoryConstants", "ODNode", "ODRecord", "ODSession"] }
+security-framework = "3"
+security-framework-sys = "2"
+
+[dev-dependencies]
+tempfile = "3"

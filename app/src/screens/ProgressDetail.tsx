@@ -51,7 +51,7 @@ export default function ProgressDetail({
                     <GroupLabel name={g.name} />
                   </th>
                   <td>
-                    <bdi dir="auto">{labelText(l10n, progress.laptops.old)}</bdi>
+                    {progress.laptops.old ? <bdi dir="auto">{labelText(l10n, progress.laptops.old)}</bdi> : l10n.getString("progress-route-old")}
                   </td>
                   <td>
                     <GroupBadge state={groupState(g.counts)} paused={paused} />

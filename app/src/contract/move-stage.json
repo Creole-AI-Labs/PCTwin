@@ -1,0 +1,30 @@
+[
+  {
+    "kind": "scanning"
+  },
+  {
+    "kind": "waiting"
+  },
+  {
+    "kind": "moving"
+  },
+  {
+    "kind": "administrator"
+  },
+  {
+    "kind": "others-not-moved",
+    "why": "not-approved"
+  },
+  {
+    "kind": "others-not-moved",
+    "why": "failed"
+  },
+  {
+    "kind": "others-not-moved",
+    "why": "not-here"
+  },
+  {
+    "kind": "others-not-moved",
+    "why": "allow-in-settings"
+  }
+]

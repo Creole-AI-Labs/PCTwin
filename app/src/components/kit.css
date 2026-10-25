@@ -460,7 +460,15 @@
   height: 100%;
   border-radius: 8px;
   background: var(--colour-blue);
-  transition: inline-size var(--motion-resize) ease-out;
+  /* Measured progress (motion recipes MC16, MC21): the bar is drawn full width and scaled to the
+     observed value, following each new value linearly; it never runs ahead of one. */
+  inline-size: 100%;
+  transform-origin: left center;
+  transition: transform var(--motion-state) var(--motion-ease-measured);
+}
+
+[dir="rtl"] .kit-progress-fill {
+  transform-origin: right center;
 }
 
 .kit-progress-meta {
@@ -689,7 +697,8 @@
   box-shadow: 0 8px 24px #171b2925;
   font-size: var(--type-supporting);
   line-height: 1.6;
-  animation: page-enter var(--motion-page) ease-out;
+  --motion-layer-shift: 6px;
+  animation: motion-layer-in var(--motion-state) var(--motion-ease-settle);
 }
 
 :root[data-theme="dark"] .kit-toast {

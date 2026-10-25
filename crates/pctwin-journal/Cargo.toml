@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 getrandom = "0.4.3"
 pctwin-record = { path = "../pctwin-record" }
+pctwin-types = { path = "../pctwin-types" }
 redb = "4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

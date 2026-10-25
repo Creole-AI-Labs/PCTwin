@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+blake3 = "1.8"
 pctwin-types = { path = "../pctwin-types" }
 cfb = "0.15"
 dirs = "7.0.0"
@@ -28,6 +29,10 @@ thread-priority = "3.1.1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 thread-priority = "3.1.1"
+
+# Whether a file carries a download mark, by the attribute's presence only (`marks.rs`).
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 proptest = "1.11.0"

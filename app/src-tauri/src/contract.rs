@@ -19,7 +19,15 @@ use pctwin_gate::{CheckedFrom, WhyMemory};
 use pctwin_journey::Problem;
 use serde_json::Value;
 
-use crate::pairing::{LabelView, NearbyView, NewView, OldView, ProblemView};
+use pctwin_record::{FolderRole, LeftOutReason};
+use pctwin_types::{ItemStatus, Reason};
+
+use crate::moving::{
+    ByStatus, Bytes, Counts, Current, EndedEarly, Evidence, GroupName, Laptops, LeftOut, MoveGroup,
+    MoveOutcome, MoveProblem, MoveProgress, Notice, OthersWhy, PlanGroup, PlanView, PreviewView,
+    Range, ReportItem, ReportNote, RunState, Size, Stage,
+};
+use crate::pairing::{HeadsUp, LabelView, NearbyView, NewView, OldView, ProblemView};
 
 fn picked() -> LabelView {
     // Colour 4 and animal 0 are "blue" and "ant".
@@ -94,11 +102,455 @@ fn nearby() -> Vec<NearbyView> {
             index: 0,
             label: picked(),
             same_label_nearby: false,
+            needs_update: false,
         },
         NearbyView {
             index: 1,
             label: named(),
             same_label_nearby: true,
+            needs_update: false,
+        },
+        NearbyView {
+            index: 2,
+            label: picked(),
+            same_label_nearby: false,
+            needs_update: true,
+        },
+    ]
+}
+
+fn heads_ups() -> Vec<HeadsUp> {
+    vec![HeadsUp::LocalNetwork, HeadsUp::Firewall]
+}
+
+fn move_problems() -> Vec<MoveProblem> {
+    vec![
+        MoveProblem::NotPaired,
+        MoveProblem::Busy,
+        MoveProblem::NotMoving,
+        MoveProblem::PlanChanged,
+        MoveProblem::Failed,
+        MoveProblem::TooManyFiles,
+    ]
+}
+
+fn stages() -> Vec<Stage> {
+    vec![
+        Stage::Scanning,
+        Stage::Waiting,
+        Stage::Moving,
+        Stage::Administrator,
+        Stage::OthersNotMoved {
+            why: OthersWhy::NotApproved,
+        },
+        Stage::OthersNotMoved {
+            why: OthersWhy::Failed,
+        },
+        Stage::OthersNotMoved {
+            why: OthersWhy::NotHere,
+        },
+        Stage::OthersNotMoved {
+            why: OthersWhy::AllowInSettings,
+        },
+    ]
+}
+
+fn endings() -> Vec<EndedEarly> {
+    vec![
+        EndedEarly::LinkLost {
+            detail: "the connection was lost".into(),
+        },
+        EndedEarly::NotApproved,
+        EndedEarly::Failed {
+            detail: "the journal could not be opened".into(),
+        },
+        EndedEarly::UpdateHere,
+        EndedEarly::UpdateThere,
+    ]
+}
+
+/// The connection during a move (C09, C10): connected again, waiting (trying, and with nothing
+/// new), and ended with and without anything moved.
+fn links() -> Vec<crate::moving::ConnectionView> {
+    use crate::moving::ConnectionView;
+    vec![
+        ConnectionView::Connected,
+        ConnectionView::Waiting {
+            nothing_new: false,
+            last_seen_seconds: 12,
+            saved_bytes: 81_600_000_000,
+            total_bytes: 120_000_000_000,
+        },
+        ConnectionView::Waiting {
+            nothing_new: true,
+            last_seen_seconds: 95,
+            saved_bytes: 81_600_000_000,
+            total_bytes: 120_000_000_000,
+        },
+        ConnectionView::Ended {
+            moved_something: true,
+            saved_bytes: 81_600_000_000,
+            total_bytes: 120_000_000_000,
+        },
+        ConnectionView::Ended {
+            moved_something: false,
+            saved_bytes: 0,
+            total_bytes: 120_000_000_000,
+        },
+    ]
+}
+
+fn peers() -> Vec<crate::moving::Peer> {
+    use crate::moving::{LinkView, Peer, Versions};
+    use pctwin_move::greeting::{About, Power, System};
+    let about = |system, chip: &str, app: &str, power, free_bytes| About {
+        system,
+        chip: chip.into(),
+        app: app.into(),
+        power,
+        free_bytes,
+    };
+    vec![
+        Peer {
+            mine: about(
+                System::Mac,
+                "aarch64",
+                "0.1.0",
+                Power::Plugged,
+                Some(410_000_000_000),
+            ),
+            theirs: about(
+                System::Windows,
+                "x86_64",
+                "0.1.0",
+                Power::Battery { percent: 34 },
+                Some(52_000_000_000),
+            ),
+            other: Some(picked()),
+            versions: Versions::Same,
+            link: Some(LinkView {
+                bytes_per_second: 62_000_000,
+                slow: false,
+            }),
+        },
+        Peer {
+            mine: about(System::Linux, "x86_64", "0.1.0", Power::Unknown, None),
+            theirs: about(System::Other, "riscv64", "0.1.0", Power::Plugged, None),
+            other: None,
+            versions: Versions::Same,
+            link: Some(LinkView {
+                bytes_per_second: 1_200_000,
+                slow: true,
+            }),
+        },
+        Peer {
+            mine: about(System::Windows, "x86_64", "0.1.0", Power::Plugged, None),
+            theirs: about(System::Mac, "aarch64", "0.2.0", Power::Plugged, None),
+            other: None,
+            versions: Versions::UpdateHere,
+            link: None,
+        },
+    ]
+}
+
+fn plans() -> Vec<PlanView> {
+    vec![PlanView {
+        first: vec![FolderRole::Documents],
+        revision: 2,
+        fingerprint: "9f".repeat(32),
+        groups: vec![PlanGroup {
+            id: "documents".into(),
+            role: FolderRole::Documents,
+            path: String::new(),
+            size: Size::Known {
+                bytes: 1_200_000,
+                files: 34,
+            },
+            to_drive: String::new(),
+            to_folder: "documents".into(),
+        }],
+        left_out: vec![LeftOut {
+            reason: LeftOutReason::CloudOnly,
+            count: 3,
+        }],
+        preview: PreviewView {
+            fits: Some(true),
+            short_bytes: 0,
+            minutes: Some(Range { low: 4, high: 8 }),
+            renamed: 1,
+            too_big: 0,
+            refused: 0,
+            runs_at_sign_in: 1,
+        },
+    }]
+}
+
+fn quiet(state: RunState, old: Option<LabelView>) -> MoveProgress {
+    MoveProgress {
+        state,
+        laptops: Laptops { old },
+        groups: Vec::new(),
+        counts: Counts::default(),
+        bytes: Bytes {
+            checked: 0,
+            total: 0,
+        },
+        current: None,
+        speed: None,
+        minutes_left: None,
+        notice: None,
+    }
+}
+
+fn progress() -> Vec<MoveProgress> {
+    let counts = Counts {
+        total: 34,
+        waiting: 20,
+        copying: 1,
+        checking: 1,
+        done: 10,
+        needs_action: 1,
+        failed: 1,
+        skipped_by_user: 0,
+    };
+    vec![
+        MoveProgress {
+            state: RunState::Running,
+            laptops: Laptops {
+                old: Some(picked()),
+            },
+            groups: vec![
+                MoveGroup {
+                    id: "documents".into(),
+                    name: GroupName::Role {
+                        role: FolderRole::Documents,
+                    },
+                    counts,
+                },
+                MoveGroup {
+                    id: "for-1".into(),
+                    name: GroupName::Folder {
+                        name: "for-1".into(),
+                    },
+                    counts: Counts::default(),
+                },
+            ],
+            counts,
+            bytes: Bytes {
+                checked: 400_000,
+                total: 1_200_000,
+            },
+            current: Some(Current {
+                name: "letter.txt".into(),
+                step: "checking",
+            }),
+            speed: Some(Range {
+                low: 40_000_000,
+                high: 40_000_000,
+            }),
+            minutes_left: Some(Range { low: 3, high: 3 }),
+            notice: Some(Notice::DriveProblem {
+                place: GroupName::Role {
+                    role: FolderRole::Pictures,
+                },
+            }),
+        },
+        MoveProgress {
+            notice: Some(Notice::LowBattery { paused: true }),
+            ..quiet(RunState::Pausing, None)
+        },
+        quiet(RunState::Paused, Some(named())),
+    ]
+}
+
+fn outcomes() -> Vec<MoveOutcome> {
+    vec![MoveOutcome {
+        people: vec![crate::moving::PersonOutcome {
+            name: "Bea".into(),
+            copied: 120,
+            needs_action: 0,
+            failed: 1,
+            at_sign_in: true,
+        }],
+        by_status: ByStatus {
+            copied: 30,
+            reinstalled: 0,
+            converted: 0,
+            needs_action: 1,
+            skipped_by_user: 1,
+            failed: 2,
+        },
+        not_copied: 0,
+        bytes_checked: 1_100_000,
+        stopped: false,
+        broke_off: false,
+        checked_from_memory: 3,
+        after_move: crate::moving::AfterMove {
+            photos: crate::moving::KindCount {
+                planned: 12,
+                copied: 11,
+            },
+            documents: crate::moving::KindCount {
+                planned: 20,
+                copied: 20,
+            },
+            ..Default::default()
+        },
+    }]
+}
+
+fn report_items() -> Vec<ReportItem> {
+    let line = |n: &str, status, reason, evidence| ReportItem {
+        id: format!("{n:0>32}"),
+        name: format!("{n}.txt"),
+        source: format!("documents/{n}.txt"),
+        destination: (status != ItemStatus::Failed).then(|| format!("{n}.txt")),
+        status,
+        reason,
+        evidence,
+        note: None,
+    };
+    vec![
+        line("1", ItemStatus::Copied, None, Some(Evidence::Drive)),
+        line(
+            "2",
+            ItemStatus::Copied,
+            None,
+            Some(Evidence::Memory {
+                why: WhyMemory::TooSmall,
+            }),
+        ),
+        line("6", ItemStatus::Copied, None, Some(Evidence::AlreadyThere)),
+        line("7", ItemStatus::Copied, None, Some(Evidence::Recovered)),
+        line("8", ItemStatus::Copied, None, Some(Evidence::NewLaptop)),
+        line("3", ItemStatus::Failed, Some(Reason::Unreadable), None),
+        line("4", ItemStatus::NeedsAction, Some(Reason::OnlineOnly), None),
+        line("5", ItemStatus::SkippedByUser, None, None),
+        // Sent as it is now, and gone before it could be sent ("changed since the scan").
+        ReportItem {
+            note: Some(ReportNote::ChangedSinceScan),
+            ..line("9", ItemStatus::Copied, None, Some(Evidence::Drive))
+        },
+        ReportItem {
+            note: Some(ReportNote::NoLongerThere),
+            ..line("10", ItemStatus::Failed, Some(Reason::Unreadable), None)
+        },
+    ]
+}
+
+fn qs_picked() -> Vec<crate::quicksend::PickedView> {
+    use crate::quicksend::PickedView;
+    vec![
+        PickedView {
+            id: "p1".into(),
+            name: "letter.txt".into(),
+            kind: "file",
+            included: true,
+            bytes: Some(1200),
+            files: Some(1),
+            problem: None,
+        },
+        PickedView {
+            id: "p2".into(),
+            name: "Holiday".into(),
+            kind: "folder",
+            included: true,
+            bytes: None,
+            files: None,
+            problem: None,
+        },
+        PickedView {
+            id: "p3".into(),
+            name: "gone.txt".into(),
+            kind: "file",
+            included: true,
+            bytes: None,
+            files: None,
+            problem: Some("missing"),
+        },
+    ]
+}
+
+fn qs_offered() -> Vec<crate::quicksend::OfferedView> {
+    vec![crate::quicksend::OfferedView {
+        id: "00112233445566778899aabbccddeeff".into(),
+        path: "Holiday/beach.jpg".into(),
+        size: 2_400_000,
+    }]
+}
+
+fn qs_receipts() -> Vec<crate::quicksend::ReceiptView> {
+    use crate::quicksend::{LineView, OutcomeView, ReceiptView};
+    let line = |path: &str, outcome| LineView {
+        path: path.into(),
+        outcome,
+    };
+    vec![ReceiptView {
+        side: "receiver",
+        stopped: false,
+        lines: vec![
+            line(
+                "a.jpg",
+                OutcomeView::Arrived {
+                    landed_as: "a.jpg".into(),
+                },
+            ),
+            line(
+                "b.jpg",
+                OutcomeView::AlreadyThere {
+                    landed_as: "b.jpg".into(),
+                },
+            ),
+            line("c.jpg", OutcomeView::Declined),
+            line(
+                "d.jpg",
+                OutcomeView::NeedsAction {
+                    landed_as: "d.jpg".into(),
+                    why: "open it once to check it".into(),
+                    word: None,
+                },
+            ),
+            line(
+                "e.jpg",
+                OutcomeView::Failed {
+                    why: "it could not be read".into(),
+                },
+            ),
+        ],
+    }]
+}
+
+fn qs_progress() -> Vec<crate::quicksend::ProgressView> {
+    vec![crate::quicksend::ProgressView {
+        phase: "copying",
+        files_done: 3,
+        files_total: 10,
+        bytes_done: 1_000_000,
+        bytes_total: 4_000_000,
+        current: None,
+        failed: 0,
+        speed: Some(Range {
+            low: 2_000_000,
+            high: 2_000_000,
+        }),
+    }]
+}
+
+fn qs_folders() -> Vec<crate::quicksend::FolderView> {
+    vec![crate::quicksend::FolderView {
+        path: r"C:\Users\Ada\Downloads".into(),
+        free_bytes: Some(80_000_000_000),
+    }]
+}
+
+fn qs_problems() -> Vec<crate::quicksend::QsProblem> {
+    use crate::quicksend::QsProblem;
+    vec![
+        QsProblem::LinkLost {
+            detail: "the connection dropped".into(),
+        },
+        QsProblem::Failed {
+            detail: "the folder cannot be used".into(),
         },
     ]
 }
@@ -116,6 +568,122 @@ fn families() -> Vec<(&'static str, Value)> {
         ("problem-view", json(problems())),
         ("nearby-view", json(nearby())),
         ("evidence", json(CheckedFrom::ALL)),
+        ("heads-up", json(heads_ups())),
+        ("move-problem", json(move_problems())),
+        ("move-stage", json(stages())),
+        ("ended-early", json(endings())),
+        ("plan-view", json(plans())),
+        ("move-progress", json(progress())),
+        ("move-outcome", json(outcomes())),
+        ("report-item", json(report_items())),
+        ("privacy", json([crate::moving::Privacy { places: 3 }])),
+        ("found", json([crate::moving::Found { bytes: 41_200_000 }])),
+        ("peer", json(peers())),
+        ("move-link", json(links())),
+        (
+            "history-entry",
+            json([
+                crate::history::Entry {
+                    id: "1792627200000-0".into(),
+                    kind: "move".into(),
+                    when: "2026-10-22T00:00:00Z".into(),
+                    other: Some(json(picked())),
+                    state: "steps-left".into(),
+                    steps_left: 2,
+                },
+                crate::history::Entry {
+                    id: "1792627200000-1".into(),
+                    kind: "send".into(),
+                    when: "2026-10-22T00:05:00Z".into(),
+                    other: None,
+                    state: "finished".into(),
+                    steps_left: 0,
+                },
+            ]),
+        ),
+        (
+            "ready-note",
+            json([pctwin_move::handover::ReadyNote {
+                landed: 120,
+                kept: 2,
+                failed: 1,
+            }]),
+        ),
+        (
+            "place-answer",
+            json([
+                crate::moving::PlaceAnswer::Chosen {
+                    path: r"E:\Photos".into(),
+                    free_bytes: Some(512_000_000_000),
+                },
+                crate::moving::PlaceAnswer::Chosen {
+                    path: "/Volumes/Backup/Photos".into(),
+                    free_bytes: None,
+                },
+                crate::moving::PlaceAnswer::NotChosen,
+                crate::moving::PlaceAnswer::NoSafeName,
+                crate::moving::PlaceAnswer::CannotOpen,
+            ]),
+        ),
+        ("qs-picked", json(qs_picked())),
+        ("qs-offered", json(qs_offered())),
+        (
+            "qs-incoming",
+            json([crate::quicksend::IncomingView {
+                files: qs_offered(),
+            }]),
+        ),
+        ("qs-receipt", json(qs_receipts())),
+        ("qs-progress", json(qs_progress())),
+        ("qs-folder", json(qs_folders())),
+        ("qs-problem", json(qs_problems())),
+        (
+            "people-to-place",
+            json([crate::moving::PeopleToPlace {
+                people: vec![crate::moving::PersonToPlace {
+                    id: "S-1-5-21-1-2-3-1002".into(),
+                    name: "Bea".into(),
+                    files: 120,
+                    bytes: 3_400_000,
+                }],
+                accounts: vec![crate::others::AccountHere {
+                    id: "S-1-5-21-9-9-9-1001".into(),
+                    name: "bea".into(),
+                }],
+                can_place: true,
+            }]),
+        ),
+        (
+            "people-here",
+            json([crate::others::PeopleHere {
+                people: vec![
+                    crate::others::PersonHere {
+                        id: "S-1-5-21-1-2-3-1001".into(),
+                        name: "Ada".into(),
+                        is_you: true,
+                    },
+                    crate::others::PersonHere {
+                        id: "S-1-5-21-1-2-3-1002".into(),
+                        name: "Bea".into(),
+                        is_you: false,
+                    },
+                ],
+                can_move_others: true,
+            }]),
+        ),
+        (
+            "interrupted",
+            json([crate::recovery::Interrupted { unfinished: 3 }]),
+        ),
+        (
+            "tidied",
+            json([crate::recovery::Tidied {
+                put_in_place: 2,
+                kept_to_continue: 1,
+                not_finished: 0,
+                left_for_later: 1,
+            }]),
+        ),
     ]
 }
 
@@ -220,6 +788,31 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
         NewView::variant,
         NewView::VARIANTS,
     );
+    check(
+        "heads-up",
+        &heads_ups(),
+        HeadsUp::variant,
+        HeadsUp::VARIANTS,
+    );
+    check(
+        "move-problem",
+        &move_problems(),
+        MoveProblem::variant,
+        MoveProblem::VARIANTS,
+    );
+    check("move-stage", &stages(), Stage::variant, Stage::VARIANTS);
+    check(
+        "move-link",
+        &links(),
+        crate::moving::ConnectionView::variant,
+        crate::moving::ConnectionView::VARIANTS,
+    );
+    check(
+        "ended-early",
+        &endings(),
+        EndedEarly::variant,
+        EndedEarly::VARIANTS,
+    );
 
     // Problems: one example per problem, each with its own key.
     let keys: BTreeSet<&str> = problems().iter().map(|p| p.key).collect();
@@ -252,6 +845,10 @@ fn every_variant_is_in_the_examples_with_its_own_tag() {
 /// commands, and the screens' bridge test proves bridge.ts calls and listens with exactly these
 /// names, so a renamed command, argument or event on either side fails a test.
 fn calls() -> Value {
+    use crate::moving::{
+        FINISHED_EVENT, PEOPLE_EVENT, PLAN_EVENT, PRIVACY_EVENT, PROBLEM_EVENT, PROGRESS_EVENT,
+        STAGE_EVENT,
+    };
     use crate::pairing::{NEW_EVENT, OLD_EVENT};
     use serde_json::json;
     json!({
@@ -264,11 +861,67 @@ fn calls() -> Value {
             { "name": "pairing_old_shuffle", "args": [] },
             { "name": "pairing_old_rename", "args": [["name", "Kitchen laptop"]] },
             { "name": "pairing_old_start_again", "args": [] },
+            { "name": "pairing_old_nearby", "args": [] },
+            { "name": "pairing_heads_up", "args": [["role", "old"]] },
             { "name": "pairing_stop", "args": [] },
             { "name": "pairing_new_search", "args": [] },
             { "name": "pairing_new_connect", "args": [["index", 0], ["code", "123456"]] },
+            { "name": "move_begin", "args": [["fallback", { "music": "From your old laptop/Music" }], ["others", ["1001"]], ["approve", "Approve reading the files of {names}."]] },
+            { "name": "move_approve", "args": [["plan", { "revision": 2, "fingerprint": "9f" }], ["approve", true], ["leftOut", ["music"]]] },
+            { "name": "move_place_people", "args": [["choices", [{ "id": "S-2", "to": { "kind": "new" } }]], ["words", { "title": "New account", "body": "{name}: {account} / {password}", "approve": "Approve reading the files of {names}." }]] },
+            { "name": "move_choose_place", "args": [["role", "pictures"]] },
+            { "name": "move_usual_place", "args": [["role", "pictures"]] },
+            { "name": "move_privacy_answer", "args": [["again", true]] },
+            { "name": "open_privacy_settings", "args": [] },
+            { "name": "move_pause", "args": [] },
+            { "name": "move_resume", "args": [] },
+            { "name": "move_stop", "args": [] },
+            { "name": "move_retry", "args": [] },
+            { "name": "move_report", "args": [] },
+            { "name": "move_people_here", "args": [] },
+            { "name": "help_code", "args": [["topic", "connection-lost"], ["step", "moving"]] },
+            { "name": "recovery_check", "args": [] },
+            { "name": "recovery_run", "args": [] },
+            { "name": "things_ready", "args": [] },
+            { "name": "history_list", "args": [] },
+            { "name": "history_open", "args": [["id", "1792627200000-0"]] },
+            { "name": "history_export", "args": [] },
+            { "name": "quicksend_pick", "args": [["folders", false]] },
+            { "name": "quicksend_accept_drops", "args": [["on", true]] },
+            { "name": "quicksend_clear", "args": [] },
+            { "name": "quicksend_offer", "args": [["ids", ["p1"]]] },
+            { "name": "quicksend_offer_missing", "args": [] },
+            { "name": "quicksend_send", "args": [] },
+            { "name": "quicksend_receive", "args": [] },
+            { "name": "quicksend_choose_folder", "args": [] },
+            { "name": "quicksend_answer", "args": [["answer", { "kind": "decline" }]] },
+            { "name": "quicksend_pause", "args": [] },
+            { "name": "quicksend_resume", "args": [] },
+            { "name": "quicksend_stop", "args": [] },
         ],
-        "events": { "old": OLD_EVENT, "new": NEW_EVENT },
+        "events": {
+            "old": OLD_EVENT,
+            "new": NEW_EVENT,
+            "moveStage": STAGE_EVENT,
+            "movePlan": PLAN_EVENT,
+            "moveProgress": PROGRESS_EVENT,
+            "moveFinished": FINISHED_EVENT,
+            "moveProblem": PROBLEM_EVENT,
+            "movePeople": PEOPLE_EVENT,
+            "movePrivacy": PRIVACY_EVENT,
+            "moveFound": crate::moving::FOUND_EVENT,
+            "movePeer": crate::moving::PEER_EVENT,
+            "moveLink": crate::moving::LINK_EVENT,
+            "qsProgress": crate::quicksend::PROGRESS_EVENT,
+            "qsIncoming": crate::quicksend::INCOMING_EVENT,
+            "qsReceipt": crate::quicksend::RECEIPT_EVENT,
+            "qsProblem": crate::quicksend::PROBLEM_EVENT,
+            "qsPicked": crate::quicksend::PICKED_EVENT,
+            "qsDragging": crate::quicksend::DRAGGING_EVENT,
+        },
+        // What the screens may name when they ask for a help code: the engine's closed lists.
+        "helpTopics": crate::help::HelpTopic::ALL,
+        "helpSteps": crate::help::HelpStep::ALL,
     })
 }
 

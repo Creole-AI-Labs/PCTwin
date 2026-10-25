@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use pctwin_journal::{DownloadMark, PartialKeep};
 use pctwin_record::{Approval, Inclusion, Item, ItemId, ItemKind, LaptopId, Record, RecordError};
@@ -10,6 +11,20 @@ const MOVE_ROOM: u64 = 64 * 1024 * 1024;
 /// Most attempts at one file: a file that keeps changing while it is read is sent again a few
 /// times, then reported, so it cannot be started over and over.
 pub const MAX_ATTEMPTS: u32 = 4;
+/// Most starts of one file, counted whether or not anything of them arrived: a start cut off on
+/// a lossy link is not an attempt ([`MAX_ATTEMPTS`]), but an old laptop cannot start a file over
+/// and over without sending it (each start is a journal entry and a temporary file here).
+pub const MAX_STARTS_PER_FILE: u32 = 32;
+/// Starts a whole move may make beyond two for each of its files (see [`max_starts_per_move`]).
+const MOVE_START_ROOM: u64 = 4096;
+
+/// Most starts a move of `files` planned files agrees to in all, however they are spread: two
+/// for each file and [`MOVE_START_ROOM`] more, for the starts a dropped connection cuts off.
+pub fn max_starts_per_move(files: usize) -> u64 {
+    (files as u64)
+        .saturating_mul(2)
+        .saturating_add(MOVE_START_ROOM)
+}
 
 /// Where one approved file lands on the new laptop: the label of an approved destination and the
 /// path inside it. Both laptops work it out from the approved plan with the same function (the
@@ -71,13 +86,33 @@ pub enum Refusal {
         "it kept changing while it was being copied; close the program using it and move it again"
     )]
     KeptChanging,
+    #[error("the old laptop started it over too many times, so it was not copied; move it again")]
+    StartedTooOften,
 }
 
-/// One approved file: its approved size and where it lands.
+/// One approved file: its approved size and where it lands, held at a fixed size: the
+/// destination is shared by every file that lands in it, and the path inside it is kept as its
+/// digest, never as a second copy of the path (a received list can hold a very great many long
+/// paths; the scan inventory's memory count leaves room for exactly this entry per item,
+/// `pctwin_record::inventory::PLAN_ROOM`).
 #[derive(Debug, Clone)]
 struct Planned {
     size: u64,
-    place: LandingPlace,
+    /// When it was last changed at the scan, in nanoseconds since 1970 ([`UNKNOWN_TIME`]: the
+    /// system did not say). A plain number, not an `Option`, so the entry stays inside its room.
+    modified_ns: i64,
+    destination: Arc<str>,
+    path: [u8; 32],
+}
+
+/// A planned file whose changed time the scan did not have.
+const UNKNOWN_TIME: i64 = i64::MIN;
+
+/// The digest a planned path is kept as (BLAKE3 in its own named mode).
+fn path_digest(path: &str) -> [u8; 32] {
+    let mut h = blake3::Hasher::new_derive_key("pctwin 2026-10-21 landing path");
+    h.update(path.as_bytes());
+    h.finalize().into()
 }
 
 /// Where one approved file is in the move.
@@ -86,6 +121,8 @@ struct Progress {
     /// The largest size it was started with.
     largest: u64,
     attempts: u32,
+    /// Every start agreed to, never given back (see [`MAX_STARTS_PER_FILE`]).
+    starts: u32,
     live: bool,
     landed: bool,
 }
@@ -109,11 +146,100 @@ pub struct Allowance {
     /// Each file's attempts so far.
     started: HashMap<ItemId, Progress>,
     started_total: u64,
+    /// Every start agreed to in this move, never given back (see [`max_starts_per_move`]).
+    starts: u64,
     /// How long a partly copied file of this move waits for the rest, as the person chose.
     partial_keep: PartialKeep,
+    /// Each folder that moves as one whole, by destination: where it was planned (as the old
+    /// laptop announces its files) and where it is stored on this laptop (`None`: no name could
+    /// be given, so its files are not received). Only this laptop knows; nothing of it crosses.
+    wholes: HashMap<String, Vec<WholePlace>>,
+}
+
+/// Where one folder that moves as one whole lands on this laptop (see
+/// [`Allowance::with_wholes`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WholePlace {
+    pub destination: String,
+    /// Its path as planned, the one the old laptop announces its files under.
+    pub planned: String,
+    /// Its path as stored here: the planned one, or a name of its own beside what was already
+    /// there; `None` when no name could be given.
+    pub stored: Option<String>,
+}
+
+/// Where the path `path` is below the folder `top` (`Some("")` at the folder itself).
+fn below<'a>(path: &'a str, top: &str) -> Option<&'a str> {
+    if path == top {
+        Some("")
+    } else {
+        path.strip_prefix(top).and_then(|r| r.strip_prefix('/'))
+    }
 }
 
 impl Allowance {
+    /// With where each folder that moves as one whole lands here (decided on this laptop before
+    /// anything is received: see `pctwin_move::landing::place_wholes`).
+    pub fn with_wholes(mut self, wholes: Vec<WholePlace>) -> Self {
+        for w in wholes {
+            self.wholes
+                .entry(w.destination.clone())
+                .or_default()
+                .push(w);
+        }
+        self
+    }
+
+    fn whole_at(
+        &self,
+        destination: &str,
+        path: &str,
+        stored: bool,
+    ) -> Option<(&WholePlace, String)> {
+        self.wholes.get(destination)?.iter().find_map(|w| {
+            let top = if stored {
+                w.stored.as_deref()?
+            } else {
+                &w.planned
+            };
+            below(path, top).map(|rest| (w, rest.to_string()))
+        })
+    }
+
+    /// Where a file announced at `path` in `destination` is stored here: inside a whole given a
+    /// name of its own, the same path below that name. `None` when it is inside a whole that
+    /// could be given no name here (it is not received).
+    pub fn stored_path(&self, destination: &str, path: &str) -> Option<String> {
+        match self.whole_at(destination, path, false) {
+            None => Some(path.to_string()),
+            Some((w, rest)) => {
+                let top = w.stored.as_deref()?;
+                Some(if rest.is_empty() {
+                    top.to_string()
+                } else {
+                    format!("{top}/{rest}")
+                })
+            }
+        }
+    }
+
+    /// The path a file stored at `stored` in `destination` was announced at (the reverse of
+    /// [`stored_path`](Self::stored_path)), to check it against the plan after a restart.
+    pub fn planned_path(&self, destination: &str, stored: &str) -> String {
+        match self.whole_at(destination, stored, true) {
+            Some((w, rest)) if rest.is_empty() => w.planned.clone(),
+            Some((w, rest)) => format!("{}/{rest}", w.planned),
+            None => stored.to_string(),
+        }
+    }
+
+    /// For a file stored at `stored` inside a whole: how many folders down its top folder is,
+    /// which must be made by this move (see `pctwin_gate::Fresh`).
+    pub fn whole_depth(&self, destination: &str, stored: &str) -> Option<usize> {
+        let (w, _) = self.whole_at(destination, stored, true)?;
+        w.stored.as_deref().map(|t| t.split('/').count())
+    }
+
     /// The allowance for `record`, only if `approval` is for exactly this revision. `landing`
     /// says where each included file lands; it must be the very function the old laptop uses to
     /// say where it sends them. A file it gives no place (`None`) is not received at all. A move
@@ -124,22 +250,32 @@ impl Allowance {
         landing: impl Fn(&Item) -> Option<LandingPlace>,
     ) -> Result<Self, RecordError> {
         record.check(approval)?;
-        let files: HashMap<ItemId, Planned> = record
-            .items
-            .iter()
-            .filter(|i| i.inclusion == Inclusion::Included && i.kind == ItemKind::File)
-            .filter_map(|i| {
-                landing(i).map(|place| {
-                    (
-                        i.id,
-                        Planned {
-                            size: i.size_bytes,
-                            place,
-                        },
-                    )
-                })
-            })
-            .collect();
+        // Room for every item at once (counted in the inventory's memory limit), so the map
+        // never grows and moves while it is filled.
+        let mut files: HashMap<ItemId, Planned> = HashMap::with_capacity(record.items.len());
+        let mut destinations: HashMap<String, Arc<str>> = HashMap::new();
+        for i in &record.items {
+            if i.inclusion != Inclusion::Included || i.kind != ItemKind::File {
+                continue;
+            }
+            let Some(place) = landing(i) else {
+                continue;
+            };
+            let path = path_digest(&place.path);
+            let destination = destinations
+                .entry(place.destination)
+                .or_insert_with_key(|d| Arc::from(d.as_str()))
+                .clone();
+            files.insert(
+                i.id,
+                Planned {
+                    size: i.size_bytes,
+                    modified_ns: i.modified_ns.unwrap_or(UNKNOWN_TIME),
+                    destination,
+                    path,
+                },
+            );
+        }
         let total = files.values().fold(0u64, |t, f| t.saturating_add(f.size));
         Ok(Self {
             source_laptop: record.source_laptop,
@@ -149,7 +285,9 @@ impl Allowance {
             mark_floor: None,
             started: HashMap::new(),
             started_total: 0,
+            starts: 0,
             partial_keep: PartialKeep::default(),
+            wholes: HashMap::new(),
         })
     }
 
@@ -168,29 +306,50 @@ impl Allowance {
         self
     }
 
+    /// Whether this laptop may say what it already has (a same-size file at a name, a copy
+    /// already received): not to someone else's laptop (files with a marker floor, as in a Quick
+    /// Send from a stranger), who would learn from the answer whether a file exists here.
+    pub fn offers_what_is_here(&self) -> bool {
+        self.mark_floor.is_none()
+    }
+
     /// The marker a file gets that the old laptop described as marked `sent`: the stricter of
     /// that and the floor.
     pub fn mark_for(&self, sent: Option<DownloadMark>) -> Option<DownloadMark> {
         sent.max(self.mark_floor)
     }
 
-    /// Where `item` lands, if it is in the plan.
-    pub fn place(&self, item: ItemId) -> Option<&LandingPlace> {
-        self.files.get(&item).map(|f| &f.place)
+    /// The destination `item` lands in, if it is in the plan (the path inside it is checked with
+    /// [`check_place`](Self::check_place)).
+    /// Whether `item`, started as `now`, has changed since the scan: its size differs, or both the
+    /// scan and the old laptop give its changed time and they differ. Only a planned file can be
+    /// (a file not in the plan is refused anyway).
+    pub fn changed_since_scan(&self, item: ItemId, now: crate::Stamp) -> bool {
+        self.files.get(&item).is_some_and(|f| {
+            let time_differs = match (f.modified_ns, now.modified_ns) {
+                (UNKNOWN_TIME, _) | (_, None) => false,
+                (scan, Some(now)) => scan != now,
+            };
+            f.size != now.size || time_differs
+        })
+    }
+
+    pub fn destination(&self, item: ItemId) -> Option<&str> {
+        self.files.get(&item).map(|f| &*f.destination)
     }
 
     /// Every approved file: its id, the destination it lands in, and its approved size.
     pub(crate) fn planned(&self) -> impl Iterator<Item = (ItemId, &str, u64)> {
         self.files
             .iter()
-            .map(|(id, f)| (*id, f.place.destination.as_str(), f.size))
+            .map(|(id, f)| (*id, &*f.destination, f.size))
     }
 
     /// Whether `item` is in the plan and announced exactly where the plan says it lands
     /// (`destination` and `path` inside it), or why not. Nothing about the attempt is counted.
     pub fn check_place(&self, item: ItemId, destination: &str, path: &str) -> Result<(), Refusal> {
         let planned = self.files.get(&item).ok_or(Refusal::NotInPlan)?;
-        if planned.place.destination != destination || planned.place.path != path {
+        if &*planned.destination != destination || planned.path != path_digest(path) {
             return Err(Refusal::NotWherePlanned);
         }
         Ok(())
@@ -219,6 +378,11 @@ impl Allowance {
         }
         if progress.attempts >= MAX_ATTEMPTS {
             return Err(Refusal::KeptChanging);
+        }
+        if progress.starts >= MAX_STARTS_PER_FILE
+            || self.starts >= max_starts_per_move(self.files.len())
+        {
+            return Err(Refusal::StartedTooOften);
         }
         let room = match self.room {
             SizeRoom::Growth => approved.saturating_add((approved / 10).max(MIN_FILE_ROOM)),
@@ -252,11 +416,13 @@ impl Allowance {
             }
         }
         self.started_total = total;
+        self.starts += 1;
         self.started.insert(
             item,
             Progress {
                 largest: before.max(size),
                 attempts: progress.attempts + 1,
+                starts: progress.starts + 1,
                 live: true,
                 landed: false,
             },
@@ -269,6 +435,16 @@ impl Allowance {
         if let Some(p) = self.started.get_mut(&item) {
             p.live = false;
             p.landed |= landed;
+        }
+    }
+
+    /// The attempt at `item` ended before anything of it arrived (a start cut off on a lossy
+    /// link): not an attempt at all, so a file is never called "kept changing" for drops. The
+    /// start itself still counts toward [`MAX_STARTS_PER_FILE`] and the move's limit.
+    pub fn ended_unstarted(&mut self, item: ItemId) {
+        if let Some(p) = self.started.get_mut(&item) {
+            p.live = false;
+            p.attempts = p.attempts.saturating_sub(1);
         }
     }
 
@@ -291,5 +467,19 @@ impl Allowance {
     /// Bytes agreed to so far, each file counted once at its largest size.
     pub fn started_bytes(&self) -> u64 {
         self.started_total
+    }
+}
+
+#[cfg(test)]
+mod room {
+    use super::*;
+
+    /// A planned file's entry fits the room the inventory's memory count leaves for it: the map
+    /// is made with room for every item at once, at most about 2.3 slots an entry, plus a control
+    /// byte each, and holds nothing else per file.
+    #[test]
+    fn a_planned_file_fits_the_room_the_inventory_leaves_for_it() {
+        let entry = std::mem::size_of::<(ItemId, Planned)>() + 1;
+        assert!(entry * 23 / 10 < pctwin_record::inventory::PLAN_ROOM as usize);
     }
 }

@@ -124,7 +124,7 @@ export const samples: Sample[] = [
     id: "Q04-busy-and-same-name",
     title: "Who should receive it, one busy and a repeated name",
     size: "everyday",
-    render: () => <QuickWho count={4} size={7_800_000} nearby={[{ ...NEARBY[0], busy: true }, { ...NEARBY[1], sameLabelNearby: true }]} onChooseNearby={nothing} onUseCode={nothing} onBack={nothing} />,
+    render: () => <QuickWho count={4} size={7_800_000} nearby={[{ ...NEARBY[0], busy: true }, { ...NEARBY[1], sameLabelNearby: true, needsUpdate: false }]} onChooseNearby={nothing} onUseCode={nothing} onBack={nothing} />,
   },
 
   { id: "Q08-default", title: "Incoming offer", size: "everyday", render: () => <QuickIncoming from={BLUE_FOX} to={GREEN_OWL} files={OFFER} onAccept={nothing} onDecline={nothing} onDone={nothing} /> },

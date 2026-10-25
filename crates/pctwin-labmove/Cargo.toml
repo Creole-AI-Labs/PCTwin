@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 pctwin-lab = { path = "../pctwin-lab" }
 pctwin-gate = { path = "../pctwin-gate" }
+pctwin-helper = { path = "../pctwin-helper" }
 pctwin-journal = { path = "../pctwin-journal" }
 pctwin-link = { path = "../pctwin-link" }
 pctwin-move = { path = "../pctwin-move" }

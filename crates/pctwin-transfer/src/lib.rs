@@ -48,6 +48,8 @@
 
 mod allowance;
 mod blockmap;
+mod cause;
+mod fit;
 mod inventory;
 mod landing;
 mod lanedriver;
@@ -59,6 +61,7 @@ mod netlanes;
 mod original;
 mod pace;
 mod partials;
+mod probe;
 mod queue;
 mod reading;
 mod recovery;
@@ -68,10 +71,15 @@ mod session;
 mod undo;
 mod version;
 
-pub use allowance::{Allowance, LandingPlace, MAX_ATTEMPTS, Refusal, SizeRoom};
+pub use allowance::{
+    Allowance, LandingPlace, MAX_ATTEMPTS, MAX_STARTS_PER_FILE, Refusal, SizeRoom, WholePlace,
+    max_starts_per_move,
+};
 pub use blockmap::{BlockMap, BlockOutside, MAX_TICKET_RUNS};
+pub use cause::{Cause, Failure, Side};
+pub use fit::{Fit, KEEP_FREE, PlaceFit, TimeRange};
 pub use inventory::{
-    INVENTORY_PIECE_WAIT, InventoryFrame, MAX_INVENTORY_BYTES, receive_inventory, send_inventory,
+    INVENTORY_PIECE_WAIT, InventoryFrame, PAGED_FROM, receive_inventory, send_inventory,
 };
 pub use landing::{Landing, NewPlaces, approve_new_places, landing_for, role_label, shown_path};
 pub use lanedriver::{Closable, LaneDriver, MAX_LANE_REFUSALS, OpenLane};
@@ -90,25 +98,28 @@ pub use partials::{
     KeepPartials, PARTIAL_NOT_WANTED, PARTIAL_TOO_MUCH, PARTIAL_TOO_OLD, Partial, Partials,
     expire_partials, partials,
 };
+pub use probe::{PROBE_BYTES, PROBE_SINCE, answer_link_test, measure_link};
 pub use queue::{Scheduler, Tier, plan_order, plan_order_with};
 pub use reading::{ReadBudget, is_drive_error};
 pub use recovery::{Recovered, recover, recover_with};
 pub use sections::{FileSections, MIN_SECTION_BYTES, SectionError};
 pub use session::{
-    Channel, ChannelError, LANE_SILENCE, MAX_OPEN_FILES, MAX_ORIGINAL_REQUESTS_PER_SESSION,
-    MAX_ORIGINALS_PER_SESSION, ORIGINALS_REPLY_WAIT, ORIGINALS_REQUEST_TIME, OriginalsBudget,
-    ReceiveOutcome, ReceiverSession, SendJob, SendOutcome, SenderSession, check_originals,
-    serve_originals,
+    Channel, ChannelError, HOLD_TICK, LANE_SILENCE, MAX_OPEN_FILES,
+    MAX_ORIGINAL_REQUESTS_PER_SESSION, MAX_ORIGINALS_PER_SESSION, ORIGINALS_REPLY_WAIT,
+    ORIGINALS_REQUEST_TIME, OriginalsBudget, ReceiveOutcome, ReceiverSession, SendJob, SendOutcome,
+    SenderSession, check_originals, serve_originals,
 };
 pub use undo::{
-    APP_KEEPS_OPEN, CANNOT_CHECK, CHANGED_SINCE, CONNECT_OLD_LAPTOP, FOLDER_MISSING, IN_USE,
-    KEPT_AT_CLOSE, KEPT_BESIDE, KEPT_WORDS, KEPT_WORDS_ROOM, MOVED_SINCE, ONLINE_ONLY,
-    ORIGINAL_CHANGED, ORIGINAL_NOT_FOUND, ORIGINAL_UNKNOWN, RESOLVE_WITHIN, SAVE_CUT_SHORT,
-    SAVED_AGAIN, SAVED_MAYBE_INCOMPLETE, SECOND_NAME, STILL_FINISHING, TOOK_TOO_LONG, UndoOptions,
-    UndoReport, Undone, WORK_STOPPED, close_undo, undo, undo_items, undo_with,
+    APP_KEEPS_OPEN, CANNOT_CHECK, CHANGED_SINCE, CONNECT_OLD_LAPTOP, DETAILS_CHANGED,
+    FILE_NUMBERS_REUSED, FOLDER_MISSING, IN_USE, KEPT_AT_CLOSE, KEPT_BESIDE, KEPT_WORDS,
+    KEPT_WORDS_ROOM, MOVED_SINCE, NO_TRASH, ONLINE_ONLY, ORIGINAL_CHANGED, ORIGINAL_NOT_FOUND,
+    ORIGINAL_UNKNOWN, RESOLVE_WITHIN, SAVE_CUT_SHORT, SAVED_AGAIN, SAVED_MAYBE_INCOMPLETE,
+    SECOND_NAME, STILL_FINISHING, TOOK_TOO_LONG, UndoOptions, UndoReport, Undone, WORK_STOPPED,
+    close_undo, undo, undo_items, undo_preview, undo_with,
 };
 pub use version::{
-    MOVE_PROTOCOL, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
+    COPY_SINCE, HOLD_SINCE, KEYED_SINCE, MOVE_PROTOCOL, PERSONAL_SINCE, SET_DOWN_SINCE, STOP_SINCE,
+    VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
 };
 
 use std::fs::File;
@@ -135,6 +146,12 @@ const BLOCK_HEADER: usize = 1 + 1 + 8 + 4 + 32;
 pub enum TransferError {
     #[error("reading the file failed: {0}")]
     Io(#[from] io::Error),
+    /// The file is stored online only on the old laptop; reading it would download it.
+    #[error("it is stored online only on the old laptop, so it was not downloaded to be moved")]
+    OnlineOnly,
+    /// Another program has the file open for writing on the old laptop, so it was not read.
+    #[error("another program has it open on the old laptop, so it was not read")]
+    InUse,
     #[error("a block was damaged: {0}")]
     Damaged(String),
     #[error("expected block {expected}, got block {got}")]
@@ -169,6 +186,9 @@ pub enum TransferError {
     /// The person stopped the move on this laptop ([`MoveControl::stop`]).
     #[error("the move was stopped on this laptop")]
     Stopped,
+    /// The person on the other laptop stopped the move ([`Message::Stopping`]).
+    #[error("the move was stopped on the other laptop")]
+    StoppedThere,
 }
 
 /// The block size for a file of `len` bytes: the smallest power of two from 128 KiB that keeps the
@@ -340,6 +360,17 @@ impl Block {
         self.index
     }
 
+    /// A block of `data` read on this laptop (a copy made from a file already here).
+    pub(crate) fn plain(index: u64, data: Vec<u8>) -> Self {
+        let hash = *blake3::hash(&data).as_bytes();
+        Self {
+            index,
+            data,
+            hash,
+            packed: None,
+        }
+    }
+
     pub fn is_compressed(&self) -> bool {
         self.packed.is_some()
     }
@@ -365,6 +396,12 @@ impl Block {
         out.extend_from_slice(&self.hash);
         out.extend_from_slice(body);
         out
+    }
+
+    /// The length of the contents its header says (before any compression), without checking
+    /// anything else; `None` if even the header is not there.
+    pub(crate) fn length_in(bytes: &[u8]) -> Option<u32> {
+        Some(u32::from_be_bytes(bytes.get(10..14)?.try_into().ok()?))
     }
 
     /// The block number its header says, without checking anything else (to name a block that
@@ -450,9 +487,25 @@ pub struct FsOpener;
 
 impl Opener for FsOpener {
     fn open(&self, path: &Path) -> io::Result<Box<dyn Source>> {
+        // A file that went online only since the scan is never opened: opening it downloads it.
+        if std::fs::symlink_metadata(path).is_ok_and(|m| pctwin_scan::is_cloud_only(&m)) {
+            return Err(io::Error::other(OnlineOnly));
+        }
         Ok(Box::new(File::open(path)?))
     }
 }
+
+/// What an [`Opener`] says (as the error inside an `io::Error`) for a file stored online only,
+/// which it did not open; reading it would download it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("it is stored online only, so it was not opened")]
+pub struct OnlineOnly;
+
+/// What an [`Opener`] says (as the error inside an `io::Error`) for a file another program has
+/// open for writing, which it did not read, so no copy is torn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("another program has it open, so it was not read")]
+pub struct InUse;
 
 /// Reads one file once, in order, as blocks, skipping blocks the receiver already has.
 pub struct FileSender {
@@ -484,7 +537,15 @@ impl FileSender {
         resume: Option<&ResumeTicket>,
         compressible: bool,
     ) -> Result<Self, TransferError> {
-        let mut file = opener.open(path)?;
+        let mut file = opener.open(path).map_err(|e| {
+            if e.get_ref().is_some_and(|inner| inner.is::<OnlineOnly>()) {
+                TransferError::OnlineOnly
+            } else if e.get_ref().is_some_and(|inner| inner.is::<InUse>()) {
+                TransferError::InUse
+            } else {
+                TransferError::Io(e)
+            }
+        })?;
         let stamp = file.stamp()?;
         let source_file = file.identity().ok().flatten();
         // Read only: the marker is looked at, never changed.
@@ -631,6 +692,12 @@ pub struct Assembly<'d> {
     done: BlockMap,
     /// Each written block's fingerprint, for the whole file's.
     hashes: std::collections::BTreeMap<u64, [u8; 32]>,
+    /// Each block's fingerprint the first time it arrived whole, kept when the block is taken
+    /// back, to tell whose fault a file that will not come right is (Quarantine Design 3).
+    first: std::collections::BTreeMap<u64, [u8; 32]>,
+    /// A block sent again arrived with other bytes than the first time, though the file did not
+    /// change: the old laptop's drive read it differently.
+    read_differently: bool,
     /// The whole file was read back and matched, and nothing was written since.
     checked: bool,
 }
@@ -668,6 +735,20 @@ impl<'d> Assembly<'d> {
         Self::start_with(destination, path, header, Some(tag))
     }
 
+    /// As [`start_tagged`](Self::start_tagged), inside a folder that moves as one whole: its top
+    /// folder made by this move (see [`pctwin_gate::Fresh`]).
+    pub fn start_tagged_fresh(
+        destination: &'d Destination,
+        path: &IncomingPath,
+        header: Header,
+        tag: &str,
+        fresh: Option<pctwin_gate::Fresh<'_>>,
+    ) -> Result<Self, TransferError> {
+        check_header(&header)?;
+        let file = destination.create_file_tagged_fresh(path, header.size, tag, fresh)?;
+        Self::started(file, header)
+    }
+
     fn start_with(
         destination: &'d Destination,
         path: &IncomingPath,
@@ -675,10 +756,14 @@ impl<'d> Assembly<'d> {
         tag: Option<&str>,
     ) -> Result<Self, TransferError> {
         check_header(&header)?;
-        let mut file = match tag {
+        let file = match tag {
             Some(tag) => destination.create_file_tagged(path, header.size, tag)?,
             None => destination.create_file(path, header.size)?,
         };
+        Self::started(file, header)
+    }
+
+    fn started(mut file: IncomingFile<'d>, header: Header) -> Result<Self, TransferError> {
         // Reserve the whole size now, so a full disk shows at the start. Callers check the size
         // against the approved plan first. A drive that cannot reserve still copies.
         file.reserve()?;
@@ -689,6 +774,8 @@ impl<'d> Assembly<'d> {
             header,
             done,
             hashes: std::collections::BTreeMap::new(),
+            first: std::collections::BTreeMap::new(),
+            read_differently: false,
             checked: false,
         })
     }
@@ -738,7 +825,9 @@ impl<'d> Assembly<'d> {
             file,
             header,
             done,
+            first: hashes.clone(),
             hashes,
+            read_differently: false,
             checked: false,
         })
     }
@@ -779,6 +868,13 @@ impl<'d> Assembly<'d> {
         self.checked = false;
         // In range and not yet done (both checked above), so this always marks it.
         let _ = self.done.insert(block.index);
+        match self.first.get(&block.index) {
+            Some(first) if *first != block.hash => self.read_differently = true,
+            Some(_) => {}
+            None => {
+                self.first.insert(block.index, block.hash);
+            }
+        }
         self.hashes.insert(block.index, block.hash);
         Ok(Receipt { block: block.index })
     }
@@ -806,6 +902,17 @@ impl<'d> Assembly<'d> {
 
     pub fn blocks_done(&self) -> u64 {
         self.done.done_count()
+    }
+
+    /// Whether a block sent again arrived with other bytes than the first time.
+    pub fn read_differently(&self) -> bool {
+        self.read_differently
+    }
+
+    /// Keeps what arrived beside the real name as a damaged copy (see
+    /// [`IncomingFile::set_aside`]): the stored path it is kept at, and which file it is.
+    pub fn set_aside(self) -> Result<(String, Option<pctwin_gate::FileId>), TransferError> {
+        Ok(self.file.set_aside()?)
     }
 
     /// Gives the file its real name, only if every block arrived and the file did not change while

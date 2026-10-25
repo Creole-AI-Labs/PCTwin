@@ -59,19 +59,44 @@ allow-wildcard-paths = true
 deny = [
   { crate = "fs_at", wrappers = ["pctwin-gate"] },
   { crate = "cap-std", wrappers = ["pctwin-gate"] },
-  { crate = "cap-primitives", wrappers = ["cap-std"] },
-  { crate = "trash", wrappers = ["pctwin-gate"] },
-  # The one crate allowed to use unsafe (approved, October 2026; see scripts/unsafe-fence.sh).
+  # The hand-over walks a person's held files through folder handles that never follow a link,
+  # and reads a file again only if it is still the file walked (fresh-context review of making
+  # sign-ins, 24 October 2026).
+  { crate = "cap-primitives", wrappers = ["cap-std", "pctwin-move"] },
+  # Undo puts copies in the Trash itself, checked and by handle (21 October 2026), so no crate may.
+  { crate = "trash" },
+  # The first crate allowed to use unsafe (approved, October 2026; see scripts/unsafe-fence.sh).
   # Only the gate may use it, and only it may use signal-hook.
   { crate = "pctwin-lease", wrappers = ["pctwin-gate"] },
   { crate = "signal-hook", wrappers = ["pctwin-lease"] },
-  # macOS: the system's list of programs with a file open, asked only by the gate's undo.
-  { crate = "libproc", wrappers = ["pctwin-gate"] },
+  # The second and last (approved 20 October 2026): the administrator helper's system calls.
+  # Only the helper program may use it (21 October 2026), and the app, which starts the helper
+  # through the system's own prompt and makes its private channel and token (since 22 October;
+  # the unsafe code stays fenced inside pctwin-helper-os, covered by the helper's reviews).
+  # Only it may use Service Management, and the autostart plugin's own wrapper on a Mac.
+  { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app"] },
+  { crate = "objc2-service-management", wrappers = ["pctwin-helper-os", "smappservice-rs"] },
+  # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
+  { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },
+  # macOS: the system's list of programs with a file open, asked only by the gate's undo; and
+  # the path of the program on the other end of the helper's socket.
+  { crate = "libproc", wrappers = ["pctwin-gate", "pctwin-helper-os"] },
   # macOS: a file's flags set by name (the hidden mark while a file is filled in), only by the
-  # gate (16 October 2026). Third-party crates that use nix themselves (checked 16 October 2026).
-  { crate = "nix", wrappers = ["pctwin-gate", "fs_at", "starship-battery"] },
+  # gate (16 October 2026); the helper's socket peer (LOCAL_PEERPID, LOCAL_PEERCRED, 20 October
+  # 2026). Third-party crates that use nix themselves (checked 16 October 2026).
+  { crate = "nix", wrappers = ["pctwin-gate", "pctwin-helper-os", "fs_at", "starship-battery", "os_info"] },
   { crate = "rustix", wrappers = [
     "pctwin-gate",
+    # The helper's private folder and socket peer (SO_PEERCRED), 20 October 2026.
+    "pctwin-helper-os",
+    # The helper program opens another person's files without following a link (O_NOFOLLOW).
+    "pctwin-helper",
+    # The scan asks whether a file carries a download mark, by the attribute's presence only,
+    # never its value (21 October 2026).
+    "pctwin-scan",
+    # The app raises its own open-file limit on Mac and Linux (RLIMIT_NOFILE, limits.rs), so a
+    # move with many connections never runs out of handles.
+    "pctwin-app",
     # Third-party crates that use rustix themselves (checked 9 October 2026).
     "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
     "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",

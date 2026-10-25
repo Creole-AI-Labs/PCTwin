@@ -14,8 +14,8 @@ use pctwin_gate::{Approved, Destinations};
 use pctwin_record::ItemId;
 use pctwin_scan::ReadPlan;
 use pctwin_transfer::{
-    Channel, ChannelError, Opener, ReceiverSession, SendJob, SendOutcome, SenderSession, Source,
-    Stamp, Tier,
+    Cause, Channel, ChannelError, Opener, ReceiverSession, SendJob, SendOutcome, SenderSession,
+    Source, Stamp, Tier,
 };
 use tokio::sync::mpsc;
 
@@ -139,14 +139,15 @@ fn id(n: u8) -> ItemId {
 /// `count` files of 200 KB each, as jobs in that order.
 fn setup(count: u8) -> (Laptops, Vec<SendJob>) {
     let l = Laptops {
-        old: tempfile::tempdir().unwrap(),
-        new: tempfile::tempdir().unwrap(),
+        old: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
+        new: tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap(),
     };
     let jobs = (0..count)
         .map(|n| {
             let source = l.old.path().join(format!("f{n}.bin"));
             std::fs::write(&source, vec![n; 200_000]).unwrap();
             SendJob {
+                size: 0,
                 item: id(n),
                 source,
                 destination: "me".into(),
@@ -220,7 +221,9 @@ async fn a_bad_file_fails_on_its_own_and_is_tried_once_more_at_the_end() {
     for n in [0, 2, 3] {
         assert_eq!(s.outcome(id(n)), Some(&SendOutcome::Arrived), "{n}");
     }
-    assert!(matches!(s.outcome(id(1)), Some(SendOutcome::Failed(_))));
+    assert!(
+        matches!(s.outcome(id(1)), Some(SendOutcome::Failed(f)) if f.cause() == Cause::Unreadable)
+    );
     assert_eq!(
         opens_of(&faulty, &path_of(&l, 1)),
         2,
@@ -263,7 +266,9 @@ async fn on_a_weak_drive_a_failed_file_is_never_read_again() {
     faulty.faults.insert(path_of(&l, 1), Fault::FirstTime);
     let faulty = Arc::new(faulty);
     let s = run(&l, jobs, faulty.clone(), careful()).await;
-    assert!(matches!(s.outcome(id(1)), Some(SendOutcome::Failed(_))));
+    assert!(
+        matches!(s.outcome(id(1)), Some(SendOutcome::Failed(f)) if f.cause() == Cause::Unreadable)
+    );
     assert_eq!(opens_of(&faulty, &path_of(&l, 1)), 1);
     assert_eq!(s.outcome(id(2)), Some(&SendOutcome::Arrived));
 }
@@ -285,7 +290,10 @@ async fn errors_in_a_row_stop_reading_to_protect_a_dying_drive() {
             "file {n} was read after the stop"
         );
         match s.outcome(id(n)) {
-            Some(SendOutcome::Failed(why)) => assert!(why.contains("stopped reading"), "{why}"),
+            Some(SendOutcome::Failed(why)) => {
+                assert!(why.contains("stopped reading"), "{why}");
+                assert_eq!(why.cause(), Cause::Unreadable);
+            }
             other => panic!("file {n}: {other:?}"),
         }
     }
@@ -331,4 +339,36 @@ async fn a_file_that_will_not_open_at_first_is_tried_again_at_the_end() {
     let s = run(&l, jobs, faulty.clone(), ReadPlan::Normal).await;
     assert_eq!(s.outcome(id(1)), Some(&SendOutcome::Arrived));
     assert_eq!(opens_of(&faulty, &path_of(&l, 1)), 2);
+}
+
+/// A file the old laptop cannot read ends on the new laptop as that, with its true reason
+/// (move protocol 4), never as "it changed while it was copied".
+#[tokio::test]
+async fn the_new_laptop_hears_a_file_could_not_be_read_not_that_it_changed() {
+    let (l, jobs) = setup(2);
+    let mut faulty = Faulty::default();
+    faulty.faults.insert(path_of(&l, 1), Fault::Always);
+    let mut table = Destinations::new();
+    table
+        .approve("me", Approved::MyFolders, l.new.path())
+        .unwrap();
+    let files: Vec<(&SendJob, u64)> = jobs.iter().map(|j| (j, 200_000)).collect();
+    let approved = common::approved_jobs(&files);
+    let mut sender = SenderSession::new(jobs.clone(), 2).with_opener(Arc::new(faulty));
+    let mut receiver = ReceiverSession::new(&table, approved, common::journal(), "1001");
+    let (mut a, mut b) = mem_pair();
+    let meter = receiver.meter();
+    let (sent, received) = common::unless_stuck(&meter, 400_000, async {
+        tokio::join!(sender.run(&mut a), receiver.run(&mut b))
+    })
+    .await;
+    sent.unwrap();
+    received.unwrap();
+    match receiver.outcome(id(1)) {
+        Some(pctwin_transfer::ReceiveOutcome::Failed(f)) => {
+            assert_eq!(f.cause(), Cause::Unreadable, "{f}");
+            assert!(f.why().contains("could not read"), "{f}");
+        }
+        other => panic!("expected it failed as unreadable, got {other:?}"),
+    }
 }

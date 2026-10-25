@@ -103,6 +103,7 @@ fn item(role: FolderRole, path: &[&str]) -> Item {
         place,
         path,
         size_bytes: 1,
+        modified_ns: None,
         portability: Portability::Portable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,

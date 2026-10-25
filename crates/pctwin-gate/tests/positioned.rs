@@ -31,7 +31,7 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 
 #[test]
 fn sections_written_in_any_order_make_the_whole_file() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let data = bytes(1000);
     let mut f = dest.create_file(&path("video.mp4"), 1000).unwrap();
@@ -49,7 +49,7 @@ fn sections_written_in_any_order_make_the_whole_file() {
 
 #[test]
 fn nothing_is_written_twice() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut f = dest.create_file(&path("a.bin"), 100).unwrap();
     f.write_at(20, &[1; 30]).unwrap(); // 20..50
@@ -72,7 +72,7 @@ fn nothing_is_written_twice() {
 
 #[test]
 fn nothing_is_written_outside_the_announced_size() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut f = dest.create_file(&path("a.bin"), 100).unwrap();
     for (offset, len) in [
@@ -97,7 +97,7 @@ fn nothing_is_written_outside_the_announced_size() {
 
 #[test]
 fn a_file_with_a_hole_is_never_finished_and_leaves_nothing_behind() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut f = dest.create_file(&path("a.bin"), 100).unwrap();
     f.write_at(0, &[1; 40]).unwrap();
@@ -114,7 +114,7 @@ fn a_file_with_a_hole_is_never_finished_and_leaves_nothing_behind() {
 
 #[test]
 fn writing_in_order_still_works_and_mixes_with_sections() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let data = bytes(100);
     let mut f = dest.create_file(&path("a.bin"), 100).unwrap();
@@ -132,7 +132,7 @@ fn writing_in_order_still_works_and_mixes_with_sections() {
 
 #[test]
 fn scattered_tiny_writes_cannot_fill_memory() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let parts = MAX_FILE_PARTS as u64;
     let mut f = dest.create_file(&path("a.bin"), 2 * parts + 10).unwrap();
@@ -152,7 +152,7 @@ fn scattered_tiny_writes_cannot_fill_memory() {
 
 #[test]
 fn parts_that_touch_are_joined_however_they_arrive() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let n = 3 * MAX_FILE_PARTS as u64;
     // Forwards, one byte at a time.
@@ -171,7 +171,7 @@ fn parts_that_touch_are_joined_however_they_arrive() {
 
 #[test]
 fn space_for_the_whole_file_can_be_reserved_first() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let data = bytes(5000);
     let mut f = dest.create_file(&path("a.bin"), 5000).unwrap();
@@ -189,7 +189,7 @@ fn space_for_the_whole_file_can_be_reserved_first() {
 
 #[test]
 fn a_file_too_big_for_the_disk_is_refused_at_the_start_and_leaves_nothing() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     // 1 PiB is more than any test machine has free; the others are more than any drive can hold.
     for size in [1u64 << 50, 1 << 62, 1 << 63, u64::MAX] {
@@ -203,7 +203,7 @@ fn a_file_too_big_for_the_disk_is_refused_at_the_start_and_leaves_nothing() {
 
 #[test]
 fn an_unfinished_reserved_file_is_removed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut f = dest.create_file(&path("a.bin"), 4096).unwrap();
     let _ = f.reserve().unwrap();
@@ -220,7 +220,7 @@ proptest! {
         size in 0u64..400,
         writes in proptest::collection::vec((0u64..450, 0usize..120), 0..40),
     ) {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
         let dest = Destination::open(root.path()).unwrap();
         let mut f = dest.create_file(&path("p.bin"), size).unwrap();
         let mut covered = vec![false; size as usize];

@@ -89,7 +89,12 @@ fn census(lab: &Lab, bea: bool) -> Census {
         residents,
         account_list_read: true,
         system: SystemKind::this(),
-        uid_range: (1000, 60000),
+        // The lab's people are made-up accounts, but on Linux and macOS its files really belong
+        // to the account running the tests (uid 1001 on a GitHub Linux runner), who is none of
+        // them. Were that uid a person here, every sweep would find "someone from an old
+        // account" the lab never made. So in the lab no user ID is a person's; finding leftover
+        // owners by user ID is proven in the census tests.
+        uid_range: (1, 0),
     }
 }
 
@@ -303,6 +308,183 @@ fn things_in_odd_places_on_every_drive_are_found_and_the_systems_are_only_counte
     assert_eq!(s.top_line, TopLine::Everything, "{:#?}", s.blind_spots);
 }
 
+/// Every item the sweep lists can be found again on the drive: its place's folder (the sweep's
+/// `item_roots`, by `placed_by`) and its path lead to it. The mover's special folders too, which
+/// are read apart from the walk: without their folder the old laptop has nothing to send them
+/// from, and the mover's own files never leave.
+#[test]
+fn every_item_listed_leads_back_to_its_file_known_folders_included() {
+    let lab = lab();
+    write(&lab.ada.join("Documents/cv.docx"), 40);
+    write(&lab.ada.join("Documents/letters/2019.txt"), 20);
+    write(&lab.ada.join("code/site/index.html"), 50);
+    write(&lab.d.join("Photos/beach.jpg"), 200);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let place_of: BTreeMap<_, _> = s.placed_by.iter().copied().collect();
+    let mut files = 0;
+    for item in s
+        .record
+        .items
+        .iter()
+        .filter(|i| i.kind == pctwin_record::ItemKind::File)
+    {
+        let place = place_of
+            .get(&item.id)
+            .unwrap_or_else(|| panic!("{} has no place", shown(item)));
+        let mut path = s
+            .item_roots
+            .get(place)
+            .unwrap_or_else(|| panic!("{}: its place has no folder", shown(item)))
+            .clone();
+        for part in item.path.parts() {
+            path.push(part.on_disk());
+        }
+        assert!(
+            path.is_file(),
+            "{} leads to {}",
+            shown(item),
+            path.display()
+        );
+        files += 1;
+    }
+    find(&s, FolderRole::Documents, "letters/2019.txt");
+    assert!(files >= 4, "{files}");
+}
+
+/// The person's own essentials (Product Spec "personal essentials"): what their records say they
+/// used most recently, then what they keep pinned, become the record's personal order, first
+/// first; only items of the record, each once; everything else keeps its place.
+#[test]
+fn what_the_person_used_most_recently_comes_first_then_what_they_pinned() {
+    let lab = lab();
+    write(&lab.ada.join("Documents/cv.docx"), 40);
+    write(&lab.ada.join("Documents/old.txt"), 40);
+    write(&lab.ada.join("code/site/index.html"), 50);
+    write(&lab.d.join("Photos/beach.jpg"), 200);
+    let mut s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let usage = pctwin_scan::Usage {
+        recent: vec![
+            (lab.ada.join("Documents/cv.docx"), Some(100)),
+            (lab.d.join("Photos/beach.jpg"), Some(200)),
+            // Opened recently, but not anything the sweep found: never in the order.
+            (lab.ada.join("gone.txt"), Some(300)),
+        ],
+        pinned: vec![lab.ada.join("code")],
+    };
+    pctwin_scan::order_by_use(&mut s, &usage);
+    let named: Vec<String> = s
+        .record
+        .personal
+        .iter()
+        .map(|id| shown(s.record.items.iter().find(|i| i.id == *id).unwrap()))
+        .collect();
+    assert_eq!(named[0], "Photos/beach.jpg");
+    assert_eq!(named[1], "cv.docx");
+    assert!(
+        named[2..].iter().any(|n| n.ends_with("index.html")),
+        "{named:?}"
+    );
+    assert!(!named.iter().any(|n| n.contains("old.txt")), "{named:?}");
+    s.record.validate().unwrap();
+}
+
+/// The administrator helper's sweep for several approved people at once (one walk of the drive
+/// for a whole family, not one per person): each person's own things are exactly what a sweep
+/// made as that person finds, in their home and outside it; another person's (approved or not)
+/// are never listed as theirs.
+#[test]
+fn one_sweep_for_several_people_finds_each_ones_things_as_their_own_sweep_does() {
+    const CAL: &str = "S-1-5-21-111-222-333-1003";
+    let lab = lab();
+    let cal_home = lab.c.join("Users").join("cal");
+    std::fs::create_dir_all(&cal_home).unwrap();
+    write(&lab.ada.join("Documents/ada.txt"), 10);
+    write(&lab.bea.join("Documents/bea.txt"), 20);
+    write(&lab.bea.join("Pictures/2019/beach.jpg"), 30);
+    write(&cal_home.join("notes/cal.txt"), 40);
+    write(&lab.d.join("Family/holiday.jpg"), 50);
+    write(&lab.d.join("Family/BeaOnly/bea-outside.txt"), 60);
+    write(&lab.d.join("Family/CalOnly/cal-outside.txt"), 70);
+    let mut answers = Answers::default();
+    for (name, who) in [("BeaOnly", BEA), ("CalOnly", CAL)] {
+        answers.0.insert(
+            name.into(),
+            AccessFact::Known(
+                access_from_sddl(&format!("O:{who}D:P(A;;FA;;;BA)(A;OICI;FA;;;{who})")).unwrap(),
+            ),
+        );
+    }
+    // The helper's census: the approved people (Bea, Cal) take the mover's place by turns; the
+    // mover (Ada) is another person to them.
+    let census_as = |me: &str| {
+        let mut c = census(&lab, true);
+        c.residents
+            .push(resident(CAL, PersonKind::Other, &cal_home));
+        for r in &mut c.residents {
+            r.kind = if r.account_id.as_deref() == Some(me) {
+                PersonKind::Me
+            } else {
+                PersonKind::Other
+            };
+        }
+        c.me = me.into();
+        c
+    };
+    let facts_as = |me: &str| {
+        let mut f = facts(&lab, true);
+        f.census = census_as(me);
+        f.known_folders = Vec::new();
+        f
+    };
+    let theirs = |s: &Sweep, who: &str| -> std::collections::BTreeSet<String> {
+        s.record
+            .items
+            .iter()
+            .filter(|i| i.kind == pctwin_record::ItemKind::File)
+            .filter(|i| {
+                i.owner
+                    == Owner::Person {
+                        account_id: who.into(),
+                    }
+            })
+            .map(shown)
+            .collect()
+    };
+    let stop = AtomicBool::new(false);
+    let together = pctwin_scan::sweep_people(
+        facts_as(BEA),
+        &std::collections::BTreeSet::from([BEA.to_string(), CAL.to_string()]),
+        &mut answers,
+        &stop,
+        &mut |_| {},
+        &SweepLimits::default(),
+    );
+    for who in [BEA, CAL] {
+        let alone = run(facts_as(who), &mut answers);
+        assert_eq!(theirs(&together, who), theirs(&alone, who), "{who}");
+        assert!(!theirs(&alone, who).is_empty(), "{who}");
+    }
+    assert!(
+        theirs(&together, CAL)
+            .iter()
+            .any(|p| p.ends_with("cal-outside.txt"))
+    );
+    assert!(
+        theirs(&together, BEA)
+            .iter()
+            .any(|p| p.ends_with("bea-outside.txt"))
+    );
+    // The mover's things are not theirs to list.
+    assert!(theirs(&together, ADA).is_empty());
+    assert!(
+        !together
+            .record
+            .items
+            .iter()
+            .any(|i| shown(i).contains("ada.txt"))
+    );
+}
+
 #[test]
 fn one_walker_on_a_hard_disk_and_up_to_four_on_an_ssd() {
     assert_eq!(DiskKind::Hdd.walkers(4), 1);
@@ -495,6 +677,102 @@ fn a_locked_home_is_a_blind_spot_with_no_names_and_a_readable_one_is_only_counte
         .unwrap();
     assert_eq!(bea.bytes, 40);
     assert_ne!(s.top_line, TopLine::Everything);
+}
+
+/// With several people, a folder in a shared place that only the administrators and the system
+/// may open is the system's, not someone's from an old account: the mover cannot read it, so it
+/// is a blind spot named with its place (it is nobody's private corner), never moved and never
+/// counted as seen.
+#[test]
+fn a_folder_only_administrators_open_is_a_named_blind_spot() {
+    let lab = lab();
+    if !can_lock(&lab.d) {
+        eprintln!("not reachable: this account reads every folder (root)");
+        return;
+    }
+    write(&lab.d.join("Family/holiday.jpg"), 10);
+    write(&lab.d.join("Family/Locked/locked-thing.txt"), 10);
+    let mut answers = Answers::default();
+    answers.0.insert(
+        "Locked".into(),
+        AccessFact::Known(access_from_sddl("O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)").unwrap()),
+    );
+    let _g = Locked::new(&lab.d.join("Family/Locked"));
+    let s = run(sized(facts(&lab, true), 0), &mut answers);
+    assert!(
+        !s.record
+            .items
+            .iter()
+            .any(|i| shown(i).contains("locked-thing"))
+    );
+    let spot = s
+        .blind_spots
+        .iter()
+        .find(|b| b.path.as_deref().is_some_and(|p| p.ends_with("Locked")))
+        .unwrap_or_else(|| panic!("not named: {:#?}", s.blind_spots));
+    assert_eq!(spot.reason, BlindReason::NoPermission);
+    assert!(
+        !s.places
+            .iter()
+            .any(|p| matches!(p.placement.whose, Whose::FromOldAccount { .. })),
+        "{:#?}",
+        s.places
+    );
+    assert_ne!(s.top_line, TopLine::Everything);
+}
+
+/// Windows: a folder whose permissions the mover may not even read looks the same whether it is
+/// another person's or the administrators' alone, so it is a nameless blind spot. The
+/// administrator helper, which can read them, says which are the administrators' and the
+/// system's only: those are named ("no permission"); another person's stays nameless.
+#[test]
+fn unreadable_places_the_helper_finds_system_only_are_named_and_the_rest_stay_nameless() {
+    let lab = lab();
+    write(&lab.d.join("Family/holiday.jpg"), 10);
+    write(&lab.d.join("Family/Locked/locked-thing.txt"), 10);
+    write(&lab.d.join("Family/BeaOnly/bea-thing.txt"), 10);
+    let mut answers = Answers::default();
+    for name in ["Locked", "BeaOnly"] {
+        answers.0.insert(
+            name.into(),
+            AccessFact::Unknown {
+                why: "the permissions could not be read (UnauthorizedAccessException)".into(),
+            },
+        );
+    }
+    let mut s = run(sized(facts(&lab, true), 0), &mut answers);
+    let nameless = |s: &Sweep| {
+        s.blind_spots
+            .iter()
+            .filter(|b| b.reason == BlindReason::AccessNotReadable && b.path.is_none())
+            .map(|b| b.count)
+            .sum::<u64>()
+    };
+    assert_eq!(nameless(&s), 2);
+    // Nothing of either is shown or saved.
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(
+        !json.contains("BeaOnly") && !json.contains("Locked"),
+        "{json}"
+    );
+    let before = s.blind_spots.iter().map(|b| b.count).sum::<u64>();
+
+    s.name_system_only(&[lab.d.join("Family/Locked")]);
+    let spot = s
+        .blind_spots
+        .iter()
+        .find(|b| b.path.as_deref().is_some_and(|p| p.ends_with("Locked")))
+        .unwrap_or_else(|| panic!("not named: {:#?}", s.blind_spots));
+    assert_eq!(spot.reason, BlindReason::NoPermission);
+    assert_eq!(nameless(&s), 1, "Bea's stays nameless");
+    assert_eq!(s.blind_spots.iter().map(|b| b.count).sum::<u64>(), before);
+    let json = serde_json::to_string(&s).unwrap();
+    assert!(!json.contains("BeaOnly"), "{json}");
+    assert!(!s.record.items.iter().any(|i| shown(i).contains("thing")));
+    assert_ne!(s.top_line, TopLine::Everything);
+    // A path the mover never found unreadable names nothing.
+    s.name_system_only(&[lab.d.join("Family/BeaOnly/elsewhere")]);
+    assert_eq!(nameless(&s), 1);
 }
 
 #[test]
@@ -739,8 +1017,80 @@ fn a_very_big_folder_is_counted_as_one_item() {
     );
     let huge = find(&s, FolderRole::Other, "Huge");
     assert_eq!(huge.size_bytes, 120);
+    // Said plainly, not moved as if it were one file: it is left out, with its reason.
+    assert_eq!(
+        huge.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::TooManyFiles
+        }
+    );
     assert!(!s.record.items.iter().any(|i| shown(i).starts_with("Huge/")));
     assert_eq!(s.volumes[1].unexplained_bytes, 0);
+}
+
+/// A laptop whose list is more than one move can hold: its biggest folder is counted as one item
+/// and left out, with its reason, until the rest fits; everything else is listed as before.
+#[test]
+fn a_laptop_past_one_move_leaves_out_its_biggest_folder_until_the_rest_fits() {
+    let lab = lab();
+    for i in 0..40 {
+        write(&lab.d.join(format!("Big/{i}.bin")), 10);
+    }
+    for i in 0..3 {
+        write(&lab.d.join(format!("Small/{i}.bin")), 10);
+    }
+    let stop = AtomicBool::new(false);
+    let run_at = |move_held: u64| {
+        sweep(
+            sized(facts(&lab, false), 0),
+            &mut Answers::default(),
+            &stop,
+            &mut |_| {},
+            &SweepLimits {
+                move_held,
+                ..SweepLimits::default()
+            },
+            None,
+        )
+    };
+    let whole = run_at(pctwin_record::MAX_HELD);
+    assert!(whole.record.items.iter().any(|i| shown(i) == "Big/0.bin"));
+    // The least that holds the list once Big is one item.
+    let without: Vec<Item> = whole
+        .record
+        .items
+        .iter()
+        .filter(|i| !shown(i).starts_with("Big/"))
+        .cloned()
+        .collect();
+    let (mut low, mut high) = (0u64, pctwin_record::MAX_HELD);
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if pctwin_record::fits_one_move(&without, mid).unwrap() {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    assert!(!pctwin_record::fits_one_move(&whole.record.items, low).unwrap());
+
+    let s = run_at(low);
+    let big = find(&s, FolderRole::Other, "Big");
+    assert_eq!(big.size_bytes, 400);
+    assert_eq!(
+        big.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::TooManyFiles
+        }
+    );
+    assert!(!s.record.items.iter().any(|i| shown(i).starts_with("Big/")));
+    for i in 0..3 {
+        let small = find(&s, FolderRole::Other, &format!("Small/{i}.bin"));
+        assert_eq!(small.inclusion, Inclusion::Included);
+    }
+    assert!(pctwin_record::fits_one_move(&s.record.items, low).unwrap());
+    assert_eq!(s.placed_by.len(), s.record.items.len());
+    s.record.validate().unwrap();
 }
 
 #[test]
@@ -1634,4 +1984,193 @@ fn a_sweep_stopped_again_and_again_during_another_persons_count_finishes_with_th
     assert_eq!(bea_of(&done), bea_of(&whole));
     assert_eq!(done.volumes, whole.volumes);
     assert_eq!(done.top_line, whole.top_line);
+}
+
+/// "Who's moving?": the mover with what was counted of theirs, another person with no size
+/// (their things are not looked at before they are approved), never a guess.
+#[test]
+fn who_is_moving_lists_everyone_with_a_size_only_where_it_was_counted() {
+    let lab = lab();
+    write(&lab.ada.join("Documents/notes.txt"), 300);
+    write(&lab.bea.join("Documents/secret.txt"), 500);
+    let s = run(sized(facts(&lab, true), 0), &mut Answers::default());
+    let people = s.who_is_moving();
+    assert_eq!(people.len(), 2);
+    assert_eq!(people[0].account_id.as_deref(), Some(ADA));
+    assert_eq!(people[0].kind, PersonKind::Me);
+    assert!(people[0].bytes.is_some_and(|b| b >= 300), "{people:?}");
+    assert_eq!(people[1].account_id.as_deref(), Some(BEA));
+    assert_eq!(people[1].bytes, None, "{people:?}");
+}
+
+/// What each place is, from the mover's own record: a camera folder is named, and a phone
+/// backup is named once as a whole (the photos inside it are the backup's); nothing about what
+/// is included changes.
+#[test]
+fn the_table_names_places_in_the_record_and_changes_nothing() {
+    let lab = lab();
+    write(
+        &lab.ada.join("Documents/Phone/DCIM/100APPLE/IMG_0001.JPG"),
+        10,
+    );
+    write(&lab.ada.join("Documents/Backup/00008030/Manifest.db"), 10);
+    write(&lab.ada.join("Documents/Backup/00008030/DCIM/a.jpg"), 10);
+    write(&lab.ada.join("Documents/disk.vhdx"), 10);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let before = s.record.clone();
+    let named = pctwin_scan::Recogniser::shipped().record(&s.record);
+    assert_eq!(s.record, before);
+    let what_of = |end: &str| {
+        named
+            .iter()
+            .filter(|r| {
+                let item = s.record.items.iter().find(|i| i.id == r.item).unwrap();
+                shown(item).ends_with(end)
+            })
+            .map(|r| r.what)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(what_of("Phone/DCIM"), [pctwin_scan::What::CameraPhotos]);
+    assert_eq!(what_of("Backup/00008030"), [pctwin_scan::What::PhoneBackup]);
+    // Inside the backup: the backup's, never named again.
+    assert!(what_of("00008030/DCIM").is_empty());
+    assert_eq!(
+        what_of("disk.vhdx"),
+        [pctwin_scan::What::VirtualMachineDisk]
+    );
+}
+
+/// Folders with the same names and sizes all the way down look like copies (one group, not one
+/// for each folder inside them); a folder with one file of another size does not.
+#[test]
+fn folders_with_the_same_names_and_sizes_look_like_copies() {
+    let lab = lab();
+    for top in ["Photos", "Photos copy", "Photos other"] {
+        for (n, name) in ["a.jpg", "b.jpg", "c.jpg"].iter().enumerate() {
+            let size = if top == "Photos other" && n == 2 {
+                99
+            } else {
+                10 + n
+            };
+            write(&lab.ada.join(format!("Documents/{top}/{name}")), size);
+            write(&lab.ada.join(format!("Documents/{top}/Trip/{name}")), size);
+        }
+    }
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    let groups = pctwin_scan::look_like_copies(&s.record);
+    let named =
+        |id: &pctwin_record::ItemId| shown(s.record.items.iter().find(|i| i.id == *id).unwrap());
+    let shown_groups: Vec<Vec<String>> = groups
+        .iter()
+        .map(|g| g.iter().map(named).collect())
+        .collect();
+    assert_eq!(shown_groups.len(), 1, "{shown_groups:?}");
+    let mut g = shown_groups[0].clone();
+    g.sort();
+    // Paths are inside the Documents place.
+    assert_eq!(g, ["Photos", "Photos copy"]);
+}
+
+/// Fast first, then sharper: what the sweep has found only ever grows while it runs, and ends at
+/// what it found in all.
+#[test]
+fn what_is_found_so_far_only_grows() {
+    let lab = lab();
+    for n in 0..40 {
+        write(&lab.ada.join(format!("Documents/f{n}/a.txt")), 100);
+    }
+    let stop = AtomicBool::new(false);
+    let mut seen: Vec<pctwin_scan::FoundSoFar> = Vec::new();
+    let s = sweep(
+        sized(facts(&lab, false), 0),
+        &mut Answers::default(),
+        &stop,
+        &mut |view| seen.push(view.found_so_far()),
+        &SweepLimits {
+            checkpoint_entries: 1,
+            checkpoint_every: std::time::Duration::ZERO,
+            ..SweepLimits::default()
+        },
+        None,
+    );
+    assert!(s.finished);
+    assert!(seen.len() > 2, "{}", seen.len());
+    for w in seen.windows(2) {
+        assert!(w[1].bytes >= w[0].bytes, "{w:?}");
+        assert!(w[1].files >= w[0].files, "{w:?}");
+        assert!(w[1].mover_bytes >= w[0].mover_bytes, "{w:?}");
+    }
+    let last = seen.last().unwrap();
+    assert!(last.mover_bytes >= 40 * 100, "{last:?}");
+}
+
+/// Gap found 24 October 2026: a Mac package (a Photos Library, a Pages document, a bundle the
+/// person made) and a project's history (`.git`) were each one folder item carrying the bytes
+/// inside it, shown as moving; but a move sends only files, so none of it was ever sent and it
+/// had no result. Now everything the sweep includes is in a file the move sends (each with its
+/// own result), and a folder item holds no bytes of its own. A folder the rules file calls
+/// rebuildable (`node_modules`) is left out with that reason, as one counted item.
+#[test]
+fn everything_shown_as_moving_is_in_a_file_the_move_sends() {
+    let lab = lab();
+    let docs = lab.ada.join("Documents");
+    write(&docs.join("Album.photoslibrary/originals/A/beach.jpg"), 10);
+    write(&docs.join("Album.photoslibrary/database/Photos.sqlite"), 4);
+    write(&docs.join("Trip.pages/Index.zip"), 7);
+    write(&docs.join("Tool.app/Contents/MacOS/Tool"), 6);
+    write(&docs.join("proj/main.rs"), 5);
+    write(&docs.join("proj/.git/objects/ab/cdef"), 20);
+    write(&docs.join("proj/.git/HEAD"), 2);
+    write(&docs.join("proj/node_modules/pad/index.js"), 9);
+    let s = run(sized(facts(&lab, false), 0), &mut Answers::default());
+    assert!(s.finished);
+
+    let mine: Vec<&Item> = s
+        .record
+        .items
+        .iter()
+        .filter(|i| i.place.role == FolderRole::Documents)
+        .collect();
+    let moving = |i: &&&Item| i.inclusion == Inclusion::Included;
+    // Every byte shown as moving is in a file.
+    let in_files: u64 = mine
+        .iter()
+        .filter(moving)
+        .filter(|i| i.kind == pctwin_record::ItemKind::File)
+        .map(|i| i.size_bytes)
+        .sum();
+    assert_eq!(in_files, 10 + 4 + 7 + 6 + 5 + 20 + 2, "{mine:#?}");
+    for i in mine.iter().filter(moving) {
+        if i.kind != pctwin_record::ItemKind::File {
+            assert_eq!(i.size_bytes, 0, "{} holds bytes no file carries", shown(i));
+        }
+    }
+    for path in [
+        "Album.photoslibrary/originals/A/beach.jpg",
+        "Trip.pages/Index.zip",
+        "Tool.app/Contents/MacOS/Tool",
+        "proj/.git/objects/ab/cdef",
+    ] {
+        let f = find(&s, FolderRole::Documents, path);
+        assert_eq!(f.kind, pctwin_record::ItemKind::File, "{path}");
+        assert_eq!(f.inclusion, Inclusion::Included, "{path}");
+    }
+    // Each package and history is marked as one whole, so it lands as one, never merged.
+    for path in ["Album.photoslibrary", "Trip.pages", "Tool.app", "proj/.git"] {
+        assert_eq!(
+            find(&s, FolderRole::Documents, path).kind,
+            pctwin_record::ItemKind::Package,
+            "{path}"
+        );
+    }
+    let nm = find(&s, FolderRole::Documents, "proj/node_modules");
+    assert_eq!(nm.size_bytes, 9);
+    assert_eq!(
+        nm.inclusion,
+        Inclusion::LeftOut {
+            reason: LeftOutReason::Rebuildable
+        }
+    );
+    assert!(!mine.iter().any(|i| shown(i).contains("pad/")));
+    s.record.validate().unwrap();
 }

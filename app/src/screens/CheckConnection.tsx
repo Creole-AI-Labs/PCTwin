@@ -1,6 +1,6 @@
 import { Localized } from "@fluent/react";
 import type { ReactNode } from "react";
-import { Badge, Banner, Button, RowList, Row } from "../components/kit";
+import { Badge, Banner, Button, RowList, Row, Section } from "../components/kit";
 import type { ConnectionCheck } from "../connection";
 import { ArrowForward, Attention, Check, Info, Laptop, Wifi } from "../icons";
 import { useUnits } from "./ConnectionParts";
@@ -16,6 +16,10 @@ type Tone = "good" | "warn" | "neutral";
  * internet. Every judgement is a word with an icon. Something that could not be read says so; it is
  * never shown as fine. Time comes later as a range, so no time is promised here. `check` is null
  * while the engine is still measuring.
+ *
+ * Both laptops show this page before anything moves, so it also carries the short checklist for
+ * the move (decided 8 October 2026): power is the measured row above it; keeping the lids open and
+ * staying near the router are the person's to do, so they carry no status PCTwin cannot see.
  */
 export default function CheckConnection({
   check,
@@ -25,7 +29,8 @@ export default function CheckConnection({
 }: {
   check: ConnectionCheck | null;
   onContinue: () => void;
-  onRecheck: () => void;
+  /** Measure again. Without it there is no "Check again" (the move measured once, as the laptops greeted). */
+  onRecheck?: () => void;
   onBack: () => void;
 }) {
   return (
@@ -42,13 +47,15 @@ export default function CheckConnection({
       ) : (
         <Results check={check} />
       )}
-      <div className="connect-actions">
-        <Button className="connect-block" onClick={onRecheck}>
-          <Localized id="check-again">
-            <span />
-          </Localized>
-        </Button>
-      </div>
+      {onRecheck && (
+        <div className="connect-actions">
+          <Button className="connect-block" onClick={onRecheck}>
+            <Localized id="check-again">
+              <span />
+            </Localized>
+          </Button>
+        </div>
+      )}
       {check !== null && (
         <FrameFooter>
           <Button variant="primary" icon={<ArrowForward />} onClick={onContinue}>
@@ -128,6 +135,14 @@ function Results({ check }: { check: ConnectionCheck }) {
         />
       </RowList>
       </div>
+      <Section title={<Word id="check-before-title" />}>
+        <div className="connect-panel">
+          <RowList>
+            <Row icon={<Laptop />} title={<Word id="check-before-lids-title" />} detail={<Word id="check-before-lids-body" />} />
+            <Row icon={<Wifi />} title={<Word id="check-before-near-title" />} detail={<Word id="check-before-near-body" />} />
+          </RowList>
+        </div>
+      </Section>
       <div className="note">
         <Info />
         <Localized id="check-estimate-note">

@@ -82,21 +82,33 @@ fn lane_numbers_count_up_and_are_never_reused() {
     assert_eq!(accepting.lane(), 2);
 }
 
+/// A copy of lane message 1 proves the keys as well as the original, so it never spends the lane's
+/// number (exit-gate review, 24 October 2026: an on-path copier could otherwise use the numbers
+/// up): the number is spent only by the confirmation (message 3) only the opener can seal. A copy
+/// is answered but can never be confirmed; once the genuine lane is confirmed, a copy is refused.
 #[test]
-fn a_replayed_lane_opening_is_refused() {
+fn a_replayed_lane_opening_never_spends_its_number_and_is_refused_once_confirmed() {
     let (mut old, mut new) = pair();
     let now = Instant::now();
     let (opening, l1) = new.open_lane(now).unwrap();
+    // Someone who copied lane message 1 sends it first, again and again.
+    let copies: Vec<_> = (0..5)
+        .map(|_| old.accept_lane(&l1, now).unwrap().0)
+        .collect();
     let (accepting, l2) = old.accept_lane(&l1, now).unwrap();
     assert_eq!(accepting.lane(), 1);
-    // Someone who copied lane message 1 off the network sends it again.
+    // The genuine lane still completes.
+    let (_new_end, l3) = opening.receive(&l2, now).unwrap();
+    accepting.confirm(&l3, now).unwrap();
+    // No copy can be confirmed: not with the genuine confirmation (another handshake's keys),
+    // and the number is spent now.
+    for copy in copies {
+        assert!(copy.confirm(&l3, now).is_err());
+    }
     assert_eq!(
         old.accept_lane(&l1, now).unwrap_err(),
         PairingError::LaneRefused
     );
-    // The genuine lane still completes.
-    let (_new_end, l3) = opening.receive(&l2, now).unwrap();
-    accepting.confirm(&l3, now).unwrap();
 }
 
 #[test]

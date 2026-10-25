@@ -1,8 +1,9 @@
 //! Reading who could open a place, without administrator rights and without opening anything
 //! inside it. Only used on laptops with two or more people.
 //!
-//! - Windows: one PowerShell helper reads each folder's security descriptor (`Get-Acl`, the
-//!   owner and access list only) and answers in SDDL, one line per folder, for the whole sweep.
+//! - Windows: one PowerShell helper reads each folder's security descriptor (the owner, group
+//!   and access list, through .NET itself, never a cmdlet: see `ACL_SCRIPT`) and answers in
+//!   SDDL, one line per folder, for the whole sweep.
 //!   A folder whose permissions this person may not read is answered "unknown", never guessed.
 //! - macOS and Linux: owner, group and mode come with the folder listing itself; the groups come
 //!   from the system's group list.
@@ -29,6 +30,23 @@ pub trait AccessReader {
 }
 
 /// The reader for this system.
+/// The elevated helper's reader on Windows: PowerShell at `powershell` (a full path the caller
+/// found from the system itself) with only `env`, nothing passed on from whoever started the
+/// helper. Elsewhere, the same as [`system_reader`].
+pub fn system_reader_clean(
+    powershell: std::path::PathBuf,
+    env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+) -> Box<dyn AccessReader + Send> {
+    if cfg!(windows) {
+        Box::new(WindowsAcl {
+            clean: Some((powershell, env)),
+            ..WindowsAcl::default()
+        })
+    } else {
+        system_reader()
+    }
+}
+
 pub fn system_reader() -> Box<dyn AccessReader + Send> {
     if cfg!(windows) {
         Box::new(WindowsAcl::default())
@@ -142,6 +160,14 @@ impl AccessReader for UnixAccess {
 /// One PowerShell helper for the whole sweep, started on first use.
 #[derive(Default)]
 struct WindowsAcl {
+    /// Set in the helper's environment on top of this process's (tests: what a parent passes on).
+    env: Vec<(String, String)>,
+    /// The elevated helper's reader: PowerShell by its full path, with only this environment
+    /// (nothing passed on from whoever started the helper).
+    clean: Option<(
+        std::path::PathBuf,
+        Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    )>,
     helper: Option<Helper>,
     broken: Option<String>,
     /// Times the helper had to be started again in a row (a slow answer, or it stopped).
@@ -166,10 +192,22 @@ impl Drop for Helper {
     }
 }
 
-const ACL_SCRIPT: &str = "$u = New-Object System.Text.UTF8Encoding $false; \
+/// .NET itself, never a cmdlet. A cmdlet comes from a module found through `PSModulePath`, which
+/// the helper inherits from whatever started PCTwin; started from PowerShell 7 (a terminal, a
+/// script, a CI runner), that path names PowerShell 7's own `Microsoft.PowerShell.Security`
+/// first, Windows PowerShell cannot load it, and `Get-Acl` is "not found": every folder's
+/// permissions read as unknown, so on a laptop with several people every place outside the
+/// homes became a blind spot and nothing in it moved. The same sections as `Get-Acl` (owner,
+/// group, access list), in the same SDDL.
+const ACL_SCRIPT: &str = "$u = [System.Text.UTF8Encoding]::new($false); \
     [Console]::InputEncoding = $u; [Console]::OutputEncoding = $u; \
+    $w = [System.Security.AccessControl.AccessControlSections]'Access, Owner, Group'; \
     while ($null -ne ($p = [Console]::In.ReadLine())) { \
-      try { $s = (Get-Acl -LiteralPath $p -ErrorAction Stop).Sddl; [Console]::Out.WriteLine('OK' + [char]9 + $s) } \
+      try { \
+        if ([System.IO.File]::Exists($p)) { $i = [System.IO.FileInfo]::new($p) } \
+        else { $i = [System.IO.DirectoryInfo]::new($p) } \
+        $s = $i.GetAccessControl($w).GetSecurityDescriptorSddlForm($w); \
+        [Console]::Out.WriteLine('OK' + [char]9 + $s) } \
       catch { [Console]::Out.WriteLine('NO' + [char]9 + $_.Exception.GetType().Name) } \
       [Console]::Out.Flush() }";
 
@@ -179,15 +217,24 @@ impl WindowsAcl {
             return Err(why.clone());
         }
         if self.helper.is_none() {
-            let exe = std::env::var_os("SystemRoot")
-                .map(|r| {
-                    std::path::PathBuf::from(r)
-                        .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
-                })
-                .unwrap_or_else(|| "powershell".into());
-            let mut command = Command::new(exe);
+            let mut command = match &self.clean {
+                Some((exe, env)) => {
+                    let mut c = Command::new(exe);
+                    c.env_clear().envs(env.iter().map(|(k, v)| (k, v)));
+                    c
+                }
+                None => Command::new(
+                    std::env::var_os("SystemRoot")
+                        .map(|r| {
+                            std::path::PathBuf::from(r)
+                                .join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
+                        })
+                        .unwrap_or_else(|| "powershell".into()),
+                ),
+            };
             command
                 .args(["-NoProfile", "-NonInteractive", "-Command", ACL_SCRIPT])
+                .envs(self.env.iter().map(|(k, v)| (k, v)))
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null());
@@ -277,6 +324,78 @@ impl AccessReader for WindowsAcl {
                 },
             },
             Err(why) => AccessFact::Unknown { why },
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    /// Started from PowerShell 7 (a terminal, a script, a CI runner), the helper inherits a
+    /// module path that names a module Windows PowerShell cannot load before its own (made here
+    /// as a stand-in for PowerShell 7's `Microsoft.PowerShell.Security`): every folder's
+    /// permissions are read all the same, never "unknown".
+    #[test]
+    fn permissions_are_read_whatever_module_path_the_helper_inherits() {
+        let dir = tempfile::tempdir().unwrap();
+        let module = dir.path().join("Microsoft.PowerShell.Security");
+        std::fs::create_dir_all(&module).unwrap();
+        std::fs::write(
+            module.join("Microsoft.PowerShell.Security.psd1"),
+            "@{ ModuleVersion='7.0.0.0'; CompatiblePSEditions=@('Core'); PowerShellVersion='7.0'; \
+             RootModule='Microsoft.PowerShell.Security.dll'; CmdletsToExport=@('Get-Acl') }",
+        )
+        .unwrap();
+        let path = format!(
+            "{};{}",
+            dir.path().display(),
+            std::env::var("PSModulePath").unwrap_or_default()
+        );
+        let mut reader = WindowsAcl {
+            env: vec![("PSModulePath".into(), path)],
+            ..WindowsAcl::default()
+        };
+        let folder = dir.path().join("plain");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        for p in [&folder, &file] {
+            let read = reader.read(p, None);
+            assert!(
+                matches!(read, AccessFact::Known(_)),
+                "{}: {read:?}",
+                p.display()
+            );
+        }
+    }
+
+    /// The elevated helper's reader: PowerShell by its full path with only a minimal
+    /// environment (nothing of the starter's) still reads every permission.
+    #[test]
+    fn the_clean_reader_reads_permissions_with_only_a_minimal_environment() {
+        let windows = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        let env: Vec<(std::ffi::OsString, std::ffi::OsString)> = vec![
+            ("SystemRoot".into(), windows.clone().into_os_string()),
+            ("windir".into(), windows.clone().into_os_string()),
+        ];
+        let mut reader = WindowsAcl {
+            clean: Some((
+                windows.join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+                env,
+            )),
+            ..WindowsAcl::default()
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.txt");
+        std::fs::write(&file, b"x").unwrap();
+        for p in [dir.path(), file.as_path()] {
+            let read = reader.read(p, None);
+            assert!(
+                matches!(read, AccessFact::Known(_)),
+                "{}: {read:?}",
+                p.display()
+            );
         }
     }
 }

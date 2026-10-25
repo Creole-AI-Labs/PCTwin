@@ -22,13 +22,54 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// The move protocol versions this release speaks. Each new version keeps the one before it
 /// (Engineering Plan 9.2: the current protocol and at least one version back), counting from the
 /// first released one. Version 2 added sending damaged blocks again (receipts say whether a block
-/// was written, and `SendAgain`); version 1 was never released, so nothing needs it.
+/// was written, and `SendAgain`); version 1 was never released, so nothing needs it. Version 3
+/// sends the old laptop's list in pages (the scan inventory version 2), so no laptop is too big
+/// to send. Version 4 added pausing and stopping told to the other laptop ([`HOLD_SINCE`],
+/// [`STOP_SINCE`]); with a laptop on version 3 a pause holds only the old laptop, and a stop
+/// looks to the other like a lost connection. No version was released before 4, so the oldest
+/// spoken is 3, one version back: version 2's one JSON document had none of the paged list's
+/// memory bounds, and a laptop saying it speaks only 2 could otherwise force it.
 pub const MOVE_PROTOCOL: Versions = Versions {
-    oldest: 2,
-    newest: 2,
+    oldest: 3,
+    newest: 4,
 };
 
-/// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33).
+/// The first move protocol version with `Hold` (a pause told to the other laptop).
+pub const HOLD_SINCE: u16 = 4;
+
+/// The first move protocol version with `Stopping` (a stop told to the other laptop) and
+/// `NotSent` (the old laptop says why it did not send a planned file). Version 4 has not been
+/// released, so it carries these with `Hold`.
+pub const STOP_SINCE: u16 = 4;
+
+/// The first move protocol version where copies cross once: the new laptop may answer a start
+/// with the fingerprint of an identical file it already received in this move, in the same
+/// person's things, and make the copy itself; and the old laptop sends a file after all when a
+/// skip is not accepted. Version 4 has not been released, so it carries this too.
+pub const COPY_SINCE: u16 = 4;
+
+/// The first move protocol version where "already there" is judged by the new laptop itself:
+/// it sends a key of its own (never its file's fingerprint), the old laptop answers with its
+/// file's fingerprint under that key (`Print`), and the new laptop compares. Nothing either
+/// laptop says can be matched against anything outside this move (the Engineering Plan's
+/// "keyed per move"). And finished files are told again by the file (`ItemDone`), never by a
+/// stream number another start may have reused. Version 4 has not been released.
+pub const KEYED_SINCE: u16 = 4;
+
+/// The first move protocol version where the new laptop may set a file down partway while the
+/// move runs: a start, end or print for a place whose drive paused the move (Quarantine Design,
+/// step 4) is answered with `ResumeFrom`, nothing more of the file is written there, and the old
+/// laptop picks it up from that ticket once the move carries on. It goes with `Hold`, which
+/// tells the old laptop of the pause. Version 4 has not been released, so it carries this too.
+pub const SET_DOWN_SINCE: u16 = 4;
+
+/// The first move protocol version whose list (the scan inventory version 3) carries the
+/// person's own essentials in the order they move, so the plan the new laptop shows is the
+/// order the old laptop sends in. Only the order crosses, never when anything was used. Version
+/// 4 has not been released, so it carries this too.
+pub const PERSONAL_SINCE: u16 = 4;
+
+/// Message kind, kept apart from the transfer's own (1 to 15) and the inventory's (32, 33, 35).
 const KIND: u8 = 34;
 const LEN: usize = 5;
 

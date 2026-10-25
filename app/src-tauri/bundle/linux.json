@@ -1,0 +1,16 @@
+{
+  "build": {
+    "beforeBuildCommand": "node ../scripts/stage-helpers.mjs release && pnpm build"
+  },
+  "bundle": {
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/pctwin/pctwin-helper": "binaries/plain/pctwin-helper",
+          "/usr/lib/pctwin/pctwin-handover": "binaries/plain/pctwin-handover",
+          "/usr/share/polkit-1/actions/com.creoleailabs.pctwin.helper.policy": "../../crates/pctwin-helper-os/packaging/linux/com.creoleailabs.pctwin.helper.policy"
+        }
+      }
+    }
+  }
+}

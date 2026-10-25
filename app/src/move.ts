@@ -1,23 +1,28 @@
 /**
  * The move in progress and its results, as the screens see them (X01, X02, F09, X05, X10, R01, R02).
  *
- * Every screen here is a view model: props in, events out. The move's commands and events are not
- * in the bridge (bridge.ts) yet, so nothing here calls the engine. What the shell must provide:
+ * Every screen here is a view model: props in, events out. The shell's commands and events, called
+ * and parsed in bridge.ts (src-tauri/src/moving.rs):
  *
  * Commands (Tauri `invoke`):
+ * - `move_begin(fallback)`: start this laptop's side with the paired link; `fallback` names, in the
+ *   person's language, the folder in the home that stands for one the new laptop lacks.
+ * - `move_approve(plan, approve)`: the person's answer to exactly the plan revision on screen (M23).
  * - `move_pause()`: ask the move to pause at a safe point, which is a block boundary, not the end
  *   of a file: only what is already on its way finishes first (at most 32 MiB, the transfer's
  *   in-flight limit, IN_FLIGHT_BYTES in crates/pctwin-transfer); the file being written does not.
  *   Replies at once; the state then reads "pausing" until `move-state` says "paused".
  * - `move_resume()`: continue a paused move, or withdraw a pause that has not completed.
  * - `move_stop()`: stop the rest of the move. What is already copied and checked stays. Not undo.
- * - `move_report(filter?)`: the finished move's items, as `ReportItem[]` (paged by the shell for big moves).
+ * - `move_report()`: the finished move's items, as `ReportItem[]` (the screen shows a page at a time).
  * - `set_window_mode("mini" | "everyday" | "expanded")`: exists already (native.ts).
  *
  * Events (Tauri `listen`):
- * - `move-progress`: a `MoveProgress` (the pairing labels, each group's measured counts, the totals), whenever a measured number changes (a few times a second at most).
- * - `move-state`: `{ state: RunState }` when the run state changes.
+ * - `move-stage`: what the move is at before files move (scanning, waiting for the other laptop, moving).
+ * - `move-plan`: the plan for the person to approve (`PlanView`, new laptop only).
+ * - `move-progress`: a `MoveProgress` (the old laptop's label, each group's measured counts, the totals, the run state), whenever a measured number changes (a few times a second at most).
  * - `move-finished`: `MoveOutcome` once nothing is waiting, copying or checking.
+ * - `move-problem`: the move could not go on (the connection was lost, the plan was not approved, or something else).
  *
  * Mirrors: `ItemStatus` and `Reason` in crates/pctwin-types (result.rs), the write steps in
  * crates/pctwin-journal (State), and `CheckedFrom` / `WhyMemory` in the gate's read-back
@@ -48,7 +53,7 @@ export const FAILED_REASONS = [
 export type FailedReason = (typeof FAILED_REASONS)[number];
 
 /** The reasons that belong to `needs-action` (the person must finish a step). */
-export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand"] as const;
+export const NEEDS_ACTION_REASONS = ["sign-in", "activation", "permission", "online-only", "manual-install", "restart", "finish-by-hand", "parts-missing"] as const;
 export type NeedsActionReason = (typeof NEEDS_ACTION_REASONS)[number];
 
 export type Reason = FailedReason | NeedsActionReason;
@@ -106,10 +111,17 @@ export function whyMemoryKey(why: WhyMemory): string {
 }
 
 /**
- * Where the bytes of a check came from (the gate's `CheckedFrom`). Both are real checks; they are
- * never shown as the same line. A file checked through the cache says so, and why.
+ * How a copied file is known to be a true copy. Read back from the drive, or through this laptop's
+ * memory (the gate's `CheckedFrom`, and why); an identical file already on the new laptop; checked
+ * before a restart and proven again after; or, on the old laptop, checked by the new laptop. Each is
+ * its own line; none is shown as another.
  */
-export type Evidence = { from: "drive" } | { from: "memory"; why: WhyMemory };
+export type Evidence =
+  | { from: "drive" }
+  | { from: "memory"; why: WhyMemory }
+  | { from: "already-there" }
+  | { from: "recovered" }
+  | { from: "new-laptop" };
 
 /**
  * A finished item and how it was checked. Only a copied file carries evidence: it was read back,
@@ -121,8 +133,15 @@ export type Outcome =
   | { status: "failed"; reason: FailedReason; evidence?: never }
   | { status: "needs-action"; reason: NeedsActionReason; evidence?: never };
 
+/**
+ * What the report adds beside a line's result (the shell's `ReportNote`): it changed on the old
+ * laptop after the scan and was sent as it is now, or it was gone before it could be sent.
+ */
+export const REPORT_NOTES = ["changed-since-scan", "no-longer-there", "time-not-kept"] as const;
+export type ReportNote = (typeof REPORT_NOTES)[number];
+
 /** One line of the detailed report (R02). Names and paths are the person's own text. */
-export type ReportItem = { id: string; name: string; source: string; destination?: string } & Outcome;
+export type ReportItem = { id: string; name: string; source: string; destination?: string; note?: ReportNote } & Outcome;
 
 /* ---------- Progress: measured numbers only ---------- */
 
@@ -176,8 +195,8 @@ export function groupState(c: Counts): GroupState {
 
 export type MoveProgress = {
   state: RunState;
-  /** The two laptops, as pairing labelled them. */
-  laptops: { old: Label; new: Label };
+  /** The old laptop's label as pairing showed it (the new laptop has none of its own); null when not known. */
+  laptops: { old: Label | null };
   /** The groups of the plan, each with its own measured counts. */
   groups: MoveGroup[];
   counts: Counts;
@@ -189,8 +208,11 @@ export type MoveProgress = {
   speed?: Range;
   /** Whole minutes left as a range; absent until it can be measured. Never a promise. */
   minutesLeft?: Range;
-  /** Something the person may need to act on. `label` is the laptop that is low on battery. */
-  notice?: { kind: "low-battery"; label: string } | { kind: "link-lost" };
+  /**
+   * Something the person may need to act on: this laptop is low on battery (`paused`: at the safe
+   * limit, so the move was paused for it), the connection dropped, or a drive is not keeping files.
+   */
+  notice?: { kind: "low-battery"; paused: boolean } | { kind: "link-lost" } | { kind: "drive-problem"; place: GroupName };
 };
 
 /** A count of zero for every status, to fill in. */
@@ -231,7 +253,12 @@ export const PHASE_STEP: Record<Phase, string> = {
 };
 
 /** What R01 shows when a move ends. `stopped` means the person stopped it early. */
+/** Another person in the move: their things, counted (never named file by file). `atSignIn`: handed over at their next sign-in (M32). */
+export type PersonOutcome = { name: string; copied: number; needsAction: number; failed: number; atSignIn: boolean };
+
 export type MoveOutcome = {
+  /** The other people in the move, one line each (absent in the screens' own samples). */
+  people?: PersonOutcome[];
   /** Items by how they ended: one count for each of the engine's six statuses. */
   byStatus: Record<ItemStatus, number>;
   /** Items that never started or never finished because the move was stopped. Zero unless `stopped`. */
@@ -239,9 +266,23 @@ export type MoveOutcome = {
   /** Bytes written and read back. */
   bytesChecked: number;
   stopped: boolean;
+  /** It ended early because something went wrong between the laptops, not because a person stopped it (absent in the screens' own samples). */
+  brokeOff?: boolean;
   /** Copied files checked from this laptop's memory, not the drive. */
   checkedFromMemory: number;
+  /** The after-move check (absent in the screens' own samples that predate it). */
+  afterMove?: AfterMove;
 };
+
+/** One kind of file after the move: how many the plan held, and how many are copied and checked. */
+export type KindCount = { planned: number; copied: number };
+
+/** The kinds the after-move check counts, in the order it lists them (as the scan counts them). */
+export const KINDS = ["photos", "videos", "music", "documents"] as const;
+export type Kind = (typeof KINDS)[number];
+
+/** The mover's photos, videos, music and documents in the plan, each with how many arrived checked. */
+export type AfterMove = Record<Kind, KindCount>;
 
 /* ---------- Formatting ---------- */
 

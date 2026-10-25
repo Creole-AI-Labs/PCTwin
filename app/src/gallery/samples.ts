@@ -18,6 +18,11 @@ export type Sample = {
 
 const FILES = import.meta.glob<{ samples: Sample[] }>("./samples/*.tsx", { eager: true });
 
+/** Each group file's name ("quicksend.tsx") and how many samples it gave, in file order. */
+export const GROUPS: { file: string; count: number }[] = Object.keys(FILES)
+  .sort()
+  .map((key) => ({ file: key.split("/").pop() ?? key, count: FILES[key].samples.length }));
+
 /** Every sample from every group, in file then listed order. */
 export const SAMPLES: Sample[] = Object.keys(FILES)
   .sort()

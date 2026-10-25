@@ -257,8 +257,10 @@ async fn an_offer_with_a_persons_things_is_refused() {
     let (mut a, mut b) = pair();
     let (_, got) = tokio::join!(
         async {
-            let _ = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL).await;
-            let _ = pctwin_transfer::send_inventory(&mut a, &record).await;
+            let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+                .await
+                .unwrap_or(pctwin_transfer::PAGED_FROM);
+            let _ = pctwin_transfer::send_inventory(&mut a, &record, v).await;
         },
         receive_offer(&mut b)
     );
@@ -286,10 +288,10 @@ async fn declined_files_sent_anyway_are_refused_and_never_written() {
     let (record, jobs) = offer.into_parts();
     let (mut a, mut b) = pair();
     let greedy = async {
-        pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+        let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
             .await
             .unwrap();
-        pctwin_transfer::send_inventory(&mut a, &record)
+        pctwin_transfer::send_inventory(&mut a, &record, v)
             .await
             .unwrap();
         let _answer = a.recv().await.unwrap();
@@ -398,10 +400,10 @@ async fn a_sender_cannot_choose_where_a_file_lands() {
     }
     let (mut a, mut b) = pair();
     let hostile = async {
-        pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
+        let v = pctwin_transfer::agree_version(&mut a, pctwin_transfer::MOVE_PROTOCOL)
             .await
             .unwrap();
-        pctwin_transfer::send_inventory(&mut a, &record)
+        pctwin_transfer::send_inventory(&mut a, &record, v)
             .await
             .unwrap();
         let _answer = a.recv().await.unwrap();
@@ -418,9 +420,13 @@ async fn a_sender_cannot_choose_where_a_file_lands() {
     let (_, receipt) = no_hang(async { tokio::join!(hostile, receiving) }).await;
     assert!(!dest.path().join("AppData").exists());
     assert!(!dest.path().join("letter.txt").exists());
+    // The receipt keeps the typed reason, not only the words.
     assert!(matches!(
         outcome(&receipt, "letter.txt"),
-        Outcome::Failed { .. }
+        Outcome::Failed {
+            cause: pctwin_transfer::Cause::RefusedBySafetyCheck,
+            ..
+        }
     ));
     // The files sent where the offer said still arrive.
     assert!(matches!(
@@ -450,7 +456,7 @@ async fn a_file_that_grew_after_it_was_offered_is_not_copied() {
     let received = received.unwrap();
     assert!(!dest.path().join("letter.txt").exists());
     assert!(
-        matches!(outcome(&received, "letter.txt"), Outcome::Failed { why } if why.contains("changed since it was chosen")),
+        matches!(outcome(&received, "letter.txt"), Outcome::Failed { cause: pctwin_transfer::Cause::ChangedDuringMove, why } if why.contains("changed since it was chosen")),
         "{:?}",
         outcome(&received, "letter.txt")
     );
@@ -488,6 +494,326 @@ async fn every_received_file_is_marked_as_from_the_internet() {
             download_mark_of(&dest.path().join(path)),
             Some(DownloadMark::Internet),
             "{path}"
+        );
+    }
+}
+
+/// A send the sender stopped before it began ends with a receipt on both sides: every accepted
+/// file failed, none arrived, and nothing is written as if it had.
+#[tokio::test]
+async fn a_stopped_send_ends_with_a_receipt_and_nothing_is_called_arrived() {
+    let old = tempfile::tempdir().unwrap();
+    let new = tempfile::tempdir().unwrap();
+    let offer = Offer::of(&chosen(old.path())).unwrap();
+    let live = pctwin_move::Live::default();
+    live.control.stop();
+    let (mut a, mut b) = pair();
+    let j = journal(new.path());
+    let (sent, got) = no_hang(async {
+        tokio::join!(
+            async {
+                // Stopped while it waits for the answer: it ends at once, and the connection
+                // closes (as the app's does when a send ends).
+                let sent = pctwin_quicksend::send_live(&mut a, offer, &live).await;
+                drop(a);
+                sent
+            },
+            async {
+                let incoming = receive_offer(&mut b).await.unwrap();
+                incoming.accept(&mut b, new.path(), None, &j, "me").await
+            }
+        )
+    })
+    .await;
+    let sent = sent.unwrap();
+    assert_eq!(sent.lines.len(), 3);
+    for line in &sent.lines {
+        assert!(
+            !matches!(
+                line.outcome,
+                Outcome::Arrived { .. } | Outcome::AlreadyThere { .. }
+            ),
+            "{line:?}"
+        );
+    }
+    if let Ok(got) = got {
+        for line in &got.lines {
+            assert!(!matches!(line.outcome, Outcome::Arrived { .. }), "{line:?}");
+        }
+    }
+    assert!(!new.path().join("letter.txt").exists());
+}
+
+/// A channel that counts the bytes it sends and, after `stop_after` messages, stops `live` (the
+/// receiver's person pressing stop part way through).
+struct Counting {
+    inner: Mem,
+    sent: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    messages: u64,
+    stop_after: Option<(u64, pctwin_move::Live)>,
+}
+
+impl Channel for Counting {
+    async fn send(&mut self, data: &[u8]) -> Result<(), ChannelError> {
+        self.sent
+            .fetch_add(data.len() as u64, std::sync::atomic::Ordering::SeqCst);
+        self.messages += 1;
+        if let Some((n, live)) = &self.stop_after
+            && self.messages >= *n
+        {
+            live.control.stop();
+        }
+        self.inner.send(data).await
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>, ChannelError> {
+        self.inner.recv().await
+    }
+}
+
+/// Bytes that do not compress (a photo's), so what crosses is what is sent.
+fn noise(len: usize, seed: u32) -> Vec<u8> {
+    let mut x = seed.wrapping_mul(2_654_435_761) | 1;
+    (0..len)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+/// "Send the missing pieces" (Task List; Q19): a send stopped part way is followed by an offer of
+/// only what did not arrive, from the receipt. The receiver keeps what arrived, and a file it
+/// holds partway is continued from its own record of the blocks it has: they are not sent again.
+#[tokio::test]
+async fn the_missing_pieces_are_offered_and_sent_once_more_and_nothing_else() {
+    let old = tempfile::tempdir().unwrap();
+    let new = tempfile::tempdir().unwrap();
+    let big = noise(6 * 1024 * 1024, 7);
+    write(&old.path().join("Holiday/beach.jpg"), &big);
+    write(&old.path().join("letter.txt"), b"Dear Ada");
+    let picked = vec![old.path().join("Holiday"), old.path().join("letter.txt")];
+    let offer = Offer::of(&picked).unwrap();
+    let laptop = offer.laptop();
+    let j = journal(new.path());
+
+    // The first send, stopped by the receiver's person part way through the big file.
+    let stop = pctwin_move::Live::default();
+    let (a, b) = pair();
+    let (mut a, mut b) = (
+        Counting {
+            inner: a,
+            sent: Default::default(),
+            messages: 0,
+            stop_after: None,
+        },
+        Counting {
+            inner: b,
+            sent: Default::default(),
+            messages: 0,
+            stop_after: Some((12, stop.clone())),
+        },
+    );
+    let (first, _) = no_hang(async {
+        tokio::join!(
+            async { pctwin_quicksend::send(&mut a, offer).await.unwrap() },
+            async {
+                let incoming = receive_offer(&mut b).await.unwrap();
+                incoming
+                    .accept_live(&mut b, new.path(), None, &j, "me", &stop)
+                    .await
+            }
+        )
+    })
+    .await;
+    assert!(
+        matches!(outcome(&first, "Holiday/beach.jpg"), Outcome::Failed { .. }),
+        "{first:?}"
+    );
+
+    // The follow-up: only what is missing, from the receipt.
+    let again = Offer::of_again(&picked, laptop)
+        .unwrap()
+        .only_missing(&first);
+    let offered: Vec<String> = again.files().into_iter().map(|f| f.path).collect();
+    let arrived_first = matches!(outcome(&first, "letter.txt"), Outcome::Arrived { .. });
+    assert!(offered.contains(&"Holiday/beach.jpg".to_string()));
+    assert_eq!(offered.contains(&"letter.txt".to_string()), !arrived_first);
+    let (a, b) = pair();
+    let mut a = Counting {
+        inner: a,
+        sent: Default::default(),
+        messages: 0,
+        stop_after: None,
+    };
+    let crossed = a.sent.clone();
+    let mut b = Counting {
+        inner: b,
+        sent: Default::default(),
+        messages: 0,
+        stop_after: None,
+    };
+    let (second, got) = no_hang(async {
+        tokio::join!(
+            async { pctwin_quicksend::send(&mut a, again).await.unwrap() },
+            async {
+                let incoming = receive_offer(&mut b).await.unwrap();
+                incoming
+                    .accept(&mut b, new.path(), None, &j, "me")
+                    .await
+                    .unwrap()
+            }
+        )
+    })
+    .await;
+    assert!(matches!(
+        outcome(&second, "Holiday/beach.jpg"),
+        Outcome::Arrived { .. }
+    ));
+    assert!(matches!(
+        outcome(&got, "Holiday/beach.jpg"),
+        Outcome::Arrived { .. }
+    ));
+    assert_eq!(
+        std::fs::read(new.path().join("Holiday/beach.jpg")).unwrap(),
+        big
+    );
+    // Blocks the receiver already had were not sent again.
+    let sent_again = crossed.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(
+        sent_again < big.len() as u64,
+        "{sent_again} bytes crossed again for a file of {}",
+        big.len()
+    );
+}
+
+/// Everything under `dir`, as paths relative to it, sorted.
+fn every_file(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_dir() {
+                todo.push(e.path());
+            } else {
+                let rel = e
+                    .path()
+                    .strip_prefix(dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push(rel);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// QS06: an archive, a program, a document with macros and a shortcut arrive exactly as sent:
+/// nothing is unpacked, opened or run, and nothing appears beside them.
+#[tokio::test]
+async fn harmful_looking_files_arrive_as_they_are_and_nothing_is_unpacked_or_run() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    // A zip's own header and a tiny archive-bomb-like body; a Windows program's header; a
+    // macro document; a Windows shortcut.
+    let mut bomb = b"PK\x03\x04".to_vec();
+    bomb.extend(std::iter::repeat_n(0u8, 4096));
+    let things: Vec<(&str, Vec<u8>)> = vec![
+        ("bomb.zip", bomb),
+        ("setup.exe", b"MZ\x90\x00not really a program".to_vec()),
+        (
+            "report.docm",
+            b"PK\x03\x04[Content_Types].xml vbaProject.bin".to_vec(),
+        ),
+        ("open me.lnk", b"L\x00\x00\x00\x01\x14\x02\x00".to_vec()),
+    ];
+    for (name, bytes) in &things {
+        write(&old.path().join(name), bytes);
+    }
+    let picked: Vec<_> = things.iter().map(|(n, _)| old.path().join(n)).collect();
+    let (_, received) = run(
+        Offer::of(&picked).unwrap(),
+        async |incoming: Incoming, ch: &mut Mem| {
+            Some(
+                incoming
+                    .accept(ch, dest.path(), None, &journal(jdir.path()), "1001")
+                    .await
+                    .unwrap(),
+            )
+        },
+    )
+    .await;
+    let received = received.unwrap();
+    for (name, bytes) in &things {
+        assert!(
+            matches!(outcome(&received, name), Outcome::Arrived { .. }),
+            "{name}"
+        );
+        assert_eq!(
+            &std::fs::read(dest.path().join(name)).unwrap(),
+            bytes,
+            "{name} unchanged"
+        );
+    }
+    let mut want: Vec<String> = things.iter().map(|(n, _)| (*n).to_string()).collect();
+    want.sort();
+    assert_eq!(
+        every_file(dest.path()),
+        want,
+        "nothing unpacked or made beside them"
+    );
+}
+
+/// QS04: the same things offered twice, as the same offer again and as a fresh one, into the same
+/// folder: nothing is written twice and no numbered copy appears. The receiver finds each file
+/// already there only once its bytes arrived (the sender is never told what is here), so the
+/// sender's receipt says it arrived and the receiver's that it was already there.
+#[tokio::test]
+async fn a_duplicate_offer_writes_nothing_twice() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let picked = chosen(old.path());
+    let first = Offer::of(&picked).unwrap();
+    let laptop = first.laptop();
+    let accept = async |incoming: Incoming, ch: &mut Mem| {
+        Some(
+            incoming
+                .accept(ch, dest.path(), None, &journal(jdir.path()), "1001")
+                .await
+                .unwrap(),
+        )
+    };
+    let (_, received) = run(first, accept).await;
+    assert!(received.is_some());
+    let after_first = every_file(dest.path());
+    for again in [
+        Offer::of_again(&picked, laptop).unwrap(),
+        Offer::of(&picked).unwrap(),
+    ] {
+        let (sent, received) = run(again, accept).await;
+        let received = received.unwrap();
+        for path in ["Holiday/beach.jpg", "Holiday/day 2/boat.jpg", "letter.txt"] {
+            assert!(
+                matches!(outcome(&received, path), Outcome::AlreadyThere { .. }),
+                "{path}: {:?}",
+                outcome(&received, path)
+            );
+            assert!(
+                matches!(outcome(&sent, path), Outcome::Arrived { .. }),
+                "{path} on the sender: {:?}",
+                outcome(&sent, path)
+            );
+        }
+        assert_eq!(
+            every_file(dest.path()),
+            after_first,
+            "nothing new was written"
         );
     }
 }

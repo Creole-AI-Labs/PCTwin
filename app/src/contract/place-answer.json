@@ -1,0 +1,21 @@
+[
+  {
+    "freeBytes": 512000000000,
+    "kind": "chosen",
+    "path": "E:\\Photos"
+  },
+  {
+    "freeBytes": null,
+    "kind": "chosen",
+    "path": "/Volumes/Backup/Photos"
+  },
+  {
+    "kind": "not-chosen"
+  },
+  {
+    "kind": "no-safe-name"
+  },
+  {
+    "kind": "cannot-open"
+  }
+]

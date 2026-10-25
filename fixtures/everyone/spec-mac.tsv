@@ -1,0 +1,39 @@
+# who	path	size	what must happen	how it is kept (see plant.py)
+pctwinmover	~/Documents/mv-letter.txt	1200	moves	own
+pctwinmover	~/Documents/Letters/2021/mv-old-letter.txt	1300	moves	own
+pctwinmover	~/Desktop/mv-desk-note.txt	300	moves	own
+pctwinmover	~/Downloads/mv-download.pdf	50000	moves	own
+pctwinmover	~/Pictures/2019/holiday/mv-beach.jpg	250000	moves	own
+pctwinmover	~/Music/mv-song.mp3	400000	moves	own
+pctwinmover	~/Videos/mv-clip.mp4	3000000	moves	own
+pctwinmover	~/odd/place/deep/a/b/c/d/mv-deep.txt	100	moves	own
+pctwinmover	~/Documents/name with spaces/mv-spaces file.txt	77	moves	own
+pctwinmover	~/Documents/ünïcödé/mv-ünï 写真.txt	88	moves	own
+pctwinmover	~/Documents/mv-empty.txt	0	moves	own
+pctwinmover	~/Documents/mv-copy-a.bin	2000000	moves	own
+pctwinmover	~/Documents/backup/mv-copy-a.bin	2000000	moves	own
+pctwinmover	~/Projects/website/mv-index.html	4000	moves	own
+pctwinmover	~/Projects/website/assets/mv-logo.png	9000	moves	own
+pctwinmover	~/mv-nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn.txt	64	moves	own
+pctwinmover	/Users/Shared/pctwin-lab/mover-only/projects/mv-outside-home.txt	500	moves	only
+pctwinmover	/Users/Shared/pctwin-lab/mover-only/mv-second.txt	600	moves	only
+shared	/Users/Shared/pctwin-shared/shared-menu.txt	900	moves	shared
+shared	/Users/Shared/pctwin-shared/sub/shared-rota.txt	901	moves	shared
+pctwinbea	~/Documents/bea-diary.txt	1500	moves	own
+pctwinbea	~/Pictures/bea-photo.jpg	300000	moves	own
+pctwinbea	~/Desktop/bea-desk.txt	200	moves	own
+pctwinbea	~/odd/bea-odd-place.txt	210	moves	own
+pctwinbea	~/Music/bea-song.mp3	123456	moves	own
+pctwinbea	~/Documents/bea-copy.bin	1500000	moves	own
+pctwinbea	~/Documents/old/bea-copy.bin	1500000	moves	own
+pctwinbea	/Users/Shared/pctwin-lab/bea-only/bea-outside.txt	220	moves	only
+pctwincarl	~/Documents/carl-notes.txt	999	moves	own
+pctwincarl	~/Music/carl-tune.mp3	45000	moves	own
+pctwincarl	~/Documents/carl-big.bin	2500000	moves	own
+pctwincarl	~/Videos/carl-video.mp4	700000	moves	own
+pctwincarl	~/Desktop/carl-todo.txt	120	moves	own
+pctwindan	~/Documents/dan-secret.txt	500	stays	own
+pctwindan	~/Pictures/dan-photo.jpg	5000	stays	own
+pctwindan	~/Desktop/dan-desk.txt	150	stays	own
+pctwindan	/Users/Shared/pctwin-lab/dan-only/dan-outside.txt	300	stays	only
+root	/Users/Shared/pctwin-lab/locked/locked-thing.txt	100	blind	locked

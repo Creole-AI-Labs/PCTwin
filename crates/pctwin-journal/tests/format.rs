@@ -18,6 +18,7 @@ fn planned() -> PlannedWrite {
         download_mark: None,
         item: ItemId::from_hex(&format!("01{}", "0".repeat(30))).unwrap(),
         source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+        scope: Default::default(),
         destination: "me".into(),
         path: "Documents/f1.txt".into(),
         size: 1000,

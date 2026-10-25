@@ -8,6 +8,7 @@ use pctwin_record::{
 use serde::Serialize;
 
 use crate::measure::{is_cloud_only, is_icloud_stub_name, measure};
+use crate::rules::{Kind, Rules};
 
 /// What scanning one folder found.
 #[derive(Debug, Clone, Default)]
@@ -74,7 +75,20 @@ pub fn scan_managed_folder(
     root: &Path,
     managed: ManagedBy,
 ) -> Scan {
-    let mut scan = scan_folder_items(laptop, owner, place, root);
+    scan_managed_folder_with(laptop, owner, place, root, managed, &Rules::shipped())
+}
+
+/// As [`scan_managed_folder`], with the folders the rules file names anywhere (`.git`,
+/// `node_modules`) taken from `rules`.
+pub(crate) fn scan_managed_folder_with(
+    laptop: &LaptopId,
+    owner: &Owner,
+    place: &Place,
+    root: &Path,
+    managed: ManagedBy,
+    rules: &Rules,
+) -> Scan {
+    let mut scan = scan_folder_items(laptop, owner, place, root, rules);
     if managed == ManagedBy::Organisation {
         for item in &mut scan.items {
             item.managed_by = ManagedBy::Organisation;
@@ -86,12 +100,21 @@ pub fn scan_managed_folder(
     scan
 }
 
-fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Path) -> Scan {
+fn scan_folder_items(
+    laptop: &LaptopId,
+    owner: &Owner,
+    place: &Place,
+    root: &Path,
+    rules: &Rules,
+) -> Scan {
     let mut scan = Scan::default();
-    // Each pending folder carries its path inside `root` and, below the top, its item's index.
-    let mut pending: Vec<(PathBuf, Vec<ItemName>, Option<usize>)> =
-        vec![(root.to_path_buf(), Vec::new(), None)];
-    while let Some((dir, parts, item)) = pending.pop() {
+    // Each pending folder carries its path inside `root`, below the top its item's index, and
+    // whether it is inside a folder that moves as one whole (a package, a project's history):
+    // there nothing is looked for by name and nothing is counted by kind (the whole was counted
+    // as itself).
+    let mut pending: Vec<(PathBuf, Vec<ItemName>, Option<usize>, bool)> =
+        vec![(root.to_path_buf(), Vec::new(), None, false)];
+    while let Some((dir, parts, item, whole)) = pending.pop() {
         let Ok(entries) = std::fs::read_dir(crate::sweep::for_listing(&dir)) else {
             if let Some(i) = item {
                 scan.items[i].inclusion = left_out(LeftOutReason::Unreadable);
@@ -120,6 +143,7 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
                 place: place.clone(),
                 path: item_path.clone(),
                 size_bytes,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: None,
@@ -144,19 +168,28 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
             } else if kind.is_symlink() {
                 scan.links += 1;
             } else if kind.is_dir() {
-                if let Some(package) = package_kind(&name) {
+                let row = (!whole).then(|| rules.anywhere(&name)).flatten();
+                let package = (!whole).then(|| package_kind(&name)).flatten();
+                if row.is_some_and(|r| r.kind == Kind::Rebuildable) {
+                    // Made again on the new laptop: one item with its whole size, left out.
                     let size = measure(&path).bytes;
-                    scan.items
-                        .push(make(package.item_kind(), size, Inclusion::Included));
+                    let mut it = make(ItemKind::Folder, size, left_out(LeftOutReason::Rebuildable));
+                    it.portability = Portability::Rebuildable;
+                    scan.items.push(it);
+                } else if package.is_some() || row.is_some_and(|r| r.kind == Kind::KeepWhole) {
+                    // Moves as one whole, as its files, below one package item.
                     match package {
-                        Package::PhotosLibrary => count_library(&path, &mut scan.counts),
-                        Package::Document => scan.counts.documents += 1,
-                        Package::App | Package::Other => {}
+                        Some(Package::PhotosLibrary) => count_library(&path, &mut scan.counts),
+                        Some(Package::Document) => scan.counts.documents += 1,
+                        _ => {}
                     }
+                    scan.items
+                        .push(make(ItemKind::Package, 0, Inclusion::Included));
+                    pending.push((path, item_parts, Some(scan.items.len() - 1), true));
                 } else {
                     scan.items
                         .push(make(ItemKind::Folder, 0, Inclusion::Included));
-                    pending.push((path, item_parts, Some(scan.items.len() - 1)));
+                    pending.push((path, item_parts, Some(scan.items.len() - 1), whole));
                 }
             } else {
                 let stub = is_icloud_stub_name(&name);
@@ -166,7 +199,9 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
                 } else {
                     &name
                 };
-                count(category(category_name), &mut scan.counts);
+                if !whole {
+                    count(category(category_name), &mut scan.counts);
+                }
                 let inclusion = if cloud_only {
                     // Its contents are in the cloud, not on this laptop; the scan never fetches it.
                     left_out(LeftOutReason::CloudOnly)
@@ -174,9 +209,12 @@ fn scan_folder_items(laptop: &LaptopId, owner: &Owner, place: &Place, root: &Pat
                     Inclusion::Included
                 };
                 let size = if stub { 0 } else { meta.len() };
-                let item = make(ItemKind::File, size, inclusion);
+                let mut item = make(ItemKind::File, size, inclusion);
                 if !stub {
-                    scan.stamps.push((item.id, Stamp::of(&meta)));
+                    let stamp = Stamp::of(&meta);
+                    // Carried in the record too, so the move can tell a file changed since the scan.
+                    item.modified_ns = stamp.modified_ns;
+                    scan.stamps.push((item.id, stamp));
                 }
                 scan.items.push(item);
             }
@@ -241,15 +279,6 @@ pub(crate) enum Package {
     Other,
 }
 
-impl Package {
-    pub(crate) fn item_kind(self) -> ItemKind {
-        match self {
-            Package::App => ItemKind::App,
-            _ => ItemKind::Folder,
-        }
-    }
-}
-
 pub(crate) fn package_kind(name: &str) -> Option<Package> {
     let ext = extension(name)?;
     Some(match ext.as_str() {
@@ -267,8 +296,10 @@ fn extension(name: &str) -> Option<String> {
     (!stem.is_empty() && !ext.is_empty()).then(|| ext.to_lowercase())
 }
 
+/// What kind of file a name says it is, by its extension, as the scan counts it ([`Counts`]). The
+/// after-move check counts the same way, so the two can be held side by side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Category {
+pub enum Category {
     Photo,
     Video,
     Music,
@@ -276,7 +307,8 @@ pub(crate) enum Category {
     Other,
 }
 
-pub(crate) fn category(name: &str) -> Category {
+/// The [`Category`] of a file called `name`.
+pub fn category(name: &str) -> Category {
     let Some(ext) = extension(name) else {
         return Category::Other;
     };

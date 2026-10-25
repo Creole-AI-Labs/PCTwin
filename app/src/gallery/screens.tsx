@@ -13,6 +13,9 @@ import "../styles.css";
 import "./gallery.css";
 import { FooterProvider } from "../screens/FrameFooter";
 import { FRAME, SAMPLES, type Sample } from "./samples";
+import { applyToDocument } from "../motion/preference";
+
+applyToDocument();
 
 function param(name: string): string | null {
   return new URLSearchParams(window.location.search).get(name);

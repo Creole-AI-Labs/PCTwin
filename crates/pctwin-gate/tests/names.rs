@@ -1,7 +1,7 @@
 //! Cross-system name rules (engineering notes): a name that a system cannot store is changed to
 //! a safe lookalike, and every change is reported so nothing is renamed silently.
 
-use pctwin_gate::{MAX_COMPONENT_BYTES, NameChange, Platform, convert_name};
+use pctwin_gate::{MAX_COMPONENT_BYTES, NameChange, Platform, convert_name, name_units};
 use proptest::prelude::*;
 
 fn win(name: &str) -> (String, Vec<NameChange>) {
@@ -67,9 +67,13 @@ fn trailing_dots_and_spaces_are_trimmed_on_windows() {
 
 #[test]
 fn a_name_made_longer_by_lookalikes_is_shortened_keeping_its_extension() {
-    let name = format!("{}.docx", "?".repeat(120)); // each ? becomes a 3-byte lookalike
+    let name = format!("{}.docx", "?".repeat(300)); // each ? becomes a lookalike
     let (out, changes) = win(&name);
-    assert!(out.len() <= MAX_COMPONENT_BYTES, "{}", out.len());
+    assert!(
+        name_units(&out) <= MAX_COMPONENT_BYTES,
+        "{}",
+        name_units(&out)
+    );
     assert!(out.ends_with(".docx"));
     assert!(changes.contains(&NameChange::Shortened));
 }
@@ -86,7 +90,7 @@ proptest! {
         let c = convert_name(&s, Platform::Windows);
         let n = &c.name;
         prop_assert!(!n.is_empty());
-        prop_assert!(n.len() <= MAX_COMPONENT_BYTES);
+        prop_assert!(name_units(n) <= MAX_COMPONENT_BYTES);
         prop_assert!(!n.chars().any(|ch| "<>:\"/\\|?*".contains(ch) || (ch as u32) < 32));
         prop_assert!(!n.ends_with('.') && !n.ends_with(' '));
         let stem = n.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
@@ -132,8 +136,8 @@ fn names_that_look_like_short_name_aliases_are_renamed_on_windows() {
 
 #[test]
 fn shortening_and_trimming_settle_on_a_clean_name() {
-    let (name, changes) = win(&format!("{} :", "a".repeat(253)));
-    assert!(name.len() <= MAX_COMPONENT_BYTES);
+    let (name, changes) = win(&format!("{} :", "a".repeat(260)));
+    assert!(name_units(&name) <= MAX_COMPONENT_BYTES);
     assert!(!name.ends_with(' ') && !name.ends_with('.'), "{name:?}");
     assert!(changes.contains(&NameChange::Shortened));
 }
@@ -144,7 +148,11 @@ fn renaming_a_reserved_name_at_the_length_limit_still_fits() {
     let input = format!("CON.{}", "x".repeat(251));
     assert_eq!(input.len(), MAX_COMPONENT_BYTES);
     let (name, changes) = win(&input);
-    assert!(name.len() <= MAX_COMPONENT_BYTES, "{}", name.len());
+    assert!(
+        name_units(&name) <= MAX_COMPONENT_BYTES,
+        "{}",
+        name_units(&name)
+    );
     assert!(changes.contains(&NameChange::ReservedName));
     assert!(!name.ends_with('.') && !name.ends_with(' '));
 }
@@ -180,7 +188,7 @@ fn reserved_names_padded_to_the_length_limit_still_fit() {
         assert_eq!(input.len(), MAX_COMPONENT_BYTES);
         let (name, changes) = win(&input);
         assert!(
-            name.len() <= MAX_COMPONENT_BYTES,
+            name_units(&name) <= MAX_COMPONENT_BYTES,
             "{reserved}: {}",
             name.len()
         );
@@ -201,7 +209,7 @@ proptest! {
         let ext = ext.map(|e| format!(".{e}")).unwrap_or_default();
         let name = format!("{stem}{}{tail}{ext}{suffix}", " ".repeat(pad));
         let once = convert_name(&name, Platform::Windows);
-        prop_assert!(once.name.len() <= MAX_COMPONENT_BYTES, "{}", once.name.len());
+        prop_assert!(name_units(&once.name) <= MAX_COMPONENT_BYTES, "{}", name_units(&once.name));
         let twice = convert_name(&once.name, Platform::Windows);
         prop_assert_eq!(&twice.name, &once.name);
         prop_assert!(twice.changes.is_empty(), "{:?}", twice.changes);
@@ -214,10 +222,26 @@ fn long_alias_like_names_still_fit_and_settle() {
         let input = format!("a~{}", "1".repeat(digits));
         let (name, _) = win(&input);
         assert!(
-            name.len() <= MAX_COMPONENT_BYTES,
+            name_units(&name) <= MAX_COMPONENT_BYTES,
             "{digits}: {}",
             name.len()
         );
         assert_eq!(win(&name).0, name, "{digits}: not settled");
+    }
+}
+
+/// A name is as long as the system counts it: on Windows 200 Chinese characters fit (255 UTF-16
+/// units), so they are kept whole; on Linux and macOS (255 bytes) the same name is shortened.
+#[test]
+fn a_long_name_in_another_script_is_only_shortened_where_the_system_needs_it() {
+    let name = format!("{}.txt", "写".repeat(200));
+    let c = convert_name(&name, Platform::Windows);
+    if cfg!(windows) {
+        assert_eq!(c.name, name);
+        assert!(!c.changes.contains(&NameChange::Shortened));
+    } else {
+        assert!(name_units(&c.name) <= MAX_COMPONENT_BYTES);
+        assert!(c.changes.contains(&NameChange::Shortened));
+        assert!(c.name.ends_with(".txt"));
     }
 }

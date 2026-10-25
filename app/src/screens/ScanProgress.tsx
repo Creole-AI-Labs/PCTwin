@@ -67,7 +67,7 @@ export default function ScanProgress({ scan, onPause, onResume, onContinue, onAl
         </div>
         <Localized id="scan-progress" attrs={{ "aria-label": true }}>
           <div className="kit-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share * 100)}>
-            <span className="kit-progress-fill" style={{ inlineSize: `${String(Math.round(share * 100))}%` }} />
+            <span className="kit-progress-fill" style={{ transform: `scaleX(${String(Math.round(share * 100) / 100)})` }} />
           </div>
         </Localized>
         <p className="plan-counts">

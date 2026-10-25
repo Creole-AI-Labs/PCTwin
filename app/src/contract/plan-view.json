@@ -1,0 +1,41 @@
+[
+  {
+    "fingerprint": "9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f9f",
+    "first": [
+      "documents"
+    ],
+    "groups": [
+      {
+        "id": "documents",
+        "path": "",
+        "role": "documents",
+        "size": {
+          "bytes": 1200000,
+          "files": 34,
+          "kind": "known"
+        },
+        "toDrive": "",
+        "toFolder": "documents"
+      }
+    ],
+    "leftOut": [
+      {
+        "count": 3,
+        "reason": "cloud-only"
+      }
+    ],
+    "preview": {
+      "fits": true,
+      "minutes": {
+        "high": 8,
+        "low": 4
+      },
+      "refused": 0,
+      "renamed": 1,
+      "runsAtSignIn": 1,
+      "shortBytes": 0,
+      "tooBig": 0
+    },
+    "revision": 2
+  }
+]

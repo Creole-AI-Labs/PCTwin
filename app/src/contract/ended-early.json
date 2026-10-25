@@ -1,0 +1,19 @@
+[
+  {
+    "detail": "the connection was lost",
+    "kind": "link-lost"
+  },
+  {
+    "kind": "not-approved"
+  },
+  {
+    "detail": "the journal could not be opened",
+    "kind": "failed"
+  },
+  {
+    "kind": "update-here"
+  },
+  {
+    "kind": "update-there"
+  }
+]

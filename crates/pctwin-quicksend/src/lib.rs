@@ -15,15 +15,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use pctwin_gate::{Approved, Destinations};
+use pctwin_gate::Destinations;
 use pctwin_journal::{DownloadMark, Ledger};
 use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
     ManagedBy, Owner, Place, Portability, Record, RecordError, Storage,
 };
 use pctwin_transfer::{
-    Allowance, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession, SendJob,
-    SendOutcome, SenderSession, SizeRoom, TransferError, agree_version, receive_inventory,
+    Allowance, Cause, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession,
+    SendJob, SendOutcome, SenderSession, SizeRoom, TransferError, agree_version, receive_inventory,
     send_inventory, shown_path,
 };
 
@@ -55,7 +55,19 @@ pub enum QuickError {
     Record(#[from] RecordError),
     #[error("the chosen folder cannot be used: {0}")]
     Destination(String),
+    #[error("the other laptop did not answer the offer in time")]
+    NotAnswered,
+    #[error("there are more files ({files} so far) than one send can carry")]
+    TooMany { files: usize },
 }
+
+/// Past this many items an offer stops counting (one send carries fewer still: see
+/// [`QuickError::TooMany`]), so choosing a vast folder never fills this laptop's memory.
+const MOST_OFFERED_ITEMS: usize = 1_000_000;
+
+/// How long the sender waits for the receiver's person to answer the offer before it ends,
+/// honestly, as not answered.
+pub const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 /// One offered file, as both screens list it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,10 +120,24 @@ impl Offer {
     /// that a move would take (links are not followed; what cannot be read is listed as left
     /// out). Two chosen things with the same name are kept apart ("notes (2).txt").
     pub fn of(chosen: &[PathBuf]) -> Result<Self, QuickError> {
+        Self::of_again(chosen, LaptopId::generate()?)
+    }
+
+    /// The offer [`of`](Self::of) made again for the same `chosen` things under the `laptop` ID
+    /// of an earlier offer ([`laptop`](Self::laptop)), so every file has the ID it had then: the
+    /// receiver knows which it already holds, whole or partway. With
+    /// [`only_missing`](Self::only_missing), "Send the missing pieces".
+    pub fn of_again(chosen: &[PathBuf], laptop: LaptopId) -> Result<Self, QuickError> {
+        Self::of_within(chosen, laptop, pctwin_record::MAX_HELD)
+    }
+
+    /// As [`of_again`](Self::of_again), refusing an offer whose list the receiver could not hold
+    /// within `held` bytes (the receiver's limit for one list: [`pctwin_record::MAX_HELD`]), said
+    /// plainly before anything is sent ([`QuickError::TooMany`]).
+    fn of_within(chosen: &[PathBuf], laptop: LaptopId, held: u64) -> Result<Self, QuickError> {
         if chosen.is_empty() {
             return Err(QuickError::NothingChosen);
         }
-        let laptop = LaptopId::generate()?;
         let owner = Owner::Shared;
         let place = place();
         let mut record = Record::new(laptop);
@@ -135,6 +161,7 @@ impl Offer {
                 place: place.clone(),
                 path,
                 size_bytes,
+                modified_ns: None,
                 portability: Portability::Portable,
                 managed_by: ManagedBy::Personal,
                 download_bytes: None,
@@ -167,11 +194,25 @@ impl Offer {
                     }
                     record.items.push(found);
                 }
+                if record.items.len() > MOST_OFFERED_ITEMS {
+                    return Err(QuickError::TooMany {
+                        files: record.items.len(),
+                    });
+                }
             } else {
                 return Err(QuickError::NotThere(path.clone()));
             }
         }
         record.validate()?;
+        if !pctwin_record::fits_one_move(&record.items, held)? {
+            return Err(QuickError::TooMany {
+                files: record
+                    .items
+                    .iter()
+                    .filter(|i| i.kind == ItemKind::File)
+                    .count(),
+            });
+        }
         // Sent as a move sends: in the order a move plans, each landing inside the chosen folder.
         // What a folder holds that cannot be read is left out by the record and not sent.
         let jobs = pctwin_move::send_plan(&record, |i| sources.get(&i.id).cloned(), landing).jobs;
@@ -181,6 +222,35 @@ impl Offer {
     /// The files offered, in path order.
     pub fn files(&self) -> Vec<OfferedFile> {
         files_of(&self.record)
+    }
+
+    /// The ID this offer's files are made under, to offer the missing pieces later with
+    /// [`of_again`](Self::of_again).
+    pub fn laptop(&self) -> LaptopId {
+        self.record.source_laptop
+    }
+
+    /// Only what `receipt` (of the earlier send of this very offer) says did not arrive: files
+    /// that failed or were not accepted (as "Send the missing pieces" lists them). What arrived,
+    /// or was already there, or is there needing action, is kept and not offered again. A file
+    /// the receiver holds partway is continued there from the blocks it has.
+    pub fn only_missing(mut self, receipt: &Receipt) -> Self {
+        // By the file's ID, never by how its name shows (two names can show alike).
+        let missing: BTreeSet<ItemId> = receipt
+            .lines
+            .iter()
+            .filter(|l| matches!(l.outcome, Outcome::Failed { .. } | Outcome::Declined))
+            .map(|l| l.id)
+            .collect();
+        // A file the receipt does not list at all (it is new since) is offered too.
+        let listed: BTreeSet<ItemId> = receipt.lines.iter().map(|l| l.id).collect();
+        let keep = |i: &Item| {
+            i.kind != ItemKind::File || missing.contains(&i.id) || !listed.contains(&i.id)
+        };
+        self.record.items.retain(|i| keep(i));
+        let ids: BTreeSet<ItemId> = self.record.items.iter().map(|i| i.id).collect();
+        self.jobs.retain(|j| ids.contains(&j.item));
+        self
     }
 
     /// For tests that play a sender breaking the rules: the record and the send jobs.
@@ -215,13 +285,20 @@ pub enum Outcome {
     AlreadyThere { landed_as: String },
     /// The receiver did not accept it.
     Declined,
-    /// It did not arrive.
-    Failed { why: String },
+    /// It is on the receiver under `landed_as` but not finished as a visible, proven copy: `why`
+    /// says what happened and what to do next.
+    NeedsAction { landed_as: String, why: String },
+    /// It did not arrive: the typed reason (for "more details" and "Send missing pieces"), and
+    /// the words.
+    Failed { cause: Cause, why: String },
 }
 
 /// One line of a receipt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceiptLine {
+    /// The file, by its ID in the send (what "Send the missing pieces" goes by: two names that
+    /// show alike are never taken for one another).
+    pub id: ItemId,
     /// The file's path in the send.
     pub path: String,
     pub outcome: Outcome,
@@ -235,18 +312,47 @@ pub struct Receipt {
 
 /// Sender: offers `offer` over `ch` (already paired), then sends what the receiver accepts.
 pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickError> {
-    agree_version(ch, MOVE_PROTOCOL).await?;
-    send_inventory(ch, &offer.record).await?;
+    send_live(ch, offer, &pctwin_move::Live::default()).await
+}
+
+/// As [`send`], counted in `live`'s meter and held or stopped by its control (the screens'
+/// progress, pause and stop). A stop, on either laptop, ends it with the receipt so far: a file
+/// it cut off failed, never arrived.
+pub async fn send_live(
+    ch: &mut impl Channel,
+    offer: Offer,
+    live: &pctwin_move::Live,
+) -> Result<Receipt, QuickError> {
+    let version = agree_version(ch, MOVE_PROTOCOL).await?;
+    send_inventory(ch, &offer.record, version).await?;
     let offered = files_of(&offer.record);
-    let accepted = read_accepted(ch, &offered).await?;
+    let Some(accepted) = wait_for_answer(ch, &offered, live).await? else {
+        // Stopped here while waiting: nothing was sent, and the receipt says so.
+        return Ok(Receipt {
+            lines: offered
+                .into_iter()
+                .map(|f| ReceiptLine {
+                    id: f.id,
+                    path: f.path,
+                    outcome: Outcome::Failed {
+                        cause: Cause::Stopped,
+                        why: "the send was stopped before it was sent".into(),
+                    },
+                })
+                .collect(),
+        });
+    };
     let jobs: Vec<SendJob> = offer
         .jobs
         .into_iter()
         .filter(|j| accepted.contains(&j.item))
         .collect();
-    let mut sender = SenderSession::new(jobs, LANES);
+    let mut sender = SenderSession::new(jobs, LANES)
+        .with_protocol(version)
+        .with_meter(live.meter.clone())
+        .with_control(live.control.clone());
     if !accepted.is_empty() {
-        sender.run(ch).await?;
+        stopped_is_fine(sender.run(ch).await)?;
     }
     Ok(Receipt {
         lines: offered
@@ -262,13 +368,18 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
                         Some(SendOutcome::AlreadyThere) => Outcome::AlreadyThere {
                             landed_as: f.path.clone(),
                         },
-                        Some(SendOutcome::Failed(why)) => Outcome::Failed { why: why.clone() },
+                        Some(SendOutcome::Failed(why)) => Outcome::Failed {
+                            cause: why.cause(),
+                            why: why.to_string(),
+                        },
                         None => Outcome::Failed {
+                            cause: Cause::NotAccepted,
                             why: "it was not sent".into(),
                         },
                     }
                 };
                 ReceiptLine {
+                    id: f.id,
                     path: f.path,
                     outcome,
                 }
@@ -280,17 +391,19 @@ pub async fn send(ch: &mut impl Channel, offer: Offer) -> Result<Receipt, QuickE
 /// What a sender offered, for the person to accept or decline.
 pub struct Incoming {
     record: Record,
+    /// The move protocol version both laptops agreed.
+    version: u16,
 }
 
 /// Receiver: the offer from the other laptop over `ch` (already paired): names and sizes only.
 /// Refused unless it is a Quick Send (everything in it shared, nothing about people).
 pub async fn receive_offer(ch: &mut impl Channel) -> Result<Incoming, QuickError> {
-    agree_version(ch, MOVE_PROTOCOL).await?;
-    let record = receive_inventory(ch).await?;
+    let version = agree_version(ch, MOVE_PROTOCOL).await?;
+    let record = receive_inventory(ch, version).await?;
     if record.items.iter().any(|i| i.owner != Owner::Shared) {
         return Err(QuickError::NotAQuickSend);
     }
-    Ok(Incoming { record })
+    Ok(Incoming { record, version })
 }
 
 impl Incoming {
@@ -301,7 +414,10 @@ impl Incoming {
 
     /// The size of everything offered, in bytes.
     pub fn total_bytes(&self) -> u64 {
-        self.files().iter().map(|f| f.size).sum()
+        // Sizes come from someone else's laptop: added without ever wrapping.
+        self.files()
+            .iter()
+            .fold(0u64, |t, f| t.saturating_add(f.size))
     }
 
     /// Accepts the files `chosen` (all of them with `None`) into the folder `dest` the person
@@ -315,6 +431,46 @@ impl Incoming {
         journal: &dyn Ledger,
         account: &str,
     ) -> Result<Receipt, QuickError> {
+        self.accept_live(
+            ch,
+            dest,
+            chosen,
+            journal,
+            account,
+            &pctwin_move::Live::default(),
+        )
+        .await
+    }
+
+    /// As [`accept`](Self::accept), counted in `live`'s meter and held or stopped by its
+    /// control. A stop ends it with the receipt so far.
+    pub async fn accept_live(
+        self,
+        ch: &mut impl Channel,
+        dest: &Path,
+        chosen: Option<&[ItemId]>,
+        journal: &dyn Ledger,
+        account: &str,
+        live: &pctwin_move::Live,
+    ) -> Result<Receipt, QuickError> {
+        let dest = pctwin_gate::Destination::open(dest)
+            .map_err(|e| QuickError::Destination(e.to_string()))?;
+        self.accept_into(ch, dest, chosen, journal, account, live)
+            .await
+    }
+
+    /// As [`accept_live`](Self::accept_live), into the very folder `dest` opened when the person
+    /// chose it in the system's picker: a folder put at that path since (another folder, a link
+    /// somewhere else) is never the one written to.
+    pub async fn accept_into(
+        self,
+        ch: &mut impl Channel,
+        dest: pctwin_gate::Destination,
+        chosen: Option<&[ItemId]>,
+        journal: &dyn Ledger,
+        account: &str,
+        live: &pctwin_move::Live,
+    ) -> Result<Receipt, QuickError> {
         let offered = self.files();
         let wanted: BTreeSet<ItemId> = match chosen {
             Some(ids) => ids
@@ -324,7 +480,9 @@ impl Incoming {
                 .collect(),
             None => offered.iter().map(|f| f.id).collect(),
         };
-        let mut record = self.record.next_revision();
+        // The offered record is not needed afterwards: the next revision is made from it in place,
+        // never as a second copy.
+        let mut record = self.record.into_next_revision();
         for item in &mut record.items {
             if item.kind == ItemKind::File
                 && item.inclusion == Inclusion::Included
@@ -344,12 +502,19 @@ impl Incoming {
             .with_mark_floor(DownloadMark::Internet);
         let mut table = Destinations::new();
         table
-            .approve(DESTINATION, Approved::MyFolders, dest)
+            .approve_chosen(DESTINATION, dest)
             .map_err(|e| QuickError::Destination(e.to_string()))?;
         write_accepted(ch, &wanted).await?;
-        let mut receiver = ReceiverSession::new(&table, allowance, journal, account);
+        let mut receiver = ReceiverSession::new(&table, allowance, journal, account)
+            .with_scope(pctwin_journal::Scope::QUICK_SEND)
+            .with_protocol(self.version)
+            .with_meter(live.meter.clone())
+            .with_control(live.control.clone());
+        // A file of this offer received partway before (a send stopped or cut off, then "Send
+        // the missing pieces") continues from the blocks this laptop's journal says it has.
+        receiver.restore()?;
         if !wanted.is_empty() {
-            receiver.run(ch).await?;
+            stopped_is_fine(receiver.run(ch).await)?;
         }
         Ok(Receipt {
             lines: offered
@@ -358,26 +523,10 @@ impl Incoming {
                     let outcome = if !wanted.contains(&f.id) {
                         Outcome::Declined
                     } else {
-                        match receiver.outcome(f.id) {
-                            Some(ReceiveOutcome::Finished(done)) => Outcome::Arrived {
-                                landed_as: done.final_path.clone(),
-                            },
-                            // Not finished as a visible, proven copy: never "arrived".
-                            Some(ReceiveOutcome::NeedsAction { why, .. }) => {
-                                Outcome::Failed { why: why.clone() }
-                            }
-                            Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
-                                landed_as: stored.clone(),
-                            },
-                            Some(ReceiveOutcome::Failed(why)) => {
-                                Outcome::Failed { why: why.clone() }
-                            }
-                            None => Outcome::Failed {
-                                why: "it did not arrive".into(),
-                            },
-                        }
+                        received(receiver.outcome(f.id).as_ref())
                     };
                     ReceiptLine {
+                        id: f.id,
                         path: f.path,
                         outcome,
                     }
@@ -389,6 +538,56 @@ impl Incoming {
     /// Declines the whole offer: nothing is sent, nothing is written.
     pub async fn decline(self, ch: &mut impl Channel) -> Result<(), QuickError> {
         write_accepted(ch, &BTreeSet::new()).await
+    }
+}
+
+/// The words for a file from someone else's laptop that landed on a drive that could not mark it
+/// as downloaded (FAT and exFAT sticks, some network drives): the system will not warn when it is
+/// opened, so the person is told to take care.
+pub const MARK_NOT_KEPT: &str =
+    "This drive could not mark the file as downloaded from another laptop. Open it with care.";
+
+/// How a file the receiver accepted came to be, from the receiving session's outcome. A file from
+/// someone else's laptop whose "downloaded" mark the drive could not keep needs the person's care:
+/// never simply "arrived".
+fn received(outcome: Option<&ReceiveOutcome>) -> Outcome {
+    match outcome {
+        Some(ReceiveOutcome::Finished(done)) if done.mark_not_kept.is_some() => {
+            Outcome::NeedsAction {
+                landed_as: done.final_path.clone(),
+                why: MARK_NOT_KEPT.into(),
+            }
+        }
+        Some(ReceiveOutcome::Finished(done)) => Outcome::Arrived {
+            landed_as: done.final_path.clone(),
+        },
+        // Not finished as a visible, proven copy: never "arrived".
+        Some(ReceiveOutcome::NeedsAction { finished, why }) => Outcome::NeedsAction {
+            landed_as: finished.final_path.clone(),
+            why: why.clone(),
+        },
+        Some(ReceiveOutcome::AlreadyThere(stored)) => Outcome::AlreadyThere {
+            landed_as: stored.clone(),
+        },
+        Some(ReceiveOutcome::Failed(why)) => Outcome::Failed {
+            cause: why.cause(),
+            why: why.to_string(),
+        },
+        None => Outcome::Failed {
+            cause: Cause::NotAccepted,
+            why: "it did not arrive".into(),
+        },
+    }
+}
+
+/// A run that a person stopped (on either laptop) is not an error: the receipt says what each
+/// file came to.
+fn stopped_is_fine(ran: Result<(), pctwin_transfer::TransferError>) -> Result<(), QuickError> {
+    match ran {
+        Err(
+            pctwin_transfer::TransferError::Stopped | pctwin_transfer::TransferError::StoppedThere,
+        ) => Ok(()),
+        other => Ok(other?),
     }
 }
 
@@ -405,6 +604,20 @@ async fn write_accepted(ch: &mut impl Channel, ids: &BTreeSet<ItemId>) -> Result
         .await
         .map_err(|_| TransferError::ConnectionDropped)?;
     Ok(())
+}
+
+/// The receiver's answer, waited for at most [`ANSWER_WAIT`]; `None` when the person here stopped
+/// the send while it waited (it ends at once: nothing was sent).
+async fn wait_for_answer(
+    ch: &mut impl Channel,
+    offered: &[OfferedFile],
+    live: &pctwin_move::Live,
+) -> Result<Option<BTreeSet<ItemId>>, QuickError> {
+    tokio::select! {
+        answer = read_accepted(ch, offered) => answer.map(Some),
+        () = live.control.wait_stopped() => Ok(None),
+        () = tokio::time::sleep(ANSWER_WAIT) => Err(QuickError::NotAnswered),
+    }
 }
 
 /// The receiver's answer: only ids it was offered, each once, and nothing else in the message.
@@ -475,6 +688,154 @@ mod tests {
         read_accepted(&mut Answer(Some(msg)), offer).await
     }
 
+    /// Exit-gate review (24 October 2026): "Send the missing pieces" goes by each file's ID, so
+    /// two files whose names show alike (names that are not text, on Linux) are never taken for
+    /// one another: only the one that did not arrive is offered again.
+    #[test]
+    fn the_missing_pieces_are_found_by_id_never_by_a_name_that_shows_alike() {
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut record = Record::new(laptop);
+        let file = |raw: &[u8]| {
+            let path = ItemPath::new(vec![ItemName::from_unix_bytes(raw)]).unwrap();
+            Item {
+                id: ItemId::derive(&laptop, &Owner::Shared, &place(), &path),
+                kind: ItemKind::File,
+                owner: Owner::Shared,
+                place: place(),
+                path,
+                size_bytes: 1,
+                modified_ns: None,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: None,
+                inclusion: Inclusion::Included,
+            }
+        };
+        // Two names that are not text, shown alike.
+        let (a, b) = (file(&[b'n', 0xFF]), file(&[b'n', 0xFE]));
+        assert_eq!(shown_path(&a.path), shown_path(&b.path));
+        assert_ne!(a.id, b.id);
+        record.items = vec![a.clone(), b.clone()];
+        let offer = Offer {
+            record,
+            jobs: Vec::new(),
+        };
+        let receipt = Receipt {
+            lines: vec![
+                ReceiptLine {
+                    id: a.id,
+                    path: shown_path(&a.path),
+                    outcome: Outcome::Arrived {
+                        landed_as: "n".into(),
+                    },
+                },
+                ReceiptLine {
+                    id: b.id,
+                    path: shown_path(&b.path),
+                    outcome: Outcome::Failed {
+                        cause: Cause::NotVerified,
+                        why: "no".into(),
+                    },
+                },
+            ],
+        };
+        let again = offer.only_missing(&receipt);
+        let ids: Vec<ItemId> = again.files().iter().map(|f| f.id).collect();
+        assert_eq!(ids, [b.id]);
+    }
+
+    /// Exit-gate review (24 October 2026): a stranger's file on a drive that cannot keep the
+    /// "downloaded" mark (no marker drive: FAT, exFAT, some network drives) is never just "arrived":
+    /// it needs the person's care, in plain words. One with its mark kept arrived.
+    #[test]
+    fn a_strangers_file_whose_mark_was_not_kept_needs_care() {
+        let done = |mark| {
+            ReceiveOutcome::Finished(pctwin_gate::Finished {
+                final_path: "Holiday/beach.jpg".into(),
+                sent_path: "Holiday/beach.jpg".into(),
+                changes: Vec::new(),
+                mark_not_kept: mark,
+                time_not_kept: false,
+                checked_from: None,
+            })
+        };
+        assert_eq!(
+            received(Some(&done(Some(DownloadMark::Internet)))),
+            Outcome::NeedsAction {
+                landed_as: "Holiday/beach.jpg".into(),
+                why: MARK_NOT_KEPT.into()
+            }
+        );
+        assert_eq!(
+            received(Some(&done(None))),
+            Outcome::Arrived {
+                landed_as: "Holiday/beach.jpg".into()
+            }
+        );
+    }
+
+    /// Exit-gate review (24 October 2026): a folder holding more files than the receiver can take
+    /// in one list is refused when the offer is made, before anything is sent, saying how many.
+    #[test]
+    fn an_offer_of_more_files_than_one_send_carries_is_refused_before_sending() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("Big");
+        std::fs::create_dir_all(&folder).unwrap();
+        for n in 0..40 {
+            std::fs::write(folder.join(format!("{n}.txt")), b"x").unwrap();
+        }
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let fits = Offer::of_within(
+            std::slice::from_ref(&folder),
+            laptop,
+            pctwin_record::MAX_HELD,
+        );
+        assert_eq!(fits.unwrap().files().len(), 40);
+        // A receiver that could hold far less: refused, saying how many.
+        let too_many = Offer::of_within(&[folder], laptop, 1);
+        assert!(
+            matches!(too_many, Err(QuickError::TooMany { files: 40 })),
+            "{:?}",
+            too_many.err()
+        );
+    }
+
+    /// A receiver that never answers.
+    struct Silent;
+
+    impl Channel for Silent {
+        async fn send(&mut self, _: &[u8]) -> Result<(), pctwin_transfer::ChannelError> {
+            Ok(())
+        }
+        async fn recv(&mut self) -> Result<Vec<u8>, pctwin_transfer::ChannelError> {
+            std::future::pending().await
+        }
+    }
+
+    /// Exit-gate review (24 October 2026): a receiver that never answers the offer is waited for
+    /// at most [`ANSWER_WAIT`], then the send ends as not answered; the person here stopping ends
+    /// the wait at once.
+    #[tokio::test(start_paused = true)]
+    async fn the_wait_for_an_answer_ends_in_time_or_at_a_stop() {
+        let offer = offered(2);
+        let live = pctwin_move::Live::default();
+        let start = tokio::time::Instant::now();
+        let got = wait_for_answer(&mut Silent, &offer, &live).await;
+        assert!(matches!(got, Err(QuickError::NotAnswered)), "{got:?}");
+        assert!(start.elapsed() >= ANSWER_WAIT);
+
+        let live = pctwin_move::Live::default();
+        let stop = live.control.clone();
+        let start = tokio::time::Instant::now();
+        let mut silent = Silent;
+        let (got, ()) = tokio::join!(wait_for_answer(&mut silent, &offer, &live), async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            stop.stop();
+        });
+        assert!(matches!(got, Ok(None)), "{got:?}");
+        assert!(start.elapsed() < ANSWER_WAIT);
+    }
+
     /// The answer names only offered files, each once, with the right count and nothing more.
     #[tokio::test]
     async fn an_answer_is_read_only_in_its_exact_form() {
@@ -506,5 +867,42 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod totals {
+    use super::*;
+    use pctwin_record::{
+        FolderRole, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, ManagedBy, Place,
+        Portability, Storage,
+    };
+
+    #[test]
+    fn an_offer_s_total_never_wraps_however_big_its_sizes_say_they_are() {
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut record = Record::new(laptop);
+        for name in ["a.bin", "b.bin"] {
+            let place = Place {
+                role: FolderRole::Other,
+                storage: Storage::SystemDrive,
+            };
+            let path = ItemPath::new(vec![ItemName::from_text(name)]).unwrap();
+            record.items.push(Item {
+                id: ItemId::derive(&laptop, &Owner::Shared, &place, &path),
+                kind: ItemKind::File,
+                owner: Owner::Shared,
+                place,
+                path,
+                size_bytes: u64::MAX,
+                modified_ns: None,
+                portability: Portability::Portable,
+                managed_by: ManagedBy::Personal,
+                download_bytes: None,
+                inclusion: Inclusion::Included,
+            });
+        }
+        let incoming = Incoming { record, version: 4 };
+        assert_eq!(incoming.total_bytes(), u64::MAX);
     }
 }

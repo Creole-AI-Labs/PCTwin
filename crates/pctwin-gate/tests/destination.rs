@@ -20,7 +20,7 @@ fn write(dest: &Destination, p: &str, bytes: &[u8]) -> Result<String, GateError>
 
 #[test]
 fn a_file_is_written_inside_the_approved_folder_with_its_folders() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let written = write(&dest, "Documents/Taxes/return.pdf", b"PDF").unwrap();
     assert_eq!(written, "Documents/Taxes/return.pdf");
@@ -32,7 +32,7 @@ fn a_file_is_written_inside_the_approved_folder_with_its_folders() {
 
 #[test]
 fn an_existing_file_is_never_overwritten() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(root.path().join("notes.txt"), b"mine").unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("notes.txt"), 6).unwrap();
@@ -52,7 +52,7 @@ fn an_existing_file_is_never_overwritten() {
 
 #[test]
 fn names_that_clash_only_by_case_are_both_kept_where_the_disk_ignores_case() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let first = write(&dest, "Photo.jpg", b"1").unwrap();
     let second = write(&dest, "photo.jpg", b"2").unwrap();
@@ -72,7 +72,7 @@ fn names_that_clash_only_by_case_are_both_kept_where_the_disk_ignores_case() {
 
 #[test]
 fn names_this_system_cannot_store_are_changed_and_reported() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("CON.txt"), 1).unwrap();
     file.write_all(b"x").unwrap();
@@ -88,7 +88,7 @@ fn names_this_system_cannot_store_are_changed_and_reported() {
 #[cfg(windows)]
 #[test]
 fn a_colon_never_creates_a_hidden_data_stream_on_windows() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let written = write(&dest, "report.txt:hidden", b"secret").unwrap();
     assert_eq!(written, "report.txt\u{FF1A}hidden");
@@ -100,7 +100,7 @@ fn a_colon_never_creates_a_hidden_data_stream_on_windows() {
 
 #[test]
 fn more_bytes_than_announced_are_refused() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("a.bin"), 4).unwrap();
     file.write_all(b"1234").unwrap();
@@ -110,7 +110,7 @@ fn more_bytes_than_announced_are_refused() {
 
 #[test]
 fn fewer_bytes_than_announced_is_not_a_finished_file() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("a.bin"), 4).unwrap();
     file.write_all(b"12").unwrap();
@@ -125,7 +125,7 @@ fn fewer_bytes_than_announced_is_not_a_finished_file() {
 
 #[test]
 fn a_folder_cannot_be_written_where_a_file_already_is() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(root.path().join("Documents"), b"a file").unwrap();
     let dest = Destination::open(root.path()).unwrap();
     assert!(matches!(
@@ -141,8 +141,8 @@ fn a_folder_cannot_be_written_where_a_file_already_is() {
 #[cfg(unix)]
 #[test]
 fn a_link_inside_the_folder_cannot_redirect_a_write_outside_it() {
-    let root = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     assert!(dest.create_file(&path("escape/stolen.txt"), 1).is_err());
@@ -152,8 +152,8 @@ fn a_link_inside_the_folder_cannot_redirect_a_write_outside_it() {
 #[cfg(unix)]
 #[test]
 fn a_link_named_like_the_file_is_not_followed() {
-    let root = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let target = outside.path().join("victim.txt");
     std::fs::write(&target, b"keep").unwrap();
     std::os::unix::fs::symlink(&target, root.path().join("note.txt")).unwrap();
@@ -178,7 +178,7 @@ fn assert_few_checks_per_file(dest: &Destination, before: u64, files: u64) {
 
 #[test]
 fn thousands_of_files_with_one_name_are_numbered_quickly() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     // Before the fix, 1,000 same-name files took over two minutes (about 500,000 checks).
     for _ in 0..1_000 {
@@ -190,7 +190,7 @@ fn thousands_of_files_with_one_name_are_numbered_quickly() {
 
 #[test]
 fn an_unfinished_or_short_file_leaves_nothing_behind() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     {
         let mut file = dest.create_file(&path("big.bin"), 100).unwrap();
@@ -206,7 +206,7 @@ fn an_unfinished_or_short_file_leaves_nothing_behind() {
 
 #[test]
 fn a_file_only_appears_under_its_name_once_complete() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("photo.jpg"), 3).unwrap();
     file.write_all(b"abc").unwrap();
@@ -223,7 +223,7 @@ fn a_file_only_appears_under_its_name_once_complete() {
 
 #[test]
 fn the_report_keeps_the_name_as_sent() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("Notes/May?.txt"), 1).unwrap();
     file.write_all(b"x").unwrap();
@@ -233,7 +233,7 @@ fn the_report_keeps_the_name_as_sent() {
 
 #[test]
 fn a_long_extension_still_gets_a_clash_number() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let name = format!("a.{}", "e".repeat(252));
     let first = write(&dest, &name, b"1").unwrap();
@@ -245,7 +245,7 @@ fn a_long_extension_still_gets_a_clash_number() {
 #[cfg(windows)]
 #[test]
 fn a_short_name_alias_never_lands_inside_an_existing_folder() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::create_dir(root.path().join("Long Folder Name")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("LONGFO~1/their.txt"), 1).unwrap();
@@ -263,7 +263,7 @@ fn a_short_name_alias_never_lands_inside_an_existing_folder() {
 #[cfg(windows)]
 #[test]
 fn shortening_never_leaves_a_trailing_space_on_windows() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let name = format!("{} :", "a".repeat(253));
     let written = write(&dest, &name, b"x").unwrap();
@@ -277,7 +277,7 @@ fn shortening_never_leaves_a_trailing_space_on_windows() {
 
 #[test]
 fn folder_names_differing_only_in_case_do_not_slow_numbering() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     // Each spelling is a different folder on Linux and the same folder on Windows and Mac.
     // Before the fix, 500 spellings took over a minute on Windows.
@@ -300,7 +300,7 @@ fn folder_names_differing_only_in_case_do_not_slow_numbering() {
 
 #[test]
 fn the_same_name_in_two_folders_is_numbered_separately() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     for _ in 0..3 {
         write(&dest, "A/a.txt", b"x").unwrap();
@@ -311,7 +311,7 @@ fn the_same_name_in_two_folders_is_numbered_separately() {
 
 #[test]
 fn two_files_can_be_in_transfer_in_one_folder() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut one = dest.create_file(&path("one.txt"), 3).unwrap();
     let mut two = dest.create_file(&path("two.txt"), 3).unwrap();
@@ -325,7 +325,7 @@ fn two_files_can_be_in_transfer_in_one_folder() {
 
 #[test]
 fn a_file_named_like_an_existing_folder_gets_a_number() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::create_dir(root.path().join("Notes")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("Notes"), 1).unwrap();
@@ -339,7 +339,7 @@ fn a_file_named_like_an_existing_folder_gets_a_number() {
 #[cfg(target_os = "linux")]
 #[test]
 fn names_differing_only_in_case_are_not_clashes_where_the_disk_keeps_case() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     write(&dest, "Readme.md", b"1").unwrap();
     let mut file = dest.create_file(&path("README.md"), 1).unwrap();
@@ -357,7 +357,7 @@ fn a_file_held_open_by_another_program_never_leaves_an_empty_file_behind() {
     use std::os::windows::fs::OpenOptionsExt;
     // Shares reading and writing but not deleting, as antivirus and sync tools often do.
     const READ_AND_WRITE_NOT_DELETE: u32 = 1 | 2;
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let mut file = dest.create_file(&path("photo.jpg"), 3).unwrap();
     file.write_all(b"abc").unwrap();
@@ -389,7 +389,7 @@ fn a_file_held_open_by_another_program_never_leaves_an_empty_file_behind() {
 
 #[test]
 fn long_names_that_shorten_to_the_same_start_do_not_slow_numbering() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let shared = "s".repeat(247);
     let names: Vec<String> = (0..400).map(|i| format!("{shared}{i:03}.txt")).collect();
@@ -410,7 +410,7 @@ fn long_names_that_shorten_to_the_same_start_do_not_slow_numbering() {
 
 #[test]
 fn a_finished_file_keeps_the_modified_time_it_is_given() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     let mut file = dest.create_file(&path("Docs/old.txt"), 3).unwrap();
@@ -423,7 +423,7 @@ fn a_finished_file_keeps_the_modified_time_it_is_given() {
 
 #[test]
 fn a_file_can_be_looked_up_by_the_name_it_would_get_without_creating_anything() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     write(&dest, "Docs/report.pdf", b"12345").unwrap();
     assert_eq!(
@@ -452,11 +452,222 @@ fn a_file_can_be_looked_up_by_the_name_it_would_get_without_creating_anything() 
 #[cfg(unix)]
 #[test]
 fn looking_up_never_follows_a_link_out_of_the_approved_folder() {
-    let root = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(outside.path().join("secret.txt"), b"secret").unwrap();
     std::os::unix::fs::symlink(outside.path(), root.path().join("link")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     assert_eq!(dest.find(&path("link/secret.txt")), None);
     assert!(dest.open_read("link/secret.txt").is_err());
+}
+
+/// Whether anything is already at a path (a folder that moves as one whole is never merged into
+/// one there): a file or a folder counts, nothing is created by looking, and the name is
+/// converted exactly as for writing.
+#[test]
+fn whether_anything_is_already_at_a_path_is_told_without_creating_anything() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    write(&dest, "Pictures/Album.photoslibrary/database/x", b"1").unwrap();
+    assert!(dest.has(&path("Pictures/Album.photoslibrary")));
+    assert!(dest.has(&path("Pictures/Album.photoslibrary/database/x")));
+    assert!(dest.has(&path("Pictures")));
+    assert!(!dest.has(&path("Pictures/Other.photoslibrary")));
+    assert!(!dest.has(&path("Nowhere/Album.photoslibrary")));
+    assert!(!root.path().join("Nowhere").exists());
+    // A file where a folder on the way would be: something is there.
+    assert!(dest.has(&path("Pictures/Album.photoslibrary/database/x/deeper")));
+}
+
+/// Two wholes meet as this place would store them: the same name in another case is one folder
+/// here where the drive does not tell case apart, and two where it does.
+#[test]
+fn a_whole_is_met_by_its_stored_name_in_this_drives_case() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let upper = dest.meet(&path("Apps/X.app"));
+    let lower = dest.meet(&path("Apps/x.app"));
+    assert!(!upper.taken && !lower.taken);
+    assert_eq!(
+        upper.key == lower.key,
+        !dest.profile().tells_case_apart(),
+        "{upper:?} {lower:?}"
+    );
+    write(&dest, "Apps/X.app/Contents/Info.plist", b"1").unwrap();
+    assert!(dest.meet(&path("Apps/X.app")).taken);
+    assert_eq!(
+        dest.meet(&path("Apps/x.app")).taken,
+        !dest.profile().tells_case_apart()
+    );
+}
+
+/// A place that cannot be looked at is never taken to be free.
+#[cfg(unix)]
+#[test]
+fn a_folder_that_cannot_be_read_counts_as_taken() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    write(&dest, "Locked/inside.txt", b"1").unwrap();
+    let locked = root.path().join("Locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    // Root reads anything; the proof runs as an ordinary account.
+    let readable = std::fs::read_dir(&locked).is_ok();
+    let taken = dest.has(&path("Locked/Photos.photoslibrary"));
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if !readable {
+        assert!(taken, "an unreadable folder was taken for free");
+    }
+}
+
+/// The top folder of a whole is made by this move or not written into: one already there that
+/// is not this move's own is refused, with nothing made inside it.
+#[test]
+fn a_whole_is_never_written_into_a_folder_someone_else_made() {
+    use pctwin_gate::Fresh;
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let theirs = |_: &str| false;
+    // Planted after the plan was made.
+    std::fs::create_dir_all(root.path().join("Pictures/Photos.photoslibrary")).unwrap();
+    let got = dest.create_file_tagged_fresh(
+        &path("Pictures/Photos.photoslibrary/originals/a.jpg"),
+        1,
+        "t1",
+        Some(Fresh {
+            depth: 2,
+            ours: &theirs,
+        }),
+    );
+    assert!(matches!(got, Err(GateError::WholeTaken)), "{:?}", got.err());
+    assert_eq!(
+        std::fs::read_dir(root.path().join("Pictures/Photos.photoslibrary"))
+            .unwrap()
+            .count(),
+        0
+    );
+    // A fresh one is made; then the next file of the same whole finds it as this move's own.
+    let made = std::sync::Mutex::new(Vec::<String>::new());
+    let ours = |p: &str| made.lock().unwrap().iter().any(|m| m == p);
+    let first = dest
+        .create_file_tagged_fresh(
+            &path("Pictures/Album.photoslibrary/originals/a.jpg"),
+            1,
+            "t2",
+            Some(Fresh {
+                depth: 2,
+                ours: &ours,
+            }),
+        )
+        .unwrap();
+    made.lock()
+        .unwrap()
+        .extend(first.created_folders().iter().cloned());
+    assert!(
+        made.lock()
+            .unwrap()
+            .contains(&"Pictures/Album.photoslibrary".to_string())
+    );
+    drop(first);
+    dest.create_file_tagged_fresh(
+        &path("Pictures/Album.photoslibrary/database/p.db"),
+        1,
+        "t3",
+        Some(Fresh {
+            depth: 2,
+            ours: &ours,
+        }),
+    )
+    .unwrap();
+}
+
+/// Exit-gate review (24 October 2026): a date the drive will not hold (here centuries before any
+/// system's file dates begin) never fails the file: it lands, and says when its date was not
+/// kept.
+#[test]
+fn a_date_the_drive_refuses_never_fails_the_file() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    // Far ahead of what ext4 (2446) or FAT (2107) store; Windows itself holds dates to 30828.
+    let ancient = std::time::UNIX_EPOCH + std::time::Duration::from_secs(28_000 * 365 * 24 * 3600);
+    let mut file = dest.create_file(&path("Docs/old.txt"), 3).unwrap();
+    file.write_all(b"abc").unwrap();
+    file.keep_modified_time(ancient);
+    let done = common::finish(file).expect("the file lands whatever its date");
+    assert_eq!(
+        std::fs::read(root.path().join("Docs/old.txt")).unwrap(),
+        b"abc"
+    );
+    let kept = std::fs::metadata(root.path().join("Docs/old.txt"))
+        .unwrap()
+        .modified()
+        .is_ok_and(|t| t == ancient);
+    // Kept exactly, or said not kept: never a different date passed off as the original.
+    assert!(
+        kept || done.time_not_kept,
+        "a date neither kept nor said: {done:?}"
+    );
+}
+
+/// A junction made by `mklink /J` at `link`, to `to` (both real paths).
+#[cfg(windows)]
+fn junction(link: &std::path::Path, to: &std::path::Path) {
+    let native = |p: &std::path::Path| p.components().collect::<std::path::PathBuf>();
+    let ok = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(native(link))
+        .arg(native(to))
+        .output()
+        .is_ok_and(|o| o.status.success());
+    assert!(ok, "mklink /J failed");
+}
+
+/// Exit-gate review (24 October 2026): a junction (a mount-point reparse point) inside the
+/// approved folder is never walked through, whether it stands for a folder on the way, the top
+/// folder of a whole, or the very name a file is given: nothing is written where it leads, and
+/// what is there is untouched.
+#[cfg(windows)]
+#[test]
+fn a_junction_is_never_walked_through_on_the_way_at_a_whole_or_at_the_name() {
+    use pctwin_gate::Fresh;
+    let outside = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    std::fs::write(outside.path().join("keep.txt"), b"the person's").unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    std::fs::create_dir_all(root.path().join("Docs")).unwrap();
+    junction(&root.path().join("Docs").join("Link"), outside.path());
+    junction(
+        &root.path().join("Docs").join("Album.photoslibrary"),
+        outside.path(),
+    );
+    junction(&root.path().join("Docs").join("a.txt"), outside.path());
+    let dest = Destination::open(root.path()).unwrap();
+    // On the way.
+    assert!(write(&dest, "Docs/Link/x.txt", b"x").is_err());
+    // At a whole's top: met as taken, and never written into.
+    assert!(dest.meet(&path("Docs/Album.photoslibrary")).taken);
+    let theirs = |_: &str| false;
+    let got = dest.create_file_tagged_fresh(
+        &path("Docs/Album.photoslibrary/originals/a.jpg"),
+        1,
+        "j1",
+        Some(Fresh {
+            depth: 2,
+            ours: &theirs,
+        }),
+    );
+    assert!(got.is_err());
+    // At the name: the file takes another name beside it.
+    let landed = write(&dest, "Docs/a.txt", b"mine").unwrap();
+    assert_ne!(landed, "Docs/a.txt");
+    // Nothing reached where the junctions lead.
+    let there: Vec<_> = std::fs::read_dir(outside.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert_eq!(there, ["keep.txt"]);
+    assert_eq!(
+        std::fs::read(outside.path().join("keep.txt")).unwrap(),
+        b"the person's"
+    );
 }

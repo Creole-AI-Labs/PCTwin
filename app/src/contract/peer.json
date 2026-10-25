@@ -1,0 +1,82 @@
+[
+  {
+    "link": {
+      "bytesPerSecond": 62000000,
+      "slow": false
+    },
+    "mine": {
+      "app": "0.1.0",
+      "chip": "aarch64",
+      "freeBytes": 410000000000,
+      "power": {
+        "kind": "plugged"
+      },
+      "system": "mac"
+    },
+    "other": {
+      "animal": "ant",
+      "colour": "blue",
+      "kind": "picked"
+    },
+    "theirs": {
+      "app": "0.1.0",
+      "chip": "x86_64",
+      "freeBytes": 52000000000,
+      "power": {
+        "kind": "battery",
+        "percent": 34
+      },
+      "system": "windows"
+    },
+    "versions": "same"
+  },
+  {
+    "link": {
+      "bytesPerSecond": 1200000,
+      "slow": true
+    },
+    "mine": {
+      "app": "0.1.0",
+      "chip": "x86_64",
+      "freeBytes": null,
+      "power": {
+        "kind": "unknown"
+      },
+      "system": "linux"
+    },
+    "other": null,
+    "theirs": {
+      "app": "0.1.0",
+      "chip": "riscv64",
+      "freeBytes": null,
+      "power": {
+        "kind": "plugged"
+      },
+      "system": "other"
+    },
+    "versions": "same"
+  },
+  {
+    "link": null,
+    "mine": {
+      "app": "0.1.0",
+      "chip": "x86_64",
+      "freeBytes": null,
+      "power": {
+        "kind": "plugged"
+      },
+      "system": "windows"
+    },
+    "other": null,
+    "theirs": {
+      "app": "0.2.0",
+      "chip": "aarch64",
+      "freeBytes": null,
+      "power": {
+        "kind": "plugged"
+      },
+      "system": "mac"
+    },
+    "versions": "update-here"
+  }
+]

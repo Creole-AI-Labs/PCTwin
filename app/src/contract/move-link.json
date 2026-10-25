@@ -1,0 +1,31 @@
+[
+  {
+    "kind": "connected"
+  },
+  {
+    "kind": "waiting",
+    "lastSeenSeconds": 12,
+    "nothingNew": false,
+    "savedBytes": 81600000000,
+    "totalBytes": 120000000000
+  },
+  {
+    "kind": "waiting",
+    "lastSeenSeconds": 95,
+    "nothingNew": true,
+    "savedBytes": 81600000000,
+    "totalBytes": 120000000000
+  },
+  {
+    "kind": "ended",
+    "movedSomething": true,
+    "savedBytes": 81600000000,
+    "totalBytes": 120000000000
+  },
+  {
+    "kind": "ended",
+    "movedSomething": false,
+    "savedBytes": 0,
+    "totalBytes": 120000000000
+  }
+]

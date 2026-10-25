@@ -28,7 +28,7 @@ fn names(dir: &Path) -> Vec<String> {
 /// and the test leaves nothing behind.
 #[test]
 fn an_ordinary_drive_names_files_at_once_and_the_test_leaves_nothing() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(root.path().join("mine.txt"), b"mine").unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let check = dest.check_drive().unwrap();
@@ -46,7 +46,7 @@ fn an_ordinary_drive_names_files_at_once_and_the_test_leaves_nothing() {
 /// test's own bytes: a file that merely has such a name is someone's, and stays.
 #[test]
 fn only_probe_files_holding_the_probe_s_own_bytes_are_cleared_away() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let (a, b) = pctwin_gate::probe_contents();
     std::fs::write(root.path().join(".pctwin-probe-0123abcd-a"), a).unwrap();
@@ -109,7 +109,7 @@ fn only_probe_files_holding_the_probe_s_own_bytes_are_cleared_away() {
 /// probe's own bytes, only when older than any test takes, never a folder or someone's file.
 #[test]
 fn the_time_test_clears_leftover_probe_files_by_the_same_rules() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let (a, _) = pctwin_gate::probe_contents();
     let time = pctwin_gate::time_probe_contents();
@@ -154,7 +154,7 @@ fn the_time_test_clears_leftover_probe_files_by_the_same_rules() {
 /// put in the probe's place, nor a folder.
 #[test]
 fn a_time_probe_another_program_wrote_into_is_never_removed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let dir = root.path().to_path_buf();
     let mut seen = Vec::new();
@@ -193,7 +193,7 @@ fn sealed_file<'d>(dest: &'d Destination, path: &str, bytes: &[u8]) -> pctwin_ga
 /// with a guess: the file is not named, and comes back sealed and whole.
 #[test]
 fn a_drive_with_no_safe_way_never_names_a_file() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path())
         .unwrap()
         .with_profile(DriveProfile::of(DriveKind::Unknown).with_naming(Naming::NoSafeMethod));
@@ -213,7 +213,7 @@ fn a_drive_with_no_safe_way_never_names_a_file() {
 /// Such a drive is refused when it is chosen, with the reason.
 #[test]
 fn a_drive_with_no_safe_way_is_refused_when_chosen() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     let refused = table.approve_with_profile(
         "usb",
@@ -238,7 +238,7 @@ fn a_drive_with_no_safe_way_is_refused_when_chosen() {
 /// that move, on every system.
 #[test]
 fn a_drive_without_hard_links_names_by_a_move_that_never_replaces() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     std::fs::write(root.path().join("a.txt"), b"theirs").unwrap();
     let dest = Destination::open(root.path()).unwrap().with_profile(
         DriveProfile::of(DriveKind::ExFat)
@@ -260,7 +260,7 @@ fn a_drive_without_hard_links_names_by_a_move_that_never_replaces() {
 #[cfg(unix)]
 #[test]
 fn a_link_put_in_place_of_a_time_probe_is_never_removed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let dest = Destination::open(root.path()).unwrap();
     let dir = root.path().to_path_buf();
     std::fs::write(dir.join("t"), pctwin_gate::time_probe_contents()).unwrap();
@@ -293,7 +293,7 @@ fn a_link_put_in_place_of_a_time_probe_is_never_removed() {
 /// kind's bytes, stays. (The review's probe.)
 #[test]
 fn part_written_leftover_probe_files_are_cleared_too() {
-    let root = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let names = |dir: &std::path::Path| {
         let mut v: Vec<String> = std::fs::read_dir(dir)
             .unwrap()

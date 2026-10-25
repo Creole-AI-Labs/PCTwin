@@ -1,0 +1,135 @@
+/*
+ * Motion: presentation only. Timings come from src/motion/tokens.ts (--motion-*), which already
+ * reads zero when the mode is reduced or off. Only transform and opacity ever animate.
+ */
+
+/* Reduced and off: no transitions, no keyframes, no smooth scrolling, no press scale. Every word,
+   control, state and focus ring stays exactly as it is. */
+:root:is([data-motion="reduced"], [data-motion="off"]) *,
+:root:is([data-motion="reduced"], [data-motion="off"]) *::before,
+:root:is([data-motion="reduced"], [data-motion="off"]) *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  animation: none !important;
+}
+
+:root:is([data-motion="reduced"], [data-motion="off"]) :is(.button, .kit-button):active {
+  transform: none;
+}
+
+/* The Motion choice sits beside the language choice: the app's only settings place for now. */
+.app-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.app-settings select {
+  min-height: var(--control-small);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--colour-line);
+  border-radius: 8px;
+  background: var(--colour-paper);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+/* ---------- The receipt seal ---------- */
+
+.motion-seal {
+  position: relative;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+/* The cover the check is traced out from: at rest it takes no room and shows nothing. */
+.motion-seal-trace {
+  position: absolute;
+  inset: 0;
+  background: var(--seal-surface, var(--colour-success-surface));
+  transform: scaleX(0);
+  pointer-events: none;
+}
+
+.qs-statuscard .motion-seal-trace {
+  --seal-surface: var(--colour-paper);
+}
+
+/* ---------- The citron bookmark ---------- */
+
+.motion-bookmark {
+  position: fixed;
+  z-index: 900;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--colour-citron);
+  box-shadow: 0 1px 4px #53631320;
+  pointer-events: none;
+}
+
+/* ---------- Layers: dialogs and toasts (MC03) ---------- */
+
+@keyframes motion-layer-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-layer-shift, 8px));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.kit-dialog[open] {
+  animation: motion-layer-in var(--motion-surface) var(--motion-ease-settle);
+}
+
+.kit-dialog[open]::backdrop {
+  animation: motion-fade-in var(--motion-surface) var(--motion-ease-settle);
+}
+
+
+/* ---------- Warnings (MC23): the banner is all there at once; one brief ring marks it, then it is still ---------- */
+
+.kit-banner-attention {
+  position: relative;
+}
+
+.kit-banner-attention::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--colour-attention-text);
+  border-radius: calc(var(--radius-content) + 3px);
+  opacity: 0;
+  pointer-events: none;
+  animation: motion-emphasis var(--motion-emphasis-max) var(--motion-ease-settle);
+}
+
+@keyframes motion-emphasis {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---------- Pairing (MC14): the accent that follows a confirmed pairing ---------- */
+
+.motion-accent {
+  display: inline-flex;
+}

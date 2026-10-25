@@ -122,6 +122,9 @@ async fn two_laptops_pair_over_a_real_connection_and_exchange_sealed_data() {
         pending_guest.approval()
     );
     let (mut host_link, mut guest_link) = (host_link.unwrap(), guest_link.unwrap());
+    // Each small message goes at once, never held back to be sent with the next (a move sends a
+    // few small messages for every file: held back, each waited on the other side's reply).
+    assert!(host_link.sends_at_once() && guest_link.sends_at_once());
 
     host_link.send(b"hello from the old laptop").await.unwrap();
     assert_eq!(
@@ -1152,6 +1155,7 @@ async fn paired_with_host() -> (pctwin_link::Link, pctwin_link::Link, Host) {
 }
 
 const KIND_LANE: u8 = 9;
+const KIND_RESUME: u8 = 10;
 
 #[tokio::test]
 async fn extra_lanes_open_beside_the_main_link_without_a_new_code() {
@@ -1364,10 +1368,11 @@ async fn a_resume_is_refused_without_keys_or_for_another_plan() {
     opened.unwrap();
 }
 
-/// Waiting for lanes only ([`accept`]) never takes a resume, even once resumes are allowed: a
-/// resume is only ever the move's new main connection, taken through `accept_any`.
+/// Waiting for lanes only ([`accept`]) never returns a resume: a resume is only ever the move's new
+/// main connection, taken through `accept_any`. One that arrives meanwhile is still taken in, and
+/// handed over by the next `accept_any`, so whichever call waits, the way back is served.
 #[tokio::test]
-async fn waiting_for_lanes_only_never_takes_a_resume() {
+async fn waiting_for_lanes_only_never_returns_a_resume_but_keeps_it_for_accept_any() {
     let (mut old, mut new, host) = paired_with_host().await;
     let now = Instant::now();
     let mut old_keys = old.take_lane_keys().unwrap();
@@ -1377,17 +1382,23 @@ async fn waiting_for_lanes_only_never_takes_a_resume() {
     let addr = new.peer_addr();
     let mut listener = host.into_lanes(old_keys, old.peer_addr());
     listener.allow_resumes(old_resumes);
-    let serving = tokio::spawn(async move { listener.accept().await });
-    assert!(
-        pctwin_link::open_resume(addr, &mut new_resumes, fast())
-            .await
-            .is_err()
-    );
-    // The listener is still waiting for a lane, and serves the next one.
-    let (accepted, opened) =
-        tokio::join!(serving, pctwin_link::open_lane(addr, &mut new_keys, fast()));
-    accepted.unwrap().unwrap();
+    let lanes_only = async {
+        let lane = listener.accept().await;
+        (lane, listener)
+    };
+    let new_laptop = async {
+        let resumed = pctwin_link::open_resume(addr, &mut new_resumes, fast()).await;
+        let lane = pctwin_link::open_lane(addr, &mut new_keys, fast()).await;
+        (resumed, lane)
+    };
+    let ((lane, mut listener), (resumed, opened)) =
+        no_hang(async { tokio::join!(lanes_only, new_laptop) }).await;
+    resumed.unwrap();
     opened.unwrap();
+    lane.unwrap();
+    // The resume taken in meanwhile comes from `accept_any`, at once.
+    let kept = tokio::time::timeout(Duration::from_secs(1), listener.accept_any()).await;
+    assert!(matches!(kept, Ok(Ok(Arrival::Resumed(_)))));
 }
 
 /// An old laptop that answers a resume with a message of another kind is refused as unexpected,
@@ -1601,4 +1612,617 @@ async fn a_new_laptop_that_never_confirms_is_not_paired() {
     assert!(host.choose(right, Instant::now()).await.is_err());
     assert!(started.elapsed() < Duration::from_secs(5));
     drop(guest);
+}
+
+/// The new laptop reconnects from another address than it paired from (a new Wi-Fi lease, Wi-Fi
+/// to cable): its resume keys prove it, so the resume is taken, and its lanes are accepted from
+/// the new address afterwards. Lanes from another address are still never taken before that.
+#[tokio::test]
+async fn a_resume_from_a_new_address_is_taken_and_lanes_follow_it() {
+    let (mut old, mut new, host) = paired_with_host().await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let addr = new.peer_addr();
+    // The listener last knew the paired laptop at another address.
+    let elsewhere: std::net::SocketAddr = "192.168.1.50:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let (arrived, opened) = no_hang(async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_resume(addr, &mut new_resumes, fast())
+        )
+    })
+    .await;
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
+    opened.unwrap();
+    // Its lanes now come from where it is.
+    let (arrived, opened) = no_hang(async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_lane(addr, &mut new_keys, fast())
+        )
+    })
+    .await;
+    assert!(matches!(arrived.unwrap(), Arrival::Lane(_)));
+    opened.unwrap();
+}
+
+/// Pairs over loopback with `config` (the listener for the move uses the host's).
+async fn paired_with(config: LinkConfig) -> (pctwin_link::Link, pctwin_link::Link, Host) {
+    let (host, sender) = host_with(config).await;
+    let addr = host.local_addr().unwrap();
+    let code = shown_code(&sender);
+    let guest = tokio::spawn(async move { connect(addr, &code, config).await.unwrap() });
+    let pending_host = host.next_peer(&sender).await.unwrap();
+    let pending_guest = guest.await.unwrap();
+    let shown = pending_guest.match_number();
+    let (old, new) = tokio::join!(
+        pending_host.choose(shown, Instant::now()),
+        pending_guest.approval()
+    );
+    (old.unwrap(), new.unwrap(), host)
+}
+
+/// A stranger on the network that keeps connections to `at` open from `from`, saying nothing, each
+/// until it is closed (or a while passes), then opens another. (Not on a Mac: the tests that use
+/// it need more loopback addresses than 127.0.0.1, which macOS does not answer by default.)
+#[cfg(not(target_os = "macos"))]
+async fn hold_open(from: std::net::IpAddr, at: std::net::SocketAddr) {
+    loop {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind(std::net::SocketAddr::new(from, 0)).unwrap();
+        if let Ok(mut held) = socket.connect(at).await {
+            let mut sink = [0u8; 64];
+            let _ = tokio::time::timeout(Duration::from_secs(5), held.read(&mut sink)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Strangers on the same network who keep connections to the old laptop's listener open, from more
+/// addresses than it serves at once, can neither keep the paired new laptop from coming back nor
+/// make it spend its tries: every one of many resumes in a row gets through at the first try.
+/// (Before, one silent stranger at a time held the only handshake for the whole step limit, the
+/// new laptop's tries timed out one after another, and after 64 the move ended.)
+// A Mac answers only on 127.0.0.1, and the strangers need addresses of their own.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn strangers_holding_the_listener_cannot_keep_the_new_laptop_from_coming_back() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_millis(200),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let strangers: Vec<_> = (2..=9u8)
+        .map(|n| tokio::spawn(hold_open(std::net::IpAddr::from([127, 0, 0, n]), at)))
+        .collect();
+    // Let the strangers take every slot they can first.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for n in 0..20 {
+        let (arrived, opened) = no_hang(async {
+            tokio::join!(
+                listener.accept_any(),
+                pctwin_link::open_resume(at, &mut new_resumes, config)
+            )
+        })
+        .await;
+        assert!(opened.is_ok(), "try {n}: {:?}", opened.err());
+        assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)), "try {n}");
+    }
+    for s in strangers {
+        s.abort();
+    }
+}
+
+/// The new laptop comes back from a new address (a new Wi-Fi lease, or a new private IPv6
+/// address) while strangers keep more silent connections open than the listener lets wait, from
+/// ever new addresses: it still gets through at its first try, since only a first word that proves
+/// the keys starts a handshake and the oldest silent connection is let go to make room.
+// A Mac answers only on 127.0.0.1, and the strangers need addresses of their own.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn back_from_a_new_address_it_gets_through_strangers_on_ever_new_addresses() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    // The listener last knew the paired laptop at another address: 127.0.0.1 is new to it.
+    let elsewhere: std::net::SocketAddr = "127.0.0.77:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    // 80 strangers at once, each moving to a new address for every connection and coming back
+    // the moment it is let go. They are other devices: they run on their own threads, so they
+    // cannot slow the new laptop's own client down (only the old laptop's listener is shared).
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopping = Arc::clone(&stop);
+    let strangers = std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let devices: Vec<_> = (0..80u8)
+                .map(|k| {
+                    let stop = Arc::clone(&stopping);
+                    tokio::spawn(async move {
+                        for n in 0u32.. {
+                            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                                return;
+                            }
+                            let last = u8::try_from(1 + n % 250).unwrap();
+                            let from = std::net::IpAddr::from([127, 0, 1 + k % 200, last]);
+                            let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                            if socket.bind(std::net::SocketAddr::new(from, 0)).is_err() {
+                                continue;
+                            }
+                            if let Ok(mut held) = socket.connect(at).await {
+                                let mut sink = [0u8; 64];
+                                let _ = tokio::time::timeout(
+                                    Duration::from_secs(5),
+                                    held.read(&mut sink),
+                                )
+                                .await;
+                            }
+                        }
+                    })
+                })
+                .collect();
+            for d in devices {
+                let _ = d.await;
+            }
+        });
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let came_back = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            listener.accept_any(),
+            pctwin_link::open_resume(at, &mut new_resumes, config)
+        )
+    })
+    .await;
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    // They stop by themselves within a few seconds; the test does not wait for them.
+    drop(strangers);
+    let (arrived, opened) = came_back.expect("it came back in time");
+    assert!(opened.is_ok(), "first try: {:?}", opened.err());
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
+}
+
+/// A try the new laptop gave up on part way (it said its first word, heard the answer, and went)
+/// is not held against its address: its next try, at once, gets through.
+// A Mac answers only on 127.0.0.1, and the listener must know the paired laptop elsewhere.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_try_the_new_laptop_gave_up_on_does_not_lock_it_out() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let elsewhere: std::net::SocketAddr = "127.0.0.77:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let new_laptop = async {
+        // The try it gives up on: its first word, the old laptop's answer, then gone.
+        let (_given_up, msg1) = new_resumes.open(Instant::now()).unwrap();
+        let mut raw = TcpStream::connect(at).await.unwrap();
+        let mut frame = vec![KIND_RESUME, 0, 0];
+        frame[1..3].copy_from_slice(&(msg1.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&msg1);
+        raw.write_all(&frame).await.unwrap();
+        let mut head = [0u8; 3];
+        raw.read_exact(&mut head).await.unwrap();
+        assert_eq!(head[0], KIND_RESUME, "the old laptop answered");
+        drop(raw);
+        // The next try, from the same address, once the old laptop has seen that one end (a real
+        // retry comes a second or more later).
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        pctwin_link::open_resume(at, &mut new_resumes, config).await
+    };
+    let came_back = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(listener.accept_any(), new_laptop)
+    })
+    .await;
+    let (arrived, opened) = came_back.expect("it came back in time");
+    assert!(opened.is_ok(), "the next try: {:?}", opened.err());
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
+}
+
+/// Whether the listener at `at` lets a silent connection from `from` wait (true), or closes it at
+/// once (false, a refused address).
+#[cfg(not(target_os = "macos"))]
+async fn waits_for(from: std::net::IpAddr, at: std::net::SocketAddr) -> bool {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind(std::net::SocketAddr::new(from, 0)).unwrap();
+    let mut held = socket.connect(at).await.unwrap();
+    let mut sink = [0u8; 8];
+    // Closed at once reads the end; a wait reads nothing for a while.
+    tokio::time::timeout(Duration::from_millis(300), held.read(&mut sink))
+        .await
+        .is_err()
+}
+
+/// Going quiet is held against nobody (a laptop on a weak network may), but a first word that is
+/// neither a genuine lane nor a genuine resume gets that exact address refused for a while, and
+/// only that address.
+// A Mac answers only on 127.0.0.1, and the strangers need addresses of their own.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn silence_is_not_held_against_an_address_but_a_false_first_word_is() {
+    let config = LinkConfig {
+        // A first word is waited for 2 s: far beyond the 300 ms each look below takes, so a busy
+        // machine cannot blur waiting and being let go.
+        step_timeout: Duration::from_secs(2),
+        handshake_timeout: Duration::from_secs(2),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let _new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    let quiet = std::net::IpAddr::from([127, 0, 0, 21]);
+    let liar = std::net::IpAddr::from([127, 0, 0, 22]);
+    let strangers = async {
+        // Silent until let go (after its 2 s): still let in afterwards.
+        assert!(waits_for(quiet, at).await);
+        tokio::time::sleep(Duration::from_millis(2_300)).await;
+        assert!(waits_for(quiet, at).await, "silence is held against nobody");
+        // A false resume: refused from then on, and only that address.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind(std::net::SocketAddr::new(liar, 0)).unwrap();
+        let mut raw = socket.connect(at).await.unwrap();
+        raw.write_all(&[KIND_RESUME, 0, 4, 1, 2, 3, 4])
+            .await
+            .unwrap();
+        let mut sink = [0u8; 8];
+        let _ = tokio::time::timeout(Duration::from_secs(1), raw.read(&mut sink)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!waits_for(liar, at).await, "a false first word is refused");
+        assert!(waits_for(quiet, at).await, "only that address");
+    };
+    tokio::select! {
+        () = strangers => {}
+        _ = listener.accept_any() => panic!("nothing genuine arrived"),
+    }
+}
+
+/// A lane the returning laptop opens from its new address before its resume is taken (too early:
+/// lanes follow a resume) is closed unread and not held against that address: its resume, right
+/// after, is answered and taken.
+// A Mac answers only on 127.0.0.1, and the listener must know the paired laptop elsewhere.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lane_sent_before_the_resume_does_not_lock_the_new_address_out() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let elsewhere: std::net::SocketAddr = "127.0.0.77:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    drop(old);
+    drop(new);
+    let new_laptop = async {
+        let early = pctwin_link::open_lane(at, &mut new_keys, config).await;
+        assert!(early.is_err(), "no lane before the resume");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        pctwin_link::open_resume(at, &mut new_resumes, config).await
+    };
+    let came_back = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(listener.accept_any(), new_laptop)
+    })
+    .await;
+    let (arrived, opened) = came_back.expect("it came back in time");
+    assert!(opened.is_ok(), "the resume: {:?}", opened.err());
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
+}
+
+/// Sends `frame` as a connection's first word to `at` and says whether the old laptop answered it
+/// (its reply begins with the same kind), keeping the connection open for `hold`.
+async fn first_word_answered(
+    at: std::net::SocketAddr,
+    kind: u8,
+    word: &[u8],
+    hold: Duration,
+) -> bool {
+    let mut raw = TcpStream::connect(at).await.unwrap();
+    let mut frame = vec![kind, 0, 0];
+    frame[1..3].copy_from_slice(&(word.len() as u16).to_be_bytes());
+    frame.extend_from_slice(word);
+    raw.write_all(&frame).await.unwrap();
+    let mut head = [0u8; 3];
+    let answered = matches!(
+        tokio::time::timeout(Duration::from_millis(500), raw.read_exact(&mut head)).await,
+        Ok(Ok(_)) if head[0] == kind
+    );
+    tokio::time::sleep(hold).await;
+    answered
+}
+
+/// When every handshake is taken, a resume's first word is closed before its keys are checked, so
+/// its number is not spent: the very same word, once there is room, is answered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn with_every_handshake_taken_a_resume_is_turned_away_without_spending_its_number() {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let mut new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let mut listener = host.into_lanes(old_keys, old.peer_addr());
+    listener.allow_resumes(old_resumes);
+    // Every handshake taken by lanes that never finish (each waits a second for its last word).
+    let lanes: Vec<Vec<u8>> = (0..pctwin_link::MAX_HANDSHAKES)
+        .map(|_| new_keys.open_lane(Instant::now()).unwrap().1)
+        .collect();
+    let (_resuming, word) = new_resumes.open(Instant::now()).unwrap();
+    let laptop = async {
+        let holding: Vec<_> = lanes
+            .iter()
+            .map(|w| first_word_answered(at, KIND_LANE, w, Duration::from_millis(1500)))
+            .collect();
+        let late = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            first_word_answered(at, KIND_RESUME, &word, Duration::ZERO).await
+        };
+        let (held, turned_away) = tokio::join!(futures_util::future::join_all(holding), late);
+        assert!(
+            held.iter().all(|a| *a),
+            "every lane's first word was answered"
+        );
+        assert!(!turned_away, "no room: turned away");
+        // Room again (the lanes gave up): the very same word is answered, its number unspent.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(first_word_answered(at, KIND_RESUME, &word, Duration::ZERO).await);
+    };
+    tokio::select! {
+        () = laptop => {}
+        _ = listener.accept_any() => panic!("nothing finished its handshake"),
+    }
+}
+
+/// Opens a connection from `from` to `at`, as a stranger does.
+#[cfg(not(target_os = "macos"))]
+async fn stranger(from: std::net::IpAddr, at: std::net::SocketAddr) -> TcpStream {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind(std::net::SocketAddr::new(from, 0)).unwrap();
+    socket.connect(at).await.unwrap()
+}
+
+/// Whether the old laptop has let `held` go (it reads the end at once), not just left it waiting.
+#[cfg(not(target_os = "macos"))]
+async fn let_go(held: &mut TcpStream) -> bool {
+    let mut sink = [0u8; 8];
+    matches!(
+        tokio::time::timeout(Duration::from_millis(150), held.read(&mut sink)).await,
+        Ok(Ok(0) | Err(_))
+    )
+}
+
+/// A listener for these tests: paired with a laptop it believes is at 127.0.0.77, resume keys held,
+/// first words waited for 3 seconds. Returns it, the new laptop's resume keys, its address and the
+/// settings.
+#[cfg(not(target_os = "macos"))]
+async fn listening_elsewhere() -> (
+    pctwin_link::LaneListener,
+    pctwin_pairing::ResumeKeys,
+    std::net::SocketAddr,
+    LinkConfig,
+) {
+    let config = LinkConfig {
+        step_timeout: Duration::from_secs(3),
+        handshake_timeout: Duration::from_secs(3),
+        silence_penalty: Duration::from_secs(30),
+        connect_timeout: Duration::from_secs(1),
+    };
+    let (mut old, mut new, host) = paired_with(config).await;
+    let now = Instant::now();
+    let mut old_keys = old.take_lane_keys().unwrap();
+    let mut new_keys = new.take_lane_keys().unwrap();
+    let old_resumes = old_keys.resume_keys(&PLAN, now).unwrap();
+    let new_resumes = new_keys.resume_keys(&PLAN, now).unwrap();
+    let at = host.local_addr().unwrap();
+    let elsewhere: std::net::SocketAddr = "127.0.0.77:9".parse().unwrap();
+    let mut listener = host.into_lanes(old_keys, elsewhere);
+    listener.allow_resumes(old_resumes);
+    (listener, new_resumes, at, config)
+}
+
+/// Strangers on their own threads (other devices), `count` at once, each on a new address for
+/// every connection and back the moment it is let go, until `stop`.
+#[cfg(not(target_os = "macos"))]
+fn flood(
+    at: std::net::SocketAddr,
+    count: u16,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let devices: Vec<_> = (0..count)
+                .map(|k| {
+                    let stop = Arc::clone(&stop);
+                    tokio::spawn(async move {
+                        for n in 0u32.. {
+                            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                                return;
+                            }
+                            let last = u8::try_from(1 + n % 250).unwrap();
+                            let third = u8::try_from(1 + k % 200).unwrap();
+                            let from = std::net::IpAddr::from([127, 0, third, last]);
+                            let socket = tokio::net::TcpSocket::new_v4().unwrap();
+                            if socket.bind(std::net::SocketAddr::new(from, 0)).is_err() {
+                                continue;
+                            }
+                            if let Ok(mut held) = socket.connect(at).await {
+                                let mut sink = [0u8; 64];
+                                let _ = tokio::time::timeout(
+                                    Duration::from_secs(5),
+                                    held.read(&mut sink),
+                                )
+                                .await;
+                            }
+                        }
+                    })
+                })
+                .collect();
+            for d in devices {
+                let _ = d.await;
+            }
+        });
+    })
+}
+
+/// A returning laptop whose first word comes late (a busy laptop, a lost packet sent again) is not
+/// pushed out meanwhile, even by more strangers than the room holds arriving fast on ever new
+/// addresses: once in, a connection is given its time to speak.
+// A Mac answers only on 127.0.0.1, and the strangers need addresses of their own.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_first_word_that_comes_late_is_not_pushed_out_by_a_fast_flood() {
+    let (mut listener, mut new_resumes, at, _) = listening_elsewhere().await;
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let late = async {
+        let mut raw = TcpStream::connect(at).await.unwrap();
+        // Then more strangers than the room holds, as fast as they can.
+        let strangers = flood(at, 300, Arc::clone(&stop));
+        // It says nothing for 300 ms while the strangers keep coming.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let (_resuming, word) = new_resumes.open(Instant::now()).unwrap();
+        let mut frame = vec![KIND_RESUME, 0, 0];
+        frame[1..3].copy_from_slice(&(word.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&word);
+        let _ = raw.write_all(&frame).await;
+        let mut head = [0u8; 3];
+        let answered = matches!(
+            tokio::time::timeout(Duration::from_secs(1), raw.read_exact(&mut head)).await,
+            Ok(Ok(_)) if head[0] == KIND_RESUME
+        );
+        (answered, strangers)
+    };
+    let (answered, strangers) = tokio::select! {
+        answered = late => answered,
+        _ = listener.accept_any() => panic!("nothing finished its handshake"),
+    };
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    drop(strangers);
+    assert!(answered, "the late first word was answered");
+}
+
+/// One address cannot fill the room: past a few waiting places, its own oldest are let go, and
+/// nobody else's.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_address_holds_only_a_few_waiting_places() {
+    let (mut listener, _resumes, at, _) = listening_elsewhere().await;
+    let checks = async {
+        let mut other = stranger(std::net::IpAddr::from([127, 0, 0, 31]), at).await;
+        let mut held = Vec::new();
+        for _ in 0..10 {
+            held.push(stranger(std::net::IpAddr::from([127, 0, 0, 30]), at).await);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut still = 0;
+        for h in &mut held {
+            if !let_go(h).await {
+                still += 1;
+            }
+        }
+        assert_eq!(still, pctwin_link::WAITING_PER_ADDRESS, "only a few wait");
+        assert!(!let_go(&mut other).await, "another address keeps its place");
+    };
+    tokio::select! {
+        () = checks => {}
+        _ = listener.accept_any() => panic!("nothing finished its handshake"),
+    }
+}
+
+/// When the room is full of strangers that have had their time, the returning laptop still gets in
+/// (the longest waiting is let go for it) and comes back.
+#[cfg(not(target_os = "macos"))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_room_full_of_silent_strangers_still_lets_the_returning_laptop_in() {
+    let (mut listener, mut new_resumes, at, config) = listening_elsewhere().await;
+    let filling = async {
+        let mut held = Vec::new();
+        for n in 0..300u16 {
+            let third = u8::try_from(2 + n / 200).unwrap();
+            let fourth = u8::try_from(1 + n % 200).unwrap();
+            held.push(stranger(std::net::IpAddr::from([127, 0, third, fourth]), at).await);
+        }
+        // Older than any connection's protected time.
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let back = pctwin_link::open_resume(at, &mut new_resumes, config).await;
+        (back, held)
+    };
+    let (arrived, (opened, _held)) =
+        no_hang(async { tokio::join!(listener.accept_any(), filling) }).await;
+    assert!(opened.is_ok(), "{:?}", opened.err());
+    assert!(matches!(arrived.unwrap(), Arrival::Resumed(_)));
 }

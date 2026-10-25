@@ -61,7 +61,11 @@ pub enum Message {
         written: bool,
     },
     /// Receiver, after a new connection: continue this file (`item`; `stream` as it was, 0 after
-    /// the new laptop's app restarted) from here.
+    /// the new laptop's app restarted) from here. Also (move protocol
+    /// [`SET_DOWN_SINCE`](crate::SET_DOWN_SINCE) and later), in answer to a start, end or print
+    /// while the move runs: the drive of the file's place paused the move, so the file is set
+    /// down here partway, nothing more of it written; continue it from here once the move
+    /// carries on.
     ResumeFrom {
         stream: u32,
         item: ItemId,
@@ -76,14 +80,24 @@ pub enum Message {
     /// Sender: every file has been sent and answered for.
     AllSent,
     /// Receiver, answering every `StartFile`: no file of that name and size is here (`None`),
-    /// or one is, with its BLAKE3 fingerprint.
+    /// or one is, with its BLAKE3 fingerprint (from move protocol 4, a key of this laptop's to
+    /// fingerprint the old laptop's file with; see `Print`).
     Have {
         stream: u32,
         same_size: Option<[u8; 32]>,
     },
     /// Sender: the file already there is identical, so it is not sent (answered with
-    /// `FileDone`).
+    /// `FileDone`). Before move protocol 4 only.
     Skip { stream: u32 },
+    /// Sender (move protocol 4 and later), in place of `Skip`: its file's BLAKE3 fingerprint
+    /// under the key the new laptop sent in `Have`. The new laptop compares it with its own file
+    /// and answers with `FileDone`: yes when identical (nothing is sent), no to send it after
+    /// all.
+    Print { stream: u32, print: [u8; 32] },
+    /// Receiver, at the start of each connection (move protocol 4 and later), in place of
+    /// `FileDone` for a file that ended on an earlier connection: by the file, never by a stream
+    /// number either app may since have given to another.
+    ItemDone { item: ItemId, ok: bool },
     /// Receiver, in place of a receipt: that block was not written (the file failed, is not open,
     /// or belongs to an earlier attempt), so its file will not finish.
     Refused { stream: u32 },
@@ -102,6 +116,21 @@ pub enum Message {
     /// Sender: it stops sending this file, for `why` (the file fails, and the new laptop says
     /// why).
     GiveUp { stream: u32, why: GiveUpWhy },
+    /// Either laptop, on the main connection (move protocol 4 and later): whether the person on
+    /// this side has paused the move. The old laptop says it when its person pauses or carries
+    /// on, and again every [`HOLD_TICK`](crate::HOLD_TICK) while the move is held; the new laptop
+    /// answers each with its own, and says it unasked, with its next reply, when its person
+    /// pauses or carries on. Neither ever takes the quiet of a pause for a dropped link.
+    Hold { paused: bool },
+    /// Either laptop, on the main connection (move protocol 4 and later): the person on this
+    /// side stopped the move. Said once, as the move ends, so the other laptop reports a stop and
+    /// never a lost connection.
+    Stopping,
+    /// Sender, on the main connection (move protocol 4 and later): it will not send the planned
+    /// file `item`, which it never started, for `cause` (only causes the old laptop can know, see
+    /// [`Cause`](crate::Cause)). Said again on each new connection, so the new laptop's report gives
+    /// the true reason, never a blank.
+    NotSent { item: ItemId, cause: u8 },
 }
 
 /// Why the old laptop stopped sending a file.
@@ -111,6 +140,9 @@ pub enum GiveUpWhy {
     AskedAgainTooOften,
     /// It was read as many times as any file may be in one move.
     ReadTooOften,
+    /// The old laptop could not read the rest of it (move protocol 4 and later; before, it said
+    /// the file changed).
+    Unreadable,
 }
 
 const START: u8 = 1;
@@ -128,6 +160,11 @@ const CHECK_ORIGINALS: u8 = 12;
 const ORIGINALS: u8 = 13;
 const SEND_AGAIN: u8 = 14;
 const GIVE_UP: u8 = 15;
+const HOLD: u8 = 16;
+const STOPPING: u8 = 17;
+const NOT_SENT: u8 = 18;
+const PRINT: u8 = 19;
+const ITEM_DONE: u8 = 20;
 
 impl Message {
     pub fn encode(&self) -> Vec<u8> {
@@ -200,7 +237,13 @@ impl Message {
                 w.push(match why {
                     GiveUpWhy::AskedAgainTooOften => 0,
                     GiveUpWhy::ReadTooOften => 1,
+                    GiveUpWhy::Unreadable => 2,
                 });
+            }
+            Message::Hold { paused } => {
+                w.push(HOLD);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                w.push(u8::from(*paused));
             }
             Message::FileDone { stream, ok } => {
                 w.push(DONE);
@@ -210,6 +253,16 @@ impl Message {
             Message::Ready => {
                 w.push(READY);
                 w.extend_from_slice(&0u32.to_be_bytes());
+            }
+            Message::Stopping => {
+                w.push(STOPPING);
+                w.extend_from_slice(&0u32.to_be_bytes());
+            }
+            Message::NotSent { item, cause } => {
+                w.push(NOT_SENT);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                w.extend_from_slice(&item_bytes(item));
+                w.push(*cause);
             }
             Message::AllSent => {
                 w.push(ALL_SENT);
@@ -229,6 +282,17 @@ impl Message {
             Message::Skip { stream } => {
                 w.push(SKIP);
                 w.extend_from_slice(&stream.to_be_bytes());
+            }
+            Message::Print { stream, print } => {
+                w.push(PRINT);
+                w.extend_from_slice(&stream.to_be_bytes());
+                w.extend_from_slice(print);
+            }
+            Message::ItemDone { item, ok } => {
+                w.push(ITEM_DONE);
+                w.extend_from_slice(&0u32.to_be_bytes());
+                w.extend_from_slice(&item_bytes(item));
+                w.push(u8::from(*ok));
             }
             Message::Refused { stream } => {
                 w.push(REFUSED);
@@ -317,6 +381,7 @@ impl Message {
                 why: match r.u8()? {
                     0 => GiveUpWhy::AskedAgainTooOften,
                     1 => GiveUpWhy::ReadTooOften,
+                    2 => GiveUpWhy::Unreadable,
                     _ => return Err(damaged("unknown reason for stopping")),
                 },
             },
@@ -325,7 +390,13 @@ impl Message {
                 ok: r.flag()?,
             },
             READY if stream == 0 => Message::Ready,
+            STOPPING if stream == 0 => Message::Stopping,
+            NOT_SENT if stream == 0 => Message::NotSent {
+                item: r.item()?,
+                cause: r.u8()?,
+            },
             ALL_SENT if stream == 0 => Message::AllSent,
+            HOLD if stream == 0 => Message::Hold { paused: r.flag()? },
             HAVE => Message::Have {
                 stream,
                 same_size: if r.flag()? {
@@ -337,6 +408,15 @@ impl Message {
                 },
             },
             SKIP => Message::Skip { stream },
+            PRINT => {
+                let mut print = [0u8; 32];
+                print.copy_from_slice(r.take(32)?);
+                Message::Print { stream, print }
+            }
+            ITEM_DONE if stream == 0 => Message::ItemDone {
+                item: r.item()?,
+                ok: r.flag()?,
+            },
             REFUSED => Message::Refused { stream },
             CHECK_ORIGINALS if stream == 0 => {
                 let nonce = r.nonce()?;

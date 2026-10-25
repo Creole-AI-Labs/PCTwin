@@ -1,11 +1,11 @@
 import { LocalizationProvider } from "@fluent/react";
 import { useState, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SAMPLES } from "../gallery/samples";
 import { localization } from "../i18n";
-import { fraction, formatBytes, historyStateOf, missingLines, receiptState, tally, type Conflict, type HistoryEntry, type PickedItem, type Receipt } from "../quicksend";
+import { extensionOf, fileName, fraction, formatBytes, historyStateOf, missingLines, receiptState, shownSafely, tally, type Conflict, type HistoryEntry, type PickedItem, type Receipt } from "../quicksend";
 import { BLUE_FOX, CONFLICTS, GREEN_OWL, HISTORY, NEARBY, OFFER, PICKED, PROGRESS, RECEIPT_PARTIAL, RECEIPT_WHOLE } from "../quicksend.fixtures";
 import { FooterProvider } from "./FrameFooter";
 import History from "./History";
@@ -54,11 +54,6 @@ function inApp(ui: ReactNode) {
       <main>{ui}</main>
     </LocalizationProvider>,
   );
-}
-
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
 }
 
 /** A screen's controlled tick, kept in a tiny harness so a test can click it. */
@@ -287,7 +282,7 @@ describe("Q04 Who should receive it?", () => {
       <QuickWho
         count={1}
         size={10}
-        nearby={[{ ...NEARBY[0], busy: true }, { ...NEARBY[1], sameLabelNearby: true }]}
+        nearby={[{ ...NEARBY[0], busy: true }, { ...NEARBY[1], sameLabelNearby: true, needsUpdate: false }]}
         onChooseNearby={onChooseNearby}
         onUseCode={fn()}
         onBack={fn()}
@@ -628,6 +623,15 @@ describe("Q14 Handover receipt", () => {
     expect(screen.getByText(nameIs(text("qs-receipt-declined-send")))).toBeTruthy();
   });
 
+  it("a file from another laptop whose downloaded mark the drive could not keep says to open it with care", () => {
+    const unmarked: Receipt = {
+      lines: [{ path: "setup.exe", outcome: { kind: "needs-action", landedAs: "setup.exe", why: "engine words", word: "mark-not-kept" } }],
+    };
+    receipt({ side: "receive", receipt: unmarked });
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-receipt-mark-not-kept", { path: "setup.exe" })));
+    expect(screen.queryByText(text("qs-receipt-box-title"))).toBeNull();
+  });
+
   it("an identical file already there is its own line and is never shown as Copied", () => {
     receipt();
     const row = screen.getByText("Project brief.pdf").closest("li");
@@ -915,5 +919,33 @@ describe("every Quick Send screen", () => {
     inApp(ours.find((s) => s.id === "Q14-partial-sender")?.render());
     await act(async () => {});
     expect(document.querySelector(".qs-rows")).not.toBeNull();
+  });
+});
+
+describe("names from another laptop are shown safely", () => {
+  it("a name that reorders itself shows its hidden characters as codes, and its real type apart", () => {
+    expect(shownSafely("invoice\u202Efdp.exe")).toBe("invoice[U+202E]fdp.exe");
+    expect(shownSafely("a\u2067b\u0000c")).toBe("a[U+2067]b[U+0000]c");
+    expect(fileName("Docs/invoice\u202Efdp.exe")).toBe("invoice[U+202E]fdp.exe");
+    expect(extensionOf("Docs/invoice\u202Efdp.exe")).toBe("exe");
+    expect(extensionOf("Docs/notes")).toBeNull();
+    expect(shownSafely("Holiday/été.jpg")).toBe("Holiday/été.jpg");
+  });
+
+  it("the offer screen shows such a name with its codes and its real type apart from it", () => {
+    inApp(
+      <QuickIncoming
+        from={BLUE_FOX}
+        to={GREEN_OWL}
+        files={[{ id: "1", path: "invoice‮fdp.exe", size: 10 }]}
+        onAccept={vi.fn()}
+        onDecline={vi.fn()}
+        onDone={vi.fn()}
+      />,
+    );
+    const body = plain(document.body.textContent);
+    expect(body).toContain("invoice[U+202E]fdp.exe");
+    expect(body).not.toContain("‮");
+    expect(body).toContain(plain(text("qs-file-type", { ext: "exe" })));
   });
 });

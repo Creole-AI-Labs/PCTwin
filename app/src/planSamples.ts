@@ -59,6 +59,7 @@ export const overview: OverviewView = {
   chosen: { folders: 3, files: 44_224, bytes: 108_700_000_000, atLeast: false },
   unreadable: 0,
   destinationProblems: 0,
+  filesNeedingLook: 0,
   peopleWaiting: 0,
 };
 

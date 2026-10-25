@@ -5,14 +5,16 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
-use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, IncomingPath};
+use pctwin_gate::{Approved, Claim, Destination, Destinations, Finished, GateError, IncomingPath};
 use pctwin_journal::{
-    Actor, FileId, Journal, JournalError, Landed, Ledger, Permission, PlannedWrite, State,
+    Actor, FileId, Journal, JournalError, Landed, Ledger, Permission, PlannedWrite, Scope, State,
 };
 use pctwin_record::ItemId;
 
+use crate::cause::{Cause, Failure, Side};
 use crate::message::{
     BLOCK_WIRE_OVERHEAD, GiveUpWhy, Message, NONCE_LEN, Nonce, split_into_pieces,
 };
@@ -21,10 +23,11 @@ use crate::queue::{Scheduler, Tier};
 use crate::reading::{ReadBudget, is_drive_error};
 use crate::sections::FileSections;
 use crate::send_states::States;
+use crate::version::{COPY_SINCE, HOLD_SINCE, KEYED_SINCE, SET_DOWN_SINCE, STOP_SINCE};
 use crate::{
-    Allowance, Assembly, Block, Confirmed, FileSender, FsOpener, MAX_ORIGINALS_PER_REQUEST, Opener,
-    OriginalNow, OriginalsFault, ResumeTicket, StoredCheck, Trailer, TransferError,
-    answer_originals,
+    Allowance, Assembly, Block, BlockMap, Confirmed, FileSender, FsOpener,
+    MAX_ORIGINALS_PER_REQUEST, Opener, OriginalNow, OriginalsFault, ResumeTicket, StoredCheck,
+    Trailer, TransferError, answer_originals,
 };
 use futures_util::StreamExt;
 use futures_util::stream::FuturesUnordered;
@@ -39,6 +42,12 @@ const STOPPED: &str =
 /// How much may be sent before the receiver confirms it (as Syncthing does): enough to keep the
 /// connection busy, small enough that memory stays bounded.
 const IN_FLIGHT_BYTES: u64 = 32 * 1024 * 1024;
+
+/// While a move is held by a pause, the old laptop says so this often, and the new laptop
+/// answers: neither takes the quiet for a dropped link, and a link that does drop during a pause
+/// is found within about this long (or the link's own keep-alive, if that is later) and is
+/// reported as a drop.
+pub const HOLD_TICK: Duration = Duration::from_secs(1);
 
 /// Most files the new laptop keeps open (started and not ended) at once. The old laptop keeps far
 /// fewer in flight; the limit stops one that starts files and never finishes them from holding
@@ -83,6 +92,24 @@ impl Channel for pctwin_link::Link {
             .map(|m| m.to_vec())
             .map_err(|_| ChannelError)
     }
+}
+
+/// How long a laptop that stops the move waits to tell the other one so.
+const STOP_NOTICE: Duration = Duration::from_secs(2);
+
+/// Tells the other laptop the person stopped the move, then keeps the connection open until the
+/// other laptop lets it go, at most [`STOP_NOTICE`] in all: a laptop that writes before it reads
+/// (a paused old laptop saying it is still held) would otherwise find the connection gone before
+/// it read the notice, and report a lost connection. What arrives meanwhile is let go unread. Best
+/// effort: if the stop cut a message short, the link refuses to send more, and the other laptop
+/// sees the connection end as it would have without the notice.
+async fn tell_stopped(main: &mut impl Channel) {
+    let _ = tokio::time::timeout(STOP_NOTICE, async {
+        if send(main, &Message::Stopping).await.is_ok() {
+            while main.recv().await.is_ok() {}
+        }
+    })
+    .await;
 }
 
 async fn send(ch: &mut impl Channel, m: &Message) -> Result<(), TransferError> {
@@ -357,6 +384,8 @@ pub struct SendJob {
     /// False for formats that are already compressed.
     pub compressible: bool,
     pub tier: Tier,
+    /// Its size at the scan (0: not known). The old laptop's time left counts down from it.
+    pub size: u64,
 }
 
 /// How a sent file ended.
@@ -366,7 +395,7 @@ pub enum SendOutcome {
     Arrived,
     /// The new laptop already had an identical file there, so it was not sent.
     AlreadyThere,
-    Failed(String),
+    Failed(Failure),
 }
 
 #[expect(
@@ -391,7 +420,7 @@ pub(crate) enum SendState {
         /// Send the whole file again if the answer is no (it changed while being read).
         retry: bool,
         /// Why it failed on this side, if it did.
-        failure: Option<String>,
+        failure: Option<Failure>,
         /// It could not be read; try it once more after everything else.
         later: bool,
     },
@@ -432,12 +461,18 @@ pub struct SenderSession {
     skips: Vec<usize>,
     /// Ends to send on the main connection (a file finished, or failed partway).
     ends: Vec<Message>,
+    /// Planned files failed here before the new laptop heard of them, with why (one per job at
+    /// most), and how many of them were said on this connection.
+    not_sent: Vec<(ItemId, Cause)>,
+    not_sent_said: usize,
     opener: Arc<dyn Opener>,
     budget: ReadBudget,
     /// Jobs that could not be read, waiting for one more try after everything else.
     later: Vec<usize>,
     /// Jobs already given their second try.
     retried: HashSet<usize>,
+    /// Files whose skip the new laptop did not accept: sent after all, never skipped again.
+    no_skip: HashSet<usize>,
     /// Per lane (0 is the main connection): blocks sent and not yet confirmed, oldest first, as
     /// (stream, block, bytes). Receipts come back in order on the lane that carried the block.
     lanes: Vec<VecDeque<(u32, u32, u64)>>,
@@ -459,6 +494,13 @@ pub struct SenderSession {
     /// Per job: the file as this laptop read it for the current attempt. Whether it changed is
     /// judged against this, never against what the new laptop says it is.
     attempt_stamp: Vec<Option<crate::Stamp>>,
+    /// Each block on its way and not yet confirmed, as sent (by stream and block), so a drop
+    /// keeps it rather than reading it again.
+    on_the_way: HashMap<(u32, u32), Vec<u8>>,
+    /// Blocks a drop cut off, kept to send again without reading the drive again (a weak drive
+    /// is read once): by job and block, with the version of the file they were read from.
+    spool: HashMap<(usize, u32), (crate::Stamp, Vec<u8>)>,
+    spooled: u64,
     /// The most that may be in flight now, in raw block bytes: the whole limit until a loss, then
     /// the floor, growing by each block receipted written (TCP's slow start with byte counting,
     /// RFC 5681 and RFC 3465). Every block a loss makes this laptop read again was earned by
@@ -477,9 +519,12 @@ pub struct SenderSession {
     /// Per job: versions of it (stamps unlike the one before) this laptop opened. Only the first
     /// [`MAX_ATTEMPTS`](crate::MAX_ATTEMPTS) are ever read.
     versions: Vec<u32>,
-    /// Per job: its fingerprint, worked out once for the version it was worked out at (`None`
-    /// when it could not be: then it is "not identical").
-    fingerprint: Vec<Option<(crate::Stamp, Option<[u8; 32]>)>>,
+    /// Per job: its fingerprint, worked out once for the version and the new laptop's key it
+    /// was worked out with (`None` when it could not be: then it is "not identical").
+    fingerprint: Vec<Option<Printed>>,
+    /// Per job being skipped (move protocol 4): its fingerprint under the new laptop's key, sent
+    /// with `Print` for the new laptop to judge.
+    print_of: HashMap<usize, [u8; 32]>,
     /// Per job: the end (or stop) last said for it, said again on each new connection while it
     /// is unanswered.
     last_end: Vec<Option<Message>>,
@@ -489,8 +534,16 @@ pub struct SenderSession {
     resume_from: Vec<Option<ResumeTicket>>,
     /// What the move has counted, readable while it runs.
     meter: MoveMeter,
-    /// The person's stop.
+    /// The person's stop and pause.
     control: MoveControl,
+    /// The move protocol version both laptops agreed.
+    version: u16,
+    /// On this connection: whether the new laptop was last told this side is paused.
+    told_hold: bool,
+    /// On this connection: whether the new laptop's person has paused the move.
+    their_hold: bool,
+    /// `Hold`s said and not yet answered.
+    holds_owed: u32,
 }
 
 impl SenderSession {
@@ -524,10 +577,13 @@ impl SenderSession {
             in_flight_limit: IN_FLIGHT_BYTES,
             skips: Vec::new(),
             ends: Vec::new(),
+            not_sent: Vec::new(),
+            not_sent_said: 0,
             opener: Arc::new(FsOpener),
             budget: ReadBudget::for_plan(ReadPlan::Normal),
             later: Vec::new(),
             retried: HashSet::new(),
+            no_skip: HashSet::new(),
             lanes: Vec::new(),
             in_flight: 0,
             dirty: false,
@@ -536,6 +592,9 @@ impl SenderSession {
             asked_again: vec![0; jobs_len],
             ended_tier: tiers,
             attempt_stamp: vec![None; jobs_len],
+            on_the_way: HashMap::new(),
+            spool: HashMap::new(),
+            spooled: 0,
             window: IN_FLIGHT_BYTES,
             careful: false,
             ran: false,
@@ -543,11 +602,24 @@ impl SenderSession {
             answered: vec![0; jobs_len],
             versions: vec![0; jobs_len],
             fingerprint: vec![None; jobs_len],
+            print_of: HashMap::new(),
             last_end: vec![None; jobs_len],
             resume_from: vec![None; jobs_len],
             meter,
             control: MoveControl::new(),
+            version: crate::MOVE_PROTOCOL.newest(),
+            told_hold: false,
+            their_hold: false,
+            holds_owed: 0,
         }
+    }
+
+    /// Speaks move protocol `version`, the one both laptops agreed
+    /// ([`agree_version`](crate::agree_version)); the newest this release speaks unless set.
+    /// Below [`HOLD_SINCE`](crate::HOLD_SINCE) a pause holds this laptop only and is not told.
+    pub fn with_protocol(mut self, version: u16) -> Self {
+        self.version = version;
+        self
     }
 
     /// Counts in `meter` from now on (the move's counts start from this session's files, all
@@ -558,7 +630,7 @@ impl SenderSession {
         self
     }
 
-    /// Stops when `control` says so (see [`MoveControl`]).
+    /// Stops and pauses when `control` says so (see [`MoveControl`]).
     pub fn with_control(mut self, control: MoveControl) -> Self {
         self.control = control;
         self
@@ -667,6 +739,9 @@ impl SenderSession {
             () = control.wait_stopped() => Err(TransferError::Stopped),
             ran = self.run_once(main, joining, after_loss) => ran,
         };
+        if matches!(ran, Err(TransferError::Stopped)) && self.version >= STOP_SINCE {
+            tell_stopped(main).await;
+        }
         self.states.check();
         self.ended_well = ran.is_ok();
         ran
@@ -678,6 +753,10 @@ impl SenderSession {
         joining: &mut UnboundedReceiver<L>,
         after_loss: bool,
     ) -> Result<(), TransferError> {
+        // What the last connection left unconfirmed is kept to send again.
+        for lane in 0..self.lanes.len() {
+            self.spool_lane(lane);
+        }
         self.resume(main).await?;
         self.states.check();
         if after_loss {
@@ -685,18 +764,34 @@ impl SenderSession {
         }
         self.lanes = vec![VecDeque::new()];
         self.in_flight = 0;
+        // What either laptop said about a pause was said on the last connection: on this one
+        // this side says its own again, and the new laptop says its own.
+        self.told_hold = false;
+        self.their_hold = false;
+        self.holds_owed = 0;
+        self.meter.paused_there(false);
+        let control = self.control.clone();
         let state = RefCell::new(self);
         let changed = Notify::new();
         // Extra lanes still running.
         let alive = Cell::new(0usize);
         let main_loop = async {
             loop {
-                // Registered before looking, so a change made meanwhile is not missed.
+                // Registered before looking, so a change made meanwhile is not missed (by a lane,
+                // or a pause, carrying on or stop, even both of a pause and a carrying on).
                 let wake = changed.notified();
+                let seen = control.changes();
                 // The state is never borrowed across a wait, so every lane can take its turn.
-                let control = state.borrow_mut().control();
-                if !control.is_empty() {
-                    for m in &control {
+                let hold = state.borrow_mut().hold_to_say();
+                if let Some(m) = hold {
+                    // This side paused or carried on: the new laptop hears it first.
+                    send(main, &m).await?;
+                    changed.notify_waiters();
+                    continue;
+                }
+                let said = state.borrow_mut().control();
+                if !said.is_empty() {
+                    for m in &said {
                         send(main, m).await?;
                     }
                     changed.notify_waiters();
@@ -736,9 +831,30 @@ impl SenderSession {
                     changed.notify_waiters();
                 } else if state.borrow().all_done() {
                     break;
+                } else if state.borrow().held() {
+                    // Paused (here or there), and nothing owed on this connection: hold. Waiting
+                    // here touches no connection, so this side's carrying on (or stop) is seen at
+                    // once; between, the new laptop is told it is still held and answers, so a
+                    // link that dropped is found and reported as a drop.
+                    let tick = tokio::select! {
+                        () = control.wait_change(seen) => false,
+                        () = tokio::time::sleep(HOLD_TICK) => true,
+                    };
+                    let still = if tick {
+                        state.borrow_mut().hold_tick()
+                    } else {
+                        None
+                    };
+                    if let Some(m) = still {
+                        send(main, &m).await?;
+                    }
                 } else if alive.get() > 0 {
-                    // Other lanes are still at work: wait until one of them changes something.
-                    wake.await;
+                    // Other lanes are still at work: wait until one of them changes something,
+                    // or this side pauses, carries on or stops.
+                    tokio::select! {
+                        () = wake => {}
+                        () = control.wait_change(seen) => {}
+                    }
                 } else if state.borrow().control.stopped() {
                     // Nothing to send because the move was stopped: that is a stop, never a
                     // move that stopped making progress.
@@ -762,7 +878,7 @@ impl SenderSession {
                         Some(ch) => {
                             let lane = state.borrow_mut().add_lane();
                             alive.set(alive.get() + 1);
-                            running.push(send_lane(&state, &changed, &alive, lane, ch));
+                            running.push(send_lane(&state, &changed, &control, &alive, lane, ch));
                             changed.notify_waiters();
                         }
                         None => open = false,
@@ -782,6 +898,8 @@ impl SenderSession {
 
     /// Reads what the new laptop already has and picks each file up from there.
     async fn resume(&mut self, ch: &mut impl Channel) -> Result<(), TransferError> {
+        // What was said on the last connection is said again on this one.
+        self.not_sent_said = 0;
         let mut tickets: BTreeMap<usize, ResumeTicket> = BTreeMap::new();
         loop {
             match recv(ch).await? {
@@ -794,6 +912,11 @@ impl SenderSession {
                 }
                 Message::FileDone { stream, ok } => {
                     if let Some(&job) = self.job_of.get(&stream) {
+                        self.done(job, ok);
+                    }
+                }
+                Message::ItemDone { item, ok } if self.version >= KEYED_SINCE => {
+                    if let Some(&job) = self.by_item.get(&item) {
                         self.done(job, ok);
                     }
                 }
@@ -848,9 +971,22 @@ impl SenderSession {
     /// Messages for the main connection: skips, ends, and starts of the files now in flight.
     fn control(&mut self) -> Vec<Message> {
         let mut out = Vec::new();
+        if self.version >= STOP_SINCE {
+            for (item, cause) in &self.not_sent[self.not_sent_said..] {
+                if let Some(cause) = cause.said() {
+                    out.push(Message::NotSent { item: *item, cause });
+                }
+            }
+        }
+        self.not_sent_said = self.not_sent.len();
         for job in std::mem::take(&mut self.skips) {
-            out.push(Message::Skip {
-                stream: self.streams[job],
+            let stream = self.streams[job];
+            out.push(match self.print_of.get(&job) {
+                Some(print) if self.version >= KEYED_SINCE => Message::Print {
+                    stream,
+                    print: *print,
+                },
+                _ => Message::Skip { stream },
             });
             self.scheduler.finished(self.jobs[job].item);
             // Already there only once the new laptop says so (see `done`).
@@ -882,6 +1018,10 @@ impl SenderSession {
                 self.scheduler
                     .push(self.jobs[job].item, self.jobs[job].tier);
             }
+        }
+        if self.held() {
+            // Held: nothing new is opened or started until the move carries on.
+            return out;
         }
         // Files that fail to open free their place at once, so keep filling until those in
         // flight are open.
@@ -981,13 +1121,13 @@ impl SenderSession {
             Err(e) => {
                 let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
                 self.scheduler.finished(j.item);
-                *self.states.slot(job) = if drive && self.read_failed(job) {
+                if drive && self.read_failed(job) {
                     // One more try after everything else.
                     self.later.push(job);
-                    SendState::Waiting
+                    *self.states.slot(job) = SendState::Waiting;
                 } else {
-                    SendState::Done(SendOutcome::Failed(e.to_string()))
-                };
+                    self.fail_unannounced(job, Failure::of(&e, Side::Old));
+                }
             }
         }
     }
@@ -1058,7 +1198,9 @@ impl SenderSession {
                 let again = changed && self.budget.try_again_later();
                 *self.states.slot(job) = SendState::Ended {
                     retry: again,
-                    failure: (changed && !again).then(|| "it changed while being read".to_string()),
+                    failure: (changed && !again).then(|| {
+                        Failure::new(Cause::ChangedDuringMove, "it changed while being read")
+                    }),
                     later: false,
                 };
                 Message::EndFile {
@@ -1070,13 +1212,21 @@ impl SenderSession {
             Err(e) => {
                 *self.states.slot(job) = SendState::Ended {
                     retry: false,
-                    failure: Some(e.to_string()),
+                    failure: Some(Failure::of(&e, Side::Old)),
                     later: false,
                 };
-                Message::EndFile {
-                    stream,
-                    stamp_after: stamp,
-                    changed: true,
+                if self.version >= KEYED_SINCE {
+                    // Said as it is: it could not be read, never "it changed".
+                    Message::GiveUp {
+                        stream,
+                        why: GiveUpWhy::Unreadable,
+                    }
+                } else {
+                    Message::EndFile {
+                        stream,
+                        stamp_after: stamp,
+                        changed: true,
+                    }
                 }
             }
         }
@@ -1088,6 +1238,7 @@ impl SenderSession {
     /// is read), one more block goes.
     fn work(&mut self, lane: usize) -> Work {
         if self.control.stopped()
+            || self.held()
             || self.budget.stopped()
             || self.in_flight >= self.in_flight_limit.min(self.window)
         {
@@ -1115,13 +1266,30 @@ impl SenderSession {
                 let Some(b) = next else {
                     continue;
                 };
-                (b, reader.block_at(u64::from(b)))
+                // Cut off by a drop and kept, from this very version of the file: sent as it
+                // was, without reading the drive again.
+                let kept = self
+                    .spool
+                    .remove(&(job, b))
+                    .filter(|(at, _)| Some(*at) == self.attempt_stamp[job]);
+                match kept {
+                    Some((_, wire)) => {
+                        self.spooled = self.spooled.saturating_sub(wire.len() as u64);
+                        (b, Err(wire))
+                    }
+                    None => (b, Ok(reader.block_at(u64::from(b)))),
+                }
+            };
+            let read = match read {
+                Ok(read) => read.map(|block| (block.data.len() as u64, block.encode(), true)),
+                Err(wire) => Ok((u64::from(Block::length_in(&wire).unwrap_or(0)), wire, false)),
             };
             match read {
-                Ok(block) => {
-                    self.budget.read_ok();
-                    let raw = block.data.len() as u64;
-                    let wire = block.encode();
+                Ok((raw, wire, from_drive)) => {
+                    if from_drive {
+                        self.budget.read_ok();
+                    }
+                    self.on_the_way.insert((stream, b), wire.clone());
                     self.lanes[lane].push_back((stream, b, raw));
                     self.in_flight += raw;
                     self.meter.block_sent(raw);
@@ -1133,9 +1301,17 @@ impl SenderSession {
         Work::Wait
     }
 
-    /// `job` stops here, for `why` (`text` is what this laptop says): the new laptop is told if
+    /// `job` failed here before the new laptop heard of it: done, and the new laptop is told why
+    /// (protocol 4 and later), so its report gives the true reason.
+    fn fail_unannounced(&mut self, job: usize, failure: Failure) {
+        self.not_sent.push((self.jobs[job].item, failure.cause()));
+        self.dirty = true;
+        *self.states.slot(job) = SendState::Done(SendOutcome::Failed(failure));
+    }
+
+    /// `job` stops here, for `why` (`failure` is what this laptop says): the new laptop is told if
     /// it holds the file, and nothing more of it is read.
-    fn give_up(&mut self, job: usize, why: GiveUpWhy, text: &str) {
+    fn give_up(&mut self, job: usize, why: GiveUpWhy, failure: Failure) {
         self.dirty = true;
         self.scheduler.finished(self.jobs[job].item);
         self.checks.retain(|(j, _)| *j != job);
@@ -1157,18 +1333,22 @@ impl SenderSession {
             );
             *self.states.slot(job) = SendState::Ended {
                 retry: false,
-                failure: Some(text.into()),
+                failure: Some(failure),
                 later: false,
             };
         } else {
-            *self.states.slot(job) = SendState::Done(SendOutcome::Failed(text.into()));
+            self.fail_unannounced(job, failure);
         }
     }
 
     /// The new laptop was answered for `job` more than any move needs: it stops here, and the new
     /// laptop is told why.
     fn read_too_often(&mut self, job: usize) {
-        self.give_up(job, GiveUpWhy::ReadTooOften, READ_TOO_OFTEN);
+        self.give_up(
+            job,
+            GiveUpWhy::ReadTooOften,
+            Failure::new(Cause::NotVerified, READ_TOO_OFTEN),
+        );
     }
 
     /// A receipt for `raw` bytes of a block of `stream`, `written` or not. Always in this order:
@@ -1201,14 +1381,6 @@ impl SenderSession {
         let stamp = reader.header().stamp;
         let drive = matches!(&e, TransferError::Io(io) if is_drive_error(io));
         let retry = matches!(e, TransferError::ChangedWhileRead) && self.budget.try_again_later();
-        self.push_end(
-            job,
-            Message::EndFile {
-                stream: self.streams[job],
-                stamp_after: stamp,
-                changed: true,
-            },
-        );
         self.scheduler.finished(self.jobs[job].item);
         // Ended first, so stopping reading (if this was one error too many) leaves it be.
         *self.states.slot(job) = SendState::Ended {
@@ -1217,9 +1389,31 @@ impl SenderSession {
             later: false,
         };
         let later = drive && self.read_failed(job);
+        let failure = (!retry && !later).then(|| Failure::of(&e, Side::Old));
+        let stream = self.streams[job];
+        // A file that could not be read ends as that (move protocol 4), never as "it changed";
+        // one tried again later, or that really changed, ends as changed and starts afresh.
+        let unreadable = self.version >= KEYED_SINCE
+            && failure.is_some()
+            && !matches!(e, TransferError::ChangedWhileRead);
+        self.push_end(
+            job,
+            if unreadable {
+                Message::GiveUp {
+                    stream,
+                    why: GiveUpWhy::Unreadable,
+                }
+            } else {
+                Message::EndFile {
+                    stream,
+                    stamp_after: stamp,
+                    changed: true,
+                }
+            },
+        );
         *self.states.slot(job) = SendState::Ended {
             retry,
-            failure: (!retry && !later).then(|| e.to_string()),
+            failure,
             later,
         };
     }
@@ -1243,6 +1437,40 @@ impl SenderSession {
         !self.ends.is_empty() || !self.skips.is_empty()
     }
 
+    /// Whether the other laptop understands `Hold`.
+    fn speaks_hold(&self) -> bool {
+        self.version >= HOLD_SINCE
+    }
+
+    /// Whether the move is held: this side's person paused it, or the new laptop's did.
+    fn held(&self) -> bool {
+        self.control.paused() || self.their_hold
+    }
+
+    /// This side's pause, to tell the new laptop if it changed since it was last told on this
+    /// connection. With a laptop that cannot be told, this side holds itself, untold.
+    fn hold_to_say(&mut self) -> Option<Message> {
+        let paused = self.control.paused();
+        if !self.speaks_hold() {
+            self.meter.paused_here(paused);
+            return None;
+        }
+        (paused != self.told_hold).then(|| self.say_hold(paused))
+    }
+
+    /// Still held: says this side's pause again, to be answered.
+    fn hold_tick(&mut self) -> Option<Message> {
+        let paused = self.control.paused();
+        self.speaks_hold().then(|| self.say_hold(paused))
+    }
+
+    fn say_hold(&mut self, paused: bool) -> Message {
+        self.told_hold = paused;
+        self.holds_owed = self.holds_owed.saturating_add(1);
+        self.meter.paused_here(paused);
+        Message::Hold { paused }
+    }
+
     /// Fingerprint comparisons still to work out: (job, the version, its file, the new laptop's
     /// fingerprint). One already worked out for that version is answered at once, reading
     /// nothing.
@@ -1254,7 +1482,9 @@ impl SenderSession {
                 continue;
             };
             match self.fingerprint[job] {
-                Some((at, mine)) if at == stamp => self.checked(job, mine == Some(theirs)),
+                Some((at, key, mine)) if at == stamp && key == self.key_of(theirs) => {
+                    self.judged(job, mine, theirs);
+                }
                 _ => out.push((job, stamp, self.jobs[job].source.clone(), theirs)),
             }
         }
@@ -1270,15 +1500,41 @@ impl SenderSession {
         mine: Option<[u8; 32]>,
         theirs: [u8; 32],
     ) {
-        self.fingerprint[job] = Some((stamp, mine));
-        let same = self.attempt_stamp[job] == Some(stamp) && mine == Some(theirs);
-        self.checked(job, same);
+        self.fingerprint[job] = Some((stamp, self.key_of(theirs), mine));
+        if self.attempt_stamp[job] == Some(stamp) {
+            self.judged(job, mine, theirs);
+        } else {
+            self.checked(job, false);
+        }
+    }
+
+    /// The key to fingerprint with: from move protocol 4 the new laptop's `Have` holds a key,
+    /// before it the new laptop's own fingerprint (compared as it is).
+    fn key_of(&self, theirs: [u8; 32]) -> Option<[u8; 32]> {
+        (self.version >= KEYED_SINCE).then_some(theirs)
+    }
+
+    /// `job`'s fingerprint (`mine`) against the new laptop's `Have`: before move protocol 4 the
+    /// two are compared here; from 4 an identical file is the new laptop's to judge, so a file
+    /// that could be read is offered with its print (`Print`), and one that could not is sent.
+    fn judged(&mut self, job: usize, mine: Option<[u8; 32]>, theirs: [u8; 32]) {
+        if self.version >= KEYED_SINCE {
+            match mine {
+                Some(print) => {
+                    self.print_of.insert(job, print);
+                    self.checked(job, true);
+                }
+                None => self.checked(job, false),
+            }
+        } else {
+            self.checked(job, mine == Some(theirs));
+        }
     }
 
     /// The comparison for `job` is done: an identical file is skipped, anything else is sent.
     fn checked(&mut self, job: usize, identical: bool) {
         if let SendState::Open { cleared, .. } = &mut *self.states.slot(job) {
-            if identical {
+            if identical && !self.no_skip.contains(&job) {
                 self.skips.push(job);
             } else {
                 *cleared = true;
@@ -1296,10 +1552,11 @@ impl SenderSession {
         std::mem::take(&mut self.dirty)
     }
 
-    /// Whether a reply is owed on the main connection: an answer to a start or an end, or a
-    /// receipt for a block it carried.
+    /// Whether a reply is owed on the main connection: an answer to a start, an end or a `Hold`,
+    /// or a receipt for a block it carried.
     fn awaiting_main(&self) -> bool {
-        !self.lanes[0].is_empty()
+        self.holds_owed > 0
+            || !self.lanes[0].is_empty()
             || self.states.iter().any(|s| {
                 matches!(
                     s,
@@ -1347,7 +1604,10 @@ impl SenderSession {
                     self.scheduler.finished(self.jobs[job].item);
                     *self.states.slot(job) = SendState::Ended {
                         retry: false,
-                        failure: Some("the new laptop could not write part of it".into()),
+                        failure: Some(Failure::new(
+                            Cause::CouldNotWrite,
+                            "the new laptop could not write part of it",
+                        )),
                         later: false,
                     };
                     self.dirty = true;
@@ -1359,16 +1619,30 @@ impl SenderSession {
                 let (stream, block, raw) = self.lanes[lane]
                     .pop_front()
                     .ok_or_else(|| protocol("a receipt for nothing sent"))?;
+                self.on_the_way.remove(&(stream, block));
                 self.in_flight -= raw;
                 self.meter.block_confirmed(raw);
+                if let Some(&job) = self.job_of.get(&stream)
+                    && matches!(self.states[job], SendState::Open { .. })
+                {
+                    // A big file counts down on this laptop too, as the new laptop confirms it.
+                    self.meter.progress(self.states.group(job), raw);
+                }
                 // Only the current attempt counts; a receipt for an earlier one frees room only.
                 if let Some(&job) = self.job_of.get(&stream)
                     && let SendState::Open { sections, .. } = &mut *self.states.slot(job)
                 {
                     let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
-                    // In order per lane, as sent; a mismatch can only mean the new laptop
-                    // failed the file, which it reports when the file ends.
-                    let _ = sections.confirmed(lane_no, block);
+                    // In order per lane, as sent: which block a receipt answers is this laptop's
+                    // own record, and an attempt only starts again once all of its blocks are
+                    // answered. A mismatch would leave the file waiting for ever on both laptops,
+                    // so it ends this lane (its blocks go back to the others) or, on the main
+                    // connection, the connection (the move carries on from where it was).
+                    if let Err(e) = sections.confirmed(lane_no, block) {
+                        return Err(protocol(&format!(
+                            "a receipt did not match the block sent on its lane ({e:?})"
+                        )));
+                    }
                 }
                 self.receipted(stream, raw, written);
                 Ok(())
@@ -1382,6 +1656,18 @@ impl SenderSession {
             Message::SendAgain { stream, ticket } if lane == 0 => {
                 if let Some(&job) = self.job_of.get(&stream) {
                     self.send_again(job, &ticket);
+                }
+                Ok(())
+            }
+            Message::ResumeFrom {
+                stream,
+                item,
+                ticket,
+            } if lane == 0 && self.version >= SET_DOWN_SINCE => {
+                if let Some(&job) = self.job_of.get(&stream)
+                    && self.jobs[job].item == item
+                {
+                    self.set_down(job, ticket);
                 }
                 Ok(())
             }
@@ -1405,7 +1691,11 @@ impl SenderSession {
                 }
                 if self.too_many_versions(job) {
                     // Started only so the new laptop can say it kept changing: never read.
-                    self.give_up(job, GiveUpWhy::ReadTooOften, KEPT_CHANGING);
+                    self.give_up(
+                        job,
+                        GiveUpWhy::ReadTooOften,
+                        Failure::new(Cause::ChangedDuringMove, KEPT_CHANGING),
+                    );
                     return Ok(());
                 }
                 match same_size {
@@ -1416,7 +1706,53 @@ impl SenderSession {
                 }
                 Ok(())
             }
+            Message::Hold { paused } if lane == 0 && self.speaks_hold() => {
+                // An answer to a `Hold` said, or the new laptop's own news: either way it is the
+                // new laptop's pause as it stands.
+                self.holds_owed = self.holds_owed.saturating_sub(1);
+                self.their_hold = paused;
+                self.meter.paused_there(paused);
+                self.dirty = true;
+                Ok(())
+            }
+            // The new laptop's person stopped the move: a stop, never a lost connection.
+            Message::Stopping if lane == 0 && self.version >= STOP_SINCE => {
+                Err(TransferError::StoppedThere)
+            }
             _ => Err(protocol("unexpected message from the new laptop")),
+        }
+    }
+
+    /// The new laptop set `job` down partway, in answer to its start, end or print: the drive of
+    /// its place paused the move, and nothing more of it is written there. It is picked up again
+    /// from `ticket` once the move carries on, on the same stream, as after a dropped connection
+    /// (see `open`), and never counted as arrived or failed meanwhile. Ignored unless the file is
+    /// waiting on exactly that answer.
+    fn set_down(&mut self, job: usize, ticket: ResumeTicket) {
+        let still_turn = match &self.states[job] {
+            // Its start was answered so: no block of it was sent.
+            SendState::Open {
+                announced: true,
+                cleared: false,
+                ..
+            } => true,
+            SendState::Ended {
+                failure: None,
+                later: false,
+                ..
+            }
+            | SendState::Skipping => false,
+            _ => return,
+        };
+        if self.checks.iter().any(|(j, _)| *j == job) || self.skips.contains(&job) {
+            return;
+        }
+        self.dirty = true;
+        self.resume_from[job] = Some(ticket);
+        *self.states.slot(job) = SendState::Waiting;
+        if !still_turn {
+            self.scheduler
+                .push(self.jobs[job].item, self.jobs[job].tier);
         }
     }
 
@@ -1446,13 +1782,21 @@ impl SenderSession {
                 && ticket.done.count() == s.size.div_ceil(block_size)
         });
         if !fits {
-            self.give_up(job, GiveUpWhy::AskedAgainTooOften, TICKET_WRONG);
+            self.give_up(
+                job,
+                GiveUpWhy::AskedAgainTooOften,
+                Failure::new(Cause::NotVerified, TICKET_WRONG),
+            );
             return;
         }
         if self.asked_again[job] >= SEND_AGAIN_ROUNDS {
             // Asked more often in this attempt than an honest new laptop asks: this attempt stops
             // here and the file fails, said as it is (never as a file that changed).
-            self.give_up(job, GiveUpWhy::AskedAgainTooOften, GAVE_UP);
+            self.give_up(
+                job,
+                GiveUpWhy::AskedAgainTooOften,
+                Failure::new(Cause::NotVerified, GAVE_UP),
+            );
             return;
         }
         self.asked_again[job] += 1;
@@ -1492,7 +1836,7 @@ impl SenderSession {
                 );
                 *self.states.slot(job) = SendState::Ended {
                     retry,
-                    failure: (!retry).then(|| e.to_string()),
+                    failure: (!retry).then(|| Failure::of(&e, Side::Old)),
                     later: false,
                 };
             }
@@ -1503,6 +1847,7 @@ impl SenderSession {
     /// the window starts again from the floor (a loss, as a dropped main connection is).
     fn lane_lost(&mut self, lane: usize) {
         let lane_no = u32::try_from(lane).unwrap_or(u32::MAX);
+        self.spool_lane(lane);
         for (_, _, raw) in self.lanes[lane].drain(..) {
             self.in_flight -= raw;
         }
@@ -1510,6 +1855,30 @@ impl SenderSession {
         for job in 0..self.states.len() {
             if let SendState::Open { sections, .. } = &mut *self.states.slot(job) {
                 sections.lane_lost(lane_no);
+            }
+        }
+    }
+
+    /// Keeps `lane`'s unconfirmed blocks to send again without reading the drive again, up to
+    /// the in-flight limit in all (beyond it they are simply read again).
+    fn spool_lane(&mut self, lane: usize) {
+        for &(stream, b, _) in &self.lanes[lane] {
+            let Some(wire) = self.on_the_way.remove(&(stream, b)) else {
+                continue;
+            };
+            let Some(&job) = self.job_of.get(&stream) else {
+                continue;
+            };
+            let Some(stamp) = self.attempt_stamp[job] else {
+                continue;
+            };
+            let len = wire.len() as u64;
+            if self.spooled.saturating_add(len) > self.in_flight_limit {
+                continue;
+            }
+            self.spooled += len;
+            if let Some((_, old)) = self.spool.insert((job, b), (stamp, wire)) {
+                self.spooled = self.spooled.saturating_sub(old.len() as u64);
             }
         }
     }
@@ -1533,7 +1902,13 @@ impl SenderSession {
         for job in 0..self.states.len() {
             let mut state = self.states.slot(job);
             match &mut *state {
-                SendState::Waiting => *state = SendState::Done(SendOutcome::Failed(STOPPED.into())),
+                SendState::Waiting => {
+                    self.not_sent.push((self.jobs[job].item, Cause::Unreadable));
+                    *state = SendState::Done(SendOutcome::Failed(Failure::new(
+                        Cause::Unreadable,
+                        STOPPED,
+                    )))
+                }
                 SendState::Open {
                     announced: true,
                     reader,
@@ -1548,12 +1923,16 @@ impl SenderSession {
                     self.ends.push(end);
                     *state = SendState::Ended {
                         retry: false,
-                        failure: Some(STOPPED.into()),
+                        failure: Some(Failure::new(Cause::Unreadable, STOPPED)),
                         later: false,
                     };
                 }
                 SendState::Open { .. } => {
-                    *state = SendState::Done(SendOutcome::Failed(STOPPED.into()));
+                    self.not_sent.push((self.jobs[job].item, Cause::Unreadable));
+                    *state = SendState::Done(SendOutcome::Failed(Failure::new(
+                        Cause::Unreadable,
+                        STOPPED,
+                    )));
                 }
                 _ => {}
             }
@@ -1572,13 +1951,25 @@ impl SenderSession {
             }
             // Already there only on the new laptop's word.
             (SendState::Skipping, true) => SendState::Done(SendOutcome::AlreadyThere),
-            (SendState::Skipping, false) => SendState::Done(SendOutcome::Failed(
-                "the new laptop did not accept it".into(),
-            )),
+            // Not accepted as already there (the new laptop could not use the copy it has): sent
+            // after all, once.
+            (SendState::Skipping, false)
+                if self.version >= COPY_SINCE && self.no_skip.insert(job) =>
+            {
+                self.scheduler.push(item, tier);
+                SendState::Waiting
+            }
+            (SendState::Skipping, false) => SendState::Done(SendOutcome::Failed(Failure::new(
+                Cause::NotAccepted,
+                "the new laptop did not accept it",
+            ))),
             // Started past the versions any file is read in, and refused: it kept changing.
             (SendState::Open { .. }, false) if self.versions[job] > crate::MAX_ATTEMPTS => {
                 self.scheduler.finished(item);
-                SendState::Done(SendOutcome::Failed(KEPT_CHANGING.into()))
+                SendState::Done(SendOutcome::Failed(Failure::new(
+                    Cause::ChangedDuringMove,
+                    KEPT_CHANGING,
+                )))
             }
             (SendState::Ended { failure: None, .. }, true) => SendState::Done(SendOutcome::Arrived),
             (SendState::Ended { retry: true, .. }, false) => {
@@ -1593,16 +1984,24 @@ impl SenderSession {
                 _,
             ) => SendState::Done(SendOutcome::Failed(why)),
             (SendState::Done(o), _) => SendState::Done(o),
+            // "Done" for a file still being sent, before its end was said: not evidence that it
+            // arrived, so it is not recorded; its end is said as usual and answered then.
+            (open @ SendState::Open { .. }, true) => open,
             (_, true) => SendState::Done(SendOutcome::Arrived),
             (_, false) => {
                 self.scheduler.finished(item);
-                SendState::Done(SendOutcome::Failed(
-                    "the new laptop did not accept it".into(),
-                ))
+                SendState::Done(SendOutcome::Failed(Failure::new(
+                    Cause::NotAccepted,
+                    "the new laptop did not accept it",
+                )))
             }
         };
     }
 }
+
+/// A job's fingerprint as worked out: the version of the file, the new laptop's key it was worked
+/// out with (move protocol 4), and the fingerprint (`None`: it could not be).
+type Printed = (crate::Stamp, Option<[u8; 32]>, Option<[u8; 32]>);
 
 /// One extra lane of the old laptop: asks the shared plan for blocks and sends them, reads
 /// receipts only when they are owed, and otherwise sleeps until another lane changes something.
@@ -1610,12 +2009,16 @@ impl SenderSession {
 async fn send_lane<C: Channel>(
     state: &RefCell<&mut SenderSession>,
     changed: &Notify,
+    control: &MoveControl,
     alive: &Cell<usize>,
     lane: usize,
     mut ch: C,
 ) {
     loop {
+        // Both made before looking: a change by another lane, or a pause, carrying on or stop
+        // made after this look, wakes this lane however it was told (or not told) to anyone.
         let wake = changed.notified();
+        let seen = control.changes();
         let work = state.borrow_mut().work(lane);
         if state.borrow_mut().take_dirty() {
             changed.notify_waiters();
@@ -1648,7 +2051,10 @@ async fn send_lane<C: Channel>(
                 }
             }
             Work::Wait => {
-                wake.await;
+                tokio::select! {
+                    () = wake => {}
+                    () = control.wait_change(seen) => {}
+                }
                 true
             }
         };
@@ -1710,10 +2116,12 @@ async fn compare_fingerprints(state: &RefCell<&mut SenderSession>) {
     let checks = state.borrow_mut().take_checks();
     for (job, stamp, source, theirs) in checks {
         let opener = Arc::clone(&state.borrow().opener);
-        let mine = tokio::task::spawn_blocking(move || fingerprint_at(&*opener, &source, stamp))
-            .await
-            .ok()
-            .flatten();
+        let key = state.borrow().key_of(theirs);
+        let mine =
+            tokio::task::spawn_blocking(move || fingerprint_at(&*opener, &source, stamp, key))
+                .await
+                .ok()
+                .flatten();
         state.borrow_mut().printed(job, stamp, mine, theirs);
     }
 }
@@ -1730,12 +2138,17 @@ async fn off_the_loop(
 /// for one more, its stamp checked before and after. `None` (so "not identical") if it is longer
 /// or shorter, its stamp moved, or it could not be read: never more than `stamp.size + 1` bytes
 /// are read.
-fn fingerprint_at(opener: &dyn Opener, path: &Path, stamp: crate::Stamp) -> Option<[u8; 32]> {
+fn fingerprint_at(
+    opener: &dyn Opener,
+    path: &Path,
+    stamp: crate::Stamp,
+    key: Option<[u8; 32]>,
+) -> Option<[u8; 32]> {
     let mut source = opener.open(path).ok()?;
     if source.stamp().ok()? != stamp {
         return None;
     }
-    let mut hasher = blake3::Hasher::new();
+    let mut hasher = hasher_for(key);
     let read = std::io::copy(&mut Read::take(&mut source, stamp.size), &mut hasher).ok()?;
     if read != stamp.size || source.read(&mut [0u8; 1]).ok()? != 0 {
         return None;
@@ -1746,8 +2159,19 @@ fn fingerprint_at(opener: &dyn Opener, path: &Path, stamp: crate::Stamp) -> Opti
     Some(*hasher.finalize().as_bytes())
 }
 
-fn hash_reader(reader: &mut impl std::io::Read) -> std::io::Result<[u8; 32]> {
-    let mut hasher = blake3::Hasher::new();
+/// BLAKE3, keyed with the new laptop's key from move protocol 4, plain before it.
+fn hasher_for(key: Option<[u8; 32]>) -> blake3::Hasher {
+    match key {
+        Some(key) => blake3::Hasher::new_keyed(&key),
+        None => blake3::Hasher::new(),
+    }
+}
+
+fn hash_reader(
+    reader: &mut impl std::io::Read,
+    key: Option<[u8; 32]>,
+) -> std::io::Result<[u8; 32]> {
+    let mut hasher = hasher_for(key);
     let mut buf = vec![0u8; 1024 * 1024];
     loop {
         let n = reader.read(&mut buf)?;
@@ -1773,7 +2197,7 @@ pub enum ReceiveOutcome {
     },
     /// An identical file was already there (its stored path); nothing was copied.
     AlreadyThere(String),
-    Failed(String),
+    Failed(Failure),
 }
 
 struct Incoming<'d> {
@@ -1785,13 +2209,123 @@ struct Incoming<'d> {
     batches: u32,
     assembly: Option<Assembly<'d>>,
     block_size: u64,
-    failure: Option<String>,
+    failure: Option<Failure>,
     destination: String,
     size: u64,
     /// The stored path of a same-size file already there, offered as possibly identical.
     same: Option<String>,
+    /// Where nothing is said to the other laptop about what is here (a Quick Send): the stored
+    /// path of a same-size file already at its name, compared only once this file has arrived
+    /// and been checked, so an identical one is not written twice.
+    unsaid: Option<String>,
+    /// Or an identical file this laptop already received in this move, to make this one from.
+    copy_of: Option<CopyOf>,
+    /// This laptop's own fingerprint of that file, once worked out.
+    own_print: Option<[u8; 32]>,
+    /// Blocks that arrived damaged (their own fingerprint did not match), over its attempt.
+    damaged: u32,
     /// Times its blocks were asked for again (see [`SEND_AGAIN_ROUNDS`]).
     rounds: u8,
+    /// Blocks of it came while its place's drive held the move, and were not written: at its
+    /// end it is picked up from its ticket again (see `set_down`), never asked for again as if
+    /// they were the drive's or the file's fault.
+    held_back: bool,
+}
+
+/// A file this laptop already received in this move, offered as possibly identical to a file
+/// the old laptop started (copies cross once): where it is, and its fingerprint once worked out.
+struct CopyOf {
+    destination: String,
+    stored: String,
+    fingerprint: Option<[u8; 32]>,
+}
+
+/// A copy to make here, from a file already received, in place of sending it.
+struct LocalCopy {
+    stream: u32,
+    file: Option<std::fs::File>,
+    header: crate::Header,
+    expected: [u8; 32],
+    /// The key `expected` was worked out with (move protocol 4), or none.
+    key: Option<[u8; 32]>,
+}
+
+/// The smallest file made from a copy already here: smaller ones cost more to compare than to
+/// send.
+const COPY_MIN: u64 = 1024 * 1024;
+/// The most received files remembered as possible copies (each an ID in a list by size).
+const MAX_COPY_SOURCES: usize = 100_000;
+/// The most remembered files of one size looked at for a start.
+const COPY_LOOKS: usize = 4;
+
+/// Whose things a destination holds, for copies: a file is only ever made from one in the same
+/// person's things, never across people. The signed-in person's folders are theirs together;
+/// another account's place is that person's; a shared folder or a drive holds only its own.
+#[derive(Debug, PartialEq, Eq)]
+enum Whose<'a> {
+    Mine,
+    Account(&'a str),
+    Only(&'a str),
+}
+
+fn whose<'a>(table: &'a Destinations, label: &'a str) -> Option<Whose<'a>> {
+    Some(match table.place(label).ok()? {
+        Approved::MyFolders => Whose::Mine,
+        Approved::AnotherAccount { account_id } => Whose::Account(account_id),
+        Approved::SharedFolder | Approved::ChosenDrive | Approved::OffloadDrive => {
+            Whose::Only(label)
+        }
+    })
+}
+
+/// Makes the skipped file of `copy` here from the identical file already received: each block
+/// read on the blocking-thread pool and written through the same checks as a block that arrived,
+/// the whole compared with the fingerprint offered, then ended as a sent file ends. The answer to
+/// send: done, or not accepted (the old laptop then sends it after all).
+async fn copy_here(
+    state: &RefCell<&mut ReceiverSession<'_>>,
+    copy: LocalCopy,
+) -> Result<Message, TransferError> {
+    let LocalCopy {
+        stream,
+        mut file,
+        header,
+        expected,
+        key,
+    } = copy;
+    let mut hasher = hasher_for(key);
+    let mut whole = file.is_some();
+    for index in 0..header.block_count {
+        let Some(mut f) = file.take() else {
+            whole = false;
+            break;
+        };
+        let len = crate::block_len(&header, index);
+        let read = tokio::task::spawn_blocking(move || {
+            let mut data = vec![0u8; len];
+            let read = f.read_exact(&mut data);
+            (f, read.map(|()| data))
+        })
+        .await;
+        let Ok((f, Ok(data))) = read else {
+            whole = false;
+            break;
+        };
+        file = Some(f);
+        hasher.update(&data);
+        if !state
+            .borrow_mut()
+            .copy_block(stream, Block::plain(index, data))
+        {
+            whole = false;
+            break;
+        }
+    }
+    // Exactly as long as it was, and as a whole what the old laptop has.
+    whole = whole
+        && file.is_some_and(|mut f| matches!(f.read(&mut [0u8; 1]), Ok(0)))
+        && *hasher.finalize().as_bytes() == expected;
+    state.borrow_mut().copied_here(stream, whole, header.stamp)
 }
 
 /// The new laptop's side of a move. A file starts only if the approved plan allows it (see
@@ -1808,19 +2342,50 @@ pub struct ReceiverSession<'d> {
     /// The signed-in person's account on this laptop (who acts).
     account: String,
     allowance: Allowance,
-    /// Bytes of blocks written so far, readable while the move runs (for the lane driver).
+    /// The files' own bytes written so far, block by block, readable while the move runs (for
+    /// the lane driver); see [`meter`](Self::meter).
     written: Arc<AtomicU64>,
     /// What the move has counted, readable while it runs, and each planned file's group and
     /// step in it.
     meter: MoveMeter,
     steps: HashMap<ItemId, (Group, Step)>,
-    /// The person's stop.
+    /// The person's stop and pause.
     control: MoveControl,
+    /// The move protocol version both laptops agreed.
+    version: u16,
+    /// On this connection: whether the old laptop was last told this side is paused.
+    told_hold: bool,
     /// Why a file's start was refused, kept per file (bounded).
-    refused: BTreeMap<ItemId, String>,
-    /// A same-size file already here, to fingerprint before answering a start (off the loop).
-    to_fingerprint: Option<(u32, std::fs::File)>,
+    refused: BTreeMap<ItemId, Failure>,
+    /// Planned files whose latest start differed from the scan (size or changed time).
+    changed: HashSet<ItemId>,
+    /// A same-size file already here, to fingerprint before answering a start (off the loop),
+    /// with the key to fingerprint it with (move protocol 4).
+    to_fingerprint: Option<(u32, std::fs::File, Option<[u8; 32]>)>,
+    /// This session's own secret, from which each file's key for comparing is made (move
+    /// protocol 4): never sent, so a print the old laptop sends means nothing outside this move.
+    same_secret: [u8; 32],
+    /// A skipped start to make here from a copy already here (off the loop).
+    to_copy: Option<u32>,
+    /// Files this laptop read back wrong at least once in this session, so if the old laptop
+    /// gives up asking, the true reason is said: it could not be stored here.
+    stored_wrong: HashSet<ItemId>,
+    /// Per approved place, whether each of its last checked files was stored correctly (newest
+    /// last, at most [`BRAKE_WINDOW`]).
+    stored_lately: HashMap<String, VecDeque<bool>>,
+    /// Files received in this move that later ones may be made from, by size.
+    copies: HashMap<u64, Vec<ItemId>>,
+    copy_sources: usize,
     streams: BTreeMap<u32, Incoming<'d>>,
+    /// Part-copies of files that ended while their place's drive held the move paused, by that
+    /// place: kept as they are, since nothing more is written there until the person carries on,
+    /// then cleared (or when the move ends).
+    parked: Vec<(String, Assembly<'d>)>,
+    /// The folders this move made, by destination and stored path (see `made_here`).
+    made: std::cell::RefCell<Option<HashMap<String, HashSet<String>>>>,
+    /// Which move this is in the journal: a new random one unless set
+    /// ([`with_scope`](Self::with_scope)). Only entries of this scope are picked up again.
+    scope: Scope,
     /// Files picked up again after the app restarted, waiting for the old laptop to continue them.
     restored: BTreeMap<ItemId, Incoming<'d>>,
     /// How each file's last attempt ended, kept per file (never per stream), so nothing started
@@ -1871,16 +2436,37 @@ impl<'d> ReceiverSession<'d> {
             meter,
             steps,
             control: MoveControl::new(),
+            version: crate::MOVE_PROTOCOL.newest(),
+            told_hold: false,
             refused: BTreeMap::new(),
+            changed: HashSet::new(),
             to_fingerprint: None,
+            same_secret: {
+                let mut secret = [0u8; 32];
+                // Without random numbers nothing is compared: every key is all zeros then, and
+                // still never matched outside this laptop's own judgement.
+                let _ = getrandom::fill(&mut secret);
+                secret
+            },
+            to_copy: None,
+            stored_lately: HashMap::new(),
+            stored_wrong: HashSet::new(),
+            copies: HashMap::new(),
+            copy_sources: 0,
             streams: BTreeMap::new(),
+            parked: Vec::new(),
+            made: std::cell::RefCell::new(None),
+            scope: new_scope(),
             restored: BTreeMap::new(),
             ended: BTreeMap::new(),
             continued: 0,
         }
     }
 
-    /// A counter of bytes of blocks written, to read while the move runs (the lane driver's speed).
+    /// A counter of the files' own bytes written, block by block, to read while the move runs
+    /// (the lane driver's speed). A block sent again counts again, so a move that goes round in
+    /// circles shows; what carried the bytes (framing, fingerprints, compression) never counts,
+    /// so it compares with the files' sizes.
     pub fn meter(&self) -> Arc<AtomicU64> {
         self.written.clone()
     }
@@ -1893,15 +2479,46 @@ impl<'d> ReceiverSession<'d> {
         self
     }
 
-    /// Stops when `control` says so (see [`MoveControl`]).
+    /// Stops and pauses when `control` says so (see [`MoveControl`]). A pause here is told to
+    /// the old laptop with this side's next reply, and the old laptop holds; blocks already on
+    /// their way are still written.
     pub fn with_control(mut self, control: MoveControl) -> Self {
         self.control = control;
+        self
+    }
+
+    /// Speaks move protocol `version`, the one both laptops agreed
+    /// ([`agree_version`](crate::agree_version)); the newest this release speaks unless set.
+    /// Below [`HOLD_SINCE`](crate::HOLD_SINCE) the old laptop cannot be told of a pause here, so
+    /// a pause here holds nothing and is not shown as held.
+    pub fn with_protocol(mut self, version: u16) -> Self {
+        self.version = version;
+        self
+    }
+
+    /// Belongs to `scope` in the journal, to pick up files of an earlier session of the same
+    /// scope ([`restore`](Self::restore)); a move leaves its own random one.
+    pub fn with_scope(mut self, scope: Scope) -> Self {
+        self.scope = scope;
         self
     }
 
     /// What this move has counted so far (the same meter the caller may hold).
     pub fn move_meter(&self) -> MoveMeter {
         self.meter.clone()
+    }
+
+    /// This side's pause, to tell the old laptop with the next reply if it changed since it was
+    /// last told on this connection.
+    fn hold_to_say(&mut self) -> Option<Message> {
+        let paused = self.control.paused();
+        (self.version >= HOLD_SINCE && paused != self.told_hold).then(|| self.say_hold(paused))
+    }
+
+    fn say_hold(&mut self, paused: bool) -> Message {
+        self.told_hold = paused;
+        self.meter.paused_here(paused);
+        Message::Hold { paused }
     }
 
     /// `item` (a file of the plan) is now at `step`.
@@ -1928,13 +2545,30 @@ impl<'d> ReceiverSession<'d> {
             .map_or(Step::Waiting, |o| outcome_step(&o))
     }
 
+    /// Files open here: being received, picked up after a restart, or kept part way at a paused
+    /// place. Never more than [`MAX_OPEN_FILES`].
+    fn open_files(&self) -> usize {
+        self.streams.len() + self.restored.len() + self.parked.len()
+    }
+
     /// An attempt let go because another start took its place: its partial file is removed with
     /// it (already failed if it had failed), and its file is counted as it now stands.
     fn started_again(&mut self, old: Incoming<'d>) {
-        self.allowance.ended(old.item, false);
+        self.end_attempt(&old);
         drop(old.assembly);
         let _ = self.journal.failed(old.entry, "it was started again");
         self.settle(old.item);
+    }
+
+    /// An attempt that ends unfinished: one that received nothing was no attempt (see
+    /// [`Allowance::ended_unstarted`]).
+    fn end_attempt(&mut self, old: &Incoming<'d>) {
+        let nothing = old.assembly.as_ref().is_some_and(|a| a.blocks_done() == 0);
+        if nothing && old.failure.is_none() {
+            self.allowance.ended_unstarted(old.item);
+        } else {
+            self.allowance.ended(old.item, false);
+        }
     }
 
     /// Counts `item` at the step its state says, after anything that may have changed it.
@@ -1991,14 +2625,15 @@ impl<'d> ReceiverSession<'d> {
         for e in self.journal.unfinished().map_err(record)? {
             // No more open at once than any move may hold; the rest stay as they are in the
             // journal, for a later start.
-            if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
+            if self.open_files() >= MAX_OPEN_FILES {
                 break;
             }
             let State::Staged { temp } = &e.state else {
                 continue;
             };
             let w = &e.write;
-            if w.source_laptop != self.allowance.source_laptop()
+            if w.scope != self.scope
+                || w.source_laptop != self.allowance.source_laptop()
                 || self.restored.contains_key(&w.item)
                 || self.streams.values().any(|s| s.item == w.item)
             {
@@ -2014,9 +2649,10 @@ impl<'d> ReceiverSession<'d> {
                 continue;
             }
             // Only what the approved plan says, where it says: the journal's word is checked too.
+            let planned = self.allowance.planned_path(&w.destination, &w.path);
             if let Err(refusal) = self
                 .allowance
-                .admit(w.item, &w.destination, &w.path, w.size)
+                .admit(w.item, &w.destination, &planned, w.size)
             {
                 self.journal
                     .failed(e.id, &refusal.to_string())
@@ -2056,7 +2692,12 @@ impl<'d> ReceiverSession<'d> {
                             destination: w.destination.clone(),
                             size: w.size,
                             same: None,
+                            unsaid: self.unsaid_same(&w.destination, &w.path, w.size),
+                            copy_of: None,
+                            own_print: None,
+                            damaged: 0,
                             rounds: 0,
+                            held_back: false,
                         },
                     );
                     picked += 1;
@@ -2118,6 +2759,18 @@ impl<'d> ReceiverSession<'d> {
             .or_else(|| ended.map(|e| e.outcome.clone()))
     }
 
+    /// How many refusals are kept (one at most per planned file), for tests.
+    #[doc(hidden)]
+    pub fn refusals_kept(&self) -> usize {
+        self.refused.len()
+    }
+
+    /// Whether `item` was sent as it is now, different from the scan (its size or its changed
+    /// time). Judged at its latest start; for the report's "changed since the scan".
+    pub fn changed_since_scan(&self, item: ItemId) -> bool {
+        self.changed.contains(&item)
+    }
+
     /// Receives over `ch` until the old laptop has sent everything, or the connection drops (call
     /// again with a new connection to continue).
     pub async fn run<C: Channel>(&mut self, ch: &mut C) -> Result<(), TransferError> {
@@ -2150,11 +2803,15 @@ impl<'d> ReceiverSession<'d> {
         // The run is only ever left at a wait, never partway through handling a message, so the
         // session stays as a dropped connection leaves it: drop it to keep partly received files,
         // or `cancel` it.
-        tokio::select! {
+        let ran = tokio::select! {
             biased;
             () = control.wait_stopped() => Err(TransferError::Stopped),
             ran = self.receive_joining(main, joining) => ran,
+        };
+        if matches!(ran, Err(TransferError::Stopped)) && self.version >= STOP_SINCE {
+            tell_stopped(main).await;
         }
+        ran
     }
 
     async fn receive_joining<C: Channel, L: Channel>(
@@ -2162,6 +2819,10 @@ impl<'d> ReceiverSession<'d> {
         main: &mut C,
         joining: &mut UnboundedReceiver<L>,
     ) -> Result<(), TransferError> {
+        // What either laptop said about a pause was said on the last connection.
+        self.told_hold = false;
+        self.meter.paused_here(false);
+        self.meter.paused_there(false);
         let state = RefCell::new(self);
         // Say what is already here, so the old laptop continues from there.
         let hello = state.borrow_mut().hello();
@@ -2181,16 +2842,34 @@ impl<'d> ReceiverSession<'d> {
                     state.borrow_mut().settle_all();
                 }
                 state.borrow().check_steps();
-                let (replies, finished) = handled?;
+                let (mut replies, finished) = handled?;
+                // A pause or carrying on here goes with the reply (the old laptop reads its
+                // replies, so it hears it at once while it sends, and on its next word while it
+                // is held).
+                let hold = state.borrow_mut().hold_to_say();
+                replies.extend(hold);
                 for r in &replies {
                     send(main, r).await?;
                 }
                 // A start waiting on a same-size file's fingerprint: worked out on the
                 // blocking-thread pool, so the lanes keep going meanwhile.
                 let waiting = state.borrow_mut().to_fingerprint.take();
-                if let Some((stream, mut file)) = waiting {
-                    let same_size = off_the_loop(move || hash_reader(&mut file)).await;
+                if let Some((stream, mut file, key)) = waiting {
+                    let own = off_the_loop(move || hash_reader(&mut file, key)).await;
+                    state.borrow_mut().offered(stream, own);
+                    // From move protocol 4 the key is sent, never this laptop's fingerprint.
+                    let same_size = match key {
+                        Some(key) => own.map(|_| key),
+                        None => own,
+                    };
                     send(main, &Message::Have { stream, same_size }).await?;
+                }
+                // A skip of a file made from a copy already here: copied block by block through
+                // the same checks as a sent file, each block read on the blocking-thread pool.
+                let copying = state.borrow_mut().take_copy();
+                if let Some(copy) = copying {
+                    let done = copy_here(&state, copy).await?;
+                    send(main, &done).await?;
                 }
                 if finished {
                     return Ok(());
@@ -2231,7 +2910,7 @@ impl<'d> ReceiverSession<'d> {
             .collect();
         for k in dropped {
             if let Some(old) = self.streams.remove(&k) {
-                self.allowance.ended(old.item, false);
+                self.end_attempt(&old);
                 // Counted as its line says, or waiting for the old laptop to start it again.
                 self.settle(old.item);
             }
@@ -2255,10 +2934,18 @@ impl<'d> ReceiverSession<'d> {
                 });
             }
         }
-        for e in self.ended.values() {
-            list.push(Message::FileDone {
-                stream: e.stream,
-                ok: e.spent(),
+        for (item, e) in &self.ended {
+            // By the file from move protocol 4: a stream number may have been reused since.
+            list.push(if self.version >= KEYED_SINCE {
+                Message::ItemDone {
+                    item: *item,
+                    ok: e.spent(),
+                }
+            } else {
+                Message::FileDone {
+                    stream: e.stream,
+                    ok: e.spent(),
+                }
             });
         }
         list.push(Message::Ready);
@@ -2273,6 +2960,9 @@ impl<'d> ReceiverSession<'d> {
         slot: &mut Slot,
     ) -> Result<(Vec<Message>, bool), TransferError> {
         let mut replies = Vec::new();
+        // Part-copies kept at a paused place are cleared once it no longer holds the move.
+        let control = &self.control;
+        self.parked.retain(|(place, _)| control.is_braked(place));
         match m {
             Message::StartFile {
                 stream,
@@ -2285,9 +2975,50 @@ impl<'d> ReceiverSession<'d> {
                 // Only the approved plan says where a file lands: a start anywhere else is
                 // refused before anything here is touched (nothing created, reserved or ended).
                 if let Err(refusal) = self.allowance.check_place(item, &destination, &path) {
-                    self.refuse(item, refusal.to_string());
+                    self.refuse(item, Failure::from(refusal));
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
+                }
+                // Inside a folder that moves as one whole: where this laptop stores that whole
+                // (the old laptop's path, or the same below a name of its own here).
+                let Some(here_path) = self.allowance.stored_path(&destination, &path) else {
+                    self.refuse(
+                        item,
+                        Failure::new(Cause::NameNotAllowed, NO_PLACE_FOR_WHOLE),
+                    );
+                    replies.push(Message::FileDone { stream, ok: false });
+                    return Ok((replies, false));
+                };
+                // A place whose drive paused the move takes no new file either: set down before
+                // anything here is created or changed (see `set_down`).
+                if self.control.is_braked(&destination) {
+                    let ticket = self
+                        .streams
+                        .get(&stream)
+                        .filter(|s| s.item == item && s.failure.is_none())
+                        .and_then(|s| s.assembly.as_ref())
+                        .map_or_else(
+                            || ResumeTicket {
+                                done: BlockMap::new(header.block_count),
+                                block_size: header.block_size,
+                                stamp: header.stamp,
+                            },
+                            Assembly::resume_ticket,
+                        );
+                    // An older old laptop cannot be told to hold it for later: it is told no,
+                    // and the file ends with the true reason and what to do.
+                    if self.version < SET_DOWN_SINCE {
+                        self.refuse(item, Failure::new(Cause::CouldNotWrite, PAUSED_THERE));
+                    }
+                    replies.push(self.set_down_as(stream, item, ticket));
+                    return Ok((replies, false));
+                }
+                // Sent as it is now; its line says when that is not as it was at the scan. Judged
+                // by its latest start, the one that lands.
+                if self.allowance.changed_since_scan(item, header.stamp) {
+                    self.changed.insert(item);
+                } else {
+                    self.changed.remove(&item);
                 }
                 // The copy is marked at least as strictly as the plan requires.
                 let mut header = header;
@@ -2350,13 +3081,19 @@ impl<'d> ReceiverSession<'d> {
                 let size = header.size;
                 // The plan is checked before anything is read, created or reserved here.
                 let admitted = if resumed_done > 0 {
-                    Err("the new laptop has no place to continue from".to_string())
-                } else if self.streams.len() + self.restored.len() >= MAX_OPEN_FILES {
-                    Err("the old laptop started too many files at once".to_string())
+                    Err(Failure::new(
+                        Cause::RefusedBySafetyCheck,
+                        "the new laptop has no place to continue from",
+                    ))
+                } else if self.open_files() >= MAX_OPEN_FILES {
+                    Err(Failure::new(
+                        Cause::RefusedBySafetyCheck,
+                        "the old laptop started too many files at once",
+                    ))
                 } else {
                     self.allowance
                         .admit(item, &destination, &path, size)
-                        .map_err(|r| r.to_string())
+                        .map_err(Failure::from)
                 };
                 if let Err(why) = admitted {
                     // Kept per file, not per start, so refusals cannot pile up.
@@ -2364,9 +3101,30 @@ impl<'d> ReceiverSession<'d> {
                     replies.push(Message::FileDone { stream, ok: false });
                     return Ok((replies, false));
                 }
-                let same = self.same_file(&destination, &path, size);
+                // Someone else's laptop is never told what is here, and before move protocol 4
+                // (no keyed fingerprints) no laptop is: an older one would get this laptop's own
+                // fingerprint, so every file is simply sent.
+                let same = if self.allowance.offers_what_is_here() && self.version >= KEYED_SINCE {
+                    self.same_file(&destination, &here_path, size)
+                } else {
+                    None
+                };
                 let stored = same.as_ref().map(|(stored, _)| stored.clone());
-                let (assembly, entry) = match self.start(item, &destination, &path, header) {
+                // Nothing like it at its place: an identical file this laptop already received in
+                // this move, in the same person's things, may be made into this one here.
+                let (copy_of, copy_file) = match &same {
+                    None if self.version >= COPY_SINCE
+                        && size >= COPY_MIN
+                        && self.allowance.offers_what_is_here() =>
+                    {
+                        match self.copy_source(&destination, size) {
+                            Some((c, f)) => (Some(c), Some(f)),
+                            None => (None, None),
+                        }
+                    }
+                    _ => (None, None),
+                };
+                let (assembly, entry) = match self.start(item, &destination, &here_path, header) {
                     Ok(started) => started,
                     Err(Start::Record(e)) => return Err(record(e)),
                     Err(Start::Refused(why)) => {
@@ -2376,10 +3134,13 @@ impl<'d> ReceiverSession<'d> {
                         return Ok((replies, false));
                     }
                 };
+                let unsaid = self.unsaid_same(&destination, &here_path, size);
                 // Every start is answered: nothing like it is here, or (once its fingerprint is
                 // worked out off the main loop) the fingerprint of the same-size file that is.
-                match same {
-                    Some((_, file)) => self.to_fingerprint = Some((stream, file)),
+                match same.map(|(_, f)| f).or(copy_file) {
+                    Some(file) => {
+                        self.to_fingerprint = Some((stream, file, self.same_key_for(item)));
+                    }
                     None => replies.push(Message::Have {
                         stream,
                         same_size: None,
@@ -2398,7 +3159,12 @@ impl<'d> ReceiverSession<'d> {
                         destination,
                         size,
                         same: stored,
+                        unsaid,
+                        copy_of,
+                        own_print: None,
+                        damaged: 0,
                         rounds: 0,
+                        held_back: false,
                     },
                 );
                 // A fresh attempt: nothing of an earlier one counts as written.
@@ -2422,91 +3188,102 @@ impl<'d> ReceiverSession<'d> {
                 changed,
             } => {
                 let trailer = Trailer::new(stamp_after, changed);
+                if let Some(down) = self.set_down(stream, Some(&trailer)) {
+                    replies.push(down);
+                    return Ok((replies, false));
+                }
                 if let Some(again) = self.send_again(stream, &trailer) {
                     replies.push(again);
                     return Ok((replies, false));
                 }
-                let Some(s) = self.streams.remove(&stream) else {
-                    replies.push(Message::FileDone { stream, ok: false });
+                replies.push(self.finish_stream(stream, trailer)?);
+            }
+            // From move protocol 4 this laptop judges: the old laptop's print against its own.
+            Message::Print { stream, print } if self.version >= KEYED_SINCE => {
+                // Taking it as already there, or making it from a copy here, would write there.
+                if let Some(down) = self.set_down(stream, None) {
+                    replies.push(down);
                     return Ok((replies, false));
-                };
-                let outcome = match (s.assembly, s.failure) {
-                    (Some(a), None) => {
-                        let dest = self
-                            .table
-                            .get(&s.destination)
-                            .map_err(|e| protocol(&e.to_string()))?;
-                        // Read back and checked now, before it gets its name.
-                        self.step(s.item, Step::Checking);
-                        self.meter.checking(Some(s.item));
-                        let landed = land(self.journal, dest, a, trailer, s.entry);
-                        self.meter.checking(None);
-                        landed?
-                    }
-                    (_, Some(why)) => {
-                        // Recorded when it failed; recorded now if that did not get through.
-                        let _ = self.journal.failed(s.entry, &why);
-                        ReceiveOutcome::Failed(why)
-                    }
-                    (None, None) => {
-                        let why = "no file open".to_string();
-                        let _ = self.journal.failed(s.entry, &why);
-                        ReceiveOutcome::Failed(why)
-                    }
-                };
-                // Landed (kept on this laptop, never sent again), even when it still needs action.
-                let ok = matches!(
-                    outcome,
-                    ReceiveOutcome::Finished(_) | ReceiveOutcome::NeedsAction { .. }
-                );
-                self.allowance.ended(s.item, ok);
-                let landed = ok.then(|| (s.destination.clone(), s.size));
-                self.end(s.item, stream, outcome, landed);
-                replies.push(Message::FileDone { stream, ok });
+                }
+                let same = self
+                    .streams
+                    .get(&stream)
+                    .is_some_and(|s| s.own_print == Some(print));
+                if same {
+                    return self.skipped(stream, replies);
+                }
+                replies.push(self.not_identical(stream));
             }
             Message::Skip { stream } => {
-                // Identical to what is here: drop the partial copy and keep the original. Always
-                // answered, so the old laptop records "already there" only on this laptop's word
-                // (a stream not open here is answered no).
-                let mut there = false;
-                if let Some(s) = self.streams.remove(&stream) {
-                    // Its partial copy is removed first, then recorded.
-                    drop(s.assembly);
-                    let outcome = match s.same {
-                        Some(stored) => {
-                            self.journal.existing(s.entry, &stored).map_err(record)?;
-                            ReceiveOutcome::AlreadyThere(stored)
-                        }
-                        None => {
-                            let why = "skipped".to_string();
-                            self.journal.failed(s.entry, &why).map_err(record)?;
-                            ReceiveOutcome::Failed(why)
-                        }
-                    };
-                    // Already there: spent, like a file that landed.
-                    there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
-                    self.allowance.ended(s.item, there);
-                    if self.end(s.item, stream, outcome, None) && there {
-                        self.meter.already_there_bytes(s.size);
-                    }
-                }
-                replies.push(Message::FileDone { stream, ok: there });
+                // Only a print, judged here, is taken as "identical": a bare skip is never
+                // believed, whatever version the other laptop says it has.
+                replies.push(self.not_identical(stream));
             }
             Message::GiveUp { stream, why } => {
                 // The old laptop stopped sending this file: it fails, with the true reason.
-                let why = match why {
-                    GiveUpWhy::AskedAgainTooOften => GAVE_UP,
-                    GiveUpWhy::ReadTooOften => READ_TOO_OFTEN,
+                let stored_wrong = self
+                    .streams
+                    .get(&stream)
+                    .is_some_and(|s| self.stored_wrong.contains(&s.item));
+                let (cause, why) = match why {
+                    // Asked for again and again because this laptop kept storing it wrong: that
+                    // is the true reason.
+                    GiveUpWhy::AskedAgainTooOften if stored_wrong => {
+                        (Cause::CouldNotWrite, NOT_STORED_HERE)
+                    }
+                    GiveUpWhy::AskedAgainTooOften => (Cause::NotVerified, GAVE_UP),
+                    GiveUpWhy::ReadTooOften => (Cause::NotVerified, READ_TOO_OFTEN),
+                    GiveUpWhy::Unreadable => (Cause::Unreadable, UNREADABLE_THERE),
                 };
                 if let Some(s) = self.streams.remove(&stream) {
-                    drop(s.assembly);
+                    // Clearing its part-copy would change a drive that holds the move paused:
+                    // it is kept as it is until the person carries on.
+                    // Kept files count as open ([`MAX_OPEN_FILES`]), so there are never more than
+                    // that; past it (never, while every start is counted) it is cleared.
+                    match s.assembly {
+                        Some(a)
+                            if self.control.is_braked(&s.destination)
+                                && self.parked.len() < MAX_OPEN_FILES =>
+                        {
+                            self.parked.push((s.destination.clone(), a));
+                        }
+                        a => drop(a),
+                    }
                     let _ = self.journal.failed(s.entry, why);
                     self.allowance.ended(s.item, false);
-                    self.end(s.item, stream, ReceiveOutcome::Failed(why.into()), None);
+                    let outcome = ReceiveOutcome::Failed(Failure::new(cause, why));
+                    // A file this drive kept storing wrong counts toward its brake, however
+                    // it ended.
+                    self.note_stored(&s.destination, &outcome);
+                    self.end(s.item, stream, outcome, None);
                 }
                 replies.push(Message::FileDone { stream, ok: false });
             }
             Message::AllSent => return Ok((replies, true)),
+            Message::Hold { paused } if self.version >= HOLD_SINCE => {
+                // The old laptop's pause as it stands; every `Hold` is answered with this side's.
+                self.meter.paused_there(paused);
+                let here = self.control.paused();
+                replies.push(self.say_hold(here));
+            }
+            // The old laptop's person stopped the move: a stop, never a lost connection.
+            Message::Stopping if self.version >= STOP_SINCE => {
+                return Err(TransferError::StoppedThere);
+            }
+            // A planned file the old laptop will not send, with why: its line says so. Kept only
+            // for a file of the plan that is not open here and has not ended here.
+            Message::NotSent { item, cause } if self.version >= STOP_SINCE => {
+                let failure = Cause::heard(cause)
+                    .ok_or_else(|| protocol("an unknown reason a file was not sent"))?;
+                let open = self.streams.values().any(|s| s.item == item)
+                    || self.restored.contains_key(&item);
+                if self.allowance.destination(item).is_some()
+                    && !open
+                    && !self.ended.contains_key(&item)
+                {
+                    self.refuse(item, failure);
+                }
+            }
             _ => return Err(protocol("unexpected message from the old laptop")),
         }
         Ok((replies, false))
@@ -2518,6 +3295,81 @@ impl<'d> ReceiverSession<'d> {
     /// connection: an honest old laptop sends each block's pieces together, so pieces of two
     /// blocks mixed are refused (the connection ends) rather than held. Every block's last piece
     /// is answered, even for a file that is not open, so the old laptop's count stays right.
+    /// Ends the file on `stream` as its last block came in: read back, checked and named through
+    /// the gate (or failed, with why). The answer to send.
+    fn finish_stream(&mut self, stream: u32, trailer: Trailer) -> Result<Message, TransferError> {
+        let Some(s) = self.streams.remove(&stream) else {
+            return Ok(Message::FileDone { stream, ok: false });
+        };
+        let outcome = match (s.assembly, s.failure) {
+            (Some(mut a), None) => {
+                let dest = self
+                    .table
+                    .get(&s.destination)
+                    .map_err(|e| protocol(&e.to_string()))?;
+                // Read back and checked now, before it gets its name.
+                self.step(s.item, Step::Checking);
+                self.meter.checking(Some(s.item));
+                // Out of rounds and still not right though it never changed on the old laptop:
+                // what is said depends on whose fault it is (Quarantine Design, step 3).
+                let unchanged = !trailer.changed && trailer.stamp_after == a.header().stamp;
+                let incomplete = a.blocks_done() < a.header().block_count;
+                if unchanged
+                    && a.read_differently()
+                    && (incomplete || !matches!(a.check_stored(), Ok(StoredCheck::Matched)))
+                {
+                    self.meter.checking(None);
+                    let kept_in = (s.destination.as_str(), s.block_size);
+                    return self.set_aside(stream, s.item, s.entry, kept_in, a);
+                }
+                let landed = if unchanged && incomplete && s.damaged >= 2 {
+                    drop(a);
+                    let why = Failure::new(Cause::NotVerified, SENT_DAMAGED);
+                    let _ = self.journal.failed(s.entry, &why);
+                    Ok(ReceiveOutcome::Failed(why))
+                } else {
+                    land(self.journal, dest, a, trailer, s.entry, s.unsaid.as_deref()).map(|out| {
+                        match out {
+                            // Stored wrong again on this laptop, though the old laptop sent the
+                            // same bytes each time.
+                            ReceiveOutcome::Failed(f)
+                                if unchanged && !incomplete && f.cause() == Cause::NotVerified =>
+                            {
+                                ReceiveOutcome::Failed(Failure::new(
+                                    Cause::CouldNotWrite,
+                                    NOT_STORED_HERE,
+                                ))
+                            }
+                            out => out,
+                        }
+                    })
+                };
+                self.meter.checking(None);
+                landed?
+            }
+            (_, Some(why)) => {
+                // Recorded when it failed; recorded now if that did not get through.
+                let _ = self.journal.failed(s.entry, &why);
+                ReceiveOutcome::Failed(why)
+            }
+            (None, None) => {
+                let why = Failure::new(Cause::NotVerified, "no file open");
+                let _ = self.journal.failed(s.entry, &why);
+                ReceiveOutcome::Failed(why)
+            }
+        };
+        self.note_stored(&s.destination, &outcome);
+        // Landed (kept on this laptop, never sent again), even when it still needs action; or
+        // found identical to the file already at its name once it arrived (delivered: the old
+        // laptop is told only that it arrived).
+        let there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
+        let ok = on_this_laptop(&outcome);
+        self.allowance.ended(s.item, ok);
+        let landed = (ok && !there).then(|| (s.destination.clone(), s.size));
+        self.end(s.item, stream, outcome, landed);
+        Ok(Message::FileDone { stream, ok })
+    }
+
     fn piece(
         &mut self,
         slot: &mut Slot,
@@ -2546,12 +3398,25 @@ impl<'d> ReceiverSession<'d> {
                 let buffer = &mut slot.get_or_insert_with(|| (stream, Vec::new())).1;
                 if buffer.len().saturating_add(bytes.len()) > limit {
                     *slot = None;
-                    self.fail_stream(stream, "a block grew past its size".into());
+                    self.fail_stream(
+                        stream,
+                        Failure::new(Cause::RefusedBySafetyCheck, "a block grew past its size"),
+                    );
                 } else {
                     buffer.extend_from_slice(bytes);
                     if last {
                         let whole = slot.take().map(|(_, b)| b).unwrap_or_default();
-                        written = self.write_block(stream, &whole);
+                        written = if self.set_down_here(stream) {
+                            // Its place's drive paused the move: never written there, and not the
+                            // block's fault (not counted as damaged). It is missing from the
+                            // file's ticket, so it is sent again once the move carries on.
+                            if let Some(s) = self.streams.get_mut(&stream) {
+                                s.held_back = true;
+                            }
+                            Some((Block::number_in(&whole).unwrap_or(u64::MAX), false))
+                        } else {
+                            self.write_block(stream, &whole)
+                        };
                     }
                 }
             }
@@ -2584,13 +3449,12 @@ impl<'d> ReceiverSession<'d> {
             let fresh = !assembly.has_block(b.index);
             let raw = b.data.len() as u64;
             let receipt = assembly.accept(b)?;
-            Ok((receipt, fresh.then_some((hash, raw))))
+            Ok((receipt, raw, fresh.then_some(hash)))
         });
         match accepted {
-            Ok((receipt, fresh)) => {
-                self.written
-                    .fetch_add(whole.len() as u64, Ordering::Relaxed);
-                if let Some((hash, raw)) = fresh {
+            Ok((receipt, raw, fresh)) => {
+                self.written.fetch_add(raw, Ordering::Relaxed);
+                if let Some(hash) = fresh {
                     if let Some((group, _)) = self.steps.get(&s.item) {
                         self.meter.written(*group, raw);
                     }
@@ -2602,10 +3466,13 @@ impl<'d> ReceiverSession<'d> {
                 Some((receipt.block, true))
             }
             Err(TransferError::Damaged(_)) => {
+                if let Some(s) = self.streams.get_mut(&stream) {
+                    s.damaged = s.damaged.saturating_add(1);
+                }
                 Some((Block::number_in(whole).unwrap_or(u64::MAX), false))
             }
             Err(e) => {
-                self.fail_stream(stream, e.to_string());
+                self.fail_stream(stream, Failure::of(&e, Side::New));
                 None
             }
         }
@@ -2625,8 +3492,12 @@ impl<'d> ReceiverSession<'d> {
         if trailer.changed || trailer.stamp_after != a.header().stamp {
             return None;
         }
-        let fixable = a.blocks_done() < a.header().block_count
-            || matches!(a.check_stored(), Ok(StoredCheck::TakenBack(_)));
+        let stored_wrong = matches!(a.check_stored(), Ok(StoredCheck::TakenBack(_)));
+        let item = s.item;
+        let fixable = a.blocks_done() < a.header().block_count || stored_wrong;
+        if stored_wrong {
+            self.stored_wrong.insert(item);
+        }
         if !fixable {
             return None;
         }
@@ -2639,7 +3510,7 @@ impl<'d> ReceiverSession<'d> {
 
     /// The file on `stream` failed: its partial copy is removed (it ends when the old laptop ends
     /// it, and reports why).
-    fn fail_stream(&mut self, stream: u32, why: String) {
+    fn fail_stream(&mut self, stream: u32, why: Failure) {
         if let Some(s) = self.streams.get_mut(&stream) {
             s.assembly = None;
             // If this does not get through, recovery finds its partial file gone and records it.
@@ -2652,7 +3523,7 @@ impl<'d> ReceiverSession<'d> {
 
     /// Records why a start was refused, once per file (and for a bounded number of files not in
     /// the plan), so refusals cannot pile up.
-    fn refuse(&mut self, item: ItemId, why: String) {
+    fn refuse(&mut self, item: ItemId, why: Failure) {
         if self.refused.len() < MAX_REMEMBERED_REFUSALS || self.refused.contains_key(&item) {
             self.refused.insert(item, why);
         }
@@ -2675,6 +3546,11 @@ impl<'d> ReceiverSession<'d> {
         self.refused.remove(&item);
         if let (ReceiveOutcome::Finished(_), Some((_, size))) = (&outcome, &landed) {
             self.meter.checked_bytes(*size);
+            // A later file of the same size may be made from it.
+            if *size >= COPY_MIN && self.copy_sources < MAX_COPY_SOURCES {
+                self.copies.entry(*size).or_default().push(item);
+                self.copy_sources += 1;
+            }
         }
         self.ended.insert(
             item,
@@ -2688,8 +3564,377 @@ impl<'d> ReceiverSession<'d> {
         true
     }
 
+    /// The latest file received in this move of exactly `size` bytes, in the same person's things
+    /// as `destination` (see [`Whose`]), still there as it landed: where it is, opened to
+    /// fingerprint.
+    fn copy_source(&self, destination: &str, size: u64) -> Option<(CopyOf, std::fs::File)> {
+        let wanted = whose(self.table, destination)?;
+        for item in self.copies.get(&size)?.iter().rev().take(COPY_LOOKS) {
+            let Some(Ended {
+                outcome: ReceiveOutcome::Finished(finished),
+                landed: Some((from, len)),
+                ..
+            }) = self.ended.get(item)
+            else {
+                continue;
+            };
+            if *len != size || whose(self.table, from).as_ref() != Some(&wanted) {
+                continue;
+            }
+            let Ok(dest) = self.table.get(from) else {
+                continue;
+            };
+            let Some((stored, now)) = IncomingPath::parse(&finished.final_path)
+                .ok()
+                .and_then(|path| dest.find(&path))
+            else {
+                continue;
+            };
+            if now != size {
+                continue;
+            }
+            let Ok(file) = dest.open_read(&stored) else {
+                continue;
+            };
+            return Some((
+                CopyOf {
+                    destination: from.clone(),
+                    stored,
+                    fingerprint: None,
+                },
+                file,
+            ));
+        }
+        None
+    }
+
+    /// The old laptop's file on `stream` is identical to what is here: made here from a copy
+    /// already received (see `copy_here`, answered once it is), or the partial copy dropped and
+    /// the file already there kept. Always answered, so the old laptop records "already there"
+    /// only on this laptop's word (a stream not open here is answered no).
+    fn skipped(
+        &mut self,
+        stream: u32,
+        mut replies: Vec<Message>,
+    ) -> Result<(Vec<Message>, bool), TransferError> {
+        let from_copy = self.streams.get(&stream).is_some_and(|s| {
+            s.failure.is_none()
+                && s.assembly.is_some()
+                && s.copy_of.as_ref().is_some_and(|c| c.fingerprint.is_some())
+        });
+        if from_copy {
+            self.to_copy = Some(stream);
+            return Ok((replies, false));
+        }
+        // Identical to what is here: drop the partial copy and keep the original. Always
+        // answered, so the old laptop records "already there" only on this laptop's word
+        // (a stream not open here is answered no).
+        let mut there = false;
+        if let Some(s) = self.streams.remove(&stream) {
+            // Its partial copy is removed first, then recorded.
+            drop(s.assembly);
+            let outcome = match s.same {
+                Some(stored) => {
+                    self.journal.existing(s.entry, &stored).map_err(record)?;
+                    ReceiveOutcome::AlreadyThere(stored)
+                }
+                None => {
+                    let why = Failure::new(Cause::RefusedBySafetyCheck, "skipped");
+                    self.journal.failed(s.entry, &why).map_err(record)?;
+                    ReceiveOutcome::Failed(why)
+                }
+            };
+            // Already there: spent, like a file that landed.
+            there = matches!(outcome, ReceiveOutcome::AlreadyThere(_));
+            self.allowance.ended(s.item, there);
+            if self.end(s.item, stream, outcome, None) && there {
+                self.meter.already_there_bytes(s.size);
+            }
+        }
+        replies.push(Message::FileDone { stream, ok: there });
+        Ok((replies, false))
+    }
+
+    /// Whether the file open on `stream` goes to a place whose drive paused the move (Quarantine
+    /// Design, step 4): from the moment the brake is put on until the person carries on, nothing
+    /// more is written there, whatever was already on its way.
+    fn set_down_here(&self, stream: u32) -> bool {
+        self.streams
+            .get(&stream)
+            .is_some_and(|s| self.control.is_braked(&s.destination))
+    }
+
+    /// The file open on `stream` is set down partway, as it is, when its place's drive paused the
+    /// move: nothing of it is checked, named or written there, and the old laptop is told to pick
+    /// it up from its ticket once the move carries on (on the same stream, as after a dropped
+    /// connection). So is a file whose blocks were held back by such a pause, at its end (`trailer`)
+    /// once the move carries on: the blocks held back are sent again without a round of asking
+    /// again. Never one that cannot land anyway (it failed, or its end says it changed): those end
+    /// as usual. `None` when it is not set down.
+    fn set_down(&mut self, stream: u32, trailer: Option<&Trailer>) -> Option<Message> {
+        let braked = self
+            .streams
+            .get(&stream)
+            .is_some_and(|s| self.control.is_braked(&s.destination));
+        let s = self
+            .streams
+            .get_mut(&stream)
+            .filter(|s| s.failure.is_none())?;
+        let a = s.assembly.as_ref()?;
+        let unchanged = trailer.is_none_or(|t| !t.changed && t.stamp_after == a.header().stamp);
+        // (An older old laptop is asked for them again as usual: it knows no such answer.)
+        let held_back = trailer.is_some() && s.held_back && self.version >= SET_DOWN_SINCE;
+        if !unchanged || !(braked || held_back) {
+            return None;
+        }
+        s.held_back = false;
+        let (item, ticket) = (s.item, a.resume_ticket());
+        Some(self.set_down_as(stream, item, ticket))
+    }
+
+    /// How a file set down is told: from move protocol [`SET_DOWN_SINCE`], continue from
+    /// `ticket` later. An older old laptop knows no such answer and is told the file did not
+    /// arrive (true: it is kept here partway, unfinished, never shown as arrived).
+    fn set_down_as(&self, stream: u32, item: ItemId, ticket: ResumeTicket) -> Message {
+        if self.version >= SET_DOWN_SINCE {
+            Message::ResumeFrom {
+                stream,
+                item,
+                ticket,
+            }
+        } else {
+            Message::FileDone { stream, ok: false }
+        }
+    }
+
+    /// Counts a checked file towards its place's brake: a drive that could not store 3 of its
+    /// last 20 checked files pauses the move (Quarantine Design, step 4). Other endings (a file
+    /// that changed, a drive that went away) are not the drive's fault and are not counted.
+    fn note_stored(&mut self, destination: &str, outcome: &ReceiveOutcome) {
+        let stored = match outcome {
+            ReceiveOutcome::Finished(_) => true,
+            ReceiveOutcome::Failed(f) if f.why() == NOT_STORED_HERE => false,
+            _ => return,
+        };
+        let lately = self
+            .stored_lately
+            .entry(destination.to_string())
+            .or_default();
+        lately.push_back(stored);
+        while lately.len() > BRAKE_WINDOW {
+            lately.pop_front();
+        }
+        if lately.iter().filter(|s| !**s).count() >= BRAKE_AFTER {
+            lately.clear();
+            self.control.brake(destination);
+        }
+    }
+
+    /// Keeps what arrived for `item` beside its real name as a damaged copy, the old laptop's
+    /// drive having read it differently each time: needs action, with where it is; the old laptop
+    /// is told it did not arrive. Where the drive cannot keep it safely it fails, said plainly.
+    fn set_aside(
+        &mut self,
+        stream: u32,
+        item: ItemId,
+        entry: u64,
+        (destination, block_size): (&str, u64),
+        a: Assembly<'d>,
+    ) -> Result<Message, TransferError> {
+        let outcome = match a.set_aside() {
+            Ok((kept, written)) => {
+                let why = format!("{READ_DIFFERENTLY} What arrived is kept as {kept}.");
+                let failure = Failure::new(Cause::NotVerified, &why);
+                // Recorded with what is on the disk, so undo can take this copy away too; one
+                // that cannot be read back now is recorded failed only, and undo leaves it.
+                let recorded = self
+                    .kept_copy(destination, block_size, &kept, written)
+                    .is_some_and(|(fingerprint, landed)| {
+                        self.journal
+                            .kept_aside(entry, &failure, &kept, fingerprint, landed)
+                            .is_ok()
+                    });
+                if !recorded {
+                    let _ = self.journal.failed(entry, &failure);
+                }
+                ReceiveOutcome::NeedsAction {
+                    finished: Finished {
+                        final_path: kept.clone(),
+                        sent_path: kept,
+                        changes: Vec::new(),
+                        mark_not_kept: None,
+                        time_not_kept: false,
+                        checked_from: None,
+                    },
+                    why,
+                }
+            }
+            Err(_) => {
+                let why = Failure::new(Cause::NotVerified, READ_DIFFERENTLY);
+                let _ = self.journal.failed(entry, &why);
+                ReceiveOutcome::Failed(why)
+            }
+        };
+        // Spent: the same unsteady bytes are not asked for again in this move.
+        self.allowance.ended(item, true);
+        self.end(item, stream, outcome, None);
+        Ok(Message::FileDone { stream, ok: false })
+    }
+
+    /// The damaged copy at `kept` in `destination`, as it is on the disk now: its whole
+    /// fingerprint and what landed, all read through one handle on that very file, and only if
+    /// it is still the file written (`written`, read through the handle that wrote it).
+    fn kept_copy(
+        &self,
+        destination: &str,
+        block_size: u64,
+        kept: &str,
+        written: Option<pctwin_gate::FileId>,
+    ) -> Option<([u8; 32], Landed)> {
+        let dest = self.table.get(destination).ok()?;
+        let stat = dest.stat(kept).ok()??;
+        if Some(stat.id) != written {
+            return None;
+        }
+        let mut file = dest.open_read(kept).ok()?;
+        let meta = file.metadata().ok()?;
+        let modified_ns = stat.modified.map(crate::nanos);
+        if meta.len() != stat.len || meta.modified().ok().map(crate::nanos) != modified_ns {
+            return None;
+        }
+        let fingerprint = crate::fingerprint_reader(&mut file, stat.len, block_size).ok()??;
+        // Still the same file once read: nothing changed it meanwhile.
+        let after = dest.stat(kept).ok()??;
+        (after.id == stat.id && after.len == stat.len && after.modified == stat.modified).then(
+            || {
+                (
+                    fingerprint,
+                    Landed {
+                        size: stat.len,
+                        modified_ns,
+                        file: Some(file_id(stat.id)),
+                    },
+                )
+            },
+        )
+    }
+
+    /// The old laptop's file on `stream` is not identical to what is here after all: its partial
+    /// copy goes, nothing is recorded as its end, and the old laptop sends it (answered no).
+    fn not_identical(&mut self, stream: u32) -> Message {
+        if let Some(s) = self.streams.remove(&stream) {
+            drop(s.assembly);
+            let why = Failure::new(Cause::NotVerified, "not identical: it is sent instead");
+            let _ = self.journal.failed(s.entry, &why);
+            self.allowance.ended(s.item, false);
+            self.settle(s.item);
+        }
+        Message::FileDone { stream, ok: false }
+    }
+
+    /// The key a file's fingerprint is compared under (move protocol 4): made from this session's
+    /// secret and the file, so it is the same on every connection of the move and nowhere else.
+    fn same_key_for(&self, item: ItemId) -> Option<[u8; 32]> {
+        (self.version >= KEYED_SINCE)
+            .then(|| *blake3::keyed_hash(&self.same_secret, item.to_hex().as_bytes()).as_bytes())
+    }
+
+    /// This laptop's own fingerprint for the start on `stream` (of the same-size file here, or
+    /// of a copy already received), kept to judge the old laptop's print by.
+    fn offered(&mut self, stream: u32, fingerprint: Option<[u8; 32]>) {
+        if let Some(s) = self.streams.get_mut(&stream) {
+            s.own_print = fingerprint;
+            if let Some(c) = s.copy_of.as_mut() {
+                c.fingerprint = fingerprint;
+            }
+        }
+    }
+
+    /// The copy to make here now, if the old laptop skipped a file offered as one already here.
+    fn take_copy(&mut self) -> Option<LocalCopy> {
+        let stream = self.to_copy.take()?;
+        let s = self.streams.get(&stream)?;
+        let c = s.copy_of.as_ref()?;
+        Some(LocalCopy {
+            stream,
+            file: self
+                .table
+                .get(&c.destination)
+                .ok()
+                .and_then(|d| d.open_read(&c.stored).ok()),
+            header: s.assembly.as_ref()?.header().clone(),
+            expected: c.fingerprint?,
+            key: self.same_key_for(s.item),
+        })
+    }
+
+    /// Writes one block of a copy made here, through the same checks as a block that arrived;
+    /// `false` if it could not be (the file has failed).
+    fn copy_block(&mut self, stream: u32, block: Block) -> bool {
+        let journal = self.journal;
+        let Some(s) = self.streams.get_mut(&stream) else {
+            return false;
+        };
+        let Some(assembly) = s.assembly.as_mut() else {
+            return false;
+        };
+        let (hash, raw) = (block.hash, block.data.len() as u64);
+        match assembly.accept(block) {
+            Ok(receipt) => {
+                if let Some((group, _)) = self.steps.get(&s.item) {
+                    self.meter.written(*group, raw);
+                }
+                s.pending.push((receipt.block, hash));
+                if s.pending.len() >= CHECKPOINT_BLOCKS {
+                    flush_checkpoint(journal, s, false);
+                }
+                true
+            }
+            Err(e) => {
+                self.fail_stream(stream, Failure::of(&e, Side::New));
+                false
+            }
+        }
+    }
+
+    /// The copy on `stream` made here is complete and identical (`whole`): it ends as a sent file
+    /// ends. If not, its partial copy is removed and it is not accepted, so the old laptop sends
+    /// it after all.
+    fn copied_here(
+        &mut self,
+        stream: u32,
+        whole: bool,
+        stamp: crate::Stamp,
+    ) -> Result<Message, TransferError> {
+        if whole {
+            return self.finish_stream(stream, Trailer::new(stamp, false));
+        }
+        if let Some(s) = self.streams.remove(&stream) {
+            drop(s.assembly);
+            let why = Failure::new(
+                Cause::NotVerified,
+                "the copy already on this laptop could not be used",
+            );
+            let _ = self.journal.failed(s.entry, &why);
+            self.allowance.ended(s.item, false);
+            self.settle(s.item);
+        }
+        Ok(Message::FileDone { stream, ok: false })
+    }
+
     /// A file already at the place `path` would land in, of exactly `size` bytes: its stored path,
     /// opened to fingerprint.
+    /// Where this laptop may not say what it has ([`Allowance::offers_what_is_here`]): the stored
+    /// path of a same-size file already at `path`, to compare once the file has arrived. Nothing
+    /// of it is told to the other laptop.
+    fn unsaid_same(&self, destination: &str, path: &str, size: u64) -> Option<String> {
+        if self.allowance.offers_what_is_here() {
+            return None;
+        }
+        self.same_file(destination, path, size)
+            .map(|(stored, _)| stored)
+    }
+
     fn same_file(
         &self,
         destination: &str,
@@ -2726,10 +3971,10 @@ impl<'d> ReceiverSession<'d> {
                 .and_then(|(dest, path)| dest.find(&path))
                 .is_some_and(|(_, len)| len == *size);
             if !still_there {
-                e.outcome = ReceiveOutcome::Failed(
-                    "it was removed or changed soon after copying, often by security software"
-                        .into(),
-                );
+                e.outcome = ReceiveOutcome::Failed(Failure::new(
+                    Cause::RemovedAfterCopy,
+                    "it was removed or changed soon after copying, often by security software",
+                ));
                 self.meter.unchecked_bytes(*size);
                 gone.push(*item);
             }
@@ -2748,11 +3993,12 @@ impl<'d> ReceiverSession<'d> {
         path: &str,
         header: crate::Header,
     ) -> Result<(Assembly<'d>, u64), Start> {
-        let refused = |e: &dyn std::fmt::Display| Start::Refused(e.to_string());
+        let refused =
+            |e: GateError| Start::Refused(Failure::new(Cause::of_gate(&e), e.to_string()));
         let table: &'d Destinations = self.table;
-        let dest = table.get(destination).map_err(|e| refused(&e))?;
-        let place = table.place(destination).map_err(|e| refused(&e))?;
-        let parsed = IncomingPath::parse(path).map_err(|e| refused(&e))?;
+        let dest = table.get(destination).map_err(refused)?;
+        let place = table.place(destination).map_err(refused)?;
+        let parsed = IncomingPath::parse(path).map_err(|e| refused(GateError::Path(e)))?;
         let (permission, for_account) = match place {
             Approved::MyFolders | Approved::ChosenDrive | Approved::OffloadDrive => {
                 (Permission::OwnFolders, self.account.clone())
@@ -2766,6 +4012,7 @@ impl<'d> ReceiverSession<'d> {
             download_mark: header.mark,
             item,
             source_laptop: self.allowance.source_laptop(),
+            scope: self.scope,
             destination: destination.to_string(),
             path: path.to_string(),
             size: header.size,
@@ -2781,15 +4028,27 @@ impl<'d> ReceiverSession<'d> {
             partial_keep: self.allowance.partial_keep(),
         };
         let entry = self.journal.plan(&write).map_err(Start::Record)?;
-        let assembly =
-            match Assembly::start_tagged(dest, &parsed, header, &self.journal.temp_tag(entry)) {
-                Ok(a) => a,
-                Err(e) => {
-                    let why = e.to_string();
-                    self.journal.failed(entry, &why).map_err(Start::Record)?;
-                    return Err(Start::Refused(why));
-                }
-            };
+        // Inside a folder that moves as one whole, its top folder must be made by this move (now,
+        // or by an earlier file of it): never one someone else made or put there since the plan.
+        let ours = |stored: &str| self.made_here(destination, stored);
+        let fresh = self
+            .allowance
+            .whole_depth(destination, path)
+            .map(|depth| pctwin_gate::Fresh { depth, ours: &ours });
+        let assembly = match Assembly::start_tagged_fresh(
+            dest,
+            &parsed,
+            header,
+            &self.journal.temp_tag(entry),
+            fresh,
+        ) {
+            Ok(a) => a,
+            Err(e) => {
+                let why = Failure::of(&e, Side::New);
+                self.journal.failed(entry, &why).map_err(Start::Record)?;
+                return Err(Start::Refused(why));
+            }
+        };
         let made: Vec<(String, Option<FileId>)> = assembly
             .created_folders()
             .iter()
@@ -2804,7 +4063,29 @@ impl<'d> ReceiverSession<'d> {
         self.journal
             .staged(entry, &assembly.temp_path(), &made)
             .map_err(Start::Record)?;
+        if let Ok(mut known) = self.made.try_borrow_mut()
+            && let Some(here) = known.as_mut().and_then(|k| k.get_mut(destination))
+        {
+            here.extend(made.into_iter().map(|(f, _)| f));
+        }
         Ok((assembly, entry))
+    }
+
+    /// Whether this move made the folder `stored` in `destination`: by its own entries in the
+    /// journal (of this move's scope), read once per destination, and kept up as files start.
+    fn made_here(&self, destination: &str, stored: &str) -> bool {
+        let Ok(mut known) = self.made.try_borrow_mut() else {
+            return false;
+        };
+        let known = known.get_or_insert_with(HashMap::new);
+        let here = known.entry(destination.to_string()).or_insert_with(|| {
+            self.journal
+                .folders_made_in(self.scope, destination)
+                .unwrap_or_default()
+                .into_iter()
+                .collect()
+        });
+        here.contains(stored)
     }
 }
 
@@ -2852,6 +4133,38 @@ fn answered_cap(size: u64) -> u64 {
 }
 
 /// Said of a file whose blocks were asked for again more often than one attempt allows.
+/// Quarantine Design, step 4: this many of a place's last [`BRAKE_WINDOW`] checked files not
+/// stored correctly pause the move.
+const BRAKE_AFTER: usize = 3;
+const BRAKE_WINDOW: usize = 20;
+
+/// Quarantine Design, step 3: the words for a file that would not come right.
+const READ_DIFFERENTLY: &str = "This file read differently each time on your old laptop, so its drive may be failing. Your original is untouched.";
+/// A new random scope for one move. Should the system's random source fail, one made from this
+/// moment and this process instead: still never another move's.
+fn new_scope() -> Scope {
+    Scope::for_a_move().unwrap_or_else(|_| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut h = blake3::Hasher::new();
+        h.update(b"pctwin/journal-scope\0");
+        h.update(&now.to_be_bytes());
+        h.update(&std::process::id().to_be_bytes());
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&h.finalize().as_bytes()[..16]);
+        Scope(bytes)
+    })
+}
+
+const NO_PLACE_FOR_WHOLE: &str = "its folder could be given no name of its own on this laptop beside one already there, so it was not copied. Your original is untouched";
+const PAUSED_THERE: &str = "the drive it was going to paused the move, so it was not copied. Once that drive is working, send it again. Your original is untouched";
+const NOT_STORED_HERE: &str =
+    "This laptop could not store this file correctly. Your original is untouched.";
+const SENT_DAMAGED: &str = "The old laptop sent it damaged each time. Your original is untouched.";
+
+const UNREADABLE_THERE: &str = "the old laptop could not read the rest of it, so it was not copied. Your original is untouched";
 const GAVE_UP: &str = "parts of it kept arriving damaged or being stored wrong, so it was not finished. Your original is untouched";
 
 /// How many times a file's missing or wrongly stored blocks are asked for again before it fails.
@@ -2887,7 +4200,7 @@ const EVERYONE: &str = "everyone";
 /// Why a file did not start: refused (the file fails on its own), or the journal could not be
 /// written (the move stops).
 enum Start {
-    Refused(String),
+    Refused(Failure),
     Record(JournalError),
 }
 
@@ -2936,27 +4249,45 @@ fn land(
     assembly: Assembly<'_>,
     trailer: Trailer,
     entry: u64,
+    unsaid: Option<&str>,
 ) -> Result<ReceiveOutcome, TransferError> {
-    let fail = |why: String| -> Result<ReceiveOutcome, TransferError> {
+    let fail = |why: Failure| -> Result<ReceiveOutcome, TransferError> {
         journal.failed(entry, &why).map_err(record)?;
         Ok(ReceiveOutcome::Failed(why))
     };
     // Checked and on disk: from here only success or recovery ends it, never a throw-away. A
     // file that cannot be named now is kept for recovery to finish at the next start.
-    let later = |sealed: pctwin_gate::Sealed<'_>, why: &dyn std::fmt::Display| {
+    let later = |sealed: pctwin_gate::Sealed<'_>, why: &GateError| {
         sealed.persist();
-        Ok(ReceiveOutcome::Failed(format!("{why}; {FINISHED_LATER}")))
+        Ok(ReceiveOutcome::Failed(Failure::new(
+            Cause::of_gate(why),
+            format!("{why}; {FINISHED_LATER}"),
+        )))
     };
     let (size, block_size) = (assembly.header().size, assembly.header().block_size);
     let (mut sealed, fingerprint) = match assembly.seal(trailer) {
         Ok(sealed) => sealed,
-        Err(e) => return fail(e.to_string()),
+        Err(e) => return fail(Failure::of(&e, Side::New)),
     };
+    // The file already at its name, if it is this very file (its whole fingerprint, read from
+    // it now): kept as it is, and the copy that arrived dropped, so nothing is written twice.
+    if let Some(stored) = unsaid {
+        let identical = dest.open_read(stored).ok().and_then(|mut f| {
+            crate::fingerprint_reader(&mut f, size, block_size)
+                .ok()
+                .flatten()
+        });
+        if identical == Some(fingerprint) {
+            drop(sealed);
+            journal.existing(entry, stored).map_err(record)?;
+            return Ok(ReceiveOutcome::AlreadyThere(stored.to_string()));
+        }
+    }
     // Which file it is, so after a crash only this very file is ever taken as it.
     let sealed_as = sealed.identity().ok().map(file_id);
     // If the journal cannot take it, the checked file is still kept (never thrown away), for
     // recovery to finish once the journal works again.
-    if let Err(e) = journal.verified(entry, fingerprint, sealed_as) {
+    if let Err(e) = journal.verified_as(entry, fingerprint, sealed_as, sealed.checked_from()) {
         sealed.persist();
         return Err(record(e));
     }
@@ -2964,7 +4295,7 @@ fn land(
     let claimed = loop {
         tries += 1;
         if tries > MAX_NAME_TRIES {
-            return later(sealed, &pctwin_gate::GateError::TooManyClashes);
+            return later(sealed, &GateError::TooManyClashes);
         }
         let name = match sealed.next_name() {
             Ok(name) => name,
@@ -3012,15 +4343,7 @@ fn land(
                         .map_err(record)?;
                 // Kept whatever the show came to: the journal has it, and recovery or the person
                 // finishes it. Reported copied only once shown.
-                let finished = claimed.keep();
-                return Ok(match end {
-                    crate::naming::ShowEnd::Shown => ReceiveOutcome::Finished(finished),
-                    crate::naming::ShowEnd::Gone(why)
-                    | crate::naming::ShowEnd::Left(why)
-                    | crate::naming::ShowEnd::Later(why) => {
-                        ReceiveOutcome::NeedsAction { finished, why }
-                    }
-                });
+                return Ok(shown_line(end, claimed.keep()));
             } else {
                 journal
                     .committed(
@@ -3036,9 +4359,44 @@ fn land(
             Ok(ReceiveOutcome::Finished(claimed.keep()))
         }
         // Gone the moment it got its name: never reported copied.
-        Ok(None) => fail(REMOVED_AT_ONCE.into()),
+        Ok(None) => fail(Failure::new(Cause::RemovedAfterCopy, REMOVED_AT_ONCE)),
         // Could not look just now: recovery finishes it (the journal has its name).
-        Err(e) => Ok(ReceiveOutcome::Failed(format!("{e}; {FINISHED_LATER}"))),
+        Err(e) => Ok(named_unconfirmed(claimed.finished().clone(), &e)),
+    }
+}
+
+/// Whether a file that ended as `outcome` is on this laptop (copied, even if it still needs
+/// action, or the same file already there): the old laptop is told it arrived, and it is never
+/// started again.
+fn on_this_laptop(outcome: &ReceiveOutcome) -> bool {
+    matches!(
+        outcome,
+        ReceiveOutcome::Finished(_)
+            | ReceiveOutcome::NeedsAction { .. }
+            | ReceiveOutcome::AlreadyThere(_)
+    )
+}
+
+/// The line of a file filled in under its name, by how showing it ended (`finished`: where it
+/// is). Shown: copied. Left or waiting: on this laptop, but the person must be told. Gone from
+/// its name before it could be shown: not on this laptop, so never said to be there.
+fn shown_line(end: crate::naming::ShowEnd, finished: Finished) -> ReceiveOutcome {
+    use crate::naming::ShowEnd;
+    match end {
+        ShowEnd::Shown => ReceiveOutcome::Finished(finished),
+        ShowEnd::Gone(why) => ReceiveOutcome::Failed(Failure::new(Cause::RemovedAfterCopy, why)),
+        ShowEnd::Left(why) | ShowEnd::Later(why) => ReceiveOutcome::NeedsAction { finished, why },
+    }
+}
+
+/// The line of a file checked and at its name, whose last look (`e`) failed before it was
+/// committed: the journal has its name, and recovery finishes it at the next start. It is on this
+/// laptop, so it is never started again here (which would fail the journal's entry and land a
+/// second copy under another name): it needs action until then.
+fn named_unconfirmed(finished: Finished, e: &std::io::Error) -> ReceiveOutcome {
+    ReceiveOutcome::NeedsAction {
+        finished,
+        why: format!("{e}; {FINISHED_LATER}"),
     }
 }
 
@@ -3183,15 +4541,18 @@ mod originals_limits {
 
     #[tokio::test]
     async fn a_look_that_hung_holds_one_thread_and_no_new_look_starts_until_it_ends() {
-        use std::sync::atomic::AtomicUsize;
-        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        // The slow look hangs until the test lets it go, however fast or busy the machine.
+        static RELEASE: AtomicBool = AtomicBool::new(false);
+        static QUICK_CALLS: AtomicUsize = AtomicUsize::new(0);
         fn slow(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
-            CALLS.fetch_add(1, Ordering::SeqCst);
-            std::thread::sleep(Duration::from_millis(800));
+            while !RELEASE.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
             items.iter().map(|i| (*i, present(1))).collect()
         }
         fn quick(_: &HashMap<ItemId, PathBuf>, items: &[ItemId]) -> Vec<(ItemId, OriginalNow)> {
-            CALLS.fetch_add(1, Ordering::SeqCst);
+            QUICK_CALLS.fetch_add(1, Ordering::SeqCst);
             items.iter().map(|i| (*i, present(1))).collect()
         }
         let mut b = OriginalsBudget::with_limits(100, 100, Duration::from_millis(50));
@@ -3201,11 +4562,12 @@ mod originals_limits {
         let second = round(&mut b, vec![id(2)], quick).await;
         assert_eq!(second, vec![(id(2), OriginalNow::CannotLook)]);
         assert_eq!(
-            CALLS.load(Ordering::SeqCst),
-            1,
+            QUICK_CALLS.load(Ordering::SeqCst),
+            0,
             "no second look was started"
         );
         // Once the hung look ends, looking works again.
+        RELEASE.store(true, Ordering::SeqCst);
         while b.look_running.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -3239,6 +4601,61 @@ mod outcomes {
     use super::*;
     use pctwin_record::{LaptopId, Record};
 
+    fn finished() -> Finished {
+        Finished {
+            final_path: "Documents/a.txt".into(),
+            sent_path: "Documents/a.txt".into(),
+            changes: Vec::new(),
+            mark_not_kept: None,
+            time_not_kept: false,
+            checked_from: None,
+        }
+    }
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a copy found gone from its name before
+    /// it could be shown is not on this laptop, so its line says it failed, with why, and the old
+    /// laptop is told it did not arrive; never "on the new laptop".
+    #[test]
+    fn a_copy_gone_before_it_was_shown_failed_and_did_not_arrive() {
+        use crate::naming::ShowEnd;
+        let gone = shown_line(ShowEnd::Gone("removed".into()), finished());
+        match &gone {
+            ReceiveOutcome::Failed(why) => assert_eq!(why.cause(), Cause::RemovedAfterCopy),
+            other => panic!("{other:?}"),
+        }
+        assert!(!on_this_laptop(&gone));
+        // Shown, left or waiting to be shown: it is here.
+        assert_eq!(
+            shown_line(ShowEnd::Shown, finished()),
+            ReceiveOutcome::Finished(finished())
+        );
+        for end in [ShowEnd::Left("x".into()), ShowEnd::Later("x".into())] {
+            let line = shown_line(end, finished());
+            assert!(
+                matches!(line, ReceiveOutcome::NeedsAction { .. }),
+                "{line:?}"
+            );
+            assert!(on_this_laptop(&line));
+        }
+    }
+
+    /// Fresh-context review of TRANSFER (24 October 2026): a file checked and at its name whose
+    /// last look failed is finished by recovery (the journal has its name). It is on this laptop
+    /// and needs action, and the old laptop is told it arrived, so it is never started again here.
+    #[test]
+    fn a_file_at_its_name_whose_last_look_failed_needs_action_and_arrived() {
+        let e = std::io::Error::other("the drive went away");
+        let line = named_unconfirmed(finished(), &e);
+        match &line {
+            ReceiveOutcome::NeedsAction { finished: f, why } => {
+                assert_eq!(f, &finished());
+                assert!(why.contains(FINISHED_LATER), "{why}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(on_this_laptop(&line));
+    }
+
     /// A receiver for a plan with nothing in it: only its own record-keeping is under test.
     fn with_receiver(test: impl FnOnce(&mut ReceiverSession<'_>)) {
         let dir = tempfile::tempdir().unwrap();
@@ -3264,23 +4681,27 @@ mod outcomes {
             r.end(
                 id(1),
                 0,
-                ReceiveOutcome::Failed("it was started again".into()),
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "it was started again")),
                 None,
             );
             r.end(
                 id(1),
                 7,
-                ReceiveOutcome::Failed("it was started again".into()),
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "it was started again")),
                 None,
             );
-            r.refuse(id(1), "it has already been moved".into());
+            r.refuse(
+                id(1),
+                Failure::new(Cause::NotVerified, "it has already been moved"),
+            );
             assert_eq!(r.outcome(id(1)), Some(there));
-            // And the next connection is told it is done, on the stream it ended on.
+            // And the next connection is told it is done, by the file (a stream number may have
+            // been given to another file since).
             assert_eq!(
                 r.hello(),
                 vec![
-                    Message::FileDone {
-                        stream: 0,
+                    Message::ItemDone {
+                        item: id(1),
                         ok: true
                     },
                     Message::Ready
@@ -3292,16 +4713,32 @@ mod outcomes {
     #[test]
     fn a_file_not_on_this_laptop_shows_the_latest_of_its_end_and_its_refusal() {
         with_receiver(|r| {
-            r.end(id(2), 3, ReceiveOutcome::Failed("first".into()), None);
-            r.refuse(id(2), "second".into());
-            assert_eq!(
-                r.outcome(id(2)),
-                Some(ReceiveOutcome::Failed("second".into()))
+            r.end(
+                id(2),
+                3,
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "first")),
+                None,
             );
-            r.end(id(2), 4, ReceiveOutcome::Failed("third".into()), None);
+            r.refuse(id(2), Failure::new(Cause::NotVerified, "second"));
             assert_eq!(
                 r.outcome(id(2)),
-                Some(ReceiveOutcome::Failed("third".into()))
+                Some(ReceiveOutcome::Failed(Failure::new(
+                    Cause::NotVerified,
+                    "second"
+                )))
+            );
+            r.end(
+                id(2),
+                4,
+                ReceiveOutcome::Failed(Failure::new(Cause::NotVerified, "third")),
+                None,
+            );
+            assert_eq!(
+                r.outcome(id(2)),
+                Some(ReceiveOutcome::Failed(Failure::new(
+                    Cause::NotVerified,
+                    "third"
+                )))
             );
         });
     }

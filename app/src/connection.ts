@@ -73,6 +73,72 @@ export interface ConnectionCheck {
   internet: "online" | "offline" | "unknown";
 }
 
+/** The words a laptop is called by, as the screen has them (the system's name is translated). */
+export interface Naming {
+  /** "Windows", "Mac", "Linux" or "Another system", in the person's language. */
+  system: (system: "windows" | "mac" | "linux" | "other") => string;
+  /** This laptop, and the other one when pairing gave it no label. */
+  thisLaptop: string;
+  otherLaptop: string;
+}
+
+/** What the engine said when the two laptops greeted (the bridge's `Peer`), as far as C06 and C07 read it. */
+export interface Greeted {
+  mine: GreetedLaptop;
+  theirs: GreetedLaptop;
+  /** The other laptop's readable label, when pairing gave one. */
+  otherLabel: string | null;
+  versions: "same" | "update-here" | "update-there";
+  link: { bytesPerSecond: number; slow: boolean } | null;
+}
+
+export interface GreetedLaptop {
+  system: "windows" | "mac" | "linux" | "other";
+  chip: string;
+  app: string;
+  power: { kind: "plugged" | "unknown" } | { kind: "battery"; percent: number };
+  freeBytes: number | null;
+}
+
+/** The sending (old) and receiving (new) laptops, by which one this is. */
+function sides(g: Greeted, old: boolean, n: Naming): { sending: Laptop; receiving: Laptop } {
+  const laptop = (l: GreetedLaptop, label: string): Laptop => ({ label, system: `${n.system(l.system)} · ${l.chip}`, version: l.app });
+  const me = laptop(g.mine, n.thisLaptop);
+  const them = laptop(g.theirs, g.otherLabel ?? n.otherLaptop);
+  return old ? { sending: me, receiving: them } : { sending: them, receiving: me };
+}
+
+/** C06 from the greeting: ready, versions that cannot move together (naming the older one), or a system PCTwin does not move to or from. */
+export function peerReadiness(g: Greeted, old: boolean, n: Naming): PeerReadiness {
+  const { sending, receiving } = sides(g, old, n);
+  if (g.versions !== "same") {
+    // "Here" is this laptop: the sending one when this is the old laptop.
+    const here = old ? "sending" : "receiving";
+    const there = old ? "receiving" : "sending";
+    return { state: "versions-differ", sending, receiving, updateOn: g.versions === "update-here" ? here : there };
+  }
+  if (g.mine.system === "other" || g.theirs.system === "other") return { state: "direction-unsupported", sending, receiving };
+  return { state: "ready", sending, receiving };
+}
+
+const power = (p: GreetedLaptop["power"]): PowerState => (p.kind === "plugged" ? "plugged-in" : p.kind === "battery" ? "on-battery" : "unknown");
+
+/** C07 from the greeting: the measured speed, the new laptop's free space, power on both. The internet is not checked (copying never needs it), so it is said to be unknown. */
+export function connectionCheck(g: Greeted, old: boolean, n: Naming): ConnectionCheck {
+  const { sending, receiving } = sides(g, old, n);
+  const [oldOne, newOne] = old ? [g.mine, g.theirs] : [g.theirs, g.mine];
+  return {
+    oldLabel: sending.label,
+    newLabel: receiving.label,
+    speedMbPerSecond: g.link ? Math.round(g.link.bytesPerSecond / 1_000_000) : null,
+    link: g.link?.slow ? "weak" : "good",
+    freeSpaceGb: newOne.freeBytes === null ? null : Math.floor(newOne.freeBytes / 1_000_000_000),
+    powerOld: power(oldOne.power),
+    powerNew: power(newOne.power),
+    internet: "unknown",
+  };
+}
+
 /** C09: why the move is waiting. */
 export type WaitingKind = "reconnecting" | "pairing-expired" | "unreachable";
 

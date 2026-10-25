@@ -7,11 +7,24 @@
 //! builds the real app with [`app`] and [`context`] on Tauri's mock runtime and calls every command
 //! Tauri knows, so anything granted beyond the closed list fails it.
 
+// The engine-written contract (contract.rs) lists every command in one json! value.
+#![recursion_limit = "256"]
+
 #[cfg(test)]
 mod contract;
+mod help;
+mod history;
+#[cfg(test)]
+mod info_plist;
+pub mod limits;
 #[cfg(test)]
 mod lockdown;
+mod moving;
+mod others;
 mod pairing;
+mod quicksend;
+mod recovery;
+mod restart;
 
 use serde::Deserialize;
 use tauri::ipc::Invoke;
@@ -174,9 +187,43 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         pairing::pairing_old_shuffle,
         pairing::pairing_old_rename,
         pairing::pairing_old_start_again,
+        pairing::pairing_old_nearby,
+        pairing::pairing_heads_up,
         pairing::pairing_stop,
         pairing::pairing_new_search,
         pairing::pairing_new_connect,
+        moving::move_begin,
+        moving::move_approve,
+        moving::move_place_people,
+        moving::move_choose_place,
+        moving::move_usual_place,
+        moving::move_privacy_answer,
+        moving::open_privacy_settings,
+        moving::move_pause,
+        moving::move_resume,
+        moving::move_stop,
+        moving::move_retry,
+        moving::move_report,
+        others::move_people_here,
+        help::help_code,
+        recovery::recovery_check,
+        recovery::recovery_run,
+        recovery::things_ready,
+        history::history_list,
+        history::history_open,
+        history::history_export,
+        quicksend::quicksend_pick,
+        quicksend::quicksend_accept_drops,
+        quicksend::quicksend_clear,
+        quicksend::quicksend_offer,
+        quicksend::quicksend_offer_missing,
+        quicksend::quicksend_send,
+        quicksend::quicksend_receive,
+        quicksend::quicksend_choose_folder,
+        quicksend::quicksend_answer,
+        quicksend::quicksend_pause,
+        quicksend::quicksend_resume,
+        quicksend::quicksend_stop,
     ]
 }
 
@@ -204,7 +251,10 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .plugin(tauri_plugin_opener::init())
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(restart::plugin())
         .manage(pairing::new_state())
+        .manage(moving::new_state())
+        .manage(quicksend::new_state())
         .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens
@@ -259,10 +309,21 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             Ok(())
         })
         // The person can switch the taskbar between light and dark at any time.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::ThemeChanged(_) = event {
-                refresh_tray_icon(window.app_handle());
-            }
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::ThemeChanged(_) => refresh_tray_icon(window.app_handle()),
+            // Quick Send's drag and drop: the paths stay here; the screens get names and sizes.
+            tauri::WindowEvent::DragDrop(drop) => match drop {
+                tauri::DragDropEvent::Enter { .. } | tauri::DragDropEvent::Over { .. } => {
+                    quicksend::dragging(window.app_handle(), true);
+                }
+                tauri::DragDropEvent::Leave => quicksend::dragging(window.app_handle(), false),
+                tauri::DragDropEvent::Drop { paths, .. } => {
+                    quicksend::dragging(window.app_handle(), false);
+                    quicksend::dropped(window.app_handle(), paths.clone());
+                }
+                _ => {}
+            },
+            _ => {}
         })
 }
 

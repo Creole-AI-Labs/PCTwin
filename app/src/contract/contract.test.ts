@@ -6,7 +6,41 @@
  *   PCTWIN_WRITE_CONTRACT=1 cargo test -p pctwin-app contract
  */
 import { describe, expect, it } from "vitest";
-import { parseEvidence, parseLabelView, parseNearbyView, parseNewView, parseOldView, parseProblemView } from "../bridge";
+import {
+  OPTIONAL_KEYS,
+  parseConnectionView,
+  parseEndedEarly,
+  parseEvidence,
+  parseHeadsUp,
+  parseInterrupted,
+  parseReadyNote,
+  parseLabelView,
+  parseMoveOutcome,
+  parseMoveProblem,
+  parseMoveProgress,
+  parseMoveStage,
+  parseNearbyView,
+  parseNewView,
+  parseOldView,
+  parsePeopleHere,
+  parsePeopleToPlace,
+  parsePlanView,
+  parsePrivacy,
+  parseFound,
+  parseHistoryEntry,
+  parsePicked,
+  parseOffered,
+  parsePeer,
+  parsePlaceAnswer,
+  parseQsFolder,
+  parseQsIncoming,
+  parseQsProblem,
+  parseQsProgress,
+  parseQsReceipt,
+  parseProblemView,
+  parseReportItem,
+  parseTidied,
+} from "../bridge";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
 
@@ -18,6 +52,32 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   "problem-view": parseProblemView,
   "nearby-view": parseNearbyView,
   evidence: parseEvidence,
+  "heads-up": parseHeadsUp,
+  "move-problem": parseMoveProblem,
+  "move-link": parseConnectionView,
+  "move-stage": parseMoveStage,
+  "ended-early": parseEndedEarly,
+  "plan-view": parsePlanView,
+  "move-progress": parseMoveProgress,
+  "move-outcome": parseMoveOutcome,
+  "report-item": parseReportItem,
+  interrupted: parseInterrupted,
+  "ready-note": parseReadyNote,
+  "people-here": parsePeopleHere,
+  "people-to-place": parsePeopleToPlace,
+  privacy: parsePrivacy,
+  found: parseFound,
+  "history-entry": parseHistoryEntry,
+  "qs-picked": parsePicked,
+  "qs-offered": parseOffered,
+  "qs-incoming": parseQsIncoming,
+  "qs-receipt": parseQsReceipt,
+  "qs-progress": parseQsProgress,
+  "qs-folder": parseQsFolder,
+  "place-answer": parsePlaceAnswer,
+  peer: parsePeer,
+  "qs-problem": parseQsProblem,
+  tidied: parseTidied,
 };
 
 const families = Object.entries(FILES).map(([path, examples]) => [path.replace(/^\.\/|\.json$/g, ""), examples] as const);
@@ -42,12 +102,15 @@ describe("the engine's examples", () => {
 
   it.each(families)("%s: a broken copy of each example is refused", (name, examples) => {
     const parse = PARSERS[name] ?? (() => null);
+    const optional = OPTIONAL_KEYS[name] ?? [];
     for (const example of examples as Record<string, unknown>[]) {
-      // An extra field, a missing field and a field of the wrong type are each refused.
+      // An extra field, a missing field and a field of the wrong type are each refused. A field the
+      // engine leaves out when it has nothing to say may be missing (whether it must be there for
+      // this example is the parser's own rule, tested below).
       expect(parse({ ...example, extra: 1 }), "extra field").toBeNull();
       for (const key of Object.keys(example)) {
         const missing = Object.fromEntries(Object.entries(example).filter(([k]) => k !== key));
-        expect(parse(missing), `without ${key}`).toBeNull();
+        if (!optional.includes(key)) expect(parse(missing), `without ${key}`).toBeNull();
         expect(parse({ ...example, [key]: { wrong: true } }), `${key} of the wrong type`).toBeNull();
       }
     }
@@ -98,6 +161,13 @@ describe("shapes the engine never sends are refused", () => {
     ["null", parseOldView, null],
     ["a string", parseNewView, "paired"],
     ["an array", parseEvidence, [{ from: "drive" }]],
+    ["a copied line without its check", parseReportItem, { id: "1", name: "a", source: "a", status: "copied" }],
+    ["a failed line that claims a check", parseReportItem, { id: "1", name: "a", source: "a", status: "failed", reason: "unreadable", evidence: { from: "drive" } }],
+    ["a failed line with a reason of another status", parseReportItem, { id: "1", name: "a", source: "a", status: "failed", reason: "sign-in" }],
+    ["a report note the shell has not", parseReportItem, { id: "1", name: "a", source: "a", status: "skipped-by-user", note: "moved-by-magic" }],
+    ["a plan fingerprint that is not hex", parsePlanView, { revision: 1, fingerprint: "zz", groups: [], leftOut: [], preview: null }],
+    ["a pause state the engine has not", parseMoveProgress, { state: "stopped", laptops: { old: null }, groups: [], counts: {}, bytes: { checked: 0, total: 0 } }],
+    ["an unknown move problem", parseMoveProblem, { kind: "hacked" }],
   ] as const)("%s", (_name, parse, value) => {
     expect((parse as (v: unknown) => unknown)(value)).toBeNull();
   });

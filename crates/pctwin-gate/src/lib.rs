@@ -41,6 +41,8 @@ mod birth_hold;
 mod drive;
 mod fill;
 #[cfg(target_os = "macos")]
+mod mac_trash;
+#[cfg(target_os = "macos")]
 mod macos_check;
 mod marks;
 mod naming;
@@ -57,6 +59,22 @@ pub use fill::{
 };
 pub use marks::download_mark_of;
 pub use naming::{DriveCheck, Naming};
+
+/// For tests: the folder undo treats as the person's home folder when it looks for the Trash on a
+/// Mac (`<home>/.Trash`), so tests never put anything in the person's real Trash. Set once per
+/// process; a later call changes nothing and returns false. The app never calls it.
+#[doc(hidden)]
+pub fn use_trash_home(home: std::path::PathBuf) -> bool {
+    TRASH_HOME.set(home).is_ok()
+}
+
+static TRASH_HOME: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The person's home folder, where their own Trash is (macOS).
+#[cfg(target_os = "macos")]
+fn trash_home() -> Option<std::path::PathBuf> {
+    TRASH_HOME.get().cloned().or_else(std::env::home_dir)
+}
 
 /// For tests: what the first and second probe files of a drive test hold, so a test can leave
 /// probe files as a crash would.
@@ -82,8 +100,25 @@ pub use siblings::{MOST_TRIES, NAME_BYTES, sibling_name};
 #[cfg(unix)]
 pub use unix_undo::{Check, Checked, Context, Resolution, Step, private_name};
 
-/// Longest single file or folder name, in bytes (the limit on every supported system).
+/// Longest single file or folder name stored, in the units the system counts names in
+/// ([`name_units`]): 255 on every supported system.
 pub const MAX_COMPONENT_BYTES: usize = 255;
+
+/// How long a name is as this system counts it: Windows counts UTF-16 units (what NTFS, FAT and
+/// exFAT hold, so "写真" is 2, not 6), Linux and macOS count bytes (their own limit, whatever the
+/// drive). A name never needs shortening only because its letters take more bytes.
+pub fn name_units(name: &str) -> usize {
+    if cfg!(windows) {
+        name.encode_utf16().count()
+    } else {
+        name.len()
+    }
+}
+/// Longest single name accepted as sent, in bytes: a Windows name of 255 characters is up to
+/// 765 bytes of text (each character up to three bytes, a pair of surrogates four), so such a
+/// name arrives whole and is shortened to [`MAX_COMPONENT_BYTES`] when it is stored, never
+/// refused for its length alone.
+pub const MAX_SENT_COMPONENT_BYTES: usize = 1024;
 /// Deepest folder nesting accepted.
 pub const MAX_DEPTH: usize = 128;
 /// Longest whole path accepted, in bytes.
@@ -158,7 +193,7 @@ impl IncomingPath {
                 _ => {}
             }
             let composed: String = part.nfc().collect();
-            if composed.len() > MAX_COMPONENT_BYTES {
+            if composed.len() > MAX_SENT_COMPONENT_BYTES {
                 return Err(PathError::ComponentTooLong);
             }
             components.push(composed);
@@ -244,6 +279,17 @@ pub enum NameChange {
     NameClash,
 }
 
+/// What storing a file would come to (see [`Destination::predict`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Predicted {
+    /// The file's own name as it would be stored.
+    pub stored_name: String,
+    /// Every change to its folders' and its own names.
+    pub changes: Vec<NameChange>,
+    /// The drive's largest file, when this one is bigger (it would be refused).
+    pub too_big: Option<u64>,
+}
+
 /// A name ready to store, and what was changed to get there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Converted {
@@ -276,7 +322,7 @@ pub fn convert_name(name: &str, rules: impl Into<NameRules>) -> Converted {
     // within a few passes.
     for _ in 0..8 {
         let before = name.clone();
-        if name.len() > MAX_COMPONENT_BYTES {
+        if name_units(&name) > MAX_COMPONENT_BYTES {
             name = shorten(&name, MAX_COMPONENT_BYTES);
             note(NameChange::Shortened, &mut changes);
         }
@@ -391,18 +437,37 @@ fn split_extension(name: &str) -> (&str, &str) {
     }
 }
 
-/// Shortens `name` to at most `max` bytes, keeping its extension and whole characters.
-fn shorten(name: &str, max: usize) -> String {
-    let (stem, ext) = split_extension(name);
-    format!("{}{ext}", cut_to(stem, max.saturating_sub(ext.len())))
+/// What follows a damaged copy's name, so nothing opens it as the real file.
+const DAMAGED: &str = " (damaged copy).pctwin-damaged";
+
+/// The name a damaged copy of `name` is kept under: its start, cut so the whole name stays well
+/// within what every drive allows (255 units), with room for a number if that name is taken.
+fn damaged_name(name: &str) -> String {
+    let room = 255usize.saturating_sub(name_units(DAMAGED) + 8);
+    format!("{}{DAMAGED}", cut_to(name, room))
 }
 
+/// Shortens `name` to at most `max` units ([`name_units`]), keeping its extension and whole
+/// characters.
+fn shorten(name: &str, max: usize) -> String {
+    let (stem, ext) = split_extension(name);
+    format!("{}{ext}", cut_to(stem, max.saturating_sub(name_units(ext))))
+}
+
+/// The longest start of `s` within `max` units ([`name_units`]), in whole characters.
 fn cut_to(s: &str, max: usize) -> &str {
-    let mut cut = max.min(s.len());
-    while !s.is_char_boundary(cut) {
-        cut -= 1;
+    let mut units = 0;
+    for (at, c) in s.char_indices() {
+        units += if cfg!(windows) {
+            c.len_utf16()
+        } else {
+            c.len_utf8()
+        };
+        if units > max {
+            return &s[..at];
+        }
     }
-    &s[..cut]
+    s
 }
 
 /// Why a file could not be written.
@@ -412,6 +477,8 @@ pub enum GateError {
     Path(#[from] PathError),
     #[error("a file is in the way of a folder with the same name")]
     Conflict,
+    #[error("a folder of that name is already there, so this whole folder was not put into it")]
+    WholeTaken,
     #[error("too many files already use this name")]
     TooManyClashes,
     #[error("the file should be {announced} bytes but {received} arrived")]
@@ -574,6 +641,54 @@ impl ClashHints {
 static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl Destination {
+    /// The space free for this person on the drive it is on, as the system reports it (`None`:
+    /// it was opened through the administrator helper, by handle only, or the system would not
+    /// say). Read only: nothing is reserved.
+    pub fn available_bytes(&self) -> Option<u64> {
+        let path = self.root_path.as_ref()?;
+        fs4::available_space(path).ok()
+    }
+
+    /// What storing a file sent as `sent` (`/` between folders), `size` bytes, here would come to,
+    /// worked out by the very rules a write uses, before anything is written: the name it gets
+    /// and every change to its folders' and its own names, and whether the drive holds a file
+    /// that big. A path the safety check refuses is refused here too. Nothing is created; a name
+    /// that turns out taken when the file lands gets a number then (not predicted here).
+    pub fn predict(&self, sent: &str, size: u64) -> Result<Predicted, GateError> {
+        let parsed = IncomingPath::parse(sent)?;
+        let (stored_name, changes) = self.converted(&parsed, &self.root)?;
+        let too_big = self
+            .profile_of(&self.root)
+            .largest_file()
+            .filter(|largest| size > *largest);
+        Ok(Predicted {
+            stored_name,
+            changes,
+            too_big,
+        })
+    }
+
+    /// The smallest space a file takes on this place's drive (its allocation unit): a drive with
+    /// big blocks loses the rest of each file's last block (`None`: not known).
+    pub fn block_bytes(&self) -> Option<u64> {
+        let path = self.root_path.as_ref()?;
+        fs4::allocation_granularity(path).ok().filter(|b| *b > 0)
+    }
+
+    /// Whether this place and `other` are on the same drive, so they share its free space
+    /// (`None`: a drive could not be told).
+    pub fn same_drive_as(&self, other: &Destination) -> Option<bool> {
+        let a = drive::volume_key(&self.root).ok()?;
+        let b = drive::volume_key(&other.root).ok()?;
+        Some(a == b)
+    }
+
+    /// Where this approved folder is, as it was approved (`None` for one handed over as a
+    /// handle). For telling the person where things land; never used to open anything.
+    pub fn shown_path(&self) -> Option<&Path> {
+        self.root_path.as_deref()
+    }
+
     /// Opens the approved folder at `path`. This is the only place an ordinary path is used.
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut dest = Self::from_dir(Dir::open_ambient_dir(path, ambient_authority())?);
@@ -655,6 +770,15 @@ impl Destination {
     /// What is known about the drive this place is on, read when it was opened.
     pub fn profile(&self) -> DriveProfile {
         self.profile
+    }
+
+    /// What undo will do with the copies in this place, by the kind of drive it is on, for the
+    /// undo screen to say before the person starts (decided 20 October 2026). A FAT or exFAT
+    /// drive keeps every copy: its file numbers are given again to new files, so PCTwin cannot
+    /// tell its own copy. A copy on another drive mounted inside this place still gets its own
+    /// drive's outcome when it is undone.
+    pub fn undo_here(&self) -> UndoHere {
+        undo_on(self.profile.kind())
     }
 
     /// For tests: asks the drive under this place how it keeps time now, as a drive whose type
@@ -1024,7 +1148,7 @@ impl Destination {
         path: &IncomingPath,
         announced: u64,
     ) -> Result<IncomingFile<'d>, GateError> {
-        self.create_with(path, announced, None)
+        self.create_with(path, announced, None, None)
     }
 
     /// As [`create_file`](Self::create_file), under the temporary name [`temp_name`]`(tag)`, which
@@ -1037,10 +1161,24 @@ impl Destination {
         announced: u64,
         tag: &str,
     ) -> Result<IncomingFile<'d>, GateError> {
+        self.create_file_tagged_fresh(path, announced, tag, None)
+    }
+
+    /// As [`create_file_tagged`](Self::create_file_tagged), inside a folder that moves as one
+    /// whole: the folder `fresh` names must be made now, by this very call, or be one this move
+    /// made before (`fresh.ours`, by its stored path); a folder of that name that is anyone
+    /// else's is never written into ([`GateError::WholeTaken`]), nothing is created there.
+    pub fn create_file_tagged_fresh<'d>(
+        &'d self,
+        path: &IncomingPath,
+        announced: u64,
+        tag: &str,
+        fresh: Option<Fresh<'_>>,
+    ) -> Result<IncomingFile<'d>, GateError> {
         if !is_plain_tag(tag) {
             return Err(GateError::BadTag);
         }
-        self.create_with(path, announced, Some(tag))
+        self.create_with(path, announced, Some(tag), fresh)
     }
 
     fn create_with<'d>(
@@ -1048,6 +1186,7 @@ impl Destination {
         path: &IncomingPath,
         announced: u64,
         tag: Option<&str>,
+        fresh: Option<Fresh<'_>>,
     ) -> Result<IncomingFile<'d>, GateError> {
         let (file_name, folders) = path
             .components()
@@ -1060,11 +1199,16 @@ impl Destination {
         let mut shown = Vec::new();
         let mut created = Vec::new();
         let mut dir = self.root.try_clone()?;
-        for folder in folders {
+        for (n, folder) in folders.iter().enumerate() {
             // Each name follows the rules of the drive it is made on.
             let converted = convert_name(folder, self.profile_of(&dir).name_rules());
             changes.extend(converted.changes.iter().copied());
-            let (opened, made) = open_or_create_folder(&dir, &converted.name)?;
+            let top = fresh.as_ref().is_some_and(|f| f.depth == n + 1);
+            let (opened, made) = if top {
+                open_fresh_folder(&dir, &converted.name, &shown, fresh.as_ref())?
+            } else {
+                open_or_create_folder(&dir, &converted.name)?
+            };
             dir = opened;
             shown.push(converted.name);
             if made {
@@ -1276,6 +1420,12 @@ impl Destination {
         // folder, so another file made there later can carry the very number recorded: the
         // number proves nothing, and the copy is kept (decided 15 October 2026). A drive that
         // cannot be tested now is not trusted either.
+        if matches!(
+            self.profile_of(&dir).kind(),
+            DriveKind::Fat | DriveKind::ExFat
+        ) {
+            return Ok(Removed::NumbersReused);
+        }
         if !self.check_for(&dir, folder).is_ok_and(|c| c.hard_links) {
             return Ok(Removed::Unsupported);
         }
@@ -1399,6 +1549,7 @@ impl Destination {
             kept_if_dropped: true,
             held: Some(held),
             mark_not_kept: None,
+            time_not_kept: false,
             checked_from: None,
             mark: None,
             show: None,
@@ -1473,6 +1624,65 @@ impl Destination {
         Some((shown.join("/"), meta.len()))
     }
 
+    /// Whether anything (a file, a folder, a link) is already where something sent as `path`
+    /// would be stored, names converted exactly as for writing. Nothing is created and no link is
+    /// followed out of the approved folder. A place that cannot be looked at counts as taken.
+    pub fn has(&self, path: &IncomingPath) -> bool {
+        self.meet(path).taken
+    }
+
+    /// What a folder that moves as one whole (a package, a project's history) meets at `path`:
+    /// its name as this place would store it, folded to one case where the drive does not tell
+    /// case apart (two wholes whose keys are equal would be one folder here), and whether
+    /// anything is already there. A place that cannot be looked at (not readable, not a folder
+    /// on the way) counts as taken: never assumed free.
+    pub fn meet(&self, path: &IncomingPath) -> Look {
+        let mut key = Vec::new();
+        let mut taken = None;
+        let mut dir = self.root.try_clone().ok();
+        let mut profile = self.profile_of(&self.root);
+        let fold = |s: &str, apart: bool| -> String {
+            if apart {
+                s.to_string()
+            } else {
+                s.chars()
+                    .flat_map(char::to_uppercase)
+                    .flat_map(char::to_lowercase)
+                    .collect()
+            }
+        };
+        let parts = path.components();
+        for (n, part) in parts.iter().enumerate() {
+            if let Some(d) = &dir {
+                profile = self.profile_of(d);
+            }
+            let name = convert_name(part, profile.name_rules()).name;
+            key.push(fold(&name, profile.tells_case_apart()));
+            let Some(d) = dir.take() else {
+                continue;
+            };
+            let last = n + 1 == parts.len();
+            match d.symlink_metadata(&name) {
+                Err(e) if e.kind() == io::ErrorKind::NotFound => taken = Some(false),
+                Err(_) => taken = Some(true),
+                Ok(_) if last => taken = Some(true),
+                Ok(m) if !m.is_dir() => taken = Some(true),
+                Ok(_) => match d.open_dir(&name) {
+                    Ok(next) => dir = Some(next),
+                    Err(_) => taken = Some(true),
+                },
+            }
+            if taken.is_some() {
+                // Below a missing folder nothing is there; below an unreadable one nothing is known.
+                continue;
+            }
+        }
+        Look {
+            key: key.join("/"),
+            taken: taken.unwrap_or(true),
+        }
+    }
+
     /// Opens a stored file to read, by its stored path (as [`find`](Self::find) or
     /// [`Finished::final_path`] give it). Never follows a link.
     pub fn open_read(&self, stored: &str) -> io::Result<std::fs::File> {
@@ -1526,7 +1736,7 @@ impl Destination {
         // that share that start compete for the same numbers: file the hint under the cut stem.
         let base = cut_to(
             stem,
-            MAX_COMPONENT_BYTES.saturating_sub(ext.len() + MAX_NUMBER_BYTES),
+            MAX_COMPONENT_BYTES.saturating_sub(name_units(ext) + MAX_NUMBER_BYTES),
         );
         let key = hints().key(
             folder,
@@ -1538,7 +1748,10 @@ impl Destination {
             let suffix = format!(" ({attempt}){ext}");
             let candidate = format!(
                 "{}{suffix}",
-                cut_to(stem, MAX_COMPONENT_BYTES.saturating_sub(suffix.len()))
+                cut_to(
+                    stem,
+                    MAX_COMPONENT_BYTES.saturating_sub(name_units(&suffix))
+                )
             );
             if !name_taken(dir, &candidate)? {
                 hints().remember(key, attempt + 1);
@@ -1769,6 +1982,12 @@ pub fn file_identity(file: &std::fs::File) -> io::Result<FileId> {
     Ok(identity(file)?.0)
 }
 
+/// As [`file_identity`], with how many names the file has on its drive (hard links), read from
+/// the same handle.
+pub fn file_identity_and_links(file: &std::fs::File) -> io::Result<(FileId, u64)> {
+    identity(file)
+}
+
 #[cfg(windows)]
 fn identity(file: &std::fs::File) -> io::Result<(FileId, u64)> {
     let info = winapi_util::file::information(file)?;
@@ -1838,6 +2057,43 @@ fn folder_to_flush(dir: &Dir) -> io::Result<std::fs::File> {
 /// What a held file's count of names says before it is removed: none left means another try (or
 /// the person) removed it meanwhile, so it is gone; more than one means another name was made for
 /// it, which stays the person's. `None` is the one name, the only case that may go ahead.
+/// What undo does with copies on a drive of `kind` on this system ([`Destination::undo_here`]):
+/// as [`unix_undo`]'s drive check and Windows' drive test decide for each copy.
+fn undo_on(kind: DriveKind) -> UndoHere {
+    if matches!(kind, DriveKind::Fat | DriveKind::ExFat) {
+        return UndoHere::KeepsFileNumbersReused;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if kind == DriveKind::Apfs {
+            UndoHere::ToTrash
+        } else {
+            UndoHere::KeepsNoSafeWay
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if matches!(
+            kind,
+            DriveKind::Ext4 | DriveKind::Xfs | DriveKind::Btrfs | DriveKind::Zfs | DriveKind::F2fs
+        ) {
+            UndoHere::Removes
+        } else {
+            UndoHere::KeepsNoSafeWay
+        }
+    }
+    // Windows tests each drive for hard links before it removes anything; every drive but FAT
+    // and exFAT is expected to pass.
+    #[cfg(windows)]
+    {
+        UndoHere::Removes
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    {
+        UndoHere::KeepsNoSafeWay
+    }
+}
+
 fn by_names(links: u64) -> Option<Removed> {
     match links {
         0 => Some(Removed::Gone),
@@ -1902,6 +2158,11 @@ pub enum Removed {
     NotThatFile,
     /// The very file, but changed since: left as it is.
     Changed,
+    /// The very file, its contents as they were (same size, same last change to its contents),
+    /// but its details changed since (Spotlight, a download mark, a tag or its permissions move
+    /// the change time without touching the contents): left as it is all the same, since
+    /// PCTwin cannot prove what else changed.
+    DetailsChanged,
     /// The file has more than one name on the drive: left as it is.
     Linked,
     /// Another program is using the file: left as it is, for another try.
@@ -1922,6 +2183,33 @@ pub enum Removed {
     /// Removed, but bytes written to it meanwhile (or a program opening it at that moment) made
     /// PCTwin save it again, under `at` beside its name.
     Salvaged { at: String },
+    /// macOS: the very file, unchanged, is in the Trash on its drive, at the absolute path `at`.
+    /// Nothing is deleted: the person can take it back out.
+    Trashed { at: String },
+    /// The drive is FAT or exFAT, whose file numbers are given again to new files, so PCTwin
+    /// cannot tell its own copy from another file: kept as it is.
+    NumbersReused,
+    /// macOS: there is no Trash on this drive PCTwin may use (or the system refused the move into
+    /// it): kept as it is, under its own name.
+    NoTrash,
+}
+
+/// What undo will do with the copies in an approved place, said before the person starts
+/// ([`Destination::undo_here`]). Each copy still gets its own outcome afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UndoHere {
+    /// Copies proven to be the move's own and unchanged are removed (Windows; Linux on its
+    /// usual drives).
+    Removes,
+    /// macOS: copies proven to be the move's own and unchanged go to the Trash.
+    ToTrash,
+    /// Every copy is kept: the drive is FAT or exFAT, whose file numbers are given again to new
+    /// files.
+    KeepsFileNumbersReused,
+    /// Every copy is kept: on this drive PCTwin cannot move or remove a file without risk to
+    /// another one.
+    KeepsNoSafeWay,
 }
 
 /// Where a copy is whose removal was under way ([`Destination::resume_removal`]).
@@ -2083,7 +2371,7 @@ fn is_plain_tag(tag: &str) -> bool {
 }
 
 /// Whether `name` is one of PCTwin's temporary names.
-fn is_temp_name(name: &str) -> bool {
+pub fn is_temp_name(name: &str) -> bool {
     name.strip_prefix(".pctwin-")
         .and_then(|rest| rest.strip_suffix(".part"))
         .is_some_and(is_plain_tag)
@@ -2180,6 +2468,14 @@ impl Destinations {
         self.admit(id, place, destination)
     }
 
+    /// Approves a folder the person chose in the system's picker, under the label `id`, as the
+    /// very folder opened when they chose it ([`Destination::open`]): a folder swapped for
+    /// another since is never the one approved.
+    pub fn approve_chosen(&mut self, id: &str, destination: Destination) -> Result<(), GateError> {
+        self.check_new(id)?;
+        self.admit(id, Approved::ChosenDrive, destination)
+    }
+
     /// For tests: as [`approve`](Self::approve), on a drive behaving as `profile` says.
     #[doc(hidden)]
     pub fn approve_with_profile(
@@ -2248,6 +2544,28 @@ impl Destinations {
         self.admit(id, place, Destination::from_dir(root))
     }
 
+    /// Approves the folder the admin helper holds another person's files in during a move (its
+    /// answer to `HoldFor`), at `path`, as that person's place (`account_id`): their things land
+    /// only there and are never mixed with anyone else's. Opened as any approved folder is.
+    pub fn approve_holding(
+        &mut self,
+        id: &str,
+        account_id: &str,
+        path: &Path,
+    ) -> Result<(), GateError> {
+        if account_id.is_empty()
+            || account_id.len() > MAX_ACCOUNT_ID_BYTES
+            || account_id.chars().any(char::is_control)
+        {
+            return Err(GateError::BadDestinationId);
+        }
+        self.check_new(id)?;
+        let place = Approved::AnotherAccount {
+            account_id: account_id.to_string(),
+        };
+        self.admit(id, place, Destination::open(path)?)
+    }
+
     /// For tests (feature `fault-plan`): the place labelled `id` fakes `plan`'s faults.
     #[cfg(feature = "fault-plan")]
     pub fn fake_faults(&mut self, id: &str, plan: FaultPlan) -> Result<(), GateError> {
@@ -2295,6 +2613,61 @@ impl Destinations {
         }
         Ok(())
     }
+}
+
+/// The folder at the top of something that moves as one whole: made by the call that creates a
+/// file in it, or one this move made before (by its stored path).
+pub struct Fresh<'a> {
+    /// How many folders down the path the whole's top folder is (1: the first).
+    pub depth: usize,
+    /// Whether this move made the folder at this stored path before (it is its own).
+    pub ours: &'a dyn Fn(&str) -> bool,
+}
+
+/// What [`Destination::meet`] finds at a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Look {
+    /// The path as this place would store it, one case where the drive does not tell case apart.
+    pub key: String,
+    /// Whether anything is there already (or it could not be looked at).
+    pub taken: bool,
+}
+
+/// Opens the top folder of a whole (see [`Fresh`]) in `parent`, below the stored folders
+/// `above`: made now, exclusively, or one this move made before; never anyone else's.
+fn open_fresh_folder(
+    parent: &Dir,
+    name: &str,
+    above: &[String],
+    fresh: Option<&Fresh<'_>>,
+) -> Result<(Dir, bool), GateError> {
+    let (dir, made) = open_or_create_folder(parent, name)?;
+    if made {
+        return Ok((dir, true));
+    }
+    let mut stored = above.to_vec();
+    stored.push(name.to_string());
+    if fresh.is_some_and(|f| (f.ours)(&stored.join("/"))) {
+        Ok((dir, false))
+    } else {
+        Err(GateError::WholeTaken)
+    }
+}
+
+/// Whether two file dates are the same as a drive keeps them (within 2 seconds).
+fn near(a: std::time::SystemTime, b: std::time::SystemTime) -> bool {
+    let gap = a.duration_since(b).or_else(|_| b.duration_since(a));
+    gap.is_ok_and(|g| g <= std::time::Duration::from_secs(2))
+}
+
+/// Whether setting a file's modified time failed because the drive will not hold that time (a
+/// date FAT or exFAT cannot store), rather than because the file could not be written.
+pub(crate) fn is_refused_time(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::InvalidInput | io::ErrorKind::InvalidData | io::ErrorKind::Unsupported
+    ) || e.raw_os_error() == Some(if cfg!(windows) { 87 } else { 22 })
+        || (cfg!(unix) && e.raw_os_error() == Some(75))
 }
 
 /// Opens the folder `name` in `parent`, creating it if there is none; says whether it was
@@ -2385,6 +2758,10 @@ pub struct Finished {
     /// must say plainly that the system no longer knows it came from the internet. `None` when
     /// every marker was kept (or there was none).
     pub mark_not_kept: Option<DownloadMark>,
+    /// The drive would not take the date it was last changed on the old laptop (FAT and exFAT
+    /// refuse dates before 1980 or far ahead): the copy is there, with the date it was copied,
+    /// and the report says so.
+    pub time_not_kept: bool,
     /// How its contents were checked before it got its name: read back from the drive, or from
     /// this laptop's memory (and why), for the report's "more details". `None` for a file checked
     /// before a restart and proven again by recovery.
@@ -2424,6 +2801,39 @@ pub struct IncomingFile<'d> {
 }
 
 impl<'d> IncomingFile<'d> {
+    /// Keeps what arrived when it cannot be proven the old laptop's file (its drive read it
+    /// differently each time it was sent): never under the real name, but beside it as
+    /// `<name> (damaged copy).pctwin-damaged` (numbered if that is taken), so the person can look
+    /// at it; the original on the old laptop is untouched. Only where the drive names files
+    /// safely; elsewhere (`Err`) it is removed like any unfinished file. The stored path it is
+    /// kept at, and which file it is, read through the handle that wrote it (`None` if the drive
+    /// would not say), so it is never recorded as some other file found at that name later.
+    pub fn set_aside(mut self) -> Result<(String, Option<FileId>), GateError> {
+        let temp = self.temp_name.clone().ok_or(GateError::Conflict)?;
+        // Which file it is, then closed: Windows renames no open file.
+        let written = self
+            .file
+            .take()
+            .and_then(|f| identity(&f.into_std()).ok().map(|(id, _)| id));
+        let wanted = damaged_name(&self.name);
+        let (name, _) = self
+            .destination
+            .free_name(&self.dir, &self.folder, &wanted)?;
+        let check = self.destination.check_for(&self.dir, &self.folder)?;
+        let folder_path = || self.destination.folder_path(&self.dir, &self.folder);
+        match claim(&self.dir, &name, &temp, &folder_path, &check)? {
+            Some(linked) => {
+                if linked == Linked::Hard {
+                    let _ = self.dir.remove_file(&temp);
+                }
+                self.temp_name = None;
+                flush_name(&self.dir, &name);
+                Ok((stored_path(&self.folder, &name), written))
+            }
+            None => Err(GateError::Conflict),
+        }
+    }
+
     /// Reserves disk space for the whole announced size now, so a full disk shows at the start
     /// rather than partway through (the approach rclone takes). Returns `false` when this drive
     /// cannot reserve space (some USB and network drives); the file can still be written.
@@ -2673,9 +3083,23 @@ impl<'d> IncomingFile<'d> {
                 mark_not_kept = Some(mark);
             }
         }
+        // A date the drive refuses never fails the file: it is kept, and the report says so.
+        let mut time_not_kept = false;
         if let Some(time) = self.modified {
-            file.set_modified(time)?;
-            file.sync_all()?;
+            match file.set_modified(time) {
+                Ok(()) => {
+                    file.sync_all()?;
+                    // Some drives take a date they cannot hold and keep another (one clamped to
+                    // what they can store): read back, so the report never says it was kept when
+                    // it was not. Within 2 seconds is the date (FAT keeps every other second).
+                    time_not_kept = !file
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .is_ok_and(|got| near(got, time));
+                }
+                Err(e) if is_refused_time(&e) => time_not_kept = true,
+                Err(e) => return Err(e.into()),
+            }
         }
         let dir = self.dir.try_clone()?;
         let temp = self.temp_name.take().ok_or(GateError::Conflict)?;
@@ -2690,6 +3114,7 @@ impl<'d> IncomingFile<'d> {
             kept_if_dropped: false,
             held: Some(file),
             mark_not_kept,
+            time_not_kept,
             checked_from: Some(checked_from),
             mark: self.mark,
             show: None,
@@ -2722,6 +3147,7 @@ pub struct Sealed<'d> {
     held: Option<std::fs::File>,
     /// The marker that could not be kept on this drive, if any.
     mark_not_kept: Option<DownloadMark>,
+    time_not_kept: bool,
     /// Where its read-back read from (`None`: checked before a restart).
     checked_from: Option<CheckedFrom>,
     /// The download marker the file carries, for a copy filled in under its real name.
@@ -2731,6 +3157,19 @@ pub struct Sealed<'d> {
 }
 
 impl<'d> Sealed<'d> {
+    /// Where its read-back read from (`None`: checked before a restart and not kept).
+    pub fn checked_from(&self) -> Option<CheckedFrom> {
+        self.checked_from
+    }
+
+    /// A checked copy found again after a restart: how it was checked then, as the journal kept
+    /// it, so its finished line still says so.
+    pub fn keep_checked_from(&mut self, from: Option<CheckedFrom>) {
+        if self.checked_from.is_none() {
+            self.checked_from = from;
+        }
+    }
+
     /// Where the temporary file is: its stored path inside the approved folder.
     pub fn temp_path(&self) -> String {
         stored_path(&self.folder, self.temp.as_deref().unwrap_or_default())
@@ -2890,8 +3329,21 @@ impl<'d> Sealed<'d> {
                         fill::same_start_of(&mut target, held, progress.written).unwrap_or(false)
                     });
                 if ours {
+                    let written = progress.written;
+                    // Let go first: the removal opens it again, for deletion, excluding writers.
+                    let expect = identity(&target).map(|(id, _)| id);
                     drop(target);
-                    if self.dir.remove_file(&name).is_ok() {
+                    let held = self.held.as_mut();
+                    let removed = match (expect, held) {
+                        (Ok(expect), Some(held)) => {
+                            fill::remove_proven(&self.dir, &name, expect, |file| {
+                                fill::same_start_of(file, held, written)
+                            })
+                            .unwrap_or(false)
+                        }
+                        _ => false,
+                    };
+                    if removed {
                         let _ = sync_folder(&self.dir);
                         let _ = steps.cleared();
                     }
@@ -3103,6 +3555,7 @@ impl<'d> Sealed<'d> {
                 sent_path: std::mem::take(&mut self.sent_path),
                 changes,
                 mark_not_kept: self.mark_not_kept,
+                time_not_kept: self.time_not_kept,
                 checked_from: self.checked_from,
             },
             _destination: std::marker::PhantomData,
@@ -3239,6 +3692,20 @@ mod tests {
     //! [`Destination`] on the test machines' disks, so it is checked directly. So is what a space
     //! reservation's error means, since the test machines' disks can all reserve.
     use super::*;
+
+    #[test]
+    fn a_damaged_copy_of_a_long_name_still_fits_on_every_drive() {
+        for len in [10, 200, 230, 250, 255] {
+            let name = format!("{}.docx", "a".repeat(len - 5));
+            let kept = damaged_name(&name);
+            assert!(kept.ends_with(DAMAGED), "{kept}");
+            assert!(name_units(&kept) <= 255 - 8, "{len}: {}", name_units(&kept));
+        }
+        // Whole characters only, in any script.
+        let wide = "照片".repeat(120);
+        assert!(name_units(&damaged_name(&wide)) <= 255 - 8);
+        assert_eq!(damaged_name("report.docx"), format!("report.docx{DAMAGED}"));
+    }
 
     /// A folder's own handle is opened for paths only on Linux, and flushing through it fails, so
     /// a flush that quietly did nothing there would go unseen. The handle a flush uses must

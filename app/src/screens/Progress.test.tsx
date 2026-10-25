@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import axe from "axe-core";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import { Dialog, MiniProgress, ProgressBar } from "../components/kit";
@@ -30,6 +30,7 @@ import MiniPanel from "./MiniPanel";
 import Outcome from "./Outcome";
 import Paused from "./Paused";
 import ProgressCompact from "./ProgressCompact";
+import { TIP_SECONDS, tipsFor, type TipContext } from "./MoveTips";
 import ProgressDetail from "./ProgressDetail";
 import Report from "./Report";
 import StopMove from "./StopMove";
@@ -88,11 +89,6 @@ function footerEl(): HTMLElement {
   return el;
 }
 
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
-
 /** No string in a screen was missing, and nothing paid was said. */
 function expectClean() {
   expect(warnings.filter((w) => /missing|not found|unknown/i.test(w))).toEqual([]);
@@ -107,10 +103,10 @@ describe("the engine's results, mirrored", () => {
     // crates/pctwin-types result.rs: reason_names_are_stable_translation_keys
     expect(ALL_REASONS.join(",")).toBe(
       "not-enough-space,changed-during-move,unreadable,not-verified,refused-by-safety-check,name-not-allowed,install-failed,no-equivalent," +
-        "sign-in,activation,permission,online-only,manual-install,restart,finish-by-hand",
+        "sign-in,activation,permission,online-only,manual-install,restart,finish-by-hand,parts-missing",
     );
     expect(FAILED_REASONS).toHaveLength(8);
-    expect(NEEDS_ACTION_REASONS).toHaveLength(7);
+    expect(NEEDS_ACTION_REASONS).toHaveLength(8);
     // crates/pctwin-types lib.rs: serialises_with_stable_names
     expect(ITEM_STATUSES.join(",")).toBe("copied,reinstalled,converted,needs-action,skipped-by-user,failed");
   });
@@ -239,10 +235,11 @@ describe("X01 Move progress, compact", () => {
     const bar = screen.getByRole("progressbar", { name: attribute("progress-percent", "aria-label") });
     expect(bar.getAttribute("aria-valuenow")).toBe("68"); // 81.6 of 120 GB
     expect(screen.getByText(hasText("81.6 GB of 120 GB"))).toBeTruthy();
-    // The route: both laptops by the names pairing gave them, then each group with its own state.
+    // The route: the old laptop by the name pairing gave it, the new one by its part (it has no
+    // label of its own), then each group with its own state.
     expect(screen.getByText("Ada’s old laptop")).toBeTruthy();
-    expect(screen.getByText(withText(text("label-picked", { colour: text("label-colour-blue"), animal: text("label-animal-fox") })))).toBeTruthy();
     expect(screen.getByText(text("progress-route-old"))).toBeTruthy();
+    expect(screen.getByText(text("progress-route-new"))).toBeTruthy();
     expect(screen.getByText(text("progress-paired"))).toBeTruthy();
     expect(within(groupRow("Documents")).getByText(text("progress-state-verified"))).toBeTruthy();
     expect(within(groupRow("Pictures")).getByText(text("progress-state-checking"))).toBeTruthy();
@@ -251,6 +248,89 @@ describe("X01 Move progress, compact", () => {
     expect(screen.getByText(text("progress-old-safe"))).toBeTruthy();
     expectClean();
     expect(await violations()).toEqual([]);
+  });
+
+  describe("T14 one tip under the bar", () => {
+    const calm: TipContext = { old: false, onBattery: false, slow: false, batteryWarning: false };
+    const compact = (p: MoveProgress, tips: Omit<TipContext, "batteryWarning">) =>
+      inApp(<ProgressCompact progress={p} tips={tips} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+    const tipText = () => document.querySelector(".mv-tip-text")?.textContent;
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("each laptop's tips are about itself: battery only on battery, the router only when slow, keep using only on the old one", () => {
+      expect(tipsFor(calm)).toEqual(["tip-lids", "tip-pause", "tip-power-cut"]);
+      expect(tipsFor({ ...calm, old: true })).toEqual(["tip-lids", "tip-keep-using", "tip-pause", "tip-power-cut"]);
+      expect(tipsFor({ ...calm, onBattery: true, slow: true })).toEqual(["tip-battery", "tip-closer", "tip-lids", "tip-pause", "tip-power-cut"]);
+      // A pinned battery warning is not repeated as a tip.
+      expect(tipsFor({ ...calm, onBattery: true, batteryWarning: true })).not.toContain("tip-battery");
+    });
+
+    it("changes about every 12 seconds, never as a live announcement, and Pause tips holds it", () => {
+      vi.useFakeTimers();
+      compact(sample.running, calm);
+      const panel = screen.getByRole("region", { name: text("tips-label") });
+      expect(panel.closest("[aria-live]")).toBeNull();
+      expect(panel.querySelector("[aria-live], [role=status], [role=alert]")).toBeNull();
+      expect(tipText()).toBe(text("tip-lids"));
+      act(() => {
+        vi.advanceTimersByTime(TIP_SECONDS * 1000 - 1);
+      });
+      expect(tipText()).toBe(text("tip-lids"));
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(tipText()).toBe(text("tip-pause"));
+      fireEvent.click(within(panel).getByRole("button", { name: text("tips-pause") }));
+      act(() => {
+        vi.advanceTimersByTime(TIP_SECONDS * 5000);
+      });
+      expect(tipText()).toBe(text("tip-pause"));
+      // Paused, Next tip still moves on by hand, and the control says it can start again.
+      fireEvent.click(within(panel).getByRole("button", { name: text("tips-next") }));
+      expect(tipText()).toBe(text("tip-power-cut"));
+      fireEvent.click(within(panel).getByRole("button", { name: text("tips-resume") }));
+      act(() => {
+        vi.advanceTimersByTime(TIP_SECONDS * 1000);
+      });
+      expect(tipText()).toBe(text("tip-lids"));
+    });
+
+    it("with reduced motion the tip stays still: no Pause tips, and Next tip by hand", () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener: noop, removeEventListener: noop }));
+      try {
+        compact(sample.running, calm);
+        act(() => {
+          vi.advanceTimersByTime(TIP_SECONDS * 3000);
+        });
+        expect(tipText()).toBe(text("tip-lids"));
+        expect(screen.queryByRole("button", { name: text("tips-pause") })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: text("tips-next") }));
+        expect(tipText()).toBe(text("tip-pause"));
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("the battery warning stays pinned in the notices while the tips go on without a battery tip", () => {
+      compact(sample.lowBattery, { old: false, onBattery: true, slow: false });
+      expect(screen.getByText(text("progress-low-battery"))).toBeTruthy();
+      expect(tipText()).toBe(text("tip-lids"));
+    });
+
+    it("has every string and no accessibility problems, in all its states", async () => {
+      compact(sample.running, { old: true, onBattery: true, slow: true });
+      expectClean();
+      expect(await violations()).toEqual([]);
+    });
+
+    it("without tips (the host gives none), there is no tip panel", () => {
+      inApp(<ProgressCompact progress={sample.running} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
+      expect(document.querySelector(".mv-tip")).toBeNull();
+    });
   });
 
   it("time left and speed are ranges, and only when measured", () => {
@@ -339,7 +419,7 @@ describe("X01 Move progress, compact", () => {
     expect(screen.getByText(text("progress-interrupted"))).toBeTruthy();
     unmount();
     inApp(<ProgressCompact progress={sample.lowBattery} onPause={noop} onResume={noop} onMinimise={noop} onSeeNeedsAction={noop} />);
-    expect(screen.getByText(withText(text("progress-low-battery", { label: "Blue Fox" })))).toBeTruthy();
+    expect(screen.getByText(text("progress-low-battery"))).toBeTruthy();
   });
 
   it("its footer, as in the mockup, holds Pause move and Keep compact and nothing else is a button", () => {
@@ -686,6 +766,25 @@ describe("R01 Welcome to your next laptop", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("the after-move check: each kind the plan held, with its counts; one short says Partial, a kind not in the plan is left out", async () => {
+    inApp(<Outcome outcome={sample.finishedChecked} {...props} />);
+    const check = screen.getByRole("region", { name: text("outcome-kinds-title") });
+    const kindRow = (k: string) => within(check).getByText(text(`outcome-kind-${k}`)).closest("li") as HTMLElement;
+    expect(plain(kindRow("photos").textContent)).toContain(plain(text("outcome-kind-count", { copied: 4208, planned: 4210 })));
+    expect(within(kindRow("photos")).getByText(text("outcome-status-partial"))).toBeTruthy();
+    expect(within(kindRow("photos")).queryByText(text("progress-state-verified"))).toBeNull();
+    expect(within(kindRow("videos")).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(within(kindRow("documents")).getByText(text("progress-state-verified"))).toBeTruthy();
+    expect(within(check).queryByText(text("outcome-kind-music"))).toBeNull();
+    expectClean();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("without the after-move check (nothing of those kinds), there is no such section", () => {
+    inApp(<Outcome outcome={{ ...sample.finishedClean, afterMove: { photos: { planned: 0, copied: 0 }, videos: { planned: 0, copied: 0 }, music: { planned: 0, copied: 0 }, documents: { planned: 0, copied: 0 } } }} {...props} />);
+    expect(screen.queryByText(text("outcome-kinds-title"))).toBeNull();
+  });
+
   it("anything that failed or needs the person is Partial, never verified, and the warning shows", () => {
     inApp(<Outcome outcome={sample.finishedMixed} {...props} />);
     expect(within(chip()).getByText(text("outcome-status-partial"))).toBeTruthy();
@@ -831,6 +930,26 @@ describe("R02 Your move, item by item", () => {
     const path = String.raw`C:\Users\Ada\Documents\Invoice March.pdf`;
     expect(plain(details.textContent)).toContain(plain(text("report-from", { path })));
     expect(plain(details.textContent)).toContain(plain(text("report-to", { path })));
+  });
+
+  it("a file changed since the scan says so beside its result, which stays copied and checked", async () => {
+    const changed: ReportItem = { id: "c", name: "Budget.xlsx", source: "Budget.xlsx", status: "copied", evidence: { from: "drive" }, note: "changed-since-scan" };
+    const gone: ReportItem = { id: "g", name: "Draft.docx", source: "Draft.docx", status: "failed", reason: "unreadable", note: "no-longer-there" };
+    const plainFailed: ReportItem = { id: "u", name: "Locked.pst", source: "Locked.pst", status: "failed", reason: "unreadable" };
+    inApp(<Report items={[changed, gone, plainFailed]} onBack={noop} />);
+    const row = rowOf("Budget.xlsx");
+    expect(within(row).getByText(text("report-note-changed-since-scan"))).toBeTruthy();
+    expect(within(row).getByText(text("evidence-read-back"))).toBeTruthy();
+    // Gone before it could be sent: that is the why, said in place of "could not be read".
+    const goneRow = rowOf("Draft.docx");
+    expect(within(goneRow).getByText(text("report-note-no-longer-there"))).toBeTruthy();
+    expect(within(goneRow).queryByText(text("reason-unreadable"))).toBeNull();
+    expect(within(goneRow).getByText(text("evidence-not-checked"))).toBeTruthy();
+    // A line with no note has none.
+    expect(rowOf("Locked.pst").querySelector(".mv-note")).toBeNull();
+    expect(within(rowOf("Locked.pst")).getByText(text("reason-unreadable"))).toBeTruthy();
+    expectClean();
+    expect(await violations()).toEqual([]);
   });
 
   it("an item that did not finish is marked as not checked", () => {

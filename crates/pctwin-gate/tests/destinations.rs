@@ -40,10 +40,10 @@ fn everything_under(root: &std::path::Path) -> Vec<String> {
 
 #[test]
 fn each_approved_place_receives_only_its_own_files() {
-    let mine = tempfile::tempdir().unwrap();
-    let shared = tempfile::tempdir().unwrap();
-    let drive = tempfile::tempdir().unwrap();
-    let offload = tempfile::tempdir().unwrap();
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let shared = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let drive = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let offload = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("me", Approved::MyFolders, mine.path())
@@ -86,8 +86,8 @@ fn each_approved_place_receives_only_its_own_files() {
 
 #[test]
 fn the_same_name_in_two_places_is_not_a_clash() {
-    let mine = tempfile::tempdir().unwrap();
-    let shared = tempfile::tempdir().unwrap();
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let shared = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("me", Approved::MyFolders, mine.path())
@@ -104,7 +104,7 @@ fn the_same_name_in_two_places_is_not_a_clash() {
 
 #[test]
 fn an_unknown_destination_is_refused_and_nothing_is_written() {
-    let parent = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mine = parent.path().join("mine");
     std::fs::create_dir(&mine).unwrap();
     let mut table = Destinations::new();
@@ -152,8 +152,8 @@ fn an_empty_table_refuses_everything() {
 
 #[test]
 fn a_destination_is_approved_only_once() {
-    let a = tempfile::tempdir().unwrap();
-    let b = tempfile::tempdir().unwrap();
+    let a = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let b = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table.approve("me", Approved::MyFolders, a.path()).unwrap();
     assert!(matches!(
@@ -169,7 +169,7 @@ fn a_destination_is_approved_only_once() {
 
 #[test]
 fn destination_ids_are_short_plain_labels() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     let long = "a".repeat(65);
     for bad in [
@@ -207,7 +207,7 @@ fn destination_ids_are_short_plain_labels() {
 
 #[test]
 fn another_persons_account_needs_the_admin_helper() {
-    let theirs = tempfile::tempdir().unwrap();
+    let theirs = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     let place = Approved::AnotherAccount {
         account_id: "S-1-5-21-1-2-3-1002".into(),
@@ -235,8 +235,40 @@ fn another_persons_account_needs_the_admin_helper() {
 }
 
 #[test]
+fn a_holding_folder_is_that_person_s_place() {
+    let held = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let mut table = Destinations::new();
+    table
+        .approve_holding("for-bea", "S-1-5-21-1-2-3-1005", held.path())
+        .unwrap();
+    assert_eq!(
+        table.place("for-bea").unwrap(),
+        &Approved::AnotherAccount {
+            account_id: "S-1-5-21-1-2-3-1005".into()
+        }
+    );
+    assert_eq!(
+        write(&table, "for-bea", "Documents/d.txt", b"d").unwrap(),
+        "Documents/d.txt"
+    );
+    assert!(held.path().join("Documents/d.txt").exists());
+    // The same checks on the person and the label as any other.
+    for (id, account) in [
+        ("x", ""),
+        (
+            "y", "S-1-5
+21",
+        ),
+        ("for-bea", "S-1-5-21-9"),
+    ] {
+        assert!(table.approve_holding(id, account, held.path()).is_err());
+    }
+    assert_eq!(table.ids().count(), 1);
+}
+
+#[test]
 fn the_helper_path_is_only_for_another_account() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     let handle = Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
     assert!(matches!(
@@ -259,7 +291,7 @@ fn the_helper_path_is_only_for_another_account() {
 
 #[test]
 fn the_table_lists_its_ids_for_the_old_laptop() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     table
         .approve("shared", Approved::SharedFolder, dir.path())
@@ -274,7 +306,7 @@ fn the_table_lists_its_ids_for_the_old_laptop() {
 
 #[test]
 fn a_missing_folder_is_not_approved() {
-    let parent = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let mut table = Destinations::new();
     assert!(matches!(
         table.approve("me", Approved::MyFolders, &parent.path().join("missing")),
@@ -285,4 +317,62 @@ fn a_missing_folder_is_not_approved() {
         Err(GateError::UnknownDestination)
     ));
     assert_eq!(everything_under(parent.path()), Vec::<String>::new());
+}
+
+/// A folder the person chose (M05) is approved as the very folder opened when they chose it:
+/// files land there, its label is taken only once, and (where a folder can be renamed while
+/// open) a folder put in its place afterwards is never written to.
+#[test]
+fn a_chosen_folder_is_the_one_opened_when_it_was_chosen() {
+    let parent = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let chosen = parent.path().join("Photos drive");
+    std::fs::create_dir(&chosen).unwrap();
+    let opened = pctwin_gate::Destination::open(&chosen).unwrap();
+    let mut table = Destinations::new();
+    table.approve_chosen("chosen-pictures", opened).unwrap();
+    let again = pctwin_gate::Destination::open(&chosen).unwrap();
+    assert!(table.approve_chosen("chosen-pictures", again).is_err());
+    #[cfg(unix)]
+    {
+        std::fs::rename(&chosen, parent.path().join("moved")).unwrap();
+        std::fs::create_dir(&chosen).unwrap();
+    }
+    assert_eq!(
+        write(&table, "chosen-pictures", "a.jpg", b"1").unwrap(),
+        "a.jpg"
+    );
+    #[cfg(unix)]
+    {
+        assert!(parent.path().join("moved/a.jpg").exists());
+        assert!(
+            !chosen.join("a.jpg").exists(),
+            "never the folder put in its place"
+        );
+    }
+    #[cfg(not(unix))]
+    assert!(chosen.join("a.jpg").exists());
+}
+
+/// A damaged copy is kept beside its real name, and set aside says which file it is, read
+/// through the handle that wrote it: the very file now at the kept name.
+#[test]
+fn a_file_set_aside_says_which_file_it_is() {
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let mut table = Destinations::new();
+    table
+        .approve("me", Approved::MyFolders, mine.path())
+        .unwrap();
+    let dest = table.get("me").unwrap();
+    let mut file = dest
+        .create_file(&IncomingPath::parse("Docs/a.txt").unwrap(), 5)
+        .unwrap();
+    file.write_all(b"bytes").map_err(GateError::Io).unwrap();
+    let (kept, written) = file.set_aside().unwrap();
+    assert_eq!(kept, "Docs/a.txt (damaged copy).pctwin-damaged");
+    let now = dest.stat(&kept).unwrap().unwrap();
+    assert_eq!(written, Some(now.id));
+    assert!(
+        !mine.path().join("Docs/a.txt").exists(),
+        "never under the real name"
+    );
 }

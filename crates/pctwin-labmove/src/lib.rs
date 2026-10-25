@@ -17,6 +17,8 @@
 //! the folders, pairs through the handoff folder, answers the new laptop's choices by itself, and
 //! writes the reports.
 
+pub mod everyone;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -238,7 +240,7 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
     let number = String::from_utf8(take(handoff, "number.txt").await?).map_err(err)?;
     let number: u8 = number.trim().parse().map_err(err)?;
     let mut link = pending.choose(number, Instant::now()).await.map_err(err)?;
-    let sent = pctwin_move::send(&mut link, &record, plan)
+    let sent = pctwin_move::send(&mut link, &record, plan, &pctwin_move::Live::default())
         .await
         .map_err(err)?;
 
@@ -260,6 +262,7 @@ pub async fn send(folders: Folders, handoff: &Path, bind: &str) -> Result<Report
         let outcome = match not.why {
             NotSentWhy::LeftOut { reason } => format!("left out: {reason:?}"),
             NotSentWhy::NoFolderForRole => "no folder for its role".to_string(),
+            NotSentWhy::NoPlaceOnNewLaptop => "no place for it on the new laptop".to_string(),
         };
         report.not_sent.push(Line {
             item: not.item.to_hex(),
@@ -283,7 +286,7 @@ impl Steps for LabSteps {
         })
     }
 
-    async fn approve(&mut self, _: &Record) -> Result<(), Stop> {
+    async fn approve(&mut self, _: &Record, _: &pctwin_move::Preview) -> Result<(), Stop> {
         Ok(())
     }
 
@@ -355,13 +358,20 @@ pub async fn receive(folders: Folders, handoff: &Path, journal: &Path) -> Result
         &mut LabSteps {
             account: account.clone(),
         },
+        &table,
     )
     .await
     .map_err(err)?;
 
     let journal = Journal::open(journal).map_err(err)?;
     let received = plan
-        .receive(&mut link, &table, &journal, &account)
+        .receive(
+            &mut link,
+            &table,
+            &journal,
+            &account,
+            &pctwin_move::Live::default(),
+        )
         .await
         .map_err(err)?;
 
@@ -703,7 +713,11 @@ pub fn pack(root: &Path, account: &str, out: &Path) -> Result<usize, String> {
             held += 1;
         }
     }
-    std::fs::write(out.join("record.json"), scan.record.to_json()).map_err(err)?;
+    // Written a piece at a time, never as one text in memory.
+    let mut file =
+        std::io::BufWriter::new(std::fs::File::create(out.join("record.json")).map_err(err)?);
+    scan.record.write_json(&mut file).map_err(err)?;
+    std::io::Write::flush(&mut file).map_err(err)?;
     let snap = pctwin_lab::snapshot(root).map_err(err)?;
     std::fs::write(
         out.join("before.json"),

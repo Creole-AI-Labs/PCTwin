@@ -1,0 +1,17 @@
+[
+  {
+    "canMoveOthers": true,
+    "people": [
+      {
+        "id": "S-1-5-21-1-2-3-1001",
+        "isYou": true,
+        "name": "Ada"
+      },
+      {
+        "id": "S-1-5-21-1-2-3-1002",
+        "isYou": false,
+        "name": "Bea"
+      }
+    ]
+  }
+]

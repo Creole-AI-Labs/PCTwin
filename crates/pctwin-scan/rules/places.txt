@@ -40,6 +40,42 @@ windows | sysroot | Intel | app
 windows | sysroot | AMD | app
 windows | sysroot | NVIDIA | app
 windows | sysroot | Drivers | app
+# Programs and developer tools many people install at the top of the system drive rather than
+# in Program Files: apps, reinstalled fresh on the new laptop, never copied as program files.
+# `#` stands for a version number (one or more digits).
+windows | sysroot | msys64 | app
+windows | sysroot | msys32 | app
+windows | sysroot | cygwin64 | app
+windows | sysroot | cygwin | app
+windows | sysroot | MinGW | app
+windows | sysroot | mingw64 | app
+windows | sysroot | Strawberry | app
+windows | sysroot | Perl64 | app
+windows | sysroot | Android | app
+windows | sysroot | tools | app
+windows | sysroot | vcpkg | app
+windows | sysroot | Miniconda | app
+windows | sysroot | Miniconda3 | app
+windows | sysroot | Anaconda3 | app
+windows | sysroot | Python# | app
+windows | sysroot | Ruby# | app
+windows | sysroot | Ruby#-x64 | app
+windows | sysroot | rtools# | app
+windows | sysroot | Go | app
+windows | sysroot | Qt | app
+windows | sysroot | flutter | app
+windows | sysroot | Modules | app
+windows | sysroot | hostedtoolcache | app
+windows | sysroot | SeleniumWebDrivers | app
+windows | sysroot | npm | app
+windows | sysroot | actions-runner | app
+windows | sysroot | CodeQL | app
+windows | sysroot | Julia-#.#.# | app
+windows | sysroot | selenium | app
+windows | sysroot | ghcup | app
+windows | sysroot | mingw32 | app
+windows | sysroot | PostgreSQL | app
+windows | sysroot | WindowsAzure | system
 windows | sysroot | pagefile.sys | system
 windows | sysroot | hiberfil.sys | system
 windows | sysroot | swapfile.sys | system
@@ -68,6 +104,8 @@ mac | sysroot | bin | system
 mac | sysroot | sbin | system
 mac | sysroot | private | system
 mac | sysroot | opt | app
+mac | sysroot | nix | app
+mac | sysroot | sw | app
 mac | sysroot | cores | junk
 mac | sysroot | etc | system
 mac | sysroot | var | system
@@ -97,6 +135,7 @@ linux | sysroot | usr | system
 linux | sysroot | var | system
 linux | sysroot | snap | app
 linux | sysroot | opt | app
+linux | sysroot | nix | app
 linux | sysroot | tmp | junk
 linux | sysroot | root | system
 linux | sysroot | swapfile | system

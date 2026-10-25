@@ -16,6 +16,8 @@ export interface OverviewProps {
   /** Ask the system for permission to read the places the search could not open. */
   onAllowAccess?: () => void;
   onBack?: () => void;
+  /** Whether the People row is shown: off where the people were already placed on their own page. */
+  people?: boolean;
 }
 
 /**
@@ -24,21 +26,22 @@ export interface OverviewProps {
  * phase and is not drawn. For the wide window: the host sets it with `windowModeFor("overview")` when it shows
  * this screen; the screen never changes the window itself.
  */
-export default function Overview({ view, onOpen, onContinue, onAllowAccess, onBack }: OverviewProps) {
+export default function Overview({ view, onOpen, onContinue, onAllowAccess, onBack, people = true }: OverviewProps) {
   const { l10n } = useLocalization();
   const fmt = useFormat();
   const attention = attentionCount(view);
-  const rows: { row: OverviewRow; icon: ReactNode; title: string; body: string; needs: boolean }[] = [
+  const all: { row: OverviewRow; icon: ReactNode; title: string; body: string; needs: boolean }[] = [
     {
       row: "files",
       icon: <FolderIcon />,
       title: l10n.getString("overview-files-title"),
       body: l10n.getString("overview-files-body", { count: view.chosen.folders }),
-      needs: view.unreadable > 0,
+      needs: view.unreadable + view.filesNeedingLook > 0,
     },
     { row: "destinations", icon: <DriveIcon />, title: l10n.getString("overview-dest-title"), body: l10n.getString("overview-dest-body"), needs: view.destinationProblems > 0 },
     { row: "people", icon: <PeopleIcon />, title: l10n.getString("overview-people-title"), body: l10n.getString("overview-people-body"), needs: view.peopleWaiting > 0 },
   ];
+  const rows = all.filter((r) => people || r.row !== "people");
 
   return (
     <div className="plan-screen plan-wide">

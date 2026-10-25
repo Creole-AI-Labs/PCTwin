@@ -1,0 +1,30 @@
+[package]
+name = "pctwin-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "PCTwin's administrator helper: started only for a move of several people, with a fixed list of typed commands, reading other people's files for the move read-only and never recalling online-only files."
+
+[lints]
+workspace = true
+
+[dependencies]
+pctwin-gate = { path = "../pctwin-gate" }
+pctwin-helper-os = { path = "../pctwin-helper-os" }
+pctwin-record = { path = "../pctwin-record" }
+pctwin-scan = { path = "../pctwin-scan" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+getrandom = "0.4.3"
+thiserror = "2.0.21"
+zeroize = "1.9.0"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs", "process"] }
+
+[dev-dependencies]
+tempfile = "3"
+zeroize = "1.9.0"

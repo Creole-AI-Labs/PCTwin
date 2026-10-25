@@ -1,5 +1,6 @@
 import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from "react";
+import { useSettle } from "../motion/screen";
 import { Badge, Banner, Button, CodeDisplay, TextField } from "../components/kit";
 import { ArrowForward, Check, Info, Laptop, Lock, Shield, Wifi } from "../icons";
 import {
@@ -11,17 +12,20 @@ import {
   oldRename,
   oldShuffle,
   oldStart,
+  oldNearby,
   oldStartAgain,
   stop,
   toProblem,
+  unseenHeadsUp,
+  type HeadsUp,
   type Label,
   type OldEvent,
   type Problem,
 } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
-type Phase = "starting" | "code" | "wait" | "locked" | "choose" | "network" | "error" | "paired";
+type Phase = "starting" | "heads-up" | "code" | "wait" | "locked" | "choose" | "network" | "error" | "paired";
 type Notice = "timed-out" | "declined" | "left";
 
 const NOTICE_TEXT: Record<Notice, string> = {
@@ -34,11 +38,15 @@ const NOTICE_TEXT: Record<Notice, string> = {
  * C03 and C05 on the old laptop. The engine drives it: a label, then a code that changes, then (when a
  * new laptop has the code) three numbers to choose from, then paired.
  * starting -> code | wait | locked -> choose -> (code again | paired); a start that cannot pick the
- * network shows the networks to choose from.
+ * network shows the networks to choose from. Before the first start on a system that will ask a
+ * question (a Mac's local network, Windows Firewall), a note says what it will ask (heads-up).
+ * Locked: someone on this network tried wrong codes; only the person here can start again.
  */
-export default function PairOld({ onBack }: { onBack: () => void }) {
+export default function PairOld({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("starting");
+  // Pairing steps arrive without travel; a step showing a code or numbers does not move at all.
+  useSettle(phase, { calm: true });
   const phaseNow = useRef<Phase>("starting");
   useEffect(() => {
     phaseNow.current = phase;
@@ -59,9 +67,12 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [checking, setChecking] = useState(false);
+  // A "None of these match" on its way: nothing else on the round may be pressed meanwhile.
+  const [declining, setDeclining] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState("");
   const [networks, setNetworks] = useState<string[]>([]);
+  const [notes, setNotes] = useState<HeadsUp[]>([]);
   const renameButton = useRef<HTMLButtonElement>(null);
   const wasRenaming = useRef(false);
   // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it, except
@@ -142,6 +153,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   // Listen first, then start, so no early update is missed. Leaving the screen stops listening.
   useEffect(() => {
     const life = { cancelled: false };
+    const gone = () => life.cancelled;
     let unlisten: (() => void) | undefined;
     void (async () => {
       try {
@@ -154,6 +166,14 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
       } catch {
         setProblem({ key: "pairing-failed", networks: [] });
         setPhase("error");
+        return;
+      }
+      const ahead = await unseenHeadsUp("old");
+      // The screen may have gone while asking (a check the compiler cannot see across the wait).
+      if (gone()) return;
+      if (ahead.length > 0) {
+        setNotes(ahead);
+        setPhase("heads-up");
         return;
       }
       await start(null);
@@ -201,6 +221,13 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
       if (!stillOn(sent)) return;
       setChecking(false);
       const p = toProblem(error);
+      // The connection dropped while checking (or the paired link could not be kept): this
+      // pairing cannot go on, so the page with a Try again that starts afresh is shown.
+      if (p.key === "pairing-connection-lost") {
+        setProblem(LOST);
+        setPhase("error");
+        return;
+      }
       // A choice that came too late: the timed-out notice already says so, once.
       if (p.key !== "pairing-timed-out") setProblem(p);
       setPhase(code ? "code" : "starting");
@@ -210,16 +237,43 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
   const decline = async () => {
     const sent = roundNow.current;
     setProblem(null);
+    setDeclining(true);
     try {
       await oldDecline(sent);
     } catch (error) {
       if (stillOn(sent)) setProblem(toProblem(error));
       return;
+    } finally {
+      setDeclining(false);
     }
-    if (!stillOn(sent)) return;
+    // The round may have ended some other way while the decline was on its way (the time ran
+    // out): what that said stands, and "did not match" is not said over it.
+    if (!stillOn(sent) || phaseNow.current !== "choose") return;
     setNotice("declined");
     setPhase(code ? "code" : "starting");
   };
+
+  // Both laptops chose Old laptop: neither looks for the other. While the code shows, listen now
+  // and then for another old laptop nearby, and say so.
+  const [sameRole, setSameRole] = useState(false);
+  useEffect(() => {
+    if (phase !== "code") return;
+    let live = true;
+    const look = () => {
+      oldNearby().then(
+        (found) => {
+          if (live) setSameRole(found);
+        },
+        () => undefined,
+      );
+    };
+    look();
+    const every = window.setInterval(look, 15000);
+    return () => {
+      live = false;
+      window.clearInterval(every);
+    };
+  }, [phase]);
 
   // Confirm disables itself while checking: keep the person's place on the checking note.
   useEffect(() => {
@@ -239,7 +293,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
     }
   };
 
-  if (phase === "paired") return <Paired />;
+  if (phase === "paired") return <Paired onContinue={onPaired} />;
 
   return (
     <>
@@ -253,6 +307,16 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
             <p className="subhead" />
           </Localized>
         </>
+      )}
+
+      {phase === "heads-up" && (
+        <HeadsUpStep
+          eyebrow="pair-old-eyebrow"
+          notes={notes}
+          onContinue={() => {
+            void start(null);
+          }}
+        />
       )}
 
       {phase === "network" && (
@@ -292,7 +356,10 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
               variant="primary"
               className="pair-block"
               onClick={() => {
-                void start(null);
+                // Whatever was left of the last attempt is let go first, so the start is fresh.
+                void stop()
+                  .catch(() => undefined)
+                  .then(() => start(null));
               }}
             >
               <Localized id="pair-try-again">
@@ -314,10 +381,17 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
 
       {phase === "locked" && (
         <>
+          <Eyebrow id="pair-old-eyebrow" />
           <Heading key="locked" id="pair-old-locked-title" />
           <Localized id="pair-old-locked-body">
             <p className="subhead" />
           </Localized>
+          <div className="note">
+            <Wifi />
+            <Localized id="pair-old-locked-hotspot">
+              <p className="note-text" />
+            </Localized>
+          </div>
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button
@@ -349,6 +423,18 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
                 <Localized id={NOTICE_TEXT[notice]}>
                   <p />
                 </Localized>
+              </Banner>
+            )}
+            {sameRole && (
+              <Banner tone="attention">
+                <Localized id="pair-old-same-role">
+                  <p />
+                </Localized>
+                <Button onClick={back}>
+                  <Localized id="pair-old-switch">
+                    <span />
+                  </Localized>
+                </Button>
               </Banner>
             )}
           </div>
@@ -503,7 +589,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
                   dir="ltr"
                   ref={i === 0 ? firstNumber : undefined}
                   aria-pressed={selected === n}
-                  disabled={checking}
+                  disabled={checking || declining}
                   onClick={() => {
                     setSelected(n);
                   }}
@@ -524,7 +610,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
             variant="primary"
             className="pair-block"
             icon={<Check />}
-            disabled={selected === null || checking}
+            disabled={selected === null || checking || declining}
             onClick={() => {
               if (selected !== null) void pick(selected);
             }}
@@ -548,7 +634,7 @@ export default function PairOld({ onBack }: { onBack: () => void }) {
           <Button
             variant="quiet"
             className="pair-block pair-text-btn"
-            disabled={checking}
+            disabled={checking || declining}
             onClick={() => {
               void decline();
             }}

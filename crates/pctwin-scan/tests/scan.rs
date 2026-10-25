@@ -141,26 +141,32 @@ fn photos_videos_music_and_documents_are_counted() {
     );
 }
 
+/// A Mac package moves as one whole, as its files (decided 24 October 2026: a package that was
+/// one item was shown as moving but never sent): one package item, holding no bytes itself, and
+/// every file inside listed, so each is sent and gets its own result.
 #[test]
-fn a_mac_package_is_one_item_and_is_not_split() {
+fn a_mac_package_moves_whole_as_its_files() {
     let root = tempfile::tempdir().unwrap();
     write(root.path(), "Report.pages/Index.zip", 100);
     write(root.path(), "Report.pages/Data/image.png", 50);
     write(root.path(), "Tool.app/Contents/MacOS/Tool", 400);
     write(root.path(), "Tool.app/Contents/Info.plist", 20);
     let scan = scan_folder(&laptop(), &ada(), &docs(), root.path());
-    assert_eq!(
-        scan.items.len(),
-        2,
-        "{:?}",
-        scan.items.iter().map(names).collect::<Vec<_>>()
-    );
-    let pages = find(&scan.items, &["Report.pages"]);
-    assert_eq!(pages.kind, ItemKind::Folder);
-    assert_eq!(pages.size_bytes, 150);
-    let app = find(&scan.items, &["Tool.app"]);
-    assert_eq!(app.kind, ItemKind::App);
-    assert_eq!(app.size_bytes, 420);
+    for package in ["Report.pages", "Tool.app"] {
+        let p = find(&scan.items, &[package]);
+        assert_eq!(p.kind, ItemKind::Package, "{package}");
+        assert_eq!(p.size_bytes, 0, "{package}");
+    }
+    for (path, size) in [
+        (&["Report.pages", "Index.zip"][..], 100),
+        (&["Report.pages", "Data", "image.png"][..], 50),
+        (&["Tool.app", "Contents", "MacOS", "Tool"][..], 400),
+        (&["Tool.app", "Contents", "Info.plist"][..], 20),
+    ] {
+        let f = find(&scan.items, path);
+        assert_eq!(f.kind, ItemKind::File, "{path:?}");
+        assert_eq!(f.size_bytes, size, "{path:?}");
+    }
     // The picture inside a document is not a photo of yours.
     assert_eq!(scan.counts.photos, 0);
     assert_eq!(scan.counts.documents, 1);
@@ -180,10 +186,18 @@ fn photos_in_a_photos_library_are_counted_from_its_originals_only() {
     );
     write(root.path(), &format!("{lib}/database/Photos.sqlite"), 1);
     let scan = scan_folder(&laptop(), &ada(), &docs(), root.path());
-    assert_eq!(scan.items.len(), 1);
     assert_eq!(scan.counts.photos, 2);
     assert_eq!(scan.counts.videos, 1);
-    assert_eq!(find(&scan.items, &[lib]).size_bytes, 32);
+    // It moves as its files, below one package item that holds no bytes itself.
+    assert_eq!(find(&scan.items, &[lib]).kind, ItemKind::Package);
+    assert_eq!(find(&scan.items, &[lib]).size_bytes, 0);
+    let files: u64 = scan
+        .items
+        .iter()
+        .filter(|i| i.kind == ItemKind::File)
+        .map(|i| i.size_bytes)
+        .sum();
+    assert_eq!(files, 32);
 }
 
 #[test]

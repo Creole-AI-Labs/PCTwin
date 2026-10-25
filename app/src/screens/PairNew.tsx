@@ -1,12 +1,13 @@
 ﻿import { Localized, useLocalization } from "@fluent/react";
 import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
+import { useSettle } from "../motion/screen";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
-import { LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, type NewEvent, type Nearby, type Problem } from "../pairing";
+import { FAILED_NEW, LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, Heading, PairStrip, ProblemNotice } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, ProblemNotice } from "./PairParts";
 
-type Phase = "searching" | "none" | "list" | "code" | "number" | "error" | "paired";
+type Phase = "heads-up" | "searching" | "none" | "list" | "code" | "number" | "error" | "paired";
 
 /** Keep what the person typed, up to a sensible length, with digits from any script as 0-9. The engine checks the code. */
 function cleanCode(text: string): string {
@@ -21,11 +22,15 @@ function cleanCode(text: string): string {
 /**
  * C04 and C05 on the new laptop.
  * searching -> none | list | code (exactly one found skips the list) ; list -> code -> number -> paired.
- * A problem after the number returns to the code field with the problem in words.
+ * A problem after the number returns to the code field with the problem in words. Before the first
+ * search on a Mac, a note says what the Mac will ask (heads-up); a search that found nothing because
+ * the Mac refuses local discovery says so, with where to switch it on.
  */
-export default function PairNew({ onBack }: { onBack: () => void }) {
+export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
   const { l10n } = useLocalization();
   const [phase, setPhase] = useState<Phase>("searching");
+  // Pairing steps arrive without travel; a step showing a code or numbers does not move at all.
+  useSettle(phase, { calm: true });
   const [nearby, setNearby] = useState<Nearby[]>([]);
   const [chosen, setChosen] = useState<Nearby | null>(null);
   const [hadList, setHadList] = useState(false);
@@ -33,6 +38,9 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [number, setNumber] = useState<number | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
+  // What happened before a search that then failed: still said, first.
+  const [earlier, setEarlier] = useState<Problem | null>(null);
+  const [notes, setNotes] = useState<HeadsUp[]>([]);
   const fieldId = useId();
   const wasBusy = useRef(false);
   // Paired is the end of pairing: nothing that arrives afterwards moves the screen off it.
@@ -44,13 +52,14 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
   // `notice` is shown while looking again (after a lost connection).
   const search = useCallback(async (notice: Problem | null = null) => {
     setProblem(notice);
+    setEarlier(null);
     setPhase("searching");
     try {
       const found = await newSearch();
       setNearby(found);
       if (found.length === 0) {
         setPhase("none");
-      } else if (found.length === 1) {
+      } else if (found.length === 1 && !found[0].needsUpdate) {
         setChosen(found[0]);
         setHadList(false);
         setCode("");
@@ -60,8 +69,17 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
         setPhase("list");
       }
     } catch (error) {
-      // What happened before looking again stays the first thing said.
-      setProblem(notice ?? toProblem(error));
+      const p = toProblem(error);
+      // Nothing was found, and the Mac says why: no old laptop found, with what to do.
+      if (p.key === "pairing-local-network-refused") {
+        setNearby([]);
+        setProblem(p);
+        setPhase("none");
+        return;
+      }
+      // The search itself failed: said as that, after what happened before looking again.
+      setEarlier(notice);
+      setProblem(p);
       setPhase("error");
     }
   }, []);
@@ -81,15 +99,18 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       setBusy(false);
       setNumber(null);
       setCode("");
-      // A dropped connection is said in this laptop's words (it has no Try again of its own).
+      // A dropped connection, or a problem with no words of its own, is said in this laptop's
+      // words: it looks again by itself, so there is no Try again to point to.
       const dropped = event.kind === "lost" || event.problem.key === "pairing-connection-lost";
-      void search(dropped ? LOST_NEW : event.problem);
+      const generic = event.kind === "problem" && event.problem.key === "pairing-failed";
+      void search(dropped ? LOST_NEW : generic ? FAILED_NEW : event.problem);
     }
   }, [search]);
 
   // Listen first, then search, so the answer to a code is never missed. Leaving the screen stops listening.
   useEffect(() => {
     const life = { cancelled: false };
+    const gone = () => life.cancelled;
     let unlisten: (() => void) | undefined;
     void (async () => {
       try {
@@ -102,6 +123,14 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       } catch {
         setProblem({ key: "pairing-failed", networks: [] });
         setPhase("error");
+        return;
+      }
+      const ahead = await unseenHeadsUp("new");
+      // The screen may have gone while asking (a check the compiler cannot see across the wait).
+      if (gone()) return;
+      if (ahead.length > 0) {
+        setNotes(ahead);
+        setPhase("heads-up");
         return;
       }
       await search();
@@ -144,11 +173,21 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
     }
   };
 
-  if (phase === "paired") return <Paired />;
+  if (phase === "paired") return <Paired onContinue={onPaired} />;
 
   return (
     <>
       <PairStrip onBack={back} />
+
+      {phase === "heads-up" && (
+        <HeadsUpStep
+          eyebrow="pair-new-eyebrow"
+          notes={notes}
+          onContinue={() => {
+            void search();
+          }}
+        />
+      )}
 
       {phase === "searching" && (
         <>
@@ -164,7 +203,8 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
       {phase === "error" && (
         <>
           <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="error" id="pair-new-searching-title" />
+          <Heading key="error" id="pair-new-search-failed-title" />
+          {earlier && <ProblemNotice problem={earlier} />}
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button
@@ -189,6 +229,10 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
           <Localized id="pair-new-none-body">
             <p className="subhead" />
           </Localized>
+          {/* Both laptops chose New laptop: nobody shows a code, so nothing can be found. */}
+          <Localized id="pair-new-none-same-role">
+            <p />
+          </Localized>
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button
@@ -199,6 +243,11 @@ export default function PairNew({ onBack }: { onBack: () => void }) {
               }}
             >
               <Localized id="pair-new-search-again">
+                <span />
+              </Localized>
+            </Button>
+            <Button className="pair-block" onClick={back}>
+              <Localized id="pair-new-switch">
                 <span />
               </Localized>
             </Button>
@@ -345,8 +394,9 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
       <button
         type="button"
         className="pair-pick"
-        aria-labelledby={nearby.sameLabelNearby ? `${nameId} ${flagId}` : nameId}
+        aria-labelledby={nearby.sameLabelNearby || nearby.needsUpdate ? `${nameId} ${flagId}` : nameId}
         onClick={onChoose}
+        disabled={nearby.needsUpdate}
       >
         <span className="pair-pick-icon">
           <Laptop />
@@ -355,7 +405,16 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
           <span id={nameId} className="pair-pick-name" dir="auto">
             {labelText(l10n, nearby.label)}
           </span>
-          {nearby.sameLabelNearby && (
+          {nearby.needsUpdate && (
+            <span id={flagId} className="pair-flag">
+              <Badge tone="warn" icon={<Attention />}>
+                <Localized id="pair-new-needs-update">
+                  <span />
+                </Localized>
+              </Badge>
+            </span>
+          )}
+          {nearby.sameLabelNearby && !nearby.needsUpdate && (
             <span id={flagId} className="pair-flag">
               <Badge tone="warn" icon={<Attention />}>
                 <Localized id="pair-new-same-label">

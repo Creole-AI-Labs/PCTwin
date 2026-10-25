@@ -1,0 +1,4 @@
+Not proven by this run (named gaps; they need real people or real hardware):
+- The administrator answers polkit's own window (here it is approved from outside the product).
+- A real restart and sign-in during a move.
+- Desktop environments other than the runner's for the sign-in hand-over.

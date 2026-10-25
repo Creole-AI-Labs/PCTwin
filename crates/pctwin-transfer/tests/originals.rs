@@ -79,9 +79,9 @@ struct World {
 }
 
 fn world() -> World {
-    let old = tempfile::tempdir().unwrap();
-    let mine = tempfile::tempdir().unwrap();
-    let jdir = tempfile::tempdir().unwrap();
+    let old = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let mine = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let jdir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();
     let mut table = Destinations::new();
     table
@@ -103,6 +103,7 @@ impl World {
         std::fs::write(&source, &data).unwrap();
         (
             SendJob {
+                size: 0,
                 item: id(n),
                 source,
                 destination: "me".into(),
@@ -189,6 +190,7 @@ fn planned(source_file: Option<FileId>, modified: Option<i64>, size: u64) -> Pla
         download_mark: None,
         item: id(1),
         source_laptop: LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap(),
+        scope: Default::default(),
         destination: "me".into(),
         path: "a".into(),
         size,
@@ -559,7 +561,7 @@ async fn the_check_leaves_the_original_exactly_as_it_was() {
 
 #[test]
 fn a_file_open_elsewhere_can_still_be_looked_at_and_does_not_block_its_owner() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let path = dir.path().join("busy.bin");
     std::fs::write(&path, b"hello").unwrap();
     let busy = std::fs::OpenOptions::new()
@@ -578,7 +580,7 @@ fn a_file_open_elsewhere_can_still_be_looked_at_and_does_not_block_its_owner() {
 
 #[test]
 fn only_an_ordinary_file_is_looked_at() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let folder = dir.path().join("folder");
     std::fs::create_dir(&folder).unwrap();
     let sent = HashMap::from([(id(1), folder.clone()), (id(2), dir.path().join("nothing"))]);
@@ -590,7 +592,7 @@ fn only_an_ordinary_file_is_looked_at() {
 #[cfg(unix)]
 #[test]
 fn a_link_is_never_followed() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let real = dir.path().join("real.bin");
     std::fs::write(&real, b"data").unwrap();
     let link = dir.path().join("link.bin");
@@ -604,7 +606,7 @@ fn a_link_is_never_followed() {
 
 #[test]
 fn answers_come_in_the_order_asked() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let a = dir.path().join("a");
     std::fs::write(&a, b"a").unwrap();
     let sent = HashMap::from([(id(1), a)]);

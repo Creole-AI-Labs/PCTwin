@@ -5,27 +5,37 @@ app-name = PCTwin
 brand-home =
     .aria-label = PCTwin首页
 language-label = 语言
+motion-label = 动画
+motion-system = 动画：跟随系统
+motion-reduced = 动画：减少
+motion-off = 动画：关闭
+
+# The opening (Wordplay); its tagline is the home headline.
+opening-label = PCTwin 正在打开
+opening-status = 正在打开 PCTwin。
+opening-skip = 跳过开场
+opening-tagline = 发送文件，或者全部搬过去。
 
 footer-free = 个人迁移免费，无需账户。
 footer-help = 帮助
 
 ## F01 Welcome
 
-welcome-eyebrow = 你的新篇章，准备好了。
-welcome-title-line1 = 你的配置。
-welcome-title-line2 = 你的下一台笔记本电脑。
-welcome-body = 迁移时，把你的文件、应用和熟悉的设置一起带上。
-welcome-start = 开始迁移
+welcome-eyebrow = PCTwin
+welcome-title-line1 = 发送文件，
+welcome-title-line2 = 或者全部搬过去。
+welcome-body = 把几个文件发送到附近的笔记本电脑，或者把你的文件、应用和设置搬到新的笔记本电脑上。
+welcome-start = 开始完整迁移
 
 ## F06 Old or new laptop
 
 role-back = 返回
-role-eyebrow = 开始迁移
+role-eyebrow = 开始完整迁移
 role-title = 这是哪台笔记本电脑？
 role-body = 在两台笔记本电脑上都打开PCTwin，然后选择这是哪一台。
-role-old-title = 我的旧笔记本电脑
+role-old-title = 这是我的旧笔记本电脑
 role-old-body = 发送我的文件、应用和设置。
-role-new-title = 我的新笔记本电脑
+role-new-title = 这是我的新笔记本电脑
 role-new-body = 从另一台笔记本电脑接收我的配置。
 role-note = 在你查看并同意方案之前，什么都不会迁移。迁移期间，你的旧笔记本电脑保持原样。
 
@@ -115,13 +125,19 @@ check-status-plug-in = 插上电源
 check-status-connected = 可用
 check-status-not-needed = 不需要
 check-status-unknown = 未知
-check-speed-unknown = PCTwin这次没能测量连接。请稍后再次检查。
+check-speed-unknown = PCTwin这次没能测量连接。文件照样会搬过去，只是没有时间估计。
 check-space-unknown = PCTwin无法读取新笔记本电脑上的可用空间。
 check-power-unknown = PCTwin无法判断{ $label }是否插上了电源。
 check-internet-unknown = PCTwin无法判断这台笔记本电脑是否在线。没关系，复制文件不需要互联网。
 check-again = 再次检查
 check-estimate-note = 预计时间仅供参考，并非固定承诺。
 check-continue = 选择要迁移的内容
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = 迁移开始前
+check-before-lids-title = 两台电脑的屏幕都保持打开
+check-before-lids-body = 合上屏幕可能会让笔记本电脑进入睡眠，迁移就会暂停。
+check-before-near-title = 靠近Wi-Fi路由器
+check-before-near-body = 迁移期间，让两台笔记本电脑都靠近路由器。
 
 ## C09 Waiting for your other laptop
 
@@ -140,6 +156,7 @@ reconnect-expired = 时间太久，无法自动重新连接。请重新配对，
 reconnect-unavailable = 无法连接到{ $label }。请检查它是否已开机、没有休眠、打开了PCTwin，并连接同一个Wi-Fi。
 reconnect-try-now = 重试连接
 reconnect-pair-again = 重新配对
+reconnect-nothing-new = 已经有一段时间没有新内容传来。PCTwin 会继续自动尝试，你也可以停止移动。目前已复制并检查过的内容都会保留。
 reconnect-details = 安全地重新连接
 reconnect-details-body = 只有这两台笔记本电脑可以重新连接，而且每次都使用新的私密连接。
 
@@ -161,6 +178,11 @@ ended-home = 返回首页
 
 pair-back = 返回
 pair-try-again = 重试
+pair-more-details = 更多详情
+pair-heads-up-title = 你的笔记本电脑可能会问你一个问题。
+pair-heads-up-local-network = 你的Mac会询问PCTwin能否查找你本地网络上的设备。请选择“允许”，这样两台笔记本电脑才能找到彼此。
+pair-heads-up-firewall = Windows可能会询问PCTwin能否接受连接。请选择“允许”，这样你的新笔记本电脑才能连接到这台电脑。
+pair-heads-up-continue = 继续
 
 ## C03 Old laptop: show the code
 
@@ -192,8 +214,9 @@ pair-old-wait-body =
     { $seconds ->
        *[other] 这次尝试没有成功。{ $seconds }秒后会出现新配对码。
     }
-pair-old-locked-title = 配对已停止。
-pair-old-locked-body = 错误尝试次数过多，为保护这台笔记本电脑的安全，配对已停止。没有共享任何内容。准备好后请重新开始。
+pair-old-locked-title = 这个网络上有人尝试了错误的配对码。
+pair-old-locked-body = 已尝试五次错误的配对码，为保护这台笔记本电脑的安全，配对已停止。没有共享任何内容。如果是你自己，请选择“重新开始”获取新的配对码。
+pair-old-locked-hotspot = 如果不知道是谁，请改为把两台笔记本电脑都连接到你手机的热点，然后选择“重新开始”。
 pair-old-start-again = 重新开始
 pair-old-timed-out = 没有及时选择数字，这是新的配对码。
 pair-old-declined = 数字不匹配，因此没有共享任何内容。这是新的配对码。
@@ -219,12 +242,18 @@ pair-choose-checking = 正在检查……
 pair-new-eyebrow = 新笔记本电脑
 pair-new-searching-title = 正在搜索你的旧笔记本电脑……
 pair-new-searching-body = 请在旧笔记本电脑上保持PCTwin打开，并与这台电脑连接同一个Wi-Fi。
+pair-new-search-failed-title = 无法查找你的旧笔记本电脑。
 pair-new-list-title = 哪一台是你的旧笔记本电脑？
 pair-new-list-body = 选择你的旧笔记本电脑屏幕上显示的名称。
 pair-new-same-label = 附近另一台笔记本电脑也叫这个名称。请查看旧笔记本电脑的屏幕。
+pair-new-needs-update = 这台笔记本电脑上的 PCTwin 版本较旧。请在它上面更新 PCTwin，然后再次搜索。
 pair-new-none-title = 没有找到旧笔记本电脑。
 pair-new-none-body = 请检查旧笔记本电脑上的PCTwin是否已打开并显示配对码，以及两台电脑是否连接同一个Wi-Fi。然后重新搜索。
 pair-new-search-again = 重新搜索
+pair-old-same-role = 附近另一台笔记本电脑也被设为旧电脑。两台中必须有一台是新电脑。
+pair-old-switch = 这是新电脑
+pair-new-none-same-role = 另一台电脑是否也选择了新电脑？那就在那台上选择旧电脑，或者切换这一台。
+pair-new-switch = 这是旧电脑
 pair-new-code-title = 输入配对码。
 pair-new-code-body = 输入{ $label }上显示的配对码。
 pair-new-code-label = 六位配对码
@@ -243,7 +272,8 @@ pair-new-number-waiting = 正在等待你的旧笔记本电脑……
 
 pair-done-eyebrow = 一切就绪
 pair-done-title = 你的笔记本电脑已配对。
-pair-done-body = 你的两台笔记本电脑已连接。下一步是选择要迁移的内容，这部分还在开发中，所以目前还没有迁移任何东西。
+pair-done-body = 两台笔记本电脑已连接。接下来，旧笔记本电脑会查找你的文件，你在新笔记本电脑上批准要移动的内容。你批准之前，什么都不会移动。
+pair-done-continue = 继续
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -263,7 +293,10 @@ pairing-different-version = 两台笔记本电脑上的PCTwin版本不同。请�
 pairing-name-invalid = 这个名称不能使用。请换一个更短的名称，只用字母和数字。
 pairing-no-network = 这台笔记本电脑没有连接Wi-Fi或有线网络。请连接网络，然后再次尝试。
 pairing-choose-network = 这台笔记本电脑连接了多个网络。请选择你的新笔记本电脑所连接的那个：
+pairing-local-network-refused = 你的Mac可能不允许PCTwin查找这个网络上的笔记本电脑。如果Mac刚刚询问过你，请选择“允许”，然后重试。否则，请打开“系统设置”，选择“隐私与安全性”，再选择“本地网络”，打开PCTwin，然后重试。
+pairing-local-network-refused-details = VPN、防火墙或过滤软件也可能让笔记本电脑无法找到彼此。如果有其中之一正在运行，请在配对期间关闭它，然后重试。
 pairing-failed = 这次配对没有成功。没有共享任何内容。请再次尝试。
+pairing-failed-new = 这次配对没有成功。没有共享任何内容。请输入旧笔记本电脑屏幕上的新代码。
 
 ## M06 Match people to their profiles (Who’s moving?)
 
@@ -342,7 +375,7 @@ help-code =
 help-contains-title = 包含的内容
 help-contains-problem = 问题的类型，以及任务进行到了哪一步。
 help-contains-step = 问题发生在迁移的哪一步。
-help-contains-versions = PCTwin版本，以及每台笔记本电脑运行的系统，例如Windows或macOS。
+help-contains-versions = PCTwin 的版本，以及这台笔记本电脑运行的系统，例如 Windows 或 macOS。
 help-never-title = 绝不包含的内容
 help-chip-included = 包含
 help-chip-excluded = 绝不包含
@@ -358,6 +391,22 @@ help-share-text = 我的PCTwin问题码是{ $code }。
 help-failed = 无法生成问题码。请再次尝试。如果还是不行，请改用你自己的话描述问题。
 help-try-again = 重试
 help-copy-failed = 无法复制问题码。请选中上面的问题码，自己复制。
+help-home-eyebrow = 帮助
+help-home-title = 帮你完成眼前的任务。
+help-home-body = 针对最常见障碍的简短指南，无需联网即可使用。
+help-home-more = 在 getpctwin.com 获取更多帮助
+help-guide-find-title = 两台笔记本电脑找不到对方
+help-guide-find-body = 让两台笔记本电脑连接同一个 Wi-Fi，不要用访客网络。配对时关闭所有 VPN。如果仍然不行，打开手机热点，让两台电脑都连上它。
+help-guide-mac-network-title = Mac 询问本地网络权限
+help-guide-mac-network-body = 选择“允许”，PCTwin 才能找到另一台笔记本电脑。如果选了“不允许”，请打开“系统设置”，再打开“隐私与安全性”，然后打开“本地网络”，并打开 PCTwin。
+help-guide-firewall-title = Windows 询问防火墙权限
+help-guide-firewall-body = 在专用网络（例如家里的 Wi-Fi）上允许 PCTwin。PCTwin 只在你自己的网络上与另一台笔记本电脑通信。
+help-guide-stopped-title = 移动中途停止了
+help-guide-stopped-body = 已复制并检查的内容不会丢失，旧笔记本电脑也没有被更改。重新配对两台电脑即可：新电脑上已有的文件会被识别，不会重复复制。
+help-guide-others-title = 移动其他人的内容
+help-guide-others-body = 在旧笔记本电脑的“谁要搬过去？”中勾选他们。每台电脑上由管理员批准一次。你永远看不到他们的文件。新账户的临时密码只会在电脑自己的窗口中显示一次；他们首次登录时设置自己的密码。
+help-guide-code-title = 向别人求助
+help-guide-code-body = 在任何问题页面上选择“获取帮助”。PCTwin 会生成一个简短代码说明出了什么问题，不含姓名、文件或密码，你可以通过 WhatsApp 或任何应用发送。
 
 ## Label words (the name each laptop shows while pairing)
 
@@ -661,8 +710,42 @@ dest-readonly = { $place }是只读的，无法复制任何内容到上面。请
 dest-format = 这些文件夹中有一个文件太大，按{ $place }目前的设置方式放不下。请选择其他地方。
 plan-place = { $drive }上的{ $folder }
 plan-group-to = 放到{ $place }
+plan-group-move = 移动 { $folder }
+plan-place-change = 选择其他位置
+plan-place-usual = 使用常用位置
+plan-place-free = 那里还有 { $size } 可用空间
+plan-place-no-room = 那里的可用空间不够。请选择其他位置，或取消勾选此文件夹。
+plan-place-no-safe-name = PCTwin 无法在该驱动器上安全地保存文件。请选择其他位置。
+plan-place-cannot-open = PCTwin 无法打开该文件夹。请选择其他位置。
 plan-version = 方案版本{ $revision }
 plan-details = 更多详情
+plan-preview-title = 开始之前
+plan-preview-fits = 这台笔记本电脑有足够的可用空间。
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = 我们会先迁移这些，让你的新笔记本电脑更快可以使用：{ $places }。
+plan-preview-short = 这台笔记本电脑还需要 { $size } 可用空间。请在开始前释放一些空间，否则硬盘满时移动会停止。
+plan-preview-space-unknown = PCTwin 无法读取这台笔记本电脑的可用空间。
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+       *[other] 大约 { $minutes } 分钟。
+    }
+plan-preview-time = 大约 { $low } 到 { $high } 分钟。
+plan-preview-renamed =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件的名称会略有不同，因为这台笔记本电脑不允许使用原名称。报告会逐一列出。
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件对这台笔记本电脑的硬盘来说太大，不会被复制。
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件的名称或文件夹不被这台笔记本电脑允许，不会被复制。
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件会在有人登录这台笔记本电脑时自动运行。请确认这是你预期的。
+    }
 plan-reference = 参考编号{ $reference }
 plan-hand-cloud-only =
     { NUMBER($count) ->
@@ -675,6 +758,10 @@ plan-hand-unreadable =
 plan-hand-work-managed =
     { NUMBER($count) ->
        *[other] 有{ $count }个项目由你的工作单位或学校管理，已被排除。勾选所在的文件夹即可包括它们。
+    }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+       *[other] 有{ $count }个文件夹里的文件太多，一次搬家装不下，所以不会搬过去。这次搬家后，请用快速发送单独发送每个文件夹，或用 USB 闪存盘复制。
     }
 plan-blocked-someone-unmapped = 旧笔记本电脑上有人还没有选择新电脑上的账户。请选择每个人的文件放到哪里，然后再回来。
 plan-blocked-account-used-twice = 有两个人会被放进新笔记本电脑上的同一个账户。请为每个人分配各自的账户。
@@ -722,7 +809,8 @@ progress-needs-action =
     }
 progress-see-needs-action = 查看需要你处理的项目
 progress-interrupted = 与另一台笔记本电脑的连接已断开。PCTwin正在尝试重新连接。已复制并检查的内容都不会丢失。
-progress-low-battery = { $label }的电池电量不足。请插上电源，以免迁移被打断。
+progress-low-battery = 这台笔记本电脑电量不足。请接上电源，以免移动中断。
+progress-battery-paused = 这台笔记本电脑电量快用完了，所以移动已安全暂停。接上电源后继续即可。不会丢失任何内容。
 progress-old-safe = 你的旧笔记本电脑保持原样。
 progress-pause = 暂停迁移
 progress-compact = 精简显示
@@ -745,6 +833,17 @@ progress-state-verified = 已检查
 progress-state-checking = 正在检查
 progress-state-paused = 已暂停
 progress-checked-note = 项目只有在检查之后才算已复制。
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = 提示
+tips-pause = 暂停提示
+tips-resume = 显示更多提示
+tips-next = 下一条提示
+tip-battery = 这台笔记本电脑正在使用电池。如果可以，请插上电源，以免长时间的迁移被打断。
+tip-closer = 连接较慢。把笔记本电脑移近Wi-Fi路由器可以加快速度。
+tip-lids = 请保持这台笔记本电脑的屏幕打开。合上屏幕可能会让它进入睡眠，迁移就会暂停。
+tip-keep-using = 你可以继续使用这台笔记本电脑。PCTwin只读取它上面的内容。
+tip-pause = 你可以随时暂停迁移，稍后再继续。
+tip-power-cut = 如果停电，请打开两台笔记本电脑并打开PCTwin。它会从中断的地方继续，已复制并检查的内容都不会丢失。
 
 ## F09 Mini panel
 
@@ -803,10 +902,160 @@ outcome-title = 欢迎使用你的新笔记本电脑。
 outcome-body = 以下是你同意的每项内容的结果。
 outcome-files-title = 已选文件
 outcome-status-partial = 部分完成
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = 迁移后已检查
+outcome-kind-photos = 照片
+outcome-kind-videos = 视频
+outcome-kind-music = 音乐
+outcome-kind-documents = 文档
+outcome-kind-count = { $planned } 个中已复制并检查 { $copied } 个
 outcome-next-title = 接下来要做什么
 outcome-old-safe = 未完成的内容会一直列在这里。旧笔记本电脑上没有删除任何东西。
 outcome-report = 查看完整报告
 outcome-home = 返回首页
+outcome-person-copied =
+    { NUMBER($count) ->
+       *[other] 已复制 { $count } 个文件。
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+       *[other] { $count } 个未完成。
+    }
+outcome-person-at-sign-in = { $name } 下次登录这台笔记本电脑时，这些内容就会放好。
+move-fallback-folder = 来自旧笔记本电脑
+move-stop = 停止移动
+move-before-open = 等待时：离开这台笔记本电脑之前
+move-get-help = 获取帮助
+pickup-eyebrow = 你的移动
+pickup-title = 安全地继续。
+pickup-body = 这台笔记本电脑上的一次移动中途停止了，可能是因为它重启或断电。请先整理，然后重新配对两台笔记本电脑以继续。
+pickup-unfinished-title = 未完成的复制
+pickup-unfinished-body =
+    { NUMBER($count) ->
+       *[other] 移动停止时，有 { $count } 个文件正在复制。
+    }
+pickup-unfinished-badge = 待整理
+pickup-tidy = 整理
+pickup-tidying = 正在整理。已完成的副本会经过检查并放到位；你的任何内容都不会被更改。
+pickup-done = 整理完毕。重新配对两台笔记本电脑以继续：这里已有的内容会被识别，不会重复复制。
+pickup-failed = 这次整理没有成功。你的任何内容都没有被更改。请重试，或先在这台笔记本电脑上关闭 PCTwin 再重新打开。
+pickup-put-in-place = 已放到位
+pickup-kept = 保留以继续
+pickup-not-finished =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件无法完成。下次移动会重新复制。
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件位于当前未连接的硬盘上。请连接该硬盘后再整理一次。
+    }
+pickup-later = 以后再说
+ready-eyebrow = 欢迎
+ready-title = 你的内容已准备好。
+ready-body = 你旧笔记本电脑上的内容已移到这台电脑，现在就在你自己的文件夹里。
+ready-landed = 个文件在你的文件夹中
+ready-where-title = 它们在哪里
+ready-where-body = 在“文档”“图片”“音乐”“视频”等你常用的文件夹中，和旧笔记本电脑上一样。
+ready-kept =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件被单独保存，因为这里已有同名文件。两者都已保留。
+    }
+ready-failed =
+    { NUMBER($count) ->
+       *[other] 有 { $count } 个文件无法放入你的文件夹。请让完成移动的人再移动一次。
+    }
+ready-done = 完成
+move-status-kept = 已保留
+move-wait-eyebrow = 你的移动
+move-wait-scanning-title = 正在查找你的文件。
+move-wait-scanning-body = 旧笔记本电脑正在查看你的文件夹。它只读取：不会打开、更改或删除任何内容。
+move-found = 目前已找到：你的内容 { $size }。
+move-wait-approval-title = 正在等待新笔记本电脑。
+move-wait-approval-body = 你的文件已准备好。在新笔记本电脑上查看计划并批准即可开始。
+move-wait-list-title = 正在等待旧笔记本电脑。
+move-wait-list-body = 旧笔记本电脑正在查找你的文件。完成后，计划会显示在这里供你批准。这可能需要几分钟。
+move-wait-starting-title = 正在开始移动。
+move-wait-starting-body = 计划已批准。复制马上开始。
+move-wait-admin-title = 正在等待管理员。
+move-wait-admin-body = 这台笔记本电脑正在请求管理员批准，以便同时移动其他人的内容。请在电脑打开的窗口中作答。
+move-others-not-approved = 管理员没有批准，所以这次只移动你的内容。其他人的内容保持原样。
+move-others-failed = PCTwin 无法启动移动其他人内容所需的组件，所以这次只移动你的内容。他们的任何内容都没有被更改。
+move-others-not-here = 此版本暂不支持从这台笔记本电脑移动其他人的内容，所以只移动你的内容。
+move-others-allow-in-settings = 首先，管理员需要在刚刚打开的“系统设置”页面中允许 PCTwin。这次只移动你的内容；允许 PCTwin 之后，下一次移动也可以带上其他人的内容。
+approve-prompt = PCTwin 将读取 { $names } 的文件，把它们移到新的笔记本电脑。这台笔记本电脑的管理员只批准这一次移动。
+who-here-title = 谁要搬过去？
+who-here-body = 你的内容总会被移动。勾选这台笔记本电脑上其他也需要移动内容的人。PCTwin 从不向你显示他们的文件。
+who-here-you = { $name }（你）
+who-here-you-hint = 始终移动
+who-here-approval = 移动其他人的内容需要管理员批准，你勾选的所有人只需批准一次。电脑会在它自己的窗口中请求。
+who-here-not-here = 此版本暂不支持从这台笔记本电脑移动其他人的内容。只移动你的内容。
+place-title = 他们的内容放到哪里？
+place-body = 旧笔记本电脑上也有其他人的内容。请为每个人选择这台电脑上的一个账户、为其新建账户，或不移动。你永远看不到他们的文件。
+place-size =
+    { NUMBER($count) ->
+       *[other] { $count } 个文件，{ $size }
+    }
+place-select = { $name } 的内容放到哪里
+place-note = 新账户以及在他们登录前保管其内容，需要在你批准计划后由管理员批准一次。每个新账户的临时密码只会在电脑自己的窗口中显示一次。
+place-todo =
+    { NUMBER($count) ->
+       *[other] 还需为 { $count } 个人选择内容放到哪里。
+    }
+fda-title = 你的 Mac 正把一些文件夹设为私密。
+fda-body =
+    { NUMBER($count) ->
+       *[other] 由于 Mac 的隐私设置，你有 { $count } 个位置无法查看。请允许 PCTwin 访问，然后再检查一次，以免遗漏你的内容。
+    }
+fda-step-1 = 打开“系统设置”，然后选择“隐私与安全性”。
+fda-step-2 = 选择“完全磁盘访问权限”。
+fda-step-3 = 打开 PCTwin。Mac 可能会要求输入密码。
+fda-open = 打开这些设置
+fda-note = PCTwin 只读取你的文件夹来复制它们，从不更改这台笔记本电脑上的任何内容。
+fda-again = 再检查一次
+fda-without = 不含这些继续
+password-title = PCTwin：一个新账户
+password-body =
+    { $name } 现在在这台笔记本电脑上有了账户。
+    
+    登录名：{ $account }
+    临时密码：{ $password }
+    
+    请把这些交给 { $name }。首次登录时，他们会设置自己的密码。请现在记下来：PCTwin 不会保存它。
+move-ended-eyebrow = 你的移动
+move-ended-kept-title = 已复制的内容
+move-ended-kept-body = 在此之前已复制并检查的内容都会留在新笔记本电脑上。
+move-ended-old-title = 你的旧笔记本电脑
+move-ended-old-body = 上面的任何内容都没有被更改或删除。
+move-ended-old-badge = 未更改
+move-ended-next = 要重试，请重新配对两台笔记本电脑。已复制并检查的文件会被识别，不会重复复制。
+move-lost-title = 与另一台笔记本电脑的连接已断开。
+move-lost-body = 两台笔记本电脑无法再互相连接，所以移动无法继续。请确认两台都已开机、未休眠且彼此靠近。
+move-not-approved-title = 移动没有开始。
+move-not-approved-old = 新笔记本电脑上没有批准计划，所以没有复制任何内容。
+move-not-approved-new = 你没有批准计划，所以没有复制任何内容。
+move-failed-title = 出了点问题。
+move-failed-body = 移动无法继续。如果再次发生，下方的“更多详情”会说明出了什么问题。
+move-peer-system-windows = Windows
+move-peer-system-mac = Mac
+move-peer-system-linux = Linux
+move-peer-system-other = 其他系统
+move-update-here-title = 请在这台电脑上更新 PCTwin
+move-update-here-body = 这台电脑上的 PCTwin 比另一台旧，所以它们无法一起搬文件。请在这里更新 PCTwin，然后重新开始。没有复制任何内容。
+move-update-there-title = 请在另一台电脑上更新 PCTwin
+move-update-there-body = 另一台电脑上的 PCTwin 比这台旧，所以它们无法一起搬文件。请在那台电脑上更新 PCTwin，然后重新开始。没有复制任何内容。
+move-refused-title = 移动无法开始。
+move-refused-not-paired = 两台笔记本电脑已不再配对。请重新配对以开始移动。
+move-refused-busy = 这台笔记本电脑上已有一个移动正在进行。
+move-refused-not-moving = 这台笔记本电脑上没有正在进行的移动。
+move-refused-plan-changed = 计划在批准前已更改。请重新配对两台笔记本电脑以查看新计划。
+move-refused-failed = 无法为移动准备好这台笔记本电脑的文件夹。请重新配对两台笔记本电脑再试一次。
+drive-problem-title = 移动需要你处理。
+drive-problem-body = PCTwin 多次检查后发现，保存在 { $place } 中的副本与原文件不一致。该硬盘可能出现故障、已满或已断开，因此复制到该处已暂停。
+drive-problem-kept-title = 已复制并检查
+drive-problem-waiting-title = 仍需复制到 { $place }
+drive-problem-badge = 已暂停
+drive-problem-fix = 请确认硬盘已连接且有可用空间，然后继续。不会为了绕过问题而遗漏你选择的任何内容。你也可以停止移动。
+drive-problem-carry-on = 继续
 
 ## R02 Your move, item by item (detailed report)
 
@@ -820,9 +1069,16 @@ report-from = 来源：{ $path }
 report-to = 去向：{ $path }
 report-none = 没有项目是这个结果。
 report-more-details = 更多详情
+# Added 23 October 2026: what the report says beside a line's result (changed since the scan).
+report-note-changed-since-scan = 扫描后有改动：已按现在的样子复制。
+report-note-no-longer-there = 已不在原处：发送之前，它已在旧笔记本电脑上被移动、改名或删除。
+report-note-time-not-kept = 日期未保留：这个磁盘无法保存它的最后修改日期，所以显示的是复制的日期。
 
 evidence-read-back = 已从硬盘读回进行检查。
 evidence-memory = 通过这台笔记本电脑的内存检查，而不是硬盘。
+evidence-already-there = 新笔记本电脑上已有：同一个文件已经在那里，所以没有再次复制。
+evidence-recovered = 在笔记本电脑重启前检查过，重启后又检查了一次。
+evidence-new-laptop = 已由新笔记本电脑检查。
 evidence-memory-explain = 副本已读回并且一致，但读取经过了这台笔记本电脑的内存，所以读到的内容可能来自内存而不是硬盘。硬盘本身的故障可能不会在这里显示，所以打开一次文件是个不错的检查方法。
 evidence-not-checked = 未检查，因为没有完成。
 # Machine-translated 16 October 2026.
@@ -847,6 +1103,7 @@ reason-online-only = 这个文件仅在线存储，所以旧笔记本电脑上�
 reason-manual-install = 这个应用必须从开发者的官网获取。请到那里下载并安装。
 reason-restart = 新笔记本电脑需要重启才能完成。准备好后请重启。
 reason-finish-by-hand = PCTwin无法替你完成这一步。请按照这份报告中为它列出的步骤操作。
+reason-parts-missing = 这个文件夹里有些文件没有到达，所以它在新电脑上并不完整。这份报告列出了这些文件及原因。请再次发送它们，或用其他方式复制这个文件夹。
 
 ## Item results (every item ends with one of these)
 
@@ -884,6 +1141,8 @@ progress-state-placing = 正在放到位
 progress-state-existing = 已存在
 outcome-stopped-title = 你的迁移已停止。
 outcome-stopped-body = 你停止了迁移。在此之前已复制并检查的内容会保留，其余的没有复制。
+outcome-broke-title = 你的迁移提前结束了。
+outcome-broke-body = 两台笔记本电脑之间出了问题，迁移无法继续。在此之前已复制并检查的内容会保留，其余的没有复制。
 outcome-files-summary = { $total }个项目中，已复制并检查{ $done }个。
 outcome-files-memory =
     { NUMBER($count) ->
@@ -902,6 +1161,15 @@ code-label = 六位配对码
 
 qs-eyebrow = 快速发送
 qs-eyebrow-receiving = 在这台笔记本电脑上接收
+qs-label-this = 这台笔记本电脑
+qs-label-other = 另一台笔记本电脑
+qs-wait-title = 正在等待文件。
+qs-wait-body = 两台笔记本电脑已配对。接收任何内容之前，你会先看到对方提供了什么。
+qs-pick-failed = 无法打开选择窗口。请重试。
+qs-pick-too-many = 文件太多，一次发送装不下。请取消勾选一些文件夹，或分几次发送。
+qs-problem-lost-title = 与另一台笔记本电脑的连接已断开。
+qs-problem-failed-title = 这次未能发送文件。
+qs-problem-body = 已接收并检查的内容会保留在原处。重新配对两台笔记本电脑即可再试一次。
 qs-route =
     .aria-label = 从{ $from }到{ $to }
 qs-route-sender = 发送 · 这台笔记本电脑
@@ -914,8 +1182,8 @@ qs-tally-badge = 附近发送
 
 ## Q01 Quick Send home
 
-qs-home-title = 几个文件，直接传过去。
-qs-home-body = 把几个文件发送到附近的笔记本电脑。
+qs-home-title = 把文件发送到附近的笔记本电脑。
+qs-home-body = 或者从附近的笔记本电脑接收文件。
 qs-send-title = 发送文件
 qs-send-body = 在这台笔记本电脑上选择文件或文件夹。
 qs-receive-title = 接收文件
@@ -952,6 +1220,7 @@ qs-choose-continue = 检查这些文件
 qs-check-title = 检查你要分享的内容。
 qs-check-body = 在这些文件离开这台笔记本电脑之前，请检查一遍。
 qs-check-included = 包含
+qs-file-type = 类型：.{ $ext }
 qs-check-shared-note = 另一台笔记本电脑能看到这些文件的名称、大小和日期。
 qs-check-changed = { $name }在你选择后有变化。请再次检查。
 qs-check-ack = 我已检查这些文件
@@ -973,7 +1242,7 @@ qs-who-action = 显示我的配对码
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = 有人想给你发送文件。
-qs-offer-body = 接受之前，请检查要发送的内容。
+qs-offer-body = { $label } 想向你发送这些文件。接受之前，请先检查。
 qs-offer-note = PCTwin只保存你接受的文件，绝不会打开或运行它们。
 qs-offer-accept = 接受并选择文件夹
 qs-offer-decline = 拒绝这些文件
@@ -1085,6 +1354,8 @@ qs-receipt-arrived =
 qs-receipt-size = { $size }与原文件一致
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = 这个文件夹没有全部送达并通过检查。
+qs-receipt-needs-action = { $path } 已在那里，但尚未完成。具体做法见“更多详情”。
+qs-receipt-mark-not-kept = { $path } 已在那里，但这个磁盘无法把它标记为从另一台笔记本电脑下载的文件。请谨慎打开。
 qs-receipt-status-verified = 已检查
 qs-receipt-status-unfinished = 未完成
 qs-receipt-not-completed = 没有完成。
@@ -1213,3 +1484,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = 开始新的发送
 history-open-name = { $what }：{ $title }
+
+## R05 撤销：撤销在每个硬盘上会做什么，以及每个副本的结果
+
+undo-here-removes = 撤销会删除 PCTwin 制作、你没有改动过的副本。你改动过的内容都会保留。
+undo-here-to-trash = 撤销会把 PCTwin 制作、你没有改动过的副本移到废纸篓。你改动过的内容都会保留，也不会删除任何东西。
+undo-here-keeps-fat = 撤销会保留 { $drive } 上的每个副本。这个硬盘使用 FAT 或 exFAT，它会重复使用区分文件的编号，所以 PCTwin 无法确定哪些文件是它自己的。你可以自己删除它们。
+undo-here-keeps-other = 撤销会保留 { $drive } 上的每个副本。在这种硬盘上，PCTwin 无法安全地移动或删除文件。你可以自己删除它们。
+undo-here-more = 更多详情
+undo-here-more-trash = Mac 无法让 PCTwin 确认没有其他应用还在写入某个文件，所以 PCTwin 从不删除文件。它会把每个副本移到同一个硬盘上的废纸篓。你可以从废纸篓把它放回原处。
+undo-here-more-fat = 在 FAT 和 exFAT 硬盘上，新文件可能会得到某个已删除文件用过的编号。PCTwin 只处理它能证明属于自己且未改动的文件，所以会保留这些文件。
+undo-done-trashed = 已移到废纸篓，名称为“{ $name }”。你可以从废纸篓把它放回原处。
+undo-kept-fat = 已保留。这个硬盘（FAT 或 exFAT）会重复使用区分文件的编号，所以 PCTwin 无法确定这是它的副本。如果你不需要它，可以自己删除。
+undo-kept-no-trash = 已保留。PCTwin 无法把这个副本移到它所在硬盘上的废纸篓。如果你不需要它，可以自己删除。

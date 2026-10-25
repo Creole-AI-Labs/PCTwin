@@ -10,7 +10,7 @@ import { Heading, ProgressPanel } from "./ProgressParts";
  * move is not yet paused; once paused, it says what is kept and what waits. Resume works in both:
  * during "pausing" it withdraws the pause.
  */
-export default function Paused({ progress, onResume }: { progress: MoveProgress; onResume: () => void }) {
+export default function Paused({ progress, onResume, onStop }: { progress: MoveProgress; onResume: () => void; onStop?: () => void }) {
   const { l10n } = useLocalization();
   const pausing = progress.state === "pausing";
   const { counts } = progress;
@@ -37,10 +37,20 @@ export default function Paused({ progress, onResume }: { progress: MoveProgress;
         />
         {counts.needsAction > 0 && <Row title={l10n.getString("progress-count-needs-action", { count: counts.needsAction })} end={<ResultChip result="needs-action" />} />}
       </RowList>
+      {progress.notice?.kind === "low-battery" && (
+        <div className="mv-note">
+          <Banner tone="attention">{l10n.getString(progress.notice.paused ? "progress-battery-paused" : "progress-low-battery")}</Banner>
+        </div>
+      )}
       <div className="mv-note">
         <Banner tone="info">{l10n.getString("pause-note")}</Banner>
       </div>
       <FrameFooter>
+        {onStop && (
+          <Button variant="quiet" onClick={onStop}>
+            {l10n.getString("move-stop")}
+          </Button>
+        )}
         <Button variant="primary" onClick={onResume}>
           {l10n.getString("pause-resume")}
         </Button>

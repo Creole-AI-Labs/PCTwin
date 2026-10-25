@@ -92,5 +92,46 @@ fresh
 printf '\n/* never closed\n' >>"$work/r/$lease"
 expect fail "a source that cannot be read as Rust fails closed"
 
+helper="crates/pctwin-helper-os/src/win.rs"
+helper_toml="crates/pctwin-helper-os/Cargo.toml"
+
+fresh
+cat >>"$work/r/$helper" <<'EOF'
+
+#[expect(unsafe_code, reason = "an unlisted function")]
+fn os_extra() -> u32 {
+    unsafe { core::mem::zeroed() }
+}
+EOF
+expect fail "an unsafe in an unlisted function in pctwin-helper-os"
+
+fresh
+# A second unsafe block inside a listed function.
+perl -0pi -e 's/(fn os_client_process_id\(pipe: BorrowedHandle<.?_>\) -> Result<u32, HRESULT> \{\n)/$1    #[expect(unsafe_code, reason = "second")]\n    let _x: u8 = unsafe { core::mem::zeroed() };\n/' "$work/r/$helper"
+grep -q 'reason = "second"' "$work/r/$helper" || { echo "WRONG: the self-test could not plant a second block"; failed=1; }
+expect fail "a second unsafe block inside a listed pctwin-helper-os function"
+
+fresh
+# A listed function renamed: its unsafe is now outside the list, and the listed name is missing.
+perl -0pi -e 's/\bos_server_process_id\b/os_server_pid/g' "$work/r/$helper"
+expect fail "a listed pctwin-helper-os function renamed"
+
+fresh
+printf '\n#[allow(\n    unsafe_code\n)]\nfn quiet() {}\n' >>"$work/r/$helper"
+expect fail "an allow(unsafe_code) in pctwin-helper-os"
+
+fresh
+perl -0pi -e 's/unsafe_code = "deny"/unsafe_code = "allow"/' "$work/r/$helper_toml"
+expect fail "pctwin-helper-os loosening unsafe_code to allow"
+
+fresh
+printf '\npub struct Raw;\nunsafe impl Send for Raw {}\n' >>"$work/r/crates/pctwin-helper-os/src/unix.rs"
+expect fail "an unsafe impl in pctwin-helper-os's Unix code"
+
+fresh
+mkdir -p "$work/r/crates/pctwin-helper-os/tests"
+printf '\n#[test]\nfn t() {\n    #[expect(unsafe_code)]\n    let _x: u8 = unsafe { core::mem::zeroed() };\n}\n' >"$work/r/crates/pctwin-helper-os/tests/sneaky.rs"
+expect fail "an unsafe in pctwin-helper-os's tests"
+
 [ "$failed" -eq 0 ] && echo "unsafe fence self-test OK"
 exit $failed

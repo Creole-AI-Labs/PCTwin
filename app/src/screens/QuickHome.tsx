@@ -81,7 +81,7 @@ export default function QuickHome({
       <ul className="choices">
         {cards.map(({ id, go }) => (
           <li key={id}>
-            <button type="button" className="choice" onClick={go}>
+            <button type="button" className="choice" data-bookmark="" data-icon-job="send" onClick={go}>
               <span className="choice-icon">
                 <Folder />
               </span>

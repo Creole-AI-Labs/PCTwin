@@ -9,7 +9,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use pctwin_journal::{FileId, Journal, PlannedWrite};
 use pctwin_record::ItemId;

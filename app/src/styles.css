@@ -1,4 +1,5 @@
 @import "./styles/tokens.css";
+@import "./motion/motion.css";
 
 /* Values follow the mockups' foundation reference (design batch 01). */
 
@@ -135,18 +136,8 @@ button {
   min-height: 0;
   overflow-y: auto;
   padding: var(--content-padding);
-  animation: page-enter var(--motion-page) ease-out;
   scrollbar-width: thin;
   scrollbar-color: #cbd3e4 transparent;
-}
-
-@keyframes page-enter {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
 }
 
 .app-footer {

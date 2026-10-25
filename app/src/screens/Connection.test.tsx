@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionCheck, PeerReadiness, WaitingState } from "../connection";
 import { localization } from "../i18n";
@@ -44,11 +44,6 @@ function inApp(ui: ReactNode) {
   );
 }
 
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
-
 const noStringsMissing = () => {
   expect(warnings.filter((w) => /missing|not found|did not match|unknown/i.test(w))).toEqual([]);
 };
@@ -58,13 +53,13 @@ const nothing = () => undefined;
 /* ---------------------------------------------------------------- F01 Resume your move */
 
 describe("F01 Welcome with an unfinished move", () => {
-  it("is unchanged when no move is waiting: Start a move, no Resume", () => {
+  it("is unchanged when no move is waiting: Start a full move, no Resume", () => {
     inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} />);
     expect(screen.getByRole("button", { name: text("welcome-start") })).toBeTruthy();
     expect(screen.queryByRole("button", { name: text("resume-open") })).toBeNull();
   });
 
-  it("the primary button reads Resume your move, not Start a move, and reopens the saved move", () => {
+  it("the primary button reads Resume your move, not Start a full move, and reopens the saved move", () => {
     const onStart = vi.fn();
     const onResume = vi.fn();
     inApp(<Welcome onStart={onStart} onSoon={nothing} onQuick={nothing} unfinished onResume={onResume} />);
@@ -80,7 +75,7 @@ describe("F01 Welcome with an unfinished move", () => {
 
   it("changes nothing else: same picture, headline and secondary choices, nothing paid, no accessibility violations", async () => {
     inApp(<Welcome onStart={nothing} onSoon={nothing} onQuick={nothing} unfinished onResume={nothing} />);
-    expect(heading().textContent).toBe("Your setup.Your next laptop.");
+    expect(heading().textContent).toBe("Send files,or move everything.");
     expect(document.querySelector(".illustration")).toBeTruthy();
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Resume your move", "Restore setup", "Rescue a laptop", "Quick Send"]);
     expect(screen.getByRole("main").textContent).not.toMatch(PAID);
@@ -382,6 +377,26 @@ describe("C07 Let's check the connection", () => {
     expect(screen.getByRole("main").textContent).not.toMatch(/standard|smart/i);
   });
 
+  it("before the move: lids open and near the router, as the person's to do, with no status PCTwin cannot see", async () => {
+    inApp(<CheckConnection check={good} {...handlers()} />);
+    const list = screen.getByRole("region", { name: text("check-before-title") });
+    for (const id of ["check-before-lids", "check-before-near"]) {
+      const item = within(list).getByText(text(`${id}-title`)).closest("li");
+      expect(item?.textContent).toContain(text(`${id}-body`));
+      // Advice, not a check: no Ready or Plug in beside it.
+      expect(item?.querySelector(".kit-chip")).toBeNull();
+    }
+    // Power stays the measured row above, said once.
+    expect(within(list).queryByText(text("check-power-title"))).toBeNull();
+    noStringsMissing();
+    expect(await violations()).toEqual([]);
+  });
+
+  it("while measuring, the checklist waits with the results", () => {
+    inApp(<CheckConnection check={null} {...handlers()} />);
+    expect(screen.queryByText(text("check-before-title"))).toBeNull();
+  });
+
   it("Check again and Back call out", () => {
     const h = handlers();
     inApp(<CheckConnection check={good} {...h} />);
@@ -460,6 +475,32 @@ describe("C09 Waiting for your other laptop", () => {
     fireEvent.click(screen.getByRole("button", { name: text("reconnect-try-now") }));
     expect(h.onRetry).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: text("reconnect-pair-again") })).toBeNull();
+  });
+
+  it("not reachable for a while: says nothing new has arrived, with Stop beside Try now", () => {
+    const onStop = vi.fn();
+    inApp(<WaitingForLaptop waiting={{ ...base, kind: "unreachable" }} {...handlers()} onStop={onStop} />);
+    expect(screen.getByRole("alert").textContent).toContain(text("reconnect-nothing-new"));
+    fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: text("reconnect-try-now") })).toBeTruthy();
+    noStringsMissing();
+  });
+
+  it("where this laptop does not do the trying there is no Try now, only Stop; once pairing has expired, no Stop", () => {
+    const onStop = vi.fn();
+    const { rerender } = inApp(<WaitingForLaptop waiting={base} onPairAgain={vi.fn()} onStop={onStop} />);
+    expect(screen.queryByRole("button", { name: text("reconnect-try-now") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: text("move-stop") }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+    rerender(
+      <LocalizationProvider l10n={l10n}>
+        <main>
+          <WaitingForLaptop waiting={{ ...base, kind: "pairing-expired" }} onPairAgain={vi.fn()} onStop={onStop} />
+        </main>
+      </LocalizationProvider>,
+    );
+    expect(screen.queryByRole("button", { name: text("move-stop") })).toBeNull();
   });
 
   it("shows the resume check as a row, pending while it waits, and not pending once pairing has expired", () => {

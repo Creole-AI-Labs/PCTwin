@@ -15,8 +15,10 @@
 //! Nothing here pairs, touches the network or opens anything: a refused command never runs, and a
 //! granted one is sent arguments of the wrong type, so it stops before doing anything. Two granted
 //! commands are checked differently: `set_window_mode` really runs (it resizes the mock window),
-//! and `pairing_new_search`, which takes no arguments and would search the network, is checked on
-//! the resolved permissions only.
+//! and `pairing_new_search` (which would search the network) and `quicksend_choose_folder` (which
+//! would open the system's folder picker), taking no arguments, are checked on
+//! the resolved permissions only. The move's commands that take no arguments (pause, resume, stop,
+//! report) do run, and find no move to act on.
 
 use std::collections::BTreeSet;
 
@@ -27,9 +29,10 @@ use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
 use tauri::webview::{InvokeRequest, WebviewWindowBuilder};
 use tauri::{App, WebviewUrl, WebviewWindow};
 
-/// Exactly what the screens may call: the app's eleven commands, listening to its own events, and
-/// opening our own site in the browser. Changing this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 14] = [
+/// Exactly what the screens may call, 46 names: the app's forty-three commands, listening to and
+/// unlistening from its own events (two), and opening our own site in the browser (one). Changing
+/// this list is a security decision.
+const SCREENS_MAY_CALL: [&str; 48] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -38,9 +41,43 @@ const SCREENS_MAY_CALL: [&str; 14] = [
     "pairing_old_shuffle",
     "pairing_old_rename",
     "pairing_old_start_again",
+    "pairing_old_nearby",
+    "pairing_heads_up",
     "pairing_stop",
     "pairing_new_search",
     "pairing_new_connect",
+    "move_begin",
+    "move_approve",
+    "move_place_people",
+    "move_choose_place",
+    "move_usual_place",
+    "move_privacy_answer",
+    "open_privacy_settings",
+    "move_pause",
+    "move_resume",
+    "move_stop",
+    "move_retry",
+    "move_report",
+    "move_people_here",
+    "help_code",
+    "recovery_check",
+    "recovery_run",
+    "things_ready",
+    "history_list",
+    "history_open",
+    "history_export",
+    "quicksend_pick",
+    "quicksend_accept_drops",
+    "quicksend_clear",
+    "quicksend_offer",
+    "quicksend_offer_missing",
+    "quicksend_send",
+    "quicksend_receive",
+    "quicksend_choose_folder",
+    "quicksend_answer",
+    "quicksend_pause",
+    "quicksend_resume",
+    "quicksend_stop",
     "plugin:event|listen",
     "plugin:event|unlisten",
     "plugin:opener|open_url",
@@ -201,6 +238,17 @@ fn wrong_arguments(cmd: &str) -> Value {
         "pairing_old_decline" => json!({ "round": "x" }),
         "pairing_old_rename" => json!({ "name": 7 }),
         "pairing_new_connect" => json!({ "index": "x", "code": 1 }),
+        "move_begin" => json!({ "fallback": 1, "others": 2 }),
+        "move_approve" => json!({ "plan": 1, "approve": "x", "leftOut": 3 }),
+        "move_place_people" => json!({ "choices": 1, "words": 2 }),
+        "move_choose_place" | "move_usual_place" => json!({ "role": 1 }),
+        "move_privacy_answer" => json!({ "again": "x" }),
+        "help_code" => json!({ "topic": 1, "step": 2 }),
+        "quicksend_pick" => json!({ "folders": "x" }),
+        "quicksend_accept_drops" => json!({ "on": "x" }),
+        "quicksend_offer" => json!({ "ids": 1 }),
+        "quicksend_answer" => json!({ "answer": 1 }),
+        "history_open" => json!({ "id": 1 }),
         "plugin:event|listen" | "plugin:event|unlisten" => json!({ "event": 1 }),
         _ => json!({}),
     }
@@ -212,8 +260,12 @@ fn from_the_main_windows_own_pages_only_the_closed_list_is_let_through() {
     let main = window(&app, "main");
     let mut let_through = BTreeSet::new();
     for cmd in every_known_command() {
-        if cmd == "pairing_new_search" || cmd == "set_window_mode" {
-            // Checked below, and in the resolved-permissions test.
+        if matches!(
+            cmd.as_str(),
+            "pairing_new_search" | "set_window_mode" | "quicksend_choose_folder" | "history_export"
+        ) {
+            // Checked below, and in the resolved-permissions test (the folder picker would open
+            // the system's window and wait for a person).
             let_through.insert(cmd);
             continue;
         }
@@ -567,11 +619,18 @@ fn the_screens_argument_names_are_the_commands_own() {
             );
             given.insert(key.to_owned(), arg[1].clone());
         }
-        // These would pair, search the network, or build a native menu (which macOS allows only
-        // on the main thread); their names are proven above all the same.
+        // These would pair, search the network, build a native menu (which macOS allows only
+        // on the main thread) or open the system's file picker and wait for a person; their
+        // names are proven above all the same.
         if matches!(
             cmd,
-            "pairing_old_start" | "pairing_new_search" | "set_tray_labels"
+            "pairing_old_start"
+                | "pairing_new_search"
+                | "set_tray_labels"
+                | "quicksend_pick"
+                | "quicksend_choose_folder"
+                | "move_choose_place"
+                | "history_export"
         ) {
             continue;
         }

@@ -1,6 +1,12 @@
 
 # cargo-vet audits file
 
+[[audits.auto-launch]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.6.0"
+notes = '''Reviewed 25 Oct 2026 for PCTwin's one use, through tauri-plugin-autostart in pctwin-app (restart.rs): enable, is_enabled and disable of the sign-in entry while a move is under way, macOS mode LaunchAgent, Windows mode left at the default (Dynamic). Read the whole crate in full (src/lib.rs, windows.rs, macos.rs, linux.rs, about 1400 lines). No unsafe code, no build script, no network. Windows: writes one string value named after the app under SOFTWARE\Microsoft\Windows\CurrentVersion\Run and a 12-byte enabled marker under Explorer\StartupApproved\Run (only if that key already exists), through windows-registry; disable deletes the value, treating not-found as done. macOS LaunchAgent: writes ~/Library/LaunchAgents/<name>.plist (create_dir only for the LaunchAgents folder) and removes it on disable; is_enabled checks the file exists. The AppleScript mode runs osascript and the SMAppService mode calls smappservice-rs and os_info; PCTwin uses neither. Linux XDG mode writes ~/.config/autostart/<name>.desktop; the systemd mode (runs systemctl --user) is not used. Residuals: (1) Dynamic mode tries HKEY_LOCAL_MACHINE first and falls back to the current user only on access denied, so if pctwin-app ever ran elevated the entry would land in the machine-wide Run key for every user; PCTwin's app runs unelevated (elevated work goes to a separate process). (2) The Run value is the path and arguments joined with a space, not quoted, so a path with spaces is the classic unquoted-path pattern; exploiting it needs write access to a parent folder such as C:\. (3) The plist and .desktop text is formatted without XML or Exec escaping; PCTwin passes only its own name and its own executable path, no arguments.'''
+
 [[audits.cfb]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
@@ -13,6 +19,18 @@ criteria = "safe-to-run"
 version = "0.10.2"
 notes = "Reviewed 15 Oct 2026. Dev-dependency only, pulled in by proptest 1.12 as its RNG (rng feature). RustCrypto project crate. About 2800 lines. Review depth is limited: I inspected where the 73 lines of unsafe sit (sse2, avx2, avx512 and neon backends: SIMD intrinsics on the 64-byte state, pointer offsets inside the state and output arrays, transmutes between vector arrays) and the build and I/O surface, not each intrinsic call. Backend choice uses cpufeatures. No build script, no network, file or process access (grep)."
 
+[[audits.ctutils]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.4.5"
+notes = "Reviewed 25 October 2026: the RustCrypto constant-time helpers pulled in by digest, updated for RUSTSEC-2026-0385 (non-constant-time mask generation and u128 comparisons). Read the whole source diff (choice.rs, lib.rs, traits/ct_gt.rs and ct_lt.rs, and the new primitives.rs, 363 lines): the bit-trick comparison macros move into const functions in primitives.rs, Choice::and and the to_*_mask functions go through to_u8 so the compiler cannot turn them into short-circuiting branches, and on 32-bit targets u128 comparisons are built from opaque 64-bit halves. The crate forbids unsafe code (#![forbid(unsafe_code)]); no build script; no file, network or process access. Cargo.toml only excludes a test folder and adds a test target."
+
+[[audits.dirs]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+delta = "7.0.0 -> 6.0.0"
+notes = "Reviewed 25 Oct 2026 (a delta down from the audited 7.0.0). Diffed both packages from the cargo registry. The only source change is one line in src/win.rs: in 6.0.0 preference_dir() returns the local app data folder (known_folder_local_app_data) where 7.0.0 returns the roaming one. Everything else is Cargo.toml (version, repository moved from GitHub to Codeberg), Cargo.lock and README text. Same dirs-sys requirement, no build script, no unsafe in either. PCTwin reaches 6.0.0 only through auto-launch, which calls home_dir() on macOS and Linux to find the LaunchAgents and autostart folders; preference_dir is not used."
+
 [[audits.fs_at]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
@@ -23,7 +41,25 @@ notes = "Reviewed 8 Oct 2026 for PCTwin's one use: FileExt::delete_by_handle on 
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 version = "0.31.3"
-notes = "Reviewed 16 Oct 2026 for PCTwin's one use: nix::unistd::chflags(path, FileFlag) in pctwin-gate on macOS (the hidden mark on a file being filled in; the gate checks the name holds its own file first and reads the flags back through its handle). Read src/unistd.rs chflags (one unsafe: libc::chflags with the pointer of a NUL-terminated CStr that lives for the call, and the flags word), NixPath for str, OsStr, Path, CStr and [u8] in src/lib.rs (paths under 1024 bytes are copied into a stack buffer with copy_nonoverlapping, bounded by the length check, then NUL-terminated and validated with CStr::from_bytes_with_nul, so an interior NUL gives EINVAL; longer paths go through CString::new), Errno::result in src/errno.rs, and the FileFlag bitflags in src/sys/stat.rs (no unsafe). build.rs only declares cfg aliases: no network, no file access, no compiled code. Only the fs feature is enabled by PCTwin; other modules were not used and were not read in full. fs_at uses this version on Unix (not built for PCTwin's Unix targets)."
+notes = "Reviewed 16 Oct 2026 for PCTwin's one use: nix::unistd::chflags(path, FileFlag) in pctwin-gate on macOS (the hidden mark on a file being filled in; the gate checks the name holds its own file first and reads the flags back through its handle). Read src/unistd.rs chflags (one unsafe: libc::chflags with the pointer of a NUL-terminated CStr that lives for the call, and the flags word), NixPath for str, OsStr, Path, CStr and [u8] in src/lib.rs (paths under 1024 bytes are copied into a stack buffer with copy_nonoverlapping, bounded by the length check, then NUL-terminated and validated with CStr::from_bytes_with_nul, so an interior NUL gives EINVAL; longer paths go through CString::new), Errno::result in src/errno.rs, and the FileFlag bitflags in src/sys/stat.rs (no unsafe). build.rs only declares cfg aliases: no network, no file access, no compiled code. Only the fs feature is enabled by PCTwin; other modules were not used and were not read in full. fs_at uses this version on Unix (not built for PCTwin's Unix targets). Added 20 Oct 2026 for pctwin-helper-os on macOS (socket feature): getsockopt with sockopt::LocalPeerPid and sockopt::LocalPeerCred on a connected Unix socket. Read getsockopt (src/sys/socket/mod.rs) and the GetOnly path of sockopt_impl with GetStruct (src/sys/socket/sockopt.rs): the value is a MaybeUninit of the option type, its size passed as the length, and assume_init asserts the kernel wrote exactly that many bytes before the value is used; XuCred::uid reads cr_uid. No other socket functions are used."
+
+[[audits.objc2-open-directory]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.3.2"
+notes = "Reviewed 21 Oct 2026 for PCTwin's one use: making a standard account on the new Mac without a password on any command line (ODSession defaultSession, ODNode nodeWithSession:type:error: and createRecordWithRecordType:name:attributes:error:, ODRecord setValue:forAttribute:error:, changePassword:toPassword:error: and synchronizeAndReturnError:, and the kODRecordTypeUsers and kODAttributeType* constants) in one fenced function of pctwin-helper-os on macOS (features std, CFOpenDirectory, CFOpenDirectoryConstants, ODNode, ODRecord, ODSession). About 13,000 lines, all generated by objc2's header translator from Apple's OpenDirectory headers: lib.rs (no_std, re-exports), generated/*.rs (classes, extern_methods! declarations, every method declared unsafe, and extern statics for the framework's constants), generated/mod.rs (links the OpenDirectory framework). The only unsafe impls are the binding's own marker impls (Encode, RefEncode, NSCopying, the CF type refs). No build script, no network, file or process access of its own; it only sends Objective-C messages and calls the framework's C functions."
+
+[[audits.objc2-service-management]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.3.2"
+notes = "Reviewed 20 Oct 2026 for PCTwin's one use: SMAppService daemonServiceWithPlistName, registerAndReturnError, unregisterAndReturnError, status and openSystemSettingsLoginItems in pctwin-helper-os on macOS (features std, SMAppService, objc2, objc2-foundation). About 830 lines, all generated by objc2's header translator from Apple's ServiceManagement headers: lib.rs (no_std, re-exports), generated/SMAppService.rs (the class, its status constants and Encode impls, and extern_methods! declarations; every method is declared unsafe and pctwin-helper-os calls each from one fenced function), generated/mod.rs (links the ServiceManagement framework; the deprecated SMJob* C functions and constants, not used). No build script, no network, file or process access of its own; it only sends Objective-C messages to the system framework."
+
+[[audits.os_info]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "3.15.0"
+notes = "Reviewed 25 Oct 2026. Reached only through auto-launch, which calls os_info::get() solely in its SMAppService mode on macOS; PCTwin uses the LaunchAgent mode, so the code is compiled but not run. Built with default features off (no serde, no schemars). Read in full the code for PCTwin's three systems: src/windows/winapi.rs, src/macos/mod.rs, src/linux (file_release.rs, lsb_release.rs, mod.rs), lib.rs, info.rs, version.rs, matcher.rs, bitness.rs, uname.rs, architecture.rs; scanned the other OS modules (aix, the BSDs, illumos, android, ios, redox, cygwin) for unsafe, process and network use only. No build script, no network. It reads OS files (/etc/os-release and friends, /System/Library/CoreServices/SystemVersion.plist) and runs local tools by bare name through PATH (sw_vers, lsb_release, uname, getconf, sysctl) to read version strings; output is only parsed into strings. Unsafe on Windows: GetNativeSystemInfo into a zeroed MaybeUninit, RtlGetVersion resolved with GetModuleHandleA/GetProcAddress and called with a correctly sized OSVERSIONINFOEX, RegOpenKeyExW/RegQueryValueExW on HKLM CurrentVersion with the type, even size and second-read size checked before the buffer is used, key closed by a drop guard. macOS: one NSPropertyListSerialization call with the result downcast-checked. Residual: GetProcAddress returns FARPROC (an Option of a function pointer) and the crate transmutes it to a plain function pointer without a null check, which would be undefined behaviour if ntdll lacked RtlGetVersion (it never does on supported Windows); the tools it runs are found through PATH."
 
 [[audits.proptest]]
 who = "PCTwin maintainers; to be confirmed in the security review"
@@ -49,6 +85,24 @@ criteria = "safe-to-run"
 version = "0.5.0"
 notes = "Reviewed 15 Oct 2026. Dev-dependency only. 155 lines, #![forbid(unsafe_code)], no build script, no dependencies other than rand_core 0.10. A xorshift generator."
 
+[[audits.rfd]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.15.4"
+notes = "Reviewed 25 Oct 2026 for PCTwin's use in pctwin-app (default features off, gtk3 only): FileDialog::new().pick_folder() run on a blocking thread (history.rs, moving.rs) and MessageDialog with OkCancel and Ok buttons, no parent window (others.rs). With gtk3 the zenity and xdg-portal backends (the only places that run a process or talk over D-Bus) are not compiled; the wasm backend is not built. build.rs only links AppKit on macOS and checks the Linux feature choice: no downloads, no file writes, no compiled code. No network anywhere. Read in full: src/backend.rs, the Windows backend (win_cid: utils.rs, file_dialog.rs, file_dialog/com.rs, dialog_ffi.rs, message_dialog.rs without common-controls-v6, thread_future.rs), the macOS backend (utils.rs, focus and policy managers, user_alert.rs, message_dialog.rs, file_dialog.rs, file_dialog/panel_ffi.rs, modal_future.rs) and the gtk3 backend (utils.rs, file_dialog.rs, dialog_ffi.rs, message_dialog.rs, gtk_future.rs); scanned lib.rs, file_dialog.rs, message_dialog.rs, oneshot.rs and file_handle for unsafe only. Unsafe is COM vtable calls on IFileOpenDialog/IShellItem with CoInitializeEx around each sync dialog and Release on drop, MessageBoxW with NUL-terminated UTF-16 owned for the call, objc2 AppKit calls (NSOpenPanel, NSAlert, CFUserNotificationDisplayAlert) dispatched to the main thread, and GTK calls queued with g_idle_add_full onto the default GLib context (so they run on the thread that owns it, Tauri's GTK main thread) with the caller blocking on a condvar; GTK message text goes through a %s format, never as the format. Residuals, none reachable from untrusted input (the person drives the dialogs; PCTwin supplies the words): Windows read_to_string unwraps String::from_utf16, so a picked path with an unpaired surrogate panics the blocking task; gtk3 get_result calls CStr::from_ptr on gtk_file_chooser_get_filename without a null check (a chosen location with no local path) and leaks the returned string; GTK titles and descriptions with an interior NUL panic (CString::new().unwrap()); on Windows an interior NUL silently truncates the message text; macOS run_on_main makes a MainThreadMarker unchecked off the main thread to read NSApplication isRunning."
+
+[[audits.security-framework]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "3.7.0"
+notes = "Reviewed 25 Oct 2026 for PCTwin's one use in pctwin-helper-os on macOS (mac.rs ask_administrator and tests/approval.rs): AuthorizationItemSetBuilder add_right and add_string, Authorization::new with INTERACTION_ALLOWED | EXTEND_RIGHTS | PREAUTHORIZE, make_external_form, Drop, and base::Error::code. Default features on (OSX_10_14, alpn, session-tickets: they only gate TLS and keychain code). No build script. Read in full: src/authorization.rs, src/base.rs, src/lib.rs. AuthorizationItemSetStorage keeps the CString names, the value bytes and the AuthorizationItem array in Vecs whose heap buffers the set points into, so moving the storage keeps the pointers valid, and Authorization::new holds the storage for the whole AuthorizationCreate call; add_string passes the value without its NUL with the matching length; the out-handle is MaybeUninit and only read after errAuthorizationSuccess; AuthorizationFree runs once in Drop with DEFAULTS unless destroy_rights is asked for; make_external_form copies the 32-byte form out only on success. Not used by PCTwin and only read: execute_with_privileges (AuthorizationExecuteWithPrivileges; the piped variant leaks the FILE behind its fd), set_right, remove_right, get_right, copy_info, job_bless (feature off). The rest of the crate (about 9500 lines: secure_transport, item, key, trust, certificate, cms, passwords, os/macos) was scanned for unsafe, build-time, file, process and network surface only: the only TcpStream and file creation are inside #[cfg(test)] modules (they connect to localhost and google.com in tests); the library itself opens no connections and runs no processes. Residual: the scanned modules' unsafe blocks (about 400 in all) were not checked one by one; PCTwin calls none of them."
+
+[[audits.security-framework-sys]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "2.17.0"
+notes = "Reviewed 25 Oct 2026. Raw extern declarations for Security.framework (linked with #[link(name = Security, kind = framework)] in lib.rs); no build script, no network, file or process code, and the only unsafe outside extern blocks is a match over extern statics in key.rs. PCTwin uses it directly in pctwin-helper-os mac.rs (AuthorizationCreateFromExternalForm, AuthorizationCopyRights, AuthorizationFree) and through security-framework. Read src/authorization.rs and src/base.rs in full and checked them against Apple's Authorization.h and AuthorizationTags.h: AuthorizationItem is {name: *const c_char, valueLength: usize, value: *mut c_void, flags: u32}, AuthorizationItemSet is {count: u32, items: *mut AuthorizationItem}, AuthorizationExternalForm is 32 c_char bytes, the six flag constants (0, 1, 2, 4, 8, 16) and the errAuthorization codes (-60001 to -60011, -60031 to -60033) match, and the function signatures match. Scanned the other modules (keychain, secure_transport, item, key, trust, cms and the rest, about 2000 lines) as declarations only. Residual: AuthorizationCopyRightsAsync is declared with a C function pointer where Apple takes a block, so calling it would be wrong; nothing in PCTwin or security-framework calls it."
+
 [[audits.serde_json]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
@@ -60,6 +114,12 @@ who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
 delta = "0.3.18 -> 0.4.5"
 notes = "Reviewed 15 Oct 2026 for PCTwin's one use: signal_hook::flag::register for SIGIO in pctwin-lease (Linux). Read the full non-test diff. flag.rs is unchanged apart from a test import, so the flag handler (an atomic store in the signal handler) is the same. low_level/pipe.rs now takes OwnedFd instead of raw fds (not used by PCTwin), sets FD_CLOEXEC, and fixes a double close; low_level/signal_details.rs drops the 32-bit Android sigset fallback; build.rs only compiles extract.c when the optional extended-siginfo-raw feature is on and the target is not Windows. Dev dependency serial_test removed. No network or file access. Same dependency (signal-hook-registry)."
+
+[[audits.smappservice-rs]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.1.3"
+notes = "Reviewed 25 Oct 2026. Reached on macOS through auto-launch, which calls it only in its SMAppService mode; PCTwin uses the LaunchAgent mode, so it is compiled but not run. Read src/lib.rs in full (the whole crate, 555 lines). A thin wrapper over objc2-service-management: AppService::new picks SMAppService mainAppService or the agent, daemon or login-item constructors with an NSString made from the caller's name; register, unregister and status forward to the framework and map its error codes and status numbers to enums (unknown codes kept as Unknown, an unknown status shown as NotFound); open_system_settings_login_items opens the Login Items settings pane. Every unsafe block is one of these objc2 method calls on a Retained object the struct owns. No build script, no network, no file or process access of its own."
 
 [[audits.tauri]]
 who = "PCTwin maintainers; to be confirmed in the security review"
@@ -91,6 +151,12 @@ criteria = "safe-to-deploy"
 delta = "2.7.1 -> 2.7.3"
 notes = "Reviewed 21 Oct 2026. Downloaded both .crate files from static.crates.io and diffed them without building or running anything. The only change in the package is Cargo.toml: version, tauri-codegen raised to ~2.7.3 and tauri-utils to ~2.10.2. No source change."
 
+[[audits.tauri-plugin-autostart]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "2.7.0"
+notes = "Reviewed 25 Oct 2026 for PCTwin's use in pctwin-app restart.rs: init(MacosLauncher::LaunchAgent, None), then autolaunch().enable() when a move begins and is_enabled()/disable() when nothing is left to pick up. Read src/lib.rs, build.rs, api-iife.js, the permission files and Cargo.toml in full. No unsafe code. build.rs only runs tauri_plugin::Builder to generate the enable, disable and is_enabled permission files and register the JS API script: no network, no downloads. The plugin builds an AutoLaunch from the app's package name and current_exe() (on macOS canonicalised, keeping the full executable path in LaunchAgent mode), with no arguments, and exposes three commands to the webview; PCTwin grants none of them in any capability, so the screens cannot call them and only the Rust side changes the sign-in entry. disable treats a missing Windows Run value as done. Residual: inherits auto-launch's behaviour (see its audit): on Windows the default Dynamic mode writes the machine-wide Run key first when the process is elevated, and the Run value is not quoted."
+
 [[audits.tauri-plugin-opener]]
 who = "PCTwin maintainers; to be confirmed in the security review"
 criteria = "safe-to-deploy"
@@ -114,6 +180,12 @@ who = "PCTwin maintainers"
 criteria = "safe-to-deploy"
 version = "3.1.1"
 notes = "Read in full for the code compiled on Windows and Linux, the two systems PCTwin uses it on (20 October 2026). Every unsafe block is a direct system call with arguments the crate owns: Windows SetThreadPriority, GetThreadPriority, GetCurrentThread, SetThreadPriorityBoost, SetThreadIdealProcessor; Linux pthread_setschedparam, pthread_getschedparam, setpriority, sched_get_priority_min/max, the sched_getattr/sched_setattr syscalls with a correctly sized struct, errno through libc's accessor, and a zero-initialised sched_param (plain integers). No pointer arithmetic, no memory outside its own locals, no network, no file access, no build script. Used only to put PCTwin's own sweep threads into background priority."
+
+[[audits.windows-registry]]
+who = "PCTwin maintainers; to be confirmed in the security review"
+criteria = "safe-to-deploy"
+version = "0.6.1"
+notes = "Reviewed 25 Oct 2026. Reached on Windows through auto-launch (Key::create, options().write().open, set_string, set_bytes, remove_value, get_string, get_value on HKCU and HKLM). Read the whole crate in full (src, about 1300 lines). No build script, no network, no file or process access. Every unsafe block is a Win32 registry or heap call bound through windows-link (advapi32 Reg* functions, kernel32 HeapAlloc/HeapFree, ktmw32 transactions): names and string values are owned NUL-terminated UTF-16 buffers that live for the call; set_bytes passes the slice pointer and its length (try_into u32, so an oversized value is an error, not a truncation); get_value queries the size first and reads into a zeroed buffer of that size, and if the value grows in between the second read fails with ERROR_MORE_DATA rather than overflowing; the returned length is used to slice the buffer; Data is a HeapAlloc block with at least u16 alignment, freed once in Drop; as_wide reads len/2 u16s; key and value iterators size their buffers from RegQueryInfoKeyW and slice by the returned lengths; keys are closed once in Drop. String conversion uses from_utf16 (an error, not a panic) after trimming trailing NULs. Residual: none found for PCTwin's use; transactions, rename and remove_tree were read but are not used."
 
 [[audits.zeroize]]
 who = "PCTwin maintainers; to be confirmed in the security review"

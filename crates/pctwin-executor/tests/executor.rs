@@ -29,6 +29,7 @@ fn app(name: &str) -> Item {
         place,
         path,
         size_bytes: 0,
+        modified_ns: None,
         portability: Portability::Rebuildable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,

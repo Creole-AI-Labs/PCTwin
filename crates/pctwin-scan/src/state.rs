@@ -35,6 +35,22 @@ pub struct DoneFolder {
     pub unreadable: Vec<String>,
 }
 
+/// Who gets the old laptop next, asked early (Product Spec: selling, family, keeping): it decides
+/// what PCTwin offers once the move is done (wiping it for a new owner, leaving a family member's
+/// own account, or nothing). Only ever the person's answer, never inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NextOwner {
+    /// Sold or given to someone outside the household.
+    Selling,
+    /// Passed to someone in the family or household.
+    Family,
+    /// The person keeps it.
+    Keeping,
+    /// The person did not say yet.
+    NotSure,
+}
+
 /// The scan as saved: enough to resume after a restart and to tell later what changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanState {
@@ -47,6 +63,7 @@ pub struct ScanState {
     pub(crate) done: Vec<DoneFolder>,
     pub(crate) record: Record,
     pub(crate) stamps: BTreeMap<ItemId, Stamp>,
+    pub(crate) next_owner: Option<NextOwner>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -61,6 +78,37 @@ struct Wire {
     /// The move record in its own format, checked on load like any record.
     record: String,
     stamps: Vec<(ItemId, Stamp)>,
+    /// Missing in a save from before it was asked.
+    #[serde(default)]
+    next_owner: Option<NextOwner>,
+}
+
+/// [`Wire`] as it is saved: the same fields in the same order, borrowed, with the record written
+/// into its text a piece at a time, so saving never holds the record's whole JSON.
+#[derive(Serialize)]
+struct SaveWire<'a> {
+    format: u32,
+    laptop: LaptopId,
+    person: &'a str,
+    started_ns: i64,
+    finished: bool,
+    done: &'a [DoneFolder],
+    #[serde(serialize_with = "record_text")]
+    record: &'a Record,
+    #[serde(serialize_with = "stamp_pairs")]
+    stamps: &'a BTreeMap<ItemId, Stamp>,
+    next_owner: Option<NextOwner>,
+}
+
+fn record_text<S: serde::Serializer>(record: &&Record, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_str(&record.json_text())
+}
+
+fn stamp_pairs<S: serde::Serializer>(
+    stamps: &&BTreeMap<ItemId, Stamp>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    s.collect_seq(stamps.iter())
 }
 
 /// Why a saved scan was not used.
@@ -84,7 +132,18 @@ impl ScanState {
             done: Vec::new(),
             record: Record::new(laptop),
             stamps: BTreeMap::new(),
+            next_owner: None,
         }
+    }
+
+    /// Who gets the old laptop next, as the person said (`None`: not asked yet).
+    pub fn next_owner(&self) -> Option<NextOwner> {
+        self.next_owner
+    }
+
+    /// The person's answer to who gets the old laptop next; kept with the scan when it is saved.
+    pub fn set_next_owner(&mut self, next: NextOwner) {
+        self.next_owner = Some(next);
     }
 
     pub fn record(&self) -> &Record {
@@ -111,17 +170,17 @@ impl ScanState {
     /// a file or link someone left there), readable by this account alone on Mac and Linux. It is
     /// removed on every failure, since it is deleted when dropped unless moved into place.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        let wire = Wire {
+        let wire = SaveWire {
             format: STATE_FORMAT,
             laptop: self.laptop,
-            person: self.person.clone(),
+            person: &self.person,
             started_ns: self.started_ns,
             finished: self.finished,
-            done: self.done.clone(),
-            record: String::from_utf8_lossy(&self.record.to_json()).into_owned(),
-            stamps: self.stamps.iter().map(|(k, v)| (*k, *v)).collect(),
+            done: &self.done,
+            record: &self.record,
+            stamps: &self.stamps,
+            next_owner: self.next_owner,
         };
-        let bytes = serde_json::to_vec(&wire).map_err(std::io::Error::other)?;
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -134,7 +193,11 @@ impl ScanState {
             .prefix(&format!(".{name}."))
             .suffix(".tmp")
             .tempfile_in(dir)?;
-        temp.write_all(&bytes)?;
+        // Written a piece at a time: the whole save is never one text in memory.
+        let mut out = std::io::BufWriter::new(&mut temp);
+        serde_json::to_writer(&mut out, &wire).map_err(std::io::Error::other)?;
+        out.flush()?;
+        drop(out);
         temp.as_file().sync_all()?;
         replace(temp, path)?;
         // On Mac and Linux the folder's own record of the new name is flushed too.
@@ -163,6 +226,7 @@ impl ScanState {
             done: wire.done,
             record,
             stamps: wire.stamps.into_iter().collect(),
+            next_owner: wire.next_owner,
         })
     }
 }
@@ -236,4 +300,87 @@ pub fn changes_between(before: &ScanState, after: &ScanState) -> Changes {
         .map(|i| i.id)
         .collect();
     changes
+}
+
+#[cfg(test)]
+mod saved_form {
+    use super::*;
+    use pctwin_record::{Inclusion, Item, ItemKind, ItemName, ItemPath, ManagedBy, Owner, Place};
+    use pctwin_record::{Portability, Storage};
+
+    /// Saving a piece at a time writes exactly what the whole-text form wrote, so scans saved by
+    /// earlier versions and this one read alike.
+    #[test]
+    fn the_save_written_a_piece_at_a_time_is_the_same_bytes() {
+        let laptop = LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap();
+        let mut record = Record::new(laptop);
+        let owner = Owner::Person {
+            account_id: "S-1-5-21-7".into(),
+        };
+        let place = Place {
+            role: FolderRole::Documents,
+            storage: Storage::SystemDrive,
+        };
+        let path = ItemPath::new(vec![
+            ItemName::from_text("Ré \"sumé\" \\ é\n"),
+            ItemName::from_windows_wide(&[0xD800, 0x61]),
+            ItemName::from_unix_bytes(&[b'x', 0xFF]),
+        ])
+        .unwrap();
+        let id = ItemId::derive(&laptop, &owner, &place, &path);
+        record.items.push(Item {
+            id,
+            kind: ItemKind::File,
+            owner,
+            place,
+            path,
+            size_bytes: 9,
+            modified_ns: None,
+            portability: Portability::Portable,
+            managed_by: ManagedBy::Personal,
+            download_bytes: None,
+            inclusion: Inclusion::Included,
+        });
+        let done = vec![DoneFolder {
+            role: FolderRole::Documents,
+            path: r"C:\Users\Ada\Documents".into(),
+            counts: Counts::default(),
+            links: 2,
+            unreadable: vec!["x".into()],
+        }];
+        let mut stamps = BTreeMap::new();
+        stamps.insert(
+            id,
+            Stamp {
+                size: 9,
+                modified_ns: Some(-5),
+            },
+        );
+        let whole = Wire {
+            format: STATE_FORMAT,
+            laptop,
+            person: "Ada".into(),
+            started_ns: 12,
+            finished: true,
+            done: done.clone(),
+            record: String::from_utf8(record.to_json()).unwrap(),
+            stamps: stamps.iter().map(|(k, v)| (*k, *v)).collect(),
+            next_owner: None,
+        };
+        let pieces = SaveWire {
+            format: STATE_FORMAT,
+            laptop,
+            person: "Ada",
+            started_ns: 12,
+            finished: true,
+            done: &done,
+            record: &record,
+            stamps: &stamps,
+            next_owner: None,
+        };
+        assert_eq!(
+            serde_json::to_vec(&pieces).unwrap(),
+            serde_json::to_vec(&whole).unwrap()
+        );
+    }
 }

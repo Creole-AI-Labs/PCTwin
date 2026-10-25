@@ -80,9 +80,27 @@ async fn sent_by(ours: Versions) -> Vec<u8> {
 }
 
 #[test]
-fn this_release_speaks_version_two() {
-    assert_eq!(MOVE_PROTOCOL.oldest(), 2);
-    assert_eq!(MOVE_PROTOCOL.newest(), 2);
+fn this_release_speaks_versions_three_and_four() {
+    // 3 sends the list in pages (PAGED_FROM), kept for a laptop one version behind; 4 adds Hold
+    // (HOLD_SINCE). 2 was never released, and its one-document list had no memory bounds.
+    assert_eq!(MOVE_PROTOCOL.oldest(), 3);
+    assert_eq!(MOVE_PROTOCOL.newest(), 4);
+    assert_eq!(pctwin_transfer::PAGED_FROM, 3);
+    assert_eq!(pctwin_transfer::HOLD_SINCE, 4);
+}
+
+/// Every pair among 2, 3 and 4 agrees on the lower of the two, from either side, so a laptop on 3
+/// gets paging but no Hold, and one on 2 gets neither.
+#[tokio::test(start_paused = true)]
+async fn laptops_on_versions_two_three_and_four_agree_on_the_lower() {
+    for (x, y) in [(2u16, 2u16), (2, 3), (2, 4), (3, 3), (3, 4), (4, 4)] {
+        let lower = x.min(y);
+        let (a, b) = agree(v(2, x), v(2, y)).await;
+        assert_eq!(a.unwrap(), lower, "{x} with {y}");
+        assert_eq!(b.unwrap(), lower, "{y} with {x}");
+        assert_eq!(lower >= pctwin_transfer::PAGED_FROM, lower >= 3);
+        assert_eq!(lower >= pctwin_transfer::HOLD_SINCE, lower == 4);
+    }
 }
 
 #[test]
@@ -95,10 +113,10 @@ fn a_range_must_start_at_one_or_later_and_not_run_backwards() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn two_laptops_on_this_release_agree_on_version_two() {
+async fn two_laptops_on_this_release_agree_on_version_four() {
     let (a, b) = agree(MOVE_PROTOCOL, MOVE_PROTOCOL).await;
-    assert_eq!(a.unwrap(), 2);
-    assert_eq!(b.unwrap(), 2);
+    assert_eq!(a.unwrap(), 4);
+    assert_eq!(b.unwrap(), 4);
 }
 
 #[tokio::test(start_paused = true)]
@@ -189,11 +207,11 @@ async fn a_range_that_starts_at_zero_or_runs_backwards_is_refused() {
 #[tokio::test(start_paused = true)]
 async fn the_message_form_is_fixed_for_every_release() {
     let kind = sent_by(v(1, 1)).await[0];
-    // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33).
+    // Apart from the transfer's kinds (1 to 15) and the inventory's (32, 33, 35).
     assert_eq!(kind, 34);
     assert_eq!(sent_by(v(2, 0x0103)).await, vec![kind, 0, 2, 1, 3]);
-    // A later laptop that speaks versions 1 to 3 still agrees with this one on 2.
-    assert_eq!(receive(&[kind, 0, 1, 0, 3]).await.unwrap(), 2);
+    // A later laptop that speaks versions 1 to 5 still agrees with this one on 4.
+    assert_eq!(receive(&[kind, 0, 1, 0, 5]).await.unwrap(), 4);
 }
 
 #[tokio::test(start_paused = true)]
@@ -282,6 +300,6 @@ async fn a_laptop_that_never_answers_is_given_up_on() {
         tokio::time::sleep(VERSION_WAIT - Duration::from_secs(1)).await;
         agree_version(&mut y, MOVE_PROTOCOL).await
     });
-    assert_eq!(a.unwrap(), 2);
-    assert_eq!(b.unwrap(), 2);
+    assert_eq!(a.unwrap(), 4);
+    assert_eq!(b.unwrap(), 4);
 }

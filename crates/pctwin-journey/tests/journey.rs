@@ -76,6 +76,7 @@ async fn counted_old_laptop() -> (
         .await
         .unwrap();
     let found = Found {
+        pairing_versions: vec![1],
         label: Label::named("Blue Fox").unwrap(),
         addrs: vec![host.local_addr().unwrap()],
         same_label_nearby: false,

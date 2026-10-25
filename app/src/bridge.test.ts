@@ -5,8 +5,45 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import calls from "./contract/shell/calls.json";
 import {
   FAILED,
+  HELP_STEPS,
+  HELP_TOPICS,
+  helpCode,
+  listenMove,
+  recoveryCheck,
+  recoveryRun,
+  thingsReady,
   listenPairingNew,
   listenPairingOld,
+  moveApprove,
+  moveBegin,
+  moveChoosePlace,
+  moveUsualPlace,
+  movePeopleHere,
+  movePlacePeople,
+  movePrivacyAnswer,
+  listenQuickSend,
+  qsAnswer,
+  qsChooseFolder,
+  qsClear,
+  qsAcceptDrops,
+  qsOffer,
+  qsOfferMissing,
+  qsPause,
+  qsPick,
+  qsReceive,
+  qsResume,
+  qsSend,
+  qsStop,
+  historyExport,
+  historyList,
+  historyOpen,
+  openPrivacySettings,
+  movePause,
+  moveReport,
+  moveResume,
+  moveRetry,
+  moveStop,
+  pairingHeadsUp,
   pairingNewConnect,
   pairingNewSearch,
   pairingOldDecline,
@@ -15,6 +52,7 @@ import {
   pairingOldShuffle,
   pairingOldStart,
   pairingOldStartAgain,
+  pairingOldNearby,
   pairingStop,
   setTrayLabels,
   setWindowMode,
@@ -101,14 +139,24 @@ describe("nothing unchecked reaches a screen", () => {
   }
 
   it("a search reply that does not parse is the generic problem, and so is a wrong number", async () => {
-    tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false }]);
-    await expect(pairingNewSearch()).resolves.toEqual([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false }]);
+    tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false, needsUpdate: false }]);
+    await expect(pairingNewSearch()).resolves.toEqual([{ index: 0, label: { kind: "named", name: "Ada" }, sameLabelNearby: false, needsUpdate: false }]);
     tauri.invoke.mockResolvedValueOnce([{ index: 0, label: { kind: "named", name: "Ada" } }]);
     expect(toProblem(await rejectionOf(pairingNewSearch()))).toEqual(FAILED);
     tauri.invoke.mockResolvedValueOnce(42);
     await expect(pairingNewConnect(0, "123456")).resolves.toBe(42);
     tauri.invoke.mockResolvedValueOnce(4200);
     expect(toProblem(await rejectionOf(pairingNewConnect(0, "123456")))).toEqual(FAILED);
+  });
+
+  it("a notes reply is used only when every note has the engine's shape", async () => {
+    tauri.invoke.mockResolvedValueOnce([{ kind: "local-network" }, { kind: "firewall" }]);
+    await expect(pairingHeadsUp("new")).resolves.toEqual([{ kind: "local-network" }, { kind: "firewall" }]);
+    expect(tauri.invoke).toHaveBeenLastCalledWith("pairing_heads_up", { role: "new" });
+    for (const wrong of [[{ kind: "local-network" }, { kind: "something-new" }], [{ kind: "firewall", more: 1 }], { kind: "firewall" }, null]) {
+      tauri.invoke.mockResolvedValueOnce(wrong);
+      expect(toProblem(await rejectionOf(pairingHeadsUp("old"))), JSON.stringify(wrong)).toEqual(FAILED);
+    }
   });
 
   it("the shown number is refused above 255, the largest the engine can send", async () => {
@@ -131,7 +179,23 @@ describe("nothing unchecked reaches a screen", () => {
 
 describe("the engine's names (contract/shell/calls.json, written by the engine)", () => {
   it("every command is called by its own name with exactly its own arguments", async () => {
-    tauri.invoke.mockImplementation((command: string) => Promise.resolve(command === "pairing_new_search" ? [] : command === "pairing_new_connect" ? 42 : null));
+    tauri.invoke.mockImplementation((command: string) =>
+      Promise.resolve(
+        command === "pairing_new_search" || command === "pairing_heads_up" || command === "move_report"
+          ? []
+          : command === "pairing_new_connect"
+            ? 42
+            : command === "help_code"
+              ? "K3QD-8XWA-2M7P"
+              : command === "quicksend_pick" || command === "quicksend_offer" || command === "quicksend_offer_missing" || command === "history_list"
+                ? []
+                : command === "recovery_check"
+                ? { unfinished: 0 }
+                : command === "recovery_run"
+                  ? { putInPlace: 0, keptToContinue: 0, notFinished: 0, leftForLater: 0 }
+                  : null,
+      ),
+    );
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
     try {
       await setWindowMode("mini");
@@ -142,9 +206,43 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await pairingOldShuffle();
       await pairingOldRename("Kitchen laptop");
       await pairingOldStartAgain();
+      await pairingOldNearby().catch(() => undefined);
+      await pairingHeadsUp("old");
       await pairingStop();
       await pairingNewSearch();
       await pairingNewConnect(0, "123456");
+      await moveBegin({ music: "From your old laptop/Music" }, ["1001"], "Approve reading the files of {names}.");
+      await movePeopleHere().catch(() => undefined);
+      await movePrivacyAnswer(true);
+      await openPrivacySettings();
+      await qsPick(false);
+      await qsClear();
+      await qsAcceptDrops(true);
+      await qsOffer(["p1"]);
+      await qsOfferMissing();
+      await qsSend();
+      await qsReceive();
+      await qsChooseFolder();
+      await qsAnswer({ kind: "decline" });
+      await qsPause();
+      await qsResume();
+      await qsStop();
+      await historyList();
+      await historyOpen("1792627200000-0").catch(() => undefined);
+      await historyExport();
+      await movePlacePeople([{ id: "S-2", to: { kind: "new" } }], { title: "New account", body: "{name}: {account} / {password}", approve: "Approve reading the files of {names}." });
+      await moveChoosePlace("pictures").catch(() => undefined);
+      await moveUsualPlace("pictures");
+      await moveApprove({ revision: 2, fingerprint: "9f" }, true, ["music"]);
+      await movePause();
+      await moveResume();
+      await moveStop();
+      await moveRetry();
+      await moveReport();
+      await helpCode("connection-lost", "moving");
+      await recoveryCheck();
+      await recoveryRun();
+      await thingsReady();
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
@@ -154,9 +252,16 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     expect(sent.sort(byName)).toEqual(engine.sort(byName));
   });
 
+  it("the screens name help topics and steps from the engine's own lists", () => {
+    expect([...HELP_TOPICS]).toEqual(calls.helpTopics);
+    expect([...HELP_STEPS]).toEqual(calls.helpSteps);
+  });
+
   it("the screens listen to the engine's own events", async () => {
     await listenPairingOld(() => undefined);
     await listenPairingNew(() => undefined);
-    expect([...tauri.handlers.keys()].sort()).toEqual([calls.events.old, calls.events.new].sort());
+    await listenMove(() => undefined);
+    await listenQuickSend(() => undefined);
+    expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
   });
 });

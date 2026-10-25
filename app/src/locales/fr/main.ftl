@@ -5,27 +5,37 @@ app-name = PCTwin
 brand-home =
     .aria-label = Accueil PCTwin
 language-label = Langue
+motion-label = Animations
+motion-system = Animations : comme le système
+motion-reduced = Animations : réduites
+motion-off = Animations : aucune
+
+# The opening (Wordplay); its tagline is the home headline.
+opening-label = PCTwin s’ouvre
+opening-status = Ouverture de PCTwin.
+opening-skip = Passer l’intro
+opening-tagline = Envoyez des fichiers, ou transférez tout.
 
 footer-free = Transferts personnels gratuits. Aucun compte nécessaire.
 footer-help = Aide
 
 ## F01 Welcome
 
-welcome-eyebrow = Votre prochain chapitre vous attend.
-welcome-title-line1 = Votre configuration.
-welcome-title-line2 = Votre nouvel ordinateur portable.
-welcome-body = Emportez vos fichiers, vos applis et vos réglages habituels pour le transfert.
-welcome-start = Commencer un transfert
+welcome-eyebrow = PCTwin
+welcome-title-line1 = Envoyez des fichiers,
+welcome-title-line2 = ou transférez tout.
+welcome-body = Envoyez quelques fichiers à un ordinateur portable à proximité, ou emportez vos fichiers, vos applis et vos réglages sur votre nouvel ordinateur portable.
+welcome-start = Commencer un transfert complet
 
 ## F06 Old or new laptop
 
 role-back = Retour
-role-eyebrow = Commencer un transfert
+role-eyebrow = Commencer un transfert complet
 role-title = Quel ordinateur portable est-ce ?
 role-body = Ouvrez PCTwin sur les deux ordinateurs portables. Puis indiquez lequel est celui-ci.
-role-old-title = Mon ancien ordinateur portable
+role-old-title = C’est mon ancien ordinateur portable
 role-old-body = Envoyer mes fichiers, applis et réglages.
-role-new-title = Mon nouvel ordinateur portable
+role-new-title = C’est mon nouvel ordinateur portable
 role-new-body = Recevoir ma configuration d’un autre ordinateur portable.
 role-note = Rien n’est transféré avant que vous ayez vérifié et approuvé le plan. Votre ancien ordinateur portable reste inchangé pendant le transfert.
 
@@ -122,13 +132,19 @@ check-status-connected = Disponible
 check-status-not-needed = Pas nécessaire
 # Added: what is said when something could not be read, so it is never shown as fine.
 check-status-unknown = Inconnu
-check-speed-unknown = PCTwin n’a pas pu mesurer la connexion cette fois. Vérifiez à nouveau dans un instant.
+check-speed-unknown = PCTwin n’a pas pu mesurer la connexion cette fois. Les fichiers sont quand même transférés ; seule l’estimation du temps manque.
 check-space-unknown = PCTwin n’a pas pu lire l’espace libre sur le nouvel ordinateur portable.
 check-power-unknown = PCTwin ne sait pas si { $label } est branché.
 check-internet-unknown = PCTwin ne sait pas si cet ordinateur portable est en ligne. Ce n’est pas grave : la copie des fichiers n’a pas besoin d’internet.
 check-again = Vérifier à nouveau
 check-estimate-note = La durée estimée n’est pas une promesse.
 check-continue = Choisir quoi transférer
+# Added 23 October 2026: the short checklist both laptops show before the move.
+check-before-title = Avant le début du transfert
+check-before-lids-title = Gardez les deux écrans ouverts
+check-before-lids-body = Un écran fermé peut mettre un ordinateur portable en veille, ce qui met le transfert en pause.
+check-before-near-title = Restez près du routeur Wi-Fi
+check-before-near-body = Gardez les deux ordinateurs portables près de lui pendant le transfert.
 
 ## C09 Waiting for your other laptop
 
@@ -150,6 +166,7 @@ reconnect-expired = Trop de temps s’est écoulé pour une reconnexion automati
 reconnect-unavailable = { $label } est injoignable. Vérifiez qu’il est allumé, sans mise en veille, avec PCTwin ouvert et sur le même Wi-Fi.
 reconnect-try-now = Réessayer la connexion
 reconnect-pair-again = Associer à nouveau
+reconnect-nothing-new = Rien de nouveau n’est arrivé depuis un moment. PCTwin continue d’essayer tout seul, ou vous pouvez arrêter le transfert. Tout ce qui a été copié et vérifié jusqu’ici est conservé.
 reconnect-details = Une reconnexion sûre
 reconnect-details-body = Seuls ces deux ordinateurs portables peuvent se reconnecter, et ils utilisent à chaque fois une nouvelle connexion privée.
 
@@ -171,6 +188,11 @@ ended-home = Retour à l’accueil
 
 pair-back = Retour
 pair-try-again = Réessayer
+pair-more-details = Plus de détails
+pair-heads-up-title = Votre ordinateur peut vous poser une question.
+pair-heads-up-local-network = Votre Mac va demander si PCTwin peut trouver des appareils sur votre réseau local. Choisissez Autoriser, pour que vos deux ordinateurs portables puissent se trouver.
+pair-heads-up-firewall = Windows peut demander si PCTwin peut accepter des connexions. Choisissez Autoriser, pour que votre nouvel ordinateur portable puisse joindre celui-ci.
+pair-heads-up-continue = Continuer
 
 ## C03 Old laptop: show the code
 
@@ -206,8 +228,9 @@ pair-old-wait-body =
         [many] Cet essai n’a pas fonctionné. Un nouveau code apparaît dans { $seconds } secondes.
        *[other] Cet essai n’a pas fonctionné. Un nouveau code apparaît dans { $seconds } secondes.
     }
-pair-old-locked-title = Association arrêtée.
-pair-old-locked-body = Il y a eu trop d’essais erronés, l’association a donc été arrêtée pour protéger cet ordinateur portable. Rien n’a été partagé. Recommencez quand vous le souhaitez.
+pair-old-locked-title = Quelqu’un sur ce réseau a essayé de mauvais codes.
+pair-old-locked-body = Après cinq mauvais codes, l’association s’est arrêtée pour protéger cet ordinateur portable. Rien n’a été partagé. Si c’était vous, choisissez Recommencer pour obtenir un nouveau code.
+pair-old-locked-hotspot = Si vous ne savez pas qui c’était, connectez plutôt les deux ordinateurs portables au partage de connexion de votre téléphone, puis choisissez Recommencer.
 pair-old-start-again = Recommencer
 pair-old-timed-out = Aucun numéro n’a été choisi à temps, voici donc un nouveau code.
 pair-old-declined = Les numéros ne correspondaient pas, rien n’a donc été partagé. Voici un nouveau code.
@@ -233,12 +256,18 @@ pair-choose-checking = Vérification…
 pair-new-eyebrow = Nouvel ordinateur portable
 pair-new-searching-title = Recherche de votre ancien ordinateur portable…
 pair-new-searching-body = Gardez PCTwin ouvert sur votre ancien ordinateur portable, sur le même Wi-Fi que celui-ci.
+pair-new-search-failed-title = Impossible de chercher votre ancien portable.
 pair-new-list-title = Lequel est votre ancien ordinateur portable ?
 pair-new-list-body = Choisissez le nom affiché sur l’écran de votre ancien ordinateur portable.
 pair-new-same-label = Un autre ordinateur portable à proximité porte ce nom. Vérifiez l’écran de l’ancien ordinateur.
+pair-new-needs-update = Cet ordinateur a une version plus ancienne de PCTwin. Mettez PCTwin à jour dessus, puis recherchez à nouveau.
 pair-new-none-title = Ancien ordinateur introuvable.
 pair-new-none-body = Vérifiez que PCTwin est ouvert sur votre ancien ordinateur portable et affiche un code, et que les deux ordinateurs sont sur le même Wi-Fi. Puis relancez la recherche.
 pair-new-search-again = Rechercher à nouveau
+pair-old-same-role = Un autre portable à proximité est aussi réglé comme l’ancien portable. L’un des deux doit être le nouveau portable.
+pair-old-switch = Ce portable est le nouveau
+pair-new-none-same-role = L’autre portable a-t-il aussi choisi Nouveau portable ? Choisissez alors Ancien portable sur celui-là, ou changez celui-ci.
+pair-new-switch = Ce portable est l’ancien
 pair-new-code-title = Saisissez le code.
 pair-new-code-body = Saisissez le code affiché sur { $label }.
 pair-new-code-label = Code à six chiffres
@@ -257,7 +286,8 @@ pair-new-number-waiting = En attente de votre ancien ordinateur portable…
 
 pair-done-eyebrow = Tout est prêt
 pair-done-title = Vos ordinateurs portables sont associés.
-pair-done-body = Vos deux ordinateurs portables sont connectés. Le choix de ce qu’il faut transférer est l’étape suivante. Elle est encore en construction, donc rien n’a encore été transféré.
+pair-done-body = Vos deux ordinateurs portables sont connectés. L’ancien cherche maintenant vos fichiers, puis vous approuvez sur le nouveau ce qui est déplacé. Rien ne bouge avant votre accord.
+pair-done-continue = Continuer
 
 ## Pairing problems (each says what happened, then what to do)
 
@@ -277,7 +307,10 @@ pairing-different-version = Les deux ordinateurs portables n’ont pas la même 
 pairing-name-invalid = Ce nom ne peut pas être utilisé. Essayez un nom plus court, avec des lettres et des chiffres.
 pairing-no-network = Cet ordinateur portable n’est sur aucun réseau Wi-Fi ou filaire. Connectez-le, puis réessayez.
 pairing-choose-network = Cet ordinateur portable est sur plusieurs réseaux. Choisissez celui de votre nouvel ordinateur :
+pairing-local-network-refused = Votre Mac empêche peut-être PCTwin de trouver des ordinateurs portables sur ce réseau. Si votre Mac vient de vous le demander, choisissez Autoriser, puis réessayez. Sinon, ouvrez Réglages Système, choisissez Confidentialité et sécurité, puis Réseau local, activez PCTwin et réessayez.
+pairing-local-network-refused-details = Un VPN, un pare-feu ou une app de filtrage peut aussi empêcher les ordinateurs portables de se trouver. S’il y en a un d’actif, désactivez-le le temps de l’association, puis réessayez.
 pairing-failed = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Réessayez.
+pairing-failed-new = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Saisissez le nouveau code affiché sur l’ancien portable.
 
 ## M06 Match people to their profiles (Who’s moving?)
 
@@ -363,7 +396,7 @@ help-code =
 help-contains-title = Ce qu’il contient
 help-contains-problem = Le type de problème et l’avancement de la tâche.
 help-contains-step = L’étape du transfert où il s’est produit.
-help-contains-versions = La version de PCTwin et le système de chaque ordinateur portable, par exemple Windows ou macOS.
+help-contains-versions = La version de PCTwin et le système de ce portable, comme Windows ou macOS.
 help-never-title = Ce qu’il ne contient jamais
 help-chip-included = Inclus
 help-chip-excluded = Jamais inclus
@@ -379,6 +412,22 @@ help-share-text = Mon code de problème PCTwin est { $code }.
 help-failed = Impossible de créer un code de problème. Réessayez. Si cela ne marche toujours pas, décrivez plutôt le problème avec vos propres mots.
 help-try-again = Réessayer
 help-copy-failed = Le code n’a pas pu être copié. Sélectionnez-le ci-dessus et copiez-le vous-même.
+help-home-eyebrow = Aide
+help-home-title = De l’aide pour ce que vous faites.
+help-home-body = De courts guides pour ce qui bloque le plus souvent. Ils fonctionnent sans internet.
+help-home-more = Plus d’aide sur getpctwin.com
+help-guide-find-title = Les portables ne se trouvent pas
+help-guide-find-body = Connectez les deux portables au même Wi-Fi, pas à un réseau invité. Coupez tout VPN pendant l’association. Si cela ne marche toujours pas, activez le partage de connexion du téléphone et connectez-y les deux portables.
+help-guide-mac-network-title = Votre Mac pose une question sur le réseau local
+help-guide-mac-network-body = Choisissez Autoriser pour que PCTwin trouve votre autre portable. Si vous avez choisi Ne pas autoriser, ouvrez Réglages Système, puis Confidentialité et sécurité, puis Réseau local, et activez PCTwin.
+help-guide-firewall-title = Windows pose une question sur le pare-feu
+help-guide-firewall-body = Autorisez PCTwin sur les réseaux privés, comme le Wi-Fi de la maison. PCTwin ne parle qu’à votre autre portable, sur votre propre réseau.
+help-guide-stopped-title = Un transfert s’est arrêté en cours de route
+help-guide-stopped-body = Rien de ce qui a été copié et vérifié n’est perdu, et l’ancien portable n’a pas changé. Associez à nouveau les portables : les fichiers déjà sur le nouveau sont reconnus et ne sont pas copiés deux fois.
+help-guide-others-title = Déplacer les affaires d’autres personnes
+help-guide-others-body = Cochez-les dans Qui déménage ? sur l’ancien portable. Un administrateur donne son accord une fois sur chaque portable. Vous ne voyez jamais leurs fichiers. Le mot de passe temporaire d’un nouveau compte s’affiche une fois dans une fenêtre du portable ; la personne choisit le sien à sa première connexion.
+help-guide-code-title = Demander de l’aide à quelqu’un
+help-guide-code-body = Sur toute page de problème, choisissez Obtenir de l’aide. PCTwin crée un code court qui dit ce qui s’est passé, sans nom, fichier ni mot de passe, à envoyer par WhatsApp ou toute autre app.
 
 ## Label words (the name each laptop shows while pairing)
 
@@ -850,8 +899,52 @@ dest-format = Un fichier de ces dossiers est trop volumineux pour la façon dont
 # $folder is a folder on the new laptop and $drive the drive it is on.
 plan-place = { $folder } sur { $drive }
 plan-group-to = Vers { $place }
+plan-group-move = Déplacer { $folder }
+plan-place-change = Choisir un autre endroit
+plan-place-usual = Utiliser l'endroit habituel
+plan-place-free = { $size } libres à cet endroit
+plan-place-no-room = Il n'y a pas assez d'espace libre à cet endroit. Choisissez un autre endroit, ou décochez ce dossier.
+plan-place-no-safe-name = PCTwin ne peut pas enregistrer de fichiers en toute sécurité sur ce disque. Choisissez un autre endroit.
+plan-place-cannot-open = PCTwin n'a pas pu ouvrir ce dossier. Choisissez un autre endroit.
 plan-version = Version du plan { $revision }
 plan-details = Plus de détails
+plan-preview-title = Avant de commencer
+plan-preview-fits = Ce portable a assez d’espace libre.
+# Added 23 October 2026: what moves first, from the move's own order. $places is a list of folder names.
+plan-preview-first = Nous transférons d’abord ceci, pour que votre nouvel ordinateur portable soit prêt plus tôt : { $places }.
+plan-preview-short = Ce portable a besoin de { $size } d’espace libre en plus. Libérez de l’espace avant de commencer, sinon le transfert s’arrêtera quand le disque sera plein.
+plan-preview-space-unknown = PCTwin n’a pas pu lire l’espace libre de ce portable.
+plan-preview-time-one =
+    { NUMBER($minutes) ->
+        [one] Environ { $minutes } minute.
+        [many] Environ { $minutes } de minutes.
+       *[other] Environ { $minutes } minutes.
+    }
+plan-preview-time = Environ { $low } à { $high } minutes.
+plan-preview-renamed =
+    { NUMBER($count) ->
+        [one] { $count } fichier aura un nom un peu différent, car ce portable n’accepte pas le sien. Le rapport l’indique.
+        [many] { $count } de fichiers auront un nom un peu différent, car ce portable n’accepte pas les leurs. Le rapport les indique un par un.
+       *[other] { $count } fichiers auront un nom un peu différent, car ce portable n’accepte pas les leurs. Le rapport les indique un par un.
+    }
+plan-preview-too-big =
+    { NUMBER($count) ->
+        [one] { $count } fichier est trop gros pour le disque de ce portable et ne sera pas copié.
+        [many] { $count } de fichiers sont trop gros pour le disque de ce portable et ne seront pas copiés.
+       *[other] { $count } fichiers sont trop gros pour le disque de ce portable et ne seront pas copiés.
+    }
+plan-preview-refused =
+    { NUMBER($count) ->
+        [one] { $count } fichier a un nom ou un dossier que ce portable n’accepte pas, et ne sera pas copié.
+        [many] { $count } de fichiers ont un nom ou un dossier que ce portable n’accepte pas, et ne seront pas copiés.
+       *[other] { $count } fichiers ont un nom ou un dossier que ce portable n’accepte pas, et ne seront pas copiés.
+    }
+plan-preview-runs-at-sign-in =
+    { NUMBER($count) ->
+        [one] { $count } fichier se lancerait tout seul à l’ouverture d’une session sur ce portable. Vérifiez que c’est voulu.
+        [many] { $count } de fichiers se lanceraient tout seuls à l’ouverture d’une session sur ce portable. Vérifiez que c’est voulu.
+       *[other] { $count } fichiers se lanceraient tout seuls à l’ouverture d’une session sur ce portable. Vérifiez que c’est voulu.
+    }
 # $reference is a short code that names exactly this version of the plan.
 plan-reference = Référence { $reference }
 # $count is how many files are affected in each line below.
@@ -872,6 +965,12 @@ plan-hand-work-managed =
         [one] { $count } élément est géré par votre entreprise ou votre école et n’est pas inclus. Cochez son dossier pour l’inclure.
         [many] { $count } d’éléments sont gérés par votre entreprise ou votre école et ne sont pas inclus. Cochez leurs dossiers pour les inclure.
        *[other] { $count } éléments sont gérés par votre entreprise ou votre école et ne sont pas inclus. Cochez leurs dossiers pour les inclure.
+    }
+plan-hand-too-many-files =
+    { NUMBER($count) ->
+        [one] { $count } dossier contient plus de fichiers qu’un seul transfert ne peut en emporter, il n’est donc pas déplacé. Après ce transfert, envoyez-le à part avec Envoi rapide, ou copiez-le avec une clé USB.
+        [many] { $count } de dossiers contiennent plus de fichiers qu’un seul transfert ne peut en emporter, ils ne sont donc pas déplacés. Après ce transfert, envoyez chacun à part avec Envoi rapide, ou copiez-les avec une clé USB.
+       *[other] { $count } dossiers contiennent plus de fichiers qu’un seul transfert ne peut en emporter, ils ne sont donc pas déplacés. Après ce transfert, envoyez chacun à part avec Envoi rapide, ou copiez-les avec une clé USB.
     }
 plan-blocked-someone-unmapped = Une personne de l’ancien ordinateur portable n’a pas encore de compte choisi sur le nouveau. Choisissez où vont les fichiers de chaque personne, puis revenez.
 plan-blocked-account-used-twice = Deux personnes se retrouveraient dans le même compte sur le nouvel ordinateur portable. Donnez à chacune son propre compte.
@@ -926,7 +1025,8 @@ progress-needs-action =
     }
 progress-see-needs-action = Voir les actions à faire
 progress-interrupted = La connexion avec l’autre ordinateur portable a été coupée. PCTwin essaie de se reconnecter. Rien de ce qui a été copié et vérifié n’est perdu.
-progress-low-battery = La batterie de { $label } est faible. Branchez-le pour que le transfert ne soit pas interrompu.
+progress-low-battery = La batterie de ce portable est faible. Branchez-le pour que le transfert ne s’interrompe pas.
+progress-battery-paused = La batterie de ce portable est presque vide : le transfert est en pause, en toute sécurité. Branchez-le, puis continuez. Rien n’est perdu.
 progress-old-safe = Votre ancien ordinateur portable reste inchangé.
 progress-pause = Mettre en pause
 progress-compact = Vue compacte
@@ -949,6 +1049,17 @@ progress-state-verified = Vérifié
 progress-state-checking = Vérification
 progress-state-paused = En pause
 progress-checked-note = Un élément ne compte comme copié qu’une fois vérifié.
+# Added 23 October 2026: T14, one tip under the progress bar, about every 12 seconds.
+tips-label = Conseil
+tips-pause = Suspendre les conseils
+tips-resume = Afficher d’autres conseils
+tips-next = Conseil suivant
+tip-battery = Ce portable fonctionne sur batterie. Branchez-le si vous le pouvez, pour qu’un long transfert ne soit pas interrompu.
+tip-closer = La connexion est lente. Rapprocher les ordinateurs portables du routeur Wi-Fi peut l’accélérer.
+tip-lids = Gardez l’écran de ce portable ouvert. Un écran fermé peut le mettre en veille, ce qui met le transfert en pause.
+tip-keep-using = Vous pouvez continuer à utiliser ce portable. PCTwin ne fait que lire ses fichiers.
+tip-pause = Vous pouvez mettre le transfert en pause à tout moment et reprendre plus tard.
+tip-power-cut = En cas de coupure de courant, rallumez les deux ordinateurs portables et ouvrez PCTwin. Il reprend là où il s’était arrêté, et rien de ce qui a été copié et vérifié n’est perdu.
 
 ## F09 Mini panel
 
@@ -1010,10 +1121,180 @@ outcome-title = Bienvenue sur votre nouvel ordinateur portable.
 outcome-body = Voici ce qui est arrivé à tout ce que vous avez approuvé.
 outcome-files-title = Fichiers sélectionnés
 outcome-status-partial = Fait en partie
+# Added 23 October 2026: the after-move check on R01, counted the way the scan counts.
+outcome-kinds-title = Vérifié après le transfert
+outcome-kind-photos = Photos
+outcome-kind-videos = Vidéos
+outcome-kind-music = Musique
+outcome-kind-documents = Documents
+outcome-kind-count = { $copied } sur { $planned } copiés et vérifiés
 outcome-next-title = Que faire ensuite
 outcome-old-safe = Tout ce qui n’est pas terminé reste listé ici. Rien n’a été retiré de votre ancien ordinateur portable.
 outcome-report = Voir le rapport complet
 outcome-home = Retour à l’accueil
+outcome-person-copied =
+    { NUMBER($count) ->
+        [one] { $count } fichier copié.
+        [many] { $count } de fichiers copiés.
+       *[other] { $count } fichiers copiés.
+    }
+outcome-person-not-done =
+    { NUMBER($count) ->
+        [one] { $count } n’a pas abouti.
+        [many] { $count } de fichiers n’ont pas abouti.
+       *[other] { $count } n’ont pas abouti.
+    }
+outcome-person-at-sign-in = Elles seront en place à la prochaine connexion de { $name } sur ce portable.
+move-fallback-folder = De votre ancien portable
+move-stop = Arrêter le transfert
+move-before-open = En attendant : avant de quitter ce portable
+move-get-help = Obtenir de l’aide
+pickup-eyebrow = Votre transfert
+pickup-title = Reprenez en toute sécurité.
+pickup-body = Un transfert sur ce portable s’est arrêté en cours de route, peut-être après un redémarrage ou une coupure de courant. Faites d’abord le tri, puis associez à nouveau les portables pour continuer.
+pickup-unfinished-title = Copies inachevées
+pickup-unfinished-body =
+    { NUMBER($count) ->
+        [one] { $count } fichier était en cours de copie quand le transfert s’est arrêté.
+        [many] { $count } de fichiers étaient en cours de copie quand le transfert s’est arrêté.
+       *[other] { $count } fichiers étaient en cours de copie quand le transfert s’est arrêté.
+    }
+pickup-unfinished-badge = À trier
+pickup-tidy = Faire le tri
+pickup-tidying = Tri en cours. Les copies terminées sont vérifiées et mises en place ; rien de ce qui est à vous n’est modifié.
+pickup-done = Tout est en ordre. Associez à nouveau les portables pour continuer : ce qui est déjà ici est reconnu et n’est pas copié deux fois.
+pickup-failed = Le tri n’a pas fonctionné cette fois. Rien de ce qui est à vous n’a changé. Réessayez, ou fermez d’abord PCTwin sur ce portable puis rouvrez-le.
+pickup-put-in-place = mis en place
+pickup-kept = gardés pour continuer
+pickup-not-finished =
+    { NUMBER($count) ->
+        [one] { $count } fichier n’a pas pu être terminé. Le prochain transfert le recopiera.
+        [many] { $count } de fichiers n’ont pas pu être terminés. Le prochain transfert les recopiera.
+       *[other] { $count } fichiers n’ont pas pu être terminés. Le prochain transfert les recopiera.
+    }
+pickup-left-for-later =
+    { NUMBER($count) ->
+        [one] { $count } fichier est sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
+        [many] { $count } de fichiers sont sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
+       *[other] { $count } fichiers sont sur un disque débranché pour l’instant. Branchez-le et refaites le tri.
+    }
+pickup-later = Pas maintenant
+ready-eyebrow = Bienvenue
+ready-title = Vos affaires sont prêtes.
+ready-body = Vos affaires de l’ancien portable ont été déplacées sur celui-ci et sont maintenant dans vos propres dossiers.
+ready-landed = fichiers dans vos dossiers
+ready-where-title = Où elles sont
+ready-where-body = Dans Documents, Images, Musique, Vidéos et vos autres dossiers habituels, comme sur votre ancien portable.
+ready-kept =
+    { NUMBER($count) ->
+        [one] { $count } fichier a été mis de côté, car un fichier de ce nom était déjà là. Les deux sont gardés.
+        [many] { $count } de fichiers ont été mis de côté, car des fichiers de ces noms étaient déjà là. Tous sont gardés.
+       *[other] { $count } fichiers ont été mis de côté, car des fichiers de ces noms étaient déjà là. Tous sont gardés.
+    }
+ready-failed =
+    { NUMBER($count) ->
+        [one] { $count } fichier n’a pas pu être mis dans vos dossiers. Demandez à la personne qui a fait le transfert de le refaire.
+        [many] { $count } de fichiers n’ont pas pu être mis dans vos dossiers. Demandez à la personne qui a fait le transfert de les refaire passer.
+       *[other] { $count } fichiers n’ont pas pu être mis dans vos dossiers. Demandez à la personne qui a fait le transfert de les refaire passer.
+    }
+ready-done = Terminé
+move-status-kept = Conservé
+move-wait-eyebrow = Votre transfert
+move-wait-scanning-title = Recherche de vos fichiers.
+move-wait-scanning-body = Votre ancien portable parcourt vos dossiers. Il les lit seulement : rien n’est ouvert, modifié ou supprimé.
+move-found = Trouvé jusqu’ici : { $size } de vos affaires.
+move-wait-approval-title = En attente du nouveau portable.
+move-wait-approval-body = Vos fichiers sont prêts. Vérifiez le plan sur le nouveau portable et approuvez-le pour commencer.
+move-wait-list-title = En attente de l’ancien portable.
+move-wait-list-body = Votre ancien portable cherche vos fichiers. Ensuite, le plan s’affiche ici pour que vous l’approuviez. Cela peut prendre quelques minutes.
+move-wait-starting-title = Début du transfert.
+move-wait-starting-body = Le plan est approuvé. La copie commence dans un instant.
+move-wait-admin-title = En attente d’un administrateur.
+move-wait-admin-body = Ce portable demande l’accord d’un administrateur pour déplacer aussi les affaires des autres personnes. Répondez dans la fenêtre qu’il a ouverte.
+move-others-not-approved = L’administrateur n’a pas donné son accord : seules vos affaires sont déplacées cette fois. Celles des autres restent en place.
+move-others-failed = PCTwin n’a pas pu lancer ce qu’il faut pour déplacer les affaires des autres : seules les vôtres sont déplacées cette fois. Rien des leurs n’a changé.
+move-others-not-here = Déplacer les affaires d’autres personnes depuis ce portable n’est pas encore prêt dans cette version : seules les vôtres sont déplacées.
+move-others-allow-in-settings = Un administrateur doit d’abord autoriser PCTwin dans la page des Réglages Système qui vient de s’ouvrir. Cette fois, seules vos affaires sont déplacées ; une fois PCTwin autorisé, votre prochain déplacement pourra prendre aussi les affaires des autres personnes.
+approve-prompt = PCTwin va lire les fichiers de { $names } pour les déplacer vers le nouveau portable. Un administrateur de ce portable donne son accord pour ce déplacement seulement.
+who-here-title = Qui déménage ?
+who-here-body = Vos affaires sont toujours déplacées. Cochez toute autre personne de ce portable dont les affaires doivent l’être aussi. PCTwin ne vous montre jamais leurs fichiers.
+who-here-you = { $name } (vous)
+who-here-you-hint = Toujours déplacé
+who-here-approval = Déplacer les affaires de quelqu’un d’autre demande l’accord d’un administrateur, une seule fois pour toutes les personnes cochées. Le portable le demandera dans sa propre fenêtre.
+who-here-not-here = Déplacer les affaires d’autres personnes depuis ce portable n’est pas encore prêt dans cette version. Seules les vôtres sont déplacées.
+place-title = Où vont leurs affaires ?
+place-body = Les affaires d’autres personnes viennent aussi de l’ancien portable. Choisissez pour chacune un compte de ce portable, un nouveau compte, ou laissez-la de côté. Vous ne voyez jamais leurs fichiers.
+place-size =
+    { NUMBER($count) ->
+        [one] { $count } fichier, { $size }
+        [many] { $count } de fichiers, { $size }
+       *[other] { $count } fichiers, { $size }
+    }
+place-select = Où vont les affaires de { $name }
+place-note = Les nouveaux comptes, et la garde de leurs affaires jusqu’à leur connexion, demandent l’accord d’un administrateur une seule fois, après votre accord sur le plan. Le mot de passe temporaire de chaque nouveau compte s’affiche une fois, dans une fenêtre du portable lui-même.
+place-todo =
+    { NUMBER($count) ->
+        [one] Choisissez où vont les affaires de { $count } personne de plus.
+        [many] Choisissez où vont les affaires de { $count } de personnes de plus.
+       *[other] Choisissez où vont les affaires de { $count } personnes de plus.
+    }
+fda-title = Votre Mac garde certains dossiers privés.
+fda-body =
+    { NUMBER($count) ->
+        [one] { $count } de vos emplacements n’a pas pu être examiné, à cause des réglages de confidentialité du Mac. Autorisez PCTwin, puis vérifiez à nouveau, pour ne rien oublier.
+        [many] { $count } de vos emplacements n’ont pas pu être examinés, à cause des réglages de confidentialité du Mac. Autorisez PCTwin, puis vérifiez à nouveau, pour ne rien oublier.
+       *[other] { $count } de vos emplacements n’ont pas pu être examinés, à cause des réglages de confidentialité du Mac. Autorisez PCTwin, puis vérifiez à nouveau, pour ne rien oublier.
+    }
+fda-step-1 = Ouvrez Réglages Système, puis Confidentialité et sécurité.
+fda-step-2 = Choisissez Accès complet au disque.
+fda-step-3 = Activez PCTwin. Le Mac peut demander votre mot de passe.
+fda-open = Ouvrir ces réglages
+fda-note = PCTwin lit seulement vos dossiers pour les copier. Il ne modifie jamais rien sur ce portable.
+fda-again = Vérifier à nouveau
+fda-without = Continuer sans eux
+password-title = PCTwin : un nouveau compte
+password-body =
+    { $name } a maintenant un compte sur ce portable.
+    
+    Nom de connexion : { $account }
+    Mot de passe temporaire : { $password }
+    
+    Donnez-les à { $name }. À sa première connexion, la personne choisit son propre mot de passe. Notez-le maintenant : PCTwin ne le garde pas.
+move-ended-eyebrow = Votre transfert
+move-ended-kept-title = Déjà copié
+move-ended-kept-body = Tout ce qui a été copié et vérifié avant cela reste sur le nouveau portable.
+move-ended-old-title = Votre ancien portable
+move-ended-old-body = Rien n’y a été modifié ni supprimé.
+move-ended-old-badge = Inchangé
+move-ended-next = Pour réessayer, associez à nouveau les portables. Les fichiers déjà copiés et vérifiés sont reconnus et ne sont pas copiés deux fois.
+move-lost-title = La connexion avec votre autre portable a été perdue.
+move-lost-body = Les portables ne communiquent plus, le transfert n’a donc pas pu continuer. Vérifiez qu’ils sont allumés, éveillés et proches l’un de l’autre.
+move-not-approved-title = Le transfert n’a pas commencé.
+move-not-approved-old = Le plan n’a pas été approuvé sur le nouveau portable, rien n’a donc été copié.
+move-not-approved-new = Vous n’avez pas approuvé le plan, rien n’a donc été copié.
+move-failed-title = Un problème est survenu.
+move-failed-body = Le transfert n’a pas pu continuer. Si cela se reproduit, Plus de détails, ci-dessous, indique ce qui s’est passé.
+move-peer-system-windows = Windows
+move-peer-system-mac = Mac
+move-peer-system-linux = Linux
+move-peer-system-other = Autre système
+move-update-here-title = Mettez à jour PCTwin sur cet ordinateur
+move-update-here-body = Cet ordinateur a une version de PCTwin plus ancienne que l'autre, ils ne peuvent donc pas transférer de fichiers ensemble. Mettez à jour PCTwin ici, puis recommencez. Rien n'a été copié.
+move-update-there-title = Mettez à jour PCTwin sur l'autre ordinateur
+move-update-there-body = L'autre ordinateur a une version de PCTwin plus ancienne que celui-ci, ils ne peuvent donc pas transférer de fichiers ensemble. Mettez à jour PCTwin sur l'autre, puis recommencez. Rien n'a été copié.
+move-refused-title = Le transfert n’a pas pu commencer.
+move-refused-not-paired = Vos portables ne sont plus associés. Associez-les à nouveau pour commencer le transfert.
+move-refused-busy = Un transfert est déjà en cours sur ce portable.
+move-refused-not-moving = Aucun transfert n’est en cours sur ce portable.
+move-refused-plan-changed = Le plan a changé avant d’être approuvé. Associez à nouveau les portables pour voir le nouveau plan.
+move-refused-failed = Les dossiers de ce portable n’ont pas pu être préparés. Associez à nouveau les portables pour réessayer.
+drive-problem-title = Le transfert a besoin de vous.
+drive-problem-body = Les copies enregistrées dans { $place } ne correspondaient pas aux originaux lors des vérifications de PCTwin, plusieurs fois. Le disque est peut-être défaillant, plein ou débranché : la copie y est en pause.
+drive-problem-kept-title = Déjà copié et vérifié
+drive-problem-waiting-title = Reste à copier dans { $place }
+drive-problem-badge = En pause
+drive-problem-fix = Vérifiez que le disque est branché et a de l’espace libre, puis continuez. Rien de ce que vous avez choisi n’est écarté pour contourner le problème. Vous pouvez aussi arrêter.
+drive-problem-carry-on = Continuer
 
 ## R02 Your move, item by item (detailed report)
 
@@ -1027,10 +1308,17 @@ report-from = De : { $path }
 report-to = Vers : { $path }
 report-none = Aucun élément n’a ce résultat.
 report-more-details = Plus de détails
+# Added 23 October 2026: what the report says beside a line's result (changed since the scan).
+report-note-changed-since-scan = Modifié depuis l’analyse : il a été copié tel qu’il est maintenant.
+report-note-no-longer-there = N’est plus là : il a été déplacé, renommé ou supprimé sur l’ancien ordinateur portable avant de pouvoir être envoyé.
+report-note-time-not-kept = Date non conservée : ce disque ne peut pas enregistrer la date de sa dernière modification, il affiche donc la date de la copie.
 
 # Evidence: how a copied item was checked.
 evidence-read-back = Vérifié en le relisant depuis le disque.
 evidence-memory = Vérifié depuis la mémoire de cet ordinateur portable, pas depuis le disque.
+evidence-already-there = Déjà sur le nouvel ordinateur portable : le même fichier y était, il n’a donc pas été recopié.
+evidence-recovered = Vérifié avant le redémarrage de l’ordinateur portable, puis de nouveau après.
+evidence-new-laptop = Vérifié par le nouvel ordinateur portable.
 evidence-memory-explain = La copie a été relue et correspondait, mais via la mémoire de cet ordinateur portable : ce qui a été lu venait peut-être de la mémoire plutôt que du disque. Un défaut du disque lui-même pourrait ne pas se voir ici, alors ouvrir le fichier une fois est une bonne vérification.
 evidence-not-checked = Non vérifié, car il n’a pas été terminé.
 # Machine-translated 16 October 2026.
@@ -1056,6 +1344,7 @@ reason-online-only = Ce fichier est stocké seulement en ligne, il n’était do
 reason-manual-install = Cette appli doit venir du site de son éditeur. Téléchargez-la et installez-la depuis ce site.
 reason-restart = Le nouvel ordinateur portable doit redémarrer pour terminer. Redémarrez-le quand vous le souhaitez.
 reason-finish-by-hand = PCTwin ne peut pas faire cette étape à votre place. Suivez les étapes indiquées pour elle dans ce rapport.
+reason-parts-missing = Certains fichiers de ce dossier ne sont pas arrivés, il n’est donc pas complet sur le nouvel ordinateur. Ils sont listés dans ce rapport avec la raison. Envoyez-les à nouveau, ou copiez le dossier autrement.
 
 ## Item results (every item ends with one of these)
 
@@ -1099,6 +1388,8 @@ progress-state-placing = Mise en place
 progress-state-existing = Déjà présent
 outcome-stopped-title = Votre transfert a été arrêté.
 outcome-stopped-body = Vous avez arrêté le transfert. Ce qui avait été copié et vérifié avant est gardé. Le reste n’a pas été copié.
+outcome-broke-title = Votre transfert s’est arrêté tôt.
+outcome-broke-body = Un problème est survenu entre les ordinateurs portables, le transfert n’a donc pas pu continuer. Ce qui avait été copié et vérifié avant est gardé. Le reste n’a pas été copié.
 # $done and $total are counts of items: what was copied and checked, and everything the person approved.
 outcome-files-summary = Éléments copiés et vérifiés : { $done } sur { $total }.
 outcome-files-memory =
@@ -1121,6 +1412,15 @@ code-label = Code à six chiffres
 
 qs-eyebrow = Envoi rapide
 qs-eyebrow-receiving = Réception sur cet ordinateur portable
+qs-label-this = Ce portable
+qs-label-other = L’autre portable
+qs-wait-title = En attente des fichiers.
+qs-wait-body = Les portables sont associés. Vous verrez ce qui est proposé avant que rien ne soit reçu.
+qs-pick-failed = Le sélecteur n’a pas pu s’ouvrir. Réessayez.
+qs-pick-too-many = C’est plus de fichiers qu’un seul envoi ne peut en emporter. Décochez quelques dossiers, ou envoyez-les en plusieurs fois.
+qs-problem-lost-title = La connexion avec l’autre portable a été perdue.
+qs-problem-failed-title = Les fichiers n’ont pas pu être envoyés cette fois.
+qs-problem-body = Ce qui a déjà été reçu et vérifié reste en place. Associez à nouveau les portables pour réessayer.
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = De { $from } vers { $to }
@@ -1136,8 +1436,8 @@ qs-tally-badge = Envoi à proximité
 
 ## Q01 Quick Send home
 
-qs-home-title = Quelques fichiers, envoyés directement.
-qs-home-body = Envoyez quelques fichiers à un ordinateur portable à proximité.
+qs-home-title = Envoyez des fichiers à un portable proche.
+qs-home-body = Ou recevez-en d’un autre.
 qs-send-title = Envoyer des fichiers
 qs-send-body = Choisissez des fichiers ou des dossiers sur cet ordinateur portable.
 qs-receive-title = Recevoir des fichiers
@@ -1175,6 +1475,7 @@ qs-choose-continue = Vérifier ces fichiers
 qs-check-title = Vérifiez ce que vous partagez.
 qs-check-body = Relisez ces fichiers avant qu’ils quittent cet ordinateur portable.
 qs-check-included = Inclus
+qs-file-type = Type : .{ $ext }
 qs-check-shared-note = L’autre ordinateur portable voit le nom, la taille et la date de ces fichiers.
 qs-check-changed = { $name } a changé depuis votre choix. Vérifiez-le à nouveau.
 qs-check-ack = J’ai vérifié ces fichiers
@@ -1196,7 +1497,7 @@ qs-who-action = Afficher mon code d’envoi
 ## Q08 Incoming offer (receiving laptop)
 
 qs-offer-title = Quelqu’un veut vous envoyer des fichiers.
-qs-offer-body = Vérifiez ce qui est envoyé avant d’accepter.
+qs-offer-body = { $label } veut vous envoyer ces fichiers. Vérifiez-les avant d’accepter.
 qs-offer-note = PCTwin enregistre seulement les fichiers que vous acceptez. Il ne les ouvre et ne les lance jamais.
 qs-offer-accept = Accepter et choisir un dossier
 qs-offer-decline = Refuser ces fichiers
@@ -1316,6 +1617,8 @@ qs-receipt-arrived =
 qs-receipt-size = { $size } conformes à l’original
 qs-receipt-saved-as = { $path }
 qs-receipt-not-arrived = Ce dossier n’est pas entièrement arrivé et vérifié.
+qs-receipt-needs-action = { $path } est là, mais n’est pas terminé. Que faire est dans Plus de détails.
+qs-receipt-mark-not-kept = { $path } est là, mais ce disque n’a pas pu le marquer comme téléchargé depuis un autre ordinateur portable. Ouvrez-le avec prudence.
 qs-receipt-status-verified = Vérifié
 qs-receipt-status-unfinished = Inachevé
 qs-receipt-not-completed = Non terminé.
@@ -1457,3 +1760,16 @@ qs-receipt-already-count =
     }
 qs-missing-new-send = Lancer un nouvel envoi
 history-open-name = { $what } : { $title }
+
+## R05 Annulation : ce que l’annulation fera sur chaque disque, et ce qu’est devenue chaque copie
+
+undo-here-removes = L’annulation supprime les copies faites par PCTwin que vous n’avez pas modifiées. Tout ce que vous avez modifié est gardé.
+undo-here-to-trash = L’annulation place dans la Corbeille les copies faites par PCTwin que vous n’avez pas modifiées. Tout ce que vous avez modifié est gardé, et rien n’est supprimé.
+undo-here-keeps-fat = L’annulation gardera toutes les copies sur { $drive }. Ce disque utilise FAT ou exFAT, qui réutilise les numéros servant à distinguer les fichiers : PCTwin ne peut donc pas être sûr de savoir quels fichiers sont les siens. Vous pouvez les supprimer vous-même.
+undo-here-keeps-other = L’annulation gardera toutes les copies sur { $drive }. Sur ce type de disque, PCTwin ne peut pas déplacer ni supprimer des fichiers en toute sécurité. Vous pouvez les supprimer vous-même.
+undo-here-more = Plus de détails
+undo-here-more-trash = Un Mac ne permet pas à PCTwin de savoir qu’aucune autre appli n’écrit encore dans un fichier : PCTwin n’en supprime donc jamais. Il place chaque copie dans la Corbeille du même disque. Vous pouvez la remettre en place depuis la Corbeille.
+undo-here-more-fat = Sur les disques FAT et exFAT, un nouveau fichier peut recevoir le numéro d’un fichier supprimé. PCTwin n’agit que sur les fichiers dont il peut prouver qu’ils sont les siens et inchangés : il garde donc ceux-ci.
+undo-done-trashed = Placé dans la Corbeille sous le nom « { $name } ». Vous pouvez le remettre en place depuis la Corbeille.
+undo-kept-fat = Gardé. Ce disque (FAT ou exFAT) réutilise les numéros servant à distinguer les fichiers : PCTwin ne peut donc pas être sûr qu’il s’agit de sa copie. Si vous n’en avez pas besoin, vous pouvez la supprimer vous-même.
+undo-kept-no-trash = Gardé. PCTwin n’a pas pu placer cette copie dans la Corbeille de son disque. Si vous n’en avez pas besoin, vous pouvez la supprimer vous-même.

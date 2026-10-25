@@ -1,0 +1,154 @@
+/* The Wordplay opening, ported from the pack's PCTwin_Wordplay_Opening.css onto the app window.
+   Only transform and opacity are animated (from Opening.tsx). */
+
+.opening {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--colour-ink);
+  font-family: var(--font-family);
+  outline: none;
+}
+
+.opening-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--colour-canvas);
+}
+
+/* The app underneath: built and laid out, shown as the opening clears; the header's own mark waits
+   for the docking mark. */
+.opening-under .app-header .brand-mark {
+  visibility: hidden;
+}
+
+.opening-block {
+  position: absolute;
+  top: calc(44% - 50px);
+  left: calc(50% - 77px);
+  z-index: 1;
+  width: 154px;
+  height: 113px;
+  border-radius: 23px;
+  background: var(--colour-citron);
+  pointer-events: none;
+}
+
+.opening-word {
+  position: absolute;
+  top: calc(44% - 46px);
+  right: 30px;
+  left: 30px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 105px;
+  pointer-events: none;
+}
+
+.opening-letter {
+  display: inline-block;
+  color: var(--colour-ink);
+  font-size: 90px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -7px;
+  transform-origin: 50% 70%;
+}
+
+.opening-letter:nth-child(3) {
+  color: var(--colour-blue);
+}
+
+.opening-case {
+  position: absolute;
+  top: calc(39% - 37px);
+  left: calc(50% - 44px);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 74px;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+.opening-wordplay .opening-case {
+  top: calc(26% - 37px);
+}
+
+/* The pack's crop: the case only, none of the lockup's name under it. */
+.opening-case .brand-mark {
+  height: 20px;
+  transform: scale(3.2);
+}
+
+.opening-name {
+  position: absolute;
+  top: calc(39% + 66px);
+  right: 20px;
+  left: 20px;
+  z-index: 5;
+  font-size: 32px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: -1px;
+  text-align: center;
+}
+
+.opening-tagline {
+  position: absolute;
+  top: calc(39% + 112px);
+  right: 24px;
+  left: 24px;
+  z-index: 12;
+  color: var(--colour-muted);
+  font-size: var(--type-body);
+  line-height: 1.5;
+  text-align: center;
+  pointer-events: none;
+}
+
+.opening-wordplay .opening-tagline {
+  top: calc(44% + 76px);
+}
+
+.opening-skip {
+  position: absolute;
+  right: 0;
+  bottom: 24px;
+  left: 0;
+  z-index: 8;
+  width: max-content;
+  min-height: 40px;
+  margin-inline: auto;
+  padding: 8px 14px;
+  border: 1px solid var(--colour-line);
+  border-radius: 10px;
+  background: var(--colour-paper);
+  color: var(--colour-muted);
+  font-size: var(--type-supporting);
+}
+
+.opening-skip:hover {
+  border-color: #bfd0ff;
+  color: var(--colour-blue);
+}
+
+/* Narrow windows: the name stays whole. */
+@media (max-width: 400px) {
+  .opening-letter {
+    font-size: 72px;
+    letter-spacing: -5px;
+  }
+}
+
+@media (forced-colors: active) {
+  .opening-skip {
+    border: 1px solid ButtonText;
+  }
+}

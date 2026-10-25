@@ -1,6 +1,9 @@
 /// The most lanes (connections) one move uses.
 pub const MAX_LANES: u8 = 4;
 
+// Every lane opens at once at most: the old laptop finishes that many handshakes together.
+const _: () = assert!(MAX_LANES as usize <= pctwin_link::MAX_HANDSHAKES);
+
 /// A lane is kept only when total speed rises by at least this many tenths (10%).
 const GAIN_TENTHS: f64 = 11.0;
 /// Going down a lane is kept when speed stays at least this share of what it was: fewer lanes are

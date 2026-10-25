@@ -95,20 +95,21 @@ pub fn measure(root: &Path) -> Measure {
     m
 }
 
+/// Whether a file's contents are stored online only (reading it would download it).
 #[cfg(windows)]
-pub(crate) fn is_cloud_only(meta: &std::fs::Metadata) -> bool {
+pub fn is_cloud_only(meta: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     cloud_only_windows(meta.file_attributes())
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn is_cloud_only(meta: &std::fs::Metadata) -> bool {
+pub fn is_cloud_only(meta: &std::fs::Metadata) -> bool {
     use std::os::macos::fs::MetadataExt;
     cloud_only_mac(meta.st_flags())
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-pub(crate) fn is_cloud_only(_meta: &std::fs::Metadata) -> bool {
+pub fn is_cloud_only(_meta: &std::fs::Metadata) -> bool {
     false
 }
 

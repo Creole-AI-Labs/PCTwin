@@ -1,0 +1,13 @@
+{
+  "build": {
+    "beforeBuildCommand": "node ../scripts/stage-helpers.mjs release && pnpm build"
+  },
+  "bundle": {
+    "externalBin": ["binaries/pctwin-helper", "binaries/pctwin-handover"],
+    "macOS": {
+      "files": {
+        "Library/LaunchDaemons/com.creoleailabs.pctwin.helper.plist": "../../crates/pctwin-helper-os/packaging/macos/com.creoleailabs.pctwin.helper.plist"
+      }
+    }
+  }
+}

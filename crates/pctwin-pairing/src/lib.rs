@@ -8,7 +8,8 @@
 //!    and an odd last digit, so the receiver can name which live code it holds
 //!    ([`PairingCode::parity`], [`RotatingSender::message_1_for`]) at the cost of one bit. Each code carries a random
 //!    session tag in the messages, so a reply is matched to the code it was made from and a stray
-//!    reply never burns the current code.
+//!    reply never burns the current code. After the laptop sleeps, every code shown before is
+//!    retired and a fresh one shows at once ([`WAKE_GAP`]).
 //! 2. Each code gets exactly one attempt. Failed attempts are budgeted: after each failure the
 //!    sender pauses before showing a new code (1, 2, 4, 8 seconds), and after
 //!    [`MAX_FAILED_ATTEMPTS`] failures in a row pairing locks until the person on the sender
@@ -55,14 +56,15 @@
 //! - Session tags are public, so anyone who sees message 1 can spend that code's single attempt
 //!   with a junk reply (and repeated junk replies trigger the lockout). Binding attempts to one
 //!   network connection belongs to the transport layer.
-//! - Time is supplied by the caller. `Instant` does not count suspend on every platform, so the
-//!   app must rotate the code when the laptop wakes from sleep.
+//! - Time is supplied by the caller. `Instant` does not count suspend on every platform (macOS
+//!   pauses it in sleep), so every deadline is also kept on the calendar clock, and is passed
+//!   when either clock passes it; the app also rotates the code when the laptop wakes.
 //! - Starting a session panics if the operating system's random source fails, as SPAKE2 does.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::ops::RangeInclusive;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use hkdf::Hkdf;
@@ -71,6 +73,54 @@ use sha2::{Digest, Sha256};
 use snow::{Builder, HandshakeState, TransportState};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
+/// A time limit kept on both clocks: the caller's `Instant` (which macOS pauses while the laptop
+/// sleeps) and the calendar clock (which counts sleep). It is passed when either has passed it, so
+/// a laptop that slept through a limit never finds it still open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Deadline {
+    mono: Instant,
+    wall: SystemTime,
+}
+
+impl Deadline {
+    fn after(now: Instant, wait: Duration) -> Self {
+        Self {
+            mono: now + wait,
+            wall: wall_now() + wait,
+        }
+    }
+
+    fn passed(&self, now: Instant) -> bool {
+        now > self.mono || wall_now() > self.wall
+    }
+}
+
+/// The calendar clock, as deadlines read it (moved forward on this thread by
+/// [`clock::move_calendar`] in tests).
+fn wall_now() -> SystemTime {
+    SystemTime::now() + clock::shift()
+}
+
+/// For tests: the calendar clock moved forward, as it is after a sleep, on this thread only.
+#[doc(hidden)]
+pub mod clock {
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    thread_local! {
+        static SHIFT: Cell<Duration> = const { Cell::new(Duration::ZERO) };
+    }
+
+    /// Moves this thread's calendar clock forward by `by`, as a sleep does.
+    pub fn move_calendar(by: Duration) {
+        SHIFT.with(|s| s.set(s.get() + by));
+    }
+
+    pub(crate) fn shift() -> Duration {
+        SHIFT.with(Cell::get)
+    }
+}
 
 /// Version of the pairing protocol carried in every message.
 pub const PROTOCOL_VERSION: u8 = 1;
@@ -84,6 +134,10 @@ pub const CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(180);
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Failed attempts in a row before pairing locks until the person on the sender starts again.
 pub const MAX_FAILED_ATTEMPTS: u32 = 5;
+/// How far the calendar clock may run ahead of the sender's own clock between two looks before
+/// the sender takes it that the laptop slept (and retires the codes shown before). `Instant` does
+/// not count sleep on every system; the calendar clock does.
+pub const WAKE_GAP: Duration = Duration::from_secs(5);
 /// Largest pairing message accepted, in bytes.
 pub const MAX_MESSAGE_LEN: usize = 512;
 /// Range of the match number shown during confirmation.
@@ -351,6 +405,8 @@ impl PairingCode {
         (self.digits[5] - b'0') & 1
     }
 
+    /// The code as SPAKE2 takes it. SPAKE2 keeps its own copy, which it does not wipe: callers hold
+    /// the result only for the one call that needs it (a temporary, dropped at once).
     fn password(&self) -> Password {
         Password::new(self.digits)
     }
@@ -367,7 +423,7 @@ pub struct SenderSession {
     id: [u8; SESSION_ID_LEN],
     spake: Spake2<Ed25519Group>,
     spake_a: Vec<u8>,
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl SenderSession {
@@ -394,7 +450,7 @@ impl SenderSession {
                 id,
                 spake,
                 spake_a,
-                deadline: now + CODE_LIFETIME + ROTATION_GRACE,
+                deadline: Deadline::after(now, CODE_LIFETIME + ROTATION_GRACE),
             },
             msg1,
         )
@@ -407,7 +463,7 @@ impl SenderSession {
         msg2: &[u8],
         now: Instant,
     ) -> Result<(SenderAwaitingReveal, Vec<u8>), PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg2, KIND_SPAKE_B_NOISE_1)?;
@@ -453,7 +509,7 @@ impl SenderSession {
                 handshake_hash,
                 confirm,
                 commitment,
-                deadline: now + CONFIRMATION_TIMEOUT,
+                deadline: Deadline::after(now, CONFIRMATION_TIMEOUT),
             },
             msg3,
         ))
@@ -464,16 +520,16 @@ impl SenderSession {
 pub struct SenderAwaitingReveal {
     transport: TransportState,
     lane_secret: Zeroizing<[u8; 32]>,
-    handshake_hash: Vec<u8>,
+    handshake_hash: Zeroizing<Vec<u8>>,
     confirm: ConfirmKeys,
     commitment: [u8; COMMIT_LEN],
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl SenderAwaitingReveal {
     /// When the sender stops waiting for the reveal.
     pub fn deadline(&self) -> Instant {
-        self.deadline
+        self.deadline.mono
     }
 
     /// Handles message 4 at time `now`. Returns the three numbers to offer the person. Junk,
@@ -484,7 +540,7 @@ impl SenderAwaitingReveal {
         msg4: &[u8],
         now: Instant,
     ) -> Result<SenderChoosing, Rejected<Self>> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(Rejected::end(PairingError::Expired));
         }
         let payload = match parse_frame(msg4, KIND_REVEAL) {
@@ -523,7 +579,7 @@ pub struct SenderChoosing {
     confirm: ConfirmKeys,
     correct: u8,
     choices: [u8; 3],
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl SenderChoosing {
@@ -534,7 +590,7 @@ impl SenderChoosing {
 
     /// When the sender stops waiting for the person's pick.
     pub fn deadline(&self) -> Instant {
-        self.deadline
+        self.deadline.mono
     }
 
     /// Records the person's pick at time `now`. The right number unlocks the sender and returns
@@ -542,7 +598,7 @@ impl SenderChoosing {
     /// deadline, cancels pairing. To cancel without picking (for example when none of the three
     /// numbers matches the receiver), drop this value.
     pub fn choose(self, picked: u8, now: Instant) -> Result<(Paired, Vec<u8>), PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         if picked != self.correct {
@@ -563,7 +619,7 @@ pub struct ReceiverSession {
     hs: HandshakeState,
     psk: Zeroizing<[u8; 32]>,
     nonce: Zeroizing<[u8; NONCE_LEN]>,
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl ReceiverSession {
@@ -610,7 +666,7 @@ impl ReceiverSession {
                 hs,
                 psk,
                 nonce,
-                deadline: now + REPLY_TIMEOUT,
+                deadline: Deadline::after(now, REPLY_TIMEOUT),
             },
             frame(KIND_SPAKE_B_NOISE_1, &payload),
         ))
@@ -625,7 +681,7 @@ impl ReceiverSession {
         msg3: &[u8],
         now: Instant,
     ) -> Result<(ReceiverAwaitingApproval, Vec<u8>), Rejected<Self>> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(Rejected::end(PairingError::Expired));
         }
         let payload = match parse_frame(msg3, KIND_NOISE_2) {
@@ -654,7 +710,7 @@ impl ReceiverSession {
                 lane_secret,
                 confirm,
                 match_number,
-                deadline: now + CONFIRMATION_TIMEOUT,
+                deadline: Deadline::after(now, CONFIRMATION_TIMEOUT),
             },
             frame(KIND_REVEAL, &reveal),
         ))
@@ -667,7 +723,7 @@ pub struct ReceiverAwaitingApproval {
     lane_secret: Zeroizing<[u8; 32]>,
     confirm: ConfirmKeys,
     match_number: u8,
-    deadline: Instant,
+    deadline: Deadline,
 }
 
 impl ReceiverAwaitingApproval {
@@ -678,14 +734,14 @@ impl ReceiverAwaitingApproval {
 
     /// When the receiver stops waiting for the approval.
     pub fn deadline(&self) -> Instant {
-        self.deadline
+        self.deadline.mono
     }
 
     /// Handles message 5 at time `now`. Succeeds only for a genuine approval from this session
     /// carrying the receiver's own number. Junk, truncated or forged messages hand the waiting
     /// state back; a wrong number, a malformed approval or a missed deadline ends the pairing.
     pub fn receive_approval(self, msg5: &[u8], now: Instant) -> Result<Paired, Rejected<Self>> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(Rejected::end(PairingError::Expired));
         }
         let payload = match parse_frame(msg5, KIND_APPROVE) {
@@ -804,7 +860,7 @@ impl LaneKeys {
             secret,
             self.lanes.opens,
             &RESUMES,
-            Some(now + RESUME_LIFETIME),
+            Some(Deadline::after(now, RESUME_LIFETIME)),
         )))
     }
 }
@@ -865,15 +921,38 @@ const RESUMES: Purpose = Purpose {
     limit: MAX_RESUMES,
 };
 
+/// The attempt numbers spent, shared between the openings and the connections under way.
+#[derive(Clone, Default)]
+struct Spent(std::sync::Arc<std::sync::Mutex<BTreeSet<u32>>>);
+
+impl Spent {
+    fn has(&self, n: u32) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&n)
+    }
+
+    /// Spends `n`; false if it was spent already.
+    fn spend(&self, n: u32) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(n)
+    }
+}
+
 /// New connections opened from a paired session's secret, numbered from 1, each number used once.
 struct Openings {
     secret: Zeroizing<[u8; 32]>,
     /// Whether this laptop opens (the new laptop) or accepts (the old laptop).
     opens: bool,
     next: u32,
-    used: BTreeSet<u32>,
+    /// Numbers spent: each by a connection whose confirmation (message 3) proved it, shared with
+    /// the openings under way so the first to confirm a number spends it.
+    used: Spent,
     purpose: &'static Purpose,
-    expires: Option<Instant>,
+    expires: Option<Deadline>,
 }
 
 impl Openings {
@@ -881,13 +960,13 @@ impl Openings {
         secret: Zeroizing<[u8; 32]>,
         opens: bool,
         purpose: &'static Purpose,
-        expires: Option<Instant>,
+        expires: Option<Deadline>,
     ) -> Self {
         Self {
             secret,
             opens,
             next: 1,
-            used: BTreeSet::new(),
+            used: Spent::default(),
             purpose,
             expires,
         }
@@ -895,7 +974,7 @@ impl Openings {
 
     fn check_time(&self, now: Instant) -> Result<(), PairingError> {
         match self.expires {
-            Some(expires) if now > expires => Err(PairingError::Expired),
+            Some(expires) if expires.passed(now) => Err(PairingError::Expired),
             _ => Ok(()),
         }
     }
@@ -923,7 +1002,7 @@ impl Openings {
                 hs,
                 psk,
                 lane: number,
-                deadline: now + REPLY_TIMEOUT,
+                deadline: Deadline::after(now, REPLY_TIMEOUT),
                 purpose: self.purpose,
             },
             frame(self.purpose.kinds[0], &payload),
@@ -944,7 +1023,7 @@ impl Openings {
             .split_at_checked(LANE_NUMBER_LEN)
             .ok_or(PairingError::Malformed)?;
         let number = u32::from_be_bytes(number.try_into().map_err(|_| PairingError::Malformed)?);
-        if !(1..=self.purpose.limit).contains(&number) || self.used.contains(&number) {
+        if !(1..=self.purpose.limit).contains(&number) || self.used.has(number) {
             return Err(PairingError::LaneRefused);
         }
         let psk = derive_numbered_psk(self.purpose, &self.secret, number)?;
@@ -959,9 +1038,10 @@ impl Openings {
         if read != 0 {
             return Err(PairingError::Malformed);
         }
-        // The message proved the keys: this number is spent, even if the connection never
-        // completes, so a copy of the message cannot open a second one.
-        self.used.insert(number);
+        // The message proved the keys, but a copy of it proves them as well: the number is spent
+        // only once the connection is confirmed (message 3, which only the laptop that started
+        // it can seal), so a replayed message 1 never uses up the numbers; and a number is
+        // confirmed once, so a copy can never open a second connection.
         let written = hs
             .write_message(&[], &mut buf)
             .map_err(|_| PairingError::HandshakeFailed)?;
@@ -971,8 +1051,9 @@ impl Openings {
             LaneAccepting {
                 transport,
                 confirm,
+                used: self.used.clone(),
                 lane: number,
-                deadline: now + REPLY_TIMEOUT,
+                deadline: Deadline::after(now, REPLY_TIMEOUT),
                 purpose: self.purpose,
             },
             frame(self.purpose.kinds[1], &buf[..written]),
@@ -985,7 +1066,7 @@ pub struct LaneOpening {
     hs: HandshakeState,
     psk: Zeroizing<[u8; 32]>,
     lane: u32,
-    deadline: Instant,
+    deadline: Deadline,
     purpose: &'static Purpose,
 }
 
@@ -1002,7 +1083,7 @@ impl LaneOpening {
         msg2: &[u8],
         now: Instant,
     ) -> Result<(Transport, Vec<u8>), PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg2, self.purpose.kinds[1])?;
@@ -1029,8 +1110,9 @@ impl LaneOpening {
 pub struct LaneAccepting {
     transport: TransportState,
     confirm: ConfirmKeys,
+    used: Spent,
     lane: u32,
-    deadline: Instant,
+    deadline: Deadline,
     purpose: &'static Purpose,
 }
 
@@ -1043,7 +1125,7 @@ impl LaneAccepting {
     /// Handles lane message 3 at time `now`. Only a confirmation sealed under this lane's fresh
     /// keys and naming this lane makes it usable; a copied lane message 1 cannot produce one.
     pub fn confirm(self, msg3: &[u8], now: Instant) -> Result<Transport, PairingError> {
-        if now > self.deadline {
+        if self.deadline.passed(now) {
             return Err(PairingError::Expired);
         }
         let payload = parse_frame(msg3, self.purpose.kinds[2])?;
@@ -1052,6 +1134,9 @@ impl LaneAccepting {
         expected.extend_from_slice(&self.lane.to_be_bytes());
         if body != &expected[..] {
             return Err(PairingError::HandshakeFailed);
+        }
+        if !self.used.spend(self.lane) {
+            return Err(PairingError::LaneRefused);
         }
         Ok(Transport(self.transport))
     }
@@ -1113,6 +1198,44 @@ pub struct RotatingSender {
     failures: u32,
     blocked_until: Option<Instant>,
     locked: bool,
+    wake: WakeWatch,
+}
+
+/// The calendar clock the sender compares its own clock with to notice sleep.
+type WallClock = Box<dyn Fn() -> SystemTime + Send>;
+
+/// Notices that the laptop slept: between two looks, the calendar clock (which counts sleep) moved
+/// on more than [`WAKE_GAP`] beyond the sender's own clock (which may not). A calendar clock set
+/// back, or the sender's clock running ahead, is never taken for sleep. A calendar clock set
+/// forward by hand is, which only costs a fresh code.
+struct WakeWatch {
+    wall: WallClock,
+    last: Instant,
+    last_wall: SystemTime,
+}
+
+impl WakeWatch {
+    fn new(now: Instant, wall: WallClock) -> Self {
+        let last_wall = wall();
+        Self {
+            wall,
+            last: now,
+            last_wall,
+        }
+    }
+
+    /// Looks at both clocks at `now`; true if the laptop slept since the last look.
+    fn slept(&mut self, now: Instant) -> bool {
+        let wall_now = (self.wall)();
+        let own = now.saturating_duration_since(self.last);
+        // A calendar clock set back gives no gap (and becomes the new baseline).
+        let calendar = wall_now
+            .duration_since(self.last_wall)
+            .unwrap_or(Duration::ZERO);
+        self.last = self.last.max(now);
+        self.last_wall = wall_now;
+        calendar > own.saturating_add(WAKE_GAP)
+    }
 }
 
 struct SenderEntry {
@@ -1136,14 +1259,23 @@ impl SenderEntry {
 }
 
 impl RotatingSender {
-    /// Creates the first code at time `now`.
+    /// Creates the first code at time `now`, watching the system's calendar clock for sleep.
     pub fn new(now: Instant) -> Result<Self, PairingError> {
+        Self::with_wall_clock(now, SystemTime::now)
+    }
+
+    /// [`new`](Self::new) with the calendar clock to compare against (tests move it by hand).
+    pub fn with_wall_clock(
+        now: Instant,
+        wall: impl Fn() -> SystemTime + Send + 'static,
+    ) -> Result<Self, PairingError> {
         Ok(Self {
             current: SenderEntry::new(now, 0)?,
             previous: None,
             failures: 0,
             blocked_until: None,
             locked: false,
+            wake: WakeWatch::new(now, Box::new(wall)),
         })
     }
 
@@ -1201,14 +1333,25 @@ impl RotatingSender {
         self.failures
     }
 
-    /// Advances to time `now`: ends a finished cool-down with a fresh code, replaces the code
-    /// when its minute is up, and forgets a previous code once its grace period ends.
-    /// Returns `true` if a new code is now showing.
+    /// Advances to time `now`: after the laptop slept, retires every code shown before (a fresh
+    /// one shows at once, or when a pause ends); ends a finished cool-down with a fresh code,
+    /// replaces the code when its minute is up, and forgets a previous code once its grace period
+    /// ends. Returns `true` if a new code is now showing.
     pub fn tick(&mut self, now: Instant) -> Result<bool, PairingError> {
+        let slept = self.wake.slept(now);
         if self.locked {
             return Ok(false);
         }
         let mut rotated = false;
+        if slept {
+            // Both live codes were on screen before the sleep: neither may be used after it.
+            self.previous = None;
+            if self.blocked_until.is_none() {
+                // Nothing else is live now, so any even/odd will do; differ from the retired one.
+                self.current = SenderEntry::new(now, 1 - self.current.code.parity())?;
+                rotated = true;
+            }
+        }
         if let Some(until) = self.blocked_until {
             if now < until {
                 return Ok(false);
@@ -1400,7 +1543,8 @@ fn derive_lane_secret(
     psk: &[u8; 32],
     handshake_hash: &[u8],
 ) -> Result<Zeroizing<[u8; 32]>, PairingError> {
-    let mut info = b"lane secret".to_vec();
+    // Holds the handshake hash: wiped when dropped.
+    let mut info = Zeroizing::new(b"lane secret".to_vec());
     info.extend_from_slice(handshake_hash);
     let mut secret = Zeroizing::new([0u8; 32]);
     Hkdf::<Sha256>::new(Some(LANE_SECRET_SALT), psk)
@@ -1466,11 +1610,15 @@ fn noise_builder<'a>(psk: &'a [u8; 32], prologue: &'a [u8]) -> Result<Builder<'a
         .map_err(|_| PairingError::HandshakeFailed)
 }
 
-fn finish_handshake(hs: HandshakeState) -> Result<(TransportState, Vec<u8>), PairingError> {
+/// The finished handshake's transport and its final hash (wiped from memory when dropped: the
+/// match number and the confirmation keys come from it).
+fn finish_handshake(
+    hs: HandshakeState,
+) -> Result<(TransportState, Zeroizing<Vec<u8>>), PairingError> {
     if !hs.is_handshake_finished() {
         return Err(PairingError::HandshakeFailed);
     }
-    let handshake_hash = hs.get_handshake_hash().to_vec();
+    let handshake_hash = Zeroizing::new(hs.get_handshake_hash().to_vec());
     let transport = hs
         .into_transport_mode()
         .map_err(|_| PairingError::HandshakeFailed)?;
@@ -1493,7 +1641,8 @@ struct ConfirmKeys {
 impl ConfirmKeys {
     fn derive(psk: &[u8; 32], handshake_hash: &[u8]) -> Result<Self, PairingError> {
         let one = |who: &[u8]| -> Result<Zeroizing<[u8; 32]>, PairingError> {
-            let mut info = who.to_vec();
+            // Holds the handshake hash: wiped when dropped.
+            let mut info = Zeroizing::new(who.to_vec());
             info.extend_from_slice(handshake_hash);
             let mut key = Zeroizing::new([0u8; 32]);
             Hkdf::<Sha256>::new(Some(CONFIRM_SALT), psk)

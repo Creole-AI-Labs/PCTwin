@@ -83,6 +83,13 @@
   margin-top: var(--space-3);
 }
 
+/* A quiet way on from a problem page (Get help), under its note */
+.mv-actions {
+  margin-top: var(--space-3);
+  display: flex;
+  justify-content: flex-start;
+}
+
 /* The "I understand" box sits in its own bordered card */
 .mv-confirm {
   margin-top: var(--space-3);
@@ -107,6 +114,32 @@
 }
 
 
+
+/* T14: one tip under the bar, in the shared note's look; its two controls sit under the words. */
+.mv-tip {
+  margin-top: var(--space-3);
+}
+
+.mv-tip-body {
+  min-width: 0;
+}
+
+.mv-tip-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mv-tip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-4);
+}
+
+/* Quiet controls under a quiet line: still a 32px target (above WCAG's 24px), less weight than the move's own actions. */
+.mv-tip-actions .mv-link {
+  min-height: 32px;
+  font-size: var(--type-supporting);
+}
 
 .mv-now {
   margin-top: var(--space-3);
@@ -211,6 +244,7 @@
 }
 
 .mv-reason,
+.mv-note,
 .mv-evidence {
   margin-block-start: var(--space-2);
   font-size: var(--type-supporting);
@@ -218,6 +252,11 @@
 
 .mv-evidence {
   color: var(--colour-muted);
+}
+
+/* A note says what else happened to the line (changed since the scan, no longer there): plain ink, weighted as the result, never colour alone. */
+.mv-note {
+  font-weight: 600;
 }
 
 /* A check from memory is its own line, set apart by a rule and the words, not by colour */
@@ -340,4 +379,45 @@
 /* The mini panel's group needs no box of its own */
 .kit-mini[data-kind] {
   inline-size: 100%;
+}
+
+/* Who's moving? on the old laptop: one tick per other person */
+.mv-people {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Numbered steps in a guide */
+.mv-steps {
+  margin: var(--space-3) 0 0;
+  padding-inline-start: var(--space-5);
+  display: grid;
+  gap: var(--space-2);
+}
+
+/* Help's guides: one per line, opened in place */
+.mv-guides {
+  margin-top: var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mv-guide summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* C06: the two laptops, while waiting. */
+.mv-peer {
+  margin-block: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.mv-peer-title {
+  font-size: 1rem;
+  margin: 0;
 }

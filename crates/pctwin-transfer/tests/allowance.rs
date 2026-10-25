@@ -8,7 +8,7 @@ use pctwin_record::{
     FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
     ManagedBy, Owner, PersonTarget, Place, Portability, Record, Storage,
 };
-use pctwin_transfer::{Allowance, LandingPlace, Refusal, SizeRoom, shown_path};
+use pctwin_transfer::{Allowance, LandingPlace, Refusal, SizeRoom, Stamp, shown_path};
 
 const MIB: u64 = 1024 * 1024;
 
@@ -34,6 +34,7 @@ fn item(n: u8, size: u64, kind: ItemKind, inclusion: Inclusion) -> Item {
         place,
         path,
         size_bytes: size,
+        modified_ns: None,
         portability: Portability::Portable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,
@@ -327,7 +328,8 @@ fn a_file_lands_only_where_the_plan_says() {
     let f = item(1, MIB, ItemKind::File, Inclusion::Included);
     let r = record(vec![f.clone()]);
     let mut a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
-    assert_eq!(a.place(f.id), Some(&LandingPlace::new("documents", "f1")));
+    assert_eq!(a.destination(f.id), Some("documents"));
+    assert_eq!(a.check_place(f.id, "documents", "f1"), Ok(()));
     // Another path in the right place, or the right path in another place: refused, and never
     // counted as an attempt (however often it is tried).
     for _ in 0..=pctwin_transfer::MAX_ATTEMPTS {
@@ -364,7 +366,7 @@ fn a_file_the_landing_gives_no_place_is_not_in_the_plan() {
         (i.id != skip).then(|| LandingPlace::new("documents", shown_path(&i.path)))
     })
     .unwrap();
-    assert_eq!(a.place(skip), None);
+    assert_eq!(a.destination(skip), None);
     assert_eq!(
         a.admit(skip, "documents", "f2", MIB),
         Err(Refusal::NotInPlan)
@@ -412,4 +414,80 @@ fn the_marker_floor_is_the_least_marker_every_file_gets() {
     assert_eq!(floored.mark_for(None), Some(Internet));
     assert_eq!(floored.mark_for(Some(Internet)), Some(Internet));
     assert_eq!(floored.mark_for(Some(Restricted)), Some(Restricted));
+}
+
+/// A file sent as it is now is "changed since the scan" when its size differs, or when both the
+/// scan and the old laptop give its changed time and they differ; with no time on either side,
+/// only the size can tell.
+#[test]
+fn a_file_is_changed_since_the_scan_by_its_size_or_its_changed_time() {
+    let mut timed = item(1, 100, ItemKind::File, Inclusion::Included);
+    timed.modified_ns = Some(1_700_000_000_000_000_000);
+    let untimed = item(2, 100, ItemKind::File, Inclusion::Included);
+    let r = record(vec![timed.clone(), untimed.clone()]);
+    let a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
+    let at = |size, modified_ns| Stamp { size, modified_ns };
+    let t = timed.modified_ns;
+    assert!(!a.changed_since_scan(timed.id, at(100, t)));
+    assert!(a.changed_since_scan(timed.id, at(101, t)));
+    assert!(a.changed_since_scan(timed.id, at(100, t.map(|t| t + 1))));
+    // The old laptop could not say when: only the size counts.
+    assert!(!a.changed_since_scan(timed.id, at(100, None)));
+    // The scan had no time: only the size counts.
+    assert!(!a.changed_since_scan(untimed.id, at(100, Some(5))));
+    assert!(a.changed_since_scan(untimed.id, at(99, Some(5))));
+    // Not in the plan: never "changed since the scan" (it is refused anyway).
+    let stranger = item(9, 100, ItemKind::File, Inclusion::Included);
+    assert!(!a.changed_since_scan(stranger.id, at(1, None)));
+}
+
+/// Fresh-context review of TRANSFER (24 October 2026): a start that ends before anything of it
+/// arrived is not counted as an attempt (a lossy link), but an old laptop that starts a file over
+/// and over without sending anything still meets a hard limit, so the journal and the temporary
+/// files cannot be churned without end.
+#[test]
+fn a_file_started_over_and_over_with_nothing_sent_is_refused_in_the_end() {
+    let f = item(1, MIB, ItemKind::File, Inclusion::Included);
+    let r = record(vec![f.clone()]);
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
+    for _ in 0..pctwin_transfer::MAX_STARTS_PER_FILE {
+        assert_eq!(
+            a.admit(f.id, "documents", &shown_path(&f.path), MIB),
+            Ok(())
+        );
+        a.ended_unstarted(f.id);
+    }
+    assert_eq!(
+        a.admit(f.id, "documents", &shown_path(&f.path), MIB),
+        Err(Refusal::StartedTooOften)
+    );
+}
+
+/// The same limit for the whole move: however the starts are spread over the plan's files, no
+/// more than the move's limit are ever agreed to.
+#[test]
+fn a_move_agrees_to_only_so_many_starts_in_all() {
+    let files: Vec<Item> = (0..=u8::MAX)
+        .map(|n| item(n, 10, ItemKind::File, Inclusion::Included))
+        .collect();
+    let r = record(files.clone());
+    let mut a = Allowance::from_record(&r, &r.approve().unwrap(), lands).unwrap();
+    let limit = pctwin_transfer::max_starts_per_move(files.len());
+    assert!(
+        limit < files.len() as u64 * u64::from(pctwin_transfer::MAX_STARTS_PER_FILE),
+        "the test must reach the move's limit before every file's own"
+    );
+    let mut agreed = 0u64;
+    for f in &files {
+        for _ in 0..pctwin_transfer::MAX_STARTS_PER_FILE {
+            match a.admit(f.id, "documents", &shown_path(&f.path), 10) {
+                Ok(()) => {
+                    agreed += 1;
+                    a.ended_unstarted(f.id);
+                }
+                Err(e) => assert_eq!(e, Refusal::StartedTooOften),
+            }
+        }
+    }
+    assert_eq!(agreed, limit);
 }

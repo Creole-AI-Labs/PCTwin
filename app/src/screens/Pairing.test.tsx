@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import axe from "axe-core";
+import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import PairNew from "./PairNew";
@@ -61,20 +61,30 @@ function inApp(ui: ReactNode) {
     </LocalizationProvider>);
 }
 
+/**
+ * Lets every reply already on its way arrive and the screen draw what follows: a task queued after
+ * them runs only once they have run. Order, not time, so a busy machine cannot make it fail.
+ */
+async function settle() {
+  for (let i = 0; i < 3; i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
 async function renderOld(onBack = vi.fn()) {
   inApp(<PairOld onBack={onBack} />);
-  await waitFor(() => {
-    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
-  });
+  await settle();
+  expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
   return onBack;
 }
 
 async function renderNew(found: unknown[], onBack = vi.fn()) {
   replies.pairing_new_search = () => found;
   inApp(<PairNew onBack={onBack} />);
-  await waitFor(() => {
-    expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
-  });
+  await settle();
+  expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
   return onBack;
 }
 
@@ -88,21 +98,13 @@ async function emit(channel: "pairing-old" | "pairing-new", payload: unknown) {
 const button = (id: string, vars?: Record<string, string | number>) => screen.getByRole("button", { name: nameIs(text(id, vars)) });
 const heading = () => screen.getByRole("heading", { level: 1 });
 
-async function violations(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
-}
-
 function noMissingText() {
   expect(warnings.filter((w) => /missing|not found|did not match/i.test(w))).toEqual([]);
 }
 
 describe("old laptop", () => {
   it("listens before it starts, shows the label and the code as six even tiles with its countdown", async () => {
-    inApp(<PairOld onBack={vi.fn()} />);
-    await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
-    });
+    await renderOld();
     expect(tauri.handlers.has("pairing-old")).toBe(true);
     expect(heading().textContent).toBe(text("pair-old-title"));
 
@@ -134,16 +136,14 @@ describe("old laptop", () => {
     expect(screen.getByText(text("pair-old-rename-note"))).toBeTruthy();
     fireEvent.change(screen.getByLabelText(text("pair-old-rename-label")), { target: { value: "Ada's laptop" } });
     fireEvent.click(button("pair-old-rename-save"));
-    await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_rename", { name: "Ada's laptop" });
-    });
-    await waitFor(() => {
-      expect(screen.queryByLabelText(text("pair-old-rename-label"))).toBeNull();
-    });
+    // The save's reply and the field closing come in order, not on a clock: settle, then look.
+    // (Focus is not a change to the page, so a polling wait saw it only on its timer, and on a busy
+    // machine the time limit could run out first.)
+    await settle();
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_rename", { name: "Ada's laptop" });
+    expect(screen.queryByLabelText(text("pair-old-rename-label"))).toBeNull();
     // Closing the field returns focus to the button that opened it (moved once the field has gone).
-    await waitFor(() => {
-      expect(document.activeElement).toBe(button("pair-old-rename"));
-    });
+    expect(document.activeElement).toBe(button("pair-old-rename"));
 
     fireEvent.click(button("pair-old-rename"));
     fireEvent.click(button("pair-old-rename-cancel"));
@@ -365,9 +365,89 @@ describe("old laptop", () => {
     await emit("pairing-old", { kind: "paired" });
     expect(await violations()).toEqual([]);
   });
+
+  it("a dropped connection while checking shows the page whose Try again starts afresh", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 3, numbers: [1, 2, 3] });
+    replies.pairing_old_pick = () => {
+      throw problem("pairing-connection-lost");
+    };
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 2 })) }));
+    fireEvent.click(button("pair-choose-confirm"));
+    expect(await screen.findByText(text("pairing-connection-lost"))).toBeTruthy();
+    // The dead code is not left on screen; the Try again here is real.
+    expect(screen.queryByText("123456")).toBeNull();
+    tauri.invoke.mockClear();
+    fireEvent.click(button("pair-try-again"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    const order = tauri.invoke.mock.calls.map(([c]) => c as string);
+    expect(order.indexOf("pairing_stop")).toBeLessThan(order.indexOf("pairing_old_start"));
+    noMissingText();
+  });
+
+  it("while None of these match is on its way nothing else on the round can be pressed, and a time-out meanwhile is not turned into did not match", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await emit("pairing-old", { kind: "choose", round: 4, numbers: [1, 2, 3] });
+    let answer: () => void = () => undefined;
+    replies.pairing_old_decline = () =>
+      new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-choose-number", { number: 1 })) }));
+    fireEvent.click(button("pair-choose-none"));
+    await waitFor(() => {
+      expect(button("pair-choose-confirm").hasAttribute("disabled")).toBe(true);
+    });
+    expect(button("pair-choose-none").hasAttribute("disabled")).toBe(true);
+    // The time runs out before the decline's reply.
+    await emit("pairing-old", { kind: "timed-out" });
+    await act(async () => {
+      answer();
+      await Promise.resolve();
+    });
+    expect(screen.getByText(text("pair-old-timed-out"))).toBeTruthy();
+    expect(screen.queryByText(text("pair-old-declined"))).toBeNull();
+    noMissingText();
+  });
 });
 
 describe("new laptop", () => {
+  it("a problem with no words of its own does not point to a Try again that is not there", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-failed", networks: [] } });
+    expect(await screen.findByText(text("pairing-failed-new"))).toBeTruthy();
+    expect(screen.queryByText(text("pairing-failed"))).toBeNull();
+    noMissingText();
+  });
+
+  it("a search that fails after an attempt says it failed, after what happened before", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
+    await screen.findByText(text("pair-new-code-title"));
+    replies.pairing_new_connect = () => 57;
+    fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
+    fireEvent.click(button("pair-new-connect"));
+    await screen.findByText(text("pair-new-number-title"));
+    replies.pairing_new_search = () => {
+      throw problem("pairing-no-network");
+    };
+    await emit("pairing-new", { kind: "problem", problem: { key: "pairing-timed-out", networks: [] } });
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-new-search-failed-title"));
+    });
+    expect(screen.getByText(text("pairing-timed-out"))).toBeTruthy();
+    expect(screen.getByText(text("pairing-no-network"))).toBeTruthy();
+    noMissingText();
+  });
+
   it("with nothing found, says so and searches again", async () => {
     await renderNew([]);
     expect(await screen.findByText(text("pair-new-none-title"))).toBeTruthy();
@@ -378,8 +458,17 @@ describe("new laptop", () => {
     noMissingText();
   });
 
+  it("an old laptop with an older PCTwin is listed with what to do, and cannot be chosen", async () => {
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: true }]);
+    expect(await screen.findByText(text("pair-new-needs-update"))).toBeTruthy();
+    const pick = screen.getByRole("button", { name: nameIs(`${foxText()} ${text("pair-new-needs-update")}`) });
+    expect((pick as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(text("pair-new-code-title"))).toBeNull();
+    noMissingText();
+  });
+
   it("with exactly one found, skips the list; the code goes to the engine as typed; the number is shown", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     expect(await screen.findByText(text("pair-new-code-title"))).toBeTruthy();
     expect(screen.queryByRole("button", { name: nameIs(text("pair-new-other-laptop")) })).toBeNull();
     expect(screen.getByText(withText(text("pair-new-code-body", { label: foxText() })))).toBeTruthy();
@@ -406,9 +495,9 @@ describe("new laptop", () => {
 
   it("flags two laptops with the same name, in words, and offers a way back to the list", async () => {
     await renderNew([
-      { index: 0, label: fox, sameLabelNearby: true },
-      { index: 1, label: fox, sameLabelNearby: true },
-      { index: 2, label: { kind: "named", name: "Ada's laptop" }, sameLabelNearby: false },
+      { index: 0, label: fox, sameLabelNearby: true, needsUpdate: false },
+      { index: 1, label: fox, sameLabelNearby: true, needsUpdate: false },
+      { index: 2, label: { kind: "named", name: "Ada's laptop" }, sameLabelNearby: false, needsUpdate: false },
     ]);
     expect(await screen.findByText(text("pair-new-list-title"))).toBeTruthy();
     const flags = screen.getAllByText(text("pair-new-same-label"));
@@ -427,7 +516,7 @@ describe("new laptop", () => {
   });
 
   it("a problem after the number returns to an empty code field with the problem in words", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -443,7 +532,7 @@ describe("new laptop", () => {
   });
 
   it("a rejected connect shows its problem and keeps the person in the code field", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => {
       throw problem("pairing-code-wrong");
@@ -467,8 +556,8 @@ describe("new laptop", () => {
 
   it("has no accessibility problems on the list, code, number and paired states", async () => {
     await renderNew([
-      { index: 0, label: fox, sameLabelNearby: true },
-      { index: 1, label: fox, sameLabelNearby: true },
+      { index: 0, label: fox, sameLabelNearby: true, needsUpdate: false },
+      { index: 1, label: fox, sameLabelNearby: true, needsUpdate: false },
     ]);
     await screen.findByText(text("pair-new-list-title"));
     expect(await violations()).toEqual([]);
@@ -487,7 +576,7 @@ describe("new laptop", () => {
 
 describe("the new laptop once paired", () => {
   it("stays on Paired whatever arrives afterwards", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -500,7 +589,7 @@ describe("the new laptop once paired", () => {
   });
 
   it("leaves Paired only when the paired connection is lost, and says so", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -520,7 +609,7 @@ describe("the new laptop once paired", () => {
   });
 
   it("after a lost connection, says so while it looks for the old laptop again", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -552,7 +641,7 @@ describe("the old laptop once paired", () => {
 
 describe("the new laptop after an attempt ends", () => {
   it("looks for the old laptop again, keeping what happened on screen", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -571,7 +660,7 @@ describe("the new laptop after an attempt ends", () => {
   });
 
   it("ignores a number that arrives after its attempt ended", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     let answer: (n: number) => void = () => undefined;
     replies.pairing_new_connect = () =>
@@ -709,7 +798,7 @@ describe("late replies never move a screen off what it shows", () => {
   });
 
   it("the new laptop stays Paired when Paired arrives before its own reply", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     let answer: (n: number) => void = () => undefined;
     replies.pairing_new_connect = () =>
@@ -728,7 +817,7 @@ describe("late replies never move a screen off what it shows", () => {
   });
 
   it("when looking again fails, what happened is still what is said", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     fireEvent.change(screen.getByLabelText(text("pair-new-code-label")), { target: { value: "123456" } });
@@ -742,7 +831,7 @@ describe("late replies never move a screen off what it shows", () => {
   });
 
   it("pairs again after a lost connection", async () => {
-    await renderNew([{ index: 0, label: fox, sameLabelNearby: false }]);
+    await renderNew([{ index: 0, label: fox, sameLabelNearby: false, needsUpdate: false }]);
     await screen.findByText(text("pair-new-code-title"));
     replies.pairing_new_connect = () => 57;
     const connect = async () => {
@@ -784,5 +873,159 @@ describe("new numbers and the checking state", () => {
     expect(await screen.findByText(text("pair-choose-checking"))).toBeTruthy();
     expect(screen.queryByText(text("pair-choose-renewed"))).toBeNull();
     expect((tile(4) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("someone tried wrong codes, and the system's own questions", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("locked says someone on this network tried wrong codes, suggests a phone hotspot, and only Start again restarts", async () => {
+    await renderOld();
+    await emit("pairing-old", { kind: "locked" });
+    expect(heading().textContent).toBe(text("pair-old-locked-title"));
+    expect(heading().textContent).toBe("Someone on this network tried wrong codes.");
+    expect(screen.getByText(withText(text("pair-old-locked-body")))).toBeTruthy();
+    expect(screen.getByText(withText(text("pair-old-locked-hotspot")))).toBeTruthy();
+    // No code is on screen while locked, and nothing restarts by itself.
+    expect(screen.queryByRole("group", { name: /\d \d \d/ })).toBeNull();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("pairing_old_start_again");
+    expect(await violations()).toEqual([]);
+    fireEvent.click(button("pair-old-start-again"));
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start_again");
+    await emit("pairing-old", { kind: "code", code: "654321", secondsLeft: 60 });
+    expect(heading().textContent).toBe(text("pair-old-title"));
+    noMissingText();
+  });
+
+  it("on a Mac, the old laptop says what the Mac will ask before it starts, and starts on Continue", async () => {
+    replies.pairing_heads_up = () => [{ kind: "local-network" }];
+    inApp(<PairOld onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-heads-up-title"));
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_heads_up", { role: "old" });
+    expect(screen.getByText(withText(text("pair-heads-up-local-network")))).toBeTruthy();
+    expect(tauri.invoke).not.toHaveBeenCalledWith("pairing_old_start", expect.anything());
+    expect(await violations()).toEqual([]);
+    fireEvent.click(button("pair-heads-up-continue"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    noMissingText();
+  });
+
+  it("a note shown once is not shown again: the next start goes straight to the code", async () => {
+    replies.pairing_heads_up = () => [{ kind: "firewall" }];
+    inApp(<PairOld onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pair-heads-up-firewall")))).toBeTruthy();
+    });
+    fireEvent.click(button("pair-heads-up-continue"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    cleanup();
+    tauri.invoke.mockClear();
+    await renderOld();
+    expect(screen.queryByText(withText(text("pair-heads-up-firewall")))).toBeNull();
+  });
+
+  it("when the notes cannot be asked for, pairing starts as usual", async () => {
+    replies.pairing_heads_up = () => {
+      throw problem("pairing-failed");
+    };
+    await renderOld();
+    expect(heading().textContent).toBe(text("pair-old-title"));
+  });
+
+  it("an old laptop whose Mac refuses the local network says where to switch it on, and Try again starts again", async () => {
+    let refuse = true;
+    replies.pairing_old_start = () => {
+      if (refuse) throw problem("pairing-local-network-refused");
+    };
+    await renderOld();
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pairing-local-network-refused")))).toBeTruthy();
+    });
+    expect(text("pairing-local-network-refused")).toContain("Privacy & Security");
+    refuse = false;
+    tauri.invoke.mockClear();
+    fireEvent.click(button("pair-try-again"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
+    });
+    noMissingText();
+  });
+
+  it("on a Mac, the new laptop says what the Mac will ask before it looks", async () => {
+    replies.pairing_heads_up = () => [{ kind: "local-network" }];
+    replies.pairing_new_search = () => [];
+    inApp(<PairNew onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-heads-up-title"));
+    });
+    expect(tauri.invoke).toHaveBeenCalledWith("pairing_heads_up", { role: "new" });
+    expect(tauri.invoke).not.toHaveBeenCalledWith("pairing_new_search");
+    fireEvent.click(button("pair-heads-up-continue"));
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
+    });
+    noMissingText();
+  });
+
+  it("a new laptop that found nothing because its Mac refuses the local network says so, with where to switch it on", async () => {
+    replies.pairing_new_search = () => {
+      throw problem("pairing-local-network-refused");
+    };
+    inApp(<PairNew onBack={vi.fn()} />);
+    await waitFor(() => {
+      expect(heading().textContent).toBe(text("pair-new-none-title"));
+    });
+    expect(screen.getByText(withText(text("pairing-local-network-refused")))).toBeTruthy();
+    // The permission is the likely cause; the other causes wait behind More details.
+    expect(screen.getByText(withText(text("pair-more-details"))).tagName).toBe("SUMMARY");
+    expect(screen.getByText(withText(text("pairing-local-network-refused-details")))).toBeTruthy();
+    expect(button("pair-new-search-again")).toBeTruthy();
+    expect(await violations()).toEqual([]);
+    noMissingText();
+  });
+});
+
+describe("both laptops chose the same role (F06)", () => {
+  it("the old laptop says so when another old laptop is nearby, and switches this one", async () => {
+    replies.pairing_old_nearby = () => true;
+    const onBack = await renderOld();
+    await emit("pairing-old", { kind: "label", label: fox });
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pair-old-same-role")))).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-old-switch")) }));
+    await waitFor(() => {
+      expect(onBack).toHaveBeenCalled();
+    });
+  });
+
+  it("the old laptop says nothing when no other old laptop is nearby", async () => {
+    replies.pairing_old_nearby = () => false;
+    await renderOld();
+    await emit("pairing-old", { kind: "code", code: "123456", secondsLeft: 50 });
+    await waitFor(() => {
+      expect(tauri.invoke.mock.calls.some(([command]) => command === "pairing_old_nearby")).toBe(true);
+    });
+    expect(screen.queryByText(withText(text("pair-old-same-role")))).toBeNull();
+  });
+
+  it("the new laptop that finds no old laptop asks whether both chose New laptop, and can switch", async () => {
+    const onBack = await renderNew([]);
+    await waitFor(() => {
+      expect(screen.getByText(withText(text("pair-new-none-same-role")))).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: nameIs(text("pair-new-switch")) }));
+    await waitFor(() => {
+      expect(onBack).toHaveBeenCalled();
+    });
   });
 });

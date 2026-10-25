@@ -1,7 +1,7 @@
 import { LocalizationProvider } from "@fluent/react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import axe from "axe-core";
+import { violations as accessible } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localization } from "../i18n";
 import {
@@ -11,11 +11,13 @@ import {
   chosenTotals,
   isPartial,
   leftOutByHand,
+  movesFirst,
   sizeParts,
   windowModeFor,
   type Approval,
   type DestGroup,
   type FolderChoice,
+  type PlanPreview,
   type PlanView,
   type ScanView,
 } from "../plan";
@@ -64,11 +66,6 @@ function inApp(ui: ReactNode) {
       <main>{ui}</main>
     </LocalizationProvider>,
   );
-}
-
-async function accessible(): Promise<string[]> {
-  const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
-  return result.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`);
 }
 
 /** No screen in this part shows anything paid. */
@@ -607,6 +604,38 @@ describe("M23 plan review and approval", () => {
     noMissingStrings();
     expectNothingPaid();
     expect(await accessible()).toEqual([]);
+  });
+
+  describe("we'll move these first", () => {
+    const preview: PlanPreview = { fits: true, shortBytes: 0, minutes: null, renamed: 0, tooBig: 0, refused: 0, runsAtSignIn: 0 };
+    /** The preview's lines, as said. */
+    const lines = () => [...document.querySelectorAll(".plan-notice .plan-item-text")].map((el) => plain(el.textContent));
+    const firstSays = (places: string) => plain(text("plan-preview-first", { places }));
+
+    it("names the groups the move sends first, in the move's own order, among the found-before-the-move notes", async () => {
+      inApp(view({ ...sample.plan, preview, first: ["documents", "pictures"] }, null));
+      expect(lines()).toContain(firstSays("Documents and Pictures"));
+      noMissingStrings();
+      expect(await accessible()).toEqual([]);
+    });
+
+    it("a group the person left out, or one not in the plan, is never said to move first", () => {
+      inApp(view({ ...sample.plan, preview, first: ["documents", "music", "pictures"] }, null, { leftOut: ["pictures"] }));
+      expect(lines()).toContain(firstSays("Documents"));
+    });
+
+    it("with nothing moving first there is no such line", () => {
+      inApp(view({ ...sample.plan, preview, first: [] }, null));
+      expect(lines().some((l) => l.startsWith(firstSays("").slice(0, 10)))).toBe(false);
+      expect(movesFirst({ ...sample.plan, first: ["documents"] }, ["documents"])).toEqual([]);
+    });
+  });
+
+  it("a folder with more files than one move can carry is said before approval, with a way on", () => {
+    inApp(view({ ...sample.plan, leftOut: [{ reason: "too-many-files", count: 1 }] }, null));
+    expect(screen.getByText(withText(text("plan-hand-body", { count: 1 })))).toBeTruthy();
+    expect(screen.getByText(withText(text("plan-hand-too-many-files", { count: 1 })))).toBeTruthy();
+    noMissingStrings();
   });
 
   it("with nothing to do by hand it says so", () => {

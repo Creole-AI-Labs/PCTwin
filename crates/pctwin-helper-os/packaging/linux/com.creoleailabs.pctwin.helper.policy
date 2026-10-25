@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Installed by the PCTwin package to /usr/share/polkit-1/actions/. It names the one program
+  pkexec may start for PCTwin, and asks an administrator every time (auth_admin, never
+  auth_admin_keep): approval lasts one move. Remote and inactive sessions are refused.
+-->
+<policyconfig>
+  <vendor>Creole AI Labs</vendor>
+  <vendor_url>https://getpctwin.com</vendor_url>
+  <action id="com.creoleailabs.pctwin.helper">
+    <description>Let PCTwin move other people's files on this computer</description>
+    <message>An administrator of this computer must approve before PCTwin reads or sets up other people's files.</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/pctwin/pctwin-helper</annotate>
+  </action>
+</policyconfig>

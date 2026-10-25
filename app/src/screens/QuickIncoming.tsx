@@ -81,7 +81,7 @@ export default function QuickIncoming({
       </div>
 
       <TallyBar count={files.length} size={bytes(totalBytes(files))} />
-      <FileRows files={files} included />
+      <FileRows files={files} included types />
 
       <QsActions>
         <button type="button" className="link" onClick={onDecline}>

@@ -1,0 +1,27 @@
+[
+  {
+    "bytes": 1200,
+    "files": 1,
+    "id": "p1",
+    "included": true,
+    "kind": "file",
+    "name": "letter.txt"
+  },
+  {
+    "bytes": null,
+    "files": null,
+    "id": "p2",
+    "included": true,
+    "kind": "folder",
+    "name": "Holiday"
+  },
+  {
+    "bytes": null,
+    "files": null,
+    "id": "p3",
+    "included": true,
+    "kind": "file",
+    "name": "gone.txt",
+    "problem": "missing"
+  }
+]

@@ -29,6 +29,7 @@ fn item(owner: Owner, role: FolderRole, storage: Storage, path: &[&str]) -> Item
         place,
         path,
         size_bytes: 1,
+        modified_ns: None,
         portability: Portability::Portable,
         managed_by: ManagedBy::Personal,
         download_bytes: None,
@@ -210,7 +211,7 @@ fn another_persons_things_need_the_administrator_helper() {
 
 #[test]
 fn the_new_laptops_folders_become_its_approved_destinations() {
-    let base = tempfile::tempdir().unwrap();
+    let base = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
     let docs = base.path().join("Documents");
     let public = base.path().join("Public");
     std::fs::create_dir_all(&docs).unwrap();

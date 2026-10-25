@@ -13,7 +13,8 @@ import type { MoveProgress } from "../../move";
 const nothing = () => undefined;
 const handlers = { onPause: nothing, onResume: nothing, onSeeNeedsAction: nothing };
 
-const compact = (progress: MoveProgress) => <ProgressCompact progress={progress} onMinimise={nothing} {...handlers} />;
+/** As the app draws it: with the tip under the bar (T14), here for the new laptop on mains power. */
+const compact = (progress: MoveProgress, tips = { old: false, onBattery: false, slow: false }) => <ProgressCompact progress={progress} onMinimise={nothing} tips={tips} {...handlers} />;
 const detail = (progress: MoveProgress) => <ProgressDetail progress={progress} onCollapse={nothing} onSeeNeedsAction={nothing} />;
 const mini = (progress: MoveProgress, kind: "move" | "send" = "move") => <MiniPanel kind={kind} progress={progress} onPause={nothing} onResume={nothing} onOpen={nothing} />;
 
@@ -23,6 +24,7 @@ export const samples: Sample[] = [
   { id: "X01-checking-last", title: "Move progress, last files being checked", size: "everyday", render: () => compact(data.almost) },
   { id: "X01-needs-action", title: "Move progress, some items need you", size: "everyday", render: () => compact(data.withFailures) },
   { id: "X01-connection-lost", title: "Move progress, connection dropped", size: "everyday", render: () => compact(data.linkLost) },
+  { id: "X01-tips-old", title: "Move progress, old laptop on battery, slow link (tips)", size: "everyday", render: () => compact(data.running, { old: true, onBattery: true, slow: true }) },
   { id: "X01-low-battery", title: "Move progress, low battery", size: "everyday", render: () => compact(data.lowBattery) },
   { id: "X02-moving", title: "Move progress, every item", size: "expanded", render: () => detail(data.running) },
   { id: "X02-paused", title: "Move progress, every item, paused", size: "expanded", render: () => detail(data.paused) },
@@ -34,6 +36,7 @@ export const samples: Sample[] = [
   { id: "X10-stop", title: "Stop the rest of the move?", size: "everyday", render: () => <StopMove open onStop={nothing} onKeep={nothing} /> },
   { id: "R01-clean", title: "Outcome, everything copied", size: "everyday", render: () => <Outcome outcome={data.finishedClean} onReport={nothing} /> },
   { id: "R01-mixed", title: "Outcome, some need you or failed", size: "everyday", render: () => <Outcome outcome={data.finishedMixed} onReport={nothing} /> },
+  { id: "R01-after-move", title: "Outcome, with the after-move check", size: "everyday", render: () => <Outcome outcome={data.finishedChecked} onReport={nothing} /> },
   { id: "R01-memory", title: "Outcome, checked from memory", size: "everyday", render: () => <Outcome outcome={data.finishedMemory} onReport={nothing} /> },
   { id: "R01-stopped", title: "Outcome, stopped by the person", size: "everyday", render: () => <Outcome outcome={data.finishedStopped} onReport={nothing} /> },
   { id: "R02-report", title: "Report, item by item", size: "expanded", render: () => <Report items={data.report} onBack={nothing} /> },

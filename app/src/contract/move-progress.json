@@ -1,0 +1,130 @@
+[
+  {
+    "bytes": {
+      "checked": 400000,
+      "total": 1200000
+    },
+    "counts": {
+      "checking": 1,
+      "copying": 1,
+      "done": 10,
+      "failed": 1,
+      "needsAction": 1,
+      "skippedByUser": 0,
+      "total": 34,
+      "waiting": 20
+    },
+    "current": {
+      "name": "letter.txt",
+      "step": "checking"
+    },
+    "groups": [
+      {
+        "counts": {
+          "checking": 1,
+          "copying": 1,
+          "done": 10,
+          "failed": 1,
+          "needsAction": 1,
+          "skippedByUser": 0,
+          "total": 34,
+          "waiting": 20
+        },
+        "id": "documents",
+        "name": {
+          "kind": "role",
+          "role": "documents"
+        }
+      },
+      {
+        "counts": {
+          "checking": 0,
+          "copying": 0,
+          "done": 0,
+          "failed": 0,
+          "needsAction": 0,
+          "skippedByUser": 0,
+          "total": 0,
+          "waiting": 0
+        },
+        "id": "for-1",
+        "name": {
+          "kind": "folder",
+          "name": "for-1"
+        }
+      }
+    ],
+    "laptops": {
+      "old": {
+        "animal": "ant",
+        "colour": "blue",
+        "kind": "picked"
+      }
+    },
+    "minutesLeft": {
+      "high": 3,
+      "low": 3
+    },
+    "notice": {
+      "kind": "drive-problem",
+      "place": {
+        "kind": "role",
+        "role": "pictures"
+      }
+    },
+    "speed": {
+      "high": 40000000,
+      "low": 40000000
+    },
+    "state": "running"
+  },
+  {
+    "bytes": {
+      "checked": 0,
+      "total": 0
+    },
+    "counts": {
+      "checking": 0,
+      "copying": 0,
+      "done": 0,
+      "failed": 0,
+      "needsAction": 0,
+      "skippedByUser": 0,
+      "total": 0,
+      "waiting": 0
+    },
+    "groups": [],
+    "laptops": {
+      "old": null
+    },
+    "notice": {
+      "kind": "low-battery",
+      "paused": true
+    },
+    "state": "pausing"
+  },
+  {
+    "bytes": {
+      "checked": 0,
+      "total": 0
+    },
+    "counts": {
+      "checking": 0,
+      "copying": 0,
+      "done": 0,
+      "failed": 0,
+      "needsAction": 0,
+      "skippedByUser": 0,
+      "total": 0,
+      "waiting": 0
+    },
+    "groups": [],
+    "laptops": {
+      "old": {
+        "kind": "named",
+        "name": "Kitchen laptop"
+      }
+    },
+    "state": "paused"
+  }
+]

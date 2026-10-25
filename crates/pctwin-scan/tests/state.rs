@@ -551,3 +551,35 @@ fn the_saved_format_1_example_still_loads() {
     assert!(back.is_finished());
     assert_eq!(item_names(&back), ["a.txt", "b.jpg"]);
 }
+
+/// Who gets the old laptop next is kept with the scan, and a save from before it was asked
+/// loads with no answer.
+#[test]
+fn who_gets_the_old_laptop_next_is_kept_with_the_scan() {
+    use pctwin_scan::NextOwner;
+    let base = tempfile::tempdir().unwrap();
+    let folders = two_folders(base.path());
+    let mut scan = build_scan_resumable(
+        laptop(),
+        me(base.path()),
+        folders,
+        Vec::new(),
+        None,
+        &mut |_| Flow::Continue,
+    )
+    .unwrap();
+    assert_eq!(scan.state.next_owner(), None);
+    let file = base.path().join("scan.json");
+    scan.state.save(&file).unwrap();
+    assert_eq!(ScanState::load(&file).unwrap().next_owner(), None);
+    for next in [
+        NextOwner::Selling,
+        NextOwner::Family,
+        NextOwner::Keeping,
+        NextOwner::NotSure,
+    ] {
+        scan.state.set_next_owner(next);
+        scan.state.save(&file).unwrap();
+        assert_eq!(ScanState::load(&file).unwrap().next_owner(), Some(next));
+    }
+}

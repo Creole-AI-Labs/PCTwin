@@ -1,0 +1,6 @@
+Not proven by this run (named gaps; they need real people or real hardware):
+- The administrator prompt is answered from outside the product, not typed by a person on the secure desktop.
+- Windows Home account rules (this runner is Windows Server).
+- Microsoft, Entra and domain accounts (only local accounts here).
+- The helper is not signed yet, so Windows shows "Unknown publisher" (signing comes before launch).
+- A real restart and sign-in during a move.

@@ -37,14 +37,14 @@ export default function Welcome({
         <p className="subhead welcome-subhead">Bring your files, apps and familiar settings along for the move.</p>
       </Localized>
       <MoveIllustration className="illustration flip" />
-      <button type="button" className="button button-primary" onClick={resuming ? onResume : onStart}>
+      <button type="button" className="button button-primary" data-bookmark="" data-icon-job="move" onClick={resuming ? onResume : onStart}>
         {resuming ? (
           <Localized id="resume-open">
             <span>Resume your move</span>
           </Localized>
         ) : (
           <Localized id="welcome-start">
-            <span>Start a move</span>
+            <span>Start a full move</span>
           </Localized>
         )}
         <ArrowForward />
@@ -53,6 +53,8 @@ export default function Welcome({
         <button
           type="button"
           className="button"
+          data-bookmark=""
+          data-icon-job="restore"
           onClick={() => {
             onSoon("restore");
           }}
@@ -65,6 +67,8 @@ export default function Welcome({
         <button
           type="button"
           className="button"
+          data-bookmark=""
+          data-icon-job="rescue"
           onClick={() => {
             onSoon("rescue");
           }}
@@ -77,6 +81,8 @@ export default function Welcome({
         <button
           type="button"
           className="button"
+          data-bookmark=""
+          data-icon-job="send"
           onClick={onQuick}
         >
           <Localized id="welcome-quick-send">

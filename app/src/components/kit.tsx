@@ -342,7 +342,7 @@ export function ProgressBar({ value, label, left, right }: { value: number | nul
   return (
     <>
       <div className="kit-progress" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct ?? undefined}>
-        {pct !== null && <span className="kit-progress-fill" style={{ inlineSize: `${pct.toString()}%` }} />}
+        {pct !== null && <span className="kit-progress-fill" style={{ transform: `scaleX(${String(pct / 100)})` }} />}
       </div>
       {(left ?? right) && (
         <p className="kit-progress-meta">

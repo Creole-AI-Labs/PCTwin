@@ -1,0 +1,44 @@
+[
+  {
+    "afterMove": {
+      "documents": {
+        "copied": 20,
+        "planned": 20
+      },
+      "music": {
+        "copied": 0,
+        "planned": 0
+      },
+      "photos": {
+        "copied": 11,
+        "planned": 12
+      },
+      "videos": {
+        "copied": 0,
+        "planned": 0
+      }
+    },
+    "brokeOff": false,
+    "byStatus": {
+      "converted": 0,
+      "copied": 30,
+      "failed": 2,
+      "needs-action": 1,
+      "reinstalled": 0,
+      "skipped-by-user": 1
+    },
+    "bytesChecked": 1100000,
+    "checkedFromMemory": 3,
+    "notCopied": 0,
+    "people": [
+      {
+        "atSignIn": true,
+        "copied": 120,
+        "failed": 1,
+        "name": "Bea",
+        "needsAction": 0
+      }
+    ],
+    "stopped": false
+  }
+]

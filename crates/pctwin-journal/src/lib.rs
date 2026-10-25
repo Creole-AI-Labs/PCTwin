@@ -28,7 +28,10 @@
 //! in one transaction, so no file is being undone, and none is left under a hidden name, once the
 //! wipe can be sent.
 
+mod checked;
 pub mod recovery;
+
+pub use checked::{CheckedFrom, WhyMemory};
 
 use std::io;
 use std::path::Path;
@@ -50,7 +53,10 @@ use serde::{Deserialize, Serialize};
 ///   October 2026 without a new number: format 2 had never shipped, so no journal on any laptop
 ///   holds the older shape. Once it ships, any change of shape needs a new number.) The write
 ///   steps `State::Filling` and `State::Filled` (a file filled in under its real name on a drive
-///   with no safe rename) joined it on 15 October 2026, still before it shipped. Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
+///   with no safe rename) joined it on 15 October 2026, still before it shipped. The undo stage
+///   `Undo::Trashing` and the outcome `UndoOutcome::Trashed` (macOS moves a proven copy from its
+///   private name into the Trash on its drive) joined it on 21 October 2026, still before it
+///   shipped (no release of PCTwin has been published). Raised because the gate came late in format 1: an earlier format-1 PCTwin ignored it
 ///   and could allow undo after the wipe, so it must refuse this journal instead.
 /// - **1**: undo set copies aside or sent them to the Recycle Bin (`Undo::Aside`,
 ///   `UndoOutcome::Trashed`). Opening a format-1 journal that holds no undo record (of a file or
@@ -69,6 +75,10 @@ const META: TableDefinition<&str, u32> = TableDefinition::new("meta");
 /// The journal's own number, the next entry number, and how far clean-up has looked.
 const COUNTERS: TableDefinition<&str, u64> = TableDefinition::new("counters");
 const ENTRIES: TableDefinition<u64, &[u8]> = TableDefinition::new("entries");
+/// How each verified file's contents were checked (see [`CheckedFrom`]), by entry, written with
+/// its `verified` step: the report after a restart still says it. A journal from before this table
+/// has none, and those files say nothing of how they were checked, as before.
+const CHECKED: TableDefinition<u64, &[u8]> = TableDefinition::new("checked");
 /// Entries not yet finished, so a restart reads only those.
 const UNFINISHED: TableDefinition<u64, ()> = TableDefinition::new("unfinished");
 /// The unfinished entry for each file of each old laptop (`laptop/item` in hex).
@@ -249,6 +259,11 @@ pub enum DownloadMark {
 pub struct PlannedWrite {
     pub item: ItemId,
     pub source_laptop: LaptopId,
+    /// Which move this write belongs to, chosen on this laptop ([`Scope`]): the old laptop's ID
+    /// comes from what it says, so a write is matched to earlier ones (started again, picked up
+    /// after a restart) only within the same scope, never across moves.
+    #[serde(default)]
+    pub scope: Scope,
     /// The approved destination's label.
     pub destination: String,
     /// The path inside it, as the old laptop sent it.
@@ -484,6 +499,18 @@ impl State {
         }
     }
 
+    /// The copy this write left under a name in the destination, for undo: a committed file, or
+    /// the damaged copy a failed write kept beside its real name ([`Journal::kept_aside`]).
+    pub fn copy_on_disk(&self) -> Option<&State> {
+        match self {
+            State::Committed { .. } => Some(self),
+            State::Failed { reached, .. } if matches!(**reached, State::Committed { .. }) => {
+                Some(reached)
+            }
+            _ => None,
+        }
+    }
+
     /// Committed, existing and failed writes are finished.
     pub fn is_finished(&self) -> bool {
         matches!(
@@ -507,7 +534,9 @@ pub struct Entry {
 /// never paths.
 ///
 /// The stages go in one direction: Removing (again with a new private name, if the first was
-/// taken), then Putting (again for each candidate name) or Salvaging, then Done. A final Done is
+/// taken), then Putting (again for each candidate name) or Salvaging, then Done. On macOS a
+/// proven copy goes from Removing to Trashing (again for each name tried in the Trash), then
+/// Done, or Putting if it cannot go to the Trash after all. A final Done is
 /// never written over; [`UndoOutcome::NotDone`] ("not done this time") may start again with
 /// Removing. Every stage before Done is about the same file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -549,6 +578,18 @@ pub enum Undo {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         complete: bool,
     },
+    /// macOS: about to move what is under `private`, proven to be the copy, into the Trash
+    /// folder `trash` on the same drive (an absolute path: the person's `~/.Trash`, or a drive's
+    /// `.Trashes/<uid>`) as `to`, never replacing anything there. Recorded before each name tried.
+    /// Nothing is deleted: the person can take it back out of the Trash.
+    Trashing {
+        file: FileId,
+        /// The folder of the removal it follows, so it can be found again if moved.
+        dir_id: FileId,
+        private: String,
+        trash: String,
+        to: String,
+    },
     /// Done; never looked at again, unless it could not be done this time.
     Done { outcome: UndoOutcome },
 }
@@ -559,6 +600,7 @@ impl Undo {
             Undo::Removing { .. } => "removing",
             Undo::Putting { .. } => "putting",
             Undo::Salvaging { .. } => "salvaging",
+            Undo::Trashing { .. } => "trashing",
             Undo::Done { .. } => "done",
         }
     }
@@ -573,7 +615,8 @@ impl Undo {
         match self {
             Undo::Removing { file, .. }
             | Undo::Putting { file, .. }
-            | Undo::Salvaging { file, .. } => Some(*file),
+            | Undo::Salvaging { file, .. }
+            | Undo::Trashing { file, .. } => Some(*file),
             Undo::Done { .. } => None,
         }
     }
@@ -583,16 +626,20 @@ impl Undo {
         match self {
             Undo::Removing { dir_id, .. }
             | Undo::Putting { dir_id, .. }
-            | Undo::Salvaging { dir_id, .. } => Some(*dir_id),
+            | Undo::Salvaging { dir_id, .. }
+            | Undo::Trashing { dir_id, .. } => Some(*dir_id),
             Undo::Done { .. } => None,
         }
     }
 
-    /// The names this stage will create or move to, each one plain name in the copy's folder.
+    /// The names this stage will create or move to, each one plain name in the copy's folder
+    /// (for Trashing, `to` is one plain name in the Trash folder).
     fn names(&self) -> Vec<&str> {
         match self {
             Undo::Removing { private, .. } => vec![private],
-            Undo::Putting { private, to, .. } => vec![private, to],
+            Undo::Putting { private, to, .. } | Undo::Trashing { private, to, .. } => {
+                vec![private, to]
+            }
             Undo::Salvaging { temp, to, .. } => vec![temp, to],
             Undo::Done { .. } => vec![],
         }
@@ -601,7 +648,9 @@ impl Undo {
     /// The hidden name in the copy's folder where the file (or what was saved of it) may be.
     fn hidden_name(&self) -> Option<&str> {
         match self {
-            Undo::Removing { private, .. } | Undo::Putting { private, .. } => Some(private),
+            Undo::Removing { private, .. }
+            | Undo::Putting { private, .. }
+            | Undo::Trashing { private, .. } => Some(private),
             Undo::Salvaging { temp, .. } => Some(temp),
             Undo::Done { .. } => None,
         }
@@ -618,6 +667,15 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
             // About the same file, in the same folder, as the removal it follows.
             let same_file = next.file().is_none_or(|f| before.file() == Some(f))
                 && next.dir_id().is_none_or(|d| before.dir_id() == Some(d));
+            // A move into the Trash moves out of the very private name the stage before it
+            // recorded (where recovery looks for the copy).
+            let same_private = match (before, next) {
+                (
+                    Undo::Removing { private: p0, .. } | Undo::Trashing { private: p0, .. },
+                    Undo::Trashing { private, .. },
+                ) => p0 == private,
+                _ => true,
+            };
             // A salvage keeps its one temporary file, and once complete stays complete.
             let same_salvage = match (before, next) {
                 (
@@ -635,6 +693,7 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
                 _ => true,
             };
             same_file
+                && same_private
                 && same_salvage
                 && matches!(
                     (before, next),
@@ -643,7 +702,11 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
                         Undo::Removing { .. }
                             | Undo::Putting { .. }
                             | Undo::Salvaging { .. }
+                            | Undo::Trashing { .. }
                             | Undo::Done { .. }
+                    ) | (
+                        Undo::Trashing { .. },
+                        Undo::Trashing { .. } | Undo::Putting { .. } | Undo::Done { .. }
                     ) | (
                         Undo::Putting { .. },
                         Undo::Putting { .. } | Undo::Done { .. }
@@ -654,6 +717,28 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
                 )
         }
     }
+}
+
+/// An error unless `trash` is a Trash folder's absolute path: `<home>/.Trash` or
+/// `<drive>/.Trashes/<number>`, with no `.` or `..` in it.
+fn trash_folder(trash: &str) -> Result<(), JournalError> {
+    let bad = || Err(JournalError::BadName(trash.into()));
+    if !trash.starts_with('/') || trash.contains(['\\', '\0']) {
+        return bad();
+    }
+    let parts: Vec<&str> = trash[1..].split('/').collect();
+    if parts
+        .iter()
+        .any(|p| p.is_empty() || *p == "." || *p == "..")
+    {
+        return bad();
+    }
+    let ok = match parts.as_slice() {
+        [.., ".Trash"] => true,
+        [.., ".Trashes", uid] => !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()),
+        _ => false,
+    };
+    if ok { Ok(()) } else { bad() }
 }
 
 /// An error unless `name` is one plain name (no folder, not `.` or `..`, nothing hidden in it).
@@ -670,6 +755,10 @@ fn plain_name(name: &str) -> Result<(), JournalError> {
 pub enum UndoOutcome {
     /// Deleted outright (not to the Recycle Bin): the original is still on the old laptop.
     Deleted,
+    /// macOS: the copy, proven to be the one the move wrote and unchanged, was moved into the
+    /// Trash on its drive, at the absolute path `at` (nothing deleted: the person can take it
+    /// back out).
+    Trashed { at: String },
     /// A folder PCTwin made, empty, removed.
     Removed,
     /// It was already gone.
@@ -889,6 +978,9 @@ impl Pending {
 pub enum Resolved {
     /// The copy, proven to be the one checked and unchanged, was removed ([`UndoOutcome::Deleted`]).
     Removed,
+    /// macOS: the copy, proven to be the one checked and unchanged, is in the Trash at `at`
+    /// ([`UndoOutcome::Trashed`]).
+    Trashed { at: String },
     /// Nothing of it is left to remove.
     AlreadyGone,
     /// Kept under its own name, and why.
@@ -904,6 +996,7 @@ impl Resolved {
     fn outcome(self) -> Result<UndoOutcome, String> {
         match self {
             Resolved::Removed => Ok(UndoOutcome::Deleted),
+            Resolved::Trashed { at } => Ok(UndoOutcome::Trashed { at }),
             Resolved::AlreadyGone => Ok(UndoOutcome::AlreadyGone),
             Resolved::Kept { why } => Ok(UndoOutcome::Kept { why }),
             Resolved::KeptAt { at, why } => Ok(UndoOutcome::KeptAt { at, why }),
@@ -1027,7 +1120,31 @@ impl std::fmt::Debug for Journal {
 }
 
 fn open_key(write: &PlannedWrite) -> String {
-    format!("{}/{}", write.source_laptop.to_hex(), write.item.to_hex())
+    let scope: String = write.scope.0.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{scope}/{}/{}",
+        write.source_laptop.to_hex(),
+        write.item.to_hex()
+    )
+}
+
+/// The move a journal entry belongs to. A move picks a new random one on this laptop; Quick Send
+/// uses [`Scope::QUICK_SEND`], so a send made again can pick up the files of an earlier one by the
+/// sender's ID ("Send the missing pieces"). Entries from before scopes have all zeros.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Scope(pub [u8; 16]);
+
+impl Scope {
+    /// Every Quick Send received on this laptop.
+    pub const QUICK_SEND: Scope = Scope(*b"pctwin-quicksend");
+
+    /// A new scope for one move: random, so no other move's entries share it.
+    pub fn for_a_move() -> Result<Self, JournalError> {
+        let mut bytes = [0u8; 16];
+        getrandom::fill(&mut bytes)
+            .map_err(|_| damaged("the system's random number source failed"))?;
+        Ok(Self(bytes))
+    }
 }
 
 impl Journal {
@@ -1094,6 +1211,7 @@ impl Journal {
                 counters.insert(NEXT_ID, 1).map_err(storage)?;
             }
             tx.open_table(ENTRIES).map_err(storage)?;
+            tx.open_table(CHECKED).map_err(storage)?;
             tx.open_table(UNFINISHED).map_err(storage)?;
             tx.open_table(OPEN_ITEMS).map_err(storage)?;
             tx.open_table(FOLDERS).map_err(storage)?;
@@ -1261,6 +1379,18 @@ impl Journal {
         fingerprint: [u8; 32],
         file: Option<FileId>,
     ) -> Result<(), JournalError> {
+        self.verified_as(id, fingerprint, file, None)
+    }
+
+    /// As [`verified`](Self::verified), keeping `checked`, how its contents were read back, in the
+    /// same step (see [`checked_from`](Self::checked_from)).
+    pub fn verified_as(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        checked: Option<CheckedFrom>,
+    ) -> Result<(), JournalError> {
         self.step(
             id,
             "verified",
@@ -1272,8 +1402,35 @@ impl Journal {
                 }),
                 _ => None,
             },
-            |_, _| Ok(()),
+            |tx, _| {
+                let Some(checked) = checked else {
+                    return Ok(());
+                };
+                let bytes = serde_json::to_vec(&checked).map_err(storage)?;
+                tx.open_table(CHECKED)
+                    .map_err(storage)?
+                    .insert(id, bytes.as_slice())
+                    .map_err(storage)?;
+                Ok(())
+            },
         )
+    }
+
+    /// How entry `id`'s contents were checked when it was verified (`None`: not said, or a journal
+    /// from before this was kept).
+    pub fn checked_from(&self, id: u64) -> Result<Option<CheckedFrom>, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let table = match tx.open_table(CHECKED) {
+            Ok(t) => t,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(None),
+            Err(e) => return Err(storage(e)),
+        };
+        let Some(v) = table.get(id).map_err(storage)? else {
+            return Ok(None);
+        };
+        serde_json::from_slice(v.value())
+            .map(Some)
+            .map_err(|e| damaged(format!("a check record: {e}")))
     }
 
     /// The real name it is getting, `final_path` inside the destination: recorded before the file
@@ -1600,6 +1757,34 @@ impl Journal {
                 (!s.is_finished()).then(|| State::Failed {
                     why: why.into(),
                     reached: Box::new(s.clone()),
+                })
+            },
+            |_, _| Ok(()),
+        )
+    }
+
+    /// It did not finish, but what arrived is kept beside its real name at `kept_path` (a damaged
+    /// copy the person is told about): failed, with that copy recorded as the step it reached, so
+    /// undo can remove it like any copy the move made, once it is proven the same file unchanged.
+    pub fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: Landed,
+    ) -> Result<(), JournalError> {
+        self.step(
+            id,
+            "failed",
+            |s| {
+                (!s.is_finished()).then(|| State::Failed {
+                    why: why.into(),
+                    reached: Box::new(State::Committed {
+                        final_path: kept_path.into(),
+                        fingerprint,
+                        landed,
+                    }),
                 })
             },
             |_, _| Ok(()),
@@ -2115,6 +2300,18 @@ pub trait Ledger {
         fingerprint: [u8; 32],
         file: Option<FileId>,
     ) -> Result<(), JournalError>;
+    /// See [`Journal::verified_as`]. A ledger that keeps no check records says it was verified
+    /// and keeps nothing more.
+    fn verified_as(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        checked: Option<CheckedFrom>,
+    ) -> Result<(), JournalError> {
+        let _ = checked;
+        self.verified(id, fingerprint, file)
+    }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError>;
     /// See [`Journal::filling`].
     fn filling(
@@ -2137,6 +2334,18 @@ pub trait Ledger {
     fn committed(&self, id: u64, landed: Landed) -> Result<(), JournalError>;
     fn existing(&self, id: u64, stored_path: &str) -> Result<(), JournalError>;
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError>;
+    /// See [`Journal::kept_aside`]. A ledger that keeps no copies for undo records it failed.
+    fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: Landed,
+    ) -> Result<(), JournalError> {
+        let _ = (kept_path, fingerprint, landed);
+        self.failed(id, why)
+    }
     fn checkpoint(
         &self,
         id: u64,
@@ -2145,9 +2354,34 @@ pub trait Ledger {
     ) -> Result<(), JournalError>;
     fn blocks(&self, id: u64) -> Result<Vec<(u64, [u8; 32])>, JournalError>;
     fn unfinished(&self) -> Result<Vec<Entry>, JournalError>;
+    /// The folders writes of `scope` made in `destination` (stored paths). A ledger that keeps no
+    /// record of folders knows none.
+    fn folders_made_in(
+        &self,
+        scope: Scope,
+        destination: &str,
+    ) -> Result<Vec<String>, JournalError> {
+        let _ = (scope, destination);
+        Ok(Vec::new())
+    }
 }
 
 impl Ledger for Journal {
+    fn folders_made_in(
+        &self,
+        scope: Scope,
+        destination: &str,
+    ) -> Result<Vec<String>, JournalError> {
+        let mut out = Vec::new();
+        for m in self.made_folders()? {
+            if m.destination == destination
+                && self.entry(m.entry)?.is_some_and(|e| e.write.scope == scope)
+            {
+                out.push(m.folder);
+            }
+        }
+        Ok(out)
+    }
     fn temp_tag(&self, id: u64) -> String {
         Journal::temp_tag(self, id)
     }
@@ -2169,6 +2403,15 @@ impl Ledger for Journal {
         file: Option<FileId>,
     ) -> Result<(), JournalError> {
         Journal::verified(self, id, fingerprint, file)
+    }
+    fn verified_as(
+        &self,
+        id: u64,
+        fingerprint: [u8; 32],
+        file: Option<FileId>,
+        checked: Option<CheckedFrom>,
+    ) -> Result<(), JournalError> {
+        Journal::verified_as(self, id, fingerprint, file, checked)
     }
     fn applied(&self, id: u64, final_path: &str) -> Result<(), JournalError> {
         Journal::applied(self, id, final_path)
@@ -2206,6 +2449,16 @@ impl Ledger for Journal {
     fn failed(&self, id: u64, why: &str) -> Result<(), JournalError> {
         Journal::failed(self, id, why)
     }
+    fn kept_aside(
+        &self,
+        id: u64,
+        why: &str,
+        kept_path: &str,
+        fingerprint: [u8; 32],
+        landed: Landed,
+    ) -> Result<(), JournalError> {
+        Journal::kept_aside(self, id, why, kept_path, fingerprint, landed)
+    }
     fn checkpoint(
         &self,
         id: u64,
@@ -2230,7 +2483,7 @@ fn put_undo(
     undo: &Undo,
 ) -> Result<(), JournalError> {
     let entry = read_entry(entries, id)?;
-    if !matches!(entry.state, State::Committed { .. }) {
+    if entry.state.copy_on_disk().is_none() {
         return Err(JournalError::OutOfOrder {
             from: entry.state.name(),
             to: "undo",
@@ -2238,6 +2491,9 @@ fn put_undo(
     }
     for name in undo.names() {
         plain_name(name)?;
+    }
+    if let Undo::Trashing { trash, .. } = undo {
+        trash_folder(trash)?;
     }
     let before: Option<Undo> = table
         .get(id)
@@ -2269,7 +2525,7 @@ fn pending_in(
         }
         let id = k.value();
         let entry = read_entry(entries, id)?;
-        let State::Committed { final_path, .. } = entry.state else {
+        let Some(State::Committed { final_path, .. }) = entry.state.copy_on_disk() else {
             return Err(damaged(format!(
                 "undo of entry {id}, which is not finished"
             )));
@@ -2277,8 +2533,8 @@ fn pending_in(
         out.push(Pending {
             id,
             stage,
+            path: final_path.clone(),
             destination: entry.write.destination,
-            path: final_path,
         });
     }
     Ok(out)

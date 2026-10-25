@@ -121,11 +121,11 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           case "$RUNNER_OS" in
-            Windows) bundles=nsis ;;
-            macOS) bundles=app ;;
-            Linux) bundles=deb ;;
+            Windows) bundles=nsis; os=windows ;;
+            macOS) bundles=app; os=macos ;;
+            Linux) bundles=deb; os=linux ;;
           esac
-          pnpm tauri build --ci --bundles "$bundles"
+          pnpm tauri build --ci --bundles "$bundles" --config "src-tauri/bundle/$os.json"
       - name: Collect the files
         shell: bash
         env:

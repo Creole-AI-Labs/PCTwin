@@ -26,15 +26,42 @@ One workspace (`Cargo.toml`), the app in `app/src-tauri`, and one crate per job 
 | `pctwin-gate` | The safety gate: the new laptop trusts nothing that arrives |
 | `pctwin-journal` | The change journal, so a crash is reconciled and a move can be undone |
 | `pctwin-power` | Keeping both laptops awake and watching the battery |
-| `pctwin-lease` | The one place that calls the system unsafely (Linux write leases) |
+| `pctwin-lease` | The first place that calls the system unsafely (Linux write leases) |
+| `pctwin-helper-os` | The administrator helper's system calls: the system's prompt, its private channel, who is calling (the second and last unsafe place, 20 October 2026) |
 
 ## Rules that come with it
 
-- `unsafe` code is forbidden in every crate except `pctwin-lease`; CI checks this fence.
+- `unsafe` code is forbidden everywhere except the functions `scripts/unsafe-fence.sh` lists in
+  `pctwin-lease` and `pctwin-helper-os`; CI checks this fence.
 - Security-sensitive crates (`pctwin-gate`, `pctwin-pairing`, `pctwin-link`) get a second review
   in a fresh context.
 - Dependencies point one way: the safety gate, the journal and the record never depend on the
   transfer or the network crates; the transfer builds on them.
+
+## Who the administrator helper trusts (20 October 2026, after its first review)
+
+- The helper authorises only on two facts: the caller's account, as the system records it when
+  the connection is made (Windows: the token the client connected with, read through the pipe;
+  macOS and Linux: the socket's peer credentials), and the private channel itself (a pipe or a
+  socket folder only the mover's account and SYSTEM or root can reach).
+- The caller's process ID and program path are read afterwards, by process ID, so a caller that
+  starts another program, or ends and has its ID reused, can change them. They are kept as
+  `program_hint`, for the record and the report, never for allowing anything.
+- The later route to tie a request to a signed program, not built yet: on macOS, the peer's
+  audit token (`LOCAL_PEERTOKEN`) checked against a code-signing requirement once the Developer
+  ID exists; on Linux, a process handle for the peer (`SO_PEERPIDFD`, kernel 6.5 and later), so
+  the program is read from the very process that connected.
+
+- **A gap against the Security Design, stated plainly.** The Security Design (part C) says
+  the helper confirms which local process is calling and ties the elevated launch to the
+  session that approved it. The code does not do that yet: it authorises on the account and
+  the private channel only. A request is not yet bound to the approving app's process or to
+  the elevated launch; that binding waits for the later route above. Until then, any program
+  running as the mover's account can talk to the helper during a move.
+- On macOS and Linux the helper's socket folder belongs to root, mode 0711: only root can add,
+  remove or rename anything in it, so the helper never changes anything by name in a place a
+  less-privileged account can write. Only the socket entry is handed to the mover (0600). The
+  app checks the socket is served by root before it sends anything.
 
 ## Consequences
 
