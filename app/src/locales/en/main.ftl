@@ -840,6 +840,8 @@ soon-restore-title = Restore setup
 soon-restore-body = Rebuild a laptop from a setup profile you saved after a move. This is coming in a later version.
 soon-rescue-title = Rescue a laptop
 soon-rescue-body = Bring files back from a laptop that will not start, by connecting its drive to a working one. This is coming in a later version.
+soon-move-title = Full move
+soon-move-body = Move everything from your old laptop to a new one: your files, apps and settings. This is coming in a later version. For now, use Quick Send to send files.
 
 ## X01 Move progress, compact
 

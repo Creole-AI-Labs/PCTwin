@@ -988,6 +988,8 @@ soon-restore-title = Restaurar configuração completa
 soon-restore-body = Monte um notebook de novo a partir de uma configuração completa que você salvou depois de uma mudança. Isso chega em uma versão futura.
 soon-rescue-title = Resgatar um notebook
 soon-rescue-body = Recupere arquivos de um notebook que não liga, conectando o disco dele a um que funciona. Isso chega em uma versão futura.
+soon-move-title = Mudança completa
+soon-move-body = Leve tudo do seu notebook antigo para um novo: seus arquivos, aplicativos e configurações. Isso chega em uma versão futura. Por enquanto, use o Envio rápido para enviar arquivos.
 
 ## X01 Move progress, compact
 

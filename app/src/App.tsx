@@ -185,7 +185,9 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
           </header>
           <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
             {screen.id === "welcome" && <Welcome
-                onStart={() => { setScreen({ id: "role" }); }}
+                // The full move opens only in builds made with it switched on (VITE_PCTWIN_FULL_MOVE=1);
+                // until it is ready for people to use, it is a coming-soon page like restore and rescue.
+                onStart={() => { setScreen(import.meta.env.VITE_PCTWIN_FULL_MOVE === "1" ? { id: "role" } : { id: "soon", which: "move" }); }}
                 onSoon={(which) => { setScreen({ id: "soon", which }); }}
                 onQuick={() => { setScreen({ id: "quick", notice: false }); }}
               />}
