@@ -191,7 +191,8 @@ impl<S: Read + Write> Client<S> {
         if handles.len() as u64 != files {
             return Err(ClientError::OutOfTurn);
         }
-        let mut items: Vec<Item> = Vec::with_capacity(handles.len());
+        // Room reserved up front is bounded; past that the list grows as pages arrive.
+        let mut items: Vec<Item> = Vec::with_capacity(handles.len().min(64 * 1024));
         while items.len() < handles.len() {
             let FromHelper::Items(page) = self.next()? else {
                 return Err(ClientError::OutOfTurn);

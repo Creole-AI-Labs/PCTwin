@@ -519,6 +519,10 @@ fn os_expire_password(name: &[u16]) -> (Option<String>, Result<(), u32>) {
         if got != 0 {
             return (None, Err(got));
         }
+        // Success always gives a buffer; a null one is refused rather than read.
+        if buffer.is_null() {
+            return (None, Err(1));
+        }
         let info = &mut *buffer.cast::<USER_INFO_4>();
         let mut text = PWSTR::null();
         let sid = match ConvertSidToStringSidW(info.usri4_user_sid, &mut text) {
