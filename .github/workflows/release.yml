@@ -115,6 +115,18 @@ jobs:
           node-version: 24
           package-manager-cache: false
       # No build caches in a release: every file is built from the tagged source alone.
+      # The version: a tag's own (v1.2.3 is 1.2.3); a run by hand is 0.1.<run number>, so each
+      # test build is newer than the last and installed copies offer it as an update.
+      - name: Version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN: ${{ github.run_number }}
+        run: |
+          if [ "$REF_TYPE" = tag ]; then version="${REF_NAME#v}"; else version="0.1.$RUN"; fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "Building $version"
       - name: Build the app
         working-directory: app
         shell: bash
@@ -125,7 +137,9 @@ jobs:
             macOS) bundles=app; os=macos ;;
             Linux) bundles=deb; os=linux ;;
           esac
-          pnpm tauri build --ci --bundles "$bundles" --config "src-tauri/bundle/$os.json"
+          # This system's settings and the version, as one config for the build.
+          node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));c.version=process.argv[2];fs.writeFileSync("build.json",JSON.stringify(c))' "src-tauri/bundle/$os.json" "$VERSION"
+          pnpm tauri build --ci --bundles "$bundles" --config build.json
       - name: Collect the files
         shell: bash
         env:
@@ -138,7 +152,27 @@ jobs:
             macOS) tar -C "$bundle/macos" -czf "out/PCTwin-$OS.app.tar.gz" PCTwin.app ;;
             Linux) cp "$bundle"/deb/*.deb "out/PCTwin-$OS.deb" ;;
           esac
+          echo "$VERSION" > out/version.txt
           ls -l out
+      # Updates (app/src-tauri/src/updates.rs): the Windows installer and the Mac app archive are
+      # signed with the update key, which installed copies check before installing. The key
+      # reaches this step only, which runs Tauri's own signer and nothing from the build. Linux
+      # packages (.deb) are not updated this way. Without the key (a fork), nothing is signed.
+      - name: Sign for updates
+        if: runner.os != 'Linux'
+        working-directory: app
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then echo "No update key: not signed for updates"; exit 0; fi
+          for f in ../out/*.exe ../out/*.app.tar.gz; do
+            [ -e "$f" ] || continue
+            # Bound to this version, so an older signed build is never accepted as a newer one.
+            pnpm tauri signer sign --app-version "$VERSION" "$f"
+          done
+          ls -l ../out
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-${{ matrix.os }}

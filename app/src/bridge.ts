@@ -750,6 +750,22 @@ export function parseTidied(value: unknown): Tidied | null {
 
 export const recoveryCheck = () => ask("recovery_check", parseInterrupted);
 
+/* ---------- Updates (src-tauri/src/updates.rs) ---------- */
+
+/** A newer build of PCTwin: its version. */
+export type Update = { version: string };
+
+export function parseUpdate(value: unknown): Update | null {
+  const f = exactly(value, ["version"]);
+  return f && typeof f.version === "string" && f.version !== "" ? { version: f.version } : null;
+}
+
+/** Whether a newer build is out; null when there is none or it cannot be told. */
+export const updateCheck = () =>
+  ask("update_check", (v) => (v === null ? { update: null } : (() => { const u = parseUpdate(v); return u ? { update: u } : null; })())).then((r) => r.update);
+/** Downloads, checks, installs the newer build and opens PCTwin again. Refused during a move. */
+export const updateInstall = () => run("update_install");
+
 /** "Your things are ready" (M32): what a hand-over at this person's sign-in did, counted. */
 export type ReadyNote = { landed: number; kept: number; failed: number };
 

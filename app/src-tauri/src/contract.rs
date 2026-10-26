@@ -904,6 +904,8 @@ fn calls() -> Value {
             { "name": "quicksend_pause", "args": [] },
             { "name": "quicksend_resume", "args": [] },
             { "name": "quicksend_stop", "args": [] },
+            { "name": "update_check", "args": [] },
+            { "name": "update_install", "args": [] },
         ],
         "events": {
             "old": OLD_EVENT,

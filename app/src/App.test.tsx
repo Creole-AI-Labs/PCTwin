@@ -255,8 +255,9 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-home-title"));
     expect(screen.queryByText("Coming soon")).toBeNull();
-    // Nothing reaches the shell but the start-up looks (a move that stopped part way, a hand-over note).
-    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check", "things_ready"]);
+    // Nothing reaches the shell but the start-up looks (a move that stopped part way, a newer
+    // version, a hand-over note).
+    expect(tauri.invoke.mock.calls.map(([c]) => c as string)).toEqual(["recovery_check", "update_check", "things_ready"]);
     // The window footer carries the free-sending note and the main action, also while the notice is showing.
     const footer = within(screen.getByRole("contentinfo"));
     expect(footer.getByText(l10n.getString("footer-note-send"))).toBeTruthy();

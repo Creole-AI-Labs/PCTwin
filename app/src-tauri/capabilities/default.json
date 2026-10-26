@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window's screens: they may call the app's own commands (window size by name, tray labels, pairing, the move, a help code, picking up after a restart, Quick Send), each granted by name and taking typed arguments only; listen to the app's own events (pairing and move updates); and open our own site in the browser. Nothing else.",
+  "description": "The main window's screens: they may call the app's own commands (window size by name, tray labels, pairing, the move, a help code, picking up after a restart, Quick Send, whether an update is out and installing it), each granted by name and taking typed arguments only; listen to the app's own events (pairing and move updates); and open our own site in the browser. Nothing else.",
   "windows": ["main"],
   "permissions": [
     "allow-set-window-mode",
@@ -50,6 +50,8 @@
     "allow-quicksend-pause",
     "allow-quicksend-resume",
     "allow-quicksend-stop",
+    "allow-update-check",
+    "allow-update-install",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     {

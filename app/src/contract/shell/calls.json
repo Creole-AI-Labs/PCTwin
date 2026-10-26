@@ -336,6 +336,14 @@
     {
       "args": [],
       "name": "quicksend_stop"
+    },
+    {
+      "args": [],
+      "name": "update_check"
+    },
+    {
+      "args": [],
+      "name": "update_install"
     }
   ],
   "events": {

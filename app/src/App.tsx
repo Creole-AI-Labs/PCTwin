@@ -2,7 +2,7 @@ import { LocalizationProvider, Localized } from "@fluent/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
-import { recoveryCheck, recoveryRun, thingsReady, type ReadyNote } from "./bridge";
+import { recoveryCheck, recoveryRun, thingsReady, toMoveProblem, updateCheck, updateInstall, type ReadyNote } from "./bridge";
 import ThingsReady from "./screens/ThingsReady";
 import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
@@ -18,7 +18,7 @@ import PutTogether from "./screens/PutTogether";
 import QuickHome from "./screens/QuickHome";
 import QuickHost from "./screens/QuickHost";
 import HistoryHost from "./screens/HistoryHost";
-import Welcome from "./screens/Welcome";
+import Welcome, { type UpdateState } from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import HeaderSettings from "./components/HeaderSettings";
 import { Question } from "./icons";
@@ -59,6 +59,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   const [screen, setScreen] = useState<Screen>({ id: "welcome" });
   // A move that stopped part way on this laptop: Home shows "Resume your move" until it is tidied up.
   const [unfinished, setUnfinished] = useState(0);
+  // A newer build of PCTwin, found when the app opened: Home offers it.
+  const [update, setUpdate] = useState<UpdateState | undefined>(undefined);
   // The mini panel (360 x 240) is the window: no header above it.
   const [mini, setMini] = useState(false);
   const onWindow = useCallback((mode: WindowMode) => {
@@ -78,6 +80,14 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     recoveryCheck().then(
       ({ unfinished }) => {
         if (live && unfinished > 0) setUnfinished(unfinished);
+      },
+      () => undefined,
+    );
+    // Asked once, when PCTwin opens: a newer build is offered on Home; no answer (no network,
+    // say) is simply no offer.
+    updateCheck().then(
+      (found) => {
+        if (live && found) setUpdate({ version: found.version, state: "ready" });
       },
       () => undefined,
     );
@@ -204,6 +214,15 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 onHistory={() => { setScreen({ id: "history", from: "welcome" }); }}
                 unfinished={unfinished > 0}
                 onResume={() => { setScreen({ id: "pickup", unfinished }); }}
+                update={update}
+                onUpdate={() => {
+                  if (!update) return;
+                  setUpdate({ ...update, state: "installing" });
+                  // On success PCTwin closes and opens again as the new version.
+                  updateInstall().catch((error: unknown) => {
+                    setUpdate({ ...update, state: toMoveProblem(error).kind === "busy" ? "busy" : "failed" });
+                  });
+                }}
                 // Waiting sends (Q18) are not built in the engine yet, so Home has none to show.
               />
             )}

@@ -12,6 +12,7 @@ Progress updates for anyone following along. The newest update is at the top. We
 
 **In progress**
 
+- **PCTwin can update itself.** When it opens, it checks whether a newer test build is out and offers it on the start page with Update now. The new build is checked against our update key before it is installed, so nobody else can push one. Windows and Mac for now; Linux stays a manual download.
 - **Quick Send is simpler.** The sender picks files and shows a code; the moment the two laptops are paired, the files start moving. The receiver types the code and the files go to its Downloads folder (or a folder it picks with Change). There are no extra check, approve or accept pages, and no receipts: each side ends on one page that says what arrived and checked, and lists only what did not.
 - **Quick Send talks about "this laptop" and "the other laptop"**, never an old or a new one.
 

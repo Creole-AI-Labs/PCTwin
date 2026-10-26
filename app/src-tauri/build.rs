@@ -48,6 +48,8 @@ const COMMANDS: &[&str] = &[
     "quicksend_pause",
     "quicksend_resume",
     "quicksend_stop",
+    "update_check",
+    "update_install",
 ];
 
 fn main() {

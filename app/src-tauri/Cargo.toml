@@ -23,6 +23,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6", "x11", "dbus", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
+# Updates (src/updates.rs): a newer build is checked against the update key in tauri.conf.json
+# before it is installed. Driven from the engine only; the screens get no updater permission.
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The system's own window for a new account's temporary password (never the screens).

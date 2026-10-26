@@ -1,6 +1,6 @@
 import { Localized } from "@fluent/react";
 import type { ReactNode } from "react";
-import { Chevron, Clock, History, MoveBoth, MoveIllustration, Rescue, Restore, Send } from "../icons";
+import { ArrowForward, Chevron, Clock, History, MoveBoth, MoveIllustration, Rescue, Restore, Send } from "../icons";
 import type { Soon } from "./ComingSoon";
 
 /** One choice card: icon, title, one plain line. The motion pack reads `data-bookmark` and `data-icon-job`. */
@@ -31,7 +31,13 @@ function Card({ job, title, body, icon, filled = false, onClick }: { job: string
  *   the saved move; the headline is smaller and the picture is left out so the cards stay in view.
  * - Waiting files (`waiting` with `onWaiting`): a quiet line under My history says how many files
  *   wait for which laptop.
+ * - A newer version (`update` with `onUpdate`): found when PCTwin opened; "A new version of PCTwin
+ *   is ready" sits at the top with Update now. While it installs it says PCTwin will open again by
+ *   itself; if it could not, it says so and PCTwin carries on as it is. Never beside Resume your
+ *   move: a move comes first.
  */
+export type UpdateState = { version: string; state: "ready" | "installing" | "failed" | "busy" };
+
 export default function Welcome({
   onStart,
   onSoon,
@@ -41,6 +47,8 @@ export default function Welcome({
   onResume,
   waiting,
   onWaiting,
+  update,
+  onUpdate,
 }: {
   onStart: () => void;
   onSoon: (which: Soon) => void;
@@ -50,8 +58,11 @@ export default function Welcome({
   onResume?: () => void;
   waiting?: { count: number; to: string };
   onWaiting?: () => void;
+  update?: UpdateState;
+  onUpdate?: () => void;
 }) {
   const resuming = unfinished === true && onResume !== undefined;
+  const updating = !resuming && update !== undefined && onUpdate !== undefined;
   const waits = waiting !== undefined && waiting.count > 0 && onWaiting !== undefined;
   return (
     <div className="home">
@@ -69,6 +80,40 @@ export default function Welcome({
           <Localized id="home-resume-action" attrs={{ "aria-label": true }}>
             <button type="button" className="home-resume-button" data-bookmark="" onClick={onResume} />
           </Localized>
+        </div>
+      )}
+      {updating && (
+        <div className="home-resume home-update" role="status">
+          <ArrowForward className="home-resume-icon home-update-icon" />
+          <span className="home-resume-text">
+            <Localized id="home-update-title">
+              <strong />
+            </Localized>
+            <small>
+              {update.state === "installing" ? (
+                <Localized id="home-updating">
+                  <span />
+                </Localized>
+              ) : update.state === "failed" ? (
+                <Localized id="home-update-failed">
+                  <span />
+                </Localized>
+              ) : update.state === "busy" ? (
+                <Localized id="home-update-busy">
+                  <span />
+                </Localized>
+              ) : (
+                <Localized id="home-update-body" vars={{ version: update.version }}>
+                  <span />
+                </Localized>
+              )}
+            </small>
+          </span>
+          {update.state === "ready" && (
+            <Localized id="home-update-action">
+              <button type="button" className="home-update-button" onClick={onUpdate} />
+            </Localized>
+          )}
         </div>
       )}
       <div className={`home-headline${resuming ? " compact" : ""}`}>

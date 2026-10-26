@@ -25,6 +25,7 @@ mod pairing;
 mod quicksend;
 mod recovery;
 mod restart;
+mod updates;
 
 use serde::Deserialize;
 use tauri::ipc::Invoke;
@@ -225,6 +226,8 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         quicksend::quicksend_pause,
         quicksend::quicksend_resume,
         quicksend::quicksend_stop,
+        updates::update_check,
+        updates::update_install,
     ]
 }
 
@@ -253,6 +256,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(restart::plugin())
+        .plugin(updates::plugin())
         .manage(pairing::new_state())
         .manage(moving::new_state())
         .manage(quicksend::new_state())

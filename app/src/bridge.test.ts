@@ -35,6 +35,8 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  updateCheck,
+  updateInstall,
   historyExport,
   historyList,
   historyOpen,
@@ -229,6 +231,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsPause();
       await qsResume();
       await qsStop();
+      await updateCheck();
+      await updateInstall();
       await historyList();
       await historyOpen("1792627200000-0").catch(() => undefined);
       await historyExport();
