@@ -113,6 +113,16 @@ pub enum Request {
     /// New laptop: hand the approved person `account`'s held files over when they next sign in,
     /// as them (the usual way once the move is over).
     HandOverAtSignIn { account: String },
+    /// Phase 2 broker, once, right after [`Request::Hello`]: the approved plan. The helper keeps
+    /// it only if it is the one whose generation and digest were on its command line (given
+    /// through the system's administrator prompt). See `pctwin_helper::broker`.
+    SealPlan {
+        plan: crate::broker::actions::ApprovedPlan,
+    },
+    /// Phase 2 broker: one of the fixed privileged actions of the sealed plan.
+    Act(Box<crate::broker::BrokerRequest>),
+    /// Phase 2 broker: the move was stopped; no new change starts in this session.
+    Revoke,
     /// The move is over: the helper ends.
     Bye,
 }
@@ -199,6 +209,12 @@ pub enum Answer {
         answers: Vec<bool>,
     },
     Refused(Refusal),
+    /// The broker kept the approved plan.
+    Sealed,
+    /// The broker acted: what it observed, signed for this session.
+    Receipt(Box<crate::broker::receipt::Receipt>),
+    /// The broker did not act, and why.
+    Denied(crate::broker::Denial),
     Goodbye,
 }
 

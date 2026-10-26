@@ -44,6 +44,8 @@ pub struct Session<'s> {
     system_only: Vec<std::path::PathBuf>,
     /// Places asked about so far (at most [`crate::MAX_SYSTEM_ASKED`]).
     asked: usize,
+    /// Phase 2: the permission broker, when the helper was started with an approved plan.
+    broker: Option<crate::broker::Broker<'s>>,
 }
 
 impl<'s> Session<'s> {
@@ -61,6 +63,41 @@ impl<'s> Session<'s> {
             held: BTreeMap::new(),
             system_only: Vec::new(),
             asked: 0,
+            broker: None,
+        }
+    }
+
+    /// With the permission broker for the plan it was started with (Phase 2.2).
+    pub fn with_broker(mut self, broker: crate::broker::Broker<'s>) -> Self {
+        self.broker = Some(broker);
+        self
+    }
+
+    /// The broker, if there is one (it is closed once the session ends).
+    pub fn broker(&self) -> Option<&crate::broker::Broker<'s>> {
+        self.broker.as_ref()
+    }
+
+    fn broker_answer(&mut self, request: Request) -> Answer {
+        use crate::broker::{Answer as Broker, Denial};
+        let Some(broker) = self.broker.as_mut() else {
+            return Answer::Denied(Denial::NotAvailable);
+        };
+        match request {
+            Request::SealPlan { plan } => match broker.seal(plan) {
+                Ok(()) => Answer::Sealed,
+                Err(why) => Answer::Denied(why),
+            },
+            Request::Act(request) => match broker.handle(&request) {
+                Broker::Done(receipt) => Answer::Receipt(receipt),
+                Broker::Denied(why) => Answer::Denied(why),
+            },
+            Request::Revoke => {
+                broker.revoker().revoke();
+                broker.close();
+                Answer::Denied(Denial::Revoked)
+            }
+            _ => Answer::Denied(Denial::NotAvailable),
         }
     }
 
@@ -218,8 +255,18 @@ impl<'s> Session<'s> {
         }
     }
 
-    /// Serves the app on `channel` until it says goodbye or the channel closes.
+    /// Serves the app on `channel` until it says goodbye or the channel closes. However it ends
+    /// (goodbye, the app gone, a broken channel), the broker is closed: nothing outlives the
+    /// session.
     pub fn serve(&mut self, channel: &mut (impl Read + Write)) -> Result<(), FrameError> {
+        let served = self.serve_requests(channel);
+        if let Some(broker) = self.broker.as_mut() {
+            broker.close();
+        }
+        served
+    }
+
+    fn serve_requests(&mut self, channel: &mut (impl Read + Write)) -> Result<(), FrameError> {
         loop {
             let request = match read_request(channel) {
                 Ok(r) => r,
@@ -282,6 +329,10 @@ impl<'s> Session<'s> {
                 }
                 Request::HandOverAtSignIn { account } => {
                     let answer = self.hand_over_at_sign_in(&account);
+                    send_answer(channel, &answer)?;
+                }
+                request @ (Request::SealPlan { .. } | Request::Act(_) | Request::Revoke) => {
+                    let answer = self.broker_answer(request);
                     send_answer(channel, &answer)?;
                 }
                 Request::Bye => {

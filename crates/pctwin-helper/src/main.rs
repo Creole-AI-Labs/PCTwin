@@ -2,7 +2,13 @@
 //! move:
 //!
 //! `pctwin-helper --session <token> --mover <account> --approve <account>[,<account>...]
-//!  --channel <name> [--dir <folder>] [--laptop <id>]`
+//!  --channel <name> [--dir <folder>] [--laptop <id>] [--plan <generation>:<digest>]`
+//!
+//! `--plan` (Phase 2.2, Windows for now) starts the permission broker for the approved plan with
+//! that generation and digest: they are on the command line so the system's administrator prompt
+//! starts the helper for that plan and no other. With `--plan`, `--approve` may be left out (a
+//! move of one person that needs an administrator only for installs, settings or a restore
+//! point).
 //!
 //! `--session -` reads the token from the first line of standard input instead, so it is never on
 //! the command line, which other programs can read on Mac and Linux.
@@ -30,11 +36,12 @@ struct Args {
     channel: String,
     dir: Option<String>,
     laptop: LaptopId,
+    plan: Option<pctwin_helper::broker::LaunchSeal>,
 }
 
 fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
-    let (mut session, mut mover, mut approve, mut channel, mut dir, mut laptop) =
-        (None, None, None, None, None, None);
+    let (mut session, mut mover, mut approve, mut channel, mut dir, mut laptop, mut plan) =
+        (None, None, None, None, None, None, None);
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(format!("{flag} needs a value"))?;
         let slot = match flag.as_str() {
@@ -44,6 +51,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--channel" => &mut channel,
             "--dir" => &mut dir,
             "--laptop" => &mut laptop,
+            "--plan" => &mut plan,
             _ => return Err(format!("unknown {flag}")),
         };
         if slot.replace(value).is_some() {
@@ -51,15 +59,28 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
         }
     }
     let mover = mover.ok_or("--mover is needed")?;
-    let approve: BTreeSet<String> = approve
-        .ok_or("--approve is needed")?
-        .split(',')
-        .filter(|a| !a.is_empty())
-        .map(str::to_string)
-        .collect();
-    if approve.is_empty() || approve.contains(&mover) {
-        return Err("--approve names the other people, never the mover".into());
-    }
+    let plan = match plan {
+        Some(p) => Some(
+            pctwin_helper::broker::LaunchSeal::parse(&p).ok_or("--plan is not a plan's seal")?,
+        ),
+        None => None,
+    };
+    let approve: BTreeSet<String> = match (approve, plan) {
+        (Some(list), _) => {
+            let approve: BTreeSet<String> = list
+                .split(',')
+                .filter(|a| !a.is_empty())
+                .map(str::to_string)
+                .collect();
+            if approve.is_empty() || approve.contains(&mover) {
+                return Err("--approve names the other people, never the mover".into());
+            }
+            approve
+        }
+        // A move of one person with an approved plan: nobody else's files are read.
+        (None, Some(_)) => BTreeSet::new(),
+        (None, None) => return Err("--approve is needed".into()),
+    };
     Ok(Args {
         session: session_from(
             session.ok_or("--session is needed")?,
@@ -73,6 +94,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Args, String> {
             Some(hex) => LaptopId::from_hex(&hex).map_err(|_| "--laptop is not an ID")?,
             None => LaptopId::from_hex(&"0".repeat(32)).map_err(|_| "no laptop ID")?,
         },
+        plan,
     })
 }
 
@@ -183,11 +205,34 @@ fn run(args: &Args) -> Result<(), String> {
     let mut system = pctwin_helper::newlaptop::System {
         mover: Account::Sid(mover.clone()),
     };
-    Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
+    // Phase 2.2: the permission broker, for the plan named on the command line. Until the undo
+    // journal (2.3) is joined to it, nothing can be recorded first, so it changes nothing.
+    let (mut authority, mut journal, mut adapters) = (
+        pctwin_helper::broker::SessionElevation,
+        pctwin_helper::broker::NoJournal,
+        pctwin_helper::broker::BuiltInAdapters,
+    );
+    let clock = pctwin_grant::Now::real;
+    let session = Session::new(args.session.clone(), args.approve.clone(), &mut scanner)
         .with_account_maker(&mut maker)
-        .with_new_laptop(&mut system)
-        .serve(&mut stream)
-        .map_err(|e| e.to_string())
+        .with_new_laptop(&mut system);
+    let mut session = match args.plan {
+        Some(seal) => {
+            let packages =
+                pctwin_helper_os::admin_only_folder("packages").map_err(|e| e.to_string())?;
+            session.with_broker(pctwin_helper::broker::Broker::new(
+                seal,
+                &args.session,
+                pctwin_helper::broker::staging::Staging::new(packages),
+                &mut authority,
+                &mut journal,
+                &mut adapters,
+                &clock,
+            ))
+        }
+        None => session,
+    };
+    session.serve(&mut stream).map_err(|e| e.to_string())
 }
 
 /// The first argument of the helper restarted with a clean environment.
@@ -341,6 +386,11 @@ fn restart_clean(raw: &[String]) -> ExitCode {
 fn run(args: &Args) -> Result<(), String> {
     use pctwin_helper_os::{Account, ChannelDir, SocketServer};
     let mover: u32 = args.mover.parse().map_err(|_| "--mover is not a user ID")?;
+    if args.plan.is_some() {
+        // The broker's own folder and the system's approval per action are built for Windows
+        // first; on Mac and Linux it is refused before anything starts.
+        return Err("--plan is not supported on this system yet".into());
+    }
     let dir = args.dir.as_ref().ok_or("--dir is needed here")?;
     let dir = ChannelDir::create(std::path::Path::new(dir)).map_err(|e| e.to_string())?;
     let server = SocketServer::bind(&dir, &args.channel, mover).map_err(|e| e.to_string())?;
@@ -628,6 +678,39 @@ mod tests {
         assert!(args(&extra).is_err());
         let mut twice = good.to_vec();
         twice.extend(["--mover", "0"]);
+        assert!(args(&twice).is_err());
+        assert!(a.plan.is_none());
+    }
+
+    /// Phase 2.2: the approved plan's seal on the command line; with it, nobody else need be
+    /// approved, and a broken seal ends the helper before anything starts.
+    #[test]
+    fn a_plan_is_read_from_the_command_line_strictly() {
+        let seal = format!("3:{}", "ab".repeat(32));
+        let base = ["--session", "t", "--mover", "1000", "--channel", "c"];
+        let mut with_plan = base.to_vec();
+        with_plan.extend(["--plan", &seal]);
+        let a = args(&with_plan).unwrap();
+        assert!(a.approve.is_empty());
+        let p = a.plan.unwrap();
+        assert_eq!(p.generation, 3);
+        assert_eq!(p.digest.to_string(), "ab".repeat(32));
+        // Without a plan, someone must be approved.
+        assert!(args(&base).is_err());
+        // With both, the approved people are still checked.
+        let mut both = with_plan.clone();
+        both.extend(["--approve", "1000"]);
+        assert!(args(&both).is_err());
+        let mut both = with_plan.clone();
+        both.extend(["--approve", "1001"]);
+        assert_eq!(args(&both).unwrap().approve.len(), 1);
+        for bad in ["3", "x:00", &format!("3:{}", "ab".repeat(31))] {
+            let mut broken = base.to_vec();
+            broken.extend(["--plan", bad]);
+            assert!(args(&broken).is_err(), "{bad}");
+        }
+        let mut twice = with_plan.clone();
+        twice.extend(["--plan", &seal]);
         assert!(args(&twice).is_err());
     }
 }
