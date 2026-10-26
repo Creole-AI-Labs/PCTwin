@@ -22,7 +22,7 @@ import {
   type QsReceipt,
 } from "../bridge";
 import { labelShownSafely, type Label } from "../pairing";
-import type { OfferedFile, PickedItem, SendProgress } from "../quicksend";
+import { useBytes, type OfferedFile, type PickedItem, type SendProgress } from "../quicksend";
 import { Heading } from "./ProgressParts";
 import { TopStrip } from "./FrameParts";
 import FrameFooter from "./FrameFooter";
@@ -65,6 +65,7 @@ function merged(old: PickedItem[], fresh: PickedItem[]): PickedItem[] {
  */
 export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; onHome: () => void }) {
   const { l10n } = useLocalization();
+  const bytes = useBytes();
   const sender = mode === "send";
   const [view, setView] = useState<View>({ kind: sender ? "pick" : "folder" });
   // Each step settles in like a new screen; a problem arrives without travel.
@@ -341,6 +342,19 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
         />
       );
     case "problem":
+      if (view.problem.kind === "no-room")
+        return (
+          <>
+            <TopStrip labelId="qs-eyebrow-receiving" />
+            <Heading id="qs-problem-room-title" vars={{ folder: folder?.name ?? "" }} />
+            <p className="subhead">{l10n.getString("qs-problem-room-body", { needed: bytes(view.problem.needed), room: bytes(view.problem.room) })}</p>
+            <FrameFooter>
+              <Button variant="primary" onClick={onHome}>
+                {l10n.getString("outcome-home")}
+              </Button>
+            </FrameFooter>
+          </>
+        );
       return (
         <>
           <TopStrip labelId={sender ? "qs-eyebrow" : "qs-eyebrow-receiving"} />

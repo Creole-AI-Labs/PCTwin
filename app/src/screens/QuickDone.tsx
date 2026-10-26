@@ -82,8 +82,12 @@ export default function QuickDone({
   const there = receipt.lines.filter((l) => inPlace(l.outcome));
   const sizeOf = files ? new Map(files.map((f) => [f.path, f.size])) : null;
   const arrivedBytes = sizeOf ? receipt.lines.reduce((sum, l) => (l.outcome.kind === "arrived" ? sum + (sizeOf.get(l.path) ?? 0) : sum), 0) : null;
+  // Every file declined: the receiving laptop took none of them, most often for want of room.
+  const refused = side === "send" && !stopped && t.total > 0 && t.declined === t.total;
   const title = stopped
     ? "qs-done-stopped-title"
+    : refused
+      ? "qs-done-refused-title"
     : whole
       ? side === "send"
         ? "qs-done-sent-title"
@@ -106,6 +110,11 @@ export default function QuickDone({
       <Heading id={title} />
 
       <div role="status" className="qs-status">
+        {refused && (
+          <Localized id="qs-done-refused-body">
+            <p className="subhead" />
+          </Localized>
+        )}
         {t.arrived > 0 && (
           <p className="subhead">
             {arrivedBytes === null

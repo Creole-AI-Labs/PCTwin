@@ -849,9 +849,12 @@ export function parseQsFolder(value: unknown): QsFolder | null {
   return f && typeof f.name === "string" && typeof f.path === "string" && isCountOrNull(f.freeBytes) ? { name: f.name, path: f.path, freeBytes: f.freeBytes } : null;
 }
 
-export type QsProblem = { kind: "link-lost" | "failed"; detail: string };
+/** Why a Quick Send could not go on; "no-room": the receiving folder had no room, so the offer was declined. */
+export type QsProblem = { kind: "link-lost" | "failed"; detail: string } | { kind: "no-room"; needed: number; room: number };
 
 export function parseQsProblem(value: unknown): QsProblem | null {
+  const room = exactly(value, ["kind", "needed", "room"]);
+  if (room) return room.kind === "no-room" && isCount(room.needed) && isCount(room.room) ? { kind: "no-room", needed: room.needed, room: room.room } : null;
   const f = exactly(value, ["kind", "detail"]);
   return f && oneOf(f.kind, ["link-lost", "failed"] as const) && typeof f.detail === "string" ? { kind: f.kind, detail: f.detail } : null;
 }

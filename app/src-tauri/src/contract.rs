@@ -553,6 +553,10 @@ fn qs_problems() -> Vec<crate::quicksend::QsProblem> {
         QsProblem::Failed {
             detail: "the folder cannot be used".into(),
         },
+        QsProblem::NoRoom {
+            needed: 238_000_000,
+            room: 120_000_000,
+        },
     ]
 }
 

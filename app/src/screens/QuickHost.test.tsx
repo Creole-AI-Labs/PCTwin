@@ -279,6 +279,21 @@ describe("receiving", () => {
     });
   });
 
+  it("no room in the folder: says so with the folder and the sizes, and that nothing was saved", async () => {
+    replies.quicksend_folder = () => DOWNLOADS;
+    inApp(<QuickHost mode="receive" onHome={vi.fn()} />);
+    await waitFor(() => {
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
+    });
+    send("pairing-new", { kind: "paired" });
+    await waitFor(() => {
+      expect(called("quicksend_receive")).toBe(true);
+    });
+    send("quicksend-problem", { kind: "no-room", needed: 238_000_000, room: 120_000_000 });
+    expect(heading()).toBe(plain(text("qs-problem-room-title", { folder: "Downloads" })));
+    expect(page()).toContain(plain(text("qs-problem-room-body", { needed: "238 MB", room: "120 MB" })));
+  });
+
   it("a lost connection says so", async () => {
     replies.quicksend_folder = () => DOWNLOADS;
     inApp(<QuickHost mode="receive" onHome={vi.fn()} />);

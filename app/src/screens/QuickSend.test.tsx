@@ -353,6 +353,12 @@ describe("Q14 Done", () => {
     expect(within(section).queryByText("Budget.xlsx")).toBeNull();
   });
 
+  it("every file declined: the sender is told the receiving laptop did not take them, never that some did not arrive", () => {
+    done({ receipt: { lines: OFFER.map((f) => ({ path: f.path, outcome: { kind: "declined" as const } })) } });
+    expect(h1()).toBe(text("qs-done-refused-title"));
+    expect(screen.getByText(text("qs-done-refused-body"))).toBeTruthy();
+  });
+
   it("Open folder is the receiver's; a folder that cannot be opened says so", () => {
     const e = done({ side: "receive", folder: "Downloads" });
     fireEvent.click(button("qs-done-open-folder"));

@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::moving::{MoveProblem, journal_path};
 use crate::pairing::AppPairing;
+use pctwin_gate::FileId;
 
 /// A send's or a receive's measured progress.
 pub const PROGRESS_EVENT: &str = "quicksend-progress";
@@ -47,7 +48,16 @@ struct Picked {
 /// written to, never whatever is at its path later), and the path it was opened at.
 struct Held {
     path: PathBuf,
+    identity: FileId,
     dest: pctwin_gate::Destination,
+}
+
+/// A folder known by its path and by what it is (its identity when it was first held), so that a
+/// folder put at that path later, or a link put there, is never taken for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Known {
+    path: PathBuf,
+    identity: FileId,
 }
 
 #[derive(Default)]
@@ -60,11 +70,14 @@ pub struct QuickSend {
     /// The receiver's folder, held open from when the pairing page showed it; taken by the receive
     /// it was shown for, so each receive holds its folder afresh.
     folder: Mutex<Option<Held>>,
-    /// The folder the person chose this session (only its path): the next receive opens it again
-    /// rather than trusting an old handle. Without one, receives go to the system's Downloads folder.
-    remembered: Mutex<Option<PathBuf>>,
+    /// The folder the person chose this session: the next receive opens it again at its path
+    /// rather than trusting an old handle, and only if it is still that folder. Without one,
+    /// receives go to the system's Downloads folder.
+    remembered: Mutex<Option<Known>>,
+    /// What the Downloads folder was when first held this session.
+    downloads: Mutex<Option<FileId>>,
     /// Where the last receive saved its files: the only folder Open folder opens.
-    received_into: Mutex<Option<PathBuf>>,
+    received_into: Mutex<Option<Known>>,
     live: Mutex<Option<Live>>,
     /// What the offer being made was made of (the chosen things), for sending the missing pieces.
     chosen: Mutex<Vec<PathBuf>>,
@@ -285,11 +298,26 @@ pub struct IncomingView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum QsProblem {
-    LinkLost { detail: String },
-    Failed { detail: String },
+    LinkLost {
+        detail: String,
+    },
+    Failed {
+        detail: String,
+    },
+    /// The receiving folder has no room for the offer: it was declined and nothing was written.
+    NoRoom {
+        needed: u64,
+        room: u64,
+    },
 }
 
 fn problem_of(e: &pctwin_quicksend::QuickError) -> QsProblem {
+    if let pctwin_quicksend::QuickError::NoRoom { needed, room } = e {
+        return QsProblem::NoRoom {
+            needed: *needed,
+            room: *room,
+        };
+    }
     let detail = e.to_string();
     if matches!(
         e,
@@ -525,9 +553,12 @@ pub async fn quicksend_receive<R: Runtime>(
         .ok_or(MoveProblem::Failed)?;
     let journal_at = journal_path(&app).ok_or(MoveProblem::Failed)?;
     // Held for this receive only: the next one holds its folder again.
-    let held = lock(&qs.folder).take().ok_or(MoveProblem::Failed)?;
+    let held = take_held(&qs)?;
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
-    *lock(&qs.received_into) = Some(held.path.clone());
+    *lock(&qs.received_into) = Some(Known {
+        path: held.path.clone(),
+        identity: held.identity,
+    });
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
     let runtime = tokio::runtime::Handle::current();
@@ -591,27 +622,46 @@ pub struct FolderView {
 }
 
 /// The folder the next receive saves into, held open from now: the one the person chose this
-/// session, opened again at its path, or else the system's Downloads folder. A chosen folder
-/// that cannot be opened any more (its drive was taken out) is forgotten for Downloads. Neither
-/// one there is a problem, and the screens ask the person to choose a folder.
+/// session, or else the system's Downloads folder (see [`hold_for_receive`]).
 #[tauri::command]
 pub fn quicksend_folder<R: Runtime>(
     app: AppHandle<R>,
     qs: State<'_, AppQuickSend>,
 ) -> Result<FolderView, MoveProblem> {
+    hold_for_receive(&qs, app.path().download_dir().ok())
+}
+
+/// Holds the folder for the next receive. The folder chosen this session is opened again at its
+/// path, and used only while it is still that very folder and not a link: otherwise it is
+/// forgotten and nothing is held, so the screens ask the person to choose a folder (files never
+/// go somewhere the page did not name). Without a chosen folder, `downloads`, held the same way
+/// against what it was the first time this session.
+fn hold_for_receive(qs: &QuickSend, downloads: Option<PathBuf>) -> Result<FolderView, MoveProblem> {
     let remembered = lock(&qs.remembered).clone();
-    if let Some(chosen) = remembered {
-        if let Some(view) = held_folder(&qs, &chosen) {
-            return Ok(view);
-        }
-        lock(&qs.remembered).take();
+    if let Some(known) = remembered {
+        return match held_folder(qs, &known.path, Some(known.identity)) {
+            Some((view, _)) => Ok(view),
+            None => {
+                lock(&qs.remembered).take();
+                Err(MoveProblem::Failed)
+            }
+        };
     }
-    let downloads = app.path().download_dir().map_err(|_| MoveProblem::Failed)?;
-    held_folder(&qs, &downloads).ok_or(MoveProblem::Failed)
+    let downloads = downloads.ok_or(MoveProblem::Failed)?;
+    let expect = *lock(&qs.downloads);
+    let (view, identity) = held_folder(qs, &downloads, expect).ok_or(MoveProblem::Failed)?;
+    lock(&qs.downloads).get_or_insert(identity);
+    Ok(view)
+}
+
+/// The folder held for this receive, taken so the next receive holds its own: never anywhere
+/// else when none is held.
+fn take_held(qs: &QuickSend) -> Result<Held, MoveProblem> {
+    lock(&qs.folder).take().ok_or(MoveProblem::Failed)
 }
 
 /// Change: a folder chosen in the system's own picker, held for the next receive in place of the
-/// one shown, and remembered (its path) for the rest of the session. `None` when none was chosen.
+/// one shown, and remembered for the rest of the session. `None` when none was chosen.
 #[tauri::command]
 pub async fn quicksend_choose_folder(
     qs: State<'_, AppQuickSend>,
@@ -622,15 +672,60 @@ pub async fn quicksend_choose_folder(
     let Some(folder) = chosen else {
         return Ok(None);
     };
-    let view = held_folder(&qs, &folder).ok_or(MoveProblem::Failed)?;
-    *lock(&qs.remembered) = Some(folder);
-    Ok(Some(view))
+    Ok(Some(remember_chosen(&qs, folder)?))
+}
+
+/// Holds a folder the person chose and remembers it, by path and identity, for the session.
+fn remember_chosen(qs: &QuickSend, folder: PathBuf) -> Result<FolderView, MoveProblem> {
+    let (view, identity) = held_folder(qs, &folder, None).ok_or(MoveProblem::Failed)?;
+    *lock(&qs.remembered) = Some(Known {
+        path: folder,
+        identity,
+    });
+    Ok(view)
+}
+
+/// Whether `path` is itself a plain folder: not a symbolic link, junction or other reparse point
+/// (a link could lead anywhere, the system's Startup folder say, while the page names the link).
+fn plain_folder(path: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return false;
+        }
+    }
+    meta.is_dir() && !meta.file_type().is_symlink()
+}
+
+/// Opens the plain folder at `path` and says what it is. `None` when it is not a plain folder,
+/// cannot be opened, or stopped being a plain folder while it was opened.
+fn open_plain(path: &std::path::Path) -> Option<(pctwin_gate::Destination, FileId)> {
+    if !plain_folder(path) {
+        return None;
+    }
+    let dest = pctwin_gate::Destination::open(path).ok()?;
+    let identity = dest.folder_identity("").ok()??;
+    plain_folder(path).then_some((dest, identity))
 }
 
 /// Opens the folder at `folder` and holds it for the next receive, replacing any held before;
-/// what the screens show of it. `None` when it cannot be opened.
-fn held_folder(qs: &QuickSend, folder: &std::path::Path) -> Option<FolderView> {
-    let dest = pctwin_gate::Destination::open(folder).ok()?;
+/// what the screens show of it, and what it is. `None` (and nothing held) when it is not a plain
+/// folder, cannot be opened, or is not the folder `expect` says it was.
+fn held_folder(
+    qs: &QuickSend,
+    folder: &std::path::Path,
+    expect: Option<FileId>,
+) -> Option<(FolderView, FileId)> {
+    lock(&qs.folder).take();
+    let (dest, identity) = open_plain(folder)?;
+    if expect.is_some_and(|e| e != identity) {
+        return None;
+    }
     let name = folder.file_name().map_or_else(
         || folder.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
@@ -642,29 +737,36 @@ fn held_folder(qs: &QuickSend, folder: &std::path::Path) -> Option<FolderView> {
     };
     *lock(&qs.folder) = Some(Held {
         path: folder.to_path_buf(),
+        identity,
         dest,
     });
-    Some(view)
+    Some((view, identity))
 }
 
 /// Open folder, on the Done page: shows the folder the last receive saved into in the system's
-/// file manager. Only that folder, and only while it is a folder: never a received file, and
-/// never a path from the screens.
+/// file manager (see [`folder_to_open`]).
 #[tauri::command]
 pub fn quicksend_open_folder<R: Runtime>(
     app: AppHandle<R>,
     qs: State<'_, AppQuickSend>,
 ) -> Result<(), MoveProblem> {
     use tauri_plugin_opener::OpenerExt;
-    let folder = lock(&qs.received_into)
-        .clone()
-        .ok_or(MoveProblem::NotMoving)?;
-    if !std::fs::symlink_metadata(&folder).is_ok_and(|m| m.is_dir()) {
-        return Err(MoveProblem::Failed);
-    }
+    let folder = folder_to_open(&qs)?;
     app.opener()
         .open_path(folder.to_string_lossy(), None::<&str>)
         .map_err(|_| MoveProblem::Failed)
+}
+
+/// The folder the last receive saved into, only while it is still that very folder and a plain
+/// one: never a received file, a link, another folder put at the path, or a path from the screens.
+fn folder_to_open(qs: &QuickSend) -> Result<PathBuf, MoveProblem> {
+    let known = lock(&qs.received_into)
+        .clone()
+        .ok_or(MoveProblem::NotMoving)?;
+    match open_plain(&known.path) {
+        Some((_, identity)) if identity == known.identity => Ok(known.path),
+        _ => Err(MoveProblem::Failed),
+    }
 }
 
 fn with_live(qs: &QuickSend, f: impl FnOnce(&Live)) -> Result<(), MoveProblem> {
@@ -799,58 +901,192 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Exit-gate review (24 October 2026), and 26 October 2026: the folder is held open from when
-    /// it is shown, so a folder put at its path afterwards is not the one written to; a receive
-    /// takes it, so the next receive holds its folder again (by the remembered path, never the
-    /// old handle).
+    /// A link put where a folder was: a junction on Windows (made with `mklink /J`, which needs
+    /// no administrator), a symbolic link elsewhere.
+    fn link(at: &std::path::Path, to: &std::path::Path) {
+        #[cfg(windows)]
+        {
+            let made = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(at)
+                .arg(to)
+                .output()
+                .unwrap();
+            assert!(made.status.success(), "mklink /J: {made:?}");
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(to, at).unwrap();
+    }
+
+    fn dir(name: &str) -> PathBuf {
+        let d = tempfile_dir().join(name);
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn known(path: &std::path::Path) -> Known {
+        Known {
+            path: path.to_path_buf(),
+            identity: open_plain(path).unwrap().1,
+        }
+    }
+
+    /// Exit-gate review (24 October 2026) and PR #108 review: the folder is held open from when it
+    /// is shown, and taken by the receive, so the next receive holds its folder again at the
+    /// remembered path, and only if it is still that very folder.
     #[test]
     fn the_folder_is_held_from_when_it_is_shown_and_held_again_for_each_receive() {
         let qs = QuickSend::default();
-        let dir = tempfile_dir().join("held");
-        let chosen = dir.join("Inbox");
+        let d = dir("held");
+        let chosen = d.join("Inbox");
         std::fs::create_dir_all(&chosen).unwrap();
-        let view = held_folder(&qs, &chosen).unwrap();
+        let view = remember_chosen(&qs, chosen.clone()).unwrap();
         assert_eq!(view.name, "Inbox");
-        // Swapped after it was shown: the path now names another folder.
-        let moved = dir.join("Inbox-moved");
-        let swapped = std::fs::rename(&chosen, &moved).is_ok();
-        if swapped {
-            std::fs::create_dir_all(&chosen).unwrap();
-            let held = lock(&qs.folder).take().unwrap();
-            assert_eq!(held.path, chosen);
-            let id = held.dest.folder_identity("").unwrap();
-            let there = pctwin_gate::Destination::open(&moved)
-                .unwrap()
-                .folder_identity("")
-                .unwrap();
-            assert_eq!(
-                id, there,
-                "the held folder is the one shown, wherever it is now"
-            );
-            // The next receive holds the folder at the path again: today's folder there.
-            held_folder(&qs, &chosen).unwrap();
-            let again = lock(&qs.folder).take().unwrap();
-            let now = pctwin_gate::Destination::open(&chosen)
-                .unwrap()
-                .folder_identity("")
-                .unwrap();
-            assert_eq!(again.dest.folder_identity("").unwrap(), now);
-            assert_ne!(now, id, "never the old handle");
-        } else {
-            // Windows keeps a folder held open from being renamed: it cannot be swapped at all.
-            lock(&qs.folder).take();
-        }
+        let first = take_held(&qs).unwrap();
+        assert_eq!(first.path, chosen);
         assert!(lock(&qs.folder).is_none(), "taken by the receive");
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(first);
+        // Still the same folder: held again.
+        hold_for_receive(&qs, None).unwrap();
+        take_held(&qs).unwrap();
+        // Swapped: the folder moved away and a new one made at its path.
+        std::fs::rename(&chosen, d.join("Inbox-moved")).unwrap();
+        std::fs::create_dir_all(&chosen).unwrap();
+        assert!(
+            hold_for_receive(&qs, None).is_err(),
+            "another folder at the path"
+        );
+        assert!(lock(&qs.folder).is_none(), "nothing held");
+        assert!(
+            lock(&qs.remembered).is_none(),
+            "forgotten: the person chooses again"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// PR #108 review: a link put at the remembered path is refused even when it leads to the
+    /// very folder chosen (the identity matches; the link could be changed to lead anywhere).
+    #[test]
+    fn a_link_at_the_remembered_path_is_refused_and_forgotten() {
+        let qs = QuickSend::default();
+        let d = dir("linked");
+        let chosen = d.join("Inbox");
+        std::fs::create_dir_all(&chosen).unwrap();
+        remember_chosen(&qs, chosen.clone()).unwrap();
+        take_held(&qs).unwrap();
+        let moved = d.join("Inbox-moved");
+        std::fs::rename(&chosen, &moved).unwrap();
+        link(&chosen, &moved);
+        assert!(!plain_folder(&chosen));
+        assert!(hold_for_receive(&qs, None).is_err());
+        assert!(lock(&qs.remembered).is_none());
+        // And a link is never chosen in the first place.
+        assert!(remember_chosen(&qs, chosen.clone()).is_err());
+        assert!(lock(&qs.folder).is_none());
+        let _ = std::fs::remove_dir(&chosen);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// PR #108 review: a remembered folder that is gone is forgotten (so the next receive goes to
+    /// Downloads, said on the page), never kept to fail again or swapped silently.
+    #[test]
+    fn a_remembered_folder_that_is_gone_is_forgotten() {
+        let qs = QuickSend::default();
+        let d = dir("gone");
+        let chosen = d.join("Inbox");
+        let downloads = d.join("Downloads");
+        std::fs::create_dir_all(&chosen).unwrap();
+        std::fs::create_dir_all(&downloads).unwrap();
+        remember_chosen(&qs, chosen.clone()).unwrap();
+        take_held(&qs).unwrap();
+        std::fs::remove_dir_all(&chosen).unwrap();
+        assert!(hold_for_receive(&qs, Some(downloads.clone())).is_err());
+        assert!(lock(&qs.remembered).is_none(), "forgotten");
+        let view = hold_for_receive(&qs, Some(downloads.clone())).unwrap();
+        assert_eq!(view.name, "Downloads");
+        assert_eq!(take_held(&qs).unwrap().path, downloads);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Downloads is held against what it was the first time this session: swapped since, refused.
+    #[test]
+    fn a_swapped_downloads_folder_is_refused() {
+        let qs = QuickSend::default();
+        let d = dir("downloads");
+        let downloads = d.join("Downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        hold_for_receive(&qs, Some(downloads.clone())).unwrap();
+        take_held(&qs).unwrap();
+        std::fs::rename(&downloads, d.join("Downloads-moved")).unwrap();
+        std::fs::create_dir_all(&downloads).unwrap();
+        assert!(hold_for_receive(&qs, Some(downloads.clone())).is_err());
+        assert!(hold_for_receive(&qs, None).is_err(), "no Downloads at all");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// With no folder held, a receive has nowhere to write: never a folder of its own choosing.
+    #[test]
+    fn with_no_folder_held_a_receive_has_nowhere_to_write() {
+        let qs = QuickSend::default();
+        assert!(take_held(&qs).is_err());
+        let d = dir("taken");
+        remember_chosen(&qs, d.clone()).unwrap();
+        assert!(take_held(&qs).is_ok());
+        assert!(take_held(&qs).is_err(), "each receive holds its own");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// PR #108 review: Open folder opens the folder the receive saved into, only while it is that
+    /// very folder: not a file put at its path, not another folder, not a link to it.
+    #[test]
+    fn open_folder_opens_only_the_folder_received_into() {
+        let qs = QuickSend::default();
+        assert_eq!(folder_to_open(&qs), Err(MoveProblem::NotMoving));
+        let d = dir("open");
+        let inbox = d.join("Inbox");
+        std::fs::create_dir_all(&inbox).unwrap();
+        *lock(&qs.received_into) = Some(known(&inbox));
+        assert_eq!(folder_to_open(&qs), Ok(inbox.clone()));
+        let moved = d.join("Inbox-moved");
+        std::fs::rename(&inbox, &moved).unwrap();
+        // A file at the path.
+        std::fs::write(&inbox, b"run me").unwrap();
+        assert_eq!(folder_to_open(&qs), Err(MoveProblem::Failed));
+        std::fs::remove_file(&inbox).unwrap();
+        // Another folder at the path.
+        std::fs::create_dir_all(&inbox).unwrap();
+        assert_eq!(folder_to_open(&qs), Err(MoveProblem::Failed));
+        std::fs::remove_dir(&inbox).unwrap();
+        // A link at the path, to the very folder.
+        link(&inbox, &moved);
+        assert_eq!(folder_to_open(&qs), Err(MoveProblem::Failed));
+        let _ = std::fs::remove_dir(&inbox);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// A folder that cannot be opened is never held.
     #[test]
     fn a_folder_that_cannot_be_opened_is_not_held() {
         let qs = QuickSend::default();
-        let dir = tempfile_dir().join("never-made");
-        assert!(held_folder(&qs, &dir.join("nope")).is_none());
+        let d = dir("never-made");
+        assert!(held_folder(&qs, &d.join("nope"), None).is_none());
         assert!(lock(&qs.folder).is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn no_room_is_said_with_the_sizes() {
+        assert_eq!(
+            problem_of(&pctwin_quicksend::QuickError::NoRoom {
+                needed: 238,
+                room: 120
+            }),
+            QsProblem::NoRoom {
+                needed: 238,
+                room: 120
+            }
+        );
     }
 
     #[test]
