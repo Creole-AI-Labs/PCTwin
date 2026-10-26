@@ -1,6 +1,7 @@
-//! The journal's format number: a journal from a newer PCTwin is refused, a format-1 journal
-//! (before undo removed files through a held handle) is upgraded only when it holds no undo
-//! record, and is otherwise refused rather than misread.
+//! The journal's format number: a journal from a newer PCTwin is refused, a format-2 journal
+//! (before the effect journal) is upgraded in place, a format-1 journal (before undo removed files
+//! through a held handle) is upgraded only when it holds no undo record, and is otherwise refused
+//! rather than misread.
 
 use pctwin_journal::{
     Actor, FileId, Journal, JournalError, Landed, Permission, PlannedWrite, UndoGate,
@@ -89,15 +90,30 @@ fn format_1_journal(dir: &Path) -> (std::path::PathBuf, String) {
 }
 
 #[test]
-fn a_new_journal_is_written_in_the_current_format_which_is_2() {
-    assert_eq!(pctwin_journal::FORMAT, 2);
+fn a_new_journal_is_written_in_the_current_format_which_is_3() {
+    assert_eq!(pctwin_journal::FORMAT, 3);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
     drop(Journal::open(&path).unwrap());
-    assert_eq!(format_on_disk(&path), Some(2));
+    assert_eq!(format_on_disk(&path), Some(3));
     // And it opens again as it is.
     drop(Journal::open(&path).unwrap());
-    assert_eq!(format_on_disk(&path), Some(2));
+    assert_eq!(format_on_disk(&path), Some(3));
+}
+
+#[test]
+fn a_format_2_journal_is_upgraded_in_place_keeping_everything_and_its_gate() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, tag) = format_1_journal(dir.path());
+    set_format(&path, 2);
+    {
+        let j = Journal::open(&path).unwrap();
+        assert_eq!(j.temp_tag(1), tag);
+        assert_eq!(j.entries().unwrap().len(), 1);
+        assert_eq!(j.undo_gate().unwrap(), UndoGate::Closed);
+        assert!(j.effects().unwrap().is_empty());
+    }
+    assert_eq!(format_on_disk(&path), Some(3));
 }
 
 #[test]
@@ -116,7 +132,7 @@ fn a_format_1_journal_with_no_undo_record_is_upgraded_in_place_keeping_everythin
         );
         assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
     }
-    assert_eq!(format_on_disk(&path), Some(2));
+    assert_eq!(format_on_disk(&path), Some(3));
 }
 
 fn assert_refused_and_untouched(path: &Path) {
@@ -168,7 +184,7 @@ fn a_format_1_journal_holding_a_folder_undo_record_is_refused_not_misread() {
 
 #[test]
 fn a_journal_in_any_newer_format_is_refused_and_left_as_it_is() {
-    for newer in [3, 99, u32::MAX] {
+    for newer in [4, 99, u32::MAX] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("journal.redb");
         drop(Journal::open(&path).unwrap());
@@ -232,5 +248,100 @@ fn the_saved_format_2_example_still_opens() {
     assert_eq!(entries[0].write, planned());
     assert!(j.unfinished().unwrap().is_empty());
     drop(j);
-    assert_eq!(format_on_disk(&copy), Some(2));
+    assert_eq!(format_on_disk(&copy), Some(3), "opened, it is upgraded");
+}
+
+fn effect() -> (
+    pctwin_journal::PlannedEffect,
+    pctwin_journal::SettingsIntent,
+) {
+    use pctwin_recipe::{RecipeId, RecipeRef, RelPath, SettingsPlace, SettingsRoot};
+    let place = SettingsPlace {
+        root: SettingsRoot::Config,
+        path: RelPath::new("vlc").unwrap(),
+    };
+    (
+        pctwin_journal::PlannedEffect {
+            scope: pctwin_journal::Scope([7; 16]),
+            item: ItemId::from_hex(&format!("aa{}", "0".repeat(30))).unwrap(),
+            recipe: RecipeRef {
+                id: RecipeId::new("org.videolan.vlc").unwrap(),
+                version: 1,
+            },
+            step: 1,
+            actor: planned().actor,
+        },
+        pctwin_journal::SettingsIntent::Copy {
+            from: place.clone(),
+            to: place,
+            before: vec![pctwin_journal::SettingsFile {
+                path: "vlcrc".into(),
+                bytes: b"old".to_vec(),
+            }],
+        },
+    )
+}
+
+/// The saved example of format 3 (one committed write, one copy of settings with its receipt
+/// and the file that was there before, a restore point answer), read by every later build. Set
+/// `PCTWIN_WRITE_FORMAT_FIXTURES=1` to write it, only when a new format number is introduced:
+/// the old file must then stay.
+#[test]
+fn the_saved_format_3_example_still_opens() {
+    use pctwin_journal::{FileHash, Found, Receipt, RestorePoint, Scope, content_hash};
+    let saved = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/formats/journal-3.redb");
+    let point = RestorePoint::EarlierExists {
+        at: 1_790_000_000,
+        number: 12,
+    };
+    let found = Found::Files(vec![FileHash {
+        path: "vlcrc".into(),
+        hash: content_hash(b"new"),
+    }]);
+    if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_journal::FORMAT == 3 {
+        let _ = std::fs::remove_file(&saved);
+        let j = Journal::open(&saved).unwrap();
+        let id = j.plan(&planned()).unwrap();
+        j.staged(id, "Documents/.pctwin-x.part", &[]).unwrap();
+        j.verified(id, [1; 32], None).unwrap();
+        j.applied(id, "Documents/f1.txt").unwrap();
+        j.committed(
+            id,
+            Landed {
+                size: 1000,
+                modified_ns: None,
+                file: None,
+            },
+        )
+        .unwrap();
+        j.record_restore_point(Scope([7; 16]), &point).unwrap();
+        let (p, intent) = effect();
+        let e = j.settings().intend(&p, &intent).unwrap();
+        j.settings().observed(e, &found, false).unwrap();
+        j.settings().receipt(e, &Receipt::Done).unwrap();
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("journal.redb");
+    std::fs::copy(&saved, &copy).unwrap();
+    let j = Journal::open(&copy).unwrap();
+    assert_eq!(j.entries().unwrap()[0].write, planned());
+    assert_eq!(j.restore_point(Scope([7; 16])).unwrap(), Some(point));
+    let effects = j.effects().unwrap();
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effects[0].planned, effect().0);
+    assert!(j.unfinished_effects().unwrap().is_empty());
+    assert_eq!(
+        effects[0].state,
+        pctwin_journal::EffectState::Receipted {
+            found,
+            after_restart: false,
+            receipt: Receipt::Done
+        }
+    );
+    assert_eq!(
+        j.kept_bytes(&content_hash(b"old")).unwrap(),
+        b"old".to_vec()
+    );
+    drop(j);
+    assert_eq!(format_on_disk(&copy), Some(3));
 }

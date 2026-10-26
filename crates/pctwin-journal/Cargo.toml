@@ -9,13 +9,19 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+blake3 = "1.8"
 getrandom = "0.4.3"
+pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-types = { path = "../pctwin-types" }
 redb = "4.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 thiserror = "2.0.21"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 redb = "4.3"

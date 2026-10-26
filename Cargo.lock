@@ -3570,9 +3570,12 @@ dependencies = [
 name = "pctwin-executor"
 version = "0.1.0"
 dependencies = [
+ "pctwin-journal",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-types",
+ "redb",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -3641,12 +3644,16 @@ dependencies = [
 name = "pctwin-journal"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "getrandom 0.4.3",
+ "pctwin-recipe",
  "pctwin-record",
  "pctwin-types",
  "redb",
+ "rustix",
  "serde",
  "serde_json",
+ "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
 ]

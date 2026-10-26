@@ -16,18 +16,26 @@
 //!   never by writing them into a command or a file by hand.
 //! - Every recipe is checked ([`Recipe::validate`]) when it is made and again when it is read, and
 //!   every saved recipe carries [`FORMAT`] under the shared format rule.
+//! - Every recipe says whether removing its app is a safe way to undo installing it, and what
+//!   else removing it touches ([`UndoDeclaration`]; System Design S14, "Apps, imports and source
+//!   policy", and S02-P06). One that says nothing is never removed by undo.
 
-use pctwin_types::format::{Format, FormatError};
+use pctwin_types::format::{Format, FormatError, Verdict};
 use serde::{Deserialize, Serialize};
 
 /// The recipe format this app writes and reads.
-pub const FORMAT: u32 = 1;
+///
+/// - **2** (26 October 2026): every recipe carries `undo`, its [`UndoDeclaration`].
+/// - **1**: no `undo`. Still read, as a recipe that says nothing about undo (so undo never
+///   removes its app); one that carries an `undo` field anyway is damaged. Read recipes are
+///   written back as format 2.
+pub const FORMAT: u32 = 2;
 
-/// Recipes in the shared format rule (no older formats yet).
+/// Recipes in the shared format rule.
 pub const RECIPE_FORMAT: Format = Format {
     name: "setup recipe",
     current: FORMAT,
-    readable: &[],
+    readable: &[1],
 };
 
 /// The longest ID, package ID, setting key or path part a recipe may hold.
@@ -370,6 +378,54 @@ pub enum Step {
     Checklist { what: ChecklistKey },
 }
 
+/// What else removing an app may touch, as its recipe declares it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SideEffect {
+    /// Removing it can also remove the person's own files or data: undo never removes it.
+    RemovesUserData,
+    /// Other apps share parts it brought: undo never removes it, so they keep working.
+    SharedParts,
+    /// Its maker's account or licence must be released by hand (sign out, deactivate): told.
+    VendorAccount,
+    /// Removing it leaves its settings and caches behind: told.
+    LeavesSettings,
+}
+
+/// Whether removing a recipe's app is a safe way to undo installing it (System Design S14:
+/// "an uninstall is not a universal inverse of installation"). Removal always goes through the
+/// app's catalog and always keeps the person's data: never a purge or zap.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct UndoDeclaration {
+    /// Removing the app through its catalog is a safe undo. `false` (the default, and every
+    /// format-1 recipe): undo leaves the app and tells the person.
+    pub uninstall: bool,
+    /// What else removing it touches.
+    #[serde(default)]
+    pub side_effects: Vec<SideEffect>,
+}
+
+impl UndoDeclaration {
+    /// Whether undo may remove the app (if PCTwin installed it).
+    pub fn removable(&self) -> bool {
+        self.why_kept().is_none()
+    }
+
+    /// Why undo leaves the app in place, in plain words; `None` when it may remove it.
+    pub fn why_kept(&self) -> Option<&'static str> {
+        if !self.uninstall {
+            Some("PCTwin cannot remove this app safely, so it was left in place")
+        } else if self.side_effects.contains(&SideEffect::RemovesUserData) {
+            Some("removing this app could also remove your own files, so it was left in place")
+        } else if self.side_effects.contains(&SideEffect::SharedParts) {
+            Some("other apps use parts of this app, so it was left in place")
+        } else {
+            None
+        }
+    }
+}
+
 /// How one app is rebuilt on a new laptop.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -379,6 +435,9 @@ pub struct Recipe {
     pub version: u32,
     pub platforms: Vec<Platform>,
     pub steps: Vec<Step>,
+    /// Whether undo may remove the app, and what removing it touches.
+    #[serde(default)]
+    pub undo: UndoDeclaration,
 }
 
 impl Step {
@@ -487,9 +546,17 @@ impl Recipe {
             version,
             platforms,
             steps,
+            undo: UndoDeclaration::default(),
         };
         r.validate()?;
         Ok(r)
+    }
+
+    /// The same recipe, declaring `undo`; checked again.
+    pub fn with_undo(mut self, undo: UndoDeclaration) -> Result<Self, RecipeError> {
+        self.undo = undo;
+        self.validate()?;
+        Ok(self)
     }
 
     pub fn reference(&self) -> RecipeRef {
@@ -528,6 +595,14 @@ impl Recipe {
                 Step::CopySettings { .. } => {}
             }
         }
+        let effects = &self.undo.side_effects;
+        if effects
+            .iter()
+            .enumerate()
+            .any(|(i, e)| effects[..i].contains(e))
+        {
+            return Err(RecipeError::Damaged("a side effect is listed twice".into()));
+        }
         // A recipe made only of checks would report an app rebuilt that nothing rebuilt.
         if self.steps.iter().all(|s| matches!(s, Step::Verify { .. })) {
             return Err(RecipeError::NothingToDo);
@@ -541,9 +616,24 @@ impl Recipe {
 
     /// Reads a saved recipe: the format first (a newer one is refused safely), then every field.
     pub fn from_json(bytes: &[u8]) -> Result<Self, RecipeError> {
-        RECIPE_FORMAT.check_json(bytes)?;
-        let r: Self =
+        let verdict = RECIPE_FORMAT.check_json(bytes)?;
+        if verdict == Verdict::Older(1) {
+            // Format 1 had no undo field: one carrying it was not made by format 1.
+            #[derive(Deserialize)]
+            struct UndoField {
+                undo: Option<serde_json::Value>,
+            }
+            let f: UndoField =
+                serde_json::from_slice(bytes).map_err(|e| RecipeError::Damaged(e.to_string()))?;
+            if f.undo.is_some() {
+                return Err(RecipeError::Damaged(
+                    "a format-1 recipe cannot say anything about undo".into(),
+                ));
+            }
+        }
+        let mut r: Self =
             serde_json::from_slice(bytes).map_err(|e| RecipeError::Damaged(e.to_string()))?;
+        r.format = FORMAT;
         r.validate()?;
         Ok(r)
     }

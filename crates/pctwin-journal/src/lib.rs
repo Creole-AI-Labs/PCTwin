@@ -29,9 +29,19 @@
 //! wipe can be sent.
 
 mod checked;
+mod effects;
+pub mod place;
 pub mod recovery;
 
 pub use checked::{CheckedFrom, WhyMemory};
+pub use effects::{
+    EffectClass, EffectEntry, EffectLedger, EffectState, EffectUndo, EffectUndoOutcome,
+    ExternalClass, FileHash, Found, ImportIntent, Imports, InstallIntent, Installs, KeptFile,
+    MAX_IDENTITY, MAX_KEPT_FILE, MAX_KEPT_FILES, MAX_KEPT_TOTAL, PlannedEffect, Presence, Receipt,
+    Recorder, RestorePoint, Role, RoleIntent, RoleMarker, Settings, SettingsFile, SettingsIntent,
+    StoredEffect, SupportView, UndoRoute, content_hash,
+};
+pub use place::Placement;
 
 use std::io;
 use std::path::Path;
@@ -45,6 +55,15 @@ use serde::{Deserialize, Serialize};
 /// The journal's format. A journal with a higher number came from a newer PCTwin and is refused
 /// ([`JournalError::NewerFormat`]), so an older PCTwin never reads records it does not know.
 ///
+/// - **3** (26 October 2026): the effect journal for installs and settings (module `effects`):
+///   the tables `effects`, `effects-unfinished`, `kept-files` (settings files from before a copy,
+///   by content hash), `effect-undo` and `restore-points`, and the counter `next-effect`; closing
+///   undo also refuses while an app or setting is part way put back. Opening a format-2 journal
+///   upgrades it to 3 in the same transaction as the open: it holds no effect, and its file
+///   records, folders and gate mean the same in both. Raised because a format-2 PCTwin knows
+///   nothing of effect undo: it would close undo, and allow the wipe, while a setting was half
+///   put back, so it must refuse this journal instead. Once format 3 ships, any change of shape
+///   of an effect record needs a new number.
 /// - **2**: undo removes a copy through the handle it was checked on (Windows) or by first moving
 ///   its name aside to a private name and checking it there (Linux and macOS): the undo stages
 ///   `Undo::Removing{file, dir_id, private}`, `Undo::Putting`, `Undo::Salvaging` and
@@ -60,15 +79,17 @@ use serde::{Deserialize, Serialize};
 ///   and could allow undo after the wipe, so it must refuse this journal instead.
 /// - **1**: undo set copies aside or sent them to the Recycle Bin (`Undo::Aside`,
 ///   `UndoOutcome::Trashed`). Opening a format-1 journal that holds no undo record (of a file or
-///   of a folder) upgrades it to 2 in the same transaction as the open: its entries, folders and
+///   of a folder) upgrades it to the current format in the same transaction as the open: its entries, folders and
 ///   gate mean the same in both, and a missing `gate` table means undo is open (no PCTwin could
 ///   send a wipe then). One that holds any undo record is refused
 ///   ([`JournalError::OlderFormatWithUndo`]) and left unchanged, because those records cannot be
 ///   read in format 2 and guessing what a half-done undo did could remove the wrong thing. (No
 ///   format-1 journal was ever installed, so this is a guard, not a migration path.)
 /// - Any other number (0) is reported damaged.
-pub const FORMAT: u32 = 2;
-/// The one older format that can still be opened (when it holds no undo record).
+pub const FORMAT: u32 = 3;
+/// An older format opened by upgrading it in place (see [`FORMAT`]).
+const FORMAT_2: u32 = 2;
+/// The oldest format that can still be opened (when it holds no undo record).
 const FORMAT_1: u32 = 1;
 
 const META: TableDefinition<&str, u32> = TableDefinition::new("meta");
@@ -144,9 +165,26 @@ pub enum JournalError {
     /// one already answered, or another move's), so nothing was recorded.
     #[error("that list of files is out of date; look at it again and choose again")]
     EscapeRefused,
-    /// A name in an undo record that is not one plain name in the copy's folder.
+    /// A name in an undo record that is not one plain name in the copy's folder (or a settings
+    /// file's path that is not inside its place, or is listed twice).
     #[error("not a plain file name: {0:?}")]
     BadName(String),
+    /// The settings files there before a copy are too large to keep a safe copy of, so the
+    /// copy must not be made.
+    #[error(
+        "the settings already there are too large for PCTwin to keep a safe copy of, so they were not changed"
+    )]
+    TooLarge,
+    /// An effect of one role was asked to be observed, finished or undone through another
+    /// role's recorder: refused, nothing written.
+    #[error(
+        "that change belongs to another part of PCTwin ({belongs_to:?}), so it was not touched"
+    )]
+    WrongRole { effect: u64, belongs_to: Role },
+    /// The journal's folder is not on a drive that is part of this laptop (or it could not be
+    /// told): nothing was opened or made there.
+    #[error("{}", .0.why_not().unwrap_or("this place cannot hold the move's record"))]
+    UnsafePlace(Placement),
 }
 
 fn storage(e: impl std::fmt::Display) -> JournalError {
@@ -1025,6 +1063,13 @@ pub enum CloseError {
     /// Some files moved part-way could not be finished (each listed with why).
     #[error("PCTwin could not finish tidying {} files, so the old laptop was not wiped", items.len())]
     Unresolved { items: Vec<UnresolvedItem> },
+    /// Some apps or settings are part way put back (these effect numbers): undo must finish
+    /// them first.
+    #[error(
+        "PCTwin has not finished putting back {} apps or settings, so the old laptop was not wiped",
+        ids.len()
+    )]
+    EffectsPartWay { ids: Vec<u64> },
     #[error(transparent)]
     Journal(#[from] JournalError),
 }
@@ -1148,8 +1193,19 @@ impl Scope {
 }
 
 impl Journal {
-    /// Opens the journal at `path`, creating it if there is none.
+    /// Opens the journal at `path`, creating it if there is none. Only on a drive that is part
+    /// of this laptop ([`place`]): a network drive, a drive that can be unplugged, or one that
+    /// cannot be told apart from those is refused ([`JournalError::UnsafePlace`]) before
+    /// anything is made there.
     pub fn open(path: &Path) -> Result<Self, JournalError> {
+        let folder = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        let placement = place::judge(folder);
+        if placement != Placement::Local {
+            return Err(JournalError::UnsafePlace(placement));
+        }
         let db = Database::create(path).map_err(|e| match e {
             redb::DatabaseError::DatabaseAlreadyOpen => JournalError::InUse,
             other => JournalError::Damaged(other.to_string()),
@@ -1172,6 +1228,9 @@ impl Journal {
             let found = meta.get("format").map_err(storage)?.map(|v| v.value());
             match found {
                 Some(FORMAT) => {}
+                Some(FORMAT_2) => {
+                    meta.insert("format", FORMAT).map_err(storage)?;
+                }
                 Some(found) if found > FORMAT => {
                     return Err(JournalError::NewerFormat { found });
                 }
@@ -1222,6 +1281,12 @@ impl Journal {
             tx.open_table(GATE).map_err(storage)?;
             tx.open_table(NOTES).map_err(storage)?;
             tx.open_table(SHOWING).map_err(storage)?;
+            tx.open_table(effects::EFFECTS).map_err(storage)?;
+            tx.open_table(effects::EFFECTS_UNFINISHED)
+                .map_err(storage)?;
+            tx.open_table(effects::KEPT_FILES).map_err(storage)?;
+            tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
+            tx.open_table(effects::RESTORE_POINTS).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -1988,6 +2053,10 @@ impl Journal {
             journal: self,
             closing_stays: false,
         };
+        let part_way = self.effects_part_way()?;
+        if !part_way.is_empty() {
+            return Err(CloseError::EffectsPartWay { ids: part_way });
+        }
         let pending = self.pending()?;
         let ticket = CloseTicket { journal: self };
         let mut finished = Vec::with_capacity(pending.len());
@@ -2032,6 +2101,13 @@ impl Journal {
                 // Returning drops the transaction uncommitted: nothing of it is written.
                 return Err(CloseError::Unresolved { items });
             }
+            // Nor beside an app or setting part way put back.
+            let effect_undo = tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
+            let part_way = effects::part_way_in(&effect_undo)?;
+            if !part_way.is_empty() {
+                return Err(CloseError::EffectsPartWay { ids: part_way });
+            }
+            drop(effect_undo);
             let mut gate = tx.open_table(GATE).map_err(storage)?;
             gate.insert(UNDO_GATE, CLOSED).map_err(storage)?;
         }
