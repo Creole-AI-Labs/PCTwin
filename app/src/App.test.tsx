@@ -212,7 +212,7 @@ describe("screens", () => {
   it("the header keeps language and motion behind one control showing the language's short name; Escape closes it", () => {
     render(<App initialLanguage="en" />);
     const header = within(screen.getByRole("banner"));
-    expect(header.getByText("This laptop")).toBeTruthy();
+    expect(header.getByText("Your laptop")).toBeTruthy();
     const settings = header.getByRole("button", { name: "Language and motion" });
     expect(settings.textContent).toBe("EN");
     expect(settings.getAttribute("aria-expanded")).toBe("false");

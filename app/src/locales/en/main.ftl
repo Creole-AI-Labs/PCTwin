@@ -45,7 +45,7 @@ home-waiting =
 
 ## Header: this laptop, the language and motion control, Help
 
-header-this-laptop = This laptop
+header-this-laptop = Your laptop
 header-settings =
     .aria-label = Language and motion
 header-help =

@@ -49,7 +49,7 @@ home-waiting =
 
 ## Header: this laptop, the language and motion control, Help
 
-header-this-laptop = هذا الحاسوب
+header-this-laptop = حاسوبك
 header-settings =
     .aria-label = اللغة والحركة
 header-help =
