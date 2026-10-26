@@ -1,7 +1,10 @@
 //! Quick Send for the screens (Q01 to Q14): chosen files and folders to a laptop nearby, over the
 //! same pairing, sealed link and safety gate as a move. The screens never name a path: files and
 //! folders are chosen in the system's own picker here, and the screens get names, sizes and
-//! opaque IDs only. The receiver chooses its folder the same way, and nothing received is opened.
+//! opaque IDs only. The receiver's files go to its Downloads folder, or to a folder it chose in
+//! the system's picker; nothing received is opened. Choosing Receive, typing the one-minute code and
+//! matching the number is the receiver's acceptance (Security Design T): once paired, everything
+//! offered is received into the folder held open since the pairing page showed it.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,17 +13,15 @@ use std::time::Duration;
 
 use pctwin_move::Live;
 use pctwin_quicksend::{Offer, Outcome, Receipt};
-use pctwin_record::ItemId;
-use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Runtime, State};
-use tokio::sync::oneshot;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::moving::{MoveProblem, journal_path};
 use crate::pairing::AppPairing;
 
 /// A send's or a receive's measured progress.
 pub const PROGRESS_EVENT: &str = "quicksend-progress";
-/// The receiver: what is offered.
+/// The receiver: what is being received (names and sizes, for the progress and Done pages).
 pub const INCOMING_EVENT: &str = "quicksend-incoming";
 /// How it ended, file by file.
 pub const RECEIPT_EVENT: &str = "quicksend-receipt";
@@ -42,10 +43,11 @@ struct Picked {
     folder: bool,
 }
 
-/// What the receiver is answering.
-enum Answer {
-    Accept(Option<Vec<ItemId>>),
-    Decline,
+/// The folder a receive writes into: opened when the pairing page showed it (the very folder
+/// written to, never whatever is at its path later), and the path it was opened at.
+struct Held {
+    path: PathBuf,
+    dest: pctwin_gate::Destination,
 }
 
 #[derive(Default)]
@@ -55,12 +57,15 @@ pub struct QuickSend {
     picked: Mutex<Vec<Picked>>,
     next_id: Mutex<u64>,
     offer: Mutex<Option<Offer>>,
-    /// The folder the receiver chose, opened when it was chosen (the very folder written to, never
-    /// whatever is at its path later); taken by the receive it was chosen for.
-    folder: Mutex<Option<pctwin_gate::Destination>>,
+    /// The receiver's folder, held open from when the pairing page showed it; taken by the receive
+    /// it was shown for, so each receive holds its folder afresh.
+    folder: Mutex<Option<Held>>,
+    /// The folder the person chose this session (only its path): the next receive opens it again
+    /// rather than trusting an old handle. Without one, receives go to the system's Downloads folder.
+    remembered: Mutex<Option<PathBuf>>,
+    /// Where the last receive saved its files: the only folder Open folder opens.
+    received_into: Mutex<Option<PathBuf>>,
     live: Mutex<Option<Live>>,
-    answer: Mutex<Option<oneshot::Sender<Answer>>>,
-    offered: Mutex<Vec<ItemId>>,
     /// What the offer being made was made of (the chosen things), for sending the missing pieces.
     chosen: Mutex<Vec<PathBuf>>,
     /// The last send from this window: what was chosen, its offer's ID and its receipt (Q19).
@@ -503,67 +508,56 @@ pub async fn quicksend_send<R: Runtime>(
         .map_err(|_| MoveProblem::Failed)
 }
 
-/// The receiver: waits for the offer over the paired link, shows it (Q08), and receives what the
-/// person accepts into the folder they chose.
+/// The receiver: once paired, receives everything offered over the paired link into the folder
+/// held for this receive. There is no second question: choosing Receive, typing the code and
+/// matching the number was the acceptance (Security Design T). With no folder held, nothing is
+/// taken from the link and the screens say so.
 #[tauri::command]
 pub async fn quicksend_receive<R: Runtime>(
     app: AppHandle<R>,
     pairing: State<'_, AppPairing>,
     qs: State<'_, AppQuickSend>,
 ) -> Result<(), MoveProblem> {
-    let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
     let me = pctwin_scan::list_people()
         .into_iter()
         .find(|p| p.is_me)
         .map(|p| p.account_id)
         .ok_or(MoveProblem::Failed)?;
     let journal_at = journal_path(&app).ok_or(MoveProblem::Failed)?;
-    let (tx, rx) = oneshot::channel();
-    *lock(&qs.answer) = Some(tx);
+    // Held for this receive only: the next one holds its folder again.
+    let held = lock(&qs.folder).take().ok_or(MoveProblem::Failed)?;
+    let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
+    *lock(&qs.received_into) = Some(held.path.clone());
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
-    let qs = Arc::clone(&qs);
     let runtime = tokio::runtime::Handle::current();
     std::thread::Builder::new()
         .name("pctwin-quickreceive".into())
         .spawn(move || {
             let ran = runtime.block_on(async {
                 let incoming = pctwin_quicksend::receive_offer(&mut link).await?;
-                let files = incoming.files();
-                *lock(&qs.offered) = files.iter().map(|f| f.id).collect();
                 let _ = app.emit(
                     INCOMING_EVENT,
                     IncomingView {
-                        files: offered(files),
+                        files: offered(incoming.files()),
                     },
                 );
-                // The person has as long as the sender waits (then the offer is declined).
-                match tokio::time::timeout(pctwin_quicksend::ANSWER_WAIT, rx).await {
-                    Ok(Ok(Answer::Accept(chosen))) => {
-                        let folder = lock(&qs.folder)
-                            .take()
-                            .ok_or(pctwin_quicksend::QuickError::NothingChosen)?;
-                        if let Some(dir) = journal_at.parent() {
-                            let _ = std::fs::create_dir_all(dir);
-                        }
-                        let journal = pctwin_journal::Journal::open(&journal_at).map_err(|e| {
-                            pctwin_quicksend::QuickError::Destination(e.to_string())
-                        })?;
-                        let done = Arc::new(AtomicBool::new(false));
-                        tick(app.clone(), live.clone(), done.clone());
-                        let r = incoming
-                            .accept_into(&mut link, folder, chosen.as_deref(), &journal, &me, &live)
-                            .await;
-                        done.store(true, Ordering::Release);
-                        r.map(Some)
-                    }
-                    _ => incoming.decline(&mut link).await.map(|()| None),
+                if let Some(dir) = journal_at.parent() {
+                    let _ = std::fs::create_dir_all(dir);
                 }
+                let journal = pctwin_journal::Journal::open(&journal_at)
+                    .map_err(|e| pctwin_quicksend::QuickError::Destination(e.to_string()))?;
+                let done = Arc::new(AtomicBool::new(false));
+                tick(app.clone(), live.clone(), done.clone());
+                // Everything offered (`None`), into the held folder.
+                let r = incoming
+                    .accept_into(&mut link, held.dest, None, &journal, &me, &live)
+                    .await;
+                done.store(true, Ordering::Release);
+                r
             });
-            // Chosen for this receive only: the next one chooses again.
-            lock(&qs.folder).take();
             match ran {
-                Ok(Some(r)) => {
+                Ok(r) => {
                     let stopped = live.control.stopped();
                     let view = receipt_view("receiver", &r, stopped);
                     crate::history::add(
@@ -576,16 +570,6 @@ pub async fn quicksend_receive<R: Runtime>(
                     );
                     let _ = app.emit(RECEIPT_EVENT, view);
                 }
-                Ok(None) => {
-                    let _ = app.emit(
-                        RECEIPT_EVENT,
-                        ReceiptView {
-                            side: "receiver",
-                            lines: Vec::new(),
-                            stopped: false,
-                        },
-                    );
-                }
                 Err(e) => {
                     let _ = app.emit(PROBLEM_EVENT, problem_of(&e));
                 }
@@ -595,15 +579,39 @@ pub async fn quicksend_receive<R: Runtime>(
         .map_err(|_| MoveProblem::Failed)
 }
 
-/// Where the receiver's files go (Q09): chosen in the system's own picker.
+/// Where the receiver's files go, as the pairing page says it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderView {
-    /// The folder, as the system shows it.
+    /// The folder's own name ("Downloads"), shown safely.
+    pub name: String,
+    /// The whole folder, as the system shows it (for More details).
     pub path: String,
     pub free_bytes: Option<u64>,
 }
 
+/// The folder the next receive saves into, held open from now: the one the person chose this
+/// session, opened again at its path, or else the system's Downloads folder. A chosen folder
+/// that cannot be opened any more (its drive was taken out) is forgotten for Downloads. Neither
+/// one there is a problem, and the screens ask the person to choose a folder.
+#[tauri::command]
+pub fn quicksend_folder<R: Runtime>(
+    app: AppHandle<R>,
+    qs: State<'_, AppQuickSend>,
+) -> Result<FolderView, MoveProblem> {
+    let remembered = lock(&qs.remembered).clone();
+    if let Some(chosen) = remembered {
+        if let Some(view) = held_folder(&qs, &chosen) {
+            return Ok(view);
+        }
+        lock(&qs.remembered).take();
+    }
+    let downloads = app.path().download_dir().map_err(|_| MoveProblem::Failed)?;
+    held_folder(&qs, &downloads).ok_or(MoveProblem::Failed)
+}
+
+/// Change: a folder chosen in the system's own picker, held for the next receive in place of the
+/// one shown, and remembered (its path) for the rest of the session. `None` when none was chosen.
 #[tauri::command]
 pub async fn quicksend_choose_folder(
     qs: State<'_, AppQuickSend>,
@@ -615,56 +623,48 @@ pub async fn quicksend_choose_folder(
         return Ok(None);
     };
     let view = held_folder(&qs, &folder).ok_or(MoveProblem::Failed)?;
+    *lock(&qs.remembered) = Some(folder);
     Ok(Some(view))
 }
 
-/// Opens the folder the person chose at `folder` and holds it for the receive, replacing any
-/// chosen before; what the screens show of it. `None` when it cannot be opened.
+/// Opens the folder at `folder` and holds it for the next receive, replacing any held before;
+/// what the screens show of it. `None` when it cannot be opened.
 fn held_folder(qs: &QuickSend, folder: &std::path::Path) -> Option<FolderView> {
     let dest = pctwin_gate::Destination::open(folder).ok()?;
+    let name = folder.file_name().map_or_else(
+        || folder.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
     let view = FolderView {
-        path: folder.display().to_string(),
+        name: shown_safely(&name),
+        path: shown_safely(&folder.display().to_string()),
         free_bytes: dest.available_bytes(),
     };
-    *lock(&qs.folder) = Some(dest);
+    *lock(&qs.folder) = Some(Held {
+        path: folder.to_path_buf(),
+        dest,
+    });
     Some(view)
 }
 
-/// The receiver's answer (Q08): accept the files `ids` (all of them with none), or decline.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum QsAnswer {
-    Accept { ids: Option<Vec<String>> },
-    Decline,
-}
-
+/// Open folder, on the Done page: shows the folder the last receive saved into in the system's
+/// file manager. Only that folder, and only while it is a folder: never a received file, and
+/// never a path from the screens.
 #[tauri::command]
-pub fn quicksend_answer(qs: State<'_, AppQuickSend>, answer: QsAnswer) -> Result<(), MoveProblem> {
-    let answer = match answer {
-        QsAnswer::Decline => Answer::Decline,
-        QsAnswer::Accept { ids } => {
-            if lock(&qs.folder).is_none() {
-                return Err(MoveProblem::Failed);
-            }
-            let offered = lock(&qs.offered).clone();
-            Answer::Accept(match ids {
-                None => None,
-                Some(ids) => Some(
-                    ids.iter()
-                        .map(|id| {
-                            ItemId::from_hex(id)
-                                .ok()
-                                .filter(|i| offered.contains(i))
-                                .ok_or(MoveProblem::Failed)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                ),
-            })
-        }
-    };
-    let tx = lock(&qs.answer).take().ok_or(MoveProblem::NotMoving)?;
-    let _ = tx.send(answer);
-    Ok(())
+pub fn quicksend_open_folder<R: Runtime>(
+    app: AppHandle<R>,
+    qs: State<'_, AppQuickSend>,
+) -> Result<(), MoveProblem> {
+    use tauri_plugin_opener::OpenerExt;
+    let folder = lock(&qs.received_into)
+        .clone()
+        .ok_or(MoveProblem::NotMoving)?;
+    if !std::fs::symlink_metadata(&folder).is_ok_and(|m| m.is_dir()) {
+        return Err(MoveProblem::Failed);
+    }
+    app.opener()
+        .open_path(folder.to_string_lossy(), None::<&str>)
+        .map_err(|_| MoveProblem::Failed)
 }
 
 fn with_live(qs: &QuickSend, f: impl FnOnce(&Live)) -> Result<(), MoveProblem> {
@@ -691,6 +691,7 @@ pub fn quicksend_stop(qs: State<'_, AppQuickSend>) -> Result<(), MoveProblem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pctwin_record::ItemId;
 
     #[test]
     fn a_receipt_names_every_outcome_and_needs_action_is_never_arrived() {
@@ -798,37 +799,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Exit-gate review (24 October 2026): the folder chosen is held open from the choice, so a
-    /// folder put at its path afterwards is not the one written to; the receive takes it, so the
-    /// next receive chooses again.
+    /// Exit-gate review (24 October 2026), and 26 October 2026: the folder is held open from when
+    /// it is shown, so a folder put at its path afterwards is not the one written to; a receive
+    /// takes it, so the next receive holds its folder again (by the remembered path, never the
+    /// old handle).
     #[test]
-    fn the_chosen_folder_is_held_from_the_choice_and_used_once() {
+    fn the_folder_is_held_from_when_it_is_shown_and_held_again_for_each_receive() {
         let qs = QuickSend::default();
         let dir = tempfile_dir().join("held");
         let chosen = dir.join("Inbox");
         std::fs::create_dir_all(&chosen).unwrap();
-        assert!(held_folder(&qs, &chosen).is_some());
-        // Swapped after the choice: the path now names another folder.
+        let view = held_folder(&qs, &chosen).unwrap();
+        assert_eq!(view.name, "Inbox");
+        // Swapped after it was shown: the path now names another folder.
         let moved = dir.join("Inbox-moved");
         let swapped = std::fs::rename(&chosen, &moved).is_ok();
         if swapped {
             std::fs::create_dir_all(&chosen).unwrap();
             let held = lock(&qs.folder).take().unwrap();
-            let id = held.folder_identity("").unwrap();
+            assert_eq!(held.path, chosen);
+            let id = held.dest.folder_identity("").unwrap();
             let there = pctwin_gate::Destination::open(&moved)
                 .unwrap()
                 .folder_identity("")
                 .unwrap();
             assert_eq!(
                 id, there,
-                "the held folder is the one chosen, wherever it is now"
+                "the held folder is the one shown, wherever it is now"
             );
+            // The next receive holds the folder at the path again: today's folder there.
+            held_folder(&qs, &chosen).unwrap();
+            let again = lock(&qs.folder).take().unwrap();
+            let now = pctwin_gate::Destination::open(&chosen)
+                .unwrap()
+                .folder_identity("")
+                .unwrap();
+            assert_eq!(again.dest.folder_identity("").unwrap(), now);
+            assert_ne!(now, id, "never the old handle");
         } else {
             // Windows keeps a folder held open from being renamed: it cannot be swapped at all.
             lock(&qs.folder).take();
         }
-        assert!(lock(&qs.folder).is_none());
+        assert!(lock(&qs.folder).is_none(), "taken by the receive");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A folder that cannot be opened is never held.
+    #[test]
+    fn a_folder_that_cannot_be_opened_is_not_held() {
+        let qs = QuickSend::default();
+        let dir = tempfile_dir().join("never-made");
+        assert!(held_folder(&qs, &dir.join("nope")).is_none());
+        assert!(lock(&qs.folder).is_none());
     }
 
     #[test]

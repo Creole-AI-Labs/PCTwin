@@ -315,18 +315,15 @@
     },
     {
       "args": [],
+      "name": "quicksend_folder"
+    },
+    {
+      "args": [],
       "name": "quicksend_choose_folder"
     },
     {
-      "args": [
-        [
-          "answer",
-          {
-            "kind": "decline"
-          }
-        ]
-      ],
-      "name": "quicksend_answer"
+      "args": [],
+      "name": "quicksend_open_folder"
     },
     {
       "args": [],

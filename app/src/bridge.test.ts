@@ -22,8 +22,9 @@ import {
   movePlacePeople,
   movePrivacyAnswer,
   listenQuickSend,
-  qsAnswer,
   qsChooseFolder,
+  qsFolder,
+  qsOpenFolder,
   qsClear,
   qsAcceptDrops,
   qsOffer,
@@ -223,7 +224,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsSend();
       await qsReceive();
       await qsChooseFolder();
-      await qsAnswer({ kind: "decline" });
+      await qsFolder().catch(() => undefined);
+      await qsOpenFolder();
       await qsPause();
       await qsResume();
       await qsStop();
