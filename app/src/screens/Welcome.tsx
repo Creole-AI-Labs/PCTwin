@@ -31,8 +31,8 @@ function Card({ job, title, body, icon, filled = false, onClick }: { job: string
  *   the saved move; the headline is smaller and the picture is left out so the cards stay in view.
  * - Waiting files (`waiting` with `onWaiting`): a quiet line under My history says how many files
  *   wait for which laptop.
- * - A newer version (`update` with `onUpdate`): found when PCTwin opened; "A new version of PCTwin
- *   is ready" sits at the top with Update now. While it installs it says PCTwin will open again by
+ * - A newer version (`update` with `onUpdate`): found when PCTwin opened; "A new version is
+ *   available." sits at the top with Update now. While it installs it says PCTwin will open again by
  *   itself; if it could not, it says so and PCTwin carries on as it is. Never beside Resume your
  *   move: a move comes first.
  */
@@ -89,25 +89,11 @@ export default function Welcome({
             <Localized id="home-update-title">
               <strong />
             </Localized>
-            <small>
-              {update.state === "installing" ? (
-                <Localized id="home-updating">
-                  <span />
-                </Localized>
-              ) : update.state === "failed" ? (
-                <Localized id="home-update-failed">
-                  <span />
-                </Localized>
-              ) : update.state === "busy" ? (
-                <Localized id="home-update-busy">
-                  <span />
-                </Localized>
-              ) : (
-                <Localized id="home-update-body" vars={{ version: update.version }}>
-                  <span />
-                </Localized>
-              )}
-            </small>
+            {update.state !== "ready" && (
+              <Localized id={update.state === "installing" ? "home-updating" : update.state === "failed" ? "home-update-failed" : "home-update-busy"}>
+                <small />
+              </Localized>
+            )}
           </span>
           {update.state === "ready" && (
             <Localized id="home-update-action">

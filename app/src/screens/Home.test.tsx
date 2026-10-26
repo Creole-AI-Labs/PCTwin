@@ -179,12 +179,13 @@ describe("F01 Home: Interrupted move", () => {
 describe("F01 Home: A newer version", () => {
   const ready = { version: "0.1.42", state: "ready" as const };
 
-  it("says a new version is ready, with its number, and Update now installs it", async () => {
+  it("says simply that a new version is available, and Update now installs it", async () => {
     const onUpdate = vi.fn();
     const calls = home({ update: ready, onUpdate });
     const banner = document.querySelector(".home-update");
     expect(banner?.textContent).toContain(text("home-update-title"));
-    expect(plain(banner?.textContent)).toContain(plain(text("home-update-body", { version: "0.1.42" })));
+    // Just that: no version numbers or timings to read.
+    expect(plain(banner?.textContent)).toBe(text("home-update-title") + text("home-update-action"));
     fireEvent.click(screen.getByRole("button", { name: text("home-update-action") }));
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(calls.start).not.toHaveBeenCalled();
