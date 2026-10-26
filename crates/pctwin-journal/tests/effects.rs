@@ -332,7 +332,7 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
             matches!(
                 j.settings(&keys().setting)
                     .intend(&planned(0), &copy(&[(bad, b"x")])),
-                Err(JournalError::BadName(_))
+                Err(JournalError::BadName)
             ),
             "{bad:?}"
         );
@@ -372,7 +372,7 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
     assert!(matches!(
         j.settings(&keys().setting)
             .intend(&planned(0), &copy(&[("a", b"1"), ("a", b"2")])),
-        Err(JournalError::BadName(_))
+        Err(JournalError::BadName)
     ));
     assert!(j.effects().unwrap().is_empty());
     // An exactly-full file and an empty place are fine.

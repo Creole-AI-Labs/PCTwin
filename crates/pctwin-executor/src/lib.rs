@@ -491,7 +491,7 @@ fn effect(
     };
     let id = match written {
         Ok(id) => id,
-        Err(JournalError::TooLarge | JournalError::BadName(_)) => {
+        Err(JournalError::TooLarge | JournalError::BadName) => {
             return Ok(Err(Reason::NotVerified));
         }
         Err(_) => return Err(Stop),

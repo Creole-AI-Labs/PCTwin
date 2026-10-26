@@ -251,7 +251,7 @@ fn an_external_identity_is_short_plain_text_or_nothing_is_recorded() {
         assert!(matches!(
             j.imports(&keys().capture)
                 .intend(&planned(), &ImportIntent::Remote { identity: bad }),
-            Err(JournalError::BadName(_))
+            Err(JournalError::BadName)
         ));
     }
     assert!(j.effects().unwrap().is_empty());

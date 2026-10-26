@@ -46,7 +46,9 @@ use pctwin_types::Reason;
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
-use crate::{Actor, GATE, Journal, JournalError, Scope, UNDO_GATE, UndoRight, damaged, storage};
+use crate::{
+    Actor, GATE, Journal, JournalError, Scope, UNDO_GATE, UndoRight, damaged, storage, unreadable,
+};
 
 /// Every effect, by number.
 pub(crate) const EFFECTS: TableDefinition<u64, &[u8]> = TableDefinition::new("effects");
@@ -565,7 +567,7 @@ fn external(
     identity: &str,
 ) -> Result<(StoredEffect, Vec<&'static SettingsFile>), JournalError> {
     if identity.is_empty() || identity.len() > MAX_IDENTITY || !pctwin_recipe::text_ok(identity) {
-        return Err(JournalError::BadName(identity.chars().take(40).collect()));
+        return Err(JournalError::BadName);
     }
     Ok((
         StoredEffect::External {
@@ -965,7 +967,7 @@ fn settings_path(path: &str) -> Result<(), JournalError> {
         return Ok(());
     }
     for part in path.split('/') {
-        crate::plain_name(part).map_err(|_| JournalError::BadName(path.into()))?;
+        crate::plain_name(part).map_err(|_| JournalError::BadName)?;
     }
     Ok(())
 }
@@ -976,7 +978,7 @@ fn distinct_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), Journa
     for p in paths {
         settings_path(p)?;
         if !seen.insert(p) {
-            return Err(JournalError::BadName(p.into()));
+            return Err(JournalError::BadName);
         }
     }
     Ok(())
@@ -996,8 +998,7 @@ fn read_effect(
 }
 
 fn parse_effect(bytes: &[u8]) -> Result<EffectEntry, JournalError> {
-    let entry: EffectEntry =
-        serde_json::from_slice(bytes).map_err(|e| damaged(format!("an effect record: {e}")))?;
+    let entry: EffectEntry = serde_json::from_slice(bytes).map_err(unreadable)?;
     let bad = |_| damaged("an effect record names a place outside its folder");
     match &entry.effect {
         StoredEffect::CopySettings { before, .. } | StoredEffect::Import { before, .. } => {
@@ -1074,8 +1075,7 @@ pub(crate) fn part_way_in(
     let mut out = Vec::new();
     for row in table.iter().map_err(storage)? {
         let (k, v) = row.map_err(storage)?;
-        let stage: EffectUndo = serde_json::from_slice(v.value())
-            .map_err(|e| damaged(format!("an effect undo record: {e}")))?;
+        let stage: EffectUndo = serde_json::from_slice(v.value()).map_err(unreadable)?;
         if stage == EffectUndo::Reversing {
             out.push(k.value());
         }
@@ -1317,7 +1317,7 @@ impl Journal {
             let before: Option<EffectUndo> = table
                 .get(id)
                 .map_err(storage)?
-                .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+                .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
                 .transpose()?;
             if !may_follow(before.as_ref(), undo) {
                 return Err(JournalError::OutOfOrder {
@@ -1344,7 +1344,7 @@ impl Journal {
         table
             .get(id)
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -1362,10 +1362,7 @@ impl Journal {
         table
             .get(scope_key(scope).as_str())
             .map_err(storage)?
-            .map(|v| {
-                serde_json::from_slice(v.value())
-                    .map_err(|e| damaged(format!("a restore point record: {e}")))
-            })
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 

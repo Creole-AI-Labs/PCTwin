@@ -132,8 +132,10 @@ const SWEPT_UPTO: &str = "swept-upto";
 /// Why the journal could not be used.
 #[derive(Debug, thiserror::Error)]
 pub enum JournalError {
+    /// Fixed plain words only: never a path, a name or a library's message, since this text may
+    /// be shown or logged (security review finding 5).
     #[error("the move's record on this laptop is damaged: {0}")]
-    Damaged(String),
+    Damaged(&'static str),
     #[error("PCTwin is already running on this laptop")]
     InUse,
     #[error("the move's record was made by a newer PCTwin (format {found}); update PCTwin")]
@@ -167,8 +169,9 @@ pub enum JournalError {
     EscapeRefused,
     /// A name in an undo record that is not one plain name in the copy's folder (or a settings
     /// file's path that is not inside its place, or is listed twice).
-    #[error("not a plain file name: {0:?}")]
-    BadName(String),
+    /// Carries nothing: the name may be a path or an identity, which never leaves PCTwin.
+    #[error("not a plain file name")]
+    BadName,
     /// The settings files there before a copy are too large to keep a safe copy of, so the
     /// copy must not be made.
     #[error(
@@ -191,8 +194,13 @@ fn storage(e: impl std::fmt::Display) -> JournalError {
     JournalError::Storage(e.to_string())
 }
 
-fn damaged(e: impl std::fmt::Display) -> JournalError {
-    JournalError::Damaged(e.to_string())
+fn damaged(why: &'static str) -> JournalError {
+    JournalError::Damaged(why)
+}
+
+/// A record that does not read: the library's message (which may quote the record) is dropped.
+fn unreadable(_: impl std::fmt::Display) -> JournalError {
+    JournalError::Damaged("a record could not be read")
 }
 
 /// Another thread stopped with a panic while it held the undo count.
@@ -760,7 +768,7 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
 /// An error unless `trash` is a Trash folder's absolute path: `<home>/.Trash` or
 /// `<drive>/.Trashes/<number>`, with no `.` or `..` in it.
 fn trash_folder(trash: &str) -> Result<(), JournalError> {
-    let bad = || Err(JournalError::BadName(trash.into()));
+    let bad = || Err(JournalError::BadName);
     if !trash.starts_with('/') || trash.contains(['\\', '\0']) {
         return bad();
     }
@@ -782,7 +790,7 @@ fn trash_folder(trash: &str) -> Result<(), JournalError> {
 /// An error unless `name` is one plain name (no folder, not `.` or `..`, nothing hidden in it).
 fn plain_name(name: &str) -> Result<(), JournalError> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
-        return Err(JournalError::BadName(name.into()));
+        return Err(JournalError::BadName);
     }
     Ok(())
 }
@@ -1208,7 +1216,7 @@ impl Journal {
         }
         let db = Database::create(path).map_err(|e| match e {
             redb::DatabaseError::DatabaseAlreadyOpen => JournalError::InUse,
-            other => JournalError::Damaged(other.to_string()),
+            _ => JournalError::Damaged("the move's record could not be opened"),
         })?;
         let journal_id = Self::prepare(&db)?;
         Ok(Self {
@@ -1246,7 +1254,7 @@ impl Journal {
                     }
                     meta.insert("format", FORMAT).map_err(storage)?;
                 }
-                Some(other) => return Err(damaged(format!("unknown format {other}"))),
+                Some(_) => return Err(damaged("its format number is not one PCTwin knows")),
                 None => {
                     meta.insert("format", FORMAT).map_err(storage)?;
                 }
@@ -1495,7 +1503,7 @@ impl Journal {
         };
         serde_json::from_slice(v.value())
             .map(Some)
-            .map_err(|e| damaged(format!("a check record: {e}")))
+            .map_err(unreadable)
     }
 
     /// The real name it is getting, `final_path` inside the destination: recorded before the file
@@ -1718,8 +1726,7 @@ impl Journal {
         let mut out = Vec::new();
         for row in table.iter().map_err(storage)? {
             let (k, v) = row.map_err(storage)?;
-            let show: Show = serde_json::from_slice(v.value())
-                .map_err(|e| damaged(format!("a pending show: {e}")))?;
+            let show: Show = serde_json::from_slice(v.value()).map_err(unreadable)?;
             out.push((read_entry(&entries, k.value())?, show));
         }
         Ok(out)
@@ -1732,7 +1739,7 @@ impl Journal {
         match table.get(id).map_err(storage)? {
             Some(v) => serde_json::from_slice(v.value())
                 .map(Some)
-                .map_err(|e| damaged(format!("a pending show: {e}"))),
+                .map_err(unreadable),
             None => Ok(None),
         }
     }
@@ -1905,7 +1912,7 @@ impl Journal {
         entries
             .get(id)
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -1921,7 +1928,7 @@ impl Journal {
         let mut out = Vec::new();
         for row in entries.range(after.saturating_add(1)..).map_err(storage)? {
             let (_, v) = row.map_err(storage)?;
-            out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
+            out.push(serde_json::from_slice(v.value()).map_err(unreadable)?);
         }
         Ok(out)
     }
@@ -1947,7 +1954,7 @@ impl Journal {
         let mut out = Vec::new();
         for row in folders.iter().map_err(storage)? {
             let (_, v) = row.map_err(storage)?;
-            out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
+            out.push(serde_json::from_slice(v.value()).map_err(unreadable)?);
         }
         Ok(out)
     }
@@ -1959,7 +1966,7 @@ impl Journal {
         match gate.get(UNDO_GATE).map_err(storage)?.map(|v| v.value()) {
             None => Ok(UndoGate::Open),
             Some(CLOSED) => Ok(UndoGate::Closed),
-            Some(other) => Err(damaged(format!("unknown undo gate {other}"))),
+            Some(_) => Err(damaged("the undo gate holds a value PCTwin does not know")),
         }
     }
 
@@ -2267,7 +2274,7 @@ impl Journal {
         table
             .get(id)
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -2308,7 +2315,7 @@ impl Journal {
         table
             .get((destination, folder))
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -2574,7 +2581,7 @@ fn put_undo(
     let before: Option<Undo> = table
         .get(id)
         .map_err(storage)?
-        .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+        .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
         .transpose()?;
     if !may_follow(before.as_ref(), undo) {
         return Err(JournalError::OutOfOrder {
@@ -2595,16 +2602,14 @@ fn pending_in(
     let mut out = Vec::new();
     for row in table.iter().map_err(storage)? {
         let (k, v) = row.map_err(storage)?;
-        let stage: Undo = serde_json::from_slice(v.value()).map_err(damaged)?;
+        let stage: Undo = serde_json::from_slice(v.value()).map_err(unreadable)?;
         if stage.is_done() {
             continue;
         }
         let id = k.value();
         let entry = read_entry(entries, id)?;
         let Some(State::Committed { final_path, .. }) = entry.state.copy_on_disk() else {
-            return Err(damaged(format!(
-                "undo of entry {id}, which is not finished"
-            )));
+            return Err(damaged("an undo record names a copy that was not finished"));
         };
         out.push(Pending {
             id,
@@ -2654,7 +2659,7 @@ fn read_entry(
         .get(id)
         .map_err(storage)?
         .ok_or(JournalError::NoSuchEntry(id))?;
-    serde_json::from_slice(found.value()).map_err(damaged)
+    serde_json::from_slice(found.value()).map_err(unreadable)
 }
 
 fn write_entry(
