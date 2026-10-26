@@ -705,12 +705,64 @@ fn plain_folder(path: &std::path::Path) -> bool {
 /// Opens the plain folder at `path` and says what it is. `None` when it is not a plain folder,
 /// cannot be opened, or stopped being a plain folder while it was opened.
 fn open_plain(path: &std::path::Path) -> Option<(pctwin_gate::Destination, FileId)> {
+    open_plain_around(path, || (), || ())
+}
+
+/// [`open_plain`], with what happens just before and just after the open (for tests, which swap
+/// a link in and out there). The open follows a link, so what it opened must be the very folder
+/// that a second open of the path, which never follows one, finds there: a link swapped in for
+/// the open and out again afterwards fails that, whenever it happens.
+fn open_plain_around(
+    path: &std::path::Path,
+    before: impl FnOnce(),
+    after: impl FnOnce(),
+) -> Option<(pctwin_gate::Destination, FileId)> {
     if !plain_folder(path) {
         return None;
     }
+    before();
     let dest = pctwin_gate::Destination::open(path).ok()?;
+    after();
     let identity = dest.folder_identity("").ok()??;
-    plain_folder(path).then_some((dest, identity))
+    (plain_identity(path)? == identity).then_some((dest, identity))
+}
+
+/// What the plain folder at `path` is, from an open that never follows a link: `None` when a
+/// link, junction or anything but a plain folder is there.
+fn plain_identity(path: &std::path::Path) -> Option<FileId> {
+    #[cfg(windows)]
+    let folder = {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+        // A folder opens only with this; the second opens a link itself, never what it leads to.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        let folder = std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .ok()?;
+        let meta = folder.metadata().ok()?;
+        if !meta.is_dir() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return None;
+        }
+        folder
+    };
+    #[cfg(unix)]
+    let folder = {
+        use rustix::fs::{Mode, OFlags};
+        // A link at the name fails the open itself; anything but a folder fails it too.
+        std::fs::File::from(
+            rustix::fs::open(
+                path,
+                OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::DIRECTORY | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .ok()?,
+        )
+    };
+    pctwin_gate::file_identity(&folder).ok()
 }
 
 /// Opens the folder at `folder` and holds it for the next receive, replacing any held before;
@@ -884,7 +936,8 @@ mod tests {
 
     #[test]
     fn a_missing_pick_says_so_and_a_folder_is_not_sized_by_guess() {
-        let dir = tempfile_dir();
+        // Its own folder: removing the shared one would pull it from under the tests beside it.
+        let dir = dir("pick");
         let file = dir.join("a.txt");
         std::fs::write(&file, b"hello").unwrap();
         let p = |path: PathBuf, folder| Picked {
@@ -1099,6 +1152,60 @@ mod tests {
             offer_problem(&pctwin_quicksend::QuickError::NothingChosen),
             MoveProblem::Failed
         );
+    }
+
+    /// PR #108 re-review: a link swapped in just for the open, and the real folder put back
+    /// right after, so every look by name sees a plain folder. The folder opened was the link's
+    /// target, so it is refused; with nothing swapped, the folder opens.
+    #[test]
+    fn a_link_swapped_in_only_for_the_open_is_refused() {
+        let d = dir("swap-for-open");
+        let real = d.join("Downloads");
+        let aside = d.join("Downloads-aside");
+        let elsewhere = d.join("Startup");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let opened = open_plain_around(
+            &real,
+            || {
+                std::fs::rename(&real, &aside).unwrap();
+                link(&real, &elsewhere);
+            },
+            || {
+                // Removes the link itself, never what it leads to.
+                std::fs::remove_dir(&real)
+                    .or_else(|_| std::fs::remove_file(&real))
+                    .unwrap();
+                std::fs::rename(&aside, &real).unwrap();
+            },
+        );
+        assert!(
+            opened.is_none(),
+            "the link's target was opened, so it is refused"
+        );
+        assert!(plain_folder(&real), "the real folder is back");
+        assert!(open_plain(&real).is_some(), "with nothing swapped it opens");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_link_or_a_file_has_no_plain_identity() {
+        let d = dir("plain-identity");
+        let real = d.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let file = d.join("file.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let linked = d.join("linked");
+        link(&linked, &real);
+        assert!(plain_identity(&real).is_some());
+        assert_eq!(plain_identity(&real), open_plain(&real).map(|(_, id)| id));
+        assert!(
+            plain_identity(&linked).is_none(),
+            "a link is not a plain folder"
+        );
+        assert!(plain_identity(&file).is_none(), "a file is not a folder");
+        assert!(plain_identity(&d.join("gone")).is_none());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn tempfile_dir() -> PathBuf {
