@@ -43,7 +43,8 @@ use pctwin_recipe::{
     Catalog, Recipe, RecipeRef, SettingValue, SettingsPlace, Step, UndoDeclaration,
 };
 
-use crate::{Adapter, ours};
+use crate::files::{self, Swap, Swapped};
+use crate::{Adapter, SettingWrite, ours};
 
 /// How undoing one effect ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,7 +195,16 @@ pub fn undo_effects(
             permit,
             adapter: &mut *adapter,
             entry: &e,
-            resumed: before == Some(EffectUndo::Reversing),
+            resumed: matches!(
+                before,
+                Some(EffectUndo::Reversing | EffectUndo::Swapping { .. })
+            ),
+            swapping: match &before {
+                Some(EffectUndo::Swapping { path, private }) => {
+                    Some((path.clone(), private.clone()))
+                }
+                _ => None,
+            },
         };
         let rule = rule_of(&e, recipes);
         let outcome = match (&e.effect, rule) {
@@ -250,6 +260,8 @@ struct One<'a, 'j> {
     entry: &'a EffectEntry,
     /// Its undo was recorded part way before (a crash): Reversing is already on disk.
     resumed: bool,
+    /// A settings file a crash left part way put back: its path and private name.
+    swapping: Option<(String, String)>,
 }
 
 fn not_done(why: &str) -> EffectUndoOutcome {
@@ -335,16 +347,23 @@ impl One<'_, '_> {
                 EffectUndoOutcome::AsBefore
             });
         }
-        if now != *applied {
+        let Some(expect) = applied.as_ref().filter(|_| now == *applied) else {
             return Ok(kept(CHANGED_SETTING));
-        }
+        };
         self.reversing()?;
-        if self.adapter.write_setting(key, before.as_ref()).is_err() {
-            return Ok(not_done(NOT_PUT_BACK));
+        // Compared and written in one step: a newer choice made since the look above is kept.
+        match self.adapter.write_setting_if(key, expect, before.as_ref()) {
+            Ok(SettingWrite::Written) => {}
+            Ok(SettingWrite::Changed) => return Ok(kept(CHANGED_SETTING)),
+            Err(_) => return Ok(not_done(NOT_PUT_BACK)),
         }
         Ok(match self.adapter.read_setting(key) {
             Ok(back) if back == *before => EffectUndoOutcome::Restored,
-            _ => not_done(NOT_PUT_BACK),
+            // Still PCTwin's: the write did not take.
+            Ok(back) if back == *applied => not_done(NOT_PUT_BACK),
+            // Neither: someone set it again right after; theirs is kept.
+            Ok(_) => kept(CHANGED_SETTING),
+            Err(_) => not_done(NOT_READ),
         })
     }
 
@@ -361,6 +380,31 @@ impl One<'_, '_> {
         };
         let written: BTreeMap<&str, [u8; 32]> =
             written.iter().map(|f| (f.path.as_str(), f.hash)).collect();
+        // A file a crash left part way put back is finished first (it may be under its private
+        // name, so the place does not show it).
+        if let Some((path, private)) = self.swapping.take() {
+            let Some(ours) = written.get(path.as_str()) else {
+                return Err(JournalError::Damaged(
+                    "an undo record names a file PCTwin did not write",
+                ));
+            };
+            let earlier = match self.earlier(before, &path)? {
+                Ok(b) => b,
+                Err(outcome) => return Ok(outcome),
+            };
+            let swap = Swap {
+                private: &private,
+                ours: *ours,
+                earlier: earlier.as_deref(),
+            };
+            if self
+                .adapter
+                .replace_settings_file(place, &path, &swap)
+                .is_err()
+            {
+                return Ok(not_done(NOT_PUT_BACK));
+            }
+        }
         let Ok(now) = self.adapter.read_settings_files(place) else {
             return Ok(not_done(NOT_READ));
         };
@@ -398,26 +442,53 @@ impl One<'_, '_> {
         // Every earlier version is read (and checked) before anything is changed.
         let mut restores = Vec::with_capacity(to_restore.len());
         for path in &to_restore {
-            let bytes = match before.get(path) {
-                Some(hash) => match self.journal.kept_bytes(hash) {
-                    Ok(b) => Some(b),
-                    Err(JournalError::Damaged(_)) => return Ok(kept(KEPT_DAMAGED)),
-                    Err(e) => return Err(e),
-                },
-                None => None,
-            };
-            restores.push((*path, bytes));
-        }
-        self.reversing()?;
-        for (path, bytes) in &restores {
-            if self
-                .adapter
-                .put_settings_file(place, path, bytes.as_deref())
-                .is_err()
-            {
-                return Ok(not_done(NOT_PUT_BACK));
+            match self.earlier(before, path)? {
+                Ok(bytes) => restores.push((*path, bytes)),
+                Err(outcome) => return Ok(outcome),
             }
         }
+        // Each file is put back only if it is still PCTwin's version, checked and replaced in
+        // one step that cannot lose a save made meanwhile; its private name is recorded first.
+        let mut put_back = Vec::with_capacity(restores.len());
+        for (path, bytes) in &restores {
+            let Ok(private) = files::private_name() else {
+                return Ok(not_done(NOT_PUT_BACK));
+            };
+            record(
+                self.rebuild,
+                self.permit,
+                self.role,
+                self.entry.id,
+                &EffectUndo::Swapping {
+                    path: (*path).to_string(),
+                    private: private.clone(),
+                },
+            )?;
+            self.resumed = true;
+            let Some(ours) = written.get(path) else {
+                // PCTwin's copy left no file here, so there is nothing of its own to swap: the
+                // earlier file is not made again over whatever may come; said, not hidden.
+                changed += 1;
+                continue;
+            };
+            let swap = Swap {
+                private: &private,
+                ours: *ours,
+                earlier: bytes.as_deref(),
+            };
+            match self.adapter.replace_settings_file(place, path, &swap) {
+                Ok(Swapped::Restored) => put_back.push(*path),
+                // Gone with nothing before it: as it was before the move.
+                Ok(Swapped::Gone) if bytes.is_none() => put_back.push(*path),
+                // Changed or removed meanwhile: the person's is kept.
+                Ok(Swapped::Kept | Swapped::Gone) => changed += 1,
+                Err(_) => return Ok(not_done(NOT_PUT_BACK)),
+            }
+        }
+        let restores: Vec<_> = restores
+            .into_iter()
+            .filter(|(path, _)| put_back.contains(path))
+            .collect();
         // Read back: every file put back is exactly as it was before the move.
         let Ok(back) = self.adapter.read_settings_files(place) else {
             return Ok(not_done(NOT_READ));
@@ -439,5 +510,22 @@ impl One<'_, '_> {
                 why: kept_why(changed),
             }
         })
+    }
+
+    /// The earlier version of `path` (none when there was no file), read and checked from what
+    /// the journal kept; `Err` with the outcome when that copy is damaged.
+    fn earlier(
+        &self,
+        before: &BTreeMap<&str, [u8; 32]>,
+        path: &str,
+    ) -> Result<Result<Option<Vec<u8>>, EffectUndoOutcome>, JournalError> {
+        match before.get(path) {
+            Some(hash) => match self.journal.kept_bytes(hash) {
+                Ok(b) => Ok(Ok(Some(b))),
+                Err(JournalError::Damaged(_)) => Ok(Err(kept(KEPT_DAMAGED))),
+                Err(e) => Err(e),
+            },
+            None => Ok(Ok(None)),
+        }
     }
 }

@@ -41,6 +41,7 @@ pub use effects::{
     MAX_IDENTITY, MAX_KEPT_FILE, MAX_KEPT_FILES, MAX_KEPT_TOTAL, PlannedEffect, Presence, Rebuild,
     RebuildRole, Receipt, Recorder, RestorePoint, Role, RoleIntent, RoleMarker, STEP_GRANT,
     Settings, SettingsFile, SettingsIntent, StoredEffect, SupportView, UndoRoute, content_hash,
+    is_private_name,
 };
 pub use place::Placement;
 

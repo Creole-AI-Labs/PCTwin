@@ -36,6 +36,7 @@
 //!   passed; failed or needs-action with its reason otherwise. A recipe that does not support the
 //!   new laptop's system fails with [`Reason::NoEquivalent`] before anything runs.
 
+pub mod files;
 mod recover;
 mod undo;
 
@@ -125,17 +126,38 @@ pub trait Adapter {
     /// Removes an app through its own catalog, keeping the person's data: never a purge, a zap
     /// or anything that removes settings or files the person made. Only undo calls it.
     fn uninstall(&mut self, catalog: Catalog, package: &str) -> Result<(), String>;
-    /// Sets a named setting back to `value`, or removes it when `None` (it was not set before).
-    /// Only undo calls it.
-    fn write_setting(&mut self, key: &str, value: Option<&SettingValue>) -> Result<(), String>;
-    /// Puts one settings file at a place back to `bytes`, or removes it when `None` (it was not
-    /// there before). Only undo calls it.
-    fn put_settings_file(
+    /// Sets a named setting to `to`, or removes it when `None` (it was not set before), only if
+    /// it holds exactly `expect` (what PCTwin set) when it is written: compared and written in one
+    /// system transaction where the system has one; otherwise read, compared and written back to
+    /// back, in which case a change made in that instant cannot be told apart (undo then reads
+    /// the setting back, and anything that is neither the earlier value nor PCTwin's is kept and
+    /// said). [`SettingWrite::Changed`] when it holds something else: nothing is written. Only undo
+    /// calls it (security review finding 2: the check and the write are one step).
+    fn write_setting_if(
+        &mut self,
+        key: &str,
+        expect: &SettingValue,
+        to: Option<&SettingValue>,
+    ) -> Result<SettingWrite, String>;
+    /// Puts the settings file `path` at `place` back as `swap` says, only if it is still PCTwin's
+    /// version, exactly as [`files::replace_if_unchanged`] does in the place's folder (that is the
+    /// real file system's implementation; an adapter resolves the place and calls it). Safe to
+    /// call again with the same `swap` after a crash. Only undo calls it.
+    fn replace_settings_file(
         &mut self,
         place: &SettingsPlace,
         path: &str,
-        bytes: Option<&[u8]>,
-    ) -> Result<(), String>;
+        swap: &files::Swap<'_>,
+    ) -> Result<files::Swapped, String>;
+}
+
+/// What writing a setting back did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingWrite {
+    /// It held what PCTwin set, and it was written.
+    Written,
+    /// It held something else (the person's newer choice): nothing was written.
+    Changed,
 }
 
 /// One planned item: the record item it rebuilds, and the recipe that rebuilds it.

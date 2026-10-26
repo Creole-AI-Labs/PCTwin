@@ -79,6 +79,31 @@ struct Racy {
     inner: Laptop,
     place: SettingsPlace,
     armed: bool,
+    /// The person sets the setting `k` to this after undo looked and before it writes.
+    before_write: Option<SettingValue>,
+    /// ... or right after undo wrote it.
+    after_write: Option<SettingValue>,
+    /// The settings files are on the real file system here (the place's own folder).
+    real: Option<std::path::PathBuf>,
+    /// The laptop loses power at this moment of putting a file back.
+    crash_at: Option<pctwin_executor::files::Moment>,
+    /// The person removes the file just before it is put back.
+    remove_before_put: bool,
+}
+
+impl Racy {
+    fn new(inner: Laptop, place: SettingsPlace) -> Self {
+        Self {
+            inner,
+            place,
+            armed: false,
+            before_write: None,
+            after_write: None,
+            real: None,
+            crash_at: None,
+            remove_before_put: false,
+        }
+    }
 }
 
 impl Adapter for Racy {
@@ -122,6 +147,18 @@ impl Adapter for Racy {
         self.inner.read_setting(k)
     }
     fn read_settings_files(&mut self, p: &SettingsPlace) -> Result<Vec<SettingsFile>, String> {
+        if let Some(dir) = &self.real {
+            // Undo's private names are never settings files.
+            let mut out = Vec::new();
+            for e in std::fs::read_dir(dir).unwrap() {
+                let name = e.unwrap().file_name().to_string_lossy().into_owned();
+                if !name.starts_with(".pctwin-undo-") {
+                    let bytes = std::fs::read(dir.join(&name)).unwrap();
+                    out.push(SettingsFile { path: name, bytes });
+                }
+            }
+            return Ok(out);
+        }
         self.inner.read_settings_files(p)
     }
     fn restore_point(&mut self) -> pctwin_journal::RestorePoint {
@@ -130,27 +167,50 @@ impl Adapter for Racy {
     fn uninstall(&mut self, c: Catalog, p: &str) -> Result<(), String> {
         self.inner.uninstall(c, p)
     }
-    fn write_setting(&mut self, k: &str, v: Option<&SettingValue>) -> Result<(), String> {
-        self.inner.write_setting(k, v)
+    fn write_setting_if(
+        &mut self,
+        k: &str,
+        e: &SettingValue,
+        v: Option<&SettingValue>,
+    ) -> Result<pctwin_executor::SettingWrite, String> {
+        if let Some(theirs) = self.before_write.take() {
+            self.inner.settings.insert(k.into(), theirs);
+        }
+        let wrote = self.inner.write_setting_if(k, e, v);
+        if let Some(theirs) = self.after_write.take() {
+            self.inner.settings.insert(k.into(), theirs);
+        }
+        wrote
     }
-    fn put_settings_file(
+    fn replace_settings_file(
         &mut self,
         p: &SettingsPlace,
         path: &str,
-        bytes: Option<&[u8]>,
-    ) -> Result<(), String> {
+        swap: &pctwin_executor::files::Swap<'_>,
+    ) -> Result<pctwin_executor::files::Swapped, String> {
         if self.armed {
-            // The person saves, after undo checked the file and before it writes.
+            // The person saves, after undo looked at the file and before it is put back.
             self.inner
                 .put_file(&self.place, "vlcrc", b"the person's new edit");
             self.armed = false;
         }
-        self.inner.put_settings_file(p, path, bytes)
+        if let Some(dir) = self.real.clone() {
+            if std::mem::take(&mut self.remove_before_put) {
+                std::fs::remove_file(dir.join(path)).unwrap();
+            }
+            let crash_at = self.crash_at.take();
+            return pctwin_executor::files::replace_if_unchanged(&dir, path, swap, &mut |m| {
+                if Some(m) == crash_at {
+                    panic!("the laptop lost power");
+                }
+            })
+            .map_err(|e| e.to_string());
+        }
+        self.inner.replace_settings_file(p, path, swap)
     }
 }
 
 #[test]
-#[ignore = "fixed with review finding 2"]
 fn an_edit_saved_between_check_and_write_is_kept() {
     let (_d, _p, j) = journal();
     let mut laptop = Laptop::ok();
@@ -158,11 +218,8 @@ fn an_edit_saved_between_check_and_write_is_kept() {
     laptop.put_file(&p, "vlcrc", b"defaults");
     laptop.put_source(&p, "vlcrc", b"old laptop vlcrc");
     moved(&j, &mut laptop, vec![recipe(vec![copy("vlc")])]);
-    let mut racy = Racy {
-        inner: laptop,
-        place: p.clone(),
-        armed: true,
-    };
+    let mut racy = Racy::new(laptop, p.clone());
+    racy.armed = true;
     let permit = j.begin_undo().unwrap();
     let got = undo_effects(&rebuild(&j), &permit, &mut racy, SCOPE, &common::book()).unwrap();
     // The person's edit is still there, and undo says it kept it.
@@ -394,4 +451,99 @@ fn settings_are_undone_only_by_their_own_checked_recipe() {
             assert_eq!((laptop.settings.clone(), laptop.files.clone()), before);
         }
     }
+}
+
+/// Finding 2 for a setting: a choice the person makes after undo looked and before it writes is
+/// kept (the write compares first); one made right after it wrote is kept too (read back).
+#[test]
+fn a_setting_changed_around_the_write_is_kept() {
+    for (after, theirs) in [
+        (false, SettingValue::Int(9)),
+        (true, SettingValue::Int(9)),
+        // The person chose the earlier value again themselves: still their choice, kept.
+        (false, SettingValue::Int(1)),
+    ] {
+        let (_d, _p, j) = journal();
+        let mut laptop = Laptop::ok();
+        laptop.settings.insert("k".into(), SettingValue::Int(1));
+        moved(
+            &j,
+            &mut laptop,
+            vec![recipe(vec![common::set("k", SettingValue::Int(2))])],
+        );
+        let mut racy = Racy::new(laptop, place("vlc"));
+        if after {
+            racy.after_write = Some(theirs.clone());
+        } else {
+            racy.before_write = Some(theirs.clone());
+        }
+        let permit = j.begin_undo().unwrap();
+        let got = undo_effects(&rebuild(&j), &permit, &mut racy, SCOPE, &common::book()).unwrap();
+        assert!(
+            matches!(got[0].outcome, EffectUndoOutcome::Kept { .. }),
+            "{got:?}"
+        );
+        assert_eq!(racy.inner.settings["k"], theirs);
+    }
+}
+
+/// Finding 2: the laptop loses power while a settings file is moved aside to be put back; undo
+/// asked again finds it under the private name it recorded first, and finishes: the earlier
+/// version is back and nothing is left under a private name.
+#[test]
+fn a_file_moved_aside_survives_a_crash_and_is_finished() {
+    use pctwin_executor::files::Moment;
+    for at in [Moment::Aside, Moment::Checked, Moment::Written] {
+        let (_d, _p, j) = journal();
+        let mut laptop = Laptop::ok();
+        let p = place("vlc");
+        laptop.put_file(&p, "vlcrc", b"defaults");
+        laptop.put_source(&p, "vlcrc", b"old laptop vlcrc");
+        moved(&j, &mut laptop, vec![recipe(vec![copy("vlc")])]);
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("vlcrc"), b"old laptop vlcrc").unwrap();
+        let mut real = Racy::new(laptop, p.clone());
+        real.real = Some(dir.path().to_path_buf());
+        real.crash_at = Some(at);
+        let permit = j.begin_undo().unwrap();
+        let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book())
+        }));
+        assert!(crashed.is_err(), "{at:?}");
+        // Still part way: closing undo waits for it.
+        assert_eq!(j.effects_part_way().unwrap().len(), 1, "{at:?}");
+        let got = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+        assert_eq!(got[0].outcome, EffectUndoOutcome::Restored, "{at:?}");
+        assert_eq!(
+            std::fs::read(dir.path().join("vlcrc")).unwrap(),
+            b"defaults"
+        );
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(left.len(), 1, "{at:?}: nothing left under a private name");
+        assert!(j.effects_part_way().unwrap().is_empty());
+    }
+}
+
+/// Finding 2: the person removes the settings file after undo looked and before it is put back:
+/// nothing is written in its place, and undo says it kept their change.
+#[test]
+fn a_file_removed_before_it_is_put_back_is_left_removed() {
+    let (_d, _p, j) = journal();
+    let mut laptop = Laptop::ok();
+    let p = place("vlc");
+    laptop.put_file(&p, "vlcrc", b"defaults");
+    laptop.put_source(&p, "vlcrc", b"old laptop vlcrc");
+    moved(&j, &mut laptop, vec![recipe(vec![copy("vlc")])]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vlcrc"), b"old laptop vlcrc").unwrap();
+    let mut real = Racy::new(laptop, p.clone());
+    real.real = Some(dir.path().to_path_buf());
+    real.remove_before_put = true;
+    let permit = j.begin_undo().unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+    assert!(
+        matches!(got[0].outcome, EffectUndoOutcome::Kept { .. }),
+        "{got:?}"
+    );
+    assert!(!dir.path().join("vlcrc").exists());
 }

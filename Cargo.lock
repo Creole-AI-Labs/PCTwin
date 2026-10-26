@@ -3591,15 +3591,18 @@ name = "pctwin-executor"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "getrandom 0.4.3",
  "pctwin-grant",
  "pctwin-journal",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-types",
  "redb",
+ "rustix",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "winapi-util",
 ]
 
 [[package]]

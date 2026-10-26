@@ -621,18 +621,23 @@ impl pctwin_executor::Adapter for Watched<'_> {
         self.part_way();
         self.laptop.uninstall(c, p)
     }
-    fn write_setting(&mut self, k: &str, v: Option<&SettingValue>) -> Result<(), String> {
+    fn write_setting_if(
+        &mut self,
+        k: &str,
+        e: &SettingValue,
+        v: Option<&SettingValue>,
+    ) -> Result<pctwin_executor::SettingWrite, String> {
         self.part_way();
-        self.laptop.write_setting(k, v)
+        self.laptop.write_setting_if(k, e, v)
     }
-    fn put_settings_file(
+    fn replace_settings_file(
         &mut self,
         pl: &pctwin_recipe::SettingsPlace,
         p: &str,
-        b: Option<&[u8]>,
-    ) -> Result<(), String> {
+        s: &pctwin_executor::files::Swap<'_>,
+    ) -> Result<pctwin_executor::files::Swapped, String> {
         self.part_way();
-        self.laptop.put_settings_file(pl, p, b)
+        self.laptop.replace_settings_file(pl, p, s)
     }
 }
 

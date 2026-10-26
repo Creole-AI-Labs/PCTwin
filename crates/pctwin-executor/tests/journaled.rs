@@ -487,16 +487,21 @@ fn a_change_that_cannot_be_seen_afterwards_is_not_counted_and_recovery_looks_aga
         fn uninstall(&mut self, c: Catalog, p: &str) -> Result<(), String> {
             self.0.uninstall(c, p)
         }
-        fn write_setting(&mut self, k: &str, v: Option<&SettingValue>) -> Result<(), String> {
-            self.0.write_setting(k, v)
+        fn write_setting_if(
+            &mut self,
+            k: &str,
+            e: &SettingValue,
+            v: Option<&SettingValue>,
+        ) -> Result<pctwin_executor::SettingWrite, String> {
+            self.0.write_setting_if(k, e, v)
         }
-        fn put_settings_file(
+        fn replace_settings_file(
             &mut self,
             pl: &pctwin_recipe::SettingsPlace,
             p: &str,
-            b: Option<&[u8]>,
-        ) -> Result<(), String> {
-            self.0.put_settings_file(pl, p, b)
+            s: &pctwin_executor::files::Swap<'_>,
+        ) -> Result<pctwin_executor::files::Swapped, String> {
+            self.0.replace_settings_file(pl, p, s)
         }
     }
     let mut laptop = GoesBlind(Laptop::ok(), false);

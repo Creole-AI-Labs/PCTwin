@@ -402,26 +402,36 @@ impl Adapter for Laptop {
         }
         Ok(())
     }
-    fn write_setting(&mut self, key: &str, value: Option<&SettingValue>) -> Result<(), String> {
+    fn write_setting_if(
+        &mut self,
+        key: &str,
+        expect: &SettingValue,
+        value: Option<&SettingValue>,
+    ) -> Result<pctwin_executor::SettingWrite, String> {
         self.note(format!("restore {key}"));
         if self.fail_restore {
             return Err("the setting could not be written".into());
         }
+        // Compared and written in one step, as a system transaction does.
+        if self.settings.get(key) != Some(expect) {
+            return Ok(pctwin_executor::SettingWrite::Changed);
+        }
         if self.restore_lies {
-            return Ok(());
+            return Ok(pctwin_executor::SettingWrite::Written);
         }
         match value {
             Some(v) => self.settings.insert(key.into(), v.clone()),
             None => self.settings.remove(key),
         };
-        Ok(())
+        Ok(pctwin_executor::SettingWrite::Written)
     }
-    fn put_settings_file(
+    fn replace_settings_file(
         &mut self,
         place: &SettingsPlace,
         path: &str,
-        bytes: Option<&[u8]>,
-    ) -> Result<(), String> {
+        swap: &pctwin_executor::files::Swap<'_>,
+    ) -> Result<pctwin_executor::files::Swapped, String> {
+        use pctwin_executor::files::Swapped;
         self.note(format!("restore file {path}"));
         if let Some(left) = self.puts_before_failing {
             if left == 0 {
@@ -432,16 +442,24 @@ impl Adapter for Laptop {
         if self.fail_restore {
             return Err("the file could not be written".into());
         }
-        if self.restore_lies {
-            return Ok(());
+        // Checked and replaced in one step, as the real one does by moving it aside first.
+        let k = (key(place), path.to_string());
+        let Some(now) = self.files.get(&k) else {
+            return Ok(Swapped::Gone);
+        };
+        if *blake3::hash(now).as_bytes() != swap.ours {
+            return Ok(Swapped::Kept);
         }
-        match bytes {
+        if self.restore_lies {
+            return Ok(Swapped::Restored);
+        }
+        match swap.earlier {
             Some(b) => self.put_file(place, path, b),
             None => {
-                self.files.remove(&(key(place), path.to_string()));
+                self.files.remove(&k);
             }
         }
-        Ok(())
+        Ok(Swapped::Restored)
     }
 }
 

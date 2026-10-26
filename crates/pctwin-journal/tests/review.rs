@@ -235,3 +235,31 @@ fn an_undo_record_changed_by_hand_holds_undo_open() {
         Err(JournalError::Damaged(_))
     ));
 }
+
+/// Finding 2: a record of putting a file back that names a path outside its place, or a private
+/// name that is not undo's, is damaged (even sealed right).
+#[test]
+fn a_swapping_record_names_only_undos_own_names() {
+    let (_d, path, j) = common::journal();
+    let id = an_install(&j);
+    drop(j);
+    for (p, private) in [
+        ("../vlcrc", ".pctwin-undo-0123456789abcdef0123456789abcdef"),
+        ("vlcrc", "vlcrc.bak"),
+    ] {
+        let json = format!(r#"{{"step":"swapping","path":"{p}","private":"{private}"}}"#);
+        forge(&path, "effect-undo", "effect-undo", id, json.as_bytes());
+        let j = common::open(&path).unwrap();
+        assert!(
+            matches!(j.effect_undo_of(id), Err(JournalError::Damaged(_))),
+            "{json}"
+        );
+    }
+    let good = r#"{"step":"swapping","path":"vlcrc","private":".pctwin-undo-0123456789abcdef0123456789abcdef"}"#;
+    forge(&path, "effect-undo", "effect-undo", id, good.as_bytes());
+    let j = common::open(&path).unwrap();
+    assert!(matches!(
+        j.effect_undo_of(id),
+        Ok(Some(pctwin_journal::EffectUndo::Swapping { .. }))
+    ));
+}

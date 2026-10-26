@@ -19,6 +19,18 @@ pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-types = { path = "../pctwin-types" }
 serde_json = "1"
 thiserror = "2.0.21"
+# 128 random bits for undo's private names.
+getrandom = "0.4.3"
+
+# Putting a settings file back only if unchanged (files.rs): MoveFileExW without replacing,
+# wrapped safely, and a file's volume and number from its open handle.
+[target.'cfg(windows)'.dependencies]
+tempfile = "3"
+winapi-util = "0.1.11"
+
+# renameat2(RENAME_NOREPLACE) on Linux, renameatx_np(RENAME_EXCL) on macOS, and O_NOFOLLOW.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1.1.5", features = ["fs"] }
 
 [dev-dependencies]
 redb = "4.3"

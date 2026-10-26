@@ -426,6 +426,11 @@ pub enum EffectUndo {
     /// About to put it back: recorded before anything is changed, so after a crash undo knows
     /// it may be part way, and closing undo waits for it.
     Reversing,
+    /// About to put the settings file `path` (inside the effect's place) back, moving it aside
+    /// first to the private name `private` (`.pctwin-undo-` and 32 hexadecimal digits) in its
+    /// folder: recorded before it is moved, so after a crash undo finds it there and finishes
+    /// (security review finding 2). Recorded again for each file.
+    Swapping { path: String, private: String },
     /// Done; never written over, unless it could not be done this time.
     Done { outcome: EffectUndoOutcome },
 }
@@ -1108,9 +1113,27 @@ fn write_effect(
     Ok(())
 }
 
-/// Reads one record of undoing effect `id`, only if its tag is right.
+/// Reads one record of undoing effect `id`, only if its tag is right and any name in it is a
+/// path inside its place and one of undo's private names.
 fn read_undo(id: u64, bytes: &[u8], key: &TagKey) -> Result<EffectUndo, JournalError> {
-    serde_json::from_slice(unseal(key, UNDO_SEAL, id, bytes)?).map_err(unreadable)
+    let undo: EffectUndo =
+        serde_json::from_slice(unseal(key, UNDO_SEAL, id, bytes)?).map_err(unreadable)?;
+    if let EffectUndo::Swapping { path, private } = &undo
+        && (settings_path(path).is_err() || !is_private_name(private))
+    {
+        return Err(damaged("an undo record names a place outside its folder"));
+    }
+    Ok(undo)
+}
+
+/// Whether `name` is one of undo's private names: `.pctwin-undo-` and 32 lowercase hexadecimal
+/// digits.
+pub fn is_private_name(name: &str) -> bool {
+    name.strip_prefix(".pctwin-undo-").is_some_and(|t| {
+        t.len() == 32
+            && t.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 fn write_undo(
@@ -1143,7 +1166,9 @@ fn may_follow(before: Option<&EffectUndo>, next: &EffectUndo) -> bool {
     match before {
         None => true,
         Some(EffectUndo::Done { outcome }) => !outcome.is_final(),
-        Some(EffectUndo::Reversing) => matches!(next, EffectUndo::Done { .. }),
+        Some(EffectUndo::Reversing | EffectUndo::Swapping { .. }) => {
+            !matches!(next, EffectUndo::Reversing)
+        }
     }
 }
 
@@ -1454,6 +1479,11 @@ impl Journal {
         undo: &EffectUndo,
     ) -> Result<(), JournalError> {
         self.check_right(right)?;
+        if let EffectUndo::Swapping { path, private } = undo
+            && (settings_path(path).is_err() || !is_private_name(private))
+        {
+            return Err(JournalError::BadName);
+        }
         let key = self.record_key()?;
         let tx = self.db.begin_write().map_err(storage)?;
         {
@@ -1480,10 +1510,12 @@ impl Journal {
                 return Err(JournalError::OutOfOrder {
                     from: match before {
                         Some(EffectUndo::Reversing) => "reversing",
+                        Some(EffectUndo::Swapping { .. }) => "swapping",
                         _ => "done",
                     },
                     to: match undo {
                         EffectUndo::Reversing => "reversing",
+                        EffectUndo::Swapping { .. } => "swapping",
                         EffectUndo::Done { .. } => "done",
                     },
                 });
