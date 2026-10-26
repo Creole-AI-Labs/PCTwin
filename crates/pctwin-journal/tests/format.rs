@@ -314,11 +314,17 @@ fn the_saved_format_3_example_still_opens() {
             },
         )
         .unwrap();
-        j.record_restore_point(Scope([7; 16]), &point).unwrap();
+        j.installs(&keys().install)
+            .record_restore_point(Scope([7; 16]), &point)
+            .unwrap();
         let (p, intent) = effect();
-        let e = j.settings().intend(&p, &intent).unwrap();
-        j.settings().observed(e, &found, false).unwrap();
-        j.settings().receipt(e, &Receipt::Done).unwrap();
+        let e = j.settings(&keys().setting).intend(&p, &intent).unwrap();
+        j.settings(&keys().setting)
+            .observed(e, &found, false)
+            .unwrap();
+        j.settings(&keys().setting)
+            .receipt(e, &Receipt::Done)
+            .unwrap();
     }
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("journal.redb");
@@ -344,4 +350,11 @@ fn the_saved_format_3_example_still_opens() {
     );
     drop(j);
     assert_eq!(format_on_disk(&copy), Some(3));
+}
+
+/// This test program's role keys: made once (a program gets them only once) and lent to every
+/// test.
+pub fn keys() -> &'static pctwin_grant::RoleKeys {
+    static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
 }

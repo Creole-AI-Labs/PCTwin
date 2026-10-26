@@ -37,9 +37,9 @@ pub use checked::{CheckedFrom, WhyMemory};
 pub use effects::{
     EffectClass, EffectEntry, EffectLedger, EffectState, EffectUndo, EffectUndoOutcome,
     ExternalClass, FileHash, Found, ImportIntent, Imports, InstallIntent, Installs, KeptFile,
-    MAX_IDENTITY, MAX_KEPT_FILE, MAX_KEPT_FILES, MAX_KEPT_TOTAL, PlannedEffect, Presence, Receipt,
-    Recorder, RestorePoint, Role, RoleIntent, RoleMarker, Settings, SettingsFile, SettingsIntent,
-    StoredEffect, SupportView, UndoRoute, content_hash,
+    MAX_IDENTITY, MAX_KEPT_FILE, MAX_KEPT_FILES, MAX_KEPT_TOTAL, PlannedEffect, Presence, Rebuild,
+    RebuildRole, Receipt, Recorder, RestorePoint, Role, RoleIntent, RoleMarker, STEP_GRANT,
+    Settings, SettingsFile, SettingsIntent, StoredEffect, SupportView, UndoRoute, content_hash,
 };
 pub use place::Placement;
 

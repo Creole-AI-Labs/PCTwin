@@ -6,9 +6,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use pctwin_executor::{Adapter, Plan, PlannedItem, Run};
+use pctwin_grant::{GrantError, InstallGrant, Now, ObjectRef, PlanSeal, SettingGrant};
 use pctwin_journal::{
     Actor, EffectEntry, EffectLedger, Found, InstallIntent, Journal, JournalError, Permission,
-    PlannedEffect, Presence, Receipt, RestorePoint, Role, Scope, SettingsFile, SettingsIntent,
+    PlannedEffect, Presence, Rebuild, RebuildRole, Receipt, RestorePoint, Scope, SettingsFile,
+    SettingsIntent,
 };
 use pctwin_recipe::{
     Arch, Catalog, Check, Os, Platform, Recipe, RecipeId, RelPath, SettingValue, SettingsPlace,
@@ -140,6 +142,19 @@ pub fn plan_of(recipes: Vec<Recipe>) -> Plan {
     .unwrap()
 }
 
+/// This test program's role keys: made once (a program gets them only once) and lent to every
+/// test.
+pub fn keys() -> &'static pctwin_grant::RoleKeys {
+    static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
+}
+
+/// The installs and settings recorders of `j`, as the program's starting code hands them to the
+/// executor.
+pub fn rebuild(j: &Journal) -> Rebuild<'_> {
+    Rebuild::new(j, &keys().install, &keys().setting)
+}
+
 pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
@@ -150,7 +165,7 @@ pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
 /// Runs `plan` on `laptop` with a fresh journal; the items' results.
 pub fn run(plan: &Plan, laptop: &mut Laptop) -> Vec<(ItemId, ItemResult)> {
     let (_d, _p, j) = journal();
-    plan.run(laptop, &j, SCOPE, &actor()).results
+    plan.run(laptop, &rebuild(&j), SCOPE, &actor()).results
 }
 
 pub fn run_with(plan: &Plan, laptop: &mut Laptop, ledger: &dyn EffectLedger) -> Run {
@@ -207,6 +222,8 @@ pub struct Laptop {
     pub install_check_lies: bool,
     /// Putting a setting or a settings file back reports success and changes nothing.
     pub restore_lies: bool,
+    /// Every permission an install or settings step was handed: (role, step, step digest).
+    pub grants: Vec<(&'static str, u64, [u8; 32])>,
 }
 
 impl Laptop {
@@ -255,7 +272,10 @@ impl Adapter for Laptop {
     fn platform(&self) -> Platform {
         self.platform.unwrap_or(WIN)
     }
-    fn install(&mut self, _: Catalog, package: &str) -> Result<(), Reason> {
+    fn install(&mut self, grant: InstallGrant, _: Catalog, package: &str) -> Result<(), Reason> {
+        assert!(!grant.expiry().is_over(Now::real()), "a live permission");
+        let a = grant.artifact();
+        self.grants.push(("install", a.handle(), a.digest()));
         self.note(format!("install {package}"));
         if let Some(reason) = self.fail_install {
             return Err(reason);
@@ -265,7 +285,15 @@ impl Adapter for Laptop {
         }
         Ok(())
     }
-    fn copy_settings(&mut self, from: &SettingsPlace, to: &SettingsPlace) -> Result<(), Reason> {
+    fn copy_settings(
+        &mut self,
+        grant: SettingGrant,
+        from: &SettingsPlace,
+        to: &SettingsPlace,
+    ) -> Result<(), Reason> {
+        assert!(!grant.expiry().is_over(Now::real()), "a live permission");
+        let s = grant.setting();
+        self.grants.push(("copy", s.handle(), s.digest()));
         self.note("copy".into());
         if !self.copy_lies {
             for (path, bytes) in self.files_at(&self.source.clone(), from) {
@@ -274,7 +302,15 @@ impl Adapter for Laptop {
         }
         Ok(())
     }
-    fn apply_setting(&mut self, key: &str, value: &SettingValue) -> Result<(), Reason> {
+    fn apply_setting(
+        &mut self,
+        grant: SettingGrant,
+        key: &str,
+        value: &SettingValue,
+    ) -> Result<(), Reason> {
+        assert!(!grant.expiry().is_over(Now::real()), "a live permission");
+        let s = grant.setting();
+        self.grants.push(("set", s.handle(), s.digest()));
         self.note(format!("set {key}"));
         self.settings.insert(key.into(), value.clone());
         Ok(())
@@ -387,7 +423,7 @@ impl Adapter for Laptop {
 /// A journal that records its calls in a shared log, and whose writes fail once `writes`
 /// successful writes have been made (a full disk, or a journal that cannot be written).
 pub struct Faulty<'j> {
-    pub inner: &'j Journal,
+    pub inner: Rebuild<'j>,
     pub writes: Cell<usize>,
     pub log: Rc<RefCell<Vec<String>>>,
     /// Refuses only this kind of write (every other one is written).
@@ -397,7 +433,7 @@ pub struct Faulty<'j> {
 impl<'j> Faulty<'j> {
     pub fn new(inner: &'j Journal, writes: usize) -> Self {
         Self {
-            inner,
+            inner: rebuild(inner),
             writes: Cell::new(writes),
             log: Rc::default(),
             only: None,
@@ -426,7 +462,7 @@ impl EffectLedger for Faulty<'_> {
         intent: &InstallIntent,
     ) -> Result<u64, JournalError> {
         self.write("intend")?;
-        self.inner.intend_install(planned, intent)
+        self.inner.installs.intend(planned, intent)
     }
     fn intend_setting(
         &self,
@@ -434,30 +470,36 @@ impl EffectLedger for Faulty<'_> {
         intent: &SettingsIntent,
     ) -> Result<u64, JournalError> {
         self.write("intend")?;
-        self.inner.intend_setting(planned, intent)
+        self.inner.settings.intend(planned, intent)
     }
     fn observed(
         &self,
-        role: Role,
+        role: RebuildRole,
         id: u64,
         found: &Found,
         after_restart: bool,
     ) -> Result<(), JournalError> {
         self.write("observed")?;
-        EffectLedger::observed(self.inner, role, id, found, after_restart)
+        EffectLedger::observed(&self.inner, role, id, found, after_restart)
     }
-    fn receipt(&self, role: Role, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
+    fn receipt(&self, role: RebuildRole, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
         self.write("receipt")?;
-        EffectLedger::receipt(self.inner, role, id, receipt)
+        EffectLedger::receipt(&self.inner, role, id, receipt)
     }
     fn unfinished_effects(&self) -> Result<Vec<EffectEntry>, JournalError> {
-        self.inner.unfinished_effects()
+        self.inner.journal().unfinished_effects()
     }
     fn restore_point(&self, scope: Scope) -> Result<Option<RestorePoint>, JournalError> {
-        self.inner.restore_point(scope)
+        self.inner.journal().restore_point(scope)
+    }
+    fn install_grant(&self, seal: PlanSeal, a: ObjectRef) -> Result<InstallGrant, GrantError> {
+        self.inner.install_grant(seal, a)
+    }
+    fn setting_grant(&self, seal: PlanSeal, s: ObjectRef) -> Result<SettingGrant, GrantError> {
+        self.inner.setting_grant(seal, s)
     }
     fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError> {
         self.write("restore-point")?;
-        EffectLedger::record_restore_point(self.inner, scope, point)
+        EffectLedger::record_restore_point(&self.inner, scope, point)
     }
 }

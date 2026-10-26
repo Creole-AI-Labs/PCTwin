@@ -9,10 +9,15 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The plan seal and the digest of each step a permission names.
+blake3 = "1.8"
+# Each step's permission: only the installs or settings recorder's key makes one.
+pctwin-grant = { path = "../pctwin-grant" }
 pctwin-journal = { path = "../pctwin-journal" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-types = { path = "../pctwin-types" }
+serde_json = "1"
 thiserror = "2.0.21"
 
 [dev-dependencies]

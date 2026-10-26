@@ -108,3 +108,10 @@ pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
     let j = Journal::open(&path).unwrap();
     (dir, path, j)
 }
+
+/// This test program's role keys: made once (a program gets them only once) and lent to every
+/// test.
+pub fn keys() -> &'static pctwin_grant::RoleKeys {
+    static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
+}

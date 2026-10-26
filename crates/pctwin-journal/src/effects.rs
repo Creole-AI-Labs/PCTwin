@@ -36,6 +36,10 @@
 
 use std::marker::PhantomData;
 
+use pctwin_grant::{
+    CaptureKey, GrantError, InstallGrant, InstallKey, Now, ObjectRef, PlanSeal, SettingGrant,
+    SettingKey,
+};
 use pctwin_recipe::{Catalog, RecipeRef, SettingValue, SettingsPlace, UndoDeclaration};
 use pctwin_record::ItemId;
 use pctwin_types::Reason;
@@ -601,28 +605,108 @@ pub enum Settings {}
 #[derive(Debug, Clone, Copy)]
 pub enum Imports {}
 
-/// A role marker: which intent it records. Sealed.
+/// A role marker: which intent it records, and whose key makes its recorder. Sealed.
 pub trait RoleMarker: sealed::Sealed {
     type Intent: RoleIntent;
+    /// The role's own key ([`pctwin_grant`]): only code given it can make the recorder.
+    type Key;
 }
 impl sealed::Sealed for Installs {}
 impl sealed::Sealed for Settings {}
 impl sealed::Sealed for Imports {}
 impl RoleMarker for Installs {
     type Intent = InstallIntent;
+    type Key = InstallKey;
 }
 impl RoleMarker for Settings {
     type Intent = SettingsIntent;
+    type Key = SettingKey;
 }
 impl RoleMarker for Imports {
     type Intent = ImportIntent;
+    type Key = CaptureKey;
 }
 
 /// One role's way to write effects: it records only its own kind of intent, and refuses to
 /// observe, finish or undo any other role's effect ([`JournalError::WrongRole`]). Made with
-/// [`Journal::installs`], [`Journal::settings`] or [`Journal::imports`].
+/// [`Journal::installs`], [`Journal::settings`] or [`Journal::imports`], each of which needs that
+/// role's own key: code that was not given the key cannot make the recorder, and there is no
+/// other way to write an effect (Phase 2 adoption, change 1; security review, 26 October 2026).
+///
+/// # The walls, proven by the compiler
+///
+/// With its own key, a role writes its own effects:
+///
+/// ```
+/// use pctwin_grant::RoleKeys;
+/// use pctwin_journal::{Journal, Rebuild};
+/// let keys = RoleKeys::mint().unwrap();
+/// let dir = tempfile::tempdir().unwrap();
+/// let j = Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _installs = j.installs(&keys.install);
+/// let _imports = j.imports(&keys.capture);
+/// let _executor = Rebuild::new(&j, &keys.install, &keys.setting);
+/// ```
+///
+/// Holding the journal is not enough: there is no recorder without a key (review proof P3),
+///
+/// ```compile_fail,E0061
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _installs = j.installs();
+/// ```
+///
+/// another role's key does not fit,
+///
+/// ```compile_fail,E0308
+/// let keys = pctwin_grant::RoleKeys::mint().unwrap();
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _installs = j.installs(&keys.setting);
+/// ```
+///
+/// nor does it make the executor's pair,
+///
+/// ```compile_fail,E0308
+/// let keys = pctwin_grant::RoleKeys::mint().unwrap();
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _r = pctwin_journal::Rebuild::new(&j, &keys.capture, &keys.setting);
+/// ```
+///
+/// the journal itself is not a ledger an effect can be finished through,
+///
+/// ```compile_fail,E0277
+/// use pctwin_journal::{EffectLedger, Found, Presence, RebuildRole};
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// EffectLedger::observed(&j, RebuildRole::Install, 1, &Found::App(Presence::Absent), true).unwrap();
+/// ```
+///
+/// its own steps are its own,
+///
+/// ```compile_fail,E0624
+/// use pctwin_journal::{Receipt, Role};
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// j.receipt(Role::Install, 1, &Receipt::Done).unwrap();
+/// ```
+///
+/// ```compile_fail,E0624
+/// use pctwin_journal::{RestorePoint, Scope};
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// j.record_restore_point(Scope([1; 16]), &RestorePoint::NotWindows).unwrap();
+/// ```
+///
+/// and the executor's ledger has no way to name an import:
+///
+/// ```compile_fail,E0599
+/// let _ = pctwin_journal::RebuildRole::Import;
+/// ```
 pub struct Recorder<'j, R: RoleMarker> {
     journal: &'j Journal,
+    key: &'j R::Key,
     _role: PhantomData<R>,
 }
 
@@ -632,7 +716,7 @@ impl<R: RoleMarker> std::fmt::Debug for Recorder<'_, R> {
     }
 }
 
-impl<R: RoleMarker> Recorder<'_, R> {
+impl<'j, R: RoleMarker> Recorder<'j, R> {
     /// Records a change about to be made, with what was there before it; returns its effect
     /// number (never reused). Files from before are kept whole in the same transaction. Nothing
     /// is recorded if a path is not inside its place or is listed twice, or an identity is not
@@ -670,11 +754,108 @@ impl<R: RoleMarker> Recorder<'_, R> {
         self.journal
             .record_effect_undo(R::Intent::ROLE, right, id, undo)
     }
+
+    /// The journal, for reading (reading is open to every part of PCTwin; writing is not).
+    pub fn journal(&self) -> &'j Journal {
+        self.journal
+    }
+}
+
+impl Recorder<'_, Installs> {
+    /// A permission for the installs role's adapter to install one exact package of the approved
+    /// plan (see [`pctwin_grant::InstallKey::grant`]): only this recorder's key makes one.
+    pub fn grant(
+        &self,
+        seal: PlanSeal,
+        artifact: ObjectRef,
+        lifetime: std::time::Duration,
+        now: Now,
+    ) -> Result<InstallGrant, GrantError> {
+        self.key.grant(seal, artifact, lifetime, now)
+    }
+
+    /// Records the restore point answer for move `scope` (asked before its first install or
+    /// setting): once, never written over.
+    pub fn record_restore_point(
+        &self,
+        scope: Scope,
+        point: &RestorePoint,
+    ) -> Result<(), JournalError> {
+        self.journal.record_restore_point(scope, point)
+    }
+}
+
+impl Recorder<'_, Settings> {
+    /// A permission for the settings role's adapter to change one named setting or settings
+    /// place of the approved plan (see [`pctwin_grant::SettingKey::grant`]).
+    pub fn grant(
+        &self,
+        seal: PlanSeal,
+        setting: ObjectRef,
+        lifetime: std::time::Duration,
+        now: Now,
+    ) -> Result<SettingGrant, GrantError> {
+        self.key.grant(seal, setting, lifetime, now)
+    }
+
+    /// Records the restore point answer for move `scope`: once, never written over.
+    pub fn record_restore_point(
+        &self,
+        scope: Scope,
+        point: &RestorePoint,
+    ) -> Result<(), JournalError> {
+        self.journal.record_restore_point(scope, point)
+    }
+}
+
+/// The installs and settings roles' recorders together: what the program's starting code hands
+/// the executor (which runs the recipes of 2.1 and 2.4), and nothing more. It cannot reach the
+/// imports role's effects: that needs the imports role's own key.
+#[derive(Debug)]
+pub struct Rebuild<'j> {
+    pub installs: Recorder<'j, Installs>,
+    pub settings: Recorder<'j, Settings>,
+}
+
+impl<'j> Rebuild<'j> {
+    /// Both recorders of `journal`, made from the two roles' own keys.
+    pub fn new(journal: &'j Journal, install: &'j InstallKey, setting: &'j SettingKey) -> Self {
+        Self {
+            installs: journal.installs(install),
+            settings: journal.settings(setting),
+        }
+    }
+
+    /// The journal, for reading.
+    pub fn journal(&self) -> &'j Journal {
+        self.installs.journal
+    }
+}
+
+/// Which of the two rebuilding roles an effect belongs to: the only roles the executor can
+/// write for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildRole {
+    Install,
+    Settings,
+}
+
+impl RebuildRole {
+    /// The rebuilding role of an effect, or `None` for an import (the imports role's own).
+    pub fn of(role: Role) -> Option<Self> {
+        match role {
+            Role::Install => Some(RebuildRole::Install),
+            Role::Settings => Some(RebuildRole::Settings),
+            Role::Import => None,
+        }
+    }
 }
 
 /// The steps an effect is recorded through, as the executor (which runs the installs and
-/// settings roles' recipes) uses them. [`Journal`] is the real one; a test can make the record
-/// fail at any step.
+/// settings roles' recipes) uses them. [`Rebuild`] is the real one, and only it can be made from
+/// a journal (with the two roles' keys); a test can wrap it to make the record fail at any step.
+/// An effect is observed or finished only through one of the two recorders ([`RebuildRole`] has
+/// no imports member), so the imports role's effects are out of reach.
 pub trait EffectLedger {
     /// See [`Recorder::intend`] (installs).
     fn intend_install(
@@ -688,59 +869,92 @@ pub trait EffectLedger {
         planned: &PlannedEffect,
         intent: &SettingsIntent,
     ) -> Result<u64, JournalError>;
-    /// See [`Recorder::observed`], for `role`'s effect.
+    /// See [`Recorder::observed`], through the recorder of `role`.
     fn observed(
         &self,
-        role: Role,
+        role: RebuildRole,
         id: u64,
         found: &Found,
         after_restart: bool,
     ) -> Result<(), JournalError>;
-    /// See [`Recorder::receipt`], for `role`'s effect.
-    fn receipt(&self, role: Role, id: u64, receipt: &Receipt) -> Result<(), JournalError>;
+    /// See [`Recorder::receipt`], through the recorder of `role`.
+    fn receipt(&self, role: RebuildRole, id: u64, receipt: &Receipt) -> Result<(), JournalError>;
     /// See [`Journal::unfinished_effects`].
     fn unfinished_effects(&self) -> Result<Vec<EffectEntry>, JournalError>;
     /// See [`Journal::restore_point`].
     fn restore_point(&self, scope: Scope) -> Result<Option<RestorePoint>, JournalError>;
-    /// See [`Journal::record_restore_point`].
+    /// Records the move's restore point answer, through the installs recorder.
     fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError>;
+    /// A permission for one install step, from the installs recorder's key.
+    fn install_grant(
+        &self,
+        seal: PlanSeal,
+        artifact: ObjectRef,
+    ) -> Result<InstallGrant, GrantError>;
+    /// A permission for one settings step, from the settings recorder's key.
+    fn setting_grant(&self, seal: PlanSeal, setting: ObjectRef)
+    -> Result<SettingGrant, GrantError>;
 }
 
-impl EffectLedger for Journal {
+/// How long a permission handed to an adapter for one step lasts: the longest allowed, since an
+/// installer may take a while; the adapter checks it before it starts.
+pub const STEP_GRANT: std::time::Duration = pctwin_grant::MAX_LIFETIME;
+
+impl EffectLedger for Rebuild<'_> {
     fn intend_install(
         &self,
         planned: &PlannedEffect,
         intent: &InstallIntent,
     ) -> Result<u64, JournalError> {
-        self.installs().intend(planned, intent)
+        self.installs.intend(planned, intent)
     }
     fn intend_setting(
         &self,
         planned: &PlannedEffect,
         intent: &SettingsIntent,
     ) -> Result<u64, JournalError> {
-        self.settings().intend(planned, intent)
+        self.settings.intend(planned, intent)
     }
     fn observed(
         &self,
-        role: Role,
+        role: RebuildRole,
         id: u64,
         found: &Found,
         after_restart: bool,
     ) -> Result<(), JournalError> {
-        Journal::observed(self, role, id, found, after_restart)
+        match role {
+            RebuildRole::Install => self.installs.observed(id, found, after_restart),
+            RebuildRole::Settings => self.settings.observed(id, found, after_restart),
+        }
     }
-    fn receipt(&self, role: Role, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
-        Journal::receipt(self, role, id, receipt)
+    fn receipt(&self, role: RebuildRole, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
+        match role {
+            RebuildRole::Install => self.installs.receipt(id, receipt),
+            RebuildRole::Settings => self.settings.receipt(id, receipt),
+        }
     }
     fn unfinished_effects(&self) -> Result<Vec<EffectEntry>, JournalError> {
-        Journal::unfinished_effects(self)
+        self.journal().unfinished_effects()
     }
     fn restore_point(&self, scope: Scope) -> Result<Option<RestorePoint>, JournalError> {
-        Journal::restore_point(self, scope)
+        self.journal().restore_point(scope)
     }
     fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError> {
-        Journal::record_restore_point(self, scope, point)
+        self.installs.record_restore_point(scope, point)
+    }
+    fn install_grant(
+        &self,
+        seal: PlanSeal,
+        artifact: ObjectRef,
+    ) -> Result<InstallGrant, GrantError> {
+        self.installs.grant(seal, artifact, STEP_GRANT, Now::real())
+    }
+    fn setting_grant(
+        &self,
+        seal: PlanSeal,
+        setting: ObjectRef,
+    ) -> Result<SettingGrant, GrantError> {
+        self.settings.grant(seal, setting, STEP_GRANT, Now::real())
     }
 }
 
@@ -882,26 +1096,29 @@ fn own(role: Role, entry: &EffectEntry) -> Result<(), JournalError> {
 }
 
 impl Journal {
-    /// The installs role's recorder (2.1).
-    pub fn installs(&self) -> Recorder<'_, Installs> {
+    /// The installs role's recorder (2.1), made only with its own key.
+    pub fn installs<'j>(&'j self, key: &'j InstallKey) -> Recorder<'j, Installs> {
         Recorder {
             journal: self,
+            key,
             _role: PhantomData,
         }
     }
 
-    /// The settings role's recorder (2.4).
-    pub fn settings(&self) -> Recorder<'_, Settings> {
+    /// The settings role's recorder (2.4), made only with its own key.
+    pub fn settings<'j>(&'j self, key: &'j SettingKey) -> Recorder<'j, Settings> {
         Recorder {
             journal: self,
+            key,
             _role: PhantomData,
         }
     }
 
-    /// The imports role's recorder (2.5).
-    pub fn imports(&self) -> Recorder<'_, Imports> {
+    /// The imports role's recorder (2.5), made only with its own key.
+    pub fn imports<'j>(&'j self, key: &'j CaptureKey) -> Recorder<'j, Imports> {
         Recorder {
             journal: self,
+            key,
             _role: PhantomData,
         }
     }
@@ -1152,12 +1369,9 @@ impl Journal {
             .transpose()
     }
 
-    /// Records the restore point answer for move `scope`: once, never written over.
-    pub fn record_restore_point(
-        &self,
-        scope: Scope,
-        point: &RestorePoint,
-    ) -> Result<(), JournalError> {
+    /// Records the restore point answer for move `scope`: once, never written over. Only through
+    /// the installs or settings recorder.
+    fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError> {
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let mut table = tx.open_table(RESTORE_POINTS).map_err(storage)?;

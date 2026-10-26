@@ -13,13 +13,19 @@
 //! - Each planned item runs one checked [`Recipe`] through an OS [`Adapter`], step by typed step.
 //!   The adapter is where each operating system does the work; it receives typed steps only,
 //!   never a command line or an address.
-//! - Every step that changes the laptop is journaled ([`EffectLedger`]) in the order S14 sets,
-//!   installs through the installs role and settings through the settings role: what is there
+//! - Every step that changes the laptop is journaled ([`EffectLedger`], in the program
+//!   [`pctwin_journal::Rebuild`]: the installs and settings roles' recorders, made from their own
+//!   keys and handed to the executor by the program's starting code, and nothing else) in the
+//!   order S14 sets, installs through the installs role and settings through the settings role: what is there
 //!   now is looked at first and recorded with the intent, durably, before anything changes; then
 //!   the change; then what is there after it is looked at and recorded; then the step's honest
 //!   receipt. An app already on the laptop is never installed again, and nothing is changed while
 //!   an earlier change to the same app, setting or place is still unaccounted for. If the journal
 //!   cannot be written, nothing more is changed and the run stops ([`Run::stopped`]).
+//! - Each changing step is handed to the adapter with its role's permission
+//!   ([`pctwin_grant::InstallGrant`] or [`pctwin_grant::SettingGrant`]) naming the approved plan
+//!   ([`Plan::seal`]) and that exact step ([`object_of`]); the adapter's entry points take nothing
+//!   else, so code without the role's key cannot ask it to install or change anything.
 //! - Before a move's first install or setting, a Windows restore point is asked for once, and its
 //!   honest answer recorded ([`Adapter::restore_point`]).
 //! - Before every run, changes a crash interrupted are reconciled ([`recover`]): the system is
@@ -36,9 +42,10 @@ mod undo;
 pub use recover::{Recovered, RecoveredAs, STILL_INSTALLING, recover};
 pub use undo::{Undone, undo_effects};
 
+use pctwin_grant::{InstallGrant, ObjectRef, PlanSeal, SettingGrant};
 use pctwin_journal::{
     Actor, EffectEntry, EffectLedger, Found, InstallIntent, JournalError, PlannedEffect, Presence,
-    Receipt, RestorePoint, Role, Scope, SettingsFile, SettingsIntent, StoredEffect,
+    RebuildRole, Receipt, RestorePoint, Scope, SettingsFile, SettingsIntent, StoredEffect,
 };
 use pctwin_recipe::{Catalog, Check, Platform, Recipe, SettingValue, SettingsPlace, Step};
 use pctwin_record::{Approval, Inclusion, ItemId, ItemKind, Record, RecordError};
@@ -70,9 +77,29 @@ pub enum PlanError {
 pub trait Adapter {
     /// The new laptop's system and processor.
     fn platform(&self) -> Platform;
-    fn install(&mut self, catalog: Catalog, package: &str) -> Result<(), Reason>;
-    fn copy_settings(&mut self, from: &SettingsPlace, to: &SettingsPlace) -> Result<(), Reason>;
-    fn apply_setting(&mut self, key: &str, value: &SettingValue) -> Result<(), Reason>;
+    /// Installs one package. `grant` is the installs role's permission for exactly this step of
+    /// the approved plan ([`object_of`]); an adapter refuses one that is over
+    /// ([`pctwin_grant::Expiry::is_over`]) or names another step.
+    fn install(
+        &mut self,
+        grant: InstallGrant,
+        catalog: Catalog,
+        package: &str,
+    ) -> Result<(), Reason>;
+    /// Copies settings; `grant` as for [`Adapter::install`], from the settings role.
+    fn copy_settings(
+        &mut self,
+        grant: SettingGrant,
+        from: &SettingsPlace,
+        to: &SettingsPlace,
+    ) -> Result<(), Reason>;
+    /// Sets one named setting; `grant` as for [`Adapter::copy_settings`].
+    fn apply_setting(
+        &mut self,
+        grant: SettingGrant,
+        key: &str,
+        value: &SettingValue,
+    ) -> Result<(), Reason>;
     /// Whether a check passes on the new laptop.
     fn verify(&mut self, check: &Check) -> bool;
 
@@ -122,6 +149,7 @@ pub struct PlannedItem {
 #[derive(Debug)]
 pub struct Plan {
     items: Vec<PlannedItem>,
+    seal: PlanSeal,
 }
 
 /// What a run did.
@@ -157,6 +185,7 @@ pub const STOPPED: &str = "PCTwin could not write down its next change, so it st
 /// Who and what a run works for, and where it records.
 struct Ctx<'a> {
     journal: &'a dyn EffectLedger,
+    seal: PlanSeal,
     scope: Scope,
     actor: &'a Actor,
     /// The restore point answer, once asked or found recorded.
@@ -200,11 +229,19 @@ impl Plan {
                 .validate()
                 .map_err(|e| PlanError::BadRecipe(e.to_string()))?;
         }
-        Ok(Self { items })
+        Ok(Self {
+            items,
+            seal: seal_of(approval),
+        })
     }
 
     pub fn items(&self) -> &[PlannedItem] {
         &self.items
+    }
+
+    /// The approved plan every permission of this run names.
+    pub fn seal(&self) -> PlanSeal {
+        self.seal
     }
 
     /// Runs every planned item for move `scope`, as `actor`, recording each change in
@@ -235,6 +272,7 @@ impl Plan {
         };
         let ctx = Ctx {
             journal,
+            seal: self.seal,
             scope,
             actor,
             restore_point: std::cell::RefCell::new(point),
@@ -442,8 +480,14 @@ fn effect(
     // 3. The intent with what was there, on disk before anything changes. What cannot be kept
     //    safely (too large, a strange name) means the change is not made.
     let (written, role) = match &intent {
-        Intent::Install(i) => (ctx.journal.intend_install(&planned, i), Role::Install),
-        Intent::Setting(i) => (ctx.journal.intend_setting(&planned, i), Role::Settings),
+        Intent::Install(i) => (
+            ctx.journal.intend_install(&planned, i),
+            RebuildRole::Install,
+        ),
+        Intent::Setting(i) => (
+            ctx.journal.intend_setting(&planned, i),
+            RebuildRole::Settings,
+        ),
     };
     let id = match written {
         Ok(id) => id,
@@ -452,7 +496,10 @@ fn effect(
         }
         Err(_) => return Err(Stop),
     };
-    // 4. The change. An app already there is never installed again.
+    // 4. The change, with its role's permission for exactly this step. An app already there is
+    //    never installed again. A permission that cannot be made fails the step.
+    let object = object_of(step_no, step);
+    let no_grant = |_| Reason::NotVerified;
     let acted = match (step, &stored) {
         (
             Step::Install { catalog, package },
@@ -460,9 +507,21 @@ fn effect(
                 before: Presence::Absent,
                 ..
             },
-        ) => adapter.install(*catalog, package),
-        (Step::ApplySetting { key, value }, _) => adapter.apply_setting(key, value),
-        (Step::CopySettings { from, to }, _) => adapter.copy_settings(from, to),
+        ) => ctx
+            .journal
+            .install_grant(ctx.seal, object)
+            .map_err(no_grant)
+            .and_then(|g| adapter.install(g, *catalog, package)),
+        (Step::ApplySetting { key, value }, _) => ctx
+            .journal
+            .setting_grant(ctx.seal, object)
+            .map_err(no_grant)
+            .and_then(|g| adapter.apply_setting(g, key, value)),
+        (Step::CopySettings { from, to }, _) => ctx
+            .journal
+            .setting_grant(ctx.seal, object)
+            .map_err(no_grant)
+            .and_then(|g| adapter.copy_settings(g, from, to)),
         _ => Ok(()),
     };
     // 5. What is there now. If it cannot be told, the intent stays as it is and the next run's
@@ -482,10 +541,29 @@ fn effect(
     })
 }
 
-/// Whether recovery and undo here act on this effect: the installs and settings roles' own.
-/// Imports belong to the imports role (2.5), which reconciles and undoes its own.
-pub(crate) fn ours(e: &EffectEntry) -> bool {
-    matches!(e.role, Role::Install | Role::Settings)
+/// The rebuilding role whose recorder recovery and undo here use for this effect: the installs
+/// or settings role's. `None` for an import, which belongs to the imports role (2.5): it
+/// reconciles and undoes its own, and the executor has no recorder for it.
+pub(crate) fn ours(e: &EffectEntry) -> Option<RebuildRole> {
+    RebuildRole::of(e.role)
+}
+
+/// The approved plan a run's permissions name: the record's revision and a digest of its
+/// approval's fingerprint.
+pub fn seal_of(approval: &Approval) -> PlanSeal {
+    let digest = blake3::derive_key(
+        "PCTwin executor plan seal 2026-10-26 v1",
+        approval.fingerprint.to_hex().as_bytes(),
+    );
+    PlanSeal::new(approval.revision, digest)
+}
+
+/// The exact step a permission names: its position in the recipe and a digest of the step
+/// itself (what to install, which setting and value, which places).
+pub fn object_of(step_no: u32, step: &Step) -> ObjectRef {
+    let bytes = serde_json::to_vec(step).unwrap_or_default();
+    let digest = blake3::derive_key("PCTwin executor step 2026-10-26 v1", &bytes);
+    ObjectRef::new(u64::from(step_no), digest)
 }
 
 /// What is on the laptop now for an effect: the app, the setting, or every file at the place

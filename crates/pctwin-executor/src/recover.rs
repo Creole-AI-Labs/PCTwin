@@ -52,9 +52,9 @@ pub fn recover(
 ) -> Result<Vec<Recovered>, JournalError> {
     let mut out = Vec::new();
     for e in journal.unfinished_effects()? {
-        if !ours(&e) {
+        let Some(role) = ours(&e) else {
             continue;
-        }
+        };
         let left = |why: String| Recovered {
             id: e.id,
             item: e.planned.item,
@@ -81,7 +81,7 @@ pub fn recover(
                 }
                 match look(adapter, &e.effect) {
                     Ok(found) => {
-                        journal.observed(e.role, e.id, &found, true)?;
+                        journal.observed(role, e.id, &found, true)?;
                         found
                     }
                     Err(why) => {
@@ -96,7 +96,7 @@ pub fn recover(
         };
         let passed = check_of(&e.effect).is_some_and(|c| adapter.verify(&c));
         let receipt = judge(&e.effect, &found, None, passed);
-        journal.receipt(e.role, e.id, &receipt)?;
+        journal.receipt(role, e.id, &receipt)?;
         out.push(Recovered {
             id: e.id,
             item: e.planned.item,

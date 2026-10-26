@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use pctwin_journal::{
     EffectEntry, EffectState, EffectUndo, EffectUndoOutcome, Found, Journal, JournalError,
-    Presence, Role, Scope, StoredEffect, UndoPermit, content_hash,
+    Presence, Rebuild, RebuildRole, Scope, StoredEffect, UndoPermit, content_hash,
 };
 use pctwin_recipe::{Catalog, SettingValue, SettingsPlace, UndoDeclaration};
 
@@ -51,22 +51,22 @@ const REMOVAL_STOPPED: &str =
     "removing this app was stopped part way; choose undo again to try once more";
 const NOT_CHECKED: &str =
     "PCTwin has not finished checking this change yet; try undo again in a moment";
-const ELSEWHERE: &str = "this was done with the app's maker or an online service; only they      can undo it, so PCTwin left it as it is";
+const ELSEWHERE: &str = "this was done with the app's maker or an online service; only they can \
+     undo it, so PCTwin left it as it is";
 const KEPT_DAMAGED: &str =
     "the copy PCTwin kept of your earlier settings is damaged, so they were left as they are";
 
 /// Records an undo step through the effect's own role (the installs or settings recorder).
 fn record(
-    journal: &Journal,
+    rebuild: &Rebuild<'_>,
     permit: &UndoPermit<'_>,
-    e: &EffectEntry,
+    role: RebuildRole,
+    id: u64,
     undo: &EffectUndo,
 ) -> Result<(), JournalError> {
-    match e.role {
-        Role::Install => journal.installs().record_undo(permit, e.id, undo),
-        Role::Settings => journal.settings().record_undo(permit, e.id, undo),
-        // Never reached: imports are the imports role's to undo. Refused by its recorder if so.
-        Role::Import => journal.settings().record_undo(permit, e.id, undo),
+    match role {
+        RebuildRole::Install => rebuild.installs.record_undo(permit, id, undo),
+        RebuildRole::Settings => rebuild.settings.record_undo(permit, id, undo),
     }
 }
 
@@ -75,16 +75,17 @@ fn record(
 /// not yet checked, which is only reported). An error means the journal could not be read or
 /// written: undo stops there, and what was recorded part way is finished next time.
 pub fn undo_effects(
-    journal: &Journal,
+    rebuild: &Rebuild<'_>,
     permit: &UndoPermit<'_>,
     adapter: &mut dyn Adapter,
     scope: Scope,
 ) -> Result<Vec<Undone>, JournalError> {
+    let journal = rebuild.journal();
     let mut out = Vec::new();
     for e in journal.effects_of(scope)?.into_iter().rev() {
-        if !ours(&e) {
+        let Some(role) = ours(&e) else {
             continue;
-        }
+        };
         let before = journal.effect_undo_of(e.id)?;
         if let Some(EffectUndo::Done { outcome }) = &before
             && outcome.is_final()
@@ -106,6 +107,8 @@ pub fn undo_effects(
         };
         let mut u = One {
             journal,
+            rebuild,
+            role,
             permit,
             adapter: &mut *adapter,
             entry: &e,
@@ -130,9 +133,10 @@ pub fn undo_effects(
             StoredEffect::Import { .. } => continue,
         };
         record(
-            journal,
+            rebuild,
             permit,
-            &e,
+            role,
+            e.id,
             &EffectUndo::Done {
                 outcome: outcome.clone(),
             },
@@ -145,6 +149,8 @@ pub fn undo_effects(
 /// Undoing one effect.
 struct One<'a, 'j> {
     journal: &'a Journal,
+    rebuild: &'a Rebuild<'j>,
+    role: RebuildRole,
     permit: &'a UndoPermit<'j>,
     adapter: &'a mut dyn Adapter,
     entry: &'a EffectEntry,
@@ -165,9 +171,10 @@ impl One<'_, '_> {
     fn reversing(&mut self) -> Result<(), JournalError> {
         if !self.resumed {
             record(
-                self.journal,
+                self.rebuild,
                 self.permit,
-                self.entry,
+                self.role,
+                self.entry.id,
                 &EffectUndo::Reversing,
             )?;
             self.resumed = true;
