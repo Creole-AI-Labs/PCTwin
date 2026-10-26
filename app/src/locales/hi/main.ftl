@@ -33,7 +33,7 @@ home-move-body = अपना सेटअप ले जाएँ
 home-restore-body = उसे वापस लाएँ
 home-rescue-body = ज़रूरी चीज़ें बचाएँ
 home-history = मेरा इतिहास
-home-history-body = आपके स्थानांतरण, और आपकी भेजी और प्राप्त फ़ाइलें
+home-history-body = आपके स्थानांतरण और उनकी रिपोर्ट
 home-resume-body = आपकी प्रगति सहेजी गई है।
 home-resume-action = फिर शुरू करें
     .aria-label = अपना स्थानांतरण फिर से शुरू करें
@@ -46,10 +46,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = आपका लैपटॉप
-header-settings =
-    .aria-label = भाषा और एनिमेशन
-header-help =
-    .aria-label = मदद
 
 ## F06 Old or new laptop
 
@@ -1421,8 +1417,6 @@ qs-send-title = फ़ाइलें भेजें
 qs-send-body = अपने लैपटॉप पर फ़ाइलें या फ़ोल्डर चुनें।
 qs-receive-title = फ़ाइलें प्राप्त करें
 qs-receive-body = पास के किसी लैपटॉप को आपके लैपटॉप पर फ़ाइलें भेजने दें।
-qs-history-title = भेजी और प्राप्त फ़ाइलें
-qs-history-body = अपने लैपटॉप पर भेजी और प्राप्त हुई फ़ाइलें देखें।
 qs-home-action = फ़ाइलें चुनें
 qs-receiving = प्राप्त करने के लिए तैयार। पास के लैपटॉप आपके लैपटॉप को { $label } नाम से देखते हैं।
 qs-receive-stop = प्राप्त करना बंद करें
@@ -1501,8 +1495,6 @@ qs-stop-keep = भेजना जारी रखें
 history-title = आपके स्थानांतरण, इस लैपटॉप पर रखे हुए।
 history-body = कोई रिपोर्ट फिर से खोलें, या सहेजा गया स्थानांतरण आगे बढ़ाएं।
 history-row-move = { $from } → { $to }
-history-row-sent = { $label } को भेजा गया
-history-row-received = { $label } से प्राप्त हुआ
 history-status-finished = पूरा हुआ
 history-status-steps-left =
     { NUMBER($count) ->
@@ -1511,7 +1503,6 @@ history-status-steps-left =
     }
 history-status-paused = रुका हुआ
 history-status-stopped = सुरक्षित रूप से बंद
-history-status-partial = सब कुछ नहीं पहुँचा
 history-open-report = रिपोर्ट
 history-continue = आगे बढ़ें
 history-export = इतिहास फ़ाइल में सहेजें
@@ -1618,6 +1609,18 @@ qs-done-already =
 qs-done-stopped-body = रोकने से पहले पहुँची फ़ाइलें जाँची गईं और जहाँ सहेजी गईं, वहीं रहेंगी। और कुछ नहीं भेजा गया।
 qs-done-folder = { $folder } में सहेजी गईं
 qs-done-open-folder = फ़ोल्डर खोलें
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] यह फ़ाइल अपने पहुँचने का समय दिखाती है, इसलिए यह फ़ोल्डर में सबसे ऊपर है।
+       *[other] ये { $count } फ़ाइलें अपने पहुँचने का समय दिखाती हैं, इसलिए ये फ़ोल्डर में सबसे ऊपर हैं।
+    }
+qs-done-keep-dates = मूल तारीख़ें रखें
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल को उसकी मूल तारीख़ वापस मिल गई।
+       *[other] { $count } फ़ाइलों को उनकी मूल तारीख़ें वापस मिल गईं।
+    }
+qs-done-dates-failed = मूल तारीख़ें वापस नहीं लगाई जा सकीं। फ़ाइलें ठीक हैं और अपनी जगह पर हैं।
 qs-done-open-failed = फ़ोल्डर नहीं खुल सका। हो सकता है वह हटा दिया गया हो या मिटा दिया गया हो।
 qs-done-not-opened = PCTwin ने प्राप्त हुई कोई भी फ़ाइल न खोली, न चलाई।
 qs-done-problems-title = जिन फ़ाइलों पर ध्यान देना है
@@ -1633,7 +1636,6 @@ qs-done-send-missing-body = सिर्फ़ वे फ़ाइलें ज�
 qs-done-done = हो गया
 qs-stop-now = भेजना बंद करें
 qs-stop-finished = यह भेजना पहले ही पूरा हो चुका है।
-history-open-files = फ़ाइलें देखें
 qs-route-receiving = प्राप्त हो रहा है
 qs-receiving-title = फ़ाइलें आ रही हैं।
 qs-receiving-body = कॉपियाँ सीधे { $label } से आती हैं।

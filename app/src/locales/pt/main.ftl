@@ -33,7 +33,7 @@ home-move-body = Leve sua configuração
 home-restore-body = Traga de volta
 home-rescue-body = Salve o que importa
 home-history = Meu histórico
-home-history-body = Suas mudanças, e os arquivos que você enviou e recebeu
+home-history-body = Suas mudanças e seus relatórios
 home-resume-body = Seu progresso está salvo.
 home-resume-action = Retomar
     .aria-label = Retomar sua mudança
@@ -47,10 +47,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = Seu notebook
-header-settings =
-    .aria-label = Idioma e movimento
-header-help =
-    .aria-label = Ajuda
 
 ## F06 Old or new laptop
 
@@ -1462,8 +1458,6 @@ qs-send-title = Enviar arquivos
 qs-send-body = Escolha arquivos ou pastas no seu notebook.
 qs-receive-title = Receber arquivos
 qs-receive-body = Deixe um notebook por perto enviar arquivos para o seu.
-qs-history-title = Enviados e recebidos
-qs-history-body = Veja os arquivos enviados e recebidos no seu notebook.
 qs-home-action = Escolher arquivos
 qs-receiving = Pronto para receber. Notebooks por perto veem o seu como { $label }.
 qs-receive-stop = Parar de receber
@@ -1544,8 +1538,6 @@ qs-stop-keep = Continuar enviando
 history-title = Suas mudanças, guardadas neste notebook.
 history-body = Abra um relatório de novo ou continue uma mudança salva.
 history-row-move = { $from } → { $to }
-history-row-sent = Enviado para { $label }
-history-row-received = Recebido de { $label }
 history-status-finished = Concluído
 history-status-steps-left =
     { NUMBER($count) ->
@@ -1555,7 +1547,6 @@ history-status-steps-left =
     }
 history-status-paused = Pausado
 history-status-stopped = Interrompido com segurança
-history-status-partial = Nem tudo chegou
 history-open-report = Relatório
 history-continue = Continuar
 history-export = Exportar histórico
@@ -1666,6 +1657,20 @@ qs-done-already =
 qs-done-stopped-body = Os arquivos que chegaram antes da parada foram verificados e ficam onde foram salvos. Nada mais foi enviado.
 qs-done-folder = Salvos em { $folder }
 qs-done-open-folder = Abrir pasta
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] Este arquivo mostra a hora em que chegou, por isso está no topo da pasta.
+        [many] Estes { $count } de arquivos mostram a hora em que chegaram, por isso estão no topo da pasta.
+       *[other] Estes { $count } arquivos mostram a hora em que chegaram, por isso estão no topo da pasta.
+    }
+qs-done-keep-dates = Manter as datas originais
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } arquivo voltou a ter a data original.
+        [many] { $count } de arquivos voltaram a ter a data original.
+       *[other] { $count } arquivos voltaram a ter a data original.
+    }
+qs-done-dates-failed = Não foi possível devolver as datas originais. Os arquivos estão bem e continuam no lugar.
 qs-done-open-failed = Não foi possível abrir a pasta. Ela pode ter sido movida ou apagada.
 qs-done-not-opened = O PCTwin não abriu nem iniciou nenhum arquivo recebido.
 qs-done-problems-title = Arquivos que precisam de atenção
@@ -1681,7 +1686,6 @@ qs-done-send-missing-body = Só os arquivos que não chegaram. Primeiro você pa
 qs-done-done = Concluído
 qs-stop-now = Parar o envio
 qs-stop-finished = Este envio já terminou.
-history-open-files = Ver os arquivos
 qs-route-receiving = Recebendo
 qs-receiving-title = Os arquivos estão chegando.
 qs-receiving-body = As cópias vêm direto de { $label }.

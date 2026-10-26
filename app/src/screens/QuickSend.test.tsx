@@ -5,7 +5,7 @@ import { violations } from "../testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SAMPLES } from "../gallery/samples";
 import { localization } from "../i18n";
-import { extensionOf, fileName, fraction, formatBytes, historyStateOf, missingLines, receiptState, shownSafely, tally, type HistoryEntry, type PickedItem, type Receipt } from "../quicksend";
+import { extensionOf, fileName, fraction, formatBytes, missingLines, receiptState, shownSafely, tally, type HistoryEntry, type PickedItem, type Receipt } from "../quicksend";
 import { BLUE_FOX, GREEN_OWL, HISTORY, OFFER, PICKED, PROGRESS, RECEIPT_PARTIAL, RECEIPT_PROBLEMS, RECEIPT_WHOLE } from "../quicksend.fixtures";
 import { FooterProvider } from "./FrameFooter";
 import History from "./History";
@@ -67,14 +67,6 @@ describe("what the words depend on (how a send ended, history, sizes)", () => {
     expect(missingLines(RECEIPT_PARTIAL).map((l) => l.path)).toEqual(["Project brief.pdf", "Reference photos/beach.jpg"]);
   });
 
-  it("a Quick Send is only 'finished' in history when the receipt is whole", () => {
-    expect(historyStateOf(RECEIPT_WHOLE, false)).toBe("finished");
-    expect(historyStateOf(RECEIPT_WHOLE, true)).toBe("finished");
-    expect(historyStateOf(RECEIPT_PARTIAL, false)).toBe("partial");
-    expect(historyStateOf(RECEIPT_PARTIAL, true)).toBe("stopped");
-    expect(historyStateOf({ lines: [] }, false)).toBe("partial");
-  });
-
   it("progress is a counted fraction, never more than whole or less than none", () => {
     expect(fraction(1, 4)).toBe(0.25);
     expect(fraction(9, 4)).toBe(1);
@@ -90,30 +82,30 @@ describe("what the words depend on (how a send ended, history, sizes)", () => {
 
 describe("Q01 Quick Send home", () => {
   const home = (props: Partial<Parameters<typeof QuickHome>[0]> = {}) => {
-    const events = { onSend: fn(), onReceive: fn(), onHistory: fn(), onBack: fn(), onStopReceiving: fn() };
+    const events = { onSend: fn(), onReceive: fn(), onBack: fn(), onStopReceiving: fn() };
     inApp(<QuickHome {...events} {...props} />);
     return events;
   };
 
-  it("takes focus on its heading and offers Send, Receive and what was sent and received as cards", () => {
+  it("takes focus on its heading and offers Send and Receive as cards, with no record of past sends", () => {
     home();
     expect(h1()).toBe(text("qs-home-title"));
     expect(document.activeElement?.tagName).toBe("H1");
     expect(screen.getAllByRole("button").map((b) => plain(b.textContent))).toEqual(
-      expect.arrayContaining([expect.stringContaining(text("qs-send-title")), expect.stringContaining(text("qs-receive-title")), expect.stringContaining(text("qs-history-title"))]),
+      expect.arrayContaining([expect.stringContaining(text("qs-send-title")), expect.stringContaining(text("qs-receive-title"))]),
     );
+    // Quick Send remembers nothing it sent or received.
+    expect(document.body.textContent).not.toMatch(/history|sent and received/i);
   });
 
   it("raises the right event for each card, the main action and Back", () => {
     const e = home();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-send-title")) }));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-receive-title")) }));
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(text("qs-history-title")) }));
     fireEvent.click(button("qs-home-action"));
     fireEvent.click(button("frame-back"));
     expect(e.onSend).toHaveBeenCalledTimes(2);
     expect(e.onReceive).toHaveBeenCalledTimes(1);
-    expect(e.onHistory).toHaveBeenCalledTimes(1);
     expect(e.onBack).toHaveBeenCalledTimes(1);
   });
 
@@ -314,6 +306,28 @@ describe("Q14 Done", () => {
     return events;
   };
 
+  it("the receiver's files show when they arrived, with Keep original dates; the sender never sees it", () => {
+    const onKeepDates = fn();
+    done({ side: "receive", folder: "Downloads", dates: { kind: "new", count: 3 }, onKeepDates });
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-done-dates-new", { count: 3 })));
+    fireEvent.click(button("qs-done-keep-dates"));
+    expect(onKeepDates).toHaveBeenCalledTimes(1);
+    cleanup();
+    done({ side: "receive", folder: "Downloads", dates: { kind: "kept", count: 3 } });
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-done-dates-kept", { count: 3 })));
+    expect(maybeButton("qs-done-keep-dates")).toBeNull();
+    cleanup();
+    done({ side: "receive", folder: "Downloads", dates: { kind: "failed" } });
+    expect(screen.getByText(text("qs-done-dates-failed"))).toBeTruthy();
+    cleanup();
+    // Nothing newly written (all already there, say): nothing to offer.
+    done({ side: "receive", folder: "Downloads", dates: { kind: "new", count: 0 }, onKeepDates });
+    expect(maybeButton("qs-done-keep-dates")).toBeNull();
+    cleanup();
+    done({ dates: { kind: "new", count: 3 }, onKeepDates });
+    expect(maybeButton("qs-done-keep-dates")).toBeNull();
+  });
+
   it("everything arrived: says so on each side, with one line of what arrived and matched", () => {
     done();
     expect(h1()).toBe(text("qs-done-sent-title"));
@@ -483,25 +497,24 @@ describe("F08 My PCTwin history", () => {
   it("lists newest first, says it stays on this laptop, and has no account", () => {
     history();
     const rows = screen.getAllByRole("listitem").map((li) => plain(li.textContent));
-    expect(rows[0]).toContain("Green Owl");
-    expect(rows[rows.length - 1]).toContain("Blue Fox");
+    expect(rows[0]).toContain("Kitchen laptop");
+    expect(rows[rows.length - 1]).toContain("Office PC");
     expect(screen.getByText(text("history-note"))).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/account(?! needed)|sign[ -]?in|log[ -]?in/i);
   });
 
-  it("each state is its own word: only a whole send or finished move is 'Finished'", () => {
+  it("each state is its own word: only a finished move is 'Finished'", () => {
     history();
     expect(screen.getAllByText(text("history-status-finished")).length).toBe(1);
-    expect(screen.getByText(text("history-status-partial"))).toBeTruthy();
     expect(screen.getByText(text("history-status-paused"))).toBeTruthy();
     expect(screen.getByText(text("history-status-stopped"))).toBeTruthy();
     expect(screen.getByText(text("history-status-steps-left", { count: 2 }))).toBeTruthy();
   });
 
-  it("opens a report for a move and the files for a send, and continues only a paused move", () => {
+  it("lists moves only, opens each one's report, and continues only a paused move", () => {
     const e = history();
-    const reports = screen.getAllByRole("button", { name: (n) => plain(n).startsWith(text("history-open-report")) || plain(n).startsWith(text("history-open-files")) });
-    expect(reports.map((b) => b.textContent)).toEqual([text("history-open-files"), text("history-open-files"), text("history-open-report"), text("history-open-report"), text("history-open-files")]);
+    const reports = screen.getAllByRole("button", { name: (n) => plain(n).startsWith(text("history-open-report")) });
+    expect(reports.map((b) => b.textContent)).toEqual([text("history-open-report"), text("history-open-report"), text("history-open-report"), text("history-open-report")]);
     expect(document.body.textContent).not.toMatch(/receipt/i);
     fireEvent.click(reports[0]);
     expect(e.onOpen).toHaveBeenCalledWith("h1");

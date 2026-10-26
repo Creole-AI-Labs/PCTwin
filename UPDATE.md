@@ -13,7 +13,9 @@ Progress updates for anyone following along. The newest update is at the top. We
 **In progress**
 
 - **Quick Send is simpler.** The sender picks files and shows a code; the moment the two laptops are paired, the files start moving. The receiver types the code and the files go to its Downloads folder (or a folder it picks with Change). There are no extra check, approve or accept pages, and no receipts: each side ends on one page that says what arrived and checked, and lists only what did not.
-- **Quick Send talks about "this laptop" and "the other laptop"**, never an old or a new one.
+- **Quick Send says "your laptop"**, and names the other one (or calls it the sending or receiving laptop), never an old or a new one.
+- **Received files show when they arrived**, so they sit at the top of Downloads. One button on the last page, Keep original dates, gives them back the dates they came with (for old photos, say). A file you already had is never touched.
+- **Quick Send remembers nothing.** What you sent or received is not kept in PCTwin; the files stay where they landed. My history now lists moves only, and sends an earlier version kept are removed from it.
 
 ## 25 October 2026
 

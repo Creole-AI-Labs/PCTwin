@@ -180,6 +180,44 @@ button {
   box-shadow: 0 12px 32px -12px #1b2f5b40;
 }
 
+ul.header-settings-panel {
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+}
+
+.header-choice {
+  display: block;
+  width: 100%;
+  min-height: var(--control-small);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--colour-ink);
+  font: inherit;
+  font-size: var(--type-supporting);
+  text-align: start;
+  cursor: pointer;
+}
+
+.header-choice:hover {
+  background: var(--colour-soft);
+}
+
+/* The current choice: a tinted row and a bold label, never colour alone. */
+.header-choice[aria-pressed="true"] {
+  background: var(--colour-soft);
+  font-weight: 600;
+}
+
+.header-choice[aria-pressed="true"]::after {
+  content: "✓";
+  float: inline-end;
+  color: var(--colour-blue);
+}
+
 .header-settings-panel select {
   width: 100%;
 }

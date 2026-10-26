@@ -9,6 +9,7 @@ import {
   qsFolder,
   qsOffer,
   qsOfferMissing,
+  qsKeepOriginalDates,
   qsOpenFolder,
   qsPause,
   qsPick,
@@ -75,6 +76,8 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
   const [folder, setFolder] = useState<QsFolder | null>(null);
   const [folderFailed, setFolderFailed] = useState(false);
   const [openFailed, setOpenFailed] = useState(false);
+  // After Keep original dates: how many got theirs back, or that it could not be done.
+  const [datesKept, setDatesKept] = useState<{ kind: "kept"; count: number } | { kind: "failed" } | null>(null);
   const [stopping, setStopping] = useState(false);
   const [failed, setFailed] = useState(false);
   const [tooMany, setTooMany] = useState(false);
@@ -323,6 +326,17 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
           stopped={view.receipt.stopped}
           folder={sender ? null : (folder?.name ?? null)}
           openFailed={openFailed}
+          dates={datesKept ?? { kind: "new", count: view.receipt.newDates }}
+          onKeepDates={() => {
+            qsKeepOriginalDates().then(
+              (count) => {
+                setDatesKept({ kind: "kept", count });
+              },
+              () => {
+                setDatesKept({ kind: "failed" });
+              },
+            );
+          }}
           onOpenFolder={() => {
             setOpenFailed(false);
             qsOpenFolder().catch(() => {

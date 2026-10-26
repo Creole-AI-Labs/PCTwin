@@ -33,7 +33,7 @@ home-move-body = Move your setup
 home-restore-body = Bring it back
 home-rescue-body = Save what matters
 home-history = My history
-home-history-body = Your moves, and the files you sent and received
+home-history-body = Your moves and their reports
 home-resume-body = Your progress is saved.
 home-resume-action = Resume
     .aria-label = Resume your move
@@ -43,13 +43,9 @@ home-waiting =
        *[other] { $count } files waiting for { $to }
     }
 
-## Header: this laptop, the language and motion control, Help
+## Header: your laptop, then the language and motion controls (Help is in the footer)
 
 header-this-laptop = Your laptop
-header-settings =
-    .aria-label = Language and motion
-header-help =
-    .aria-label = Help
 
 ## F06 Old or new laptop
 
@@ -1296,8 +1292,6 @@ qs-send-title = Send files
 qs-send-body = Choose files or folders on your laptop.
 qs-receive-title = Receive files
 qs-receive-body = Let a laptop nearby send files to yours.
-qs-history-title = Sent and received
-qs-history-body = See the files sent and received on your laptop.
 qs-home-action = Choose files
 qs-receiving = Ready to receive. Other laptops nearby see yours as { $label }.
 qs-receive-stop = Stop receiving
@@ -1376,8 +1370,6 @@ qs-stop-keep = Keep sending
 history-title = Your moves, kept on this laptop.
 history-body = Open a report again, or carry on with a saved move.
 history-row-move = { $from } → { $to }
-history-row-sent = Sent to { $label }
-history-row-received = Received from { $label }
 history-status-finished = Completed
 history-status-steps-left =
     { NUMBER($count) ->
@@ -1386,7 +1378,6 @@ history-status-steps-left =
     }
 history-status-paused = Paused
 history-status-stopped = Stopped safely
-history-status-partial = Not all arrived
 history-open-report = Report
 history-continue = Continue
 history-export = Export history
@@ -1493,6 +1484,18 @@ qs-done-already =
 qs-done-stopped-body = Files that arrived before the stop were checked and stay where they were saved. Nothing else was sent.
 qs-done-folder = Saved in { $folder }
 qs-done-open-folder = Open folder
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] This file shows the time it arrived, so it is at the top of the folder.
+       *[other] These { $count } files show the time they arrived, so they are at the top of the folder.
+    }
+qs-done-keep-dates = Keep original dates
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } file has its original date again.
+       *[other] { $count } files have their original dates again.
+    }
+qs-done-dates-failed = The original dates could not be put back. The files are fine and stay where they are.
 qs-done-open-failed = The folder could not be opened. It may have been moved or deleted.
 qs-done-not-opened = PCTwin did not open or run any received file.
 qs-done-problems-title = Files that need attention
@@ -1508,7 +1511,6 @@ qs-done-send-missing-body = Only the files that did not arrive. You pair the lap
 qs-done-done = Done
 qs-stop-now = Stop sending
 qs-stop-finished = This send has already finished.
-history-open-files = See the files
 qs-route-receiving = Receiving
 qs-receiving-title = Files are arriving.
 qs-receiving-body = Copies come straight from { $label }.

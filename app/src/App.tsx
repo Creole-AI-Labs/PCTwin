@@ -20,14 +20,12 @@ import QuickHost from "./screens/QuickHost";
 import HistoryHost from "./screens/HistoryHost";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
-import HeaderSettings from "./components/HeaderSettings";
-import { Question } from "./icons";
+import { HeaderLanguage, HeaderMotion } from "./components/HeaderSettings";
 import Opening from "./motion/Opening";
 import { openingKind, type OpeningKind } from "./motion/openingRule";
 import { applyToDocument } from "./motion/preference";
 import { restoreReveal } from "./motion/play";
 import { installScreenMotion, settleScreen } from "./motion/screen";
-import { HELP_URL, openExternal } from "./external";
 import "./styles.css";
 
 /** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), pairing (C03 to C05), then the move; and Quick Send's home. */
@@ -45,8 +43,8 @@ type Screen =
   | { id: "pickup"; unfinished: number }
   // Quick Send, either way, from its home.
   | { id: "qs"; mode: "send" | "receive" }
-  // My PCTwin history (F08), from Home or Quick Send's home; Back returns there.
-  | { id: "history"; from: "welcome" | "quick" }
+  // My PCTwin history (F08), from Home; Back returns there.
+  | { id: "history" }
   // Help (S01), from the footer; Back returns to where it was opened.
   | { id: "help"; from: Screen }
   | { id: "soon"; which: Soon }
@@ -179,20 +177,9 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               <Localized id="header-this-laptop">
                 <span className="header-badge">This laptop</span>
               </Localized>
-              <HeaderSettings language={language} onLanguage={choose} />
-              <Localized id="header-help" attrs={{ "aria-label": true }}>
-                <button
-                  type="button"
-                  className="header-icon"
-                  aria-label="Help"
-                  onClick={() => {
-                    if (onHelp) onHelp();
-                    else void openExternal(HELP_URL);
-                  }}
-                >
-                  <Question />
-                </button>
-              </Localized>
+              <HeaderLanguage language={language} onLanguage={choose} />
+              {/* Help is in the footer of every page, so the header keeps only the settings. */}
+              <HeaderMotion />
             </div>
           </header>
           <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>
@@ -201,7 +188,7 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 onStart={startMove}
                 onSoon={(which) => { setScreen({ id: "soon", which }); }}
                 onQuick={() => { setScreen({ id: "quick", notice: false }); }}
-                onHistory={() => { setScreen({ id: "history", from: "welcome" }); }}
+                onHistory={() => { setScreen({ id: "history" }); }}
                 unfinished={unfinished > 0}
                 onResume={() => { setScreen({ id: "pickup", unfinished }); }}
                 // Waiting sends (Q18) are not built in the engine yet, so Home has none to show.
@@ -212,11 +199,10 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 notice={screen.notice}
                 onSend={() => { setScreen({ id: "qs", mode: "send" }); }}
                 onReceive={() => { setScreen({ id: "qs", mode: "receive" }); }}
-                onHistory={() => { setScreen({ id: "history", from: "quick" }); }}
                 onBack={() => { setScreen({ id: "welcome" }); }}
               />
             )}
-            {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen(screen.from === "welcome" ? { id: "welcome" } : { id: "quick", notice: false }); }} />}
+            {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "qs" && <QuickHost mode={screen.mode} onHome={() => { setScreen({ id: "quick", notice: false }); }} />}
             {screen.id === "soon" && <ComingSoon which={screen.which} onBack={() => { setScreen({ id: "welcome" }); }} />}
             {screen.id === "role" && <WhichLaptop onBack={() => { setScreen({ id: "welcome" }); }} onChoose={(role) => { setScreen({ id: "connect", role }); }} />}

@@ -24,6 +24,7 @@ import {
   listenQuickSend,
   qsChooseFolder,
   qsFolder,
+  qsKeepOriginalDates,
   qsOpenFolder,
   qsClear,
   qsAcceptDrops,
@@ -226,6 +227,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsChooseFolder();
       await qsFolder().catch(() => undefined);
       await qsOpenFolder();
+      await qsKeepOriginalDates().catch(() => undefined);
       await qsPause();
       await qsResume();
       await qsStop();

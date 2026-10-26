@@ -37,10 +37,10 @@ const progress = (patch: Partial<typeof PROGRESS>) => (
 const done = (props: Partial<Parameters<typeof QuickDone>[0]>) => <QuickDone side="send" receipt={RECEIPT_WHOLE} files={OFFER} onDone={nothing} {...props} />;
 
 export const samples: Sample[] = [
-  { id: "Q01-default", title: "Quick Send home", size: "everyday", render: () => <QuickHome onSend={nothing} onReceive={nothing} onHistory={nothing} onBack={nothing} /> },
-  { id: "Q01-receiving", title: "Quick Send home, ready to receive", size: "everyday", render: () => <QuickHome receiving={BLUE_FOX} onSend={nothing} onReceive={nothing} onStopReceiving={nothing} onHistory={nothing} onBack={nothing} /> },
-  { id: "Q01-no-nearby", title: "Quick Send home, no laptop found nearby", size: "everyday", render: () => <QuickHome receiving={BLUE_FOX} noNearby onSend={nothing} onReceive={nothing} onStopReceiving={nothing} onHistory={nothing} onBack={nothing} /> },
-  { id: "Q01-not-connected", title: "Quick Send home, engine not connected yet", size: "everyday", render: () => <QuickHome notice onSend={nothing} onReceive={nothing} onHistory={nothing} onBack={nothing} /> },
+  { id: "Q01-default", title: "Quick Send home", size: "everyday", render: () => <QuickHome onSend={nothing} onReceive={nothing} onBack={nothing} /> },
+  { id: "Q01-receiving", title: "Quick Send home, ready to receive", size: "everyday", render: () => <QuickHome receiving={BLUE_FOX} onSend={nothing} onReceive={nothing} onStopReceiving={nothing} onBack={nothing} /> },
+  { id: "Q01-no-nearby", title: "Quick Send home, no laptop found nearby", size: "everyday", render: () => <QuickHome receiving={BLUE_FOX} noNearby onSend={nothing} onReceive={nothing} onStopReceiving={nothing} onBack={nothing} /> },
+  { id: "Q01-not-connected", title: "Quick Send home, engine not connected yet", size: "everyday", render: () => <QuickHome notice onSend={nothing} onReceive={nothing} onBack={nothing} /> },
 
   { id: "Q02-empty", title: "Choose files, nothing chosen", size: "everyday", render: () => <Pick items={[]} /> },
   { id: "Q02-chosen", title: "Choose files, three chosen", size: "everyday", render: () => <Pick items={PICKED} /> },

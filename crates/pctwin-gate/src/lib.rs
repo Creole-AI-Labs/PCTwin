@@ -1326,6 +1326,59 @@ impl Destination {
         }))
     }
 
+    /// Gives the regular file at the stored path `stored` the modified time `time`, only while it
+    /// is still the file `expected` (by identity) and has no other name: a file put at that name
+    /// since, or one also reachable from elsewhere, is never touched. `Ok(false)` when no regular
+    /// file is there, it is another one, or it has more than one name. Never follows a link, and
+    /// opens the file for its attributes only: its bytes cannot be changed through this.
+    pub fn set_modified_time(
+        &self,
+        stored: &str,
+        expected: FileId,
+        time: std::time::SystemTime,
+    ) -> io::Result<bool> {
+        let Some((dir, name)) = self.open_stored_folder(stored)? else {
+            return Ok(false);
+        };
+        match dir.symlink_metadata(name) {
+            Ok(meta) if meta.is_file() => {}
+            Ok(_) => return Ok(false),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        let mut options = OpenOptions::new();
+        #[cfg(windows)]
+        {
+            use cap_std::fs::OpenOptionsExt;
+            const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const SYNCHRONIZE: u32 = 0x0010_0000;
+            const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+            options
+                .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+        }
+        #[cfg(not(windows))]
+        {
+            // Setting the time on Linux and macOS needs the file's owner, not write access; a
+            // read-only open is enough and changes nothing in it.
+            options.read(true);
+        }
+        let file = match dir.open_with(name, &options) {
+            Ok(f) => f.into_std(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        };
+        // One name only: a file with a second name elsewhere (a hard link) is the same file there
+        // too, and its date is not this folder's to change.
+        let (id, names) = identity(&file)?;
+        if !file.metadata()?.is_file() || id != expected || names != 1 {
+            return Ok(false);
+        }
+        file.set_modified(time)?;
+        Ok(true)
+    }
+
     /// The identity of the folder at the stored path `stored` (`""` is the approved folder
     /// itself), or `None` if there is no folder there. Never follows a link.
     pub fn folder_identity(&self, stored: &str) -> io::Result<Option<FileId>> {

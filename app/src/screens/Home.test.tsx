@@ -106,7 +106,7 @@ describe("F01 Home: Returning and First use", () => {
     fireEvent.click(screen.getByRole("button", { name: /Rescue a laptop/ }));
     expect(calls.soon).toHaveBeenLastCalledWith("rescue");
     const history = screen.getByRole("button", { name: /My history/ });
-    expect(history.textContent).toContain("Your moves, and the files you sent and received");
+    expect(history.textContent).toContain("Your moves and their reports");
     fireEvent.click(history);
     expect(calls.history).toHaveBeenCalledTimes(1);
   });

@@ -84,16 +84,13 @@ export type SendProgress = {
 };
 
 export type MoveHistoryState = "finished" | "steps-left" | "paused" | "stopped";
-export type SendHistoryState = "finished" | "stopped" | "partial";
 
 /**
- * One thing done on this laptop: a move, or a Quick Send either way. Kept locally, no account. Only the
- * bridge says "finished", and for a Quick Send only when the receipt is whole (see historyStateOf).
- * `when` is an ISO 8601 date and time; `from`, `to` and `peer` are the laptops' names as the person saw them.
+ * One move done on this laptop, kept locally, no account. Only the bridge says "finished". Quick Send
+ * keeps nothing: what was sent or received is not remembered (decided 26 October 2026). `when` is an
+ * ISO 8601 date and time; `from` and `to` are the laptops' names as the person saw them.
  */
-export type HistoryEntry =
-  | { id: string; kind: "move"; when: string; from: string; to: string; state: MoveHistoryState; stepsLeft?: number }
-  | { id: string; kind: "send" | "receive"; when: string; peer: string; state: SendHistoryState };
+export type HistoryEntry = { id: string; kind: "move"; when: string; from: string; to: string; state: MoveHistoryState; stepsLeft?: number };
 
 /* ---------- Rules the words depend on ---------- */
 
@@ -158,12 +155,6 @@ export function receiptState(receipt: Receipt): "complete" | "partial" | "empty"
 /** The lines that still need to go: failed or not accepted. */
 export function missingLines(receipt: Receipt): ReceiptLine[] {
   return receipt.lines.filter((l) => l.outcome.kind === "failed" || l.outcome.kind === "declined");
-}
-
-/** The history state a finished Quick Send gets: never "finished" unless the receipt is whole. */
-export function historyStateOf(receipt: Receipt, stopped: boolean): SendHistoryState {
-  if (receiptState(receipt) === "complete") return "finished";
-  return stopped ? "stopped" : "partial";
 }
 
 /** A fraction from 0 to 1 of counted bytes; 0 when nothing is to be sent. */
