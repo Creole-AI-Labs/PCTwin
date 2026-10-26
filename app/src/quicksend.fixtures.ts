@@ -58,9 +58,8 @@ export const RECEIPT_PROBLEMS: Receipt = {
 };
 
 export const HISTORY: HistoryEntry[] = [
-  { id: "h1", kind: "send", when: "2026-10-15T14:05:00Z", peer: "Green Owl", state: "finished" },
-  { id: "h2", kind: "receive", when: "2026-10-14T10:20:00Z", peer: "Sam’s laptop", state: "partial" },
+  { id: "h1", kind: "move", when: "2026-10-15T14:05:00Z", from: "Kitchen laptop", to: "New laptop", state: "finished" },
   { id: "h3", kind: "move", when: "2026-10-12T18:00:00Z", from: "Old laptop", to: "New laptop", state: "paused" },
   { id: "h4", kind: "move", when: "2026-09-28T09:00:00Z", from: "Studio PC", to: "Studio laptop", state: "steps-left", stepsLeft: 2 },
-  { id: "h5", kind: "send", when: "2026-09-20T16:40:00Z", peer: "Blue Fox", state: "stopped" },
+  { id: "h5", kind: "move", when: "2026-09-20T16:40:00Z", from: "Office PC", to: "Office laptop", state: "stopped" },
 ];

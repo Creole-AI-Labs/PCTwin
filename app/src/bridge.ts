@@ -909,27 +909,27 @@ export async function listenQuickSend(handler: (event: QsEvent) => void): Promis
 
 /* ---------- History (src-tauri/src/history.rs) ---------- */
 
-/** One thing done on this laptop, as the app recorded it when it ended. */
+/** One move done on this laptop, as the app recorded it when it ended. Quick Send keeps nothing. */
 export type HistoryEntryRaw = {
   id: string;
-  kind: "move" | "send" | "receive";
+  kind: "move";
   when: string;
   other: Label | null;
-  state: "finished" | "steps-left" | "stopped" | "partial";
+  state: "finished" | "steps-left" | "stopped";
   stepsLeft: number;
 };
 
 export function parseHistoryEntry(value: unknown): HistoryEntryRaw | null {
   const f = exactly(value, ["id", "kind", "when", "other", "state", "stepsLeft"]);
   if (!f || typeof f.id !== "string" || typeof f.when !== "string" || !isCount(f.stepsLeft)) return null;
-  if (!oneOf(f.kind, ["move", "send", "receive"] as const) || !oneOf(f.state, ["finished", "steps-left", "stopped", "partial"] as const)) return null;
+  if (!oneOf(f.kind, ["move"] as const) || !oneOf(f.state, ["finished", "steps-left", "stopped"] as const)) return null;
   const other = f.other === null ? null : parseLabelView(f.other);
   if (f.other !== null && other === null) return null;
   return { id: f.id, kind: f.kind, when: f.when, other, state: f.state, stepsLeft: f.stepsLeft };
 }
 
-/** What an entry kept: a move's report or a send's receipt. */
-export type Kept = { kind: "report"; items: ReportItem[] } | { kind: "receipt"; receipt: QsReceipt };
+/** What an entry kept: the move's report. */
+export type Kept = { kind: "report"; items: ReportItem[] };
 
 export function parseKept(value: unknown): Kept | null {
   const kind = typeof value === "object" && value !== null ? (value as Fields).kind : undefined;
@@ -937,11 +937,6 @@ export function parseKept(value: unknown): Kept | null {
     const f = exactly(value, ["kind", "items"]);
     const items = f && listOf(f.items, parseReportItem);
     return items ? { kind, items } : null;
-  }
-  if (kind === "receipt") {
-    const f = exactly(value, ["kind", "receipt"]);
-    const receipt = f && parseQsReceipt(f.receipt);
-    return receipt ? { kind, receipt } : null;
   }
   return null;
 }

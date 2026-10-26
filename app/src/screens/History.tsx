@@ -14,11 +14,10 @@ function tone(state: HistoryEntry["state"]): "good" | "warn" | "neutral" {
 }
 
 /**
- * F08 My PCTwin history: the moves and Quick Sends done on this laptop, newest first, each with its
- * report or receipt, and Start a full move as the main action. Kept on this laptop only: no account,
- * nothing sent anywhere. A state says "Finished" only when the bridge says the whole thing finished
- * (for a Quick Send that is a receipt with every file in place, see historyStateOf). Export saves a
- * plain copy of the list; the bridge says where it went (or that it could not).
+ * F08 My PCTwin history: the moves done on this laptop, newest first, each with its report, and
+ * Start a full move as the main action. Kept on this laptop only: no account, nothing sent anywhere.
+ * Quick Send keeps nothing here. A state says "Finished" only when the bridge says the whole move
+ * finished. Export saves a plain copy of the list; the bridge says where it went (or that it could not).
  * Events: onOpen(id), onContinue(id) for a paused move, onExport, onStart, onBack.
  */
 export default function History({
@@ -41,12 +40,9 @@ export default function History({
   const { l10n } = useLocalization();
   const language = typeof document === "undefined" ? "en" : document.documentElement.lang;
   const sorted = [...entries].sort((a, b) => Date.parse(b.when) - Date.parse(a.when));
-  const title = (e: HistoryEntry) =>
-    e.kind === "move"
-      ? l10n.getString("history-row-move", { from: e.from, to: e.to })
-      : l10n.getString(e.kind === "send" ? "history-row-sent" : "history-row-received", { label: e.peer });
+  const title = (e: HistoryEntry) => l10n.getString("history-row-move", { from: e.from, to: e.to });
   const status = (e: HistoryEntry) =>
-    e.kind === "move" && e.state === "steps-left" ? l10n.getString("history-status-steps-left", { count: e.stepsLeft ?? 0 }) : l10n.getString(`history-status-${e.state}`);
+    e.state === "steps-left" ? l10n.getString("history-status-steps-left", { count: e.stepsLeft ?? 0 }) : l10n.getString(`history-status-${e.state}`);
   return (
     <>
       <QsStrip onBack={onBack} />
@@ -96,12 +92,12 @@ export default function History({
                   )}
                   <Button
                     variant="quiet"
-                    aria-label={l10n.getString("history-open-name", { what: l10n.getString(e.kind === "move" ? "history-open-report" : "history-open-files"), title: title(e) })}
+                    aria-label={l10n.getString("history-open-name", { what: l10n.getString("history-open-report"), title: title(e) })}
                     onClick={() => {
                       onOpen(e.id);
                     }}
                   >
-                    {l10n.getString(e.kind === "move" ? "history-open-report" : "history-open-files")}
+                    {l10n.getString("history-open-report")}
                   </Button>
                 </>
               }

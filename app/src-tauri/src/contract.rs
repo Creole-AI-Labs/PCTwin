@@ -598,7 +598,7 @@ fn families() -> Vec<(&'static str, Value)> {
                 },
                 crate::history::Entry {
                     id: "1792627200000-1".into(),
-                    kind: "send".into(),
+                    kind: "move".into(),
                     when: "2026-10-22T00:05:00Z".into(),
                     other: None,
                     state: "finished".into(),

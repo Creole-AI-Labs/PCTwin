@@ -514,14 +514,6 @@ pub async fn quicksend_send<R: Runtime>(
                         laptop,
                         receipt: r.clone(),
                     });
-                    crate::history::add(
-                        &app,
-                        "send",
-                        None,
-                        crate::history::send_state(&view),
-                        0,
-                        &crate::history::receipt_kept(&view),
-                    );
                     let _ = app.emit(RECEIPT_EVENT, view);
                 }
                 Err(e) => {
@@ -591,14 +583,6 @@ pub async fn quicksend_receive<R: Runtime>(
                 Ok(r) => {
                     let stopped = live.control.stopped();
                     let view = receipt_view("receiver", &r, stopped);
-                    crate::history::add(
-                        &app,
-                        "receive",
-                        None,
-                        crate::history::send_state(&view),
-                        0,
-                        &crate::history::receipt_kept(&view),
-                    );
                     let _ = app.emit(RECEIPT_EVENT, view);
                 }
                 Err(e) => {

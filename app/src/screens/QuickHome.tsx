@@ -3,15 +3,15 @@ import { Banner, Button } from "../components/kit";
 import { ArrowForward } from "../icons";
 import { labelText, type Label } from "../pairing";
 import FrameFooter from "./FrameFooter";
-import { Folder, Heading, QsStrip, Tile } from "./QsParts";
+import { Folder, Heading, QsStrip } from "./QsParts";
 
 /**
- * Q01 Quick Send home: Send files and Receive files as the two big choice cards, then what was
- * sent and received on this laptop in one smaller row card (the mockup's Request and Pending rows are out of scope),
- * with Choose files as the main action in the window footer. While this laptop is ready to receive, `receiving`
+ * Q01 Quick Send home: Send files and Receive files as the two big choice cards (Quick Send keeps no
+ * record of what was sent or received, so there is no history row; the mockup's Request and Pending
+ * rows are out of scope), with Choose files as the main action in the window footer. While this laptop is ready to receive, `receiving`
  * carries the name nearby laptops see for it, and `noNearby` says no other laptop was found. `notice`
  * says the engine is not connected yet (the screens exist, nothing is sent or received).
- * Events: onSend, onReceive, onStopReceiving, onHistory, onBack.
+ * Events: onSend, onReceive, onStopReceiving, onBack.
  */
 export default function QuickHome({
   receiving,
@@ -20,7 +20,6 @@ export default function QuickHome({
   onSend,
   onReceive,
   onStopReceiving,
-  onHistory,
   onBack,
 }: {
   receiving?: Label;
@@ -29,7 +28,6 @@ export default function QuickHome({
   onSend: () => void;
   onReceive: () => void;
   onStopReceiving?: () => void;
-  onHistory: () => void;
   onBack: () => void;
 }) {
   const { l10n } = useLocalization();
@@ -98,23 +96,6 @@ export default function QuickHome({
           </li>
         ))}
       </ul>
-
-      <div className="qs-rows">
-        <button type="button" className="qs-rowlink" onClick={onHistory}>
-          <Tile>
-            <Folder size={18} />
-          </Tile>
-          <span>
-            <Localized id="qs-history-title">
-              <strong />
-            </Localized>
-            <Localized id="qs-history-body">
-              <small />
-            </Localized>
-          </span>
-          <ArrowForward />
-        </button>
-      </div>
 
       <FrameFooter note="send">
         <Button variant="primary" onClick={onSend}>

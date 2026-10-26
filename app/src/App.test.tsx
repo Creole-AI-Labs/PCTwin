@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { violations } from "./testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -173,29 +173,10 @@ describe("screens", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
-  it("Sent and received opens the history the app recorded, opens what a send brought again, and Back returns", async () => {
-    const l10n = localization("en");
-    tauri.invoke.mockImplementation((command: string) =>
-      Promise.resolve(
-        command === "history_list"
-          ? [{ id: "e1", kind: "receive", when: "2026-10-22T00:05:00Z", other: null, state: "finished", stepsLeft: 0 }]
-          : command === "history_open"
-            ? { kind: "receipt", receipt: { side: "receiver", stopped: false, lines: [{ path: "a.jpg", outcome: { kind: "arrived", landedAs: "a.jpg" } }] } }
-            : command === "recovery_check"
-              ? { unfinished: 0 }
-              : undefined,
-      ),
-    );
+  it("Quick Send home offers no history: what was sent or received is not remembered", () => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("history-title"));
-    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-peer-sending") }).replace(/[⁦-⁩]/g, ""));
-    expect(row).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("history-open-files")) }));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-done-here-title"));
-    });
+    expect(screen.queryByRole("button", { name: /history|sent and received/i })).toBeNull();
   });
 
   it("My history on Home opens the history, and Back returns to Home", async () => {
