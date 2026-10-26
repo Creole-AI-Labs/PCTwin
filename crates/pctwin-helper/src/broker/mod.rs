@@ -6,8 +6,9 @@
 //! itself ([`Broker::seal`]); the helper keeps it only if it matches. After that, each request
 //! ([`BrokerRequest`]) goes through, in order (plan section 4):
 //!
-//! 1. the protocol version, the session still open and not revoked, the plan sealed and its lease
-//!    not over;
+//! 1. the protocol version, the session still open and not revoked, the plan sealed, its lease
+//!    not over (each action renews the lease) and the session's fixed deadline not passed
+//!    ([`pctwin_grant::MAX_SESSION`] from sealing; nothing renews it);
 //! 2. the request's one-use nonce (a request said twice is refused);
 //! 3. the role it comes from: it must be one that may ask for privileged work, and the one that
 //!    owns this action;
@@ -349,6 +350,8 @@ pub struct Broker<'a> {
     launch: LaunchSeal,
     plan: Option<ApprovedPlan>,
     lease: Option<Expiry>,
+    /// The session's fixed end, set when the plan is sealed and never renewed.
+    deadline: Option<Expiry>,
     nonces: BTreeSet<Hex16>,
     closed: bool,
     revoker: Revoker,
@@ -374,6 +377,7 @@ impl<'a> Broker<'a> {
             launch,
             plan: None,
             lease: None,
+            deadline: None,
             nonces: BTreeSet::new(),
             closed: false,
             revoker: Revoker::default(),
@@ -415,8 +419,9 @@ impl<'a> Broker<'a> {
         {
             return Err(Denial::WrongPlan);
         }
-        self.lease =
-            Some(Expiry::after(MAX_LIFETIME, (self.clock)()).map_err(|_| Denial::Expired)?);
+        let now = (self.clock)();
+        self.lease = Some(Expiry::after(MAX_LIFETIME, now).map_err(|_| Denial::Expired)?);
+        self.deadline = Some(Expiry::session_from(now).map_err(|_| Denial::Expired)?);
         self.plan = Some(plan);
         Ok(())
     }
@@ -426,6 +431,7 @@ impl<'a> Broker<'a> {
         self.closed = true;
         self.plan = None;
         self.lease = None;
+        self.deadline = None;
         self.staging.clear();
     }
 
@@ -438,13 +444,14 @@ impl<'a> Broker<'a> {
             self.close();
             return Err(Denial::Revoked);
         }
-        match self.lease {
-            None => Err(Denial::NotSealed),
-            Some(lease) if lease.is_over((self.clock)()) => {
+        let now = (self.clock)();
+        match (self.lease, self.deadline) {
+            (Some(lease), Some(deadline)) if lease.is_over(now) || deadline.is_over(now) => {
                 self.close();
                 Err(Denial::Expired)
             }
-            Some(_) => Ok(()),
+            (Some(_), Some(_)) => Ok(()),
+            _ => Err(Denial::NotSealed),
         }
     }
 

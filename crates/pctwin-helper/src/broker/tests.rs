@@ -1252,3 +1252,41 @@ fn t22_005_an_oversized_request_is_refused_unread() {
         Err(crate::protocol::FrameError::TooLong)
     ));
 }
+
+/// Review finding 6: however busy, a session ends at a fixed deadline set when the plan was
+/// sealed: acting renews the lease, never the deadline.
+#[test]
+fn a_busy_session_still_ends_at_its_fixed_deadline() {
+    let mut rig = Rig::new();
+    rig.plan.operations = (0..24)
+        .map(|n| PlannedOperation {
+            action_id: id(&format!("rp.{n}")),
+            action: restore_point(),
+        })
+        .collect();
+    let requests: Vec<BrokerRequest> = (0..24).map(|n| rig.request(&format!("rp.{n}"))).collect();
+    let step = Duration::from_secs(14 * 60);
+    let times: Vec<Now> = (1..=24u32)
+        .map(|n| rig.at(step * n, i64::from(n) * 14 * 60))
+        .collect();
+    let now = Rc::clone(&rig.now);
+    let mut b = rig.broker();
+    let mut ended = None;
+    for (n, (r, t)) in requests.iter().zip(&times).enumerate() {
+        now.set(*t);
+        match b.handle(r) {
+            Answer::Done(_) => {}
+            Answer::Denied(d) => {
+                ended = Some((n, d));
+                break;
+            }
+        }
+    }
+    let (n, why) = ended.expect("the session ended");
+    assert_eq!(why, Denial::Expired);
+    // Every action inside the deadline was done; the first after it was not.
+    let ended_at = step * (n as u32 + 1);
+    assert!(ended_at > pctwin_grant::MAX_SESSION, "{ended_at:?}");
+    assert!(ended_at <= pctwin_grant::MAX_SESSION + step, "{ended_at:?}");
+    assert!(b.is_closed());
+}
