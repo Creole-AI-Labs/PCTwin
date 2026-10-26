@@ -1195,7 +1195,7 @@ qs-problem-failed-title = 这次未能发送文件。
 qs-problem-body = 已接收并检查的内容会保留在原处。重新配对两台笔记本电脑即可再试一次。
 qs-route =
     .aria-label = 从{ $from }到{ $to }
-qs-route-sender = 发送 · 这台笔记本电脑
+qs-route-sender = 正在发送
 qs-route-receiver = 接收 · 同一个Wi-Fi
 qs-tally =
     { NUMBER($count) ->
@@ -1415,3 +1415,19 @@ qs-done-done = 完成
 qs-stop-now = 停止发送
 qs-stop-finished = 这次发送已经完成。
 history-open-files = 查看文件
+qs-route-receiving = 正在接收
+qs-receiving-title = 文件正在到达。
+qs-receiving-body = 副本直接来自另一台笔记本电脑。
+qs-receiving-card = 正在接收文件
+qs-receiving-progress =
+    .aria-label = 正在接收文件
+qs-receiving-current = 正在接收：{ $name }
+qs-step-receiving-body =
+    { NUMBER($done) ->
+       *[other] 已到达{ $done }个文件。
+    }
+qs-tally-received =
+    { NUMBER($count) ->
+       *[other] { $count }个文件 · { $size }
+    }
+qs-receive-pause = 暂停

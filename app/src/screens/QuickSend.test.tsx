@@ -208,6 +208,31 @@ describe("Q12 Your files are on their way", () => {
     return events;
   };
 
+  it("the receiver's page is in receive words: never Sending selected files or Pause send", () => {
+    const e = { onPause: fn(), onResume: fn(), onCompact: fn(), onStop: fn() };
+    inApp(<QuickProgress side="receive" from={GREEN_OWL} to={BLUE_FOX} progress={PROGRESS} {...e} />);
+    const body = plain(document.body.textContent);
+    expect(h1()).toBe(text("qs-receiving-title"));
+    for (const id of ["qs-sending-card", "qs-pause", "qs-stop", "qs-sending-title"]) expect(body).not.toContain(text(id));
+    expect(body).not.toMatch(/Sending selected files|Pause send|selected item/);
+    expect(body).toContain(text("qs-receiving-card"));
+    expect(body).toContain(plain(text("qs-step-receiving-body", { done: 2 })));
+    expect(body).toContain(`Green Owl${text("qs-route-sender")}`);
+    expect(body).toContain(`Blue Fox${text("qs-route-receiving")}`);
+    fireEvent.click(button("qs-receive-pause"));
+    fireEvent.click(button("qs-receive-stop"));
+    expect(e.onPause).toHaveBeenCalled();
+    expect(e.onStop).toHaveBeenCalled();
+  });
+
+  it("the sender's route reads this laptop sending, the other laptop receiving", () => {
+    progress();
+    const body = plain(document.body.textContent);
+    expect(body).toContain(`Blue Fox${text("qs-route-sender")}`);
+    expect(body).toContain(`Green Owl${text("qs-route-receiver")}`);
+    expect(text("qs-route-sender")).toBe("Sending");
+  });
+
   it("the bar is the counted fraction of bytes, with the counts in words", () => {
     progress();
     const bar = screen.getByRole("progressbar");
@@ -572,13 +597,13 @@ describe("names from another laptop are shown safely", () => {
 });
 
 describe("pairing in Quick Send's words", () => {
-  it.each(["en", "fr", "es", "pt", "ar", "hi", "zh-CN"])("%s: every pairing line that names the laptops old or new has a Quick Send twin with other words", (lang) => {
+  it.each(["en", "fr", "es", "pt", "ar", "hi", "zh-CN"] as const)("%s: every pairing line that names the laptops old or new has a Quick Send twin with other words", (lang) => {
     const words = localization(lang);
     for (const id of QUICK_WORDS) {
       expect(words.getBundle(`qs-${id}`), `qs-${id}`).not.toBeNull();
       const vars = { seconds: 5, label: "Blue Fox", number: 42 };
       expect(words.getString(`qs-${id}`, vars), id).not.toBe(words.getString(id, vars));
-      if (lang === "en") expect(words.getString(`qs-${id}`, vars)).not.toMatch(/(old|new) laptop/i);
+      if (lang === "en") expect(words.getString(`qs-${id}`, vars)).not.toMatch(/\b(old|new) laptop/i);
     }
   });
 });

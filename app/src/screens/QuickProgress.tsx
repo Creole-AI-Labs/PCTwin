@@ -7,7 +7,7 @@ import { Heading, QsActions, QsStrip, Route, useAttribute } from "./QsParts";
 import { labelText } from "../pairing";
 
 /** The two stages and which one a phase is in. "lost" stops short: the copying has not finished. */
-function stages(p: SendProgress, say: (id: string, vars?: Record<string, number>) => string): StepItem[] {
+function stages(p: SendProgress, receiving: boolean, say: (id: string, vars?: Record<string, number>) => string): StepItem[] {
   const at: Record<SendProgress["phase"], [StepState, StepState]> = {
     copying: ["current", "todo"],
     paused: ["current", "todo"],
@@ -18,7 +18,7 @@ function stages(p: SendProgress, say: (id: string, vars?: Record<string, number>
   };
   const [copying, checking] = at[p.phase];
   return [
-    { state: copying, title: say("qs-step-copying"), body: say("qs-step-copying-body", { done: p.filesDone, total: p.filesTotal }) },
+    { state: copying, title: say("qs-step-copying"), body: say(receiving ? "qs-step-receiving-body" : "qs-step-copying-body", { done: p.filesDone, total: p.filesTotal }) },
     { state: checking, title: say("qs-step-checking"), body: say("qs-step-checking-body") },
   ];
 }
@@ -31,6 +31,7 @@ function stages(p: SendProgress, say: (id: string, vars?: Record<string, number>
  * or absent, nothing animates on its own. A change of phase is announced politely; the bar is not
  * announced on every tick. Keep it compact raises an event so the shell can show lane D's mini panel
  * (this screen does not build another).
+ * `side`: the receiver's page says files are arriving, in receive words; the sender's says they are on their way.
  * Events: onPause, onResume, onCompact, onStop.
  */
 export default function QuickProgress({
@@ -41,6 +42,7 @@ export default function QuickProgress({
   onResume,
   onCompact,
   onStop,
+  side = "send",
 }: {
   from: Label;
   to: Label;
@@ -49,28 +51,32 @@ export default function QuickProgress({
   onResume: () => void;
   onCompact: () => void;
   onStop: () => void;
+  side?: "send" | "receive";
 }) {
   const { l10n } = useLocalization();
   const attribute = useAttribute();
   const bytes = useBytes();
   const language = typeof document === "undefined" ? "en" : document.documentElement.lang;
-  const label = labelText(l10n, to);
+  const receiving = side === "receive";
+  // The other laptop: the one files go to, or come from.
+  const label = labelText(l10n, receiving ? from : to);
+  const say = (send: string, receive: string) => (receiving ? receive : send);
   const paused = p.phase === "paused";
   const lost = p.phase === "lost";
   const live = !paused && !lost;
   const value = fraction(p.bytesDone, p.bytesTotal);
   const detail = [
-    live && p.current ? l10n.getString("qs-sending-current", { name: fileName(p.current) }) : null,
+    live && p.current ? l10n.getString(say("qs-sending-current", "qs-receiving-current"), { name: fileName(p.current) }) : null,
     live && p.speed ? l10n.getString("qs-sending-speed", { speed: formatRate(p.speed.low, p.speed.high, language) }) : null,
   ].filter(Boolean);
   return (
     <>
-      <QsStrip onBack={undefined} />
-      <Heading id="qs-sending-title" />
-      <Localized id="qs-sending-body" vars={{ label }}>
+      <QsStrip onBack={undefined} receiving={receiving} />
+      <Heading id={say("qs-sending-title", "qs-receiving-title")} />
+      <Localized id={say("qs-sending-body", "qs-receiving-body")} vars={{ label }}>
         <p className="subhead" />
       </Localized>
-      <Route from={from} to={to} />
+      <Route from={from} to={to} receiving={receiving} />
 
       <div role="status" className="qs-status">
         {paused && (
@@ -105,21 +111,21 @@ export default function QuickProgress({
 
       <section className="qs-progress-card" aria-labelledby="qs-sending-card">
         <div className="qs-progress-head">
-          <Localized id="qs-sending-card">
+          <Localized id={say("qs-sending-card", "qs-receiving-card")}>
             <h2 id="qs-sending-card" />
           </Localized>
           <ProgressValue value={value} />
         </div>
         <ProgressBar
           value={value}
-          label={attribute("qs-sending-progress", "aria-label")}
-          left={l10n.getString("qs-tally", { count: p.filesDone, size: bytes(p.bytesDone) })}
+          label={attribute(say("qs-sending-progress", "qs-receiving-progress"), "aria-label")}
+          left={l10n.getString(say("qs-tally", "qs-tally-received"), { count: p.filesDone, size: bytes(p.bytesDone) })}
           right={l10n.getString("qs-progress-of", { total: bytes(p.bytesTotal) })}
         />
         {detail.length > 0 && <p className="qs-small">{detail.join(" · ")}</p>}
       </section>
 
-      <Steps steps={stages(p, (id, vars) => l10n.getString(id, vars))} />
+      <Steps steps={stages(p, receiving, (id, vars) => l10n.getString(id, vars))} />
 
       <QsActions>
         {p.phase === "complete" ? null : paused ? (
@@ -132,7 +138,7 @@ export default function QuickProgress({
           !lost &&
           p.phase !== "needs-action" && (
             <Button onClick={onPause}>
-              <Localized id="qs-pause">
+              <Localized id={say("qs-pause", "qs-receive-pause")}>
                 <span />
               </Localized>
             </Button>
@@ -147,7 +153,7 @@ export default function QuickProgress({
         )}
         {p.phase !== "complete" && (
           <Button variant="quiet" onClick={onStop}>
-            <Localized id="qs-stop">
+            <Localized id={say("qs-stop", "qs-receive-stop")}>
               <span />
             </Localized>
           </Button>

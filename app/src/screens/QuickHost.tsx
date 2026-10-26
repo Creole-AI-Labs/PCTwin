@@ -286,6 +286,7 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
             from={from}
             to={to}
             progress={view.progress}
+            side={sender ? "send" : "receive"}
             onPause={() => void qsPause().catch(() => undefined)}
             onResume={() => void qsResume().catch(() => undefined)}
             onCompact={() => undefined}

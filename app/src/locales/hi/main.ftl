@@ -1404,7 +1404,7 @@ qs-problem-body = जो पहले से मिल चुका और ज�
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = { $from } से { $to } तक
-qs-route-sender = भेज रहा है · यह लैपटॉप
+qs-route-sender = भेजा जा रहा है
 qs-route-receiver = प्राप्त कर रहा है · वही Wi-Fi
 qs-tally =
     { NUMBER($count) ->
@@ -1634,3 +1634,21 @@ qs-done-done = हो गया
 qs-stop-now = भेजना बंद करें
 qs-stop-finished = यह भेजना पहले ही पूरा हो चुका है।
 history-open-files = फ़ाइलें देखें
+qs-route-receiving = प्राप्त हो रहा है
+qs-receiving-title = फ़ाइलें आ रही हैं।
+qs-receiving-body = कॉपियाँ सीधे दूसरे लैपटॉप से आती हैं।
+qs-receiving-card = फ़ाइलें प्राप्त हो रही हैं
+qs-receiving-progress =
+    .aria-label = फ़ाइलें प्राप्त हो रही हैं
+qs-receiving-current = अभी प्राप्त हो रही है: { $name }
+qs-step-receiving-body =
+    { NUMBER($done) ->
+        [one] { $done } फ़ाइल पहुँची।
+       *[other] { $done } फ़ाइलें पहुँचीं।
+    }
+qs-tally-received =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल · { $size }
+       *[other] { $count } फ़ाइलें · { $size }
+    }
+qs-receive-pause = कुछ देर रोकें

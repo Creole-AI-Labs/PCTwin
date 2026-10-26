@@ -243,10 +243,10 @@ describe("receiving", () => {
     await waitFor(() => {
       expect(called("quicksend_receive")).toBe(true);
     });
-    expect(heading()).toBe(text("qs-sending-title"));
+    expect(heading()).toBe(text("qs-receiving-title"));
     // What is offered is not a page: the receive is already going.
     send("quicksend-incoming", { files: offeredExamples });
-    expect(heading()).toBe(text("qs-sending-title"));
+    expect(heading()).toBe(text("qs-receiving-title"));
     send("quicksend-receipt", receipts[0]);
     expect(heading()).toBe(text("qs-done-partial-title"));
     // A file there but not finished is never shown as arrived.

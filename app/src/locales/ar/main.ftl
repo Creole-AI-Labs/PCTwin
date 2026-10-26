@@ -1591,7 +1591,7 @@ qs-problem-body = يبقى كل ما استُلم وتم التحقق منه ف�
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = من { $from } إلى { $to }
-qs-route-sender = إرسال · هذا الحاسوب
+qs-route-sender = الإرسال
 qs-route-receiver = استلام · شبكة Wi-Fi نفسها
 qs-tally =
     { NUMBER($count) ->
@@ -1853,3 +1853,29 @@ qs-done-done = تم
 qs-stop-now = إيقاف الإرسال
 qs-stop-finished = انتهى هذا الإرسال بالفعل.
 history-open-files = عرض الملفات
+qs-route-receiving = الاستلام
+qs-receiving-title = الملفات في الطريق إليك.
+qs-receiving-body = تأتي النسخ مباشرة من الحاسوب الآخر.
+qs-receiving-card = استلام الملفات
+qs-receiving-progress =
+    .aria-label = استلام الملفات
+qs-receiving-current = جارٍ الاستلام: { $name }
+qs-step-receiving-body =
+    { NUMBER($done) ->
+        [zero] { $done } ملف وصلت.
+        [one] وصل ملف واحد.
+        [two] وصل ملفان.
+        [few] { $done } ملفات وصلت.
+        [many] { $done } ملفًا وصلت.
+       *[other] { $done } ملف وصلت.
+    }
+qs-tally-received =
+    { NUMBER($count) ->
+        [zero] { $count } ملف · { $size }
+        [one] ملف واحد · { $size }
+        [two] ملفان · { $size }
+        [few] { $count } ملفات · { $size }
+        [many] { $count } ملفًا · { $size }
+       *[other] { $count } ملف · { $size }
+    }
+qs-receive-pause = إيقاف مؤقت

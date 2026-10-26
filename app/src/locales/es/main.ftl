@@ -1440,7 +1440,7 @@ qs-problem-body = Lo que ya se recibió y comprobó se queda donde está. Vuelve
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = De { $from } a { $to }
-qs-route-sender = Envía · este portátil
+qs-route-sender = Enviando
 qs-route-receiver = Recibe · misma Wi-Fi
 qs-tally =
     { NUMBER($count) ->
@@ -1678,3 +1678,23 @@ qs-done-done = Listo
 qs-stop-now = Parar el envío
 qs-stop-finished = Este envío ya terminó.
 history-open-files = Ver los archivos
+qs-route-receiving = Recibiendo
+qs-receiving-title = Los archivos están llegando.
+qs-receiving-body = Las copias llegan directamente del otro portátil.
+qs-receiving-card = Recibiendo archivos
+qs-receiving-progress =
+    .aria-label = Recibiendo archivos
+qs-receiving-current = Recibiendo: { $name }
+qs-step-receiving-body =
+    { NUMBER($done) ->
+        [one] { $done } archivo llegó.
+        [many] { $done } de archivos llegaron.
+       *[other] { $done } archivos llegaron.
+    }
+qs-tally-received =
+    { NUMBER($count) ->
+        [one] { $count } archivo · { $size }
+        [many] { $count } de archivos · { $size }
+       *[other] { $count } archivos · { $size }
+    }
+qs-receive-pause = Pausar

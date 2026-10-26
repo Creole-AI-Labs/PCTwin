@@ -43,7 +43,8 @@ export function QsStrip({ onBack, receiving = false }: { onBack?: () => void; re
 }
 
 /** Who sends to whom: the two laptops, one under the other, each with its role. */
-export function Route({ from, to }: { from: Label; to: Label }) {
+/** `receiving`: this laptop is the receiver (the second row), so its line says Receiving, without the Wi-Fi note. */
+export function Route({ from, to, receiving = false }: { from: Label; to: Label; receiving?: boolean }) {
   const { l10n } = useLocalization();
   const attribute = useAttribute();
   const a = labelText(l10n, from);
@@ -52,7 +53,7 @@ export function Route({ from, to }: { from: Label; to: Label }) {
     <div className="qs-route" role="group" aria-label={attribute("qs-route", "aria-label", { from: a, to: b })}>
       {[
         { who: a, role: "qs-route-sender" },
-        { who: b, role: "qs-route-receiver" },
+        { who: b, role: receiving ? "qs-route-receiving" : "qs-route-receiver" },
       ].map(({ who, role }) => (
         <div key={role} className="qs-route-row">
           <Tile>
