@@ -1243,13 +1243,13 @@ qs-choose-continue = 继续
 qs-sending-title = 你的文件正在发送中。
 qs-sending-body = 副本直接发送到接收方电脑。
 qs-sending-progress =
-    .aria-label = 正在发送选择的文件
+    .aria-label = 正在发送文件
 qs-sending-current = 正在发送：{ $name }
 qs-sending-speed = { $speed }（实测）
 qs-step-copying = 正在复制
 qs-step-copying-body =
     { NUMBER($done) ->
-       *[other] 已接收{ $done }个选择的项目。
+       *[other] 已发送{ $done }个文件。
     }
 qs-step-checking = 正在检查
 qs-step-checking-body = 每个文件都会与原文件进行比对。
@@ -1316,7 +1316,7 @@ qs-tally-counting =
     }
 qs-gone = { $name }已不在原处。它可能已被移动或删除。请取消勾选，或者把它放回原处后重新添加。
 qs-choose-why-problems = 部分已勾选的项目暂时无法发送。请取消勾选，或按说明解决后继续。
-qs-sending-card = 正在发送选择的文件
+qs-sending-card = 正在发送文件
 qs-progress-of = 共 { $total }
 history-open-name = { $what }：{ $title }
 
@@ -1426,7 +1426,7 @@ qs-step-receiving-body =
     { NUMBER($done) ->
        *[other] 已到达{ $done }个文件。
     }
-qs-tally-received =
+qs-tally-files =
     { NUMBER($count) ->
        *[other] { $count }个文件 · { $size }
     }

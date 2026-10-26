@@ -1491,16 +1491,16 @@ qs-choose-continue = Continuar
 qs-sending-title = Tus archivos están en camino.
 qs-sending-body = Las copias van directamente al portátil que recibe.
 qs-sending-progress =
-    .aria-label = Enviando los archivos seleccionados
+    .aria-label = Enviando archivos
 qs-sending-current = Enviando: { $name }
 # $speed is measured and already formatted, for example "3.1 MB/s".
 qs-sending-speed = { $speed }, medida
 qs-step-copying = Copiando
 qs-step-copying-body =
     { NUMBER($done) ->
-        [one] { $done } elemento seleccionado recibido.
-        [many] { $done } de elementos seleccionados recibidos.
-       *[other] { $done } elementos seleccionados recibidos.
+        [one] { $done } archivo enviado.
+        [many] { $done } de archivos enviados.
+       *[other] { $done } archivos enviados.
     }
 qs-step-checking = Comprobando
 qs-step-checking-body = Cada archivo se compara con el original.
@@ -1573,7 +1573,7 @@ qs-tally-counting =
     }
 qs-gone = { $name } ya no está ahí. Puede que se haya movido o borrado. Desmárcalo, o vuelve a ponerlo en su sitio y añádelo de nuevo.
 qs-choose-why-problems = Algunos elementos marcados aún no se pueden enviar. Desmárcalos o soluciónalos como se indica para continuar.
-qs-sending-card = Enviando los archivos seleccionados
+qs-sending-card = Enviando archivos
 qs-progress-of = de { $total }
 history-open-name = { $what }: { $title }
 
@@ -1691,7 +1691,7 @@ qs-step-receiving-body =
         [many] { $done } de archivos llegaron.
        *[other] { $done } archivos llegaron.
     }
-qs-tally-received =
+qs-tally-files =
     { NUMBER($count) ->
         [one] { $count } archivo · { $size }
         [many] { $count } de archivos · { $size }

@@ -1454,15 +1454,15 @@ qs-choose-continue = जारी रखें
 qs-sending-title = आपकी फ़ाइलें रास्ते में हैं।
 qs-sending-body = कॉपियाँ सीधे पाने वाले लैपटॉप पर जाती हैं।
 qs-sending-progress =
-    .aria-label = चुनी गई फ़ाइलें भेजी जा रही हैं
+    .aria-label = फ़ाइलें भेजी जा रही हैं
 qs-sending-current = अभी भेजा जा रहा है: { $name }
 # $speed is measured and already formatted, for example "3.1 MB/s".
 qs-sending-speed = { $speed }, मापा गया
 qs-step-copying = कॉपी हो रहा है
 qs-step-copying-body =
     { NUMBER($done) ->
-        [one] { $done } चुना गया आइटम प्राप्त हुआ।
-       *[other] { $done } चुने गए आइटम प्राप्त हुए।
+        [one] { $done } फ़ाइल भेजी गई।
+       *[other] { $done } फ़ाइलें भेजी गईं।
     }
 qs-step-checking = जाँच
 qs-step-checking-body = हर फ़ाइल की तुलना मूल फ़ाइल से की जाती है।
@@ -1532,7 +1532,7 @@ qs-tally-counting =
     }
 qs-gone = { $name } अब यहां नहीं है। शायद इसे हटा दिया गया या दूसरी जगह ले जाया गया। इसका टिक हटाएं, या इसे वापस रखकर फिर से शामिल करें।
 qs-choose-why-problems = टिक किए गए कुछ आइटम अभी भेजे नहीं जा सकते। आगे बढ़ने के लिए उनका टिक हटाएं, या बताए गए तरीके से उन्हें ठीक करें।
-qs-sending-card = चुनी गई फ़ाइलें भेजी जा रही हैं
+qs-sending-card = फ़ाइलें भेजी जा रही हैं
 qs-progress-of = कुल { $total }
 history-open-name = { $what }: { $title }
 
@@ -1646,7 +1646,7 @@ qs-step-receiving-body =
         [one] { $done } फ़ाइल पहुँची।
        *[other] { $done } फ़ाइलें पहुँचीं।
     }
-qs-tally-received =
+qs-tally-files =
     { NUMBER($count) ->
         [one] { $count } फ़ाइल · { $size }
        *[other] { $count } फ़ाइलें · { $size }

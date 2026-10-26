@@ -1329,15 +1329,15 @@ qs-choose-continue = Continue
 qs-sending-title = Your files are on their way.
 qs-sending-body = Copies go straight to the receiving laptop.
 qs-sending-progress =
-    .aria-label = Sending selected files
+    .aria-label = Sending files
 qs-sending-current = Now sending: { $name }
 # $speed is measured and already formatted, for example "3.1 MB/s".
 qs-sending-speed = { $speed }, measured
 qs-step-copying = Copying
 qs-step-copying-body =
     { NUMBER($done) ->
-        [one] { $done } selected item received.
-       *[other] { $done } selected items received.
+        [one] { $done } file sent.
+       *[other] { $done } files sent.
     }
 qs-step-checking = Checking
 qs-step-checking-body = Each file is compared with the original.
@@ -1407,7 +1407,7 @@ qs-tally-counting =
     }
 qs-gone = { $name } is not there any more. It may have been moved or deleted. Untick it, or put it back and add it again.
 qs-choose-why-problems = Some ticked items cannot be sent yet. Untick them, or fix them as described, to continue.
-qs-sending-card = Sending selected files
+qs-sending-card = Sending files
 qs-progress-of = of { $total }
 history-open-name = { $what }: { $title }
 
@@ -1521,7 +1521,7 @@ qs-step-receiving-body =
         [one] { $done } file arrived.
        *[other] { $done } files arrived.
     }
-qs-tally-received =
+qs-tally-files =
     { NUMBER($count) ->
         [one] { $count } file · { $size }
        *[other] { $count } files · { $size }

@@ -237,7 +237,8 @@ describe("Q12 Your files are on their way", () => {
     progress();
     const bar = screen.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe(String(Math.round((2_000_000 / 7_800_000) * 100)));
-    expect(plain(document.body.textContent)).toContain(plain(text("qs-tally", { count: 2, size: "2 MB" })));
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-tally-files", { count: 2, size: "2 MB" })));
+    expect(plain(document.body.textContent)).not.toMatch(/selected/);
     expect(plain(document.body.textContent)).toContain(plain(text("qs-step-copying-body", { done: 2, total: 4 })));
   });
 

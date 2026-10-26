@@ -1645,19 +1645,19 @@ qs-choose-continue = متابعة
 qs-sending-title = ملفاتك في الطريق.
 qs-sending-body = تذهب النسخ مباشرة إلى الحاسوب المستلم.
 qs-sending-progress =
-    .aria-label = جارٍ إرسال الملفات المحددة
+    .aria-label = إرسال الملفات
 qs-sending-current = يُرسل الآن: { $name }
 # $speed is measured and already formatted, for example "3.1 MB/s".
 qs-sending-speed = { $speed }، حسب القياس
 qs-step-copying = النسخ
 qs-step-copying-body =
     { NUMBER($done) ->
-        [zero] تم استلام { $done } عنصر محدد.
-        [one] تم استلام عنصر واحد محدد.
-        [two] تم استلام عنصرين محددين.
-        [few] تم استلام { $done } عناصر محددة.
-        [many] تم استلام { $done } عنصرًا محددًا.
-       *[other] تم استلام { $done } عنصر محدد.
+        [zero] أُرسل { $done } ملف.
+        [one] أُرسل ملف واحد.
+        [two] أُرسل ملفان.
+        [few] أُرسلت { $done } ملفات.
+        [many] أُرسل { $done } ملفًا.
+       *[other] أُرسل { $done } ملف.
     }
 qs-step-checking = التحقق
 qs-step-checking-body = يُقارن كل ملف بالأصل.
@@ -1739,7 +1739,7 @@ qs-tally-counting =
     }
 qs-gone = لم يعد { $name } موجودًا. ربما نُقل أو حُذف. ألغِ تحديده، أو أعده إلى مكانه وأضفه مرة أخرى.
 qs-choose-why-problems = لا يمكن إرسال بعض العناصر المحددة بعد. ألغِ تحديدها، أو أصلحها كما هو موضح، للمتابعة.
-qs-sending-card = جارٍ إرسال الملفات المحددة
+qs-sending-card = إرسال الملفات
 qs-progress-of = من { $total }
 history-open-name = { $what }: { $title }
 
@@ -1869,7 +1869,7 @@ qs-step-receiving-body =
         [many] { $done } ملفًا وصلت.
        *[other] { $done } ملف وصلت.
     }
-qs-tally-received =
+qs-tally-files =
     { NUMBER($count) ->
         [zero] { $count } ملف · { $size }
         [one] ملف واحد · { $size }

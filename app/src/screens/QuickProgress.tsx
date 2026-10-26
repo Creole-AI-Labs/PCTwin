@@ -119,7 +119,7 @@ export default function QuickProgress({
         <ProgressBar
           value={value}
           label={attribute(say("qs-sending-progress", "qs-receiving-progress"), "aria-label")}
-          left={l10n.getString(say("qs-tally", "qs-tally-received"), { count: p.filesDone, size: bytes(p.bytesDone) })}
+          left={l10n.getString("qs-tally-files", { count: p.filesDone, size: bytes(p.bytesDone) })}
           right={l10n.getString("qs-progress-of", { total: bytes(p.bytesTotal) })}
         />
         {detail.length > 0 && <p className="qs-small">{detail.join(" · ")}</p>}
