@@ -257,6 +257,11 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl Moving {
+    /// Whether a move is going on this laptop (begun and not finished).
+    pub fn underway(&self) -> bool {
+        lock(&self.run).as_ref().is_some_and(|r| !r.finished)
+    }
+
     /// Starts a run, unless one is going.
     fn begin(&self) -> Result<(Live, Arc<AtomicBool>), MoveProblem> {
         let mut run = lock(&self.run);

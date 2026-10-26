@@ -906,6 +906,12 @@ fn calls() -> Value {
             { "name": "quicksend_pause", "args": [] },
             { "name": "quicksend_resume", "args": [] },
             { "name": "quicksend_stop", "args": [] },
+            { "name": "update_check", "args": [] },
+            { "name": "update_install", "args": [] },
+            { "name": "laptop_name", "args": [] },
+            { "name": "laptop_name_shuffle", "args": [] },
+            { "name": "laptop_name_use", "args": [] },
+            { "name": "laptop_name_type", "args": [["name", "Ezzy Laptop"]] },
         ],
         "events": {
             "old": OLD_EVENT,

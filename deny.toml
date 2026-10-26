@@ -55,6 +55,13 @@ ignore = true
 crate = "libfuzzer-sys"
 allow = ["NCSA"]
 
+# The updater's HTTPS (app/src-tauri/src/updates.rs) checks certificates against the standard
+# internet root certificates, which this crate carries as data under the Community Data License
+# Agreement, a permissive licence (26 October 2026). Allowed for that crate only.
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
@@ -106,6 +113,9 @@ deny = [
     # Third-party crates that use rustix themselves (checked 9 October 2026).
     "async-io", "async-process", "async-signal", "cap-primitives", "cap-std", "fs-set-times",
     "fs4", "polling", "rustix-linux-procfs", "tempfile", "zbus",
+    # The Mac updater unpacks the new app with tar, which keeps file attributes through xattr
+    # (checked 26 October 2026).
+    "xattr",
   ] },
 ]
 

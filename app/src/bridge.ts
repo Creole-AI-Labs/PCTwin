@@ -750,6 +750,43 @@ export function parseTidied(value: unknown): Tidied | null {
 
 export const recoveryCheck = () => ask("recovery_check", parseInterrupted);
 
+/* ---------- This laptop's name (src-tauri/src/laptop_name.rs) ---------- */
+
+/** The name this laptop keeps (null before one was chosen), and the one the naming page suggests. */
+export type NameView = { kept: Label | null; suggested: Label };
+
+export function parseNameView(value: unknown): NameView | null {
+  const f = exactly(value, ["kept", "suggested"]);
+  if (!f) return null;
+  const kept = f.kept === null ? null : parseLabelView(f.kept);
+  const suggested = parseLabelView(f.suggested);
+  return suggested && (f.kept === null || kept) ? { kept, suggested } : null;
+}
+
+export const laptopName = () => ask("laptop_name", parseNameView);
+/** Choose another name: a new random colour and animal, shown in place of the suggestion. */
+export const laptopNameShuffle = () => ask("laptop_name_shuffle", parseLabelView);
+/** Use this name: keeps the name shown. */
+export const laptopNameUse = () => ask("laptop_name_use", parseLabelView);
+/** Keeps a name the person typed; a name that cannot be used is refused as `pairing-name-invalid`. */
+export const laptopNameType = (name: string) => ask("laptop_name_type", parseLabelView, { name });
+
+/* ---------- Updates (src-tauri/src/updates.rs) ---------- */
+
+/** A newer build of PCTwin: its version. */
+export type Update = { version: string };
+
+export function parseUpdate(value: unknown): Update | null {
+  const f = exactly(value, ["version"]);
+  return f && typeof f.version === "string" && f.version !== "" ? { version: f.version } : null;
+}
+
+/** Whether a newer build is out; null when there is none or it cannot be told. */
+export const updateCheck = () =>
+  ask("update_check", (v) => (v === null ? { update: null } : (() => { const u = parseUpdate(v); return u ? { update: u } : null; })())).then((r) => r.update);
+/** Downloads, checks, installs the newer build and opens PCTwin again. Refused during a move. */
+export const updateInstall = () => run("update_install");
+
 /** "Your things are ready" (M32): what a hand-over at this person's sign-in did, counted. */
 export type ReadyNote = { landed: number; kept: number; failed: number };
 

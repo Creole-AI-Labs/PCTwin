@@ -595,6 +595,36 @@ h1 {
   background: var(--colour-blue-hover);
 }
 
+/* A newer version: the same banner, calm blue rather than the attention colour of a move left part way. */
+.home-update {
+  border-color: var(--colour-line);
+  background: var(--colour-soft);
+  color: var(--colour-muted);
+}
+
+.home-update-icon {
+  color: var(--colour-blue);
+  transform: rotate(-90deg);
+}
+
+.home-update-button {
+  flex: none;
+  min-height: 36px;
+  padding: 7px var(--space-3);
+  border: 0;
+  border-radius: 8px;
+  background: var(--colour-blue);
+  color: #fff;
+  font: inherit;
+  font-size: var(--type-tertiary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.home-update-button:hover {
+  background: var(--colour-blue-hover);
+}
+
 .home-waiting {
   display: inline-flex;
   align-items: center;

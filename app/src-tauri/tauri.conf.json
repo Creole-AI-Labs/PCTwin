@@ -30,6 +30,16 @@
       ]
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwMzExQ0UyNkYzQzlFMjAKUldRZ25qeHY0aHd4UUt3YzBFS2hwUCtxWXlUSnZPcE10UVRJRi84alRmNVplcEJtazhlSHNmaVIK",
+      "endpoints": ["https://pctwin-test.pages.dev/update/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

@@ -32,7 +32,7 @@ use tauri::{App, WebviewUrl, WebviewWindow};
 /// Exactly what the screens may call, 46 names: the app's forty-three commands, listening to and
 /// unlistening from its own events (two), and opening our own site in the browser (one). Changing
 /// this list is a security decision.
-const SCREENS_MAY_CALL: [&str; 50] = [
+const SCREENS_MAY_CALL: [&str; 56] = [
     "set_window_mode",
     "set_tray_labels",
     "pairing_old_start",
@@ -80,6 +80,12 @@ const SCREENS_MAY_CALL: [&str; 50] = [
     "quicksend_pause",
     "quicksend_resume",
     "quicksend_stop",
+    "update_check",
+    "update_install",
+    "laptop_name",
+    "laptop_name_shuffle",
+    "laptop_name_use",
+    "laptop_name_type",
     "plugin:event|listen",
     "plugin:event|unlisten",
     "plugin:opener|open_url",
@@ -577,7 +583,32 @@ fn the_merged_config_keeps_the_lockdown() {
     // The screens come from the app's own files, or the local dev server while developing.
     assert_eq!(config["build"]["frontendDist"], json!("../dist"));
     assert_eq!(config["build"]["devUrl"], json!("http://localhost:1420/"));
-    assert_eq!(config["plugins"], json!({}), "no plugin settings");
+    // The only plugin settings are the updater's (src/updates.rs): its key, one HTTPS address,
+    // signatures bound to their version, and nothing that would loosen the check (no plain-HTTP
+    // address allowed, no other plugin configured).
+    let plugins = config["plugins"].as_object().unwrap();
+    assert_eq!(
+        plugins.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["updater"],
+        "only the updater has settings"
+    );
+    let updater = plugins["updater"].as_object().unwrap();
+    assert_eq!(
+        updater.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+        BTreeSet::from(["endpoints", "pubkey", "requireSignedVersion", "windows"]),
+        "an updater setting was added (an insecure address, headers...)"
+    );
+    assert!(updater["pubkey"].as_str().is_some_and(|k| !k.is_empty()));
+    assert_eq!(updater["requireSignedVersion"], json!(true));
+    assert_eq!(updater["windows"], json!({ "installMode": "passive" }));
+    let endpoints = updater["endpoints"].as_array().unwrap();
+    assert!(!endpoints.is_empty());
+    assert!(
+        endpoints
+            .iter()
+            .all(|e| e.as_str().is_some_and(|u| u.starts_with("https://"))),
+        "updates come over HTTPS only"
+    );
 }
 
 /// The argument names the screens send (app/src/contract/shell/calls.json, written by the engine's

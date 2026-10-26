@@ -49,6 +49,12 @@ const COMMANDS: &[&str] = &[
     "quicksend_pause",
     "quicksend_resume",
     "quicksend_stop",
+    "update_check",
+    "update_install",
+    "laptop_name",
+    "laptop_name_shuffle",
+    "laptop_name_use",
+    "laptop_name_type",
 ];
 
 fn main() {

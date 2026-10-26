@@ -176,6 +176,50 @@ describe("F01 Home: Interrupted move", () => {
   });
 });
 
+describe("F01 Home: A newer version", () => {
+  const ready = { version: "0.1.42", state: "ready" as const };
+
+  it("says simply that a new version is available, and Update now installs it", async () => {
+    const onUpdate = vi.fn();
+    const calls = home({ update: ready, onUpdate });
+    const banner = document.querySelector(".home-update");
+    expect(banner?.textContent).toContain(text("home-update-title"));
+    // Just that: no version numbers or timings to read.
+    expect(plain(banner?.textContent)).toBe(text("home-update-title") + text("home-update-action"));
+    fireEvent.click(screen.getByRole("button", { name: text("home-update-action") }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(calls.start).not.toHaveBeenCalled();
+    expect(cards()).toHaveLength(4);
+    expect(await violations()).toEqual([]);
+    noStringsMissing();
+  });
+
+  it("while installing says PCTwin will open again, and offers nothing to press twice", () => {
+    home({ update: { ...ready, state: "installing" }, onUpdate: vi.fn() });
+    expect(document.querySelector(".home-update")?.textContent).toContain(text("home-updating"));
+    expect(screen.queryByRole("button", { name: text("home-update-action") })).toBeNull();
+  });
+
+  it("says plainly when it could not install, or that a move comes first", () => {
+    home({ update: { ...ready, state: "failed" }, onUpdate: vi.fn() });
+    expect(document.querySelector(".home-update")?.textContent).toContain(text("home-update-failed"));
+    cleanup();
+    home({ update: { ...ready, state: "busy" }, onUpdate: vi.fn() });
+    expect(document.querySelector(".home-update")?.textContent).toContain(text("home-update-busy"));
+  });
+
+  it("never sits beside Resume your move: a move comes first", () => {
+    home({ unfinished: true, onResume: vi.fn(), update: ready, onUpdate: vi.fn() });
+    expect(document.querySelector(".home-update")).toBeNull();
+    expect(screen.getByRole("button", { name: text("resume-open") })).toBeTruthy();
+  });
+
+  it("without an update, shows nothing", () => {
+    home();
+    expect(document.querySelector(".home-update")).toBeNull();
+  });
+});
+
 describe("F01 Home: Waiting files", () => {
   it("adds a quiet line under My history that names how many files wait and for which laptop", () => {
     const onWaiting = vi.fn();

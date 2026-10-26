@@ -16,6 +16,7 @@ mod help;
 mod history;
 #[cfg(test)]
 mod info_plist;
+mod laptop_name;
 pub mod limits;
 #[cfg(test)]
 mod lockdown;
@@ -25,6 +26,7 @@ mod pairing;
 mod quicksend;
 mod recovery;
 mod restart;
+mod updates;
 
 use serde::Deserialize;
 use tauri::ipc::Invoke;
@@ -226,6 +228,12 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         quicksend::quicksend_pause,
         quicksend::quicksend_resume,
         quicksend::quicksend_stop,
+        updates::update_check,
+        updates::update_install,
+        laptop_name::laptop_name,
+        laptop_name::laptop_name_shuffle,
+        laptop_name::laptop_name_use,
+        laptop_name::laptop_name_type,
     ]
 }
 
@@ -254,9 +262,11 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         // Remembers the size and position the person chose.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(restart::plugin())
+        .plugin(updates::plugin())
         .manage(pairing::new_state())
         .manage(moving::new_state())
         .manage(quicksend::new_state())
+        .manage(laptop_name::new_state())
         .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens
