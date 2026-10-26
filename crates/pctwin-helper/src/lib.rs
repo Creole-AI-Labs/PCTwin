@@ -13,6 +13,7 @@
 
 pub mod accepting;
 pub mod account;
+pub mod broker;
 pub mod client;
 pub mod lock;
 pub mod newlaptop;

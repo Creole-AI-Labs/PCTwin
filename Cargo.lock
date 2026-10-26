@@ -3614,16 +3614,20 @@ dependencies = [
 name = "pctwin-helper"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "getrandom 0.4.3",
  "pctwin-gate",
+ "pctwin-grant",
  "pctwin-helper-os",
  "pctwin-record",
  "pctwin-scan",
  "rustix",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
+ "wmi",
  "zeroize",
 ]
 
