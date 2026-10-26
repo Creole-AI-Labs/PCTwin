@@ -49,6 +49,13 @@ fn dir_of<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("history"))
 }
 
+/// Whether `id` is an entry ID as [`add`] makes them (digits, then a dash, then digits): the only
+/// names this module ever turns into a file name, so an index changed by hand can never point at
+/// a file outside the history folder ("../x", an absolute path).
+fn plain_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+}
+
 /// The moves kept here. A Quick Send an earlier version kept is removed, with what it kept, the
 /// first time the list is read: sends are not remembered.
 fn read_index(dir: &Path) -> Vec<Entry> {
@@ -62,7 +69,7 @@ fn read_index(dir: &Path) -> Vec<Entry> {
         && let Ok(bytes) = serde_json::to_vec(&moves)
         && write_whole(&dir.join("index.json"), &bytes).is_ok()
     {
-        for e in &sends {
+        for e in sends.iter().filter(|e| plain_id(&e.id)) {
             let _ = std::fs::remove_file(dir.join(format!("{}.json", e.id)));
         }
     }
@@ -181,7 +188,7 @@ pub fn history_list<R: Runtime>(app: AppHandle<R>) -> Vec<Entry> {
 #[tauri::command]
 pub fn history_open<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Kept, MoveProblem> {
     let dir = dir_of(&app).ok_or(MoveProblem::Failed)?;
-    if !read_index(&dir).iter().any(|e| e.id == id) {
+    if !plain_id(&id) || !read_index(&dir).iter().any(|e| e.id == id) {
         return Err(MoveProblem::Failed);
     }
     let bytes = std::fs::read(dir.join(format!("{id}.json"))).map_err(|_| MoveProblem::Failed)?;
@@ -309,6 +316,37 @@ mod tests {
             "the list itself forgets them"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// PR #109 review: an index changed by hand cannot make the clean-up delete, or Open read, a
+    /// file outside the history folder.
+    #[test]
+    fn only_plain_entry_ids_become_file_names() {
+        let root = std::env::temp_dir().join(format!("pctwin-history-ids-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("history");
+        std::fs::create_dir_all(&dir).unwrap();
+        let outside = root.join("victim.json");
+        std::fs::write(&outside, b"keep me").unwrap();
+        let entry = |id: &str| Entry {
+            id: id.into(),
+            kind: "send".into(),
+            when: "2026-10-25T00:00:00Z".into(),
+            other: None,
+            state: "finished".into(),
+            steps_left: 0,
+        };
+        let absolute = root.join("victim").display().to_string();
+        let old = vec![entry("../victim"), entry(&absolute)];
+        std::fs::write(dir.join("index.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        assert!(read_index(&dir).is_empty());
+        assert!(
+            outside.exists(),
+            "nothing outside the history folder is removed"
+        );
+        assert!(plain_id("1792627200000-3"));
+        assert!(!plain_id("../victim") && !plain_id(&absolute) && !plain_id(""));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

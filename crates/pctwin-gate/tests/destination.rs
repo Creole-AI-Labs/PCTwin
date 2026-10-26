@@ -60,6 +60,18 @@ fn a_received_files_date_changes_only_on_that_very_file() {
         std::fs::metadata(&on_disk).unwrap().modified().unwrap(),
         theirs
     );
+    // A file with a second name elsewhere (a hard link): left as it is.
+    std::fs::remove_file(&on_disk).unwrap();
+    let elsewhere = root.path().join("elsewhere.jpg");
+    std::fs::write(&elsewhere, b"outside").unwrap();
+    std::fs::hard_link(&elsewhere, &on_disk).unwrap();
+    let linked = dest.stat(&stored).unwrap().unwrap();
+    let before = std::fs::metadata(&elsewhere).unwrap().modified().unwrap();
+    assert!(!dest.set_modified_time(&stored, linked.id, when).unwrap());
+    assert_eq!(
+        std::fs::metadata(&elsewhere).unwrap().modified().unwrap(),
+        before
+    );
     // Nothing there, or a folder there: nothing to change.
     assert!(!dest.set_modified_time("Photos/gone.jpg", id, when).unwrap());
     assert!(!dest.set_modified_time("Photos", id, when).unwrap());

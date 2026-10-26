@@ -1327,8 +1327,9 @@ impl Destination {
     }
 
     /// Gives the regular file at the stored path `stored` the modified time `time`, only while it
-    /// is still the file `expected` (by identity): a file put at that name since is never touched.
-    /// `Ok(false)` when no regular file is there or it is another one. Never follows a link, and
+    /// is still the file `expected` (by identity) and has no other name: a file put at that name
+    /// since, or one also reachable from elsewhere, is never touched. `Ok(false)` when no regular
+    /// file is there, it is another one, or it has more than one name. Never follows a link, and
     /// opens the file for its attributes only: its bytes cannot be changed through this.
     pub fn set_modified_time(
         &self,
@@ -1368,7 +1369,10 @@ impl Destination {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
             Err(e) => return Err(e),
         };
-        if !file.metadata()?.is_file() || identity(&file)?.0 != expected {
+        // One name only: a file with a second name elsewhere (a hard link) is the same file there
+        // too, and its date is not this folder's to change.
+        let (id, names) = identity(&file)?;
+        if !file.metadata()?.is_file() || id != expected || names != 1 {
             return Ok(false);
         }
         file.set_modified(time)?;
