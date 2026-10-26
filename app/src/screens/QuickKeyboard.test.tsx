@@ -1,6 +1,6 @@
 import { LocalizationProvider } from "@fluent/react";
 import type { ReactNode } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import offeredExamples from "../contract/qs-offered.json";
@@ -33,7 +33,7 @@ const LANGUAGES = ["en", "fr", "es", "pt", "ar", "hi", "zh-CN"] as const;
 let replies: Partial<Record<string, (args: unknown) => unknown>> = {};
 
 beforeEach(() => {
-  replies = {};
+  replies = { pairing_heads_up: () => [], pairing_new_search: () => [] };
   tauri.handlers.clear();
   tauri.invoke.mockReset();
   tauri.invoke.mockImplementation((command: string, args?: unknown) => Promise.resolve().then(() => replies[command]?.(args)));
@@ -68,7 +68,7 @@ describe.each(LANGUAGES)("Quick Send by keyboard alone (QS08), %s", (lang) => {
   // A label may sit inside a longer accessible name (an icon's words, a count).
   const named = (id: string) => (n: string) => n.includes(text(id));
 
-  it("the sender picks, offers and checks with the keyboard only", async () => {
+  it("the sender picks and offers with the keyboard only, and lands on pairing in Quick Send's words", async () => {
     replies.quicksend_pick = () => [{ id: "p1", name: "letter.txt", kind: "file", included: true, bytes: 1200, files: 1 }];
     replies.quicksend_offer = () => offeredExamples;
     const user = userEvent.setup();
@@ -82,36 +82,33 @@ describe.each(LANGUAGES)("Quick Send by keyboard alone (QS08), %s", (lang) => {
     await tabTo(user, "button", named("qs-choose-continue"));
     await user.keyboard("{Enter}");
     await waitFor(() => {
-      expect(heading()).toBe(text("qs-check-title"));
+      expect(tauri.invoke).toHaveBeenCalledWith("pairing_old_start", { network: null });
     });
     expect(tauri.invoke).toHaveBeenCalledWith("quicksend_offer", { ids: ["p1"] });
+    act(() => {
+      tauri.handlers.get("pairing-old")?.({ payload: { kind: "code", code: "123456", secondsLeft: 50 } });
+    });
+    const words = document.body.textContent;
+    expect(words).toContain(text("qs-pair-old-body"));
+    // Never the full move's words for the laptops.
+    for (const id of ["pair-old-eyebrow", "pair-old-body", "pair-old-waiting", "pair-old-steps-title"]) expect(words).not.toContain(text(id));
   });
 
-  it("the receiver sees the offer, accepts and chooses a folder with the keyboard only", async () => {
-    replies.quicksend_choose_folder = () => ({ path: "C:/Users/Ada/Downloads", freeBytes: 80_000_000_000 });
+  it("the receiver changes the folder with the keyboard only, on a pairing page in Quick Send's words", async () => {
+    replies.quicksend_folder = () => ({ name: "Downloads", path: "C:/Users/Ada/Downloads", freeBytes: 80_000_000_000 });
+    replies.quicksend_choose_folder = () => ({ name: "Work", path: "D:/Work", freeBytes: null });
     const user = userEvent.setup();
     inApp(<QuickHost mode="receive" onHome={vi.fn()} />);
     await waitFor(() => {
       expect(tauri.invoke).toHaveBeenCalledWith("pairing_new_search");
     });
-    tauri.handlers.get("quicksend-incoming")?.({ payload: { files: offeredExamples } });
-    await waitFor(() => {
-      expect(heading()).toBe(text("qs-offer-title"));
-    });
-    await tabTo(user, "button", named("qs-offer-accept"));
-    await user.keyboard("{Enter}");
-    expect(heading()).toBe(text("qs-land-title"));
-    await tabTo(user, "button", named("qs-land-choose"));
+    await tabTo(user, "button", named("qs-folder-change"));
     await user.keyboard("{Enter}");
     await waitFor(() => {
-      expect(screen.getByText("C:/Users/Ada/Downloads")).toBeTruthy();
+      expect(tauri.invoke.mock.calls.some((c: unknown[]) => c[0] === "quicksend_choose_folder")).toBe(true);
     });
-    await tabTo(user, "checkbox", named("qs-land-confirm"));
-    await user.keyboard(" ");
-    await tabTo(user, "button", named("qs-land-use"));
-    await user.keyboard("{Enter}");
-    await waitFor(() => {
-      expect(tauri.invoke).toHaveBeenCalledWith("quicksend_answer", { answer: { kind: "accept", ids: null } });
-    });
+    const words = document.body.textContent;
+    for (const id of ["pair-new-eyebrow", "pair-new-none-title", "pair-new-none-body", "pair-new-none-same-role", "pair-new-switch"]) expect(words).not.toContain(text(id));
+    expect(words).toContain(text("qs-pair-new-none-title"));
   });
 });

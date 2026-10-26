@@ -5,10 +5,9 @@
  */
 import { Localized, useLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
-import { Badge, Row, RowList } from "../components/kit";
-import { Check, Laptop } from "../icons";
+import { Badge, RowList } from "../components/kit";
+import { Laptop } from "../icons";
 import { labelText, type Label } from "../pairing";
-import { extensionOf, fileName, shownSafely, useBytes } from "../quicksend";
 import { TopStrip } from "./FrameParts";
 import "./quicksend.css";
 
@@ -44,7 +43,8 @@ export function QsStrip({ onBack, receiving = false }: { onBack?: () => void; re
 }
 
 /** Who sends to whom: the two laptops, one under the other, each with its role. */
-export function Route({ from, to }: { from: Label; to: Label }) {
+/** `receiving`: this laptop is the receiver (the second row), so its line says Receiving, without the Wi-Fi note. */
+export function Route({ from, to, receiving = false }: { from: Label; to: Label; receiving?: boolean }) {
   const { l10n } = useLocalization();
   const attribute = useAttribute();
   const a = labelText(l10n, from);
@@ -53,7 +53,7 @@ export function Route({ from, to }: { from: Label; to: Label }) {
     <div className="qs-route" role="group" aria-label={attribute("qs-route", "aria-label", { from: a, to: b })}>
       {[
         { who: a, role: "qs-route-sender" },
-        { who: b, role: "qs-route-receiver" },
+        { who: b, role: receiving ? "qs-route-receiving" : "qs-route-receiver" },
       ].map(({ who, role }) => (
         <div key={role} className="qs-route-row">
           <Tile>
@@ -88,9 +88,6 @@ export function TallyBar({ count, size, live = false }: { count: number; size: s
   );
 }
 
-/** What is wrong with a file that is no longer as it was when the person looked. */
-export const ISSUE_TEXT = { changed: "qs-check-changed", missing: "qs-check-missing", unreadable: "qs-check-unreadable" } as const;
-
 /** A list of rows in a card that wraps its end items under the text when the window is narrow or the text is large. */
 export function QsRowList({ children }: { children: ReactNode }) {
   return (
@@ -108,72 +105,4 @@ export function QsActions({ children }: { children: ReactNode }) {
 /** Text that may be in any script or direction (file names, laptop names): isolated so it cannot scramble the words around it. */
 export function Name({ children }: { children: string }) {
   return <bdi dir="auto">{children}</bdi>;
-}
-
-/** The folder part of a path in the send ("Holiday/beach.jpg" -> "Holiday"), or null at the top. */
-export function folderOf(path: string): string | null {
-  const at = path.lastIndexOf("/");
-  return at > 0 ? shownSafely(path.slice(0, at)) : null;
-}
-
-/** Offered files as rows: icon tile, name, folder and size, and optionally a word saying it is included. */
-export function FileRows({
-  files,
-  limit,
-  included = false,
-  types = false,
-}: {
-  files: readonly { path: string; size: number }[];
-  limit?: number;
-  included?: boolean;
-  /** Each file's real type by its name, shown apart from the name (the offer screen). */
-  types?: boolean;
-}) {
-  const { l10n } = useLocalization();
-  const bytes = useBytes();
-  const shown = limit === undefined ? files : files.slice(0, limit);
-  return (
-    <QsRowList>
-      {shown.map((f) => {
-        const folder = folderOf(f.path);
-        return (
-          <Row
-            key={f.path}
-            icon={
-              <Tile>
-                <Folder size={18} />
-              </Tile>
-            }
-            title={<Name>{fileName(f.path)}</Name>}
-            detail={
-              <>
-                <bdi>{bytes(f.size)}</bdi>
-                {types && extensionOf(f.path) !== null && (
-                  <>
-                    {" · "}
-                    <bdi dir="ltr">{l10n.getString("qs-file-type", { ext: extensionOf(f.path) ?? "" })}</bdi>
-                  </>
-                )}
-                {folder && (
-                  <>
-                    {" · "}
-                    <Name>{folder}</Name>
-                  </>
-                )}
-              </>
-            }
-            end={
-              included ? (
-                <Badge tone="good" icon={<Check />}>
-                  <Localized id="qs-check-included">
-                    <span />
-                  </Localized>
-                </Badge>
-              ) : undefined
-            }
-          />
-        );
-      })}
-    </QsRowList>
-  );
 }

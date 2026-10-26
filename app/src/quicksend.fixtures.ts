@@ -1,6 +1,6 @@
 /** Made-up data for the Quick Send screens: used by the screens page and by the tests. Nothing here is real. */
 import type { Label } from "./pairing";
-import type { Conflict, HistoryEntry, NearbyLaptop, OfferedFile, PickedItem, Receipt, SendProgress } from "./quicksend";
+import type { HistoryEntry, OfferedFile, PickedItem, Receipt, SendProgress } from "./quicksend";
 
 export const BLUE_FOX: Label = { kind: "picked", colour: "blue", animal: "fox" };
 export const GREEN_OWL: Label = { kind: "picked", colour: "green", animal: "owl" };
@@ -16,30 +16,6 @@ export const OFFER: OfferedFile[] = [
   { id: "f2", path: "Project brief.pdf", size: 1_200_000 },
   { id: "f3", path: "Reference photos/beach.jpg", size: 2_900_000 },
   { id: "f4", path: "Reference photos/market.jpg", size: 3_100_000 },
-];
-
-export const NEARBY: NearbyLaptop[] = [
-  { index: 0, label: GREEN_OWL, sameLabelNearby: false, needsUpdate: false },
-  { index: 1, label: { kind: "named", name: "Sam’s laptop" }, sameLabelNearby: false, needsUpdate: false },
-];
-
-export const CONFLICTS: Conflict[] = [
-  {
-    path: "Budget.xlsx",
-    existingBytes: 590_000,
-    offeredBytes: 600_000,
-    newName: "Budget (2).xlsx",
-    existingModified: "2026-10-14T09:30:00Z",
-    choice: "keep-both",
-  },
-  {
-    path: "Reference photos/beach.jpg",
-    existingBytes: 2_900_000,
-    offeredBytes: 2_900_000,
-    newName: "beach (2).jpg",
-    existingModified: null,
-    choice: null,
-  },
 ];
 
 export const PROGRESS: SendProgress = {
@@ -68,6 +44,16 @@ export const RECEIPT_PARTIAL: Receipt = {
     { path: "Project brief.pdf", outcome: { kind: "declined" } },
     { path: "Reference photos/beach.jpg", outcome: { kind: "failed", why: "the connection was lost before it finished" } },
     { path: "Reference photos/market.jpg", outcome: { kind: "arrived", landedAs: "Reference photos/market.jpg" } },
+  ],
+};
+
+/** A receive where one file did not arrive and one needs a step: what the Done page lists. */
+export const RECEIPT_PROBLEMS: Receipt = {
+  lines: [
+    { path: "Budget.xlsx", outcome: { kind: "arrived", landedAs: "Budget.xlsx" } },
+    { path: "Project brief.pdf", outcome: { kind: "arrived", landedAs: "Project brief.pdf" } },
+    { path: "Reference photos/beach.jpg", outcome: { kind: "failed", why: "the connection was lost before it finished" } },
+    { path: "setup.exe", outcome: { kind: "needs-action", landedAs: "setup.exe", why: "the drive could not keep the downloaded mark", word: "mark-not-kept" } },
   ],
 };
 

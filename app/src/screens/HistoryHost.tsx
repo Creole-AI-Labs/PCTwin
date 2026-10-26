@@ -3,17 +3,17 @@ import { useEffect, useState } from "react";
 import { useSettle } from "../motion/screen";
 import { historyExport, historyList, historyOpen, type HistoryEntryRaw, type QsReceipt } from "../bridge";
 import type { ReportItem } from "../move";
-import { labelText } from "../pairing";
 import type { HistoryEntry } from "../quicksend";
+import { labelShownSafely } from "../pairing";
 import History, { type ExportResult } from "./History";
-import QuickReceipt from "./QuickReceipt";
+import QuickDone from "./QuickDone";
 import Report from "./Report";
 
-type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "receipt"; receipt: QsReceipt };
+type View = { kind: "list" } | { kind: "report"; items: ReportItem[] } | { kind: "send"; receipt: QsReceipt };
 
 /**
  * F08 My PCTwin history, from what the app recorded on this laptop when each move or Quick Send
- * ended (never from the screens): the list, each entry's report or receipt opened again, and an
+ * ended (never from the screens): the list, each entry's report or what a send brought opened again, and an
  * export to a folder the person chooses in the system's picker.
  */
 export default function HistoryHost({ onStart, onBack }: { onStart: () => void; onBack: () => void }) {
@@ -38,7 +38,7 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
 
   // The screen's words for each entry: the old laptop by its pairing label, when known.
   const shown: HistoryEntry[] = entries.map((e) => {
-    const other = e.other ? labelText(l10n, e.other) : null;
+    const other = e.other ? labelShownSafely(l10n, e.other) : null;
     if (e.kind === "move") {
       return {
         id: e.id,
@@ -54,7 +54,7 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       id: e.id,
       kind: e.kind,
       when: e.when,
-      peer: other ?? l10n.getString("qs-label-other"),
+      peer: other ?? l10n.getString(e.kind === "send" ? "qs-peer-receiving" : "qs-peer-sending"),
       state: e.state as Extract<HistoryEntry, { kind: "send" }>["state"],
     };
   });
@@ -69,20 +69,12 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       />
     );
   }
-  if (view.kind === "receipt") {
-    const me = { kind: "named" as const, name: l10n.getString("qs-label-this") };
-    const them = { kind: "named" as const, name: l10n.getString("qs-label-other") };
-    const sender = view.receipt.side === "sender";
+  if (view.kind === "send") {
     return (
-      <QuickReceipt
-        side={sender ? "send" : "receive"}
+      <QuickDone
+        side={view.receipt.side === "sender" ? "send" : "receive"}
         receipt={{ lines: view.receipt.lines }}
-        from={sender ? me : them}
-        to={sender ? them : me}
         stopped={view.receipt.stopped}
-        onHistory={() => {
-          setView({ kind: "list" });
-        }}
         onDone={() => {
           setView({ kind: "list" });
         }}
@@ -99,7 +91,7 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       onOpen={(id) => {
         historyOpen(id).then(
           (kept) => {
-            setView(kept.kind === "report" ? { kind: "report", items: kept.items } : { kind: "receipt", receipt: kept.receipt });
+            setView(kept.kind === "report" ? { kind: "report", items: kept.items } : { kind: "send", receipt: kept.receipt });
           },
           () => undefined,
         );

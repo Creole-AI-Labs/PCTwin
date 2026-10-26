@@ -33,7 +33,7 @@ home-move-body = अपना सेटअप ले जाएँ
 home-restore-body = उसे वापस लाएँ
 home-rescue-body = ज़रूरी चीज़ें बचाएँ
 home-history = मेरा इतिहास
-home-history-body = आपके स्थानांतरण, भेजी गई फ़ाइलें और रसीदें
+home-history-body = आपके स्थानांतरण, और आपकी भेजी और प्राप्त फ़ाइलें
 home-resume-body = आपकी प्रगति सहेजी गई है।
 home-resume-action = फिर शुरू करें
     .aria-label = अपना स्थानांतरण फिर से शुरू करें
@@ -45,7 +45,7 @@ home-waiting =
 
 ## Header: this laptop, the language and motion control, Help
 
-header-this-laptop = यह लैपटॉप
+header-this-laptop = आपका लैपटॉप
 header-settings =
     .aria-label = भाषा और एनिमेशन
 header-help =
@@ -1393,20 +1393,18 @@ code-label = छह अंकों का कोड
 ## Shared Quick Send words
 
 qs-eyebrow = क्विक सेंड
-qs-eyebrow-receiving = इस लैपटॉप पर प्राप्त हो रहा है
+qs-eyebrow-receiving = आपके लैपटॉप पर प्राप्त हो रहा है
 qs-label-this = यह लैपटॉप
 qs-label-other = दूसरा लैपटॉप
-qs-wait-title = फ़ाइलों का इंतज़ार है।
-qs-wait-body = लैपटॉप जुड़ गए हैं। कुछ भी मिलने से पहले आप देखेंगे कि क्या भेजा जा रहा है।
 qs-pick-failed = चुनने वाली विंडो नहीं खुल सकी। फिर से कोशिश करें।
 qs-pick-too-many = ये एक बार भेजने में जा सकने वाली फ़ाइलों से ज़्यादा हैं। कुछ फ़ोल्डरों से टिक हटाएँ, या इन्हें हिस्सों में भेजें।
-qs-problem-lost-title = दूसरे लैपटॉप से कनेक्शन टूट गया।
+qs-problem-lost-title = लैपटॉप के बीच कनेक्शन टूट गया।
 qs-problem-failed-title = इस बार फ़ाइलें नहीं भेजी जा सकीं।
 qs-problem-body = जो पहले से मिल चुका और जाँचा जा चुका है, वह अपनी जगह रहता है। फिर से कोशिश करने के लिए लैपटॉप दोबारा जोड़ें।
 # The route between the two laptops, for example "Blue Fox" to "Green Owl".
 qs-route =
     .aria-label = { $from } से { $to } तक
-qs-route-sender = भेज रहा है · यह लैपटॉप
+qs-route-sender = भेजा जा रहा है
 qs-route-receiver = प्राप्त कर रहा है · वही Wi-Fi
 qs-tally =
     { NUMBER($count) ->
@@ -1420,15 +1418,15 @@ qs-tally-badge = आस-पास भेजना
 qs-home-title = आस-पास के किसी लैपटॉप पर फ़ाइलें भेजें।
 qs-home-body = या किसी लैपटॉप से फ़ाइलें पाएँ।
 qs-send-title = फ़ाइलें भेजें
-qs-send-body = इस लैपटॉप पर फ़ाइलें या फ़ोल्डर चुनें।
+qs-send-body = अपने लैपटॉप पर फ़ाइलें या फ़ोल्डर चुनें।
 qs-receive-title = फ़ाइलें प्राप्त करें
-qs-receive-body = आस-पास के किसी लैपटॉप को इस लैपटॉप पर फ़ाइलें भेजने दें।
-qs-history-title = आपकी रसीदें
-qs-history-body = देखें कि प्राप्त फ़ाइलें कहाँ गईं और क्या पूरा नहीं हुआ।
+qs-receive-body = पास के किसी लैपटॉप को आपके लैपटॉप पर फ़ाइलें भेजने दें।
+qs-history-title = भेजी और प्राप्त फ़ाइलें
+qs-history-body = अपने लैपटॉप पर भेजी और प्राप्त हुई फ़ाइलें देखें।
 qs-home-action = फ़ाइलें चुनें
-qs-receiving = प्राप्त करने के लिए तैयार। आस-पास के दूसरे लैपटॉप इसे { $label } नाम से देखते हैं।
+qs-receiving = प्राप्त करने के लिए तैयार। पास के लैपटॉप आपके लैपटॉप को { $label } नाम से देखते हैं।
 qs-receive-stop = प्राप्त करना बंद करें
-qs-no-nearby = आस-पास कोई लैपटॉप नहीं मिला। दूसरे लैपटॉप पर PCTwin खोलें और दोनों को एक ही Wi-Fi पर रखें।
+qs-no-nearby = पास में कोई लैपटॉप नहीं मिला। भेजने वाले लैपटॉप पर PCTwin खोलें और दोनों को एक ही Wi-Fi पर रखें।
 
 ## Q02 Choose files and folders
 
@@ -1446,126 +1444,28 @@ qs-remove =
 # $kind is the file type, for example "PDF document" or "8 photos".
 qs-file-detail = { $size } · { $kind }
 qs-empty = भेजने के लिए फ़ाइलें या फ़ोल्डर शामिल करें।
-qs-online-only = कुछ फ़ाइलें सिर्फ़ ऑनलाइन हैं। पहले उन्हें इस लैपटॉप पर उपलब्ध कराएं, फिर भेजें।
+qs-online-only = कुछ फ़ाइलें सिर्फ़ ऑनलाइन हैं। पहले उन्हें अपने लैपटॉप पर उपलब्ध करें, फिर भेजें।
 qs-protected = PCTwin { $name } को नहीं पढ़ सकता। पहुँच की अनुमति दें, या इसे सूची से हटाएं।
 qs-allow = पहुँच की अनुमति दें
-qs-choose-continue = इन फ़ाइलों की जाँच करें
-
-## Q03 Check what you are sharing
-
-qs-check-title = जाँच लें कि क्या शेयर हो रहा है।
-qs-check-body = इस लैपटॉप से जाने से पहले इन फ़ाइलों को एक बार देख लें।
-qs-check-included = शामिल
-qs-file-type = प्रकार: .{ $ext }
-qs-check-shared-note = दूसरा लैपटॉप इन फ़ाइलों के नाम, साइज़ और तारीख़ें देखता है।
-qs-check-changed = चुनने के बाद { $name } बदल गया है। इसे फिर से जाँचें।
-qs-check-ack = मैंने इन फ़ाइलों की जाँच कर ली है
-qs-check-ack-hint = भेजने से पहले कोई भी निजी चीज़ हटा दें।
-qs-check-continue = दूसरा लैपटॉप चुनें
-
-## Q04 Who should receive it?
-
-qs-who-title = इसे कौन प्राप्त करे?
-qs-who-body = दूसरे लैपटॉप पर दिखाया गया नाम चुनें।
-qs-who-nearby = आस-पास · वही Wi-Fi।
-qs-who-code = जोड़ने का कोड इस्तेमाल करें
-qs-who-code-body = भेजने वाले लैपटॉप पर दिखाया गया कोड डालें।
-qs-who-same-label = आस-पास के दो लैपटॉप का यही नाम है। दूसरे लैपटॉप की स्क्रीन पर नाम देखें।
-qs-who-busy = { $label } अभी कुछ और भेजने में व्यस्त है। थोड़ा इंतज़ार करें, और फिर से कोशिश करें।
-qs-who-note = दूसरा लैपटॉप फ़ाइलें स्वीकार करता है और चुनता है कि वे कहाँ जाएं।
-qs-who-action = मेरा भेजने का कोड दिखाएं
-
-## Q08 Incoming offer (receiving laptop)
-
-qs-offer-title = कोई आपको फ़ाइलें भेजना चाहता है।
-qs-offer-body = { $label } आपको ये फ़ाइलें भेजना चाहता है। स्वीकार करने से पहले इन्हें देख लें।
-qs-offer-note = PCTwin सिर्फ़ वही फ़ाइलें सहेजता है जिन्हें आप स्वीकार करें। वह उन्हें कभी खोलता या चलाता नहीं।
-qs-offer-accept = स्वीकार करें और फ़ोल्डर चुनें
-qs-offer-decline = इन फ़ाइलों को मना करें
-qs-offer-declined = आपने मना कर दिया। इस लैपटॉप पर कुछ भी सहेजा नहीं गया।
-qs-offer-changed = भेजने वाले ने फ़ाइलें बदल दीं। स्वीकार करने से पहले नई सूची जाँचें।
-qs-offer-gone = { $label } अब उपलब्ध नहीं है। इस लैपटॉप पर कुछ भी सहेजा नहीं गया।
-
-## Q09 Where should the files land?
-
-qs-land-title = फ़ाइलें कहाँ रखी जाएं?
-qs-land-body = इस लैपटॉप पर फ़ोल्डर चुनें।
-qs-land-folder-label = प्राप्त करने वाला फ़ोल्डर
-qs-land-choose = दूसरा फ़ोल्डर चुनें
-qs-land-space-title = उपलब्ध स्टोरेज
-qs-land-space = { $free } उपलब्ध · { $needed } चाहिए।
-qs-land-status-fits = जगह काफ़ी है
-qs-land-status-no-space = पर्याप्त स्टोरेज नहीं
-qs-land-no-space = इस फ़ोल्डर में { $free } स्टोरेज उपलब्ध है, लेकिन इन फ़ाइलों को { $needed } चाहिए। कोई दूसरा फ़ोल्डर चुनें या स्टोरेज खाली करें।
-qs-land-unavailable = यह फ़ोल्डर उपलब्ध नहीं है। इसकी ड्राइव कनेक्ट करें, या दूसरा फ़ोल्डर चुनें।
-qs-land-denied = PCTwin को इस फ़ोल्डर में सहेजने की अनुमति नहीं है। दूसरा फ़ोल्डर चुनें।
-qs-land-note = अगर उसी नाम की फ़ाइल पहले से वहाँ है, तो कुछ भी सहेजने से पहले आपसे पूछा जाएगा कि क्या करना है।
-qs-land-confirm = इन फ़ाइलों के लिए यह फ़ोल्डर इस्तेमाल करें
-qs-land-confirm-hint = यहाँ सिर्फ़ वही फ़ाइलें सहेजी जाती हैं जिन्हें आपने स्वीकार किया।
-qs-land-use = यह फ़ोल्डर इस्तेमाल करें
-
-## Q10 Keep your existing work safe
-
-qs-conflict-title = अपना मौजूदा काम सुरक्षित रखें।
-qs-conflict-body = चुनें कि जब उसी नाम की फ़ाइल पहले से मौजूद हो, तो क्या हो।
-qs-conflict-col-file = आइटम
-qs-conflict-col-existing = पहले से मौजूद
-qs-conflict-col-choice = विकल्प
-# $when is already formatted, for example "yesterday".
-qs-conflict-existing = आख़िरी बदलाव: { $when }
-qs-conflict-none = कोई मौजूदा कॉपी नहीं
-qs-conflict-select =
-    .aria-label = { $name } के साथ क्या हो
-qs-keep-both = दोनों रखें
-qs-skip = यह आइटम छोड़ें
-qs-add-new = नया शामिल करें
-qs-keep-both-note = “दोनों रखें” चुनने पर पहले से मौजूद फ़ाइल जैसी है वैसी रहती है। नई फ़ाइल { $newName } नाम से सहेजी जाती है।
-qs-no-conflicts = इनमें से कोई भी फ़ाइल अभी फ़ोल्डर में नहीं है। किसी फ़ाइल की जगह कुछ नहीं रखा जाएगा।
-qs-conflict-target-changed = अगर पहले से मौजूद फ़ाइल बदल जाए या खुल न सके, तो वह तब तक रुकी रहती है जब तक आप उसे फिर से न जाँचें।
-qs-conflict-approve = ये विकल्प मुझे मंज़ूर हैं
-qs-conflict-continue = इन विकल्पों की पुष्टि करें
-
-## Q11 Ready to send these files?
-
-qs-approve-title = क्या ये फ़ाइलें भेजने के लिए तैयार हैं?
-qs-approve-body = शुरू होने से पहले ठीक-ठीक जाँचें कि क्या भेजा जा रहा है।
-qs-approve-receiver-title = दूसरा लैपटॉप
-qs-approve-receiver-waiting = दूसरे लैपटॉप के स्वीकार करने और फ़ोल्डर चुनने का इंतज़ार है।
-qs-approve-receiver-ready = दूसरे लैपटॉप ने स्वीकार कर लिया, फ़ोल्डर चुन लिया, और यह भी चुन लिया कि पहले से मौजूद फ़ाइलों का क्या करना है।
-qs-approve-files-title = फ़ाइलें
-qs-approve-files-same = भेजे जाने तक इन फ़ाइलों को न बदलें।
-qs-approve-files-changed = जाँचने के बाद कुछ फ़ाइलें बदल गई हैं। उन्हें फिर से जाँचें।
-qs-approve-existing-title = मौजूदा फ़ाइलें
-qs-approve-existing-body = चुने गए विकल्प के अनुसार दोनों रखें।
-qs-status-waiting = इंतज़ार
-qs-status-accepted = मंज़ूर
-qs-status-unchanged = देखें
-qs-status-changed = बदला गया
-qs-approve-ack = ये फ़ाइलें भेजें
-qs-approve-ack-hint = ये फ़ाइलें और यह लैपटॉप मुझे मंज़ूर हैं।
-qs-approve-start = भेजना शुरू करें
-qs-approve-cleared = आपने फ़ाइलें बदल दीं, इसलिए { $label } को उन्हें फिर से स्वीकार करना होगा।
-qs-approve-withdrawn = { $label } अब इन फ़ाइलों को स्वीकार नहीं कर रहा। कुछ भी नहीं भेजा गया।
+qs-choose-continue = जारी रखें
 
 ## Q12 Send progress
 
 qs-sending-title = आपकी फ़ाइलें रास्ते में हैं।
-qs-sending-body = कॉपी सीधे एक लैपटॉप से दूसरे पर जाती हैं।
+qs-sending-body = कॉपियाँ सीधे पाने वाले लैपटॉप पर जाती हैं।
 qs-sending-progress =
-    .aria-label = चुनी गई फ़ाइलें भेजी जा रही हैं
+    .aria-label = फ़ाइलें भेजी जा रही हैं
 qs-sending-current = अभी भेजा जा रहा है: { $name }
 # $speed is measured and already formatted, for example "3.1 MB/s".
 qs-sending-speed = { $speed }, मापा गया
 qs-step-copying = कॉपी हो रहा है
 qs-step-copying-body =
     { NUMBER($done) ->
-        [one] { $done } चुना गया आइटम प्राप्त हुआ।
-       *[other] { $done } चुने गए आइटम प्राप्त हुए।
+        [one] { $done } फ़ाइल भेजी गई।
+       *[other] { $done } फ़ाइलें भेजी गईं।
     }
 qs-step-checking = जाँच
 qs-step-checking-body = हर फ़ाइल की तुलना मूल फ़ाइल से की जाती है।
-qs-step-receipt = रसीद
-qs-step-receipt-body = आख़िर में देखें कि फ़ाइलें कहाँ गईं और क्या पूरा नहीं हुआ।
 qs-sending-paused = रुका हुआ। जो फ़ाइलें प्राप्त और जाँची जा चुकी हैं, वे रखी गई हैं।
 qs-sending-disconnected = { $label } से कनेक्शन टूट गया। जो फ़ाइलें जाँची जा चुकी हैं, वे रखी गई हैं। अपने-आप फिर से कोशिश हो रही है…
 qs-sending-needs-action =
@@ -1578,60 +1478,6 @@ qs-resume = फिर से शुरू करें
 qs-compact = छोटा करें
 qs-stop = यह भेजना बंद करें
 qs-sending-complete-title = भेजना पूरा हुआ
-qs-sending-complete-body = जो भी फ़ाइल पहुँची, वह अपनी मूल फ़ाइल से मेल खाई। देखें कि वे कहाँ सहेजी गईं।
-qs-sending-receipt = रसीद देखें
-
-## Q14 Handover receipt (both laptops)
-
-qs-receipt-title = यह रही आपकी रसीद।
-qs-receipt-body = ठीक-ठीक देखें कि क्या पहुँचा और कहाँ रखा गया।
-qs-receipt-box-title = आपकी फ़ाइलें पहुँच गईं
-qs-receipt-box-body = हर कॉपी की तुलना मूल से की गई, और वह मेल खाई।
-qs-receipt-arrived =
-    { NUMBER($count) ->
-        [one] { $count } चुना गया आइटम प्राप्त हुआ
-       *[other] { $count } चुने गए आइटम प्राप्त हुए
-    }
-qs-receipt-size = { $size } मूल से मेल खाया
-qs-receipt-saved-as = { $path }
-qs-receipt-not-arrived = इस फ़ोल्डर का कुछ हिस्सा पहुँचा नहीं या जाँचा नहीं गया।
-qs-receipt-needs-action = { $path } वहाँ है, पर पूरा नहीं हुआ। क्या करना है, यह ज़्यादा जानकारी में है।
-qs-receipt-mark-not-kept = { $path } वहाँ है, पर यह ड्राइव इसे किसी दूसरे लैपटॉप से डाउनलोड की गई फ़ाइल के रूप में चिह्नित नहीं कर सकी। इसे सावधानी से खोलें।
-qs-receipt-status-verified = जाँचा गया
-qs-receipt-status-unfinished = अधूरा
-qs-receipt-not-completed = पूरा नहीं हुआ।
-qs-receipt-stopped-row = बंद होने से पहले प्राप्त और जाँचा गया।
-qs-receipt-partial =
-    { NUMBER($count) ->
-        [one] { $count } आइटम पर अब भी ध्यान देना है।
-       *[other] { $count } आइटम पर अब भी ध्यान देना है।
-    }
-qs-receipt-stopped = यह भेजना बंद कर दिया गया। जो फ़ाइलें पूरी पहुँचीं, वे आपके चुने फ़ोल्डर में रहती हैं।
-qs-receipt-not-opened = PCTwin ने प्राप्त हुई कोई भी फ़ाइल न खोली, न चलाई।
-qs-receipt-ack = रसीद मिलने की पुष्टि करें
-# $when is already formatted, for example "today at 14:05".
-qs-receipt-acked = रसीद की पुष्टि हुई: { $when }।
-qs-receipt-ack-note = इस रसीद की पुष्टि का मतलब यह नहीं कि फ़ाइलें खोली या इस्तेमाल की गईं।
-qs-receipt-offline = { $label } ऑफ़लाइन है, इसलिए उस पर यह रसीद अभी नहीं दिखी है। रसीद इस लैपटॉप पर सहेजी गई है।
-qs-receipt-missing = छूटे हिस्से भेजें
-qs-receipt-missing-body = सिर्फ़ वे फ़ाइलें जाँचें जो नहीं पहुँचीं।
-qs-receipt-history = सभी रसीदें
-qs-receipt-done = क्विक सेंड पर वापस
-
-## Q19 Finish the missing part
-
-qs-missing-title = छूटा हुआ हिस्सा पूरा करें।
-qs-missing-body = पिछली रसीद से देखें कि क्या नहीं पहुँचा।
-qs-missing-status-there = पहुँच गया
-qs-missing-status-missing = कार्रवाई ज़रूरी
-qs-missing-there-body = यह पहुँच गया और मूल से मेल खाया।
-qs-missing-missing-body = वे फ़ाइलें जाँचें जो छूट गईं या पूरी नहीं हुईं।
-qs-missing-note = जो फ़ाइलें पहुँच गईं, वे रखी गई हैं। नई या बदली हुई फ़ाइलों के लिए फिर से आपकी मंज़ूरी चाहिए।
-qs-missing-ack = छूटी हुई फ़ाइलें भेजें
-qs-missing-ack-hint = PCTwin फ़ाइलों की फिर से जाँच करता है, और दूसरा लैपटॉप उन्हें फिर से स्वीकार करता है।
-qs-missing-complete = सब कुछ पहले ही पहुँच चुका है। भेजने के लिए कुछ नहीं बचा।
-qs-missing-unavailable = पिछली रसीद नहीं मिल रही, इसलिए PCTwin नहीं बता सकता कि क्या छूटा है। इसके बजाय नया भेजना शुरू करें।
-qs-missing-continue = देखें क्या भेजा जाएगा
 
 ## Q20 Stop this send? (and decline)
 
@@ -1648,12 +1494,7 @@ qs-stop-status-stop = बंद
 qs-stop-status-review = देखें
 qs-stop-ack = यह भेजना बंद करें
 qs-stop-ack-hint = जो फ़ाइलें पूरी पहुँच गईं, वे हटाई नहीं जातीं।
-qs-stop-confirm = बंद करें और रसीद देखें
 qs-stop-keep = भेजना जारी रखें
-qs-decline-title = इन फ़ाइलों को मना करें?
-qs-decline-body = इस लैपटॉप पर कुछ भी सहेजा नहीं जाता, और भेजने वाले को बताया जाता है कि आपने मना कर दिया।
-qs-decline-confirm = मना करें
-qs-already-finished = यह भेजना पहले ही पूरा हो चुका है। क्या पहुँचा, यह रसीद में देखें।
 
 ## F08 Your moves, kept on this laptop (history)
 
@@ -1672,7 +1513,6 @@ history-status-paused = रुका हुआ
 history-status-stopped = सुरक्षित रूप से बंद
 history-status-partial = सब कुछ नहीं पहुँचा
 history-open-report = रिपोर्ट
-history-open-receipt = रसीद
 history-continue = आगे बढ़ें
 history-export = इतिहास फ़ाइल में सहेजें
 history-exported = इतिहास { $path } में सहेजा गया।
@@ -1692,45 +1532,8 @@ qs-tally-counting =
     }
 qs-gone = { $name } अब यहां नहीं है। शायद इसे हटा दिया गया या दूसरी जगह ले जाया गया। इसका टिक हटाएं, या इसे वापस रखकर फिर से शामिल करें।
 qs-choose-why-problems = टिक किए गए कुछ आइटम अभी भेजे नहीं जा सकते। आगे बढ़ने के लिए उनका टिक हटाएं, या बताए गए तरीके से उन्हें ठीक करें।
-qs-check-missing = { $name } अब वहाँ नहीं है। वापस जाकर इसे हटाएं, या इसे वापस रखें।
-qs-check-unreadable = PCTwin अब { $name } को नहीं पढ़ सकता। पहुँच की अनुमति दें, या वापस जाकर इसे हटाएं।
-qs-check-show-all =
-    { NUMBER($count) ->
-        [one] फ़ाइल दिखाएं
-       *[other] सभी { $count } फ़ाइलें दिखाएं
-    }
-qs-check-change = भेजी जाने वाली चीज़ें बदलें
-qs-land-none = अभी कोई फ़ोल्डर नहीं चुना गया।
-qs-land-space-unknown = PCTwin यहाँ उपलब्ध स्टोरेज नहीं माप सका। इन फ़ाइलों को { $needed } चाहिए।
-qs-conflict-existing-unknown = पहले से मौजूद
-qs-conflict-choice-open = अभी नहीं चुना गया
-qs-conflict-why = आगे बढ़ने के लिए हर फ़ाइल के लिए चुनें कि क्या हो, फिर बॉक्स पर टिक करें।
-qs-approve-folder-title = प्राप्त करने वाला फ़ोल्डर
-qs-status-recipient-choice = पाने वाले का विकल्प
-qs-sending-card = चुनी गई फ़ाइलें भेजी जा रही हैं
+qs-sending-card = फ़ाइलें भेजी जा रही हैं
 qs-progress-of = कुल { $total }
-qs-receipt-partial-title = सब कुछ नहीं पहुँचा
-qs-receipt-metric-items =
-    { NUMBER($count) ->
-        [one] चुना गया आइटम प्राप्त हुआ
-       *[other] चुने गए आइटम प्राप्त हुए
-    }
-qs-receipt-metric-size = मूल से मिलाकर जाँचा गया
-qs-receipt-sent-as = { $path } के रूप में भेजा गया
-qs-receipt-renamed = उस नाम की फ़ाइल पहले से वहाँ थी, इसलिए इसे नया नाम दिया गया।
-qs-receipt-chip-already = पहले से मौजूद
-qs-receipt-already = एक जैसी फ़ाइल पहले से वहाँ थी ({ $path }), इसलिए इसे फिर से नहीं भेजा गया।
-qs-receipt-chip-declined = स्वीकार नहीं किया गया
-qs-receipt-declined-send = दूसरे लैपटॉप ने यह फ़ाइल स्वीकार नहीं की, इसलिए इसे भेजा नहीं गया।
-qs-receipt-declined-receive = आपने यह फ़ाइल स्वीकार नहीं की, इसलिए इसे सहेजा नहीं गया।
-qs-receipt-more = और जानकारी
-qs-receipt-empty = कुछ भी नहीं भेजा गया, इसलिए दिखाने के लिए कुछ नहीं है।
-qs-receipt-already-count =
-    { NUMBER($count) ->
-        [one] { $count } आइटम पहले से एक जैसी फ़ाइल के रूप में मौजूद था
-       *[other] { $count } आइटम पहले से एक जैसी फ़ाइलों के रूप में मौजूद थे
-    }
-qs-missing-new-send = नया भेजना शुरू करें
 history-open-name = { $what }: { $title }
 
 ## R05 वापस लेना: हर ड्राइव पर वापस लेने से क्या होगा, और हर कॉपी का क्या हुआ
@@ -1745,3 +1548,122 @@ undo-here-more-fat = FAT और exFAT ड्राइव पर किसी न
 undo-done-trashed = “{ $name }” नाम से ट्रैश में डाल दी गई। आप उसे ट्रैश से वापस ला सकते हैं।
 undo-kept-fat = रखी गई। यह ड्राइव (FAT या exFAT) फ़ाइलों को अलग पहचानने वाले नंबर दोबारा इस्तेमाल करती है, इसलिए PCTwin पक्का नहीं कह सकता कि यह उसकी कॉपी है। अगर आपको इसकी ज़रूरत नहीं है, तो आप इसे ख़ुद मिटा सकते हैं।
 undo-kept-no-trash = रखी गई। PCTwin इस कॉपी को उसकी ड्राइव के ट्रैश में नहीं डाल सका। अगर आपको इसकी ज़रूरत नहीं है, तो आप इसे ख़ुद मिटा सकते हैं।
+
+## Quick Send (26 October 2026): pairing in Quick Send's words, where received files go, and the Done page
+
+qs-pair-old-eyebrow = भेजा जा रहा है
+qs-pair-old-body = पाने वाले लैपटॉप पर “फ़ाइलें प्राप्त करें” चुनें, फिर यह कोड डालें।
+qs-pair-old-waiting = पाने वाले लैपटॉप का इंतज़ार है…
+qs-pair-old-label-hint = पाने वाला लैपटॉप आपके लैपटॉप को इसी नाम से ढूँढेगा।
+qs-pair-old-steps-title = पाने वाले लैपटॉप पर
+qs-pair-old-step-1 = PCTwin खोलें, “क्विक सेंड” चुनें, फिर “फ़ाइलें प्राप्त करें”।
+qs-pair-old-left = नंबर चुने जाने से पहले पाने वाले लैपटॉप ने जोड़ना बंद कर दिया, इसलिए कुछ भी शेयर नहीं हुआ। यह नया कोड है।
+qs-pair-network-hint = वह नेटवर्क चुनें जिस पर पाने वाला लैपटॉप है।
+qs-pair-choose-body = पाने वाले लैपटॉप को देखें। जो नंबर वह दिखाता है, उसे चुनें।
+qs-pair-choose-renewed = नए नंबर दिख रहे हैं। पाने वाले लैपटॉप वाला नंबर चुनें।
+qs-pair-choose-note = अगर पाने वाला लैपटॉप कोई नंबर नहीं दिखाता, या इनमें से कोई उससे मेल नहीं खाता, तो “इनमें से कोई मेल नहीं खाता” चुनें।
+qs-pair-heads-up-firewall = Windows पूछ सकता है कि क्या PCTwin कनेक्शन स्वीकार कर सकता है। “अनुमति दें” चुनें, ताकि पाने वाला लैपटॉप आपके लैपटॉप तक पहुँच सके।
+qs-pair-new-eyebrow = प्राप्त हो रहा है
+qs-pair-new-searching-title = भेजने वाले लैपटॉप को खोजा जा रहा है…
+qs-pair-new-searching-body = भेजने वाले लैपटॉप पर PCTwin खुला रखें, उसी Wi-Fi पर जिस पर आपका लैपटॉप है।
+qs-pair-new-search-failed-title = भेजने वाले लैपटॉप को खोजा नहीं जा सका।
+qs-pair-new-list-title = कौन-सा लैपटॉप भेज रहा है?
+qs-pair-new-list-body = वह नाम चुनें जो भेजने वाला लैपटॉप अपनी स्क्रीन पर दिखाता है।
+qs-pair-new-same-label = पास के किसी दूसरे लैपटॉप का भी यही नाम है। भेजने वाले लैपटॉप की स्क्रीन देखें।
+qs-pair-new-none-title = भेजने वाला कोई लैपटॉप नहीं मिला।
+qs-pair-new-none-body = जाँचें कि भेजने वाले लैपटॉप पर PCTwin खुला है और कोड दिखा रहा है, और दोनों लैपटॉप एक ही Wi-Fi पर हैं। फिर से खोजें।
+qs-pair-new-code-hint = इसे { $label } की स्क्रीन से पढ़ें। यह हर मिनट बदलता है।
+qs-pair-new-number-title = { $label } पर यह नंबर चुनें।
+qs-pair-new-number-body = { $label } पर तीन नंबर दिखते हैं। वहाँ यह नंबर चुनें।
+qs-pair-new-number-waiting = { $label } का इंतज़ार है…
+qs-pairing-code-invalid = कोड में छह अंक होने चाहिए। { $label } की स्क्रीन देखें और कोड फिर से लिखें।
+qs-pairing-code-wrong = कोड मेल नहीं खाया। { $label } की स्क्रीन देखें और फिर से कोशिश करें।
+qs-pairing-code-expired = कोड बदल गया है। { $label } की स्क्रीन से नया कोड लिखें।
+qs-pairing-busy = अभी { $label } से नहीं जोड़ा जा सकता: वह किसी और लैपटॉप से जुड़ रहा है। थोड़ा इंतज़ार करें, और फिर से कोशिश करें।
+qs-pairing-wait = { $label } पर नया कोड तैयार हो रहा है। उसका इंतज़ार करें, और फिर नया कोड लिखें।
+qs-pairing-locked = बहुत ज़्यादा गलत कोशिशों के बाद जोड़ना बंद हो गया। { $label } पर “फिर से शुरू करें” चुनें।
+qs-pairing-unreachable = आपका लैपटॉप { $label } तक नहीं पहुँच सका। जाँचें कि दोनों एक ही Wi-Fi पर हैं, और फिर से कोशिश करें।
+qs-pairing-wrong-number = वह नंबर पाने वाले लैपटॉप के नंबर से मेल नहीं खाया। कुछ भी शेयर नहीं हुआ। फिर से कोशिश करने के लिए पाने वाले लैपटॉप पर नया कोड लिखें।
+qs-pairing-no-match = { $label } पर नंबर मेल नहीं खाए। कुछ भी शेयर नहीं हुआ। उसकी स्क्रीन से नया कोड लिखें।
+qs-pairing-timed-out = समय पर कोई नंबर नहीं चुना गया। { $label } पर दिख रहे नए कोड से फिर से कोशिश करें।
+qs-pairing-connection-lost-new = { $label } से कनेक्शन टूट गया। कुछ भी शेयर नहीं हुआ।
+qs-pairing-choose-network = आपका लैपटॉप एक से ज़्यादा नेटवर्क पर है। वह चुनें जिस पर पाने वाला लैपटॉप है:
+qs-pairing-failed-new = इस बार जोड़ना काम नहीं किया। कुछ भी शेयर नहीं हुआ। { $label } की स्क्रीन से नया कोड लिखें।
+qs-folder-line = फ़ाइलें { $folder } में सहेजी जाएँगी।
+qs-folder-change = बदलें
+qs-folder-title = फ़ाइलें कहाँ जाएँ?
+qs-folder-none = PCTwin प्राप्त फ़ाइलों वाले फ़ोल्डर का उपयोग नहीं कर सकता। फ़ाइलों के लिए कोई फ़ोल्डर चुनें, फिर जोड़ें।
+qs-folder-choose = फ़ोल्डर चुनें
+qs-folder-failed = PCTwin उस फ़ोल्डर में फ़ाइलें नहीं सहेज सकता। कोई दूसरा फ़ोल्डर चुनें।
+qs-done-sent-title = आपकी फ़ाइलें भेज दी गईं।
+qs-done-here-title = आपकी फ़ाइलें आ गई हैं।
+qs-done-partial-title = कुछ फ़ाइलें नहीं पहुँचीं।
+qs-done-stopped-title = यह भेजना बंद किया गया।
+qs-done-empty-title = कुछ भी नहीं भेजा गया।
+qs-done-arrived =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल · { $size } पहुँची और मूल से मेल खाई
+       *[other] { $count } फ़ाइलें · { $size } पहुँचीं और मूल से मेल खाईं
+    }
+qs-done-arrived-count =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल पहुँची और मूल से मेल खाई
+       *[other] { $count } फ़ाइलें पहुँचीं और मूल से मेल खाईं
+    }
+qs-done-already =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल पहले से वहाँ थी, एक जैसी, इसलिए दोबारा नहीं भेजी गई।
+       *[other] { $count } फ़ाइलें पहले से वहाँ थीं, एक जैसी, इसलिए दोबारा नहीं भेजी गईं।
+    }
+qs-done-stopped-body = रोकने से पहले पहुँची फ़ाइलें जाँची गईं और जहाँ सहेजी गईं, वहीं रहेंगी। और कुछ नहीं भेजा गया।
+qs-done-folder = { $folder } में सहेजी गईं
+qs-done-open-folder = फ़ोल्डर खोलें
+qs-done-open-failed = फ़ोल्डर नहीं खुल सका। हो सकता है वह हटा दिया गया हो या मिटा दिया गया हो।
+qs-done-not-opened = PCTwin ने प्राप्त हुई कोई भी फ़ाइल न खोली, न चलाई।
+qs-done-problems-title = जिन फ़ाइलों पर ध्यान देना है
+qs-done-not-arrived = यह नहीं पहुँची।
+qs-done-not-completed = यह रोकने से पहले नहीं भेजी गई।
+qs-done-needs-action = यह यहाँ है, पर पूरी नहीं हुई। क्या करना है, यह और जानकारी में है।
+qs-done-mark-not-kept = यह यहाँ है, पर यह ड्राइव इसे किसी दूसरे लैपटॉप से डाउनलोड की गई फ़ाइल के रूप में चिह्नित नहीं कर सकी। इसे सावधानी से खोलें।
+qs-done-see-files = फ़ाइलें देखें
+qs-done-renamed = { $name } नाम से सहेजी गई, क्योंकि उस नाम की फ़ाइल पहले से वहाँ थी।
+qs-done-identical = एक जैसी फ़ाइल पहले से वहाँ थी, इसलिए यह दोबारा नहीं भेजी गई।
+qs-done-send-missing = छूटी हुई फ़ाइलें भेजें
+qs-done-send-missing-body = सिर्फ़ वे फ़ाइलें जो नहीं पहुँचीं। पहले आप लैपटॉप फिर से जोड़ेंगे।
+qs-done-done = हो गया
+qs-stop-now = भेजना बंद करें
+qs-stop-finished = यह भेजना पहले ही पूरा हो चुका है।
+history-open-files = फ़ाइलें देखें
+qs-route-receiving = प्राप्त हो रहा है
+qs-receiving-title = फ़ाइलें आ रही हैं।
+qs-receiving-body = कॉपियाँ सीधे { $label } से आती हैं।
+qs-receiving-card = फ़ाइलें प्राप्त हो रही हैं
+qs-receiving-progress =
+    .aria-label = फ़ाइलें प्राप्त हो रही हैं
+qs-receiving-current = अभी प्राप्त हो रही है: { $name }
+qs-step-receiving-body =
+    { NUMBER($done) ->
+        [one] { $done } फ़ाइल पहुँची।
+       *[other] { $done } फ़ाइलें पहुँचीं।
+    }
+qs-tally-files =
+    { NUMBER($count) ->
+        [one] { $count } फ़ाइल · { $size }
+       *[other] { $count } फ़ाइलें · { $size }
+    }
+qs-receive-pause = कुछ देर रोकें
+qs-label-yours = आपका लैपटॉप
+qs-label-receiving = पाने वाला लैपटॉप
+qs-label-sending = भेजने वाला लैपटॉप
+qs-peer-receiving = पाने वाला लैपटॉप
+qs-peer-sending = भेजने वाला लैपटॉप
+qs-pair-old-label-title = अभी आपके लैपटॉप का नाम
+qs-pair-old-rename-label = आपके लैपटॉप का नाम
+qs-pair-old-step-2 = अगर कोई सूची दिखे, तो अपने लैपटॉप का नाम चुनें।
+qs-pair-old-locked-body = पाँच गलत कोड के बाद, आपके लैपटॉप को सुरक्षित रखने के लिए जोड़ना बंद हो गया। कुछ भी शेयर नहीं हुआ। अगर यह आप थे, तो नए कोड के लिए “फिर से शुरू करें” चुनें।
+qs-pair-new-needs-update = उस पर PCTwin का पुराना संस्करण है। उस पर PCTwin अपडेट करें, फिर से खोजें।
+qs-pairing-no-network = आपका लैपटॉप किसी Wi-Fi या तार वाले नेटवर्क पर नहीं है। उसे जोड़ें, फिर से कोशिश करें।
+qs-problem-room-title = { $folder } में पर्याप्त जगह नहीं है।
+qs-problem-room-body = इन फ़ाइलों को { $needed } चाहिए, और वहाँ { $room } इस्तेमाल हो सकता है। कुछ भी सहेजा नहीं गया। जगह खाली करें या कोई दूसरा फ़ोल्डर चुनें, फिर से कोशिश करें।
+qs-done-refused-title = पाने वाले लैपटॉप ने ये फ़ाइलें नहीं लीं।
+qs-done-refused-body = हो सकता है उस पर पर्याप्त जगह न हो। कुछ भी नहीं भेजा गया।

@@ -33,7 +33,7 @@ home-move-body = 迁移你的设置
 home-restore-body = 把它还原回来
 home-rescue-body = 保住重要的内容
 home-history = 我的记录
-home-history-body = 你的迁移、发送和收据
+home-history-body = 你的迁移，以及你发送和接收的文件
 home-resume-body = 进度已保存。
 home-resume-action = 继续
     .aria-label = 恢复你的迁移
@@ -44,7 +44,7 @@ home-waiting =
 
 ## Header: this laptop, the language and motion control, Help
 
-header-this-laptop = 这台电脑
+header-this-laptop = 你的电脑
 header-settings =
     .aria-label = 语言和动画
 header-help =
@@ -1185,19 +1185,17 @@ code-label = 六位配对码
 ## Shared Quick Send words
 
 qs-eyebrow = 快速发送
-qs-eyebrow-receiving = 在这台笔记本电脑上接收
+qs-eyebrow-receiving = 在你的笔记本电脑上接收
 qs-label-this = 这台笔记本电脑
 qs-label-other = 另一台笔记本电脑
-qs-wait-title = 正在等待文件。
-qs-wait-body = 两台笔记本电脑已配对。接收任何内容之前，你会先看到对方提供了什么。
 qs-pick-failed = 无法打开选择窗口。请重试。
 qs-pick-too-many = 文件太多，一次发送装不下。请取消勾选一些文件夹，或分几次发送。
-qs-problem-lost-title = 与另一台笔记本电脑的连接已断开。
+qs-problem-lost-title = 两台电脑之间的连接已断开。
 qs-problem-failed-title = 这次未能发送文件。
 qs-problem-body = 已接收并检查的内容会保留在原处。重新配对两台笔记本电脑即可再试一次。
 qs-route =
     .aria-label = 从{ $from }到{ $to }
-qs-route-sender = 发送 · 这台笔记本电脑
+qs-route-sender = 正在发送
 qs-route-receiver = 接收 · 同一个Wi-Fi
 qs-tally =
     { NUMBER($count) ->
@@ -1210,15 +1208,15 @@ qs-tally-badge = 附近发送
 qs-home-title = 把文件发送到附近的笔记本电脑。
 qs-home-body = 或者从附近的笔记本电脑接收文件。
 qs-send-title = 发送文件
-qs-send-body = 在这台笔记本电脑上选择文件或文件夹。
+qs-send-body = 选择你笔记本电脑上的文件或文件夹。
 qs-receive-title = 接收文件
-qs-receive-body = 让附近的笔记本电脑把文件发送到这台电脑。
-qs-history-title = 你的回执
-qs-history-body = 查看接收的文件去了哪里，以及哪些没有完成。
+qs-receive-body = 让附近的笔记本电脑把文件发送到你的电脑。
+qs-history-title = 已发送和已接收
+qs-history-body = 查看在你的笔记本电脑上发送和接收的文件。
 qs-home-action = 选择文件
-qs-receiving = 准备好接收了。附近的其他笔记本电脑会看到这台电脑名为{ $label }。
+qs-receiving = 已准备好接收。附近的笔记本电脑看到你的电脑名为{ $label }。
 qs-receive-stop = 停止接收
-qs-no-nearby = 附近没有找到笔记本电脑。请在另一台电脑上打开PCTwin，并让两台电脑连接同一个Wi-Fi。
+qs-no-nearby = 附近没有找到笔记本电脑。请在发送方电脑上打开PCTwin，并让两台电脑连接同一个Wi-Fi。
 
 ## Q02 Choose files and folders
 
@@ -1235,123 +1233,26 @@ qs-remove =
     .aria-label = 移除{ $name }
 qs-file-detail = { $size } · { $kind }
 qs-empty = 还没有选择任何内容。请添加要发送的文件或文件夹。
-qs-online-only = 有些文件仅在线存储。请先让它们在这台笔记本电脑上可用，然后再发送。
+qs-online-only = 有些文件只在线上。请先让它们在你的笔记本电脑上可用，然后再发送。
 qs-protected = PCTwin无法读取{ $name }。请允许访问，或将它从列表中移除。
 qs-allow = 允许访问
-qs-choose-continue = 检查这些文件
-
-## Q03 Check what you are sharing
-
-qs-check-title = 检查你要分享的内容。
-qs-check-body = 在这些文件离开这台笔记本电脑之前，请检查一遍。
-qs-check-included = 包含
-qs-file-type = 类型：.{ $ext }
-qs-check-shared-note = 另一台笔记本电脑能看到这些文件的名称、大小和日期。
-qs-check-changed = { $name }在你选择后有变化。请再次检查。
-qs-check-ack = 我已检查这些文件
-qs-check-ack-hint = 发送前请移除任何私人内容。
-qs-check-continue = 选择另一台笔记本电脑
-
-## Q04 Who should receive it?
-
-qs-who-title = 谁来接收？
-qs-who-body = 选择另一台笔记本电脑上显示的名称。
-qs-who-nearby = 附近 · 同一个Wi-Fi。
-qs-who-code = 使用配对码
-qs-who-code-body = 输入发送方显示的配对码。
-qs-who-same-label = 附近有两台笔记本电脑使用这个名称。请查看另一台电脑屏幕上的名称。
-qs-who-busy = { $label }正在处理另一次发送。请稍等片刻，然后再次尝试。
-qs-who-note = 由另一台笔记本电脑接受文件，并选择存放的地方。
-qs-who-action = 显示我的配对码
-
-## Q08 Incoming offer (receiving laptop)
-
-qs-offer-title = 有人想给你发送文件。
-qs-offer-body = { $label } 想向你发送这些文件。接受之前，请先检查。
-qs-offer-note = PCTwin只保存你接受的文件，绝不会打开或运行它们。
-qs-offer-accept = 接受并选择文件夹
-qs-offer-decline = 拒绝这些文件
-qs-offer-declined = 你已拒绝。这台笔记本电脑上没有保存任何内容。
-qs-offer-changed = 发送方更改了文件。接受之前请检查新的列表。
-qs-offer-gone = { $label }已不可用。这台笔记本电脑上没有保存任何内容。
-
-## Q09 Where should the files land?
-
-qs-land-title = 文件要放到哪里？
-qs-land-body = 选择这台笔记本电脑上的文件夹。
-qs-land-folder-label = 接收文件夹
-qs-land-choose = 选择其他文件夹
-qs-land-space-title = 可用空间
-qs-land-space = 可用{ $free } · 需要{ $needed }。
-qs-land-status-fits = 放得下
-qs-land-status-no-space = 空间不足
-qs-land-no-space = 这个文件夹有{ $free }可用空间，但这些文件需要{ $needed }。请选择其他文件夹或腾出空间。
-qs-land-unavailable = 这个文件夹不可用。请连接它所在的硬盘，或选择其他文件夹。
-qs-land-denied = 这个文件夹不允许PCTwin保存文件。请选择其他文件夹。
-qs-land-note = 如果那里已有同名文件，在保存任何内容之前，由你选择如何处理。
-qs-land-confirm = 把这些文件放到这个文件夹
-qs-land-confirm-hint = 只有你接受的文件会保存在这里。
-qs-land-use = 使用这个文件夹
-
-## Q10 Keep your existing work safe
-
-qs-conflict-title = 确保已有的文件安全。
-qs-conflict-body = 选择已有同名文件时如何处理。
-qs-conflict-col-file = 项目
-qs-conflict-col-existing = 已有文件
-qs-conflict-col-choice = 选择
-qs-conflict-existing = 编辑于{ $when }
-qs-conflict-none = 没有已有副本
-qs-conflict-select =
-    .aria-label = { $name }如何处理
-qs-keep-both = 两个都保留
-qs-skip = 跳过这个项目
-qs-add-new = 添加新文件
-qs-keep-both-note = “两个都保留”会让已有的文件保持原样。新文件将保存为{ $newName }。
-qs-no-conflicts = 文件夹中还没有这些文件。不会替换任何内容。
-qs-conflict-target-changed = 如果已有的文件发生变化或无法打开，它会等待你再次检查。
-qs-conflict-approve = 我同意这些选择
-qs-conflict-continue = 确认这些选择
-
-## Q11 Ready to send these files?
-
-qs-approve-title = 准备好发送这些文件了吗？
-qs-approve-body = 开始之前，请仔细检查要发送的内容。
-qs-approve-receiver-title = 另一台笔记本电脑
-qs-approve-receiver-waiting = 正在等待另一台笔记本电脑接受并选择文件夹。
-qs-approve-receiver-ready = 另一台笔记本电脑已接受，并选择了文件夹以及如何处理已有文件。
-qs-approve-files-title = 文件
-qs-approve-files-same = 发送完成之前，请不要更改这些文件。
-qs-approve-files-changed = 有些文件在你检查后发生了变化。请再次检查。
-qs-approve-existing-title = 已有文件
-qs-approve-existing-body = 按照选择，两个都保留。
-qs-status-waiting = 等待中
-qs-status-accepted = 已同意
-qs-status-unchanged = 待查看
-qs-status-changed = 已更改
-qs-approve-ack = 发送这些文件
-qs-approve-ack-hint = 我同意这些文件和这台笔记本电脑。
-qs-approve-start = 开始发送
-qs-approve-cleared = 你更改了文件，所以{ $label }需要重新接受。
-qs-approve-withdrawn = { $label }不再接受这次发送。没有发送任何内容。
+qs-choose-continue = 继续
 
 ## Q12 Send progress
 
 qs-sending-title = 你的文件正在发送中。
-qs-sending-body = 副本直接从一台笔记本电脑传到另一台。
+qs-sending-body = 副本直接发送到接收方电脑。
 qs-sending-progress =
-    .aria-label = 正在发送选择的文件
+    .aria-label = 正在发送文件
 qs-sending-current = 正在发送：{ $name }
 qs-sending-speed = { $speed }（实测）
 qs-step-copying = 正在复制
 qs-step-copying-body =
     { NUMBER($done) ->
-       *[other] 已接收{ $done }个选择的项目。
+       *[other] 已发送{ $done }个文件。
     }
 qs-step-checking = 正在检查
 qs-step-checking-body = 每个文件都会与原文件进行比对。
-qs-step-receipt = 回执
-qs-step-receipt-body = 最后可以查看文件去了哪里，以及哪些没有完成。
 qs-sending-paused = 已暂停。已接收并检查的文件会保留。
 qs-sending-disconnected = 与{ $label }的连接已断开。已检查的文件会保留。正在自动重新连接……
 qs-sending-needs-action =
@@ -1363,57 +1264,6 @@ qs-resume = 恢复
 qs-compact = 精简显示
 qs-stop = 停止这次发送
 qs-sending-complete-title = 发送已完成
-qs-sending-complete-body = 每个送达的文件都与原文件一致。看看它们保存在哪里。
-qs-sending-receipt = 查看回执
-
-## Q14 Handover receipt (both laptops)
-
-qs-receipt-title = 这是你的回执。
-qs-receipt-body = 查看具体送达了什么，以及放在了哪里。
-qs-receipt-box-title = 你的文件已送达
-qs-receipt-box-body = 每个副本都与原文件进行了比对，并且一致。
-qs-receipt-arrived =
-    { NUMBER($count) ->
-       *[other] 已接收{ $count }个选择的项目
-    }
-qs-receipt-size = { $size }与原文件一致
-qs-receipt-saved-as = { $path }
-qs-receipt-not-arrived = 这个文件夹没有全部送达并通过检查。
-qs-receipt-needs-action = { $path } 已在那里，但尚未完成。具体做法见“更多详情”。
-qs-receipt-mark-not-kept = { $path } 已在那里，但这个磁盘无法把它标记为从另一台笔记本电脑下载的文件。请谨慎打开。
-qs-receipt-status-verified = 已检查
-qs-receipt-status-unfinished = 未完成
-qs-receipt-not-completed = 没有完成。
-qs-receipt-stopped-row = 停止前已接收并检查。
-qs-receipt-partial =
-    { NUMBER($count) ->
-       *[other] 还有{ $count }个项目需要留意。
-    }
-qs-receipt-stopped = 这次发送已停止。完整送达的文件会留在你选择的文件夹中。
-qs-receipt-not-opened = PCTwin没有打开或运行任何接收的文件。
-qs-receipt-ack = 确认回执
-qs-receipt-acked = 已于{ $when }确认回执。
-qs-receipt-ack-note = 确认这份回执并不代表文件已被打开或使用。
-qs-receipt-offline = { $label }处于离线状态，所以还没有看到这份回执。回执已保存在这台笔记本电脑上。
-qs-receipt-missing = 发送缺失的部分
-qs-receipt-missing-body = 只检查没有送达的文件。
-qs-receipt-history = 所有回执
-qs-receipt-done = 返回快速发送
-
-## Q19 Finish the missing part
-
-qs-missing-title = 完成缺失的部分。
-qs-missing-body = 根据之前的回执，查看哪些没有送达。
-qs-missing-status-there = 已送达
-qs-missing-status-missing = 需要处理
-qs-missing-there-body = 已送达，并与原文件一致。
-qs-missing-missing-body = 检查缺失或没有完成的文件。
-qs-missing-note = 已送达的文件会保留。新增或更改的文件需要你再次同意。
-qs-missing-ack = 发送缺失的文件
-qs-missing-ack-hint = PCTwin会再次检查这些文件，另一台笔记本电脑也会再次接受它们。
-qs-missing-complete = 所有内容都已送达，没有需要发送的了。
-qs-missing-unavailable = 找不到之前的回执，所以PCTwin无法判断缺少什么。请改为开始一次新的发送。
-qs-missing-continue = 检查将要发送的内容
 
 ## Q20 Stop this send? (and decline)
 
@@ -1430,12 +1280,7 @@ qs-stop-status-stop = 停止
 qs-stop-status-review = 待查看
 qs-stop-ack = 停止这次发送
 qs-stop-ack-hint = 完整送达的文件不会被删除。
-qs-stop-confirm = 停止并查看回执
 qs-stop-keep = 继续发送
-qs-decline-title = 拒绝这些文件？
-qs-decline-body = 这台笔记本电脑上不会保存任何内容，发送方会被告知你已拒绝。
-qs-decline-confirm = 拒绝
-qs-already-finished = 这次发送已经完成。请查看回执，了解送达了什么。
 
 ## F08 Your moves, kept on this laptop (history)
 
@@ -1453,7 +1298,6 @@ history-status-paused = 已暂停
 history-status-stopped = 已安全停止
 history-status-partial = 未全部送达
 history-open-report = 报告
-history-open-receipt = 回执
 history-continue = 继续
 history-export = 导出历史记录
 history-exported = 历史记录已保存为{ $path }。
@@ -1472,42 +1316,8 @@ qs-tally-counting =
     }
 qs-gone = { $name }已不在原处。它可能已被移动或删除。请取消勾选，或者把它放回原处后重新添加。
 qs-choose-why-problems = 部分已勾选的项目暂时无法发送。请取消勾选，或按说明解决后继续。
-qs-check-missing = { $name }已不在原处。请返回将它移除，或者把它放回原处。
-qs-check-unreadable = PCTwin无法再读取{ $name }。请允许访问，或返回将它移除。
-qs-check-show-all =
-    { NUMBER($count) ->
-       *[other] 显示全部{ $count }个文件
-    }
-qs-check-change = 更改要发送的内容
-qs-land-none = 还没有选择文件夹。
-qs-land-space-unknown = PCTwin无法测量这里的可用空间。这些文件需要{ $needed }。
-qs-conflict-existing-unknown = 已有文件
-qs-conflict-choice-open = 尚未选择
-qs-conflict-why = 为每个文件选择处理方式，然后勾选方框，即可继续。
-qs-approve-folder-title = 接收文件夹
-qs-status-recipient-choice = 接收方选择
-qs-sending-card = 正在发送选择的文件
+qs-sending-card = 正在发送文件
 qs-progress-of = 共 { $total }
-qs-receipt-partial-title = 并非所有内容都已送达
-qs-receipt-metric-items =
-    { NUMBER($count) ->
-       *[other] 个已选项目已接收
-    }
-qs-receipt-metric-size = 已与源文件比对
-qs-receipt-sent-as = 发送时的名称：{ $path }
-qs-receipt-renamed = 那里已有同名文件，所以这个文件使用了新名称。
-qs-receipt-chip-already = 已存在
-qs-receipt-already = 那里已有一个相同的文件（{ $path }），所以没有再次发送。
-qs-receipt-chip-declined = 未接受
-qs-receipt-declined-send = 另一台笔记本电脑没有接受这个文件，所以没有发送。
-qs-receipt-declined-receive = 你没有接受这个文件，所以没有保存。
-qs-receipt-more = 更多详情
-qs-receipt-empty = 没有发送任何内容，所以没有可显示的。
-qs-receipt-already-count =
-    { NUMBER($count) ->
-       *[other] { $count }个项目已作为相同的文件存在
-    }
-qs-missing-new-send = 开始新的发送
 history-open-name = { $what }：{ $title }
 
 ## R05 撤销：撤销在每个硬盘上会做什么，以及每个副本的结果
@@ -1522,3 +1332,117 @@ undo-here-more-fat = 在 FAT 和 exFAT 硬盘上，新文件可能会得到某�
 undo-done-trashed = 已移到废纸篓，名称为“{ $name }”。你可以从废纸篓把它放回原处。
 undo-kept-fat = 已保留。这个硬盘（FAT 或 exFAT）会重复使用区分文件的编号，所以 PCTwin 无法确定这是它的副本。如果你不需要它，可以自己删除。
 undo-kept-no-trash = 已保留。PCTwin 无法把这个副本移到它所在硬盘上的废纸篓。如果你不需要它，可以自己删除。
+
+## Quick Send (26 October 2026): pairing in Quick Send's words, where received files go, and the Done page
+
+qs-pair-old-eyebrow = 正在发送
+qs-pair-old-body = 在接收方电脑上选择“接收文件”，然后输入这个配对码。
+qs-pair-old-waiting = 正在等待接收方电脑……
+qs-pair-old-label-hint = 接收方电脑会通过这个名字找到你的电脑。
+qs-pair-old-steps-title = 在接收方电脑上
+qs-pair-old-step-1 = 打开PCTwin，选择“快速发送”，然后选择“接收文件”。
+qs-pair-old-left = 在选择数字之前，接收方电脑停止了配对，因此没有共享任何内容。这是新的配对码。
+qs-pair-network-hint = 选择接收方电脑所连接的网络。
+qs-pair-choose-body = 看看接收方电脑。选择它显示的数字。
+qs-pair-choose-renewed = 已显示新的数字。请选择接收方电脑上的那个。
+qs-pair-choose-note = 如果接收方电脑没有显示数字，或者这些数字都不匹配，请选择“都不匹配”。
+qs-pair-heads-up-firewall = Windows可能会询问PCTwin能否接受连接。请选择“允许”，这样接收方电脑才能连接到你的电脑。
+qs-pair-new-eyebrow = 正在接收
+qs-pair-new-searching-title = 正在搜索发送方电脑……
+qs-pair-new-searching-body = 请在发送方电脑上保持PCTwin打开，并与你的电脑连接同一个Wi-Fi。
+qs-pair-new-search-failed-title = 无法查找发送方电脑。
+qs-pair-new-list-title = 哪一台笔记本电脑在发送？
+qs-pair-new-list-body = 选择发送方电脑屏幕上显示的名字。
+qs-pair-new-same-label = 附近另一台笔记本电脑也叫这个名字。请查看发送方电脑的屏幕。
+qs-pair-new-none-title = 没有找到正在发送的笔记本电脑。
+qs-pair-new-none-body = 请检查发送方电脑上的PCTwin是否已打开并显示配对码，以及两台电脑是否连接同一个Wi-Fi。然后重新搜索。
+qs-pair-new-code-hint = 请从{ $label }的屏幕上读取。它每分钟都会变化。
+qs-pair-new-number-title = 在{ $label }上选择这个数字。
+qs-pair-new-number-body = { $label }上会显示三个数字。请在那里选择这个。
+qs-pair-new-number-waiting = 正在等待{ $label }……
+qs-pairing-code-invalid = 配对码需要六位数字。请查看{ $label }的屏幕，然后重新输入。
+qs-pairing-code-wrong = 配对码不正确。请查看{ $label }的屏幕，然后再次尝试。
+qs-pairing-code-expired = 配对码已更换。请输入{ $label }屏幕上的新配对码。
+qs-pairing-busy = 现在无法与{ $label }配对：它正在与另一台电脑配对。请稍等片刻，然后再次尝试。
+qs-pairing-wait = { $label }正在准备新的配对码。请等待它准备好，然后输入新配对码。
+qs-pairing-locked = 错误尝试次数过多，配对已停止。请在{ $label }上选择“重新开始”。
+qs-pairing-unreachable = 你的笔记本电脑无法连接到{ $label }。请检查两台电脑是否连接同一个Wi-Fi，然后再次尝试。
+qs-pairing-wrong-number = 这个数字与接收方电脑上的不匹配。没有共享任何内容。请在接收方电脑上输入新的配对码，再次尝试。
+qs-pairing-no-match = { $label }上的数字不匹配。没有共享任何内容。请输入它屏幕上的新配对码。
+qs-pairing-timed-out = 没有及时选择数字。请使用{ $label }上的新配对码再次尝试。
+qs-pairing-connection-lost-new = 与{ $label }的连接已断开。没有共享任何内容。
+qs-pairing-choose-network = 你的笔记本电脑连接了多个网络。请选择接收方电脑所连接的那个：
+qs-pairing-failed-new = 这次配对没有成功。没有共享任何内容。请输入{ $label }屏幕上的新配对码。
+qs-folder-line = 文件将保存在{ $folder }。
+qs-folder-change = 更改
+qs-folder-title = 文件要保存到哪里？
+qs-folder-none = PCTwin无法使用接收文件的文件夹。请为文件选择一个文件夹，然后再连接。
+qs-folder-choose = 选择文件夹
+qs-folder-failed = PCTwin无法在那个文件夹中保存文件。请选择另一个。
+qs-done-sent-title = 你的文件已发送。
+qs-done-here-title = 你的文件已到达。
+qs-done-partial-title = 有些文件没有到达。
+qs-done-stopped-title = 这次发送已停止。
+qs-done-empty-title = 没有发送任何内容。
+qs-done-arrived =
+    { NUMBER($count) ->
+       *[other] { $count }个文件 · { $size } 已到达，并与原文件一致
+    }
+qs-done-arrived-count =
+    { NUMBER($count) ->
+       *[other] { $count }个文件已到达，并与原文件一致
+    }
+qs-done-already =
+    { NUMBER($count) ->
+       *[other] { $count }个文件已经存在且完全相同，因此没有再次发送。
+    }
+qs-done-stopped-body = 停止前到达的文件已经过检查，仍保存在原来的位置。没有发送其他内容。
+qs-done-folder = 已保存在{ $folder }
+qs-done-open-folder = 打开文件夹
+qs-done-open-failed = 无法打开文件夹。它可能已被移动或删除。
+qs-done-not-opened = PCTwin没有打开或运行任何接收的文件。
+qs-done-problems-title = 需要注意的文件
+qs-done-not-arrived = 它没有到达。
+qs-done-not-completed = 停止前没有发送它。
+qs-done-needs-action = 它已在这里，但尚未完成。具体做法见“更多详情”。
+qs-done-mark-not-kept = 它已在这里，但这个磁盘无法把它标记为从另一台笔记本电脑下载的文件。请谨慎打开。
+qs-done-see-files = 查看文件
+qs-done-renamed = 已另存为{ $name }，因为那里已有同名文件。
+qs-done-identical = 那里已有一个完全相同的文件，因此没有再次发送。
+qs-done-send-missing = 发送缺少的文件
+qs-done-send-missing-body = 只发送没有到达的文件。你需要先重新配对两台电脑。
+qs-done-done = 完成
+qs-stop-now = 停止发送
+qs-stop-finished = 这次发送已经完成。
+history-open-files = 查看文件
+qs-route-receiving = 正在接收
+qs-receiving-title = 文件正在到达。
+qs-receiving-body = 副本直接来自{ $label }。
+qs-receiving-card = 正在接收文件
+qs-receiving-progress =
+    .aria-label = 正在接收文件
+qs-receiving-current = 正在接收：{ $name }
+qs-step-receiving-body =
+    { NUMBER($done) ->
+       *[other] 已到达{ $done }个文件。
+    }
+qs-tally-files =
+    { NUMBER($count) ->
+       *[other] { $count }个文件 · { $size }
+    }
+qs-receive-pause = 暂停
+qs-label-yours = 你的笔记本电脑
+qs-label-receiving = 接收方电脑
+qs-label-sending = 发送方电脑
+qs-peer-receiving = 接收方电脑
+qs-peer-sending = 发送方电脑
+qs-pair-old-label-title = 你的笔记本电脑当前的名字
+qs-pair-old-rename-label = 你的笔记本电脑的名字
+qs-pair-old-step-2 = 如果出现列表，请选择你的笔记本电脑的名字。
+qs-pair-old-locked-body = 输错五次配对码后，配对已停止，以保护你的笔记本电脑。没有共享任何内容。如果是你自己，请选择“重新开始”获取新的配对码。
+qs-pair-new-needs-update = 它的PCTwin版本较旧。请在它上面更新PCTwin，然后重新搜索。
+qs-pairing-no-network = 你的笔记本电脑没有连接Wi-Fi或有线网络。请连接后再次尝试。
+qs-problem-room-title = { $folder }中的空间不足。
+qs-problem-room-body = 这些文件需要{ $needed }，那里可用的空间为{ $room }。没有保存任何内容。请释放空间或选择另一个文件夹，然后再试一次。
+qs-done-refused-title = 接收方电脑没有接收这些文件。
+qs-done-refused-body = 它的空间可能不足。没有发送任何内容。

@@ -1,45 +1,19 @@
 /**
- * Quick Send for the screens (Q01 to Q20 and the local history): the shapes the screens draw, which
- * mirror the engine's library (crates/pctwin-quicksend) exactly, and the few rules about them that the
- * words depend on. There is no Tauri command for Quick Send yet, so every screen is a view model: data
- * in as props, events out as callbacks, and the bridge fills them in later.
+ * Quick Send for the screens: the shapes the screens draw, which mirror the engine's library
+ * (crates/pctwin-quicksend) exactly, and the few rules about them that the words depend on. The
+ * commands and events are in bridge.ts (src-tauri/src/quicksend.rs).
  *
- * Commands the bridge needs (names are proposals; nothing here calls them):
- *  - quicksend_pick { kind: "files" | "folders" } -> PickedItem[]
- *      Opens the system picker. Raised by Q02 "Add files" / "Add folders". Dropped paths do not come
- *      from the screen: the shell reads them from the window's drag-drop event and calls
- *      quicksend_add { paths: string[] }; it also tells Q02 when a drag is over the window (`dragging`).
- *  - Untick in Q02 is local: the bridge keeps the list and sends only the ticked items to quicksend_offer.
- *  - quicksend_offer () -> { files: OfferedFile[], issues: SourceIssue[] }
- *      Offer::of(chosen) then Offer::files(). Q03 shows it; issues are files that changed, went missing
- *      or cannot be read since they were picked.
- *  - Pairing: Send uses the existing PairOld screen (it shows the code, then the three numbers) and
- *      Receive uses PairNew (type the code, then the number is shown). The bridge starts pairing in
- *      Quick Send mode, and on the `paired` event moves to Q08 (receiver) or Q11 (sender) instead of the
- *      Paired page. This needs a small change in PairOld/PairNew: an optional `onPaired` prop and a
- *      `variant` that picks quick-send wording ("the other laptop" rather than "old"/"new").
- *  - quicksend_incoming event { from: Label, files: OfferedFile[] } -> Q08   (receive_offer)
- *  - quicksend_accept { ids: string[] | null, folder } -> Receipt   Q08 + Q09 + Q10 (Incoming::accept;
- *      `ids` is the subset the person kept ticked, null for all). quicksend_decline {} -> void
- *      (Incoming::decline).
- *  - quicksend_choose_folder () -> { path, freeBytes | null }    Q09 "Choose a folder".
- *  - quicksend_conflicts { folder, ids } -> Conflict[]            Q10 (what is already in the folder).
- *      The engine today only keeps both (a taken name gets "(2)"); Skip is "do not tick the file" in Q08;
- *      Replace does not exist: the safety gate never overwrites, so Q10 offers only Keep both and Skip.
- *  - quicksend_send { offer } -> Receipt   Q11 Start (send(ch, offer)). The sender's approval and the
- *      receiver's approval are separate; changing the selection clears the receiver's.
- *  - quicksend_progress event { phase, filesDone, filesTotal, bytesDone, bytesTotal, current, failed }
- *      -> Q12. quicksend_pause / quicksend_resume / quicksend_stop {} -> void.
- *  - quicksend_receipt event/query { side, receipt: Receipt, stopped } -> Q14, Q19, History.
- *  - quicksend_history () -> HistoryEntry[]; quicksend_history_export () -> { savedTo } -> History.
+ * The flow (decided 26 October 2026): the sender picks files, pairs (showing the code), and the
+ * send starts the moment the laptops are paired. The receiver sees where files will be saved
+ * (Downloads, or the folder it chose this session), pairs (typing the code), and receives
+ * everything offered: choosing Receive, typing the code and matching the number is the acceptance
+ * (Security Design T). Both end on the Done page, which says what arrived and checked, and lists
+ * only what did not.
  */
 import { useLocalization } from "@fluent/react";
-import type { Label, Nearby } from "./pairing";
+import type { Label } from "./pairing";
 
 export type { Label };
-
-/** A laptop nearby that can receive: the pairing list's entry, and whether it is busy with another send. */
-export type NearbyLaptop = Nearby & { busy?: boolean };
 
 /** One offered file, as both sides list it (OfferedFile). `path` uses "/" between folders. */
 export type OfferedFile = { id: string; path: string; size: number };
@@ -86,24 +60,6 @@ export type PickedItem = {
    * (the original is not on this laptop yet, so there is nothing to read).
    */
   problem?: "missing" | "unreadable" | "online-only";
-};
-
-/** A thing in the offer that is not as it was when the person looked (source files change). */
-export type SourceIssue = { path: string; kind: "changed" | "missing" | "unreadable" };
-
-/** A file the receiving folder already has under the offered name. */
-export type Conflict = {
-  path: string;
-  existingBytes: number;
-  offeredBytes: number;
-  /** What Keep both would save the new file as ("notes (2).txt"), worked out the way the engine does. */
-  newName: string;
-  /** When the file already in the folder was last changed (ISO 8601), or null if unknown. */
-  existingModified: string | null;
-  /** Null until chosen, and again whenever the file in the folder changed since the person looked. */
-  choice: "keep-both" | "skip" | null;
-  /** The file in the folder changed (or could not be read) since the person looked. */
-  changed?: boolean;
 };
 
 /**

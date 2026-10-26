@@ -22,9 +22,9 @@ use pctwin_record::{
     ManagedBy, Owner, Place, Portability, Record, RecordError, Storage,
 };
 use pctwin_transfer::{
-    Allowance, Cause, Channel, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome, ReceiverSession,
-    SendJob, SendOutcome, SenderSession, SizeRoom, TransferError, agree_version, receive_inventory,
-    send_inventory, shown_path,
+    Allowance, Cause, Channel, KEEP_FREE, LandingPlace, MOVE_PROTOCOL, ReceiveOutcome,
+    ReceiverSession, SendJob, SendOutcome, SenderSession, SizeRoom, TransferError, agree_version,
+    receive_inventory, send_inventory, shown_path,
 };
 
 /// The destination label everything of a Quick Send lands under: the folder the receiver chose.
@@ -59,6 +59,10 @@ pub enum QuickError {
     NotAnswered,
     #[error("there are more files ({files} so far) than one send can carry")]
     TooMany { files: usize },
+    /// The receiving folder has no room for what was offered (keeping [`KEEP_FREE`] spare): the
+    /// offer was declined and nothing was written. `room` is what could be used there.
+    #[error("not enough room: {needed} bytes needed, {room} bytes can be used")]
+    NoRoom { needed: u64, room: u64 },
 }
 
 /// Past this many items an offer stops counting (one send carries fewer still: see
@@ -471,6 +475,27 @@ impl Incoming {
         account: &str,
         live: &pctwin_move::Live,
     ) -> Result<Receipt, QuickError> {
+        let free = dest.available_bytes();
+        self.accept_into_with_free(ch, dest, chosen, journal, account, live, free)
+            .await
+    }
+
+    /// As [`accept_into`](Self::accept_into), with the folder's free space as measured (`None`:
+    /// the drive cannot say). Before anything is accepted, an offer the folder has no room for
+    /// (with [`KEEP_FREE`] spare) is declined over the wire, so the sender is told and nothing is
+    /// sent or written. Free space that cannot be measured does not refuse: the gate still never
+    /// overwrites, and a file that cannot be written ends failed, said as that.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn accept_into_with_free(
+        self,
+        ch: &mut impl Channel,
+        dest: pctwin_gate::Destination,
+        chosen: Option<&[ItemId]>,
+        journal: &dyn Ledger,
+        account: &str,
+        live: &pctwin_move::Live,
+        free: Option<u64>,
+    ) -> Result<Receipt, QuickError> {
         let offered = self.files();
         let wanted: BTreeSet<ItemId> = match chosen {
             Some(ids) => ids
@@ -492,6 +517,14 @@ impl Incoming {
                     reason: LeftOutReason::ChosenByUser,
                 };
             }
+        }
+        let needed = offered
+            .iter()
+            .filter(|f| wanted.contains(&f.id))
+            .fold(0u64, |t, f| t.saturating_add(f.size));
+        if let Err(no_room) = room_for(needed, free) {
+            write_accepted(ch, &BTreeSet::new()).await?;
+            return Err(no_room);
         }
         let approval = record.approve()?;
         // Where each file lands comes from the offer, never from the sender's start; the files
@@ -538,6 +571,18 @@ impl Incoming {
     /// Declines the whole offer: nothing is sent, nothing is written.
     pub async fn decline(self, ch: &mut impl Channel) -> Result<(), QuickError> {
         write_accepted(ch, &BTreeSet::new()).await
+    }
+}
+
+/// Whether `needed` bytes fit where `free` bytes are free, keeping [`KEEP_FREE`] spare. Unknown
+/// free space fits (see [`Incoming::accept_into_with_free`]).
+fn room_for(needed: u64, free: Option<u64>) -> Result<(), QuickError> {
+    match free {
+        Some(free) if needed.saturating_add(KEEP_FREE) > free => Err(QuickError::NoRoom {
+            needed,
+            room: free.saturating_sub(KEEP_FREE),
+        }),
+        _ => Ok(()),
     }
 }
 

@@ -3,14 +3,11 @@ import { useState, type ReactNode } from "react";
 import { Badge, Banner, Button, Checkbox, Dialog, Row } from "../components/kit";
 import { QsRowList } from "./QsParts";
 
-export type StopKind = "stop" | "decline";
-
 /**
- * Q20 Stop or decline: a dialog that says what stays and what does not before anything stops. Closing
- * it (Keep sending, Escape) keeps everything going. Stopping a send needs the person to tick that files
+ * Q20 Stop this send: a dialog that says what stays and what does not before anything stops. Closing
+ * it (Keep sending, Escape) keeps everything going. Stopping needs the person to tick that files
  * which already arrived are kept, and focus starts on the first sentence, never on the stop button.
- * Declining an offer is plainer: nothing was saved, nothing is sent. `finished` is true when the send
- * ended while the dialog was open; then there is nothing left to stop.
+ * `finished` is true when the send ended while the dialog was open; then there is nothing left to stop.
  * Events: onConfirm, onClose.
  */
 export default function QuickStop(props: StopProps) {
@@ -20,7 +17,6 @@ export default function QuickStop(props: StopProps) {
 
 type StopProps = {
   open: boolean;
-  kind: StopKind;
   finished?: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -28,7 +24,6 @@ type StopProps = {
 
 function StopInner({
   open,
-  kind,
   finished = false,
   onConfirm,
   onClose,
@@ -36,20 +31,11 @@ function StopInner({
   const { l10n } = useLocalization();
   const [understood, setUnderstood] = useState(false);
 
-  if (kind === "decline") {
-    return (
-      <StopDialog open={open} title="qs-decline-title" onClose={onClose} confirm="qs-decline-confirm" onConfirm={onConfirm}>
-        <Localized id="qs-decline-body">
-          <p data-autofocus tabIndex={-1} />
-        </Localized>
-      </StopDialog>
-    );
-  }
   if (finished) {
     return (
       <StopDialog open={open} title="qs-stop-title" onClose={onClose}>
         <Banner tone="info">
-          <Localized id="qs-already-finished">
+          <Localized id="qs-stop-finished">
             <p data-autofocus tabIndex={-1} />
           </Localized>
         </Banner>
@@ -57,7 +43,7 @@ function StopInner({
     );
   }
   return (
-    <StopDialog open={open} title="qs-stop-title" onClose={onClose} confirm="qs-stop-confirm" onConfirm={onConfirm} disabled={!understood} keep>
+    <StopDialog open={open} title="qs-stop-title" onClose={onClose} confirm="qs-stop-now" onConfirm={onConfirm} disabled={!understood} keep>
       <Localized id="qs-stop-body">
         <p data-autofocus tabIndex={-1} />
       </Localized>

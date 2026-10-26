@@ -196,6 +196,88 @@ async fn a_declined_offer_writes_nothing_and_both_sides_know() {
     assert_eq!(sent.lines.len(), 3);
 }
 
+/// Security review of PR #108: a receiver that takes every offer without a question must never
+/// start writing what its folder has no room for. The offer is declined over the wire (the sender
+/// is told, nothing is sent) and the receiver is told how much is needed and how much can be used,
+/// keeping the gate's spare gigabyte free.
+#[tokio::test]
+async fn an_offer_with_no_room_for_it_is_declined_before_anything_is_written() {
+    let old = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let jdir = tempfile::tempdir().unwrap();
+    let offer = Offer::of(&chosen(old.path())).unwrap();
+    let needed = 12 + 12 + 8;
+    let free = pctwin_transfer::KEEP_FREE + needed - 1;
+    let (sent, refused) = run(offer, async |incoming: Incoming, ch: &mut Mem| {
+        let folder = pctwin_gate::Destination::open(dest.path()).unwrap();
+        let r = incoming
+            .accept_into_with_free(
+                ch,
+                folder,
+                None,
+                &journal(jdir.path()),
+                "1001",
+                &pctwin_move::Live::default(),
+                Some(free),
+            )
+            .await;
+        match r {
+            Err(pctwin_quicksend::QuickError::NoRoom { needed: n, room }) => {
+                assert_eq!(n, needed);
+                assert_eq!(room, needed - 1);
+                None
+            }
+            other => panic!("expected NoRoom, got {:?}", other.map(|_| ())),
+        }
+    })
+    .await;
+    assert!(refused.is_none());
+    assert!(
+        std::fs::read_dir(dest.path()).unwrap().next().is_none(),
+        "nothing written"
+    );
+    assert!(
+        sent.lines.iter().all(|l| l.outcome == Outcome::Declined),
+        "the sender is told"
+    );
+}
+
+/// Exactly enough room (with the spare gigabyte), or free space the drive cannot report: received.
+#[tokio::test]
+async fn an_offer_that_fits_or_whose_room_is_unknown_is_received() {
+    for free in [Some(pctwin_transfer::KEEP_FREE + 32), None] {
+        let old = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let jdir = tempfile::tempdir().unwrap();
+        let offer = Offer::of(&chosen(old.path())).unwrap();
+        let (sent, received) = run(offer, async |incoming: Incoming, ch: &mut Mem| {
+            let folder = pctwin_gate::Destination::open(dest.path()).unwrap();
+            Some(
+                incoming
+                    .accept_into_with_free(
+                        ch,
+                        folder,
+                        None,
+                        &journal(jdir.path()),
+                        "1001",
+                        &pctwin_move::Live::default(),
+                        free,
+                    )
+                    .await
+                    .unwrap(),
+            )
+        })
+        .await;
+        assert!(received.is_some());
+        assert!(
+            sent.lines
+                .iter()
+                .all(|l| matches!(l.outcome, Outcome::Arrived { .. })),
+            "{free:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_name_already_taken_is_kept_and_the_new_one_lands_beside_it() {
     let old = tempfile::tempdir().unwrap();

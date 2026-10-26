@@ -6,5 +6,10 @@
   {
     "detail": "the folder cannot be used",
     "kind": "failed"
+  },
+  {
+    "kind": "no-room",
+    "needed": 238000000,
+    "room": 120000000
   }
 ]

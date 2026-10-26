@@ -538,6 +538,7 @@ fn qs_progress() -> Vec<crate::quicksend::ProgressView> {
 
 fn qs_folders() -> Vec<crate::quicksend::FolderView> {
     vec![crate::quicksend::FolderView {
+        name: "Downloads".into(),
         path: r"C:\Users\Ada\Downloads".into(),
         free_bytes: Some(80_000_000_000),
     }]
@@ -551,6 +552,10 @@ fn qs_problems() -> Vec<crate::quicksend::QsProblem> {
         },
         QsProblem::Failed {
             detail: "the folder cannot be used".into(),
+        },
+        QsProblem::NoRoom {
+            needed: 238_000_000,
+            room: 120_000_000,
         },
     ]
 }
@@ -893,8 +898,9 @@ fn calls() -> Value {
             { "name": "quicksend_offer_missing", "args": [] },
             { "name": "quicksend_send", "args": [] },
             { "name": "quicksend_receive", "args": [] },
+            { "name": "quicksend_folder", "args": [] },
             { "name": "quicksend_choose_folder", "args": [] },
-            { "name": "quicksend_answer", "args": [["answer", { "kind": "decline" }]] },
+            { "name": "quicksend_open_folder", "args": [] },
             { "name": "quicksend_pause", "args": [] },
             { "name": "quicksend_resume", "args": [] },
             { "name": "quicksend_stop", "args": [] },

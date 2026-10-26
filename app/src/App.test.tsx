@@ -173,7 +173,7 @@ describe("screens", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
-  it("Your receipts opens the history the app recorded, opens an entry's receipt again, and Back returns", async () => {
+  it("Sent and received opens the history the app recorded, opens what a send brought again, and Back returns", async () => {
     const l10n = localization("en");
     tauri.invoke.mockImplementation((command: string) =>
       Promise.resolve(
@@ -190,11 +190,11 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("history-title"));
-    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-label-other") }).replace(/[⁦-⁩]/g, ""));
+    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-peer-sending") }).replace(/[⁦-⁩]/g, ""));
     expect(row).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("history-open-receipt")) }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("history-open-files")) }));
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-receipt-title"));
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-done-here-title"));
     });
   });
 
@@ -212,7 +212,7 @@ describe("screens", () => {
   it("the header keeps language and motion behind one control showing the language's short name; Escape closes it", () => {
     render(<App initialLanguage="en" />);
     const header = within(screen.getByRole("banner"));
-    expect(header.getByText("This laptop")).toBeTruthy();
+    expect(header.getByText("Your laptop")).toBeTruthy();
     const settings = header.getByRole("button", { name: "Language and motion" });
     expect(settings.textContent).toBe("EN");
     expect(settings.getAttribute("aria-expanded")).toBe("false");

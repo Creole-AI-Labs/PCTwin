@@ -841,16 +841,20 @@ export function parseQsProgress(value: unknown): SendProgress | null {
   return { phase: f.phase, filesDone, filesTotal, bytesDone, bytesTotal, current: f.current, failed, speed };
 }
 
-export type QsFolder = { path: string; freeBytes: number | null };
+/** Where received files go: the folder's own name, the whole folder (for More details), and its free space. */
+export type QsFolder = { name: string; path: string; freeBytes: number | null };
 
 export function parseQsFolder(value: unknown): QsFolder | null {
-  const f = exactly(value, ["path", "freeBytes"]);
-  return f && typeof f.path === "string" && isCountOrNull(f.freeBytes) ? { path: f.path, freeBytes: f.freeBytes } : null;
+  const f = exactly(value, ["name", "path", "freeBytes"]);
+  return f && typeof f.name === "string" && typeof f.path === "string" && isCountOrNull(f.freeBytes) ? { name: f.name, path: f.path, freeBytes: f.freeBytes } : null;
 }
 
-export type QsProblem = { kind: "link-lost" | "failed"; detail: string };
+/** Why a Quick Send could not go on; "no-room": the receiving folder had no room, so the offer was declined. */
+export type QsProblem = { kind: "link-lost" | "failed"; detail: string } | { kind: "no-room"; needed: number; room: number };
 
 export function parseQsProblem(value: unknown): QsProblem | null {
+  const room = exactly(value, ["kind", "needed", "room"]);
+  if (room) return room.kind === "no-room" && isCount(room.needed) && isCount(room.room) ? { kind: "no-room", needed: room.needed, room: room.room } : null;
   const f = exactly(value, ["kind", "detail"]);
   return f && oneOf(f.kind, ["link-lost", "failed"] as const) && typeof f.detail === "string" ? { kind: f.kind, detail: f.detail } : null;
 }
@@ -864,8 +868,12 @@ export const qsOffer = (ids: string[]) => ask("quicksend_offer", (v) => listOf(v
 export const qsOfferMissing = () => ask("quicksend_offer_missing", (v) => listOf(v, parseOffered));
 export const qsSend = () => run("quicksend_send");
 export const qsReceive = () => run("quicksend_receive");
+/** The folder the next receive saves into, held from now: the one chosen this session, or Downloads. */
+export const qsFolder = () => ask("quicksend_folder", parseQsFolder);
+/** Change: a folder from the system's picker, used from now on this session ({ none } when none was chosen). */
 export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
-export const qsAnswer = (answer: { kind: "accept"; ids: string[] | null } | { kind: "decline" }) => run("quicksend_answer", { answer });
+/** Opens the folder the last receive saved into, in the system's file manager (never a file). */
+export const qsOpenFolder = () => run("quicksend_open_folder");
 export const qsPause = () => run("quicksend_pause");
 export const qsResume = () => run("quicksend_resume");
 export const qsStop = () => run("quicksend_stop");
