@@ -1,11 +1,11 @@
 ﻿import { Localized, useLocalization } from "@fluent/react";
-import { useCallback, useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
+import { useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode, type SyntheticEvent } from "react";
 import { useSettle } from "../motion/screen";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
 import { FAILED_NEW, LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, HeadsUpStep, Heading, PairStrip, ProblemNotice } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, PairedNow, ProblemNotice, QuickPairing, pairWord } from "./PairParts";
 
 type Phase = "heads-up" | "searching" | "none" | "list" | "code" | "number" | "error" | "paired";
 
@@ -26,8 +26,21 @@ function cleanCode(text: string): string {
  * search on a Mac, a note says what the Mac will ask (heads-up); a search that found nothing because
  * the Mac refuses local discovery says so, with where to switch it on.
  */
-export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPaired?: () => void }) {
+export default function PairNew({
+  onBack,
+  onPaired,
+  quick = false,
+  aside,
+}: {
+  onBack: () => void;
+  onPaired?: () => void;
+  /** Quick Send's receiver: its own words, no same-side switch, and onPaired at once (see PairOld). */
+  quick?: boolean;
+  /** Shown under each pairing step (Quick Send: where the files will be saved). */
+  aside?: ReactNode;
+}) {
   const { l10n } = useLocalization();
+  const w = (id: string) => pairWord(id, quick);
   const [phase, setPhase] = useState<Phase>("searching");
   // Pairing steps arrive without travel; a step showing a code or numbers does not move at all.
   useSettle(phase, { calm: true });
@@ -173,10 +186,10 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
     }
   };
 
-  if (phase === "paired") return <Paired onContinue={onPaired} />;
+  if (phase === "paired") return quick ? <PairedNow onPaired={onPaired} /> : <Paired onContinue={onPaired} />;
 
   return (
-    <>
+    <QuickPairing.Provider value={quick}>
       <PairStrip onBack={back} />
 
       {phase === "heads-up" && (
@@ -191,9 +204,9 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
 
       {phase === "searching" && (
         <>
-          <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="searching" id="pair-new-searching-title" />
-          <Localized id="pair-new-searching-body">
+          <Eyebrow id={w("pair-new-eyebrow")} />
+          <Heading key="searching" id={w("pair-new-searching-title")} />
+          <Localized id={w("pair-new-searching-body")}>
             <p className="subhead" />
           </Localized>
           {problem && <ProblemNotice problem={problem} />}
@@ -202,8 +215,8 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
 
       {phase === "error" && (
         <>
-          <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="error" id="pair-new-search-failed-title" />
+          <Eyebrow id={w("pair-new-eyebrow")} />
+          <Heading key="error" id={w("pair-new-search-failed-title")} />
           {earlier && <ProblemNotice problem={earlier} />}
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
@@ -214,7 +227,7 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
                 void search();
               }}
             >
-              <Localized id="pair-try-again">
+              <Localized id={w("pair-try-again")}>
                 <span />
               </Localized>
             </Button>
@@ -224,15 +237,17 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
 
       {phase === "none" && (
         <>
-          <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="none" id="pair-new-none-title" />
-          <Localized id="pair-new-none-body">
+          <Eyebrow id={w("pair-new-eyebrow")} />
+          <Heading key="none" id={w("pair-new-none-title")} />
+          <Localized id={w("pair-new-none-body")}>
             <p className="subhead" />
           </Localized>
           {/* Both laptops chose New laptop: nobody shows a code, so nothing can be found. */}
-          <Localized id="pair-new-none-same-role">
-            <p />
-          </Localized>
+          {!quick && (
+            <Localized id={w("pair-new-none-same-role")}>
+              <p />
+            </Localized>
+          )}
           {problem && <ProblemNotice problem={problem} />}
           <div className="pair-section">
             <Button
@@ -242,24 +257,26 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
                 void search();
               }}
             >
-              <Localized id="pair-new-search-again">
+              <Localized id={w("pair-new-search-again")}>
                 <span />
               </Localized>
             </Button>
-            <Button className="pair-block" onClick={back}>
-              <Localized id="pair-new-switch">
-                <span />
-              </Localized>
-            </Button>
+            {!quick && (
+              <Button className="pair-block" onClick={back}>
+                <Localized id={w("pair-new-switch")}>
+                  <span />
+                </Localized>
+              </Button>
+            )}
           </div>
         </>
       )}
 
       {phase === "list" && (
         <>
-          <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="list" id="pair-new-list-title" />
-          <Localized id="pair-new-list-body">
+          <Eyebrow id={w("pair-new-eyebrow")} />
+          <Heading key="list" id={w("pair-new-list-title")} />
+          <Localized id={w("pair-new-list-body")}>
             <p className="subhead" />
           </Localized>
           {problem && <ProblemNotice problem={problem} />}
@@ -285,7 +302,7 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
                 void search();
               }}
             >
-              <Localized id="pair-new-search-again">
+              <Localized id={w("pair-new-search-again")}>
                 <span />
               </Localized>
             </Button>
@@ -295,9 +312,9 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
 
       {phase === "code" && chosen && (
         <>
-          <Eyebrow id="pair-new-eyebrow" />
-          <Heading key="code" id="pair-new-code-title" />
-          <Localized id="pair-new-code-body" vars={{ label: labelText(l10n, chosen.label) }}>
+          <Eyebrow id={w("pair-new-eyebrow")} />
+          <Heading key="code" id={w("pair-new-code-title")} />
+          <Localized id={w("pair-new-code-body")} vars={{ label: labelText(l10n, chosen.label) }}>
             <p className="subhead" />
           </Localized>
           {problem && <ProblemNotice problem={problem} />}
@@ -306,12 +323,12 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
               id={fieldId}
               className="pair-code-input"
               label={
-                <Localized id="pair-new-code-label">
+                <Localized id={w("pair-new-code-label")}>
                   <span />
                 </Localized>
               }
               hint={
-                <Localized id="pair-new-code-hint">
+                <Localized id={w("pair-new-code-hint")}>
                   <span />
                 </Localized>
               }
@@ -326,7 +343,7 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
               spellCheck={false}
             />
             <Button type="submit" variant="primary" className="pair-block" disabled={busy || code.trim() === ""}>
-              <Localized id={busy ? "pair-new-connecting" : "pair-new-connect"}>
+              <Localized id={w(busy ? "pair-new-connecting" : "pair-new-connect")}>
                 <span />
               </Localized>
             </Button>
@@ -342,7 +359,7 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
                   setPhase("list");
                 }}
               >
-                <Localized id="pair-new-other-laptop">
+                <Localized id={w("pair-new-other-laptop")}>
                   <span />
                 </Localized>
               </Button>
@@ -353,13 +370,13 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
 
       {phase === "number" && number !== null && (
         <>
-          <Eyebrow id="pair-new-number-eyebrow" />
-          <Heading key="number" id="pair-new-number-title" />
-          <Localized id="pair-new-number-body">
+          <Eyebrow id={w("pair-new-number-eyebrow")} />
+          <Heading key="number" id={w("pair-new-number-title")} />
+          <Localized id={w("pair-new-number-body")}>
             <p className="subhead" />
           </Localized>
           <div className="pair-tile pair-number-tile" dir="ltr" role="group" aria-label={l10n.getString("pair-new-number-label", { number })}>
-            <Localized id="pair-new-number-tile">
+            <Localized id={w("pair-new-number-tile")}>
               <span className="pair-tile-index" aria-hidden="true" />
             </Localized>
             <span className="pair-tile-value" aria-hidden="true">
@@ -367,25 +384,28 @@ export default function PairNew({ onBack, onPaired }: { onBack: () => void; onPa
             </span>
           </div>
           <div role="status" className="pair-waiting">
-            <Localized id="pair-new-number-waiting">
+            <Localized id={w("pair-new-number-waiting")}>
               <p />
             </Localized>
           </div>
           <p className="pair-safe">
             <Shield />
-            <Localized id="pair-choose-safe">
+            <Localized id={w("pair-choose-safe")}>
               <span />
             </Localized>
           </p>
         </>
       )}
-    </>
+      {phase !== "heads-up" && aside}
+    </QuickPairing.Provider>
   );
 }
 
 /** One old laptop in the list. A name shared by two laptops nearby carries a flag in words and an icon. */
 function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void }) {
   const { l10n } = useLocalization();
+  const quick = useContext(QuickPairing);
+  const w = (id: string) => pairWord(id, quick);
   const id = useId();
   const nameId = `${id}-name`;
   const flagId = `${id}-flag`;
@@ -408,7 +428,7 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
           {nearby.needsUpdate && (
             <span id={flagId} className="pair-flag">
               <Badge tone="warn" icon={<Attention />}>
-                <Localized id="pair-new-needs-update">
+                <Localized id={w("pair-new-needs-update")}>
                   <span />
                 </Localized>
               </Badge>
@@ -417,7 +437,7 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
           {nearby.sameLabelNearby && !nearby.needsUpdate && (
             <span id={flagId} className="pair-flag">
               <Badge tone="warn" icon={<Attention />}>
-                <Localized id="pair-new-same-label">
+                <Localized id={w("pair-new-same-label")}>
                   <span />
                 </Localized>
               </Badge>
