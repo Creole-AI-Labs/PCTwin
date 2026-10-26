@@ -9,10 +9,15 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+pctwin-journal = { path = "../pctwin-journal" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-types = { path = "../pctwin-types" }
 thiserror = "2.0.21"
+
+[dev-dependencies]
+redb = "4.3"
+tempfile = "3"
 
 [lints]
 workspace = true

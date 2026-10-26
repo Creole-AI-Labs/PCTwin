@@ -107,6 +107,9 @@ deny = [
     # The scan asks whether a file carries a download mark, by the attribute's presence only,
     # never its value (21 October 2026).
     "pctwin-scan",
+    # The journal asks which file system its own folder is on (statfs), so it is never kept on
+    # a network drive (26 October 2026).
+    "pctwin-journal",
     # The app raises its own open-file limit on Mac and Linux (RLIMIT_NOFILE, limits.rs), so a
     # move with many connections never runs out of handles.
     "pctwin-app",

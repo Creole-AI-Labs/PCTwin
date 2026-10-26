@@ -1,126 +1,14 @@
 //! The executor runs only an approved plan, through typed steps, and every item ends honestly.
 
-use pctwin_executor::{Adapter, Plan, PlanError, PlannedItem};
-use pctwin_recipe::{
-    Arch, Catalog, Check, ChecklistKey, Os, Platform, Recipe, RecipeId, SettingValue,
-    SettingsPlace, Step,
-};
-use pctwin_record::{
-    Approval, FolderRole, Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId,
-    LeftOutReason, ManagedBy, Owner, Place, Portability, Record, Storage,
-};
+mod common;
+
+use common::{Laptop, app, approved, install_and_check, laptop_id, recipe, run};
+use pctwin_executor::{Plan, PlanError, PlannedItem};
+use pctwin_recipe::{Arch, Catalog, Check, ChecklistKey, Os, Platform, SettingValue, Step};
+use pctwin_record::{Approval, Inclusion, ItemId, ItemKind, LeftOutReason, Portability, Record};
 use pctwin_types::{ItemStatus, Reason};
 
-fn laptop() -> LaptopId {
-    LaptopId::from_hex("00112233445566778899aabbccddeeff").unwrap()
-}
-
-fn app(name: &str) -> Item {
-    let owner = Owner::Shared;
-    let place = Place {
-        role: FolderRole::Documents,
-        storage: Storage::SystemDrive,
-    };
-    let path = ItemPath::new(vec![ItemName::from_text(name)]).unwrap();
-    Item {
-        id: ItemId::derive(&laptop(), &owner, &place, &path),
-        kind: ItemKind::App,
-        owner,
-        place,
-        path,
-        size_bytes: 0,
-        modified_ns: None,
-        portability: Portability::Rebuildable,
-        managed_by: ManagedBy::Personal,
-        download_bytes: None,
-        inclusion: Inclusion::Included,
-    }
-}
-
-const WIN: Platform = Platform {
-    os: Os::Windows,
-    arch: Arch::X86_64,
-};
-
-fn recipe(steps: Vec<Step>) -> Recipe {
-    Recipe::new(RecipeId::new("x").unwrap(), 1, vec![WIN], steps).unwrap()
-}
-
-fn install_and_check(package: &str) -> Recipe {
-    recipe(vec![
-        Step::Install {
-            catalog: Catalog::Winget,
-            package: package.into(),
-        },
-        Step::Verify {
-            check: Check::PackageInstalled {
-                catalog: Catalog::Winget,
-                package: package.into(),
-            },
-        },
-    ])
-}
-
-/// A pretend new laptop that records every step it is asked to do. It knows what it really
-/// installed; `lies` makes an install report success and do nothing.
-#[derive(Default)]
-struct Fake {
-    platform: Option<Platform>,
-    done: Vec<String>,
-    fail_install: Option<Reason>,
-    lies: bool,
-    installed: std::collections::HashSet<String>,
-    /// Whether checks other than "is it installed" pass.
-    checks_pass: bool,
-    /// Settings places whose contents really match their source.
-    copied: std::collections::HashSet<String>,
-    /// Makes a settings copy report success and copy nothing.
-    copy_lies: bool,
-}
-
-impl Adapter for Fake {
-    fn platform(&self) -> Platform {
-        self.platform.unwrap_or(WIN)
-    }
-    fn install(&mut self, _: Catalog, package: &str) -> Result<(), Reason> {
-        self.done.push(format!("install {package}"));
-        if let Some(reason) = self.fail_install {
-            return Err(reason);
-        }
-        if !self.lies {
-            self.installed.insert(package.to_string());
-        }
-        Ok(())
-    }
-    fn copy_settings(&mut self, _: &SettingsPlace, to: &SettingsPlace) -> Result<(), Reason> {
-        self.done.push("copy".into());
-        if !self.copy_lies {
-            self.copied.insert(format!("{to:?}"));
-        }
-        Ok(())
-    }
-    fn apply_setting(&mut self, key: &str, _: &SettingValue) -> Result<(), Reason> {
-        self.done.push(format!("set {key}"));
-        Ok(())
-    }
-    fn verify(&mut self, check: &Check) -> bool {
-        self.done.push("check".into());
-        match check {
-            Check::PackageInstalled { package, .. } => self.installed.contains(package),
-            Check::SettingsMatch { to, .. } => self.copied.contains(&format!("{to:?}")),
-            _ => self.checks_pass,
-        }
-    }
-}
-
-fn approved(items: Vec<Item>) -> (Record, Approval) {
-    let mut record = Record::new(laptop());
-    record.items = items;
-    let approval = record.approve().unwrap();
-    (record, approval)
-}
-
-fn one_app_plan(a: &Item) -> Plan {
+fn one_app_plan(a: &pctwin_record::Item) -> Plan {
     let (record, approval) = approved(vec![a.clone()]);
     Plan::approved(
         &record,
@@ -136,48 +24,51 @@ fn one_app_plan(a: &Item) -> Plan {
 #[test]
 fn an_approved_app_is_reinstalled_only_when_its_check_passes() {
     let plan = one_app_plan(&app("Firefox"));
-    let mut good = Fake {
-        checks_pass: true,
-        ..Fake::default()
-    };
-    assert_eq!(plan.run(&mut good)[0].1.status(), ItemStatus::Reinstalled);
+    let mut good = Laptop::ok();
+    assert_eq!(run(&plan, &mut good)[0].1.status(), ItemStatus::Reinstalled);
     // The install is checked right after it runs, then the recipe's own check runs.
-    assert_eq!(good.done, ["install Mozilla.Firefox", "check", "check"]);
+    assert_eq!(
+        good.done,
+        ["restore point", "install Mozilla.Firefox", "check", "check"]
+    );
 
-    let mut liar = Fake {
+    let mut liar = Laptop {
         lies: true,
-        checks_pass: true,
-        ..Fake::default()
+        ..Laptop::ok()
     };
-    assert_eq!(plan.run(&mut liar)[0].1.reason(), Some(Reason::NotVerified));
+    assert_eq!(
+        run(&plan, &mut liar)[0].1.reason(),
+        Some(Reason::NotVerified)
+    );
 }
 
 #[test]
 fn a_failed_step_stops_the_recipe_and_says_why() {
     let plan = one_app_plan(&app("Firefox"));
-    let mut fake = Fake {
+    let mut fake = Laptop {
         fail_install: Some(Reason::InstallFailed),
-        checks_pass: true,
-        ..Fake::default()
+        ..Laptop::ok()
     };
-    let results = plan.run(&mut fake);
+    let results = run(&plan, &mut fake);
     assert_eq!(results[0].1.status(), ItemStatus::Failed);
     assert_eq!(results[0].1.reason(), Some(Reason::InstallFailed));
-    assert_eq!(fake.done, ["install Mozilla.Firefox"]);
+    assert_eq!(fake.done, ["restore point", "install Mozilla.Firefox"]);
 }
 
 #[test]
 fn nothing_runs_for_a_system_the_recipe_does_not_support() {
     let plan = one_app_plan(&app("Firefox"));
-    let mut mac = Fake {
+    let mut mac = Laptop {
         platform: Some(Platform {
             os: Os::Macos,
             arch: Arch::Aarch64,
         }),
-        checks_pass: true,
-        ..Fake::default()
+        ..Laptop::ok()
     };
-    assert_eq!(plan.run(&mut mac)[0].1.reason(), Some(Reason::NoEquivalent));
+    assert_eq!(
+        run(&plan, &mut mac)[0].1.reason(),
+        Some(Reason::NoEquivalent)
+    );
     assert!(mac.done.is_empty());
 }
 
@@ -196,7 +87,7 @@ fn a_checklist_step_leaves_the_item_for_the_person() {
         }],
     )
     .unwrap();
-    let results = plan.run(&mut Fake::default());
+    let results = run(&plan, &mut Laptop::default());
     assert_eq!(results[0].1.status(), ItemStatus::NeedsAction);
     assert_eq!(results[0].1.reason(), Some(Reason::FinishByHand));
 }
@@ -274,13 +165,12 @@ fn an_install_that_did_nothing_is_never_reinstalled() {
     ]);
     let plan =
         Plan::approved(&record, &approval, vec![PlannedItem { item: a.id, recipe }]).unwrap();
-    let mut liar = Fake {
+    let mut liar = Laptop {
         lies: true,
-        checks_pass: true,
-        ..Fake::default()
+        ..Laptop::ok()
     };
-    liar.installed.insert("Already.There".into());
-    let result = plan.run(&mut liar)[0].1;
+    liar.installed.insert("Already.There".into(), "2.0".into());
+    let result = run(&plan, &mut liar)[0].1;
     assert_eq!(result.status(), ItemStatus::Failed);
     assert_eq!(result.reason(), Some(Reason::NotVerified));
 }
@@ -295,15 +185,12 @@ fn settings_alone_are_converted_and_each_change_is_checked() {
     }]);
     let plan =
         Plan::approved(&record, &approval, vec![PlannedItem { item: a.id, recipe }]).unwrap();
-    let mut ok = Fake {
-        checks_pass: true,
-        ..Fake::default()
-    };
-    assert_eq!(plan.run(&mut ok)[0].1.status(), ItemStatus::Converted);
-    assert_eq!(ok.done, ["set editor.font", "check"]);
-    let mut wrong = Fake::default();
+    let mut ok = Laptop::ok();
+    assert_eq!(run(&plan, &mut ok)[0].1.status(), ItemStatus::Converted);
+    assert_eq!(ok.done, ["restore point", "set editor.font", "check"]);
+    let mut wrong = Laptop::default();
     assert_eq!(
-        plan.run(&mut wrong)[0].1.reason(),
+        run(&plan, &mut wrong)[0].1.reason(),
         Some(Reason::NotVerified)
     );
 }
@@ -315,7 +202,7 @@ fn forged_approvals_and_recipes_for_files_are_refused() {
     let a = app("Firefox");
     let mut bound = app("Authenticator");
     bound.portability = Portability::DeviceBound;
-    let mut record = Record::new(laptop());
+    let mut record = Record::new(laptop_id());
     record.items = vec![a.clone(), bound];
     assert!(record.approve().is_err());
     let forged = Approval {
@@ -356,25 +243,28 @@ fn forged_approvals_and_recipes_for_files_are_refused() {
 fn a_copy_onto_existing_defaults_is_checked_by_contents() {
     let a = app("Editor");
     let (record, approval) = approved(vec![a.clone()]);
-    let place = SettingsPlace {
-        root: pctwin_recipe::SettingsRoot::Config,
-        path: pctwin_recipe::RelPath::new("Editor/settings.json").unwrap(),
-    };
+    let place = common::place("Editor/settings.json");
     let recipe = recipe(vec![Step::CopySettings {
         from: place.clone(),
-        to: place,
+        to: place.clone(),
     }]);
     let plan =
         Plan::approved(&record, &approval, vec![PlannedItem { item: a.id, recipe }]).unwrap();
     // The defaults are there, so "is a file there" would pass; the copy itself did nothing.
-    let mut liar = Fake {
+    let mut liar = Laptop {
         copy_lies: true,
-        checks_pass: true,
-        ..Fake::default()
+        ..Laptop::ok()
     };
-    assert_eq!(plan.run(&mut liar)[0].1.reason(), Some(Reason::NotVerified));
-    let mut honest = Fake::default();
-    assert_eq!(plan.run(&mut honest)[0].1.status(), ItemStatus::Converted);
+    liar.put_file(&place, "", b"{\"defaults\":true}");
+    liar.put_source(&place, "", b"{\"font\":14}");
+    assert_eq!(
+        run(&plan, &mut liar)[0].1.reason(),
+        Some(Reason::NotVerified)
+    );
+    let mut honest = Laptop::default();
+    honest.put_file(&place, "", b"{\"defaults\":true}");
+    honest.put_source(&place, "", b"{\"font\":14}");
+    assert_eq!(run(&plan, &mut honest)[0].1.status(), ItemStatus::Converted);
 }
 
 /// Regression (second fresh-context review of PR 20): a setting is never "reinstalled".
