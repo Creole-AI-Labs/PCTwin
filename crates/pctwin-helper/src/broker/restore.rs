@@ -186,7 +186,7 @@ mod windows_wmi {
     const WBEM_E_ACCESS_DENIED: i64 = 0x8004_1003;
     const E_ACCESSDENIED: i64 = 0x8007_0005;
 
-    fn code(e: &wmi::WMIError) -> SystemError {
+    pub(super) fn code(e: &wmi::WMIError) -> SystemError {
         let c = match e {
             wmi::WMIError::HResultError { hres } => i64::from(*hres) & 0xFFFF_FFFF,
             _ => -1,
@@ -462,6 +462,17 @@ mod tests {
                 reason: NotMadeReason::Failed
             }
         );
+    }
+
+    /// Windows' two ways of saying "administrators only", and "System Restore is off".
+    #[cfg(windows)]
+    #[test]
+    fn the_systems_codes_are_read_as_what_they_mean() {
+        let of = |h: u32| windows_wmi::code(&wmi::WMIError::HResultError { hres: h as i32 });
+        assert_eq!(of(0x8004_1003), SystemError::AccessDenied);
+        assert_eq!(of(0x8007_0005), SystemError::AccessDenied);
+        assert_eq!(of(0x8007_0422), SystemError::ProtectionOff);
+        assert_eq!(of(0x8000_4005), SystemError::Other(0x8000_4005));
     }
 
     /// Run for real on this laptop without administrator rights: Windows refuses to list restore

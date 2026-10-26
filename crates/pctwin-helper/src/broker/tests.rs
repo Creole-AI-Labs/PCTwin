@@ -34,6 +34,8 @@ impl NativeAuthority for FakeAuthority {
 #[derive(Default)]
 struct FakeJournal {
     down: bool,
+    /// Can be read, but cannot write a new intent durably.
+    intents_down: bool,
     outcomes_down: bool,
     /// Stops the move while the intent is being written.
     revoke_on_intent: Rc<RefCell<Option<Revoker>>>,
@@ -60,7 +62,7 @@ impl IntentJournal for FakeJournal {
     }
 
     fn record_intent(&mut self, intent: &Intent) -> Result<JournalRef, JournalUnavailable> {
-        if self.down {
+        if self.down || self.intents_down {
             return Err(JournalUnavailable);
         }
         self.entries.push((intent.clone(), None));
@@ -502,6 +504,46 @@ fn only_the_plan_named_at_launch_is_sealed_and_only_once() {
     assert_eq!(b.seal(plan), Err(Denial::Closed));
 }
 
+/// The command line's generation must be the plan's own, even when the digest matches; and a
+/// plan that is not well formed is never sealed, even when the command line names it.
+#[test]
+fn a_seal_must_match_in_every_part() {
+    let mut rig = Rig::new();
+    let plan = rig.plan.clone();
+    let mut twice = plan.clone();
+    let first = twice.operations[0].clone();
+    twice.operations.push(first);
+    let seals = [
+        (
+            LaunchSeal {
+                generation: plan.generation + 1,
+                digest: plan.digest(),
+            },
+            plan.clone(),
+        ),
+        (
+            LaunchSeal {
+                generation: twice.generation,
+                digest: twice.digest(),
+            },
+            twice,
+        ),
+    ];
+    for (launch, offered) in seals {
+        let staging = Staging::new(rig._dir.path().to_path_buf());
+        let mut b = Broker::new(
+            launch,
+            TOKEN,
+            staging,
+            &mut rig.authority,
+            &mut rig.journal,
+            &mut rig.adapters,
+            &*rig.clock,
+        );
+        assert_eq!(b.seal(offered), Err(Denial::WrongPlan));
+    }
+}
+
 #[test]
 fn launch_seals_are_read_exactly() {
     let d = "ab".repeat(32);
@@ -730,6 +772,19 @@ fn t22_018_no_journal_no_change() {
         none.record_outcome(JournalRef(0), &Outcome::AlreadyInPlace)
             .is_err()
     );
+}
+
+/// T22-018, the other way round: the journal can be read but the intent cannot be written.
+#[test]
+fn t22_018_an_intent_that_cannot_be_written_means_no_change() {
+    let mut rig = Rig::new();
+    rig.journal.intents_down = true;
+    let req = rig.request("restore-point");
+    let mut b = rig.broker();
+    assert_eq!(denied(b.handle(&req)), Denial::JournalUnavailable);
+    drop(b);
+    assert_eq!(rig.adapters.restore_points, 0);
+    assert!(rig.journal.entries.is_empty());
 }
 
 #[test]
