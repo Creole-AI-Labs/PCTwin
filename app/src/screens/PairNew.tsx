@@ -3,9 +3,9 @@ import { useCallback, useContext, useEffect, useId, useRef, useState, type React
 import { useSettle } from "../motion/screen";
 import { Badge, Button, TextField, onlyDigits } from "../components/kit";
 import { Attention, Laptop, Shield } from "../icons";
-import { FAILED_NEW, LOST_NEW, labelText, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type NewEvent, type Nearby, type Problem } from "../pairing";
+import { FAILED_NEW, LOST_NEW, labelShownSafely, listenNew, newConnect, newSearch, stop, toProblem, unseenHeadsUp, type HeadsUp, type Label, type NewEvent, type Nearby, type Problem } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, HeadsUpStep, Heading, PairStrip, PairedNow, ProblemNotice, QuickPairing, pairWord } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, PairedNow, PeerName, ProblemNotice, QuickPairing, pairWord } from "./PairParts";
 
 type Phase = "heads-up" | "searching" | "none" | "list" | "code" | "number" | "error" | "paired";
 
@@ -33,7 +33,8 @@ export default function PairNew({
   aside,
 }: {
   onBack: () => void;
-  onPaired?: () => void;
+  /** Called once paired; Quick Send's receiver is told the laptop it paired with. */
+  onPaired?: (peer?: Label) => void;
   /** Quick Send's receiver: its own words, no same-side switch, and onPaired at once (see PairOld). */
   quick?: boolean;
   /** Shown under each pairing step (Quick Send: where the files will be saved). */
@@ -46,6 +47,8 @@ export default function PairNew({
   useSettle(phase, { calm: true });
   const [nearby, setNearby] = useState<Nearby[]>([]);
   const [chosen, setChosen] = useState<Nearby | null>(null);
+  // The laptop this one pairs with, by name once chosen (shown safely: it comes from the network).
+  const peer = chosen ? labelShownSafely(l10n, chosen.label) : quick ? l10n.getString("qs-peer-sending") : "";
   const [hadList, setHadList] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -186,10 +189,20 @@ export default function PairNew({
     }
   };
 
-  if (phase === "paired") return quick ? <PairedNow onPaired={onPaired} /> : <Paired onContinue={onPaired} />;
+  if (phase === "paired")
+    return quick ? (
+      <PairedNow
+        onPaired={() => {
+          onPaired?.(chosen?.label);
+        }}
+      />
+    ) : (
+      <Paired onContinue={onPaired} />
+    );
 
   return (
     <QuickPairing.Provider value={quick}>
+      <PeerName.Provider value={peer}>
       <PairStrip onBack={back} />
 
       {phase === "heads-up" && (
@@ -314,7 +327,7 @@ export default function PairNew({
         <>
           <Eyebrow id={w("pair-new-eyebrow")} />
           <Heading key="code" id={w("pair-new-code-title")} />
-          <Localized id={w("pair-new-code-body")} vars={{ label: labelText(l10n, chosen.label) }}>
+          <Localized id={w("pair-new-code-body")} vars={{ label: peer }}>
             <p className="subhead" />
           </Localized>
           {problem && <ProblemNotice problem={problem} />}
@@ -328,7 +341,7 @@ export default function PairNew({
                 </Localized>
               }
               hint={
-                <Localized id={w("pair-new-code-hint")}>
+                <Localized id={w("pair-new-code-hint")} vars={{ label: peer }}>
                   <span />
                 </Localized>
               }
@@ -371,8 +384,8 @@ export default function PairNew({
       {phase === "number" && number !== null && (
         <>
           <Eyebrow id={w("pair-new-number-eyebrow")} />
-          <Heading key="number" id={w("pair-new-number-title")} />
-          <Localized id={w("pair-new-number-body")}>
+          <Heading key="number" id={w("pair-new-number-title")} vars={{ label: peer }} />
+          <Localized id={w("pair-new-number-body")} vars={{ label: peer }}>
             <p className="subhead" />
           </Localized>
           <div className="pair-tile pair-number-tile" dir="ltr" role="group" aria-label={l10n.getString("pair-new-number-label", { number })}>
@@ -384,7 +397,7 @@ export default function PairNew({
             </span>
           </div>
           <div role="status" className="pair-waiting">
-            <Localized id={w("pair-new-number-waiting")}>
+            <Localized id={w("pair-new-number-waiting")} vars={{ label: peer }}>
               <p />
             </Localized>
           </div>
@@ -397,6 +410,7 @@ export default function PairNew({
         </>
       )}
       {phase !== "heads-up" && aside}
+      </PeerName.Provider>
     </QuickPairing.Provider>
   );
 }
@@ -423,7 +437,7 @@ function NearbyRow({ nearby, onChoose }: { nearby: Nearby; onChoose: () => void 
         </span>
         <span className="pair-pick-text">
           <span id={nameId} className="pair-pick-name" dir="auto">
-            {labelText(l10n, nearby.label)}
+            {labelShownSafely(l10n, nearby.label)}
           </span>
           {nearby.needsUpdate && (
             <span id={flagId} className="pair-flag">

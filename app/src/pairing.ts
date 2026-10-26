@@ -5,6 +5,7 @@
  * translation files.
  */
 import { useLocalization, type ReactLocalization } from "@fluent/react";
+import { shownSafely } from "./quicksend";
 import {
   FAILED,
   listenPairingNew,
@@ -43,6 +44,11 @@ export const LOST_NEW: Problem = { key: "pairing-connection-lost-new", networks:
 export const FAILED_NEW: Problem = { key: "pairing-failed-new", networks: [] };
 
 /** A label as words: "Blue Fox" in the chosen language, or the typed name (or "unnamed"). */
+/** A laptop's label as the screens may show it: a name typed on another laptop is shown safely. */
+export function labelShownSafely(l10n: ReactLocalization, label: Label): string {
+  return label.kind === "named" ? shownSafely(labelText(l10n, label)) : labelText(l10n, label);
+}
+
 export function labelText(l10n: ReactLocalization, label: Label): string {
   if (label.kind === "picked") {
     // Some languages make the colour word agree with the animal word ("Renard bleu", "Panthère

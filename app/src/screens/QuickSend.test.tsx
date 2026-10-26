@@ -607,3 +607,28 @@ describe("pairing in Quick Send's words", () => {
     }
   });
 });
+
+describe("Quick Send names the laptops by name or role", () => {
+  // Kept because the full move uses them (MoveHost): never shown on a Quick Send page.
+  const FULL_MOVE_ONLY = new Set(["qs-label-this", "qs-label-other"]);
+
+  it("no English Quick Send line says this laptop, the other laptop, old laptop or new laptop", () => {
+    const ftl = Object.values(import.meta.glob<string>("../locales/en/main.ftl", { query: "?raw", import: "default", eager: true }))[0];
+    const bad: string[] = [];
+    let id = "";
+    for (const line of ftl.split(/\r?\n/)) {
+      const m = /^([a-z][a-z0-9-]*) =/.exec(line);
+      if (m) id = m[1];
+      else if (!line.startsWith(" ")) id = "";
+      if (!id.startsWith("qs-") || FULL_MOVE_ONLY.has(id)) continue;
+      if (/this laptop|the other laptop|old laptop|new laptop/i.test(line)) bad.push(line);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("a name from the other laptop is shown safely on the pages that use it", () => {
+    inApp(<QuickProgress side="receive" from={{ kind: "named", name: shownSafely("Ada‮gpj.exe") }} to={{ kind: "named", name: text("qs-label-yours") }} progress={PROGRESS} onPause={fn()} onResume={fn()} onCompact={fn()} onStop={fn()} />);
+    expect(document.body.textContent).not.toContain("‮");
+    expect(document.body.textContent).toContain("Ada[U+202E]gpj.exe");
+  });
+});

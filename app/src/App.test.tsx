@@ -190,7 +190,7 @@ describe("screens", () => {
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
     fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("history-title"));
-    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-label-other") }).replace(/[⁦-⁩]/g, ""));
+    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-peer-sending") }).replace(/[⁦-⁩]/g, ""));
     expect(row).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("history-open-files")) }));
     await waitFor(() => {

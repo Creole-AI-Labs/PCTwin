@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { useSettle } from "../motion/screen";
 import { historyExport, historyList, historyOpen, type HistoryEntryRaw, type QsReceipt } from "../bridge";
 import type { ReportItem } from "../move";
-import { labelText } from "../pairing";
 import type { HistoryEntry } from "../quicksend";
+import { labelShownSafely } from "../pairing";
 import History, { type ExportResult } from "./History";
 import QuickDone from "./QuickDone";
 import Report from "./Report";
@@ -38,7 +38,7 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
 
   // The screen's words for each entry: the old laptop by its pairing label, when known.
   const shown: HistoryEntry[] = entries.map((e) => {
-    const other = e.other ? labelText(l10n, e.other) : null;
+    const other = e.other ? labelShownSafely(l10n, e.other) : null;
     if (e.kind === "move") {
       return {
         id: e.id,
@@ -54,7 +54,7 @@ export default function HistoryHost({ onStart, onBack }: { onStart: () => void; 
       id: e.id,
       kind: e.kind,
       when: e.when,
-      peer: other ?? l10n.getString("qs-label-other"),
+      peer: other ?? l10n.getString(e.kind === "send" ? "qs-peer-receiving" : "qs-peer-sending"),
       state: e.state as Extract<HistoryEntry, { kind: "send" }>["state"],
     };
   });

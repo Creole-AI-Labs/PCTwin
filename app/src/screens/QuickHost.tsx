@@ -21,7 +21,7 @@ import {
   type QsProblem,
   type QsReceipt,
 } from "../bridge";
-import type { Label } from "../pairing";
+import { labelShownSafely, type Label } from "../pairing";
 import type { OfferedFile, PickedItem, SendProgress } from "../quicksend";
 import { Heading } from "./ProgressParts";
 import { TopStrip } from "./FrameParts";
@@ -79,8 +79,14 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
   const [tooMany, setTooMany] = useState(false);
   const [dragging, setDragging] = useState(false);
   const live = useRef(true);
-  const me: Label = { kind: "named", name: l10n.getString("qs-label-this") };
-  const other: Label = { kind: "named", name: l10n.getString("qs-label-other") };
+  // The receiver learns the sending laptop's name when it picks it to pair with; the sender is
+  // never told the receiver's, so it says its role. A name from the network is shown safely.
+  const [peer, setPeer] = useState<Label | null>(null);
+  const me: Label = { kind: "named", name: l10n.getString("qs-label-yours") };
+  const other: Label = {
+    kind: "named",
+    name: peer ? labelShownSafely(l10n, peer) : l10n.getString(sender ? "qs-label-receiving" : "qs-label-sending"),
+  };
   const [from, to] = sender ? [me, other] : [other, me];
 
   useEffect(() => {
@@ -273,7 +279,8 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
           quick
           aside={folderLine}
           onBack={onHome}
-          onPaired={() => {
+          onPaired={(label) => {
+            setPeer(label ?? null);
             setView({ kind: "progress", progress: STARTING });
             qsReceive().catch(fail);
           }}

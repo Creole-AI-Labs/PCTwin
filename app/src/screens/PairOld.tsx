@@ -23,7 +23,7 @@ import {
   type Problem,
 } from "../pairing";
 import Paired from "./Paired";
-import { Eyebrow, HeadsUpStep, Heading, PairStrip, PairedNow, ProblemNotice, QuickPairing, pairWord } from "./PairParts";
+import { Eyebrow, HeadsUpStep, Heading, PairStrip, PairedNow, PeerName, ProblemNotice, QuickPairing, pairWord } from "./PairParts";
 
 type Phase = "starting" | "heads-up" | "code" | "wait" | "locked" | "choose" | "network" | "error" | "paired";
 type Notice = "timed-out" | "declined" | "left";
@@ -301,6 +301,7 @@ export default function PairOld({ onBack, onPaired, quick = false }: { onBack: (
 
   return (
     <QuickPairing.Provider value={quick}>
+      <PeerName.Provider value={quick ? l10n.getString("qs-peer-receiving") : ""}>
       <PairStrip onBack={back} />
 
       {phase === "starting" && (
@@ -661,6 +662,7 @@ export default function PairOld({ onBack, onPaired, quick = false }: { onBack: (
           </div>
         </>
       )}
+      </PeerName.Provider>
     </QuickPairing.Provider>
   );
 }

@@ -13,6 +13,12 @@ import "./pairing.css";
  */
 export const QUICK_WORDS: ReadonlySet<string> = new Set([
   "pair-old-eyebrow",
+  "pair-old-label-title",
+  "pair-old-rename-label",
+  "pair-old-step-2",
+  "pair-old-locked-body",
+  "pair-new-needs-update",
+  "pairing-no-network",
   "pair-old-body",
   "pair-old-waiting",
   "pair-old-label-hint",
@@ -57,8 +63,14 @@ export function pairWord(id: string, quick: boolean): string {
   return quick && QUICK_WORDS.has(id) ? `qs-${id}` : id;
 }
 
-/** Whether the pairing page is Quick Send's: its parts say "the other laptop", never old or new. */
+/** Whether the pairing page is Quick Send's: its parts say "your laptop" and name the other one, never old or new. */
 export const QuickPairing = createContext(false);
+
+/**
+ * Quick Send: the other laptop as the words may name it ($label), already shown safely: its name
+ * once known (the receiver picked it from the list), or its role ("the sending laptop").
+ */
+export const PeerName = createContext("");
 
 /**
  * Quick Send, the moment the laptops are paired: no Paired page and no Continue. The send (or the
@@ -125,6 +137,7 @@ export function Eyebrow({ id }: { id: string }) {
 export function ProblemNotice({ problem }: { problem: Problem }) {
   const { l10n } = useLocalization();
   const quick = useContext(QuickPairing);
+  const peer = useContext(PeerName);
   // A key this version has no words for still says something useful: the generic problem.
   const key = l10n.getBundle(problem.key) ? problem.key : "pairing-failed";
   // Other possible causes, when a problem has them, wait behind More details.
@@ -132,7 +145,7 @@ export function ProblemNotice({ problem }: { problem: Problem }) {
   return (
     <div className="pair-notice">
       <Banner tone="attention">
-        <Localized id={pairWord(key, quick)}>
+        <Localized id={pairWord(key, quick)} vars={{ label: peer }}>
           <p />
         </Localized>
         {l10n.getBundle(details) && (
