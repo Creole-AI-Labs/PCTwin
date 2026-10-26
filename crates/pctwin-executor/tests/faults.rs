@@ -154,6 +154,11 @@ fn a_full_disk_or_a_refused_write_stops_every_change_after_it() {
             0,
             "writes {writes}: a change after the refusal: {log:?}"
         );
+        assert_eq!(
+            log.iter().filter(|e| e.ends_with("refused")).count(),
+            1,
+            "writes {writes}: nothing more is written after a refusal: {log:?}"
+        );
         // Every change made has its intent written before it.
         let intents = log[..refused].iter().filter(|e| *e == "intend").count();
         assert!(
@@ -411,4 +416,76 @@ fn imports_belong_to_their_own_role_and_are_left_to_it() {
     let run = run_with(&plan_of(vec![recipe(vec![copy("Mail")])]), &mut laptop, &j);
     assert_eq!(run.results[0].1.status(), ItemStatus::Failed);
     assert!(!laptop.done.contains(&"copy".to_string()));
+}
+
+#[test]
+fn a_restore_point_answer_that_cannot_be_written_down_stops_the_move() {
+    let (_d, _p, j) = journal();
+    let mut ledger = Faulty::new(&j, 0);
+    ledger.only = Some("restore-point");
+    let mut laptop = Laptop::ok();
+    let run = run_with(
+        &plan_of(vec![removable(vec![install("A.B")])]),
+        &mut laptop,
+        &ledger,
+    );
+    assert!(run.stopped.is_some());
+    assert!(installs(&laptop).is_empty(), "{:?}", laptop.done);
+    assert!(j.effects().unwrap().is_empty());
+}
+
+#[test]
+fn after_a_crash_a_change_seen_made_still_needs_its_own_check() {
+    let (_d, path, j) = journal();
+    let mut laptop = Laptop::default();
+    {
+        let ledger = Faulty::new(&j, 2);
+        run_with(
+            &plan_of(vec![recipe(vec![set("k", SettingValue::Int(1))])]),
+            &mut laptop,
+            &ledger,
+        );
+    }
+    drop(j);
+    let j = Journal::open(&path).unwrap();
+    // The value is there, but the setting's own check does not pass.
+    assert_eq!(laptop.settings.get("k"), Some(&SettingValue::Int(1)));
+    let got = recover(&j, &mut laptop).unwrap();
+    assert_eq!(
+        got[0].outcome,
+        RecoveredAs::Receipt(Receipt::Failed {
+            reason: pctwin_types::Reason::NotVerified
+        })
+    );
+}
+
+#[test]
+fn putting_back_settings_files_finished_just_before_a_crash_is_found_restored() {
+    let (_d, path, j) = journal();
+    let mut laptop = before_move();
+    let p = place("vlc");
+    run_with(&plan_of(vec![recipe(vec![copy("vlc")])]), &mut laptop, &j);
+    let id = j.effects().unwrap()[0].id;
+    {
+        let permit = j.begin_undo().unwrap();
+        j.settings()
+            .record_undo(&permit, id, &pctwin_journal::EffectUndo::Reversing)
+            .unwrap();
+    }
+    // Every file was put back; the power went before the result was written.
+    laptop.put_file(&p, "vlcrc", b"defaults");
+    let extra = laptop
+        .files
+        .keys()
+        .find(|k| k.1 == "extra.ini")
+        .unwrap()
+        .clone();
+    laptop.files.remove(&extra);
+    drop(j);
+    let j = Journal::open(&path).unwrap();
+    let permit = j.begin_undo().unwrap();
+    laptop.done.clear();
+    let got = undo_effects(&j, &permit, &mut laptop, SCOPE).unwrap();
+    assert_eq!(got[0].outcome, EffectUndoOutcome::Restored);
+    assert!(laptop.done.is_empty());
 }

@@ -499,3 +499,31 @@ fn an_effect_undone_elsewhere_is_never_claimed_undone_here() {
         .unwrap();
     assert!(kept.needs_action() && kept.is_final());
 }
+
+#[test]
+fn a_recorded_observation_changed_by_hand_never_supplies_a_path() {
+    let (_d, path, j) = common::journal();
+    let m = j.imports().intend(&planned(), &import()).unwrap();
+    j.imports()
+        .observed(
+            m,
+            &Found::Files(vec![pctwin_journal::FileHash {
+                path: "inbox.mbox".into(),
+                hash: [1; 32],
+            }]),
+            false,
+        )
+        .unwrap();
+    drop(j);
+    tamper(&path, m, |r| {
+        let at = r.rfind("inbox.mbox").unwrap();
+        format!(
+            "{}{}{}",
+            &r[..at],
+            "../escape",
+            &r[at + "inbox.mbox".len()..]
+        )
+    });
+    let j = Journal::open(&path).unwrap();
+    assert!(matches!(j.effect(m), Err(JournalError::Damaged(_))));
+}

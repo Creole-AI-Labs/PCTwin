@@ -513,3 +513,19 @@ fn the_faulty_journal_used_here_really_refuses() {
     );
     assert!(j.effects().unwrap().is_empty());
 }
+
+#[test]
+fn a_catalog_check_that_passes_is_not_enough_when_the_app_is_not_there() {
+    let (_d, _p, j) = journal();
+    let mut laptop = Laptop {
+        lies: true,
+        install_check_lies: true,
+        ..Laptop::ok()
+    };
+    let run = run_with(
+        &plan_of(vec![removable(vec![install("A.B")])]),
+        &mut laptop,
+        &j,
+    );
+    assert_eq!(run.results[0].1.reason(), Some(Reason::NotVerified));
+}

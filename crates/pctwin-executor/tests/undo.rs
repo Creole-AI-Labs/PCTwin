@@ -504,3 +504,146 @@ fn undo_follows_the_gate_closing_undo_shuts_it_for_effects_too() {
     ));
     assert_eq!(laptop.settings.get("k"), Some(&SettingValue::Int(2)));
 }
+
+#[test]
+fn an_app_the_person_installed_after_pctwins_install_failed_is_theirs_and_left() {
+    let (_d, _p, j) = journal();
+    let mut laptop = Laptop {
+        lies: true,
+        ..Laptop::ok()
+    };
+    moved(&j, &mut laptop, vec![removable(vec![install("A.B")])]);
+    // PCTwin's install did nothing; the person installed it themselves later.
+    laptop.installed.insert("A.B".into(), "2.0".into());
+    assert_eq!(undo(&j, &mut laptop), [EffectUndoOutcome::AsBefore]);
+    assert!(laptop.installed.contains_key("A.B"));
+    assert!(laptop.done.is_empty());
+}
+
+#[test]
+fn putting_back_that_reports_success_but_changes_nothing_is_not_claimed() {
+    for files in [false, true] {
+        let (_d, _p, j) = journal();
+        let mut laptop = Laptop::ok();
+        let p = place("vlc");
+        laptop.settings.insert("k".into(), SettingValue::Int(1));
+        laptop.put_file(&p, "vlcrc", b"defaults");
+        laptop.put_source(&p, "vlcrc", b"from the old laptop");
+        let r = if files {
+            recipe(vec![copy("vlc")])
+        } else {
+            recipe(vec![set("k", SettingValue::Int(2))])
+        };
+        moved(&j, &mut laptop, vec![r]);
+        laptop.restore_lies = true;
+        let got = undo(&j, &mut laptop);
+        assert!(
+            matches!(got[0], EffectUndoOutcome::NotDone { .. }),
+            "{got:?}"
+        );
+    }
+}
+
+/// Wraps the laptop and checks, before every change undo makes, that the journal already holds
+/// that change's undo as part way.
+struct Watched<'a> {
+    laptop: Laptop,
+    journal: &'a Journal,
+    checked: usize,
+}
+
+impl Watched<'_> {
+    fn part_way(&mut self) {
+        let parts = self.journal.effects_part_way().unwrap();
+        assert_eq!(parts.len(), 1, "recorded before the change");
+        self.checked += 1;
+    }
+}
+
+impl pctwin_executor::Adapter for Watched<'_> {
+    fn platform(&self) -> pctwin_recipe::Platform {
+        self.laptop.platform()
+    }
+    fn install(&mut self, c: pctwin_recipe::Catalog, p: &str) -> Result<(), pctwin_types::Reason> {
+        self.laptop.install(c, p)
+    }
+    fn copy_settings(
+        &mut self,
+        f: &pctwin_recipe::SettingsPlace,
+        t: &pctwin_recipe::SettingsPlace,
+    ) -> Result<(), pctwin_types::Reason> {
+        self.laptop.copy_settings(f, t)
+    }
+    fn apply_setting(&mut self, k: &str, v: &SettingValue) -> Result<(), pctwin_types::Reason> {
+        self.laptop.apply_setting(k, v)
+    }
+    fn verify(&mut self, c: &pctwin_recipe::Check) -> bool {
+        self.laptop.verify(c)
+    }
+    fn app_presence(
+        &mut self,
+        c: pctwin_recipe::Catalog,
+        p: &str,
+    ) -> Result<pctwin_journal::Presence, String> {
+        self.laptop.app_presence(c, p)
+    }
+    fn install_running(&mut self, c: pctwin_recipe::Catalog, p: &str) -> Result<bool, String> {
+        self.laptop.install_running(c, p)
+    }
+    fn read_setting(&mut self, k: &str) -> Result<Option<SettingValue>, String> {
+        self.laptop.read_setting(k)
+    }
+    fn read_settings_files(
+        &mut self,
+        p: &pctwin_recipe::SettingsPlace,
+    ) -> Result<Vec<pctwin_journal::SettingsFile>, String> {
+        self.laptop.read_settings_files(p)
+    }
+    fn restore_point(&mut self) -> pctwin_journal::RestorePoint {
+        self.laptop.restore_point()
+    }
+    fn uninstall(&mut self, c: pctwin_recipe::Catalog, p: &str) -> Result<(), String> {
+        self.part_way();
+        self.laptop.uninstall(c, p)
+    }
+    fn write_setting(&mut self, k: &str, v: Option<&SettingValue>) -> Result<(), String> {
+        self.part_way();
+        self.laptop.write_setting(k, v)
+    }
+    fn put_settings_file(
+        &mut self,
+        pl: &pctwin_recipe::SettingsPlace,
+        p: &str,
+        b: Option<&[u8]>,
+    ) -> Result<(), String> {
+        self.part_way();
+        self.laptop.put_settings_file(pl, p, b)
+    }
+}
+
+#[test]
+fn every_undo_change_is_recorded_as_part_way_before_it_is_made() {
+    for kind in ["app", "setting", "files"] {
+        let (_d, _p, j) = journal();
+        let mut laptop = Laptop::ok();
+        let p = place("vlc");
+        laptop.put_file(&p, "vlcrc", b"defaults");
+        laptop.put_source(&p, "vlcrc", b"from the old laptop");
+        let r = match kind {
+            "app" => removable(vec![install("A.B")]),
+            "setting" => recipe(vec![set("k", SettingValue::Int(2))]),
+            _ => recipe(vec![copy("vlc")]),
+        };
+        moved(&j, &mut laptop, vec![r]);
+        let mut watched = Watched {
+            laptop,
+            journal: &j,
+            checked: 0,
+        };
+        let permit = j.begin_undo().unwrap();
+        let got = undo_effects(&j, &permit, &mut watched, SCOPE).unwrap();
+        assert!(!got[0].outcome.needs_action(), "{kind}: {got:?}");
+        assert!(watched.checked > 0, "{kind}");
+        assert!(j.effects_part_way().unwrap().is_empty(), "{kind}: finished");
+    }
+}

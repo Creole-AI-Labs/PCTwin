@@ -203,6 +203,10 @@ pub struct Laptop {
     pub restore_asked: usize,
     /// Settings files put back before putting one back fails.
     pub puts_before_failing: Option<usize>,
+    /// The catalog's "is it installed" check says yes whatever is there.
+    pub install_check_lies: bool,
+    /// Putting a setting or a settings file back reports success and changes nothing.
+    pub restore_lies: bool,
 }
 
 impl Laptop {
@@ -278,7 +282,9 @@ impl Adapter for Laptop {
     fn verify(&mut self, check: &Check) -> bool {
         self.note("check".into());
         match check {
-            Check::PackageInstalled { package, .. } => self.installed.contains_key(package),
+            Check::PackageInstalled { package, .. } => {
+                self.install_check_lies || self.installed.contains_key(package)
+            }
             Check::SettingsMatch { from, to } => {
                 self.files_at(&self.source, from) == self.files_at(&self.files, to)
             }
@@ -340,6 +346,9 @@ impl Adapter for Laptop {
         if self.fail_restore {
             return Err("the setting could not be written".into());
         }
+        if self.restore_lies {
+            return Ok(());
+        }
         match value {
             Some(v) => self.settings.insert(key.into(), v.clone()),
             None => self.settings.remove(key),
@@ -362,6 +371,9 @@ impl Adapter for Laptop {
         if self.fail_restore {
             return Err("the file could not be written".into());
         }
+        if self.restore_lies {
+            return Ok(());
+        }
         match bytes {
             Some(b) => self.put_file(place, path, b),
             None => {
@@ -378,6 +390,8 @@ pub struct Faulty<'j> {
     pub inner: &'j Journal,
     pub writes: Cell<usize>,
     pub log: Rc<RefCell<Vec<String>>>,
+    /// Refuses only this kind of write (every other one is written).
+    pub only: Option<&'static str>,
 }
 
 impl<'j> Faulty<'j> {
@@ -386,10 +400,15 @@ impl<'j> Faulty<'j> {
             inner,
             writes: Cell::new(writes),
             log: Rc::default(),
+            only: None,
         }
     }
 
     fn write(&self, what: &str) -> Result<(), JournalError> {
+        if self.only.is_some_and(|only| only != what) {
+            self.log.borrow_mut().push(what.into());
+            return Ok(());
+        }
         if self.writes.get() == 0 {
             self.log.borrow_mut().push(format!("{what} refused"));
             return Err(JournalError::Storage("the disk is full".into()));
