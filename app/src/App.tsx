@@ -20,14 +20,12 @@ import QuickHost from "./screens/QuickHost";
 import HistoryHost from "./screens/HistoryHost";
 import Welcome from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
-import HeaderSettings from "./components/HeaderSettings";
-import { Question } from "./icons";
+import { HeaderLanguage, HeaderMotion } from "./components/HeaderSettings";
 import Opening from "./motion/Opening";
 import { openingKind, type OpeningKind } from "./motion/openingRule";
 import { applyToDocument } from "./motion/preference";
 import { restoreReveal } from "./motion/play";
 import { installScreenMotion, settleScreen } from "./motion/screen";
-import { HELP_URL, openExternal } from "./external";
 import "./styles.css";
 
 /** Welcome, Which laptop is this?, How will you connect? (C01), Put both laptops together (C02), pairing (C03 to C05), then the move; and Quick Send's home. */
@@ -179,20 +177,9 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
               <Localized id="header-this-laptop">
                 <span className="header-badge">This laptop</span>
               </Localized>
-              <HeaderSettings language={language} onLanguage={choose} />
-              <Localized id="header-help" attrs={{ "aria-label": true }}>
-                <button
-                  type="button"
-                  className="header-icon"
-                  aria-label="Help"
-                  onClick={() => {
-                    if (onHelp) onHelp();
-                    else void openExternal(HELP_URL);
-                  }}
-                >
-                  <Question />
-                </button>
-              </Localized>
+              <HeaderLanguage language={language} onLanguage={choose} />
+              {/* Help is in the footer of every page, so the header keeps only the settings. */}
+              <HeaderMotion />
             </div>
           </header>
           <main className="app-main" ref={main} tabIndex={-1} key={screen.id}>

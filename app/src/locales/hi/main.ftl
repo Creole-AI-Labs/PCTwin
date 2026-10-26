@@ -46,10 +46,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = आपका लैपटॉप
-header-settings =
-    .aria-label = भाषा और एनिमेशन
-header-help =
-    .aria-label = मदद
 
 ## F06 Old or new laptop
 

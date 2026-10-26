@@ -47,10 +47,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = Seu notebook
-header-settings =
-    .aria-label = Idioma e movimento
-header-help =
-    .aria-label = Ajuda
 
 ## F06 Old or new laptop
 

@@ -50,10 +50,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = حاسوبك
-header-settings =
-    .aria-label = اللغة والحركة
-header-help =
-    .aria-label = مساعدة
 
 ## F06 Old or new laptop
 

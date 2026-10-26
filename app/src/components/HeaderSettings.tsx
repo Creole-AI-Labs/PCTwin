@@ -1,18 +1,20 @@
-import { Localized } from "@fluent/react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useLocalization } from "@fluent/react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { LANGUAGES, type LanguageCode } from "../i18n";
-import { Globe } from "../icons";
-import MotionChoice from "../motion/MotionChoice";
+import { Globe, MotionLines } from "../icons";
+import { PREFERENCES, useMotion } from "../motion/preference";
 
 /** The short name on the header control, as in the mockup's "EN". */
 const SHORT: Record<LanguageCode, string> = { en: "EN", fr: "FR", es: "ES", pt: "PT", ar: "AR", "zh-CN": "ZH", hi: "HI" };
 
+type Choice = { key: string; label: string; lang?: string; current: boolean; choose: () => void };
+
 /**
- * The header's language control (the mockup's globe and "EN"). It opens a small panel with the
- * language choice and the Motion choice, the app's settings for now. Escape, or a click outside,
- * closes it; Escape returns focus to the control.
+ * One header control and the short list it opens: each choice is a button, the current one marked
+ * as pressed; choosing applies at once and closes the list. Escape, or a click outside, closes it;
+ * Escape and a choice return focus to the control.
  */
-export default function HeaderSettings({ language, onLanguage }: { language: LanguageCode; onLanguage: (code: LanguageCode) => void }) {
+function HeaderMenu({ className, label, face, choices }: { className: string; label: string; face: ReactNode; choices: Choice[] }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -30,6 +32,11 @@ export default function HeaderSettings({ language, onLanguage }: { language: Lan
     };
   }, [open]);
 
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
+
   return (
     <div
       className="header-settings"
@@ -37,48 +44,89 @@ export default function HeaderSettings({ language, onLanguage }: { language: Lan
       onKeyDown={(e) => {
         if (e.key !== "Escape" || !open) return;
         e.stopPropagation();
-        setOpen(false);
-        button.current?.focus();
+        close();
       }}
     >
-      <Localized id="header-settings" attrs={{ "aria-label": true }}>
-        <button
-          type="button"
-          ref={button}
-          className="header-icon header-language"
-          aria-label="Language and motion"
-          aria-expanded={open}
-          aria-controls={panel}
-          onClick={() => {
-            setOpen((o) => !o);
-          }}
-        >
-          <Globe />
-          <span lang="en">{SHORT[language]}</span>
-        </button>
-      </Localized>
+      <button
+        type="button"
+        ref={button}
+        className={`header-icon ${className}`}
+        aria-label={label}
+        aria-expanded={open}
+        aria-controls={panel}
+        onClick={() => {
+          setOpen((o) => !o);
+        }}
+      >
+        {face}
+      </button>
       {open && (
-        <div className="header-settings-panel" id={panel}>
-          <label className="language">
-            <Localized id="language-label">
-              <span className="visually-hidden">Language</span>
-            </Localized>
-            <select
-              value={language}
-              onChange={(e) => {
-                onLanguage(e.target.value as LanguageCode);
-              }}
-            >
-              {LANGUAGES.map((l) => (
-                <option key={l.code} value={l.code} lang={l.code}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <MotionChoice />
-        </div>
+        <ul className="header-settings-panel" id={panel} aria-label={label}>
+          {choices.map((c) => (
+            <li key={c.key}>
+              <button
+                type="button"
+                className="header-choice"
+                lang={c.lang}
+                aria-pressed={c.current}
+                onClick={() => {
+                  c.choose();
+                  close();
+                }}
+              >
+                {c.label}
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
+  );
+}
+
+/** The header's language control (the mockup's globe and "EN"): it opens the list of languages. */
+export function HeaderLanguage({ language, onLanguage }: { language: LanguageCode; onLanguage: (code: LanguageCode) => void }) {
+  const { l10n } = useLocalization();
+  return (
+    <HeaderMenu
+      className="header-language"
+      label={l10n.getString("language-label")}
+      face={
+        <>
+          <Globe />
+          <span lang="en">{SHORT[language]}</span>
+        </>
+      }
+      choices={LANGUAGES.map((l) => ({
+        key: l.code,
+        label: l.name,
+        lang: l.code,
+        current: l.code === language,
+        choose: () => {
+          onLanguage(l.code);
+        },
+      }))}
+    />
+  );
+}
+
+/** The header's motion control: follow the system (the default), reduced, or off; applies at once. */
+export function HeaderMotion() {
+  const { l10n } = useLocalization();
+  const { preference, setPreference } = useMotion();
+  return (
+    <HeaderMenu
+      className="header-motion"
+      label={l10n.getString("motion-label")}
+      face={<MotionLines />}
+      choices={PREFERENCES.map((p) => ({
+        key: p,
+        label: l10n.getString(`motion-${p}`),
+        current: p === preference,
+        choose: () => {
+          setPreference(p);
+        },
+      }))}
+    />
   );
 }

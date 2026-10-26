@@ -43,13 +43,9 @@ home-waiting =
        *[other] { $count } files waiting for { $to }
     }
 
-## Header: this laptop, the language and motion control, Help
+## Header: your laptop, then the language and motion controls (Help is in the footer)
 
 header-this-laptop = Your laptop
-header-settings =
-    .aria-label = Language and motion
-header-help =
-    .aria-label = Help
 
 ## F06 Old or new laptop
 
