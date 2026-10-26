@@ -33,7 +33,7 @@ home-move-body = Transférer votre configuration
 home-restore-body = La remettre en place
 home-rescue-body = Sauver l’essentiel
 home-history = Mon historique
-home-history-body = Vos transferts, envois et reçus
+home-history-body = Vos transferts, et les fichiers envoyés et reçus
 home-resume-body = Votre progression est enregistrée.
 home-resume-action = Reprendre
     .aria-label = Reprendre votre transfert
@@ -1441,8 +1441,6 @@ qs-eyebrow = Envoi rapide
 qs-eyebrow-receiving = Réception sur cet ordinateur portable
 qs-label-this = Ce portable
 qs-label-other = L’autre portable
-qs-wait-title = En attente des fichiers.
-qs-wait-body = Les portables sont associés. Vous verrez ce qui est proposé avant que rien ne soit reçu.
 qs-pick-failed = Le sélecteur n’a pas pu s’ouvrir. Réessayez.
 qs-pick-too-many = C’est plus de fichiers qu’un seul envoi ne peut en emporter. Décochez quelques dossiers, ou envoyez-les en plusieurs fois.
 qs-problem-lost-title = La connexion avec l’autre portable a été perdue.
@@ -1469,8 +1467,8 @@ qs-send-title = Envoyer des fichiers
 qs-send-body = Choisissez des fichiers ou des dossiers sur cet ordinateur portable.
 qs-receive-title = Recevoir des fichiers
 qs-receive-body = Laissez un ordinateur portable à proximité envoyer des fichiers à celui-ci.
-qs-history-title = Vos reçus
-qs-history-body = Voyez où sont allés les fichiers reçus et ce qui n’a pas abouti.
+qs-history-title = Envoyés et reçus
+qs-history-body = Voyez les fichiers envoyés et reçus sur cet ordinateur portable.
 qs-home-action = Choisir des fichiers
 qs-receiving = Prêt à recevoir. Les autres ordinateurs portables à proximité voient celui-ci sous le nom { $label }.
 qs-receive-stop = Arrêter la réception
@@ -1495,103 +1493,7 @@ qs-empty = Rien de choisi pour l’instant. Ajoutez des fichiers ou des dossiers
 qs-online-only = Certains fichiers sont seulement en ligne. Rendez-les d’abord disponibles sur cet ordinateur portable, puis envoyez-les.
 qs-protected = PCTwin ne peut pas lire { $name }. Autorisez l’accès, ou retirez-le de la liste.
 qs-allow = Autoriser l’accès
-qs-choose-continue = Vérifier ces fichiers
-
-## Q03 Check what you are sharing
-
-qs-check-title = Vérifiez ce que vous partagez.
-qs-check-body = Relisez ces fichiers avant qu’ils quittent cet ordinateur portable.
-qs-check-included = Inclus
-qs-file-type = Type : .{ $ext }
-qs-check-shared-note = L’autre ordinateur portable voit le nom, la taille et la date de ces fichiers.
-qs-check-changed = { $name } a changé depuis votre choix. Vérifiez-le à nouveau.
-qs-check-ack = J’ai vérifié ces fichiers
-qs-check-ack-hint = Retirez tout ce qui est privé avant l’envoi.
-qs-check-continue = Choisir l’autre ordinateur portable
-
-## Q04 Who should receive it?
-
-qs-who-title = Qui doit le recevoir ?
-qs-who-body = Choisissez le nom affiché sur l’autre ordinateur portable.
-qs-who-nearby = À proximité · même Wi-Fi.
-qs-who-code = Utiliser un code d’association
-qs-who-code-body = Saisissez le code affiché par l’expéditeur.
-qs-who-same-label = Deux ordinateurs portables à proximité ont ce nom. Vérifiez le nom sur l’écran de l’autre ordinateur.
-qs-who-busy = { $label } est occupé par un autre envoi. Attendez un instant, puis réessayez.
-qs-who-note = L’autre ordinateur portable accepte les fichiers et choisit où ils vont.
-qs-who-action = Afficher mon code d’envoi
-
-## Q08 Incoming offer (receiving laptop)
-
-qs-offer-title = Quelqu’un veut vous envoyer des fichiers.
-qs-offer-body = { $label } veut vous envoyer ces fichiers. Vérifiez-les avant d’accepter.
-qs-offer-note = PCTwin enregistre seulement les fichiers que vous acceptez. Il ne les ouvre et ne les lance jamais.
-qs-offer-accept = Accepter et choisir un dossier
-qs-offer-decline = Refuser ces fichiers
-qs-offer-declined = Vous avez refusé. Rien n’a été enregistré sur cet ordinateur portable.
-qs-offer-changed = L’expéditeur a modifié les fichiers. Vérifiez la nouvelle liste avant d’accepter.
-qs-offer-gone = { $label } n’est plus disponible. Rien n’a été enregistré sur cet ordinateur portable.
-
-## Q09 Where should the files land?
-
-qs-land-title = Où enregistrer les fichiers ?
-qs-land-body = Choisissez le dossier sur cet ordinateur portable.
-qs-land-folder-label = Dossier de réception
-qs-land-choose = Choisir un autre dossier
-qs-land-space-title = Espace disponible
-qs-land-space = Disponible : { $free } · nécessaire : { $needed }.
-qs-land-status-fits = Suffisant
-qs-land-status-no-space = Espace insuffisant
-qs-land-no-space = Ce dossier a { $free } d’espace libre, mais ces fichiers ont besoin de { $needed }. Choisissez un autre dossier ou libérez de l’espace.
-qs-land-unavailable = Ce dossier n’est pas disponible. Connectez son disque, ou choisissez un autre dossier.
-qs-land-denied = PCTwin n’est pas autorisé à enregistrer dans ce dossier. Choisissez un autre dossier.
-qs-land-note = Si un fichier du même nom s’y trouve déjà, vous choisissez ce qui se passe avant tout enregistrement.
-qs-land-confirm = Utiliser ce dossier pour ces fichiers
-qs-land-confirm-hint = Seuls les fichiers acceptés sont enregistrés ici.
-qs-land-use = Utiliser ce dossier
-
-## Q10 Keep your existing work safe
-
-qs-conflict-title = Gardez votre travail en sécurité.
-qs-conflict-body = Choisissez ce qui se passe quand un fichier du même nom est déjà là.
-qs-conflict-col-file = Élément
-qs-conflict-col-existing = Déjà présent
-qs-conflict-col-choice = Choix
-# $when is already formatted, for example "yesterday".
-qs-conflict-existing = Modifié { $when }
-qs-conflict-none = Aucune copie existante
-qs-conflict-select =
-    .aria-label = Que faire de { $name }
-qs-keep-both = Garder les deux
-qs-skip = Ignorer cet élément
-qs-add-new = Ajouter le nouveau
-qs-keep-both-note = Garder les deux laisse le fichier existant tel quel. Le nouveau est enregistré sous le nom { $newName }.
-qs-no-conflicts = Aucun de ces fichiers n’est encore dans le dossier. Rien ne sera remplacé.
-qs-conflict-target-changed = Si le fichier déjà présent change ou ne peut pas être ouvert, il attend que vous le vérifiiez à nouveau.
-qs-conflict-approve = J’approuve ces choix
-qs-conflict-continue = Confirmer ces choix
-
-## Q11 Ready to send these files?
-
-qs-approve-title = Envoyer ces fichiers maintenant ?
-qs-approve-body = Vérifiez exactement ce qui est envoyé avant le début.
-qs-approve-receiver-title = Autre ordinateur portable
-qs-approve-receiver-waiting = En attente : l’autre ordinateur portable doit accepter et choisir un dossier.
-qs-approve-receiver-ready = L’autre ordinateur portable a accepté, et a choisi un dossier et ce qu’il faut faire des fichiers déjà présents.
-qs-approve-files-title = Fichiers
-qs-approve-files-same = Ne modifiez pas ces fichiers avant la fin de l’envoi.
-qs-approve-files-changed = Certains fichiers ont changé depuis votre vérification. Vérifiez-les à nouveau.
-qs-approve-existing-title = Fichiers existants
-qs-approve-existing-body = Garder les deux, comme choisi.
-qs-status-waiting = En attente
-qs-status-accepted = Approuvé
-qs-status-unchanged = À vérifier
-qs-status-changed = Modifié
-qs-approve-ack = Envoyer ces fichiers
-qs-approve-ack-hint = J’approuve ces fichiers et cet ordinateur portable.
-qs-approve-start = Commencer l’envoi
-qs-approve-cleared = Vous avez modifié les fichiers : { $label } doit donc les accepter à nouveau.
-qs-approve-withdrawn = { $label } n’accepte plus cet envoi. Rien n’a été envoyé.
+qs-choose-continue = Continuer
 
 ## Q12 Send progress
 
@@ -1611,8 +1513,6 @@ qs-step-copying-body =
     }
 qs-step-checking = Vérification
 qs-step-checking-body = Chaque fichier est comparé à l’original.
-qs-step-receipt = Reçu
-qs-step-receipt-body = À la fin, voyez où sont allés les fichiers et ce qui n’a pas abouti.
 qs-sending-paused = En pause. Les fichiers déjà reçus et vérifiés sont gardés.
 qs-sending-disconnected = La connexion avec { $label } a été coupée. Les fichiers déjà vérifiés sont gardés. Nouvel essai automatique…
 qs-sending-needs-action =
@@ -1626,62 +1526,6 @@ qs-resume = Reprendre
 qs-compact = Vue compacte
 qs-stop = Arrêter cet envoi
 qs-sending-complete-title = L’envoi est terminé
-qs-sending-complete-body = Chaque fichier arrivé correspondait à son original. Voyez où ils ont été enregistrés.
-qs-sending-receipt = Voir le reçu
-
-## Q14 Handover receipt (both laptops)
-
-qs-receipt-title = Voici votre reçu.
-qs-receipt-body = Voyez exactement ce qui est arrivé et où.
-qs-receipt-box-title = Vos fichiers sont arrivés
-qs-receipt-box-body = Chaque copie a été comparée à l’original et correspondait.
-qs-receipt-arrived =
-    { NUMBER($count) ->
-        [one] { $count } élément sélectionné reçu
-        [many] { $count } d’éléments sélectionnés reçus
-       *[other] { $count } éléments sélectionnés reçus
-    }
-qs-receipt-size = { $size } conformes à l’original
-qs-receipt-saved-as = { $path }
-qs-receipt-not-arrived = Ce dossier n’est pas entièrement arrivé et vérifié.
-qs-receipt-needs-action = { $path } est là, mais n’est pas terminé. Que faire est dans Plus de détails.
-qs-receipt-mark-not-kept = { $path } est là, mais ce disque n’a pas pu le marquer comme téléchargé depuis un autre ordinateur portable. Ouvrez-le avec prudence.
-qs-receipt-status-verified = Vérifié
-qs-receipt-status-unfinished = Inachevé
-qs-receipt-not-completed = Non terminé.
-qs-receipt-stopped-row = Reçu et vérifié avant l’arrêt.
-qs-receipt-partial =
-    { NUMBER($count) ->
-        [one] { $count } élément demande encore votre attention.
-        [many] { $count } d’éléments demandent encore votre attention.
-       *[other] { $count } éléments demandent encore votre attention.
-    }
-qs-receipt-stopped = Cet envoi a été arrêté. Les fichiers arrivés en entier restent dans le dossier choisi.
-qs-receipt-not-opened = PCTwin n’a ouvert ni lancé aucun fichier reçu.
-qs-receipt-ack = Confirmer ce reçu
-# $when is already formatted, for example "today at 14:05".
-qs-receipt-acked = Reçu confirmé { $when }.
-qs-receipt-ack-note = Confirmer ce reçu ne signifie pas que les fichiers ont été ouverts ou utilisés.
-qs-receipt-offline = { $label } est hors ligne et n’a donc pas encore vu ce reçu. Le reçu est enregistré sur cet ordinateur portable.
-qs-receipt-missing = Envoyer ce qui manque
-qs-receipt-missing-body = Vérifiez seulement les fichiers qui ne sont pas arrivés.
-qs-receipt-history = Tous les reçus
-qs-receipt-done = Retour à Envoi rapide
-
-## Q19 Finish the missing part
-
-qs-missing-title = Terminez la partie manquante.
-qs-missing-body = Utilisez le reçu précédent pour voir ce qui n’est pas arrivé.
-qs-missing-status-there = Arrivé
-qs-missing-status-missing = Action nécessaire
-qs-missing-there-body = Il est arrivé et correspondait à l’original.
-qs-missing-missing-body = Vérifiez les fichiers manquants ou inachevés.
-qs-missing-note = Les fichiers arrivés sont gardés. Les fichiers nouveaux ou modifiés doivent être approuvés à nouveau.
-qs-missing-ack = Envoyer les fichiers manquants
-qs-missing-ack-hint = PCTwin vérifie à nouveau les fichiers, et l’autre ordinateur portable les accepte à nouveau.
-qs-missing-complete = Tout est déjà arrivé. Il ne reste rien à envoyer.
-qs-missing-unavailable = Le reçu précédent est introuvable, PCTwin ne peut donc pas savoir ce qui manque. Lancez plutôt un nouvel envoi.
-qs-missing-continue = Vérifier ce qui sera envoyé
 
 ## Q20 Stop this send? (and decline)
 
@@ -1698,12 +1542,7 @@ qs-stop-status-stop = Arrêt
 qs-stop-status-review = À vérifier
 qs-stop-ack = Arrêter cet envoi
 qs-stop-ack-hint = Les fichiers arrivés en entier ne sont pas supprimés.
-qs-stop-confirm = Arrêter et voir le reçu
 qs-stop-keep = Continuer l’envoi
-qs-decline-title = Refuser ces fichiers ?
-qs-decline-body = Rien n’est enregistré sur cet ordinateur portable, et l’expéditeur est informé de votre refus.
-qs-decline-confirm = Refuser
-qs-already-finished = Cet envoi est déjà terminé. Consultez le reçu pour voir ce qui est arrivé.
 
 ## F08 Your moves, kept on this laptop (history)
 
@@ -1723,7 +1562,6 @@ history-status-paused = En pause
 history-status-stopped = Arrêté en toute sécurité
 history-status-partial = Arrivé en partie
 history-open-report = Rapport
-history-open-receipt = Reçu
 history-continue = Continuer
 history-export = Exporter l’historique
 history-exported = Historique enregistré sous { $path }.
@@ -1744,48 +1582,8 @@ qs-tally-counting =
     }
 qs-gone = { $name } n’est plus là. Il a peut-être été déplacé ou supprimé. Décochez-le, ou remettez-le en place et ajoutez-le à nouveau.
 qs-choose-why-problems = Certains éléments cochés ne peuvent pas encore être envoyés. Décochez-les, ou corrigez-les comme indiqué, pour continuer.
-qs-check-missing = { $name } n’est plus là. Revenez en arrière et retirez-le, ou remettez-le en place.
-qs-check-unreadable = PCTwin ne peut plus lire { $name }. Autorisez l’accès, ou revenez en arrière et retirez-le.
-qs-check-show-all =
-    { NUMBER($count) ->
-        [one] Afficher le fichier
-        [many] Afficher les { $count } fichiers
-       *[other] Afficher les { $count } fichiers
-    }
-qs-check-change = Modifier ce que j’envoie
-qs-land-none = Aucun dossier choisi.
-qs-land-space-unknown = PCTwin n’a pas pu mesurer l’espace libre ici. Ces fichiers ont besoin de { $needed }.
-qs-conflict-existing-unknown = Déjà présent
-qs-conflict-choice-open = Pas encore choisi
-qs-conflict-why = Choisissez ce qui arrive à chaque fichier, puis cochez la case, pour continuer.
-qs-approve-folder-title = Dossier de réception
-qs-status-recipient-choice = Choix du destinataire
 qs-sending-card = Envoi des fichiers sélectionnés
 qs-progress-of = sur { $total }
-qs-receipt-partial-title = Tout n’est pas arrivé
-qs-receipt-metric-items =
-    { NUMBER($count) ->
-        [one] élément sélectionné reçu
-        [many] d’éléments sélectionnés reçus
-       *[other] éléments sélectionnés reçus
-    }
-qs-receipt-metric-size = vérifiés par rapport à l’original
-qs-receipt-sent-as = Envoyé sous le nom { $path }
-qs-receipt-renamed = Un fichier de ce nom était déjà là, celui-ci a donc reçu un nouveau nom.
-qs-receipt-chip-already = Déjà présent
-qs-receipt-already = Un fichier identique était déjà là ({ $path }), il n’a donc pas été renvoyé.
-qs-receipt-chip-declined = Non accepté
-qs-receipt-declined-send = L’autre ordinateur portable n’a pas accepté ce fichier, il n’a donc pas été envoyé.
-qs-receipt-declined-receive = Vous n’avez pas accepté ce fichier, il n’a donc pas été enregistré.
-qs-receipt-more = Plus de détails
-qs-receipt-empty = Rien n’a été envoyé, il n’y a donc rien à afficher.
-qs-receipt-already-count =
-    { NUMBER($count) ->
-        [one] { $count } élément était déjà là, identique
-        [many] { $count } d’éléments étaient déjà là, identiques
-       *[other] { $count } éléments étaient déjà là, identiques
-    }
-qs-missing-new-send = Lancer un nouvel envoi
 history-open-name = { $what } : { $title }
 
 ## R05 Annulation : ce que l’annulation fera sur chaque disque, et ce qu’est devenue chaque copie
@@ -1800,3 +1598,92 @@ undo-here-more-fat = Sur les disques FAT et exFAT, un nouveau fichier peut recev
 undo-done-trashed = Placé dans la Corbeille sous le nom « { $name } ». Vous pouvez le remettre en place depuis la Corbeille.
 undo-kept-fat = Gardé. Ce disque (FAT ou exFAT) réutilise les numéros servant à distinguer les fichiers : PCTwin ne peut donc pas être sûr qu’il s’agit de sa copie. Si vous n’en avez pas besoin, vous pouvez la supprimer vous-même.
 undo-kept-no-trash = Gardé. PCTwin n’a pas pu placer cette copie dans la Corbeille de son disque. Si vous n’en avez pas besoin, vous pouvez la supprimer vous-même.
+
+## Quick Send (26 October 2026): pairing in Quick Send's words, where received files go, and the Done page
+
+qs-pair-old-eyebrow = Envoi
+qs-pair-old-body = Sur l’autre ordinateur portable, choisissez Recevoir des fichiers, puis saisissez ce code.
+qs-pair-old-waiting = En attente de l’autre ordinateur portable…
+qs-pair-old-label-hint = L’autre ordinateur portable trouvera celui-ci sous ce nom.
+qs-pair-old-steps-title = Sur l’autre ordinateur portable
+qs-pair-old-step-1 = Ouvrez PCTwin, choisissez Envoi rapide, puis Recevoir des fichiers.
+qs-pair-old-left = L’autre ordinateur portable a arrêté l’association avant le choix d’un numéro, rien n’a donc été partagé. Voici un nouveau code.
+qs-pair-network-hint = Choisissez le réseau de l’autre ordinateur portable.
+qs-pair-choose-body = Regardez l’autre ordinateur portable. Choisissez le numéro qu’il affiche.
+qs-pair-choose-renewed = De nouveaux numéros sont affichés. Choisissez celui de l’autre ordinateur portable.
+qs-pair-choose-note = Si l’autre ordinateur portable n’affiche aucun numéro, ou si aucun ne correspond, choisissez Aucun ne correspond.
+qs-pair-heads-up-firewall = Windows peut demander si PCTwin peut accepter des connexions. Choisissez Autoriser, pour que l’autre ordinateur portable puisse joindre celui-ci.
+qs-pair-new-eyebrow = Réception
+qs-pair-new-searching-title = Recherche de l’ordinateur portable qui envoie…
+qs-pair-new-searching-body = Gardez PCTwin ouvert sur l’autre ordinateur portable, sur le même Wi-Fi que celui-ci.
+qs-pair-new-search-failed-title = Impossible de chercher l’autre ordinateur portable.
+qs-pair-new-list-title = Quel ordinateur portable envoie ?
+qs-pair-new-list-body = Choisissez le nom affiché sur l’écran de l’autre ordinateur portable.
+qs-pair-new-same-label = Un autre ordinateur portable à proximité porte ce nom. Vérifiez l’écran de l’ordinateur qui envoie.
+qs-pair-new-none-title = Aucun ordinateur qui envoie trouvé.
+qs-pair-new-none-body = Vérifiez que PCTwin est ouvert sur l’autre ordinateur portable et affiche un code, et que les deux ordinateurs sont sur le même Wi-Fi. Puis relancez la recherche.
+qs-pair-new-code-hint = Lisez-le sur l’écran de l’autre ordinateur portable. Il change chaque minute.
+qs-pair-new-number-title = Choisissez ce numéro sur l’autre ordinateur portable.
+qs-pair-new-number-body = L’autre ordinateur portable affiche trois numéros. Choisissez celui-ci là-bas.
+qs-pair-new-number-waiting = En attente de l’autre ordinateur portable…
+qs-pairing-code-invalid = Ce code doit comporter six chiffres. Vérifiez l’écran de l’autre ordinateur portable et saisissez-le à nouveau.
+qs-pairing-code-wrong = Ce code ne correspond pas. Vérifiez l’écran de l’autre ordinateur portable et réessayez.
+qs-pairing-code-expired = Ce code a changé. Saisissez le nouveau code affiché sur l’écran de l’autre ordinateur portable.
+qs-pairing-busy = L’autre ordinateur portable est déjà en cours d’association avec un autre. Attendez un instant, puis réessayez.
+qs-pairing-wait = L’autre ordinateur portable prépare un nouveau code. Attendez-le, puis saisissez le nouveau code.
+qs-pairing-locked = L’association s’est arrêtée après trop d’essais erronés. Sur l’autre ordinateur portable, choisissez Recommencer.
+qs-pairing-unreachable = Cet ordinateur portable n’a pas pu joindre l’autre. Vérifiez que les deux sont sur le même Wi-Fi, puis réessayez.
+qs-pairing-wrong-number = Ce numéro ne correspond pas à celui de l’autre ordinateur portable. Rien n’a été partagé. Saisissez le nouveau code sur l’autre ordinateur pour réessayer.
+qs-pairing-no-match = Les numéros ne correspondaient pas sur l’autre ordinateur portable. Rien n’a été partagé. Saisissez le nouveau code affiché sur l’écran de l’autre ordinateur.
+qs-pairing-timed-out = Aucun numéro n’a été choisi à temps. Réessayez avec le nouveau code de l’autre ordinateur portable.
+qs-pairing-connection-lost-new = La connexion avec l’autre ordinateur portable a été coupée. Rien n’a été partagé.
+qs-pairing-choose-network = Cet ordinateur portable est sur plusieurs réseaux. Choisissez celui de l’autre ordinateur :
+qs-pairing-failed-new = L’association n’a pas fonctionné cette fois. Rien n’a été partagé. Saisissez le nouveau code affiché sur l’autre portable.
+qs-folder-line = Les fichiers seront enregistrés dans { $folder }.
+qs-folder-change = Changer
+qs-folder-title = Où enregistrer les fichiers ?
+qs-folder-none = PCTwin n’a pas trouvé votre dossier Téléchargements. Choisissez un dossier pour les fichiers, puis connectez-vous.
+qs-folder-choose = Choisir un dossier
+qs-folder-failed = PCTwin ne peut pas enregistrer de fichiers dans ce dossier. Choisissez-en un autre.
+qs-done-sent-title = Vos fichiers ont été envoyés.
+qs-done-here-title = Vos fichiers sont arrivés.
+qs-done-partial-title = Certains fichiers ne sont pas arrivés.
+qs-done-stopped-title = Cet envoi a été arrêté.
+qs-done-empty-title = Rien n’a été envoyé.
+qs-done-arrived =
+    { NUMBER($count) ->
+        [one] { $count } fichier · { $size } arrivé et identique à l’original
+        [many] { $count } de fichiers · { $size } arrivés et identiques aux originaux
+       *[other] { $count } fichiers · { $size } arrivés et identiques aux originaux
+    }
+qs-done-arrived-count =
+    { NUMBER($count) ->
+        [one] { $count } fichier arrivé et identique à l’original
+        [many] { $count } de fichiers arrivés et identiques aux originaux
+       *[other] { $count } fichiers arrivés et identiques aux originaux
+    }
+qs-done-already =
+    { NUMBER($count) ->
+        [one] { $count } fichier était déjà là, identique, il n’a donc pas été renvoyé.
+        [many] { $count } de fichiers étaient déjà là, identiques, ils n’ont donc pas été renvoyés.
+       *[other] { $count } fichiers étaient déjà là, identiques, ils n’ont donc pas été renvoyés.
+    }
+qs-done-stopped-body = Les fichiers arrivés avant l’arrêt ont été vérifiés et restent là où ils ont été enregistrés. Rien d’autre n’a été envoyé.
+qs-done-folder = Enregistrés dans { $folder }
+qs-done-open-folder = Ouvrir le dossier
+qs-done-open-failed = Le dossier n’a pas pu être ouvert. Il a peut-être été déplacé ou supprimé.
+qs-done-not-opened = PCTwin n’a ouvert ni lancé aucun fichier reçu.
+qs-done-problems-title = Fichiers à vérifier
+qs-done-not-arrived = Il n’est pas arrivé.
+qs-done-not-completed = Il n’a pas été envoyé avant l’arrêt.
+qs-done-needs-action = Il est là, mais n’est pas terminé. Que faire est dans Plus de détails.
+qs-done-mark-not-kept = Il est là, mais ce disque n’a pas pu le marquer comme téléchargé depuis un autre ordinateur portable. Ouvrez-le avec prudence.
+qs-done-see-files = Voir les fichiers
+qs-done-renamed = Enregistré sous { $name }, car un fichier portant ce nom était déjà là.
+qs-done-identical = Un fichier identique était déjà là, il n’a donc pas été renvoyé.
+qs-done-send-missing = Envoyer les fichiers manquants
+qs-done-send-missing-body = Seulement les fichiers qui ne sont pas arrivés. Vous associez d’abord les ordinateurs à nouveau.
+qs-done-done = Terminé
+qs-stop-now = Arrêter l’envoi
+qs-stop-finished = Cet envoi est déjà terminé.
+history-open-files = Voir les fichiers

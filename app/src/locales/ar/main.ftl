@@ -33,7 +33,7 @@ home-move-body = انقل إعداداتك
 home-restore-body = أعِدها كما كانت
 home-rescue-body = أنقذ ما يهمك
 home-history = السجل
-home-history-body = عمليات النقل والإرسال والإيصالات
+home-history-body = عمليات النقل، والملفات التي أرسلتها واستلمتها
 home-resume-body = تم حفظ تقدمك.
 home-resume-action = متابعة
     .aria-label = استئناف عملية النقل
@@ -1583,8 +1583,6 @@ qs-eyebrow = الإرسال السريع
 qs-eyebrow-receiving = الاستلام على هذا الحاسوب المحمول
 qs-label-this = هذا الحاسوب
 qs-label-other = الحاسوب الآخر
-qs-wait-title = في انتظار الملفات.
-qs-wait-body = الحاسوبان مقترنان. سترى ما يُعرض قبل استلام أي شيء.
 qs-pick-failed = تعذّر فتح نافذة الاختيار. حاول مرة أخرى.
 qs-pick-too-many = هذه ملفات أكثر مما يحمله إرسال واحد. ألغِ تحديد بعض المجلدات، أو أرسلها على أجزاء.
 qs-problem-lost-title = انقطع الاتصال بالحاسوب الآخر.
@@ -1614,8 +1612,8 @@ qs-send-title = إرسال الملفات
 qs-send-body = اختر ملفات أو مجلدات على هذا الحاسوب المحمول.
 qs-receive-title = استلام الملفات
 qs-receive-body = اسمح لحاسوب محمول قريب بإرسال ملفات إلى هذا الحاسوب.
-qs-history-title = إيصالاتك
-qs-history-body = اعرف أين ذهبت الملفات المستلمة وما لم يكتمل.
+qs-history-title = المرسلة والمستلمة
+qs-history-body = اعرض الملفات المرسلة والمستلمة على هذا الحاسوب.
 qs-home-action = اختيار الملفات
 qs-receiving = جاهز للاستلام. ترى الحواسيب المحمولة القريبة هذا الحاسوب باسم { $label }.
 qs-receive-stop = إيقاف الاستلام
@@ -1640,103 +1638,7 @@ qs-empty = لم يُختر أي شيء بعد. أضف ملفات أو مجلدا
 qs-online-only = بعض الملفات موجودة على الإنترنت فقط. اجعلها متاحة على هذا الحاسوب المحمول أولًا، ثم أرسلها.
 qs-protected = لا يستطيع PCTwin قراءة { $name }. اسمح بالوصول، أو أزله من القائمة.
 qs-allow = السماح بالوصول
-qs-choose-continue = التحقق من هذه الملفات
-
-## Q03 Check what you are sharing
-
-qs-check-title = تحقق مما ستشاركه.
-qs-check-body = راجع هذه الملفات قبل أن تغادر هذا الحاسوب المحمول.
-qs-check-included = مضمّن
-qs-file-type = النوع: .{ $ext }
-qs-check-shared-note = يرى الحاسوب المحمول الآخر أسماء هذه الملفات وأحجامها وتواريخها.
-qs-check-changed = تغيّر { $name } منذ أن اخترته. تحقق منه مرة أخرى.
-qs-check-ack = لقد تحققت من هذه الملفات
-qs-check-ack-hint = أزل أي شيء خاص قبل الإرسال.
-qs-check-continue = اختيار الحاسوب الآخر
-
-## Q04 Who should receive it?
-
-qs-who-title = من سيستلمها؟
-qs-who-body = اختر الاسم الظاهر على الحاسوب المحمول الآخر.
-qs-who-nearby = قريب · شبكة Wi-Fi نفسها.
-qs-who-code = استخدام رمز ربط
-qs-who-code-body = أدخل الرمز الظاهر على حاسوب المرسل.
-qs-who-same-label = يحمل حاسوبان محمولان قريبان هذا الاسم. تحقق من الاسم على شاشة الحاسوب الآخر.
-qs-who-busy = الحاسوب { $label } مشغول بإرسال آخر. انتظر لحظة، ثم حاول مرة أخرى.
-qs-who-note = يقبل الحاسوب المحمول الآخر الملفات ويختار أين تذهب.
-qs-who-action = عرض رمز الإرسال
-
-## Q08 Incoming offer (receiving laptop)
-
-qs-offer-title = هناك من يريد أن يرسل إليك ملفات.
-qs-offer-body = يريد { $label } أن يرسل إليك هذه الملفات. تحقق منها قبل أن تقبل.
-qs-offer-note = لا يحفظ PCTwin إلا الملفات التي تقبلها، ولا يفتحها أو يشغّلها أبدًا.
-qs-offer-accept = القبول واختيار مجلد
-qs-offer-decline = رفض هذه الملفات
-qs-offer-declined = لقد رفضت. لم يُحفظ أي شيء على هذا الحاسوب المحمول.
-qs-offer-changed = غيّر المرسل الملفات. تحقق من القائمة الجديدة قبل أن تقبل.
-qs-offer-gone = لم يعد { $label } متاحًا. لم يُحفظ أي شيء على هذا الحاسوب المحمول.
-
-## Q09 Where should the files land?
-
-qs-land-title = أين تُحفظ الملفات؟
-qs-land-body = اختر المجلد على هذا الحاسوب المحمول.
-qs-land-folder-label = مجلد الاستلام
-qs-land-choose = اختيار مجلد آخر
-qs-land-space-title = المساحة المتاحة
-qs-land-space = المتاح { $free } · المطلوب { $needed }.
-qs-land-status-fits = تتسع
-qs-land-status-no-space = المساحة غير كافية
-qs-land-no-space = في هذا المجلد مساحة متاحة قدرها { $free }، لكن هذه الملفات تحتاج إلى { $needed }. اختر مجلدًا آخر أو وفّر مساحة.
-qs-land-unavailable = هذا المجلد غير متاح. وصّل محرك الأقراص الخاص به، أو اختر مجلدًا آخر.
-qs-land-denied = لا يملك PCTwin إذنًا بالحفظ في هذا المجلد. اختر مجلدًا آخر.
-qs-land-note = إذا كان هناك ملف بالاسم نفسه، فستختار ما يحدث قبل حفظ أي شيء.
-qs-land-confirm = استخدام هذا المجلد لهذه الملفات
-qs-land-confirm-hint = لا تُحفظ هنا إلا الملفات التي قبلتها.
-qs-land-use = استخدام هذا المجلد
-
-## Q10 Keep your existing work safe
-
-qs-conflict-title = احمِ عملك الموجود.
-qs-conflict-body = اختر ما يحدث عندما يكون هناك ملف بالاسم نفسه.
-qs-conflict-col-file = العنصر
-qs-conflict-col-existing = موجود مسبقًا
-qs-conflict-col-choice = الاختيار
-# $when is already formatted, for example "yesterday".
-qs-conflict-existing = آخر تعديل: { $when }
-qs-conflict-none = لا توجد نسخة سابقة
-qs-conflict-select =
-    .aria-label = ما يحدث للعنصر { $name }
-qs-keep-both = الاحتفاظ بالاثنين
-qs-skip = تخطي هذا العنصر
-qs-add-new = إضافة الجديد
-qs-keep-both-note = يُبقي خيار «الاحتفاظ بالاثنين» الملف الموجود كما هو، ويُحفظ الجديد باسم { $newName }.
-qs-no-conflicts = لا يوجد أي من هذه الملفات في المجلد بعد. لن يُستبدل أي شيء.
-qs-conflict-target-changed = إذا تغيّر الملف الموجود أو تعذّر فتحه، فسينتظر حتى تتحقق منه مرة أخرى.
-qs-conflict-approve = أوافق على هذه الاختيارات
-qs-conflict-continue = تأكيد هذه الاختيارات
-
-## Q11 Ready to send these files?
-
-qs-approve-title = هل نرسل هذه الملفات؟
-qs-approve-body = تحقق مما سيُرسل بالضبط قبل أن يبدأ.
-qs-approve-receiver-title = الحاسوب الآخر
-qs-approve-receiver-waiting = في انتظار أن يقبل الحاسوب المحمول الآخر ويختار مجلدًا.
-qs-approve-receiver-ready = قبِل الحاسوب المحمول الآخر، واختار مجلدًا وما يحدث للملفات الموجودة مسبقًا.
-qs-approve-files-title = الملفات
-qs-approve-files-same = لا تغيّر هذه الملفات حتى تُرسل.
-qs-approve-files-changed = تغيّرت بعض الملفات منذ أن تحققت منها. تحقق منها مرة أخرى.
-qs-approve-existing-title = الملفات الموجودة
-qs-approve-existing-body = الاحتفاظ بالاثنين، كما اخترت.
-qs-status-waiting = في الانتظار
-qs-status-accepted = تمت الموافقة
-qs-status-unchanged = مراجعة
-qs-status-changed = تغيّر
-qs-approve-ack = إرسال هذه الملفات
-qs-approve-ack-hint = أوافق على هذه الملفات وعلى هذا الحاسوب المحمول.
-qs-approve-start = بدء الإرسال
-qs-approve-cleared = غيّرت الملفات، لذا يجب أن يقبلها { $label } مرة أخرى.
-qs-approve-withdrawn = لم يعد { $label } يقبل هذا الإرسال. لم يُرسل أي شيء.
+qs-choose-continue = متابعة
 
 ## Q12 Send progress
 
@@ -1759,8 +1661,6 @@ qs-step-copying-body =
     }
 qs-step-checking = التحقق
 qs-step-checking-body = يُقارن كل ملف بالأصل.
-qs-step-receipt = الإيصال
-qs-step-receipt-body = في النهاية، اعرف أين ذهبت الملفات وما لم يكتمل.
 qs-sending-paused = متوقف مؤقتًا. الملفات التي استُلمت وتم التحقق منها محفوظة.
 qs-sending-disconnected = انقطع الاتصال مع { $label }. الملفات التي تم التحقق منها محفوظة. تجري إعادة المحاولة تلقائيًا…
 qs-sending-needs-action =
@@ -1777,68 +1677,6 @@ qs-resume = استئناف
 qs-compact = عرض مختصر
 qs-stop = إيقاف هذا الإرسال
 qs-sending-complete-title = اكتمل الإرسال
-qs-sending-complete-body = كل ملف وصل طابق أصله. اعرف أين حُفظت الملفات.
-qs-sending-receipt = عرض الإيصال
-
-## Q14 Handover receipt (both laptops)
-
-qs-receipt-title = هذا هو إيصالك.
-qs-receipt-body = اعرف بالضبط ما وصل وأين حُفظ.
-qs-receipt-box-title = وصلت ملفاتك
-qs-receipt-box-body = قورنت كل نسخة بالأصل وتطابقت.
-qs-receipt-arrived =
-    { NUMBER($count) ->
-        [zero] تم استلام { $count } عنصر محدد
-        [one] تم استلام عنصر واحد محدد
-        [two] تم استلام عنصرين محددين
-        [few] تم استلام { $count } عناصر محددة
-        [many] تم استلام { $count } عنصرًا محددًا
-       *[other] تم استلام { $count } عنصر محدد
-    }
-qs-receipt-size = تطابق { $size } مع الأصل
-qs-receipt-saved-as = { $path }
-qs-receipt-not-arrived = لم يصل كل ما في هذا المجلد، أو لم يتم التحقق منه كله.
-qs-receipt-needs-action = { $path } موجود، لكنه لم يكتمل. ما يجب فعله موجود في مزيد من التفاصيل.
-qs-receipt-mark-not-kept = { $path } موجود، لكن هذا القرص لم يتمكن من تمييزه كملف تم تنزيله من حاسوب محمول آخر. افتحه بحذر.
-qs-receipt-status-verified = تم التحقق
-qs-receipt-status-unfinished = لم يكتمل
-qs-receipt-not-completed = لم يكتمل.
-qs-receipt-stopped-row = استُلم وتم التحقق منه قبل الإيقاف.
-qs-receipt-partial =
-    { NUMBER($count) ->
-        [zero] لا يزال { $count } عنصر بحاجة إلى انتباه.
-        [one] لا يزال عنصر واحد بحاجة إلى انتباه.
-        [two] لا يزال عنصران بحاجة إلى انتباه.
-        [few] لا تزال { $count } عناصر بحاجة إلى انتباه.
-        [many] لا يزال { $count } عنصرًا بحاجة إلى انتباه.
-       *[other] لا يزال { $count } عنصر بحاجة إلى انتباه.
-    }
-qs-receipt-stopped = تم إيقاف هذا الإرسال. الملفات التي وصلت كاملة تبقى في المجلد الذي اخترته.
-qs-receipt-not-opened = لم يفتح PCTwin أي ملف مستلم ولم يشغّله.
-qs-receipt-ack = تأكيد استلام الإيصال
-# $when is already formatted, for example "today at 14:05".
-qs-receipt-acked = تم تأكيد استلام الإيصال { $when }.
-qs-receipt-ack-note = تأكيد استلام هذا الإيصال لا يعني أن الملفات فُتحت أو استُخدمت.
-qs-receipt-offline = الحاسوب { $label } غير متصل، لذا لم يطّلع على هذا الإيصال بعد. الإيصال محفوظ على هذا الحاسوب المحمول.
-qs-receipt-missing = إرسال الأجزاء الناقصة
-qs-receipt-missing-body = تحقق فقط من الملفات التي لم تصل.
-qs-receipt-history = كل الإيصالات
-qs-receipt-done = العودة إلى الإرسال السريع
-
-## Q19 Finish the missing part
-
-qs-missing-title = أكمل الجزء الناقص.
-qs-missing-body = استخدم الإيصال السابق لمعرفة ما لم يصل.
-qs-missing-status-there = وصل
-qs-missing-status-missing = يحتاج إلى إجراء
-qs-missing-there-body = وصل وطابق الأصل.
-qs-missing-missing-body = تحقق من الملفات الناقصة أو التي لم تكتمل.
-qs-missing-note = الملفات التي وصلت محفوظة. الملفات الجديدة أو المتغيرة تحتاج إلى موافقتك مرة أخرى.
-qs-missing-ack = إرسال الملفات الناقصة
-qs-missing-ack-hint = يتحقق PCTwin من الملفات مرة أخرى، ويقبلها الحاسوب المحمول الآخر مرة أخرى.
-qs-missing-complete = وصل كل شيء بالفعل. لم يتبقَّ شيء لإرساله.
-qs-missing-unavailable = تعذّر العثور على الإيصال السابق، لذا لا يستطيع PCTwin معرفة ما الناقص. ابدأ إرسالًا جديدًا بدلًا من ذلك.
-qs-missing-continue = التحقق مما سيُرسل
 
 ## Q20 Stop this send? (and decline)
 
@@ -1855,12 +1693,7 @@ qs-stop-status-stop = إيقاف
 qs-stop-status-review = مراجعة
 qs-stop-ack = إيقاف هذا الإرسال
 qs-stop-ack-hint = الملفات التي وصلت كاملة لا تُحذف.
-qs-stop-confirm = الإيقاف وعرض الإيصال
 qs-stop-keep = متابعة الإرسال
-qs-decline-title = هل تريد رفض هذه الملفات؟
-qs-decline-body = لن يُحفظ أي شيء على هذا الحاسوب المحمول، وسيُبلَّغ المرسل بأنك رفضت.
-qs-decline-confirm = رفض
-qs-already-finished = انتهى هذا الإرسال بالفعل. اطّلع على الإيصال لمعرفة ما وصل.
 
 ## F08 Your moves, kept on this laptop (history)
 
@@ -1883,7 +1716,6 @@ history-status-paused = متوقف مؤقتًا
 history-status-stopped = أُوقف بأمان
 history-status-partial = لم يصل كل شيء
 history-open-report = التقرير
-history-open-receipt = الإيصال
 history-continue = متابعة
 history-export = تصدير السجل
 history-exported = حُفظ السجل في { $path }.
@@ -1907,57 +1739,8 @@ qs-tally-counting =
     }
 qs-gone = لم يعد { $name } موجودًا. ربما نُقل أو حُذف. ألغِ تحديده، أو أعده إلى مكانه وأضفه مرة أخرى.
 qs-choose-why-problems = لا يمكن إرسال بعض العناصر المحددة بعد. ألغِ تحديدها، أو أصلحها كما هو موضح، للمتابعة.
-qs-check-missing = لم يعد { $name } موجودًا. ارجع وأزله، أو أعده إلى مكانه.
-qs-check-unreadable = لم يعد PCTwin قادرًا على قراءة { $name }. اسمح بالوصول، أو ارجع وأزله.
-qs-check-show-all =
-    { NUMBER($count) ->
-        [zero] عرض كل الملفات ({ $count })
-        [one] عرض الملف
-        [two] عرض الملفين
-        [few] عرض كل الملفات ({ $count })
-        [many] عرض كل الملفات ({ $count })
-       *[other] عرض كل الملفات ({ $count })
-    }
-qs-check-change = تغيير ما سأرسله
-qs-land-none = لم يُختر أي مجلد بعد.
-qs-land-space-unknown = تعذّر على PCTwin قياس المساحة المتاحة هنا. تحتاج هذه الملفات إلى { $needed }.
-qs-conflict-existing-unknown = موجود مسبقًا
-qs-conflict-choice-open = لم يُحدَّد بعد
-qs-conflict-why = اختر ما يحدث لكل ملف، ثم حدّد المربع، للمتابعة.
-qs-approve-folder-title = مجلد الاستلام
-qs-status-recipient-choice = اختيار المستلم
 qs-sending-card = جارٍ إرسال الملفات المحددة
 qs-progress-of = من { $total }
-qs-receipt-partial-title = لم يصل كل شيء
-qs-receipt-metric-items =
-    { NUMBER($count) ->
-        [zero] عنصر محدد مستلم
-        [one] عنصر محدد مستلم
-        [two] عنصران محددان مستلمان
-        [few] عناصر محددة مستلمة
-        [many] عنصرًا محددًا مستلمًا
-       *[other] عنصر محدد مستلم
-    }
-qs-receipt-metric-size = تم التحقق منها مقارنةً بالمصدر
-qs-receipt-sent-as = أُرسل باسم { $path }
-qs-receipt-renamed = كان هناك ملف بهذا الاسم، لذا حصل هذا الملف على اسم جديد.
-qs-receipt-chip-already = موجود مسبقًا
-qs-receipt-already = كان هناك ملف مطابق بالفعل ({ $path })، لذا لم يُرسل مرة أخرى.
-qs-receipt-chip-declined = لم يُقبل
-qs-receipt-declined-send = لم يقبل الحاسوب المحمول الآخر هذا الملف، لذا لم يُرسل.
-qs-receipt-declined-receive = لم تقبل هذا الملف، لذا لم يُحفظ.
-qs-receipt-more = مزيد من التفاصيل
-qs-receipt-empty = لم يُرسل أي شيء، لذا لا يوجد ما يُعرض.
-qs-receipt-already-count =
-    { NUMBER($count) ->
-        [zero] { $count } عنصر كانت موجودة مسبقًا كملفات مطابقة
-        [one] عنصر واحد كان موجودًا مسبقًا كملف مطابق
-        [two] عنصران كانا موجودين مسبقًا كملفين مطابقين
-        [few] { $count } عناصر كانت موجودة مسبقًا كملفات مطابقة
-        [many] { $count } عنصرًا كانت موجودة مسبقًا كملفات مطابقة
-       *[other] { $count } عنصر كانت موجودة مسبقًا كملفات مطابقة
-    }
-qs-missing-new-send = بدء إرسال جديد
 history-open-name = { $what }: { $title }
 
 ## R05 التراجع: ما سيفعله التراجع على كل محرك أقراص، وما انتهت إليه كل نسخة
@@ -1972,3 +1755,101 @@ undo-here-more-fat = على محركات الأقراص FAT وexFAT، قد يح�
 undo-done-trashed = نُقل إلى سلة المهملات باسم "{ $name }". يمكنك إرجاعه من سلة المهملات.
 undo-kept-fat = تم الاحتفاظ به. يعيد محرك الأقراص هذا (FAT أو exFAT) استخدام الأرقام التي تميّز الملفات، لذلك لا يستطيع PCTwin أن يتأكد أن هذه نسخته. إذا لم تكن بحاجة إليها، يمكنك حذفها بنفسك.
 undo-kept-no-trash = تم الاحتفاظ به. لم يتمكن PCTwin من نقل هذه النسخة إلى سلة المهملات على محرك الأقراص الخاص بها. إذا لم تكن بحاجة إليها، يمكنك حذفها بنفسك.
+
+## Quick Send (26 October 2026): pairing in Quick Send's words, where received files go, and the Done page
+
+qs-pair-old-eyebrow = الإرسال
+qs-pair-old-body = على الحاسوب الآخر، اختر «استلام الملفات»، ثم أدخل هذا الرمز.
+qs-pair-old-waiting = في انتظار الحاسوب الآخر…
+qs-pair-old-label-hint = سيجد الحاسوب الآخر هذا الحاسوب بهذا الاسم.
+qs-pair-old-steps-title = على الحاسوب الآخر
+qs-pair-old-step-1 = افتح PCTwin، واختر «الإرسال السريع»، ثم «استلام الملفات».
+qs-pair-old-left = أوقف الحاسوب الآخر الربط قبل اختيار رقم، لذا لم تتم مشاركة أي شيء. هذا رمز جديد.
+qs-pair-network-hint = اختر الشبكة التي يتصل بها الحاسوب الآخر.
+qs-pair-choose-body = انظر إلى الحاسوب الآخر. اختر الرقم الذي يعرضه.
+qs-pair-choose-renewed = ظهرت أرقام جديدة. اختر الرقم الظاهر على الحاسوب الآخر.
+qs-pair-choose-note = إذا لم يعرض الحاسوب الآخر أي رقم، أو لم يطابقه أي من هذه الأرقام، فاختر «لا يطابق أي منها».
+qs-pair-heads-up-firewall = قد يسألك Windows هل يمكن لـ PCTwin قبول الاتصالات. اختر «السماح» حتى يتمكن الحاسوب الآخر من الوصول إلى هذا الحاسوب.
+qs-pair-new-eyebrow = الاستلام
+qs-pair-new-searching-title = جارٍ البحث عن الحاسوب الذي يرسل…
+qs-pair-new-searching-body = أبقِ PCTwin مفتوحًا على الحاسوب الآخر، وعلى شبكة Wi-Fi نفسها.
+qs-pair-new-search-failed-title = تعذّر البحث عن الحاسوب الآخر.
+qs-pair-new-list-title = أي حاسوب يرسل؟
+qs-pair-new-list-body = اختر الاسم الذي يعرضه الحاسوب الآخر على شاشته.
+qs-pair-new-same-label = حاسوب آخر قريب يحمل هذا الاسم. تحقق من شاشة الحاسوب الذي يرسل.
+qs-pair-new-none-title = لم يُعثر على حاسوب يرسل.
+qs-pair-new-none-body = تأكد أن PCTwin مفتوح على الحاسوب الآخر ويعرض رمزًا، وأن الحاسوبين على شبكة Wi-Fi نفسها. ثم ابحث مرة أخرى.
+qs-pair-new-code-hint = اقرأه من شاشة الحاسوب الآخر. يتغير كل دقيقة.
+qs-pair-new-number-title = اختر هذا الرقم على الحاسوب الآخر.
+qs-pair-new-number-body = يعرض الحاسوب الآخر ثلاثة أرقام. اختر هذا الرقم هناك.
+qs-pair-new-number-waiting = في انتظار الحاسوب الآخر…
+qs-pairing-code-invalid = يجب أن يتكون الرمز من ستة أرقام. تحقق من شاشة الحاسوب الآخر واكتبه مرة أخرى.
+qs-pairing-code-wrong = الرمز غير مطابق. تحقق من شاشة الحاسوب الآخر وحاول مرة أخرى.
+qs-pairing-code-expired = تغيّر الرمز. اكتب الرمز الجديد من شاشة الحاسوب الآخر.
+qs-pairing-busy = الحاسوب الآخر مشغول بالربط مع حاسوب آخر. انتظر لحظة، ثم حاول مرة أخرى.
+qs-pairing-wait = يجهّز الحاسوب الآخر رمزًا جديدًا. انتظر حتى يظهر، ثم اكتب الرمز الجديد.
+qs-pairing-locked = توقف الربط بعد محاولات خاطئة كثيرة. على الحاسوب الآخر، اختر «البدء من جديد».
+qs-pairing-unreachable = تعذّر على هذا الحاسوب الوصول إلى الحاسوب الآخر. تأكد أن الحاسوبين على شبكة Wi-Fi نفسها، ثم حاول مرة أخرى.
+qs-pairing-wrong-number = هذا الرقم لا يطابق رقم الحاسوب الآخر. لم تتم مشاركة أي شيء. اكتب الرمز الجديد على الحاسوب الآخر لتحاول مرة أخرى.
+qs-pairing-no-match = لم تتطابق الأرقام على الحاسوب الآخر. لم تتم مشاركة أي شيء. اكتب الرمز الجديد من شاشة الحاسوب الآخر.
+qs-pairing-timed-out = لم يُختر أي رقم في الوقت المحدد. حاول مرة أخرى بالرمز الجديد على الحاسوب الآخر.
+qs-pairing-connection-lost-new = انقطع الاتصال بالحاسوب الآخر. لم تتم مشاركة أي شيء.
+qs-pairing-choose-network = هذا الحاسوب متصل بأكثر من شبكة. اختر الشبكة التي يتصل بها الحاسوب الآخر:
+qs-pairing-failed-new = لم ينجح الاقتران هذه المرة. لم تتم مشاركة أي شيء. اكتب الرمز الجديد من شاشة الحاسوب الآخر.
+qs-folder-line = ستُحفظ الملفات في { $folder }.
+qs-folder-change = تغيير
+qs-folder-title = أين تُحفظ الملفات؟
+qs-folder-none = لم يجد PCTwin مجلد التنزيلات. اختر مجلدًا للملفات، ثم اتصل.
+qs-folder-choose = اختيار مجلد
+qs-folder-failed = لا يمكن لـ PCTwin حفظ الملفات في هذا المجلد. اختر مجلدًا آخر.
+qs-done-sent-title = أُرسلت ملفاتك.
+qs-done-here-title = وصلت ملفاتك.
+qs-done-partial-title = لم تصل بعض الملفات.
+qs-done-stopped-title = أُوقف هذا الإرسال.
+qs-done-empty-title = لم يُرسل أي شيء.
+qs-done-arrived =
+    { NUMBER($count) ->
+        [zero] { $count } ملف · { $size } وصلت ومطابقة للأصل
+        [one] ملف واحد · { $size } وصل ومطابق للأصل
+        [two] ملفان · { $size } وصلا ومطابقان للأصل
+        [few] { $count } ملفات · { $size } وصلت ومطابقة للأصل
+        [many] { $count } ملفًا · { $size } وصلت ومطابقة للأصل
+       *[other] { $count } ملف · { $size } وصلت ومطابقة للأصل
+    }
+qs-done-arrived-count =
+    { NUMBER($count) ->
+        [zero] { $count } ملف وصلت ومطابقة للأصل
+        [one] ملف واحد وصل ومطابق للأصل
+        [two] ملفان وصلا ومطابقان للأصل
+        [few] { $count } ملفات وصلت ومطابقة للأصل
+        [many] { $count } ملفًا وصلت ومطابقة للأصل
+       *[other] { $count } ملف وصلت ومطابقة للأصل
+    }
+qs-done-already =
+    { NUMBER($count) ->
+        [zero] { $count } ملف كانت موجودة مسبقًا ومطابقة، لذا لم تُرسل مرة أخرى.
+        [one] ملف واحد كان موجودًا مسبقًا ومطابقًا، لذا لم يُرسل مرة أخرى.
+        [two] ملفان كانا موجودين مسبقًا ومطابقين، لذا لم يُرسلا مرة أخرى.
+        [few] { $count } ملفات كانت موجودة مسبقًا ومطابقة، لذا لم تُرسل مرة أخرى.
+        [many] { $count } ملفًا كانت موجودة مسبقًا ومطابقة، لذا لم تُرسل مرة أخرى.
+       *[other] { $count } ملف كانت موجودة مسبقًا ومطابقة، لذا لم تُرسل مرة أخرى.
+    }
+qs-done-stopped-body = الملفات التي وصلت قبل الإيقاف تم التحقق منها وتبقى حيث حُفظت. لم يُرسل أي شيء آخر.
+qs-done-folder = حُفظت في { $folder }
+qs-done-open-folder = فتح المجلد
+qs-done-open-failed = تعذّر فتح المجلد. ربما نُقل أو حُذف.
+qs-done-not-opened = لم يفتح PCTwin أي ملف مستلم ولم يشغّله.
+qs-done-problems-title = ملفات تحتاج إلى انتباه
+qs-done-not-arrived = لم يصل.
+qs-done-not-completed = لم يُرسل قبل الإيقاف.
+qs-done-needs-action = إنه هنا، لكنه لم يكتمل. ما يجب فعله موجود في مزيد من التفاصيل.
+qs-done-mark-not-kept = إنه هنا، لكن هذا القرص لم يتمكن من تمييزه كملف تم تنزيله من حاسوب آخر. افتحه بحذر.
+qs-done-see-files = عرض الملفات
+qs-done-renamed = حُفظ باسم { $name }، لأن ملفًا بهذا الاسم كان موجودًا مسبقًا.
+qs-done-identical = كان ملف مطابق موجودًا مسبقًا، لذا لم يُرسل مرة أخرى.
+qs-done-send-missing = إرسال الملفات الناقصة
+qs-done-send-missing-body = الملفات التي لم تصل فقط. تربط الحاسوبين مرة أخرى أولًا.
+qs-done-done = تم
+qs-stop-now = إيقاف الإرسال
+qs-stop-finished = انتهى هذا الإرسال بالفعل.
+history-open-files = عرض الملفات

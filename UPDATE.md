@@ -8,6 +8,13 @@ Progress updates for anyone following along. The newest update is at the top. We
 - **Ready to use?** Not yet. Please don't move real files with it.
 - **Next:** the last pieces of this stage, independent reviews of the newest parts, then one full test run before it is merged.
 
+## 26 October 2026
+
+**In progress**
+
+- **Quick Send is simpler.** The sender picks files and shows a code; the moment the two laptops are paired, the files start moving. The receiver types the code and the files go to its Downloads folder (or a folder it picks with Change). There are no extra check, approve or accept pages, and no receipts: each side ends on one page that says what arrived and checked, and lists only what did not.
+- **Quick Send talks about "this laptop" and "the other laptop"**, never an old or a new one.
+
 ## 25 October 2026
 
 **In progress (every full test passes on Windows, Mac and Linux)**
