@@ -1662,6 +1662,20 @@ qs-done-already =
 qs-done-stopped-body = Les fichiers arrivés avant l’arrêt ont été vérifiés et restent là où ils ont été enregistrés. Rien d’autre n’a été envoyé.
 qs-done-folder = Enregistrés dans { $folder }
 qs-done-open-folder = Ouvrir le dossier
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] Ce fichier porte l’heure de son arrivée : il est en haut du dossier.
+        [many] Ces { $count } de fichiers portent l’heure de leur arrivée : ils sont en haut du dossier.
+       *[other] Ces { $count } fichiers portent l’heure de leur arrivée : ils sont en haut du dossier.
+    }
+qs-done-keep-dates = Garder les dates d’origine
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } fichier a retrouvé sa date d’origine.
+        [many] { $count } de fichiers ont retrouvé leur date d’origine.
+       *[other] { $count } fichiers ont retrouvé leur date d’origine.
+    }
+qs-done-dates-failed = Les dates d’origine n’ont pas pu être remises. Les fichiers sont intacts et restent à leur place.
 qs-done-open-failed = Le dossier n’a pas pu être ouvert. Il a peut-être été déplacé ou supprimé.
 qs-done-not-opened = PCTwin n’a ouvert ni lancé aucun fichier reçu.
 qs-done-problems-title = Fichiers à vérifier

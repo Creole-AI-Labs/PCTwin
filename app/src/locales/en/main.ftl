@@ -1484,6 +1484,18 @@ qs-done-already =
 qs-done-stopped-body = Files that arrived before the stop were checked and stay where they were saved. Nothing else was sent.
 qs-done-folder = Saved in { $folder }
 qs-done-open-folder = Open folder
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] This file shows the time it arrived, so it is at the top of the folder.
+       *[other] These { $count } files show the time they arrived, so they are at the top of the folder.
+    }
+qs-done-keep-dates = Keep original dates
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } file has its original date again.
+       *[other] { $count } files have their original dates again.
+    }
+qs-done-dates-failed = The original dates could not be put back. The files are fine and stay where they are.
 qs-done-open-failed = The folder could not be opened. It may have been moved or deleted.
 qs-done-not-opened = PCTwin did not open or run any received file.
 qs-done-problems-title = Files that need attention

@@ -306,6 +306,28 @@ describe("Q14 Done", () => {
     return events;
   };
 
+  it("the receiver's files show when they arrived, with Keep original dates; the sender never sees it", () => {
+    const onKeepDates = fn();
+    done({ side: "receive", folder: "Downloads", dates: { kind: "new", count: 3 }, onKeepDates });
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-done-dates-new", { count: 3 })));
+    fireEvent.click(button("qs-done-keep-dates"));
+    expect(onKeepDates).toHaveBeenCalledTimes(1);
+    cleanup();
+    done({ side: "receive", folder: "Downloads", dates: { kind: "kept", count: 3 } });
+    expect(plain(document.body.textContent)).toContain(plain(text("qs-done-dates-kept", { count: 3 })));
+    expect(maybeButton("qs-done-keep-dates")).toBeNull();
+    cleanup();
+    done({ side: "receive", folder: "Downloads", dates: { kind: "failed" } });
+    expect(screen.getByText(text("qs-done-dates-failed"))).toBeTruthy();
+    cleanup();
+    // Nothing newly written (all already there, say): nothing to offer.
+    done({ side: "receive", folder: "Downloads", dates: { kind: "new", count: 0 }, onKeepDates });
+    expect(maybeButton("qs-done-keep-dates")).toBeNull();
+    cleanup();
+    done({ dates: { kind: "new", count: 3 }, onKeepDates });
+    expect(maybeButton("qs-done-keep-dates")).toBeNull();
+  });
+
   it("everything arrived: says so on each side, with one line of what arrived and matched", () => {
     done();
     expect(h1()).toBe(text("qs-done-sent-title"));

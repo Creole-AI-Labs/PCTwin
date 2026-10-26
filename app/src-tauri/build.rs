@@ -45,6 +45,7 @@ const COMMANDS: &[&str] = &[
     "quicksend_folder",
     "quicksend_choose_folder",
     "quicksend_open_folder",
+    "quicksend_keep_original_dates",
     "quicksend_pause",
     "quicksend_resume",
     "quicksend_stop",

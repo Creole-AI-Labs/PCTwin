@@ -488,6 +488,7 @@ fn qs_receipts() -> Vec<crate::quicksend::ReceiptView> {
     vec![ReceiptView {
         side: "receiver",
         stopped: false,
+        new_dates: 1,
         lines: vec![
             line(
                 "a.jpg",
@@ -901,6 +902,7 @@ fn calls() -> Value {
             { "name": "quicksend_folder", "args": [] },
             { "name": "quicksend_choose_folder", "args": [] },
             { "name": "quicksend_open_folder", "args": [] },
+            { "name": "quicksend_keep_original_dates", "args": [] },
             { "name": "quicksend_pause", "args": [] },
             { "name": "quicksend_resume", "args": [] },
             { "name": "quicksend_stop", "args": [] },

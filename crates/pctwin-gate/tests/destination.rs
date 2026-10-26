@@ -30,6 +30,41 @@ fn a_file_is_written_inside_the_approved_folder_with_its_folders() {
     );
 }
 
+/// Quick Send stamps a received file with the arrival time, or gives it back its original date
+/// (26 October 2026): only the very file received, never one put at its name since, and never its
+/// bytes.
+#[test]
+fn a_received_files_date_changes_only_on_that_very_file() {
+    let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let dest = Destination::open(root.path()).unwrap();
+    let stored = write(&dest, "Photos/beach.jpg", b"JPEG").unwrap();
+    let id = dest.stat(&stored).unwrap().unwrap().id;
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+    assert!(dest.set_modified_time(&stored, id, when).unwrap());
+    let on_disk = root.path().join("Photos/beach.jpg");
+    assert_eq!(
+        std::fs::metadata(&on_disk).unwrap().modified().unwrap(),
+        when
+    );
+    assert_eq!(
+        std::fs::read(&on_disk).unwrap(),
+        b"JPEG",
+        "the bytes are untouched"
+    );
+    // Another file put at the name since: left as it is.
+    std::fs::remove_file(&on_disk).unwrap();
+    std::fs::write(&on_disk, b"someone else's").unwrap();
+    let theirs = std::fs::metadata(&on_disk).unwrap().modified().unwrap();
+    assert!(!dest.set_modified_time(&stored, id, when).unwrap());
+    assert_eq!(
+        std::fs::metadata(&on_disk).unwrap().modified().unwrap(),
+        theirs
+    );
+    // Nothing there, or a folder there: nothing to change.
+    assert!(!dest.set_modified_time("Photos/gone.jpg", id, when).unwrap());
+    assert!(!dest.set_modified_time("Photos", id, when).unwrap());
+}
+
 #[test]
 fn an_existing_file_is_never_overwritten() {
     let root = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();

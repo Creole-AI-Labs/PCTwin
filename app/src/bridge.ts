@@ -815,17 +815,18 @@ function parseQsOutcome(value: unknown): QsOutcome | null {
 }
 
 /** How a Quick Send ended, on one side. */
-export type QsReceipt = { side: "sender" | "receiver"; lines: Receipt["lines"]; stopped: boolean };
+/** `newDates`: on the receiver, how many arrived files now show the arrival time (0 on the sender). */
+export type QsReceipt = { side: "sender" | "receiver"; lines: Receipt["lines"]; stopped: boolean; newDates: number };
 
 export function parseQsReceipt(value: unknown): QsReceipt | null {
-  const f = exactly(value, ["side", "lines", "stopped"]);
-  if (!f || !oneOf(f.side, ["sender", "receiver"] as const) || typeof f.stopped !== "boolean") return null;
+  const f = exactly(value, ["side", "lines", "stopped", "newDates"]);
+  if (!f || !oneOf(f.side, ["sender", "receiver"] as const) || typeof f.stopped !== "boolean" || !isCount(f.newDates)) return null;
   const lines = listOf(f.lines, (v) => {
     const l = exactly(v, ["path", "outcome"]);
     const outcome = l && parseQsOutcome(l.outcome);
     return l && typeof l.path === "string" && outcome ? { path: l.path, outcome } : null;
   });
-  return lines ? { side: f.side, lines, stopped: f.stopped } : null;
+  return lines ? { side: f.side, lines, stopped: f.stopped, newDates: f.newDates } : null;
 }
 
 const QS_PHASES = ["copying", "paused", "checking", "needs-action", "lost", "complete"] as const;
@@ -874,6 +875,8 @@ export const qsFolder = () => ask("quicksend_folder", parseQsFolder);
 export const qsChooseFolder = () => ask("quicksend_choose_folder", (v) => (v === null ? { none: true as const } : parseQsFolder(v)));
 /** Opens the folder the last receive saved into, in the system's file manager (never a file). */
 export const qsOpenFolder = () => run("quicksend_open_folder");
+/** Keep original dates: how many of the last receive's files got their original dates back. */
+export const qsKeepOriginalDates = () => ask("quicksend_keep_original_dates", (v) => (isCount(v) ? v : null));
 export const qsPause = () => run("quicksend_pause");
 export const qsResume = () => run("quicksend_resume");
 export const qsStop = () => run("quicksend_stop");

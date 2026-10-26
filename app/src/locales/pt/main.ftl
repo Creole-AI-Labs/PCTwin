@@ -1657,6 +1657,20 @@ qs-done-already =
 qs-done-stopped-body = Os arquivos que chegaram antes da parada foram verificados e ficam onde foram salvos. Nada mais foi enviado.
 qs-done-folder = Salvos em { $folder }
 qs-done-open-folder = Abrir pasta
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] Este arquivo mostra a hora em que chegou, por isso está no topo da pasta.
+        [many] Estes { $count } de arquivos mostram a hora em que chegaram, por isso estão no topo da pasta.
+       *[other] Estes { $count } arquivos mostram a hora em que chegaram, por isso estão no topo da pasta.
+    }
+qs-done-keep-dates = Manter as datas originais
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } arquivo voltou a ter a data original.
+        [many] { $count } de arquivos voltaram a ter a data original.
+       *[other] { $count } arquivos voltaram a ter a data original.
+    }
+qs-done-dates-failed = Não foi possível devolver as datas originais. Os arquivos estão bem e continuam no lugar.
 qs-done-open-failed = Não foi possível abrir a pasta. Ela pode ter sido movida ou apagada.
 qs-done-not-opened = O PCTwin não abriu nem iniciou nenhum arquivo recebido.
 qs-done-problems-title = Arquivos que precisam de atenção

@@ -1390,6 +1390,16 @@ qs-done-already =
 qs-done-stopped-body = 停止前到达的文件已经过检查，仍保存在原来的位置。没有发送其他内容。
 qs-done-folder = 已保存在{ $folder }
 qs-done-open-folder = 打开文件夹
+qs-done-dates-new =
+    { NUMBER($count) ->
+       *[other] 这{ $count }个文件显示的是到达时间，所以排在文件夹最上面。
+    }
+qs-done-keep-dates = 保留原始日期
+qs-done-dates-kept =
+    { NUMBER($count) ->
+       *[other] { $count }个文件已恢复原始日期。
+    }
+qs-done-dates-failed = 无法恢复原始日期。文件完好无损，仍在原处。
 qs-done-open-failed = 无法打开文件夹。它可能已被移动或删除。
 qs-done-not-opened = PCTwin没有打开或运行任何接收的文件。
 qs-done-problems-title = 需要注意的文件

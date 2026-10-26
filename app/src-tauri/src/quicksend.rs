@@ -83,6 +83,18 @@ pub struct QuickSend {
     chosen: Mutex<Vec<PathBuf>>,
     /// The last send from this window: what was chosen, its offer's ID and its receipt (Q19).
     last: Mutex<Option<LastSend>>,
+    /// The files the last receive wrote, given the arrival time, with their original dates: what
+    /// Keep original dates gives back. Kept in memory for this window only, never on disk.
+    dated: Mutex<Vec<Dated>>,
+}
+
+/// A file a receive wrote and gave the arrival time, as Keep original dates needs it: where it
+/// is in the folder, which file it is, and the date it came with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Dated {
+    stored: String,
+    identity: FileId,
+    original: std::time::SystemTime,
 }
 
 /// A send that ended, as Q19 needs it: the same chosen things, offered again under the same
@@ -217,12 +229,17 @@ pub struct ReceiptView {
     pub side: &'static str,
     pub lines: Vec<LineView>,
     pub stopped: bool,
+    /// The receiver: how many arrived files now show the arrival time, so Keep original dates
+    /// can give theirs back. Always 0 on the sender.
+    #[serde(rename = "newDates")]
+    pub new_dates: u64,
 }
 
 fn receipt_view(side: &'static str, r: &Receipt, stopped: bool) -> ReceiptView {
     ReceiptView {
         side,
         stopped,
+        new_dates: 0,
         lines: r
             .lines
             .iter()
@@ -547,10 +564,13 @@ pub async fn quicksend_receive<R: Runtime>(
     // Held for this receive only: the next one holds its folder again.
     let held = take_held(&qs)?;
     let (mut link, _) = pairing.take_link().await.ok_or(MoveProblem::NotPaired)?;
-    *lock(&qs.received_into) = Some(Known {
+    let into = Known {
         path: held.path.clone(),
         identity: held.identity,
-    });
+    };
+    *lock(&qs.received_into) = Some(into.clone());
+    lock(&qs.dated).clear();
+    let state = Arc::clone(&qs);
     let live = Live::default();
     *lock(&qs.live) = Some(live.clone());
     let runtime = tokio::runtime::Handle::current();
@@ -582,7 +602,14 @@ pub async fn quicksend_receive<R: Runtime>(
             match ran {
                 Ok(r) => {
                     let stopped = live.control.stopped();
-                    let view = receipt_view("receiver", &r, stopped);
+                    let mut view = receipt_view("receiver", &r, stopped);
+                    // Received files show when they arrived, at the top of the folder; the person
+                    // can give them their original dates back from the Done page.
+                    let dated = reopened(&into)
+                        .map(|dest| arrival_dates(&dest, &r, std::time::SystemTime::now()))
+                        .unwrap_or_default();
+                    view.new_dates = dated.len() as u64;
+                    *lock(&state.dated) = dated;
                     let _ = app.emit(RECEIPT_EVENT, view);
                 }
                 Err(e) => {
@@ -592,6 +619,67 @@ pub async fn quicksend_receive<R: Runtime>(
         })
         .map(|_| ())
         .map_err(|_| MoveProblem::Failed)
+}
+
+/// The folder a receive saved into, opened again, only while it is still that very folder.
+fn reopened(known: &Known) -> Option<pctwin_gate::Destination> {
+    open_plain(&known.path)
+        .filter(|(_, identity)| *identity == known.identity)
+        .map(|(dest, _)| dest)
+}
+
+/// Gives each file this receive wrote (arrived, not one already there, which is the person's own)
+/// the time `now`, and says which ones and the date each came with. A file that cannot be read or
+/// changed keeps its date and is left out.
+fn arrival_dates(
+    dest: &pctwin_gate::Destination,
+    r: &Receipt,
+    now: std::time::SystemTime,
+) -> Vec<Dated> {
+    r.lines
+        .iter()
+        .filter_map(|l| match &l.outcome {
+            Outcome::Arrived { landed_as } => Some(landed_as),
+            _ => None,
+        })
+        .filter_map(|stored| {
+            let stat = dest.stat(stored).ok()??;
+            let original = stat.modified?;
+            dest.set_modified_time(stored, stat.id, now)
+                .ok()?
+                .then(|| Dated {
+                    stored: stored.clone(),
+                    identity: stat.id,
+                    original,
+                })
+        })
+        .collect()
+}
+
+/// Keep original dates, on the receiver's Done page: the files the last receive wrote get back
+/// the dates they came with. Returns how many did; a file moved, changed for another or gone since
+/// keeps its date. Once only: the dates are then forgotten.
+#[tauri::command]
+pub fn quicksend_keep_original_dates(qs: State<'_, AppQuickSend>) -> Result<u64, MoveProblem> {
+    keep_original_dates(&qs)
+}
+
+fn keep_original_dates(qs: &QuickSend) -> Result<u64, MoveProblem> {
+    let dated = std::mem::take(&mut *lock(&qs.dated));
+    if dated.is_empty() {
+        return Err(MoveProblem::NotMoving);
+    }
+    let known = lock(&qs.received_into)
+        .clone()
+        .ok_or(MoveProblem::NotMoving)?;
+    let dest = reopened(&known).ok_or(MoveProblem::Failed)?;
+    Ok(dated
+        .iter()
+        .filter(|d| {
+            dest.set_modified_time(&d.stored, d.identity, d.original)
+                .unwrap_or(false)
+        })
+        .count() as u64)
 }
 
 /// Where the receiver's files go, as the pairing page says it.
@@ -1076,6 +1164,66 @@ mod tests {
 
     /// PR #108 review: Open folder opens the folder the receive saved into, only while it is that
     /// very folder: not a file put at its path, not another folder, not a link to it.
+    /// Received files show the arrival time (26 October 2026); Keep original dates gives each
+    /// back the date it came with, once. A file that was already there is the person's own and
+    /// is never touched.
+    #[test]
+    fn received_files_show_the_arrival_time_and_can_keep_their_original_dates() {
+        let d = dir("dates");
+        let old = std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        let theirs = std::time::UNIX_EPOCH + Duration::from_secs(1_100_000_000);
+        let now = std::time::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let stamp = |name: &str, time| {
+            let f = std::fs::File::options()
+                .write(true)
+                .open(d.join(name))
+                .unwrap();
+            f.set_modified(time).unwrap();
+        };
+        let date = |name: &str| std::fs::metadata(d.join(name)).unwrap().modified().unwrap();
+        std::fs::write(d.join("old photo.jpg"), b"jpeg").unwrap();
+        stamp("old photo.jpg", old);
+        std::fs::write(d.join("mine.txt"), b"mine").unwrap();
+        stamp("mine.txt", theirs);
+        let id = ItemId::from_hex(&"0".repeat(32)).unwrap();
+        let r = Receipt {
+            lines: vec![
+                pctwin_quicksend::ReceiptLine {
+                    id,
+                    path: "old photo.jpg".into(),
+                    outcome: Outcome::Arrived {
+                        landed_as: "old photo.jpg".into(),
+                    },
+                },
+                pctwin_quicksend::ReceiptLine {
+                    id,
+                    path: "mine.txt".into(),
+                    outcome: Outcome::AlreadyThere {
+                        landed_as: "mine.txt".into(),
+                    },
+                },
+            ],
+        };
+        let qs = QuickSend::default();
+        let into = known(&d);
+        let dest = reopened(&into).unwrap();
+        let dated = arrival_dates(&dest, &r, now);
+        assert_eq!(dated.len(), 1, "only the file this receive wrote");
+        assert_eq!(date("old photo.jpg"), now, "shows when it arrived");
+        assert_eq!(
+            date("mine.txt"),
+            theirs,
+            "the person's own file is untouched"
+        );
+        *lock(&qs.received_into) = Some(into);
+        *lock(&qs.dated) = dated;
+        assert_eq!(keep_original_dates(&qs).unwrap(), 1);
+        assert_eq!(date("old photo.jpg"), old, "its original date is back");
+        assert_eq!(date("mine.txt"), theirs);
+        assert!(keep_original_dates(&qs).is_err(), "once only");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn open_folder_opens_only_the_folder_received_into() {
         let qs = QuickSend::default();

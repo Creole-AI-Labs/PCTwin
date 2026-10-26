@@ -44,8 +44,9 @@ function Trouble({ line, stopped }: { line: ReceiptLine; stopped: boolean }) {
  * needs a step, those files with what to do (the engine's reason behind More details). It never
  * says the files were sent, or are here, unless every file ended in place and checked. The sender
  * can send only the missing files again. `files` (the offer) gives the sizes; without it (history)
- * only the count is said.
- * Events: onOpenFolder (receiver), onSendMissing (sender), onDone, onBack.
+ * only the count is said. Received files show the time they arrived; `dates` says so, and Keep
+ * original dates gives them back the dates they came with.
+ * Events: onOpenFolder and onKeepDates (receiver), onSendMissing (sender), onDone, onBack.
  */
 export default function QuickDone({
   side,
@@ -54,7 +55,9 @@ export default function QuickDone({
   stopped = false,
   folder,
   openFailed = false,
+  dates,
   onOpenFolder,
+  onKeepDates,
   onSendMissing,
   onDone,
   onBack,
@@ -67,7 +70,10 @@ export default function QuickDone({
   folder?: string | null;
   /** Open folder was pressed and the folder could not be opened. */
   openFailed?: boolean;
+  /** The receiver's arrived files: showing the arrival time, given their original dates back, or that could not be done. */
+  dates?: { kind: "new"; count: number } | { kind: "kept"; count: number } | { kind: "failed" };
   onOpenFolder?: () => void;
+  onKeepDates?: () => void;
   onSendMissing?: () => void;
   onDone: () => void;
   onBack?: () => void;
@@ -150,6 +156,25 @@ export default function QuickDone({
               </Localized>
             </Button>
           )}
+        </div>
+      )}
+
+      {side === "receive" && dates && (dates.kind !== "new" || dates.count > 0) && (
+        <div className="qs-dates" role="status">
+          {dates.kind === "new" && (
+            <>
+              <p className="qs-small">{l10n.getString("qs-done-dates-new", { count: dates.count })}</p>
+              {onKeepDates && (
+                <Button onClick={onKeepDates}>
+                  <Localized id="qs-done-keep-dates">
+                    <span />
+                  </Localized>
+                </Button>
+              )}
+            </>
+          )}
+          {dates.kind === "kept" && <p className="qs-small">{l10n.getString("qs-done-dates-kept", { count: dates.count })}</p>}
+          {dates.kind === "failed" && <Banner tone="attention">{l10n.getString("qs-done-dates-failed")}</Banner>}
         </div>
       )}
 
