@@ -4,8 +4,12 @@
 //! A package is only ever installed from the helper's own copy, never from where the app or a
 //! download put it, and is checked on the very file the installer is given:
 //!
-//! 1. [`Staging::admit`] copies the bytes into a new file of the helper's own, named by the
-//!    helper, hashing as it writes; a copy whose SHA-256 is not the approved one is removed.
+//! 0. [`Staging::new`] empties the folder first: a package left by a helper that crashed belongs
+//!    to no session any more (security review finding 7: a stale file under a counted name used to
+//!    jam staging for good).
+//! 1. [`Staging::admit`] copies the bytes into a new file of the helper's own, under a random
+//!    name the helper chose (never one made before, so nothing left behind can be in its way),
+//!    hashing as it writes; a copy whose SHA-256 is not the approved one is removed.
 //! 2. [`Staging::open_verified`], at the moment of use, opens that file without following a link,
 //!    on Windows so that nobody may write, rename or delete it while it is open (and fails if
 //!    anyone already holds it open for writing), checks it is a plain file, and hashes it again
@@ -49,8 +53,15 @@ pub struct Staging {
 
 impl Staging {
     /// Packages kept in `root`, a folder of the helper's own that only administrators and the
-    /// system can open (`pctwin_helper_os::admin_only_folder` on Windows).
+    /// system can open (`pctwin_helper_os::admin_only_folder` on Windows). Everything already in
+    /// it is removed first (only the one helper of a move uses it, and none is running before it
+    /// starts); a link there is removed itself, never followed.
     pub fn new(root: PathBuf) -> Self {
+        if let Ok(list) = std::fs::read_dir(&root) {
+            for entry in list.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
         Self {
             root,
             next: 1,
@@ -71,7 +82,10 @@ impl Staging {
     /// SHA-256 is `expected`. Its handle is returned.
     pub fn admit(&mut self, from: &mut impl Read, expected: [u8; 32]) -> Result<u64, StageError> {
         let handle = self.next;
-        let path = self.root.join(format!("p{handle}.pkg"));
+        let mut bits = [0u8; 16];
+        getrandom::fill(&mut bits).map_err(|_| StageError::Io)?;
+        let name: String = bits.iter().map(|b| format!("{b:02x}")).collect();
+        let path = self.root.join(format!("p-{name}.pkg"));
         let mut out = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -351,6 +365,25 @@ mod tests {
             s.open_verified(h, sha(&bytes)).unwrap_err(),
             StageError::NotPlain
         );
+    }
+
+    /// Review finding 7: a package a crashed helper left behind never jams staging, and is gone
+    /// once the next helper starts.
+    #[test]
+    fn a_stale_package_from_a_crash_never_jams_staging() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("p1.pkg"), b"left by a crash").unwrap();
+        let mut s = Staging::new(dir.path().to_path_buf());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        // Even a file appearing later under a name an earlier scheme used is never in the way.
+        std::fs::write(dir.path().join("p1.pkg"), b"left by a crash").unwrap();
+        let bytes = b"the package".to_vec();
+        let h = s.admit(&mut bytes.as_slice(), sha(&bytes)).unwrap();
+        // A file under the very name the next package would get (if names were counted).
+        let first = s.path_of(h).unwrap().to_path_buf();
+        let h2 = s.admit(&mut bytes.as_slice(), sha(&bytes)).unwrap();
+        assert_ne!(s.path_of(h2).unwrap(), first, "every package its own name");
+        assert_eq!(std::fs::read(s.path_of(h2).unwrap()).unwrap(), bytes);
     }
 
     #[test]
