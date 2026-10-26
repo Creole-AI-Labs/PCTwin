@@ -3,12 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { useSettle } from "../motion/screen";
 import {
   listenQuickSend,
-  qsAnswer,
   qsChooseFolder,
   qsAcceptDrops,
   qsClear,
+  qsFolder,
   qsOffer,
   qsOfferMissing,
+  qsOpenFolder,
   qsPause,
   qsPick,
   qsReceive,
@@ -21,35 +22,29 @@ import {
   type QsReceipt,
 } from "../bridge";
 import type { Label } from "../pairing";
-import { totalBytes, type OfferedFile, type PickedItem, type SendProgress } from "../quicksend";
+import type { OfferedFile, PickedItem, SendProgress } from "../quicksend";
 import { Heading } from "./ProgressParts";
 import { TopStrip } from "./FrameParts";
 import FrameFooter from "./FrameFooter";
 import { Banner, Button } from "../components/kit";
 import PairNew from "./PairNew";
 import PairOld from "./PairOld";
-import QuickApprove from "./QuickApprove";
-import QuickIncoming from "./QuickIncoming";
-import QuickMissing from "./QuickMissing";
+import QuickDone from "./QuickDone";
 import QuickPick from "./QuickPick";
 import QuickProgress from "./QuickProgress";
-import QuickReceipt from "./QuickReceipt";
-import QuickReview from "./QuickReview";
 import QuickStop from "./QuickStop";
-import QuickWhere from "./QuickWhere";
+import { Folder, Tile } from "./QsParts";
 import "./progress.css";
 
 type View =
   | { kind: "pick" }
-  | { kind: "review"; files: OfferedFile[] }
+  /** The receiver, before pairing: finding the folder the files will go to. */
+  | { kind: "folder" }
+  /** The receiver has no folder (no Downloads folder could be found or opened): choose one first. */
+  | { kind: "no-folder" }
   | { kind: "pair" }
-  | { kind: "approve" }
-  | { kind: "waiting" }
-  | { kind: "incoming"; files: OfferedFile[] }
-  | { kind: "where"; files: OfferedFile[] }
   | { kind: "progress"; progress: SendProgress }
-  | { kind: "receipt"; receipt: QsReceipt }
-  | { kind: "missing"; receipt: QsReceipt }
+  | { kind: "done"; receipt: QsReceipt }
   | { kind: "problem"; problem: QsProblem };
 
 const STARTING: SendProgress = { phase: "copying", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, current: null, failed: 0, speed: null };
@@ -60,24 +55,25 @@ function merged(old: PickedItem[], fresh: PickedItem[]): PickedItem[] {
 }
 
 /**
- * Quick Send, either way (Q02 to Q14), over the move's pairing: the sender chooses files in the
- * system's picker, checks them, pairs (showing the code, as an old laptop does) and starts; the
- * receiver pairs (typing the code), sees what is offered, chooses a folder in the system's picker
- * and accepts. Both follow the measured progress and end on their own receipt. The screens never
- * see a path on this laptop, only names and sizes.
+ * Quick Send, either way, over the move's pairing with Quick Send's words. The sender chooses files
+ * in the system's picker, then pairs (showing the code), and the send starts the moment the laptops
+ * are paired. The receiver sees where the files will be saved (its Downloads folder, or the folder
+ * it chose this session) with Change, pairs (typing the code), and receives everything offered into
+ * that folder the moment the laptops are paired: choosing Receive, typing the code and matching the
+ * number is the acceptance (Security Design T). Both follow the measured progress and end on the
+ * Done page. The screens never see a path on this laptop, only names and sizes.
  */
 export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; onHome: () => void }) {
   const { l10n } = useLocalization();
   const sender = mode === "send";
-  const [view, setView] = useState<View>({ kind: sender ? "pick" : "pair" });
+  const [view, setView] = useState<View>({ kind: sender ? "pick" : "folder" });
   // Each step settles in like a new screen; a problem arrives without travel.
   useSettle(view.kind, { calm: view.kind === "problem" });
   const [items, setItems] = useState<PickedItem[]>([]);
   const [offered, setOffered] = useState<OfferedFile[]>([]);
-  const [checked, setChecked] = useState(false);
-  const [approved, setApproved] = useState(false);
   const [folder, setFolder] = useState<QsFolder | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [folderFailed, setFolderFailed] = useState(false);
+  const [openFailed, setOpenFailed] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [failed, setFailed] = useState(false);
   const [tooMany, setTooMany] = useState(false);
@@ -101,16 +97,20 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
         setDragging(event.over);
         return;
       }
+      // What is being received: kept for the sizes on the Done page, never a page of its own.
+      if (event.kind === "incoming") {
+        setOffered(event.files);
+        return;
+      }
       setView((v) => {
-        if (v.kind === "receipt" || v.kind === "missing" || v.kind === "problem") return v;
+        // Only a send that is going on moves the page: a late word never takes the person off
+        // the page they are on.
+        if (v.kind !== "progress" && v.kind !== "pair") return v;
         switch (event.kind) {
           case "progress":
-            return { kind: "progress", progress: event.progress };
-          case "incoming":
-            setOffered(event.files);
-            return { kind: "incoming", files: event.files };
+            return v.kind === "progress" ? { kind: "progress", progress: event.progress } : v;
           case "receipt":
-            return { kind: "receipt", receipt: event.receipt };
+            return v.kind === "progress" ? { kind: "done", receipt: event.receipt } : v;
           case "problem":
             return { kind: "problem", problem: event.problem };
         }
@@ -126,6 +126,26 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
       void qsClear().catch(() => undefined);
     };
   }, []);
+
+  // The receiver: the folder the files will go to, held from now (the one chosen this session, or
+  // Downloads). Without one, the person chooses a folder before pairing.
+  useEffect(() => {
+    if (sender) return;
+    let on = true;
+    qsFolder().then(
+      (f) => {
+        if (!on) return;
+        setFolder(f);
+        setView((v) => (v.kind === "folder" ? { kind: "pair" } : v));
+      },
+      () => {
+        if (on) setView((v) => (v.kind === "folder" ? { kind: "no-folder" } : v));
+      },
+    );
+    return () => {
+      on = false;
+    };
+  }, [sender]);
 
   // Things dropped on the window are taken only while the pick page is open.
   const picking = view.kind === "pick";
@@ -151,6 +171,31 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
     setView({ kind: "problem", problem: { kind: "failed", detail: "" } });
   };
 
+  const chooseFolder = () => {
+    setFolderFailed(false);
+    qsChooseFolder().then(
+      (chosen) => {
+        if ("none" in chosen) return;
+        setFolder(chosen);
+        setView((v) => (v.kind === "no-folder" ? { kind: "pair" } : v));
+      },
+      () => {
+        setFolderFailed(true);
+      },
+    );
+  };
+
+  const folderLine = (
+    <div className="qs-folder-line">
+      <Tile>
+        <Folder size={18} />
+      </Tile>
+      <span dir="auto" role="status">{folder ? l10n.getString("qs-folder-line", { folder: folder.name }) : ""}</span>
+      <Button onClick={chooseFolder}>{l10n.getString("qs-folder-change")}</Button>
+      {folderFailed && <Banner tone="attention">{l10n.getString("qs-folder-failed")}</Banner>}
+    </div>
+  );
+
   switch (view.kind) {
     case "pick":
       return (
@@ -174,8 +219,7 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
               qsOffer(ids).then(
                 (files) => {
                   setOffered(files);
-                  setChecked(false);
-                  setView({ kind: "review", files });
+                  setView({ kind: "pair" });
                 },
                 (error: unknown) => {
                   // Said before anything is sent, on the page where the choice can change.
@@ -194,105 +238,44 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
           )}
         </>
       );
-    case "review":
+    case "folder":
+      return <TopStrip onBack={onHome} labelId="qs-eyebrow-receiving" />;
+    case "no-folder":
       return (
-        <QuickReview
-          files={view.files}
-          checked={checked}
-          onCheckedChange={setChecked}
-          onChange={() => {
-            setView({ kind: "pick" });
-          }}
-          onContinue={() => {
-            setView({ kind: "pair" });
-          }}
-          onBack={() => {
-            setView({ kind: "pick" });
-          }}
-        />
+        <>
+          <TopStrip onBack={onHome} labelId="qs-eyebrow-receiving" />
+          <Heading id="qs-folder-title" />
+          <p className="subhead">{l10n.getString("qs-folder-none")}</p>
+          {folderFailed && <Banner tone="attention">{l10n.getString("qs-folder-failed")}</Banner>}
+          <FrameFooter>
+            <Button variant="primary" onClick={chooseFolder}>
+              {l10n.getString("qs-folder-choose")}
+            </Button>
+          </FrameFooter>
+        </>
       );
     case "pair":
+      // The pairing is the acceptance: the moment the laptops are paired the send (or the
+      // receive) starts, with no page in between.
       return sender ? (
         <PairOld
+          quick
           onBack={() => {
-            setView({ kind: "review", files: offered });
+            setView({ kind: "pick" });
           }}
           onPaired={() => {
-            setApproved(false);
-            setView({ kind: "approve" });
+            setView({ kind: "progress", progress: STARTING });
+            qsSend().catch(fail);
           }}
         />
       ) : (
         <PairNew
+          quick
+          aside={folderLine}
           onBack={onHome}
           onPaired={() => {
-            setView({ kind: "waiting" });
+            setView({ kind: "progress", progress: STARTING });
             qsReceive().catch(fail);
-          }}
-        />
-      );
-    case "approve":
-      return (
-        <QuickApprove
-          from={from}
-          to={to}
-          count={offered.length}
-          size={totalBytes(offered)}
-          receiver="waiting"
-          approved={approved}
-          onApprovedChange={setApproved}
-          onStart={() => {
-            setView({ kind: "progress", progress: STARTING });
-            qsSend().catch(fail);
-          }}
-          onBack={onHome}
-        />
-      );
-    case "waiting":
-      return (
-        <>
-          <TopStrip labelId="qs-eyebrow-receiving" />
-          <Heading id="qs-wait-title" />
-          <p className="subhead" role="status">
-            {l10n.getString("qs-wait-body")}
-          </p>
-        </>
-      );
-    case "incoming":
-      return (
-        <QuickIncoming
-          from={from}
-          to={to}
-          files={view.files}
-          onAccept={() => {
-            setConfirmed(false);
-            setView({ kind: "where", files: view.files });
-          }}
-          onDecline={() => {
-            void qsAnswer({ kind: "decline" }).catch(() => undefined);
-          }}
-          onDone={onHome}
-        />
-      );
-    case "where":
-      return (
-        <QuickWhere
-          folder={folder?.path ?? null}
-          free={folder?.freeBytes ?? null}
-          needed={totalBytes(view.files)}
-          confirmed={confirmed}
-          onConfirmedChange={setConfirmed}
-          onChoose={() => {
-            qsChooseFolder().then((chosen) => {
-              if (!("none" in chosen)) setFolder(chosen);
-            }, fail);
-          }}
-          onContinue={() => {
-            setView({ kind: "progress", progress: STARTING });
-            qsAnswer({ kind: "accept", ids: null }).catch(fail);
-          }}
-          onBack={() => {
-            setView({ kind: "incoming", files: view.files });
           }}
         />
       );
@@ -309,11 +292,9 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
             onStop={() => {
               setStopping(true);
             }}
-            onReceipt={() => undefined}
           />
           <QuickStop
             open={stopping}
-            kind="stop"
             onConfirm={() => {
               setStopping(false);
               void qsStop().catch(() => undefined);
@@ -324,45 +305,31 @@ export default function QuickHost({ mode, onHome }: { mode: "send" | "receive"; 
           />
         </>
       );
-    case "receipt":
+    case "done":
       return (
-        <QuickReceipt
+        <QuickDone
           side={view.receipt.side === "sender" ? "send" : "receive"}
           receipt={{ lines: view.receipt.lines }}
-          from={from}
-          to={to}
           files={offered}
           stopped={view.receipt.stopped}
-          onSendMissing={() => {
-            setApproved(false);
-            setView({ kind: "missing", receipt: view.receipt });
+          folder={sender ? null : (folder?.name ?? null)}
+          openFailed={openFailed}
+          onOpenFolder={() => {
+            setOpenFailed(false);
+            qsOpenFolder().catch(() => {
+              setOpenFailed(true);
+            });
           }}
-          onHistory={onHome}
-          onDone={onHome}
-        />
-      );
-    case "missing":
-      return (
-        <QuickMissing
-          receipt={{ lines: view.receipt.lines }}
-          approved={approved}
-          onApprovedChange={setApproved}
-          onContinue={() => {
-            // The same chosen things offered again, only what did not arrive: then checked, paired
-            // and approved as any send.
+          onSendMissing={() => {
+            // The same chosen things offered again, only what did not arrive; then paired again,
+            // and sent the moment the laptops are paired, as any send.
             qsOfferMissing().then((files) => {
+              if (files.length === 0) return;
               setOffered(files);
-              setChecked(false);
-              setView({ kind: "review", files });
+              setView({ kind: "pair" });
             }, fail);
           }}
-          onNewSend={() => {
-            setItems([]);
-            setView({ kind: "pick" });
-          }}
-          onBack={() => {
-            setView({ kind: "receipt", receipt: view.receipt });
-          }}
+          onDone={onHome}
         />
       );
     case "problem":

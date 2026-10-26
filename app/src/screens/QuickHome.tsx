@@ -6,8 +6,8 @@ import FrameFooter from "./FrameFooter";
 import { Folder, Heading, QsStrip, Tile } from "./QsParts";
 
 /**
- * Q01 Quick Send home: Send files and Receive files as the two big choice cards, then the local
- * handover receipts in one smaller row card (the mockup's Request and Pending rows are out of scope),
+ * Q01 Quick Send home: Send files and Receive files as the two big choice cards, then what was
+ * sent and received on this laptop in one smaller row card (the mockup's Request and Pending rows are out of scope),
  * with Choose files as the main action in the window footer. While this laptop is ready to receive, `receiving`
  * carries the name nearby laptops see for it, and `noNearby` says no other laptop was found. `notice`
  * says the engine is not connected yet (the screens exist, nothing is sent or received).

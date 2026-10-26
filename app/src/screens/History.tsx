@@ -96,12 +96,12 @@ export default function History({
                   )}
                   <Button
                     variant="quiet"
-                    aria-label={l10n.getString("history-open-name", { what: l10n.getString(e.kind === "move" ? "history-open-report" : "history-open-receipt"), title: title(e) })}
+                    aria-label={l10n.getString("history-open-name", { what: l10n.getString(e.kind === "move" ? "history-open-report" : "history-open-files"), title: title(e) })}
                     onClick={() => {
                       onOpen(e.id);
                     }}
                   >
-                    {l10n.getString(e.kind === "move" ? "history-open-report" : "history-open-receipt")}
+                    {l10n.getString(e.kind === "move" ? "history-open-report" : "history-open-files")}
                   </Button>
                 </>
               }

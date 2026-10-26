@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { localization } from "../i18n";
 import { finishedClean, finishedMixed, finishedStopped } from "../moveSamples";
-import { BLUE_FOX, GREEN_OWL, OFFER, RECEIPT_PARTIAL, RECEIPT_WHOLE } from "../quicksend.fixtures";
+import { OFFER, RECEIPT_PARTIAL, RECEIPT_WHOLE } from "../quicksend.fixtures";
 import Outcome from "../screens/Outcome";
-import QuickReceipt from "../screens/QuickReceipt";
+import QuickDone from "../screens/QuickDone";
 import { fakeAnimations } from "../testing/animations";
 import { APP_VERSION, resetOpening } from "./openingRule";
 import { resetMotion } from "./preference";
@@ -105,7 +105,7 @@ describe("the six signature motions", () => {
     list.remove();
   });
 
-  it("the receipt seal: only on a result verified as a whole", () => {
+  it("the seal: only on a result verified as a whole", () => {
     const wrap = (ui: ReactNode) => render(<LocalizationProvider l10n={l10n}>{ui}</LocalizationProvider>);
     wrap(<Outcome outcome={finishedClean} onReport={() => undefined} />);
     expect(anim.on(".motion-seal")).toHaveLength(1);
@@ -119,12 +119,12 @@ describe("the six signature motions", () => {
       cleanup();
     }
     anim.made.length = 0;
-    wrap(<QuickReceipt side="receive" receipt={RECEIPT_WHOLE} from={BLUE_FOX} to={GREEN_OWL} files={OFFER} onHistory={() => undefined} onDone={() => undefined} />);
+    wrap(<QuickDone side="receive" receipt={RECEIPT_WHOLE} files={OFFER} onDone={() => undefined} />);
     expect(anim.on(".motion-seal")).toHaveLength(1);
     cleanup();
     anim.made.length = 0;
-    wrap(<QuickReceipt side="receive" receipt={RECEIPT_PARTIAL} from={BLUE_FOX} to={GREEN_OWL} files={OFFER} onHistory={() => undefined} onDone={() => undefined} />);
-    wrap(<QuickReceipt side="send" receipt={RECEIPT_WHOLE} from={BLUE_FOX} to={GREEN_OWL} files={OFFER} stopped onHistory={() => undefined} onDone={() => undefined} />);
+    wrap(<QuickDone side="receive" receipt={RECEIPT_PARTIAL} files={OFFER} onDone={() => undefined} />);
+    wrap(<QuickDone side="send" receipt={RECEIPT_WHOLE} files={OFFER} stopped onDone={() => undefined} />);
     expect(anim.on(".motion-seal")).toHaveLength(0);
   });
 
