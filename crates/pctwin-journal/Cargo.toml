@@ -30,6 +30,9 @@ rustix = { version = "1.1.5", features = ["fs", "process"] }
 # (security review finding 3): Windows' Credential Manager (DPAPI), macOS' login Keychain.
 [target.'cfg(windows)'.dependencies]
 keyring-core = "1"
+# The bus of the disk the journal's folder is on (USB hard disks report themselves "fixed"), from
+# the system's storage list (security review finding 4). Safe Rust; already used by the helper.
+wmi = "0.18.4"
 windows-native-keyring-store = { version = "1.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]

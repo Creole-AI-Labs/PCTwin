@@ -263,3 +263,43 @@ fn a_swapping_record_names_only_undos_own_names() {
         Ok(Some(pctwin_journal::EffectUndo::Swapping { .. }))
     ));
 }
+
+/// Finding 4: on Windows only a disk positively on a bus inside the laptop, and listed as not
+/// removable, may hold the journal; a USB hard disk that reports itself fixed, a volume missing
+/// from the list, a disk file mounted as a drive, or an unknown bus may not.
+#[test]
+fn windows_placement_needs_a_disk_positively_inside_the_laptop() {
+    use pctwin_journal::Placement::*;
+    use pctwin_journal::place::windows_placement as judge;
+    let c = r"\\?\C:\Users\someone\AppData\Local\PCTwin";
+    for (bus, listed, want) in [
+        (Some(17), Some(false), Local),     // NVMe
+        (Some(11), Some(false), Local),     // SATA
+        (Some(14), Some(false), Local),     // a virtual machine's own disk
+        (Some(7), Some(false), Removable),  // a USB hard disk calling itself fixed
+        (Some(12), Some(false), Removable), // an SD card
+        (Some(17), Some(true), Removable),
+        (Some(9), Some(false), Network),  // iSCSI
+        (Some(17), None, Unknown),        // not in the volume list
+        (None, Some(false), Unknown),     // the bus could not be found
+        (Some(15), Some(false), Unknown), // a disk file mounted as a drive
+        (Some(0), Some(false), Unknown),
+    ] {
+        assert_eq!(judge(c, bus, listed), want, "{bus:?} {listed:?}");
+    }
+    assert_eq!(
+        judge(r"\\?\UNC\server\share\x", Some(17), Some(false)),
+        Network
+    );
+}
+
+/// Finding 4, on this very laptop: its own temporary folder is judged local through the real
+/// bus lookup (Windows), as the journal tests rely on.
+#[test]
+fn this_laptops_own_folder_is_local() {
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(
+        pctwin_journal::place::judge(dir.path()),
+        pctwin_journal::Placement::Local
+    );
+}

@@ -6,9 +6,10 @@
 //! too ("in doubt" counts as no).
 //!
 //! The drive is judged from the journal's folder itself: on Windows, the folder's real path (a
-//! mapped network drive resolves to `\\?\UNC\server\share`) and the system's list of volumes; on
-//! Linux and macOS, the folder's file system as the system reports it, and the list of volumes
-//! for whether it is removable.
+//! mapped network drive resolves to `\\?\UNC\server\share`), the bus its disk is attached by
+//! ([`windows_placement`]: a USB hard disk reports itself "fixed", so the bus decides; security
+//! review finding 4) and the system's list of volumes; on Linux and macOS, the folder's file
+//! system as the system reports it, and the list of volumes for whether it is removable.
 
 use std::path::Path;
 
@@ -112,6 +113,38 @@ pub fn removable_in(real: &str, volumes: &[(String, bool)]) -> Option<bool> {
         .map(|(_, removable)| *removable)
 }
 
+/// The buses (Windows' `STORAGE_BUS_TYPE`) of disks inside the laptop: SCSI, ATAPI, ATA, RAID,
+/// SAS, SATA, a virtual machine's own disk (`Virtual`, as cloud and Hyper-V machines report),
+/// Storage Spaces, NVMe, storage-class memory and UFS.
+pub const LOCAL_BUSES: [u16; 11] = [1, 2, 3, 8, 10, 11, 14, 16, 17, 18, 19];
+/// The buses of disks that can be pulled out: USB, FireWire, SD cards and MMC cards.
+pub const REMOVABLE_BUSES: [u16; 4] = [7, 4, 12, 13];
+/// The buses of disks on another computer: iSCSI and Fibre Channel.
+pub const NETWORK_BUSES: [u16; 2] = [9, 6];
+
+/// Windows: decides the placement from the folder's real path, the bus of the disk its volume is
+/// on (`None`: it could not be found, or the volume is on no disk this laptop lists) and whether
+/// the volume list shows the drive as removable (`None`: not listed). Only a disk positively on
+/// a bus inside the laptop, listed as not removable, is local; anything else, including a disk
+/// file mounted as a drive (`FileBackedVirtual`: the file could be anywhere) and an unknown bus,
+/// is not ("in doubt" counts as no).
+pub fn windows_placement(
+    real: &str,
+    bus: Option<u16>,
+    listed_removable: Option<bool>,
+) -> Placement {
+    if classify(real, FsKind::Unknown, None) == Placement::Network {
+        return Placement::Network;
+    }
+    match (bus, listed_removable) {
+        (Some(b), _) if NETWORK_BUSES.contains(&b) => Placement::Network,
+        (Some(b), _) if REMOVABLE_BUSES.contains(&b) => Placement::Removable,
+        (_, Some(true)) => Placement::Removable,
+        (Some(b), Some(false)) if LOCAL_BUSES.contains(&b) => Placement::Local,
+        _ => Placement::Unknown,
+    }
+}
+
 /// Judges the drive of `folder` (which must exist).
 pub fn judge(folder: &Path) -> Placement {
     let Ok(real) = std::fs::canonicalize(folder) else {
@@ -128,19 +161,81 @@ pub fn judge(folder: &Path) -> Placement {
                 )
             })
             .collect();
-    classify(
+    #[cfg(windows)]
+    let placement = windows_placement(
+        &real_text,
+        windows_bus::bus_of(&real_text),
+        removable_in(&real_text, &volumes),
+    );
+    #[cfg(not(windows))]
+    let placement = classify(
         &real_text,
         fs_kind(&real),
         removable_in(&real_text, &volumes),
-    )
+    );
+    placement
 }
 
+/// Windows: the bus of the disk holding a path, from the system's storage list
+/// (`root\Microsoft\Windows\Storage`: each partition's access paths and disk, each disk's bus),
+/// through Windows Management Instrumentation with the `wmi` crate (safe Rust, no new unsafe).
 #[cfg(windows)]
-fn fs_kind(_real: &Path) -> FsKind {
-    // A network share, also one mapped to a drive letter, shows in the real path itself (a
-    // `\\?\UNC\` path, checked by `classify`); every other path is on one of this laptop's
-    // volumes, and the volume list says whether that one can be unplugged.
-    FsKind::Local
+mod windows_bus {
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    #[expect(non_snake_case, reason = "WMI's own names")]
+    struct Partition {
+        DiskNumber: u32,
+        AccessPaths: Option<Vec<String>>,
+    }
+
+    #[derive(Deserialize)]
+    #[expect(non_snake_case, reason = "WMI's own names")]
+    struct Disk {
+        Number: u32,
+        BusType: u16,
+    }
+
+    /// The bus of the disk whose partition has the longest access path (a drive letter, or a
+    /// folder a volume is mounted in) that holds `real`; `None` when none does or the system
+    /// cannot say. Asked on a thread of its own, so the caller's own COM setup never matters.
+    pub(super) fn bus_of(real: &str) -> Option<u16> {
+        let real = real.to_string();
+        std::thread::spawn(move || ask(&real)).join().ok().flatten()
+    }
+
+    fn ask(real: &str) -> Option<u16> {
+        let fold = |s: &str| {
+            s.trim_start_matches(r"\\?\")
+                .to_lowercase()
+                .replace('/', "\\")
+        };
+        let real = fold(real);
+        let con =
+            wmi::WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Storage").ok()?;
+        let partitions: Vec<Partition> = con
+            .raw_query("SELECT DiskNumber, AccessPaths FROM MSFT_Partition")
+            .ok()?;
+        let (disk, _) = partitions
+            .iter()
+            .flat_map(|p| {
+                p.AccessPaths
+                    .iter()
+                    .flatten()
+                    .map(move |a| (p.DiskNumber, fold(a)))
+            })
+            .filter(|(_, a)| {
+                let a = a.trim_end_matches('\\');
+                !a.is_empty()
+                    && (real == a || real.strip_prefix(a).is_some_and(|r| r.starts_with('\\')))
+            })
+            .max_by_key(|(_, a)| a.len())?;
+        let disks: Vec<Disk> = con
+            .raw_query("SELECT Number, BusType FROM MSFT_Disk")
+            .ok()?;
+        disks.iter().find(|d| d.Number == disk).map(|d| d.BusType)
+    }
 }
 
 #[cfg(target_os = "linux")]
