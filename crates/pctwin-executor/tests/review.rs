@@ -9,7 +9,7 @@ use redb::ReadableTable;
 use common::{Laptop, SCOPE, copy, install, journal, place, plan_of, recipe};
 use pctwin_executor::{Adapter, Undone, undo_effects};
 use pctwin_journal::{EffectUndoOutcome, Journal, Presence, SettingsFile};
-use pctwin_recipe::{Catalog, Check, Platform, SettingValue, SettingsPlace};
+use pctwin_recipe::{Catalog, Check, Platform, SettingValue, SettingsPlace, Step};
 use pctwin_types::Reason;
 
 fn moved(j: &Journal, laptop: &mut Laptop, recipes: Vec<pctwin_recipe::Recipe>) {
@@ -28,8 +28,12 @@ fn tamper(path: &std::path::Path, edit: impl Fn(String) -> String) {
             .unwrap();
         let ids: Vec<u64> = { t.iter().unwrap().map(|r| r.unwrap().0.value()).collect() };
         for id in ids {
-            let old = String::from_utf8(t.get(id).unwrap().unwrap().value().to_vec()).unwrap();
-            t.insert(id, edit(old).as_bytes()).unwrap();
+            // The seal (32 bytes) is kept; the words after it are changed by hand.
+            let stored = t.get(id).unwrap().unwrap().value().to_vec();
+            let (seal, json) = stored.split_at(32);
+            let new = edit(String::from_utf8(json.to_vec()).unwrap());
+            t.insert(id, [seal, new.as_bytes()].concat().as_slice())
+                .unwrap();
         }
     }
     tx.commit().unwrap();
@@ -38,7 +42,6 @@ fn tamper(path: &std::path::Path, edit: impl Fn(String) -> String) {
 /// Review P1: a journal record changed by hand (another package, removal allowed) must never make
 /// undo remove an app the person already had.
 #[test]
-#[ignore = "fixed with review finding 3"]
 fn a_record_changed_by_hand_never_makes_undo_remove_an_app() {
     let (_d, path, j) = journal();
     let mut laptop = Laptop::ok();
@@ -50,9 +53,9 @@ fn a_record_changed_by_hand_never_makes_undo_remove_an_app() {
         r.replace("A.B", "Person.App")
             .replace("\"uninstall\":false", "\"uninstall\":true")
     });
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let permit = j.begin_undo().unwrap();
-    let got: Vec<_> = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE)
+    let got: Vec<_> = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book())
         .unwrap()
         .into_iter()
         .map(|Undone { outcome, .. }| outcome)
@@ -161,7 +164,7 @@ fn an_edit_saved_between_check_and_write_is_kept() {
         armed: true,
     };
     let permit = j.begin_undo().unwrap();
-    let got = undo_effects(&rebuild(&j), &permit, &mut racy, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut racy, SCOPE, &common::book()).unwrap();
     // The person's edit is still there, and undo says it kept it.
     assert_eq!(
         racy.inner.file(&p, "vlcrc").unwrap().as_slice(),
@@ -218,4 +221,177 @@ fn the_seal_names_the_approved_revision() {
     assert_eq!(two.generation(), next.revision);
     assert_ne!(one.generation(), two.generation());
     assert_ne!(one.digest(), two.digest());
+}
+
+/// Finding 3: undo's rules come from the checked recipe looked up again, never from the record.
+/// The move ran with a recipe that allowed removal; the checked recipe of that ID and version now
+/// says it does not: undo keeps the app.
+#[test]
+fn undo_follows_the_checked_recipe_not_the_record() {
+    let (_d, _p, j) = journal();
+    let mut laptop = Laptop::ok();
+    let r = common::removable(vec![install("A.B")]);
+    moved(&j, &mut laptop, vec![r.clone()]);
+    let mut strict = r;
+    strict.undo = Default::default();
+    let permit = j.begin_undo().unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &vec![strict]).unwrap();
+    assert!(laptop.installed.contains_key("A.B"));
+    assert!(
+        matches!(got[0].outcome, EffectUndoOutcome::Kept { .. }),
+        "{got:?}"
+    );
+}
+
+/// Finding 3: a change whose recipe cannot be found, or whose step is not the recipe's, is left.
+#[test]
+fn undo_without_the_checked_recipe_leaves_the_change() {
+    for book in [vec![], vec![recipe(vec![install("Other.App")])]] {
+        let (_d, _p, j) = journal();
+        let mut laptop = Laptop::ok();
+        let r = common::removable(vec![install("A.B")]);
+        moved(&j, &mut laptop, vec![r.clone()]);
+        // The same ID and version, another step (when the book holds one).
+        let book: Vec<_> = book
+            .into_iter()
+            .map(|mut other| {
+                other.id = r.id.clone();
+                other.undo = r.undo.clone();
+                other
+            })
+            .collect();
+        let permit = j.begin_undo().unwrap();
+        let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &book).unwrap();
+        let want = if book.is_empty() {
+            pctwin_executor::NO_RECIPE
+        } else {
+            pctwin_executor::NOT_THE_RECIPE
+        };
+        assert_eq!(got[0].outcome, EffectUndoOutcome::Kept { why: want.into() });
+        assert!(laptop.installed.contains_key("A.B"));
+        assert!(laptop.done.is_empty());
+    }
+}
+
+/// Finding 3: one damaged record is reported and drives nothing; the rest are still undone.
+#[test]
+fn one_damaged_record_does_not_stop_the_rest() {
+    let (_d, path, j) = journal();
+    let mut laptop = Laptop::ok();
+    moved(
+        &j,
+        &mut laptop,
+        vec![
+            common::removable(vec![install("A.B")]),
+            common::removable(vec![install("C.D")]),
+        ],
+    );
+    drop(j);
+    let db = redb::Database::open(&path).unwrap();
+    let tx = db.begin_write().unwrap();
+    {
+        let mut t = tx
+            .open_table(redb::TableDefinition::<u64, &[u8]>::new("effects"))
+            .unwrap();
+        let mut first = t.get(1).unwrap().unwrap().value().to_vec();
+        first[0] ^= 1;
+        t.insert(1, first.as_slice()).unwrap();
+    }
+    tx.commit().unwrap();
+    drop(db);
+    let j = common::open(&path).unwrap();
+    let permit = j.begin_undo().unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
+    assert_eq!(
+        got[0],
+        Undone {
+            id: 1,
+            outcome: EffectUndoOutcome::Kept {
+                why: pctwin_executor::DAMAGED_RECORD.into()
+            }
+        }
+    );
+    assert_eq!(got[1].outcome, EffectUndoOutcome::Uninstalled);
+    assert!(laptop.installed.contains_key("A.B"));
+    assert!(!laptop.installed.contains_key("C.D"));
+}
+
+/// Finding 3 and T23-007: with its key gone, a journal holding effects makes no new key, erases
+/// nothing, and drives no undo; with the key back, all is as it was.
+#[test]
+fn a_missing_key_is_waited_for_never_replaced() {
+    let (_d, path, j) = journal();
+    let mut laptop = Laptop::ok();
+    moved(
+        &j,
+        &mut laptop,
+        vec![common::removable(vec![install("A.B")])],
+    );
+    drop(j);
+    let wrong = pctwin_journal::Journal::open_with_record_key(
+        &path,
+        pctwin_journal::keystore::TagKey::from_bytes([1; 32]),
+    )
+    .unwrap();
+    let permit = wrong.begin_undo().unwrap();
+    let got = undo_effects(
+        &rebuild(&wrong),
+        &permit,
+        &mut laptop,
+        SCOPE,
+        &common::book(),
+    )
+    .unwrap();
+    assert!(got.iter().all(|u| u.outcome
+        == EffectUndoOutcome::Kept {
+            why: pctwin_executor::DAMAGED_RECORD.into()
+        }));
+    assert!(laptop.installed.contains_key("A.B"));
+    drop(permit);
+    drop(wrong);
+    let j = common::open(&path).unwrap();
+    assert_eq!(j.effects().unwrap().len(), 1, "nothing was erased");
+}
+
+/// Finding 3: a setting or a settings copy is put back only when it is exactly the step of the
+/// checked recipe it names, and only from a recipe that passes its own checks.
+#[test]
+fn settings_are_undone_only_by_their_own_checked_recipe() {
+    let steps = [common::set("k", SettingValue::Bool(true)), copy("vlc")];
+    let others = [
+        common::set("k", SettingValue::Bool(false)),
+        Step::CopySettings {
+            from: place("vlc"),
+            to: place("other"),
+        },
+    ];
+    for (step, other) in steps.into_iter().zip(others) {
+        for broken in [false, true] {
+            let (_d, _p, j) = journal();
+            let mut laptop = Laptop::ok();
+            laptop
+                .settings
+                .insert("k".into(), SettingValue::Bool(false));
+            laptop.put_source(&place("vlc"), "vlcrc", b"old laptop vlcrc");
+            let r = recipe(vec![step.clone()]);
+            moved(&j, &mut laptop, vec![r.clone()]);
+            let mut book = r.clone();
+            if broken {
+                // Its own recipe, failing its checks (no system named).
+                book.platforms.clear();
+            } else {
+                book.steps = vec![other.clone()];
+            }
+            let before = (laptop.settings.clone(), laptop.files.clone());
+            let permit = j.begin_undo().unwrap();
+            let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &vec![book]).unwrap();
+            let want = if broken {
+                pctwin_executor::NO_RECIPE
+            } else {
+                pctwin_executor::NOT_THE_RECIPE
+            };
+            assert_eq!(got[0].outcome, EffectUndoOutcome::Kept { why: want.into() });
+            assert_eq!((laptop.settings.clone(), laptop.files.clone()), before);
+        }
+    }
 }

@@ -63,18 +63,43 @@ pub fn app(name: &str) -> Item {
     }
 }
 
+thread_local! {
+    /// Every recipe this test made, by ID: the checked recipes undo looks up again.
+    static MADE: RefCell<BTreeMap<String, Recipe>> = RefCell::default();
+}
+
+/// Adds `r` to the checked recipes undo finds again.
+pub fn made(r: Recipe) -> Recipe {
+    MADE.with(|m| m.borrow_mut().insert(r.id.as_str().to_string(), r.clone()));
+    r
+}
+
+/// A recipe with an ID of its own in this test ("x", "x2", "x3" ...).
 pub fn recipe(steps: Vec<Step>) -> Recipe {
-    Recipe::new(RecipeId::new("x").unwrap(), 1, vec![WIN], steps).unwrap()
+    let n = MADE.with(|m| m.borrow().len()) + 1;
+    let id = if n == 1 {
+        "x".to_string()
+    } else {
+        format!("x{n}")
+    };
+    made(Recipe::new(RecipeId::new(&id).unwrap(), 1, vec![WIN], steps).unwrap())
+}
+
+/// The checked recipes undo finds again: every one this test made.
+pub fn book() -> Vec<Recipe> {
+    MADE.with(|m| m.borrow().values().cloned().collect())
 }
 
 /// A recipe whose app undo may remove.
 pub fn removable(steps: Vec<Step>) -> Recipe {
-    recipe(steps)
-        .with_undo(UndoDeclaration {
-            uninstall: true,
-            side_effects: vec![],
-        })
-        .unwrap()
+    made(
+        recipe(steps)
+            .with_undo(UndoDeclaration {
+                uninstall: true,
+                side_effects: vec![],
+            })
+            .unwrap(),
+    )
 }
 
 pub fn install(package: &str) -> Step {
@@ -158,7 +183,7 @@ pub fn rebuild(j: &Journal) -> Rebuild<'_> {
 pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
-    let j = Journal::open(&path).unwrap();
+    let j = open(&path).unwrap();
     (dir, path, j)
 }
 
@@ -502,4 +527,17 @@ impl EffectLedger for Faulty<'_> {
         self.write("restore-point")?;
         EffectLedger::record_restore_point(&self.inner, scope, point)
     }
+}
+
+/// Opens a journal with this test program's record key (never the system's key store, so tests
+/// leave nothing behind in it).
+pub fn open(
+    path: &std::path::Path,
+) -> Result<pctwin_journal::Journal, pctwin_journal::JournalError> {
+    pctwin_journal::Journal::open_with_record_key(path, test_key())
+}
+
+/// The record key every test journal is sealed with.
+pub fn test_key() -> pctwin_journal::keystore::TagKey {
+    pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32])
 }

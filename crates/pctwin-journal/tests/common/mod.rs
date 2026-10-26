@@ -105,7 +105,7 @@ pub fn salvaging(n: u8, to: &str) -> Undo {
 pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
-    let j = Journal::open(&path).unwrap();
+    let j = open(&path).unwrap();
     (dir, path, j)
 }
 
@@ -114,4 +114,17 @@ pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
 pub fn keys() -> &'static pctwin_grant::RoleKeys {
     static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
     KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
+}
+
+/// Opens a journal with this test program's record key (never the system's key store, so tests
+/// leave nothing behind in it).
+pub fn open(
+    path: &std::path::Path,
+) -> Result<pctwin_journal::Journal, pctwin_journal::JournalError> {
+    pctwin_journal::Journal::open_with_record_key(path, test_key())
+}
+
+/// The record key every test journal is sealed with.
+pub fn test_key() -> pctwin_journal::keystore::TagKey {
+    pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32])
 }

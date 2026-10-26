@@ -17,6 +17,16 @@
 //!   removed, if there was none) only if its content hash is still exactly what PCTwin wrote.
 //!   Any file changed since is kept; files that appeared since are never touched.
 //!
+//! Undo never trusts what a record says about what may be removed (security review finding 3):
+//!
+//! - every record is sealed with a key the journal file does not hold
+//!   ([`pctwin_journal::keystore`]); a record whose seal is wrong is reported damaged and never
+//!   drives anything ([`DAMAGED_RECORD`]);
+//! - the undo rules (whether an app may be removed) come from the checked recipe the record
+//!   names, looked up again now in the [`RecipeBook`], never from the record; and the record's
+//!   app, setting or place must be exactly that recipe's step, or nothing is undone
+//!   ([`NOT_THE_RECIPE`]); a recipe that cannot be found leaves it as it is ([`NO_RECIPE`]).
+//!
 //! Before any change, the effect's undo is recorded as part way ([`EffectUndo::Reversing`]), so
 //! closing undo waits for it. After a crash, undoing a setting or settings files simply looks
 //! again (the same rule gives the same answer, so it is safe to repeat); an interrupted app
@@ -29,7 +39,9 @@ use pctwin_journal::{
     EffectEntry, EffectState, EffectUndo, EffectUndoOutcome, Found, Journal, JournalError,
     Presence, Rebuild, RebuildRole, Scope, StoredEffect, UndoPermit, content_hash,
 };
-use pctwin_recipe::{Catalog, SettingValue, SettingsPlace, UndoDeclaration};
+use pctwin_recipe::{
+    Catalog, Recipe, RecipeRef, SettingValue, SettingsPlace, Step, UndoDeclaration,
+};
 
 use crate::{Adapter, ours};
 
@@ -55,6 +67,66 @@ const ELSEWHERE: &str = "this was done with the app's maker or an online service
      undo it, so PCTwin left it as it is";
 const KEPT_DAMAGED: &str =
     "the copy PCTwin kept of your earlier settings is damaged, so they were left as they are";
+/// Why a record that was changed outside PCTwin was not undone.
+pub const DAMAGED_RECORD: &str = "PCTwin's record of this change was changed outside PCTwin, so \
+     undo did not trust it and left everything as it is";
+/// Why a change whose checked instructions cannot be found was not undone.
+pub const NO_RECIPE: &str = "PCTwin could not find the checked instructions this change was made \
+     with, so undo left it as it is";
+/// Why a change that does not match the checked instructions it names was not undone.
+pub const NOT_THE_RECIPE: &str = "this change does not match the checked instructions it names, \
+     so undo left it as it is";
+
+/// Where undo finds, again, the checked recipe a change was made with (in the app: the signed
+/// recipe channel's local copy). Undo's rules come only from here.
+pub trait RecipeBook {
+    /// The recipe with exactly this ID and version, if it is known.
+    fn recipe(&self, reference: &RecipeRef) -> Option<Recipe>;
+}
+
+impl RecipeBook for Vec<Recipe> {
+    fn recipe(&self, reference: &RecipeRef) -> Option<Recipe> {
+        self.iter().find(|r| r.reference() == *reference).cloned()
+    }
+}
+
+/// The undo rule for effect `e`, from its recipe looked up again: an app's removal declaration
+/// (`None` for a setting or files), or why undo leaves it.
+fn rule_of(
+    e: &EffectEntry,
+    recipes: &dyn RecipeBook,
+) -> Result<Option<UndoDeclaration>, &'static str> {
+    let recipe = recipes.recipe(&e.planned.recipe).ok_or(NO_RECIPE)?;
+    if recipe.validate().is_err() {
+        return Err(NO_RECIPE);
+    }
+    let step = usize::try_from(e.planned.step)
+        .ok()
+        .and_then(|n| recipe.steps.get(n))
+        .ok_or(NOT_THE_RECIPE)?;
+    match (step, &e.effect) {
+        (
+            Step::Install { catalog, package },
+            StoredEffect::Install {
+                catalog: c,
+                package: p,
+                ..
+            },
+        ) if catalog == c && package == p => Ok(Some(recipe.undo.clone())),
+        (
+            Step::ApplySetting { key, value },
+            StoredEffect::ApplySetting {
+                key: k, value: v, ..
+            },
+        ) if key == k && value == v => Ok(None),
+        (Step::CopySettings { from, to }, StoredEffect::CopySettings { from: f, to: t, .. })
+            if from == f && to == t =>
+        {
+            Ok(None)
+        }
+        _ => Err(NOT_THE_RECIPE),
+    }
+}
 
 /// Records an undo step through the effect's own role (the installs or settings recorder).
 fn record(
@@ -79,10 +151,20 @@ pub fn undo_effects(
     permit: &UndoPermit<'_>,
     adapter: &mut dyn Adapter,
     scope: Scope,
+    recipes: &dyn RecipeBook,
 ) -> Result<Vec<Undone>, JournalError> {
     let journal = rebuild.journal();
-    let mut out = Vec::new();
-    for e in journal.effects_of(scope)?.into_iter().rev() {
+    let checked = journal.effects_checked(scope)?;
+    // A damaged record drives nothing: reported, never recorded as undone (it cannot be read).
+    let mut out: Vec<Undone> = checked
+        .damaged
+        .iter()
+        .map(|&id| Undone {
+            id,
+            outcome: kept(DAMAGED_RECORD),
+        })
+        .collect();
+    for e in checked.effects.into_iter().rev() {
         let Some(role) = ours(&e) else {
             continue;
         };
@@ -114,23 +196,35 @@ pub fn undo_effects(
             entry: &e,
             resumed: before == Some(EffectUndo::Reversing),
         };
-        let outcome = match &e.effect {
-            StoredEffect::Install {
-                catalog,
-                package,
-                before,
-                undo,
-            } => u.app(*catalog, package, before, undo, found)?,
-            StoredEffect::ApplySetting { key, before, .. } => u.setting(key, before, found)?,
-            StoredEffect::CopySettings { to, before, .. } => {
-                let kept: BTreeMap<&str, [u8; 32]> =
-                    before.iter().map(|f| (f.path.as_str(), f.hash)).collect();
-                u.files(to, &kept, found)?
+        let rule = rule_of(&e, recipes);
+        let outcome = match (&e.effect, rule) {
+            // Only its maker or service can undo it, whatever the recipe says.
+            (StoredEffect::External { .. }, _) => kept(ELSEWHERE),
+            (_, Err(why)) => kept(why),
+            (
+                StoredEffect::Install {
+                    catalog,
+                    package,
+                    before,
+                    ..
+                },
+                Ok(rule),
+            ) => {
+                // The recipe's own declaration, never the one stored with the record.
+                let undo = rule.unwrap_or_default();
+                u.app(*catalog, package, before, &undo, found)?
             }
-            // Never claimed undone here: only its maker or service can undo it.
-            StoredEffect::External { .. } => kept(ELSEWHERE),
-            // Not this role's: skipped above.
-            StoredEffect::Import { .. } => continue,
+            (effect, Ok(_)) => match effect {
+                StoredEffect::ApplySetting { key, before, .. } => u.setting(key, before, found)?,
+                StoredEffect::CopySettings { to, before, .. } => {
+                    let kept: BTreeMap<&str, [u8; 32]> =
+                        before.iter().map(|f| (f.path.as_str(), f.hash)).collect();
+                    u.files(to, &kept, found)?
+                }
+                // Not reached: an install, an external change and an import (not this role's,
+                // skipped above) are matched before.
+                _ => continue,
+            },
         };
         record(
             rebuild,
@@ -228,7 +322,7 @@ impl One<'_, '_> {
     ) -> Result<EffectUndoOutcome, JournalError> {
         let Found::Setting(applied) = found else {
             return Err(JournalError::Damaged(
-                "a setting's record holds another kind of observation".into(),
+                "a setting's record holds another kind of observation",
             ));
         };
         let Ok(now) = self.adapter.read_setting(key) else {
@@ -262,7 +356,7 @@ impl One<'_, '_> {
     ) -> Result<EffectUndoOutcome, JournalError> {
         let Found::Files(written) = found else {
             return Err(JournalError::Damaged(
-                "a settings copy's record holds another kind of observation".into(),
+                "a settings copy's record holds another kind of observation",
             ));
         };
         let written: BTreeMap<&str, [u8; 32]> =

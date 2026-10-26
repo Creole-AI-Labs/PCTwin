@@ -465,7 +465,9 @@ impl Step {
 /// Package IDs as the catalogs spell them (`Mozilla.Firefox`, `firefox`, `org.mozilla.firefox`,
 /// `9NBLGGH4NNS1`): letters, digits and `.`, `-`, `_`, `+`, `@`; no spaces, slashes or `:`, so
 /// they cannot carry an address or a command.
-fn package_ok(p: &str) -> bool {
+/// Whether `p` is a package name a checked recipe may hold (also used to check names read back
+/// from the journal before undo hands them to the system).
+pub fn package_ok(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= MAX_TEXT
         && p.bytes()
@@ -501,7 +503,8 @@ fn looks_like_a_file(p: &str) -> bool {
 }
 
 /// Setting keys: a dotted name such as `browser.startup.page`.
-fn key_ok(k: &str) -> bool {
+/// Whether `k` is a setting's name a checked recipe may hold.
+pub fn key_ok(k: &str) -> bool {
     !k.is_empty()
         && !k.starts_with(['-', '.'])
         && k.len() <= MAX_TEXT

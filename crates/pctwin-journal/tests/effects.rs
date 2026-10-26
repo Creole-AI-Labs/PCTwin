@@ -99,7 +99,7 @@ fn an_install_goes_intent_observed_receipt_and_is_read_back_after_reopening() {
         .receipt(id, &Receipt::Done)
         .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(j.unfinished_effects().unwrap().is_empty());
     let EffectEntry {
         planned: p,
@@ -139,7 +139,7 @@ fn effect_numbers_are_never_reused_and_kept_apart_from_file_writes() {
         .unwrap();
     assert!(b > a);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let c = j
         .settings(&keys().setting)
         .intend(&planned(2), &setting(None))
@@ -234,7 +234,7 @@ fn settings_files_there_before_are_kept_in_the_journal_with_their_hashes() {
         )
         .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let StoredEffect::CopySettings { before, .. } = j.effect(id).unwrap().unwrap().effect else {
         panic!("not a copy");
     };
@@ -284,7 +284,7 @@ fn a_kept_file_damaged_on_disk_is_reported_never_handed_back() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(
         j.kept_bytes(&before[0].hash),
         Err(JournalError::Damaged(_))
@@ -308,7 +308,7 @@ fn a_damaged_effect_record_is_reported() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.effect(id), Err(JournalError::Damaged(_))));
     assert!(matches!(j.effects(), Err(JournalError::Damaged(_))));
     assert!(matches!(
@@ -567,7 +567,7 @@ fn closing_undo_refuses_while_an_app_or_setting_is_being_put_back_and_then_shuts
     j.close_undo(&mut |_, _| unreachable!()).unwrap();
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
     // What was there before stays kept for good, even with undo closed.
     assert!(j.effect(other).unwrap().is_some());
@@ -650,7 +650,7 @@ fn the_restore_point_answer_is_kept_once_per_move() {
         )
         .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert_eq!(j.restore_point(SCOPE).unwrap(), Some(made));
     assert!(matches!(
         j.restore_point(other).unwrap(),

@@ -30,6 +30,7 @@
 
 mod checked;
 mod effects;
+pub mod keystore;
 pub mod place;
 pub mod recovery;
 
@@ -62,7 +63,9 @@ use serde::{Deserialize, Serialize};
 ///   upgrades it to 3 in the same transaction as the open: it holds no effect, and its file
 ///   records, folders and gate mean the same in both. Raised because a format-2 PCTwin knows
 ///   nothing of effect undo: it would close undo, and allow the wipe, while a setting was half
-///   put back, so it must refuse this journal instead. Once format 3 ships, any change of shape
+///   put back, so it must refuse this journal instead. Each effect record and each record of undoing one is
+///   stored sealed: a 32-byte keyed BLAKE3 tag ([`keystore`]), then its JSON (added 26 October
+///   2026, before format 3 shipped, so without a new number). Once format 3 ships, any change of shape
 ///   of an effect record needs a new number.
 /// - **2**: undo removes a copy through the handle it was checked on (Windows) or by first moving
 ///   its name aside to a private name and checking it there (Linux and macOS): the undo stages
@@ -184,6 +187,16 @@ pub enum JournalError {
         "that change belongs to another part of PCTwin ({belongs_to:?}), so it was not touched"
     )]
     WrongRole { effect: u64, belongs_to: Role },
+    /// The key that seals this journal's records of changes is not where it was kept (security
+    /// review finding 3; acceptance case T23-007): nothing is erased and no new key is made over
+    /// it; the records are not trusted, and nothing new is recorded, until it is back.
+    #[error(
+        "PCTwin cannot find the key that checks its record of the move on this laptop, so it changed nothing; sign in as the person who started the move"
+    )]
+    RecordKeyMissing,
+    /// The system's key store could not be read or written now.
+    #[error("PCTwin could not reach this laptop's key store, so it changed nothing; try again")]
+    RecordKeyUnavailable,
     /// The journal's folder is not on a drive that is part of this laptop (or it could not be
     /// told): nothing was opened or made there.
     #[error("{}", .0.why_not().unwrap_or("this place cannot hold the move's record"))]
@@ -1161,6 +1174,8 @@ pub struct Journal {
     undo: Mutex<UndoUse>,
     /// Woken when a permit is given back.
     undo_free: Condvar,
+    /// The key that seals effect records ([`keystore`]).
+    record_key: keystore::Held,
     /// The offer to leave part-way files that an answer is awaited for (kept in memory only: an
     /// offer never outlives the PCTwin that showed it).
     escape: Mutex<Option<StoredOffer>>,
@@ -1224,8 +1239,18 @@ impl Journal {
             journal_id,
             undo: Mutex::new(UndoUse::default()),
             undo_free: Condvar::new(),
+            record_key: keystore::Held::system(),
             escape: Mutex::new(None),
         })
+    }
+
+    /// Opens the journal at `path` as [`Journal::open`] does, with the key that seals its effect
+    /// records given here instead of kept by the system (tests, and tools that keep the key
+    /// elsewhere).
+    pub fn open_with_record_key(path: &Path, key: keystore::TagKey) -> Result<Self, JournalError> {
+        let mut j = Self::open(path)?;
+        j.record_key = keystore::Held::given(key);
+        Ok(j)
     }
 
     /// Checks the format and makes every table; returns the journal's own number.
@@ -2110,7 +2135,8 @@ impl Journal {
             }
             // Nor beside an app or setting part way put back.
             let effect_undo = tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
-            let part_way = effects::part_way_in(&effect_undo)?;
+            let key = self.key_if_any(&effect_undo);
+            let part_way = effects::part_way_in(&effect_undo, key.as_ref())?;
             if !part_way.is_empty() {
                 return Err(CloseError::EffectsPartWay { ids: part_way });
             }
@@ -2292,7 +2318,7 @@ impl Journal {
             let made = tx.open_table(FOLDERS).map_err(storage)?;
             if made.get((destination, folder)).map_err(storage)?.is_none() {
                 return Err(JournalError::Damaged(
-                    "undo of a folder PCTwin did not make".into(),
+                    "undo of a folder PCTwin did not make",
                 ));
             }
             let mut table = tx.open_table(UNDO_FOLDERS).map_err(storage)?;

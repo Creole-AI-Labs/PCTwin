@@ -44,7 +44,7 @@ fn an_install_is_recorded_before_it_runs_and_observed_after() {
     );
     let e = &j.effects_of(SCOPE).unwrap()[0];
     assert_eq!(e.planned.step, 0);
-    assert_eq!(e.planned.recipe.id.as_str(), "x");
+    assert!(e.planned.recipe.id.as_str().starts_with('x'));
     let StoredEffect::Install { before, undo, .. } = &e.effect else {
         panic!("not an install");
     };
@@ -258,7 +258,7 @@ fn after_a_crash_an_install_that_happened_is_found_and_never_run_again() {
     let (_d, path, j) = journal();
     let id = intend_install(&j);
     drop(j); // the power went out after the install ran
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let mut laptop = Laptop::ok();
     laptop.installed.insert("A.B".into(), "1.0".into());
     let got = recover(&rebuild(&j), &mut laptop).unwrap();
@@ -281,7 +281,7 @@ fn after_a_crash_an_install_that_did_not_happen_fails_and_is_not_run_again() {
     let (_d, path, j) = journal();
     let id = intend_install(&j);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let mut laptop = Laptop::ok();
     let got = recover(&rebuild(&j), &mut laptop).unwrap();
     assert_eq!(
@@ -305,7 +305,7 @@ fn after_a_crash_what_cannot_be_looked_at_is_left_for_next_time() {
     let (_d, path, j) = journal();
     let id = intend_install(&j);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let mut laptop = Laptop::ok();
     laptop.blind.insert("app");
     let got = recover(&rebuild(&j), &mut laptop).unwrap();
@@ -340,7 +340,7 @@ fn after_a_crash_an_observation_without_a_receipt_gets_its_receipt_from_what_was
         .observed(id, &Found::Setting(Some(SettingValue::Bool(false))), false)
         .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     // Whatever the laptop says now, the recorded observation decides: it was not set as wanted.
     let mut laptop = Laptop::ok();
     laptop.settings.insert("k".into(), SettingValue::Bool(true));
@@ -375,7 +375,7 @@ fn a_run_reconciles_first_and_running_again_finishes_without_installing_twice() 
         assert!(run.stopped.is_some());
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(run.recovered.len(), 1);
     assert_eq!(
@@ -413,7 +413,7 @@ fn a_run_whose_recovery_cannot_write_changes_nothing() {
     let (_d, path, j) = journal();
     intend_install(&j);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let ledger = Faulty::new(&j, 0);
     let mut laptop = Laptop::ok();
     let plan = plan_of(vec![removable(vec![install("C.D")])]);

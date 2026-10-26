@@ -15,8 +15,8 @@ use common::{
 };
 use pctwin_executor::{RecoveredAs, recover, undo_effects};
 use pctwin_journal::{
-    EffectUndoOutcome, Found, ImportIntent, InstallIntent, Journal, JournalError, PlannedEffect,
-    Receipt, SettingsFile,
+    EffectUndoOutcome, Found, ImportIntent, InstallIntent, JournalError, PlannedEffect, Receipt,
+    SettingsFile,
 };
 use pctwin_recipe::{RecipeId, RecipeRef, SettingValue};
 use pctwin_types::ItemStatus;
@@ -99,7 +99,7 @@ fn the_power_going_out_after_any_journal_write_is_recovered_honestly_and_undone_
         }
         drop(j);
         // Restart: the journal holds exactly the steps already taken.
-        let j = Journal::open(&path).unwrap();
+        let j = common::open(&path).unwrap();
         let recovered = recover(&rebuild(&j), &mut laptop).unwrap();
         for r in &recovered {
             assert!(
@@ -126,7 +126,7 @@ fn the_power_going_out_after_any_journal_write_is_recovered_honestly_and_undone_
         assert!(j.restore_point(SCOPE).unwrap().is_some(), "writes {writes}");
         // Undo puts the laptop back as it was before the move.
         let permit = j.begin_undo().unwrap();
-        for u in undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap() {
+        for u in undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap() {
             assert!(!u.outcome.needs_action(), "writes {writes}: {u:?}");
         }
         assert_eq!(laptop.settings, start.settings, "writes {writes}");
@@ -184,7 +184,7 @@ fn an_installer_still_running_is_never_started_again() {
         );
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     laptop.installed.clear();
     laptop.installing.insert("A.B".into());
     laptop.done.clear();
@@ -238,7 +238,7 @@ fn a_late_step_from_a_replaced_worker_is_refused() {
         );
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let got = recover(&rebuild(&j), &mut laptop).unwrap();
     let id = got[0].id;
     // The old worker comes back with its own observation and receipt: refused, nothing changed.
@@ -283,9 +283,9 @@ fn putting_back_settings_files_stopped_part_way_is_finished_by_looking_again() {
     }
     laptop.put_file(&p, "vlcrc", b"defaults");
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let permit = j.begin_undo().unwrap();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
     assert_eq!(got[0].outcome, EffectUndoOutcome::Restored);
     assert_eq!(laptop.file(&p, "vlcrc").unwrap(), b"defaults");
     assert_eq!(laptop.file(&p, "extra.ini"), None);
@@ -304,7 +304,7 @@ fn a_putting_back_that_fails_part_way_keeps_exactly_what_is_left_for_next_time()
 
     laptop.puts_before_failing = Some(1);
     let permit = j.begin_undo().unwrap();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
     assert!(matches!(got[0].outcome, EffectUndoOutcome::NotDone { .. }));
     assert_eq!(
         laptop
@@ -318,7 +318,7 @@ fn a_putting_back_that_fails_part_way_keeps_exactly_what_is_left_for_next_time()
     // Next time, what is left is finished; what was already put back is left as it is.
     laptop.puts_before_failing = None;
     laptop.done.clear();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
     assert_eq!(got[0].outcome, EffectUndoOutcome::Restored);
     assert_eq!(
         laptop
@@ -354,10 +354,10 @@ fn an_earlier_version_whose_bytes_are_missing_is_never_promised_back() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let permit = j.begin_undo().unwrap();
     laptop.done.clear();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
     assert!(matches!(&got[0].outcome, EffectUndoOutcome::Kept { .. }));
     assert_eq!(laptop.file(&p, "vlcrc").unwrap(), b"from the old laptop");
     assert!(laptop.done.is_empty(), "nothing was changed");
@@ -396,7 +396,7 @@ fn a_licence_or_service_change_is_never_claimed_undone_here() {
         .unwrap();
     let mut laptop = Laptop::ok();
     let permit = j.begin_undo().unwrap();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
     assert!(
         matches!(&got[0].outcome, EffectUndoOutcome::Kept { why } if why.contains("only they"))
     );
@@ -425,7 +425,7 @@ fn imports_belong_to_their_own_role_and_are_left_to_it() {
     assert_eq!(j.unfinished_effects().unwrap().len(), 1);
     let permit = j.begin_undo().unwrap();
     assert!(
-        undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE)
+        undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book())
             .unwrap()
             .is_empty()
     );
@@ -470,7 +470,7 @@ fn after_a_crash_a_change_seen_made_still_needs_its_own_check() {
         );
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     // The value is there, but the setting's own check does not pass.
     assert_eq!(laptop.settings.get("k"), Some(&SettingValue::Int(1)));
     let got = recover(&rebuild(&j), &mut laptop).unwrap();
@@ -509,10 +509,10 @@ fn putting_back_settings_files_finished_just_before_a_crash_is_found_restored() 
         .clone();
     laptop.files.remove(&extra);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let permit = j.begin_undo().unwrap();
     laptop.done.clear();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE).unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book()).unwrap();
     assert_eq!(got[0].outcome, EffectUndoOutcome::Restored);
     assert!(laptop.done.is_empty());
 }

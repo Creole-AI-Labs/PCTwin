@@ -1415,7 +1415,7 @@ struct StopsAt<'l> {
 impl StopsAt<'_> {
     fn check(&self, step: &str) -> Result<(), pctwin_journal::JournalError> {
         if step == self.at {
-            Err(pctwin_journal::JournalError::Damaged("stopped here".into()))
+            Err(pctwin_journal::JournalError::Damaged("stopped here"))
         } else {
             Ok(())
         }

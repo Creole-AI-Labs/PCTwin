@@ -34,7 +34,7 @@ fn it_is_asked_once_before_the_first_change_and_its_answer_kept() {
     assert_eq!(j.restore_point(SCOPE).unwrap(), Some(answer.clone()));
     // The same move run again (after a restart): not asked again.
     drop(j);
-    let j = pctwin_journal::Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(laptop.restore_asked, 1);
     assert_eq!(run.restore_point, Some(answer));

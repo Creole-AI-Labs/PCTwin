@@ -21,7 +21,7 @@ fn moved(j: &Journal, laptop: &mut Laptop, recipes: Vec<pctwin_recipe::Recipe>) 
 
 fn undo(j: &Journal, laptop: &mut Laptop) -> Vec<EffectUndoOutcome> {
     let permit = j.begin_undo().unwrap();
-    undo_effects(&rebuild(j), &permit, laptop, SCOPE)
+    undo_effects(&rebuild(j), &permit, laptop, SCOPE, &common::book())
         .unwrap()
         .into_iter()
         .map(|Undone { outcome, .. }| outcome)
@@ -76,9 +76,11 @@ fn an_app_whose_recipe_does_not_allow_removal_is_kept_and_the_person_told_why() 
     ] {
         let (_d, _p, j) = journal();
         let mut laptop = Laptop::ok();
-        let r = recipe(vec![install("A.B")])
-            .with_undo(undo_decl.clone())
-            .unwrap();
+        let r = common::made(
+            recipe(vec![install("A.B")])
+                .with_undo(undo_decl.clone())
+                .unwrap(),
+        );
         moved(&j, &mut laptop, vec![r]);
         let got = undo(&j, &mut laptop);
         assert_eq!(
@@ -337,7 +339,7 @@ fn a_damaged_earlier_version_is_never_written_back() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let got = undo(&j, &mut laptop);
     assert!(matches!(&got[0], EffectUndoOutcome::Kept { why } if why.contains("damaged")));
     assert_eq!(laptop.file(&p, "vlcrc").unwrap(), b"old laptop");
@@ -362,7 +364,7 @@ fn after_a_crash_part_way_a_setting_is_looked_at_again_and_finished() {
             .unwrap();
     }
     drop(j); // the power went out before the setting was written back
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert_eq!(undo(&j, &mut laptop), [EffectUndoOutcome::Restored]);
     assert_eq!(laptop.settings.get("k"), Some(&SettingValue::Int(1)));
     // And if it had already been written back before the power went out:
@@ -382,7 +384,7 @@ fn after_a_crash_part_way_a_setting_is_looked_at_again_and_finished() {
     }
     laptop2.settings.remove("k");
     drop(j2);
-    let j2 = Journal::open(&path2).unwrap();
+    let j2 = common::open(&path2).unwrap();
     assert_eq!(undo(&j2, &mut laptop2), [EffectUndoOutcome::Restored]);
     assert!(laptop2.done.is_empty());
 }
@@ -400,7 +402,7 @@ fn after_a_crash_part_way_an_app_removal_is_never_run_again_by_itself() {
             .unwrap();
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let got = undo(&j, &mut laptop);
     assert!(matches!(&got[0], EffectUndoOutcome::NotDone { why } if why.contains("again")));
     assert!(
@@ -423,7 +425,7 @@ fn after_a_crash_part_way_an_app_removal_is_never_run_again_by_itself() {
     }
     laptop2.installed.clear();
     drop(j2);
-    let j2 = Journal::open(&path2).unwrap();
+    let j2 = common::open(&path2).unwrap();
     assert_eq!(undo(&j2, &mut laptop2), [EffectUndoOutcome::Uninstalled]);
 }
 
@@ -654,7 +656,8 @@ fn every_undo_change_is_recorded_as_part_way_before_it_is_made() {
             checked: 0,
         };
         let permit = j.begin_undo().unwrap();
-        let got = undo_effects(&rebuild(&j), &permit, &mut watched, SCOPE).unwrap();
+        let got =
+            undo_effects(&rebuild(&j), &permit, &mut watched, SCOPE, &common::book()).unwrap();
         assert!(!got[0].outcome.needs_action(), "{kind}: {got:?}");
         assert!(watched.checked > 0, "{kind}");
         assert!(j.effects_part_way().unwrap().is_empty(), "{kind}: finished");

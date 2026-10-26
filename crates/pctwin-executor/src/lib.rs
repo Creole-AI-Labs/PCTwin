@@ -40,7 +40,7 @@ mod recover;
 mod undo;
 
 pub use recover::{Recovered, RecoveredAs, STILL_INSTALLING, recover};
-pub use undo::{Undone, undo_effects};
+pub use undo::{DAMAGED_RECORD, NO_RECIPE, NOT_THE_RECIPE, RecipeBook, Undone, undo_effects};
 
 use pctwin_grant::{InstallGrant, ObjectRef, PlanSeal, SettingGrant};
 use pctwin_journal::{

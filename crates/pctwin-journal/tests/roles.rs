@@ -363,9 +363,12 @@ fn tamper(path: &std::path::Path, id: u64, edit: impl Fn(String) -> String) {
         let mut t = tx
             .open_table(redb::TableDefinition::<u64, &[u8]>::new("effects"))
             .unwrap();
-        let old = String::from_utf8(t.get(id).unwrap().unwrap().value().to_vec()).unwrap();
-        let new = edit(old);
-        t.insert(id, new.as_bytes()).unwrap();
+        // A record is its seal (32 bytes), then its words; the words are changed, the seal kept.
+        let stored = t.get(id).unwrap().unwrap().value().to_vec();
+        let (seal, json) = stored.split_at(32);
+        let new = edit(String::from_utf8(json.to_vec()).unwrap());
+        t.insert(id, [seal, new.as_bytes()].concat().as_slice())
+            .unwrap();
     }
     tx.commit().unwrap();
 }
@@ -390,7 +393,7 @@ fn a_record_changed_by_hand_never_supplies_a_path_or_a_role() {
     tamper(&path, s, |r| {
         r.replace(r#""role":"settings""#, r#""role":"install""#)
     });
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.effect(m), Err(JournalError::Damaged(_))));
     assert!(matches!(j.effect(s), Err(JournalError::Damaged(_))));
     assert!(matches!(j.effects(), Err(JournalError::Damaged(_))));
@@ -410,7 +413,7 @@ fn a_truncated_journal_is_reported_and_left_exactly_as_it_was() {
     std::fs::write(&path, &bytes[..bytes.len() / 3]).unwrap();
     let cut = std::fs::read(&path).unwrap();
     assert!(matches!(
-        Journal::open(&path),
+        common::open(&path),
         Err(JournalError::Damaged(_) | JournalError::Storage(_))
     ));
     assert_eq!(
@@ -504,11 +507,11 @@ fn the_volume_holding_a_folder_is_the_longest_mount_it_lies_inside() {
 fn a_journal_opens_in_a_temporary_folder_on_this_laptop() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(pctwin_journal::place::judge(dir.path()), Placement::Local);
-    drop(Journal::open(&dir.path().join("journal.redb")).unwrap());
+    drop(common::open(&dir.path().join("journal.redb")).unwrap());
     // A folder that does not exist cannot be judged: refused, nothing made.
     let missing = dir.path().join("nowhere").join("journal.redb");
     assert!(matches!(
-        Journal::open(&missing),
+        common::open(&missing),
         Err(JournalError::UnsafePlace(Placement::Unknown))
     ));
     assert!(!missing.exists());
@@ -577,6 +580,6 @@ fn a_recorded_observation_changed_by_hand_never_supplies_a_path() {
             &r[at + "inbox.mbox".len()..]
         )
     });
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.effect(m), Err(JournalError::Damaged(_))));
 }
