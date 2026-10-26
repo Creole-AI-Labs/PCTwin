@@ -3,9 +3,10 @@
 # on standard input; EVENT is the GitHub event name and FULL_LABEL is "true" when the pull request
 # carries the full-check label. Writes key=value lines for the jobs to standard output.
 #
-# Pull requests get the quick set for the parts they touch. The merge queue, pushes to main, the
-# nightly run and the full-check label get the heavy set. A change to the workflows, or to any
-# path not named below, runs everything. Documentation alone runs nothing.
+# Pull requests get the quick set for the parts they touch, never the heavy set (decided 26
+# October 2026: no waiting hours to merge); a change to the workflows, or to any path not named
+# below, gets the quick set of everything. Pushes to main, the nightly run, a run by hand and the
+# full-check label get the heavy set. Documentation alone runs nothing.
 set -euo pipefail
 
 app=false installer=false rust=false fuzz=false code=false everything=false files=0
@@ -40,6 +41,10 @@ esac
 [ "${FULL_LABEL:-false}" = true ] && everything=true
 if $everything; then
   heavy=true app=true installer=true rust=true fuzz=true code=true
+fi
+# A pull request is never held for the heavy set, unless the full-check label asks for it.
+if [ "${EVENT:-}" = pull_request ] && [ "${FULL_LABEL:-false}" != true ]; then
+  heavy=false
 fi
 
 all_os='["windows-latest","windows-11-arm","macos-latest","macos-15-intel","ubuntu-latest","ubuntu-24.04-arm"]'
