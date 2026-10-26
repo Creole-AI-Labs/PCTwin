@@ -1,0 +1,7 @@
+# cargo-nextest, as CI runs it (`--profile ci`).
+[profile.ci]
+# A failed test is tried once more. One that then passes still counts as passed, but the summary
+# names it FLAKY, so it is seen and fixed rather than hidden.
+retries = 1
+# Every test runs, so one failure does not hide the next.
+fail-fast = false

@@ -1,9 +1,16 @@
 name: CI
 
+# What runs when (decided 26 October 2026): a pull request gets the quick checks for the parts it
+# touches; the merge queue checks the exact merge commit with the heavy set; pushes to main, the
+# nightly run and the full-check label run everything. The `changes` job decides
+# (scripts/ci-changes.sh), and "All checks" is the one check main requires.
 on:
   push:
     branches: [main]
   pull_request:
+    # Labelled too, so adding full-check starts the full set.
+    types: [opened, synchronize, reopened, labeled]
+  merge_group:
   # Nightly: the whole matrix again on unchanged code, to catch flaky tests and runner or
   # toolchain changes before they meet a real change.
   schedule:
@@ -15,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -27,9 +34,71 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      heavy: ${{ steps.decide.outputs.heavy }}
+      ui: ${{ steps.decide.outputs.ui }}
+      motion: ${{ steps.decide.outputs.motion }}
+      rust_quick: ${{ steps.decide.outputs.rust_quick }}
+      rust_os: ${{ steps.decide.outputs.rust_os }}
+      fuzz: ${{ steps.decide.outputs.fuzz }}
+      real_drives: ${{ steps.decide.outputs.real_drives }}
+      labs: ${{ steps.decide.outputs.labs }}
+      security: ${{ steps.decide.outputs.security }}
+      codeql: ${{ steps.decide.outputs.codeql }}
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: ${{ env.EGRESS_POLICY }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci-changes.sh
+          sparse-checkout-cone-mode: false
+      - name: Decide
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.merge_group.head_sha }}
+          FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'full-check') }}
+        run: |
+          # The changed paths: a pull request's own list, or what the merge commit adds to main.
+          # A list cut short (3000 files for a pull request, 300 for a comparison) runs everything.
+          case "$EVENT" in
+            pull_request)
+              gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' > changed.txt
+              most=3000 ;;
+            merge_group)
+              gh api "repos/$REPO/compare/$BASE...$HEAD" --jq '.files[].filename' > changed.txt
+              most=300 ;;
+            *) : > changed.txt; most=3000 ;;
+          esac
+          echo "changed: $(wc -l < changed.txt) paths"
+          MOST_FILES=$most bash scripts/ci-changes.sh < changed.txt | tee -a "$GITHUB_OUTPUT"
+
   ui:
     # Also on Windows: the screen tests once failed there alone (16 October 2026), while Linux passed.
-    # The Linux run keeps the exact name main's protection requires; the Windows run is named apart.
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
     name: ${{ matrix.os == 'ubuntu-latest' && 'Screens (type check, lint, unit tests, build)' || format('Screens (type check, lint, unit tests, build) ({0})', matrix.os) }}
     strategy:
       fail-fast: false
@@ -100,7 +169,7 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile || { sleep 15; pnpm install --frozen-lockfile; }
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
@@ -110,6 +179,8 @@ jobs:
     # Motion smoothness in the engines the app really uses (Task List 1.10): Edge on Windows
     # (WebView2 is Edge's engine), the processor slowed four times as on a slow laptop, and WebKit
     # on a Mac (WKWebView's engine). Every frame of the opening and a screen change is timed.
+    needs: changes
+    if: needs.changes.outputs.motion == 'true'
     name: Motion smoothness (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -136,7 +207,7 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile || { sleep 15; pnpm install --frozen-lockfile; }
       - run: pnpm build
       - name: The Mac's engine
         if: matrix.engine == 'webkit'
@@ -155,6 +226,8 @@ jobs:
   fuzz:
     # Everything that arrives from the other laptop or the person, fuzzed for a minute per
     # target with cargo-fuzz (libFuzzer, nightly compiler): a crash, hang or failed check fails CI.
+    needs: changes
+    if: needs.changes.outputs.fuzz == 'true'
     name: Fuzzing (messages, frames, the record, paths, pairing input, landing messages)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -207,11 +280,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: nightly
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: nightly
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz --locked
+        run: cargo +nightly install cargo-fuzz --locked || { sleep 15; cargo +nightly install cargo-fuzz --locked; }
       - name: Fuzz each target for a minute
         shell: bash
         run: |
@@ -226,6 +306,8 @@ jobs:
     # every drive unmounted and mounted again at the same path in between (PCTWIN_FAT_PHASE
     # before, then after). Drive kinds: Linux vfat, kernel exFAT and exfat-fuse; Mac FAT32 and
     # exFAT; Windows FAT32 and exFAT. Only the gate crate is built: no screens, no app.
+    needs: changes
+    if: needs.changes.outputs.real_drives == 'true'
     name: Gate on real drives (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -299,7 +381,14 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -399,18 +488,102 @@ jobs:
           PCTWIN_FAT_PHASE: after
         run: cargo test -p pctwin-transfer --test real_fat_kill --locked -- --nocapture
 
+  # The quick Rust checks on a pull request (Linux only; the six systems run in the merge
+  # queue): formatting, the fences, lint, every test and the bridge examples. No app build.
+  rust-quick:
+    needs: changes
+    if: needs.changes.outputs.rust_quick == 'true'
+    name: Rust quick (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          # Audit only: these tests send to the local multicast group (device discovery), which a
+          # blocking policy refuses.
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Linux system libraries for Tauri
+        timeout-minutes: 10
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Its own cache: the full Linux job's holds a release build this one never needs.
+          key: quick
+      # The app's Rust build embeds the built screens, so build them first.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 10
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Build screens
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile || { sleep 15; pnpm install --frozen-lockfile; }
+          pnpm build
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Public core stands alone
+        run: bash scripts/public-only.sh
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Unsafe fence
+        run: bash scripts/unsafe-fence.sh
+      - name: Unsafe fence self-test
+        run: bash scripts/unsafe-fence-selftest.sh
+      - name: Fence canary
+        run: bash scripts/clippy-canary.sh
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-nextest@0.9.148
+      - name: Tests
+        env:
+          PCTWIN_REQUIRE_UNIX_UNDO: "1"
+        run: cargo nextest run --workspace --locked --profile ci
+      - name: Examples in the documentation
+        run: cargo test --workspace --locked --doc
+      - name: Bridge example files are current
+        env:
+          PCTWIN_WRITE_CONTRACT: "1"
+        run: |
+          cargo test -p pctwin-app --locked --lib contract::the_example_files_match_the_engine
+          git diff --exit-code -- app/src/contract
+          if [ -n "$(git status --porcelain -- app/src/contract)" ]; then
+            git status --porcelain -- app/src/contract
+            echo "app/src/contract has files that are not checked in" >&2
+            exit 1
+          fi
+
   rust:
+    needs: changes
+    if: needs.changes.outputs.rust_os != '[]'
     name: Rust (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - windows-latest
-          - windows-11-arm
-          - macos-latest
-          - macos-15-intel
-          - ubuntu-latest
-          - ubuntu-24.04-arm
+        # All six in the heavy set; the three main ones when only the screens changed; Windows
+        # alone on a pull request that changes what the installer is made from.
+        os: ${{ fromJSON(needs.changes.outputs.rust_os) }}
     runs-on: ${{ matrix.os }}
     # A stuck runner (an apt mirror once hung for over an hour) is stopped instead of waiting
     # for GitHub's six-hour limit. The Intel Mac is the slowest runner: with a cold cache (the
@@ -447,7 +620,15 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
           components: rustfmt, clippy
@@ -464,7 +645,7 @@ jobs:
       - name: Build screens
         working-directory: app
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile || { sleep 15; pnpm install --frozen-lockfile; }
           pnpm build
       - name: Formatting
         if: matrix.os == 'ubuntu-latest'
@@ -488,12 +669,20 @@ jobs:
         shell: bash
         run: bash scripts/clippy-canary.sh
       # The gate, journal and transfer tests all run here, on macOS too (the matrix includes
-      # macos-latest and macos-15-intel): this runs the whole workspace.
+      # macos-latest and macos-15-intel): this runs the whole workspace. cargo-nextest runs each
+      # test in its own process and tries a failed test once more: a test that then passes is
+      # still named FLAKY in the summary (.config/nextest.toml).
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-nextest@0.9.148
       - name: Tests
         # Linux and macOS: the undo tests must really run on the runner's drive, never skip.
         env:
           PCTWIN_REQUIRE_UNIX_UNDO: "1"
-        run: cargo test --workspace --locked --no-fail-fast
+        run: cargo nextest run --workspace --locked --profile ci
+      - name: Examples in the documentation
+        run: cargo test --workspace --locked --doc
       # The screens' example files (app/src/contract) are the engine's own output. Made again
       # here, they must equal what is checked in, so a shape that crosses the bridge cannot change
       # without the screens' contract test (contract.test.ts) seeing the new shape.
@@ -667,6 +856,8 @@ jobs:
   # (pairing, sealed link, safety gate, journal). Hosted runners cannot pair with each other, so
   # live pairing between machines is tested on owned hardware; this proves everything else.
   two-accounts:
+    needs: changes
+    if: needs.changes.outputs.labs == 'true'
     name: Test lab, move between two accounts (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -723,7 +914,14 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -804,6 +1002,8 @@ jobs:
   # through the real engine, so names born on one system meet the other system's safety gate.
   # The lab package is not encrypted: the encrypted drive package is Release 2's archive format.
   lab-pack:
+    needs: changes
+    if: needs.changes.outputs.labs == 'true'
     name: Test lab, pack on ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -849,7 +1049,14 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -869,7 +1076,8 @@ jobs:
 
   lab-handoff:
     name: Test lab, move a package from ${{ matrix.from }} on ${{ matrix.to }}
-    needs: lab-pack
+    needs: [changes, lab-pack]
+    if: needs.changes.outputs.labs == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -918,7 +1126,14 @@ jobs:
           }
           Write-Error "DNS did not come back within two minutes"
           exit 1
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -955,6 +1170,8 @@ jobs:
   # them, a lab laptop paired and moved across, and the cable cut for 8 seconds part way through
   # (fixtures/two-machines/run.sh says what this does not cover).
   lab-two-machines:
+    needs: changes
+    if: needs.changes.outputs.labs == 'true'
     name: Test lab, two machines over a poor network
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -979,7 +1196,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -995,3 +1219,55 @@ jobs:
           path: ${{ runner.temp }}/two-machines/evidence
           if-no-files-found: warn
           retention-days: 14
+
+  # The dependency, workflow and code-scanning checks (security.yml), with CodeQL for the
+  # languages the change touches.
+  security:
+    needs: changes
+    if: needs.changes.outputs.security == 'true'
+    name: Security
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/security.yml # zizmor: ignore[self-repository]
+    with:
+      codeql: ${{ needs.changes.outputs.codeql }}
+
+  # The one check main requires, under the same name for pull requests and the merge queue. It
+  # passes when every job the change needed passed (a job not needed is skipped, which is fine)
+  # and fails if any failed or was cancelled, or if the decision itself did not run.
+  all-checks:
+    name: All checks
+    if: always()
+    needs:
+      - changes
+      - ui
+      - motion
+      - fuzz
+      - real-drives
+      - rust-quick
+      - rust
+      - two-accounts
+      - lab-pack
+      - lab-handoff
+      - lab-two-machines
+      - security
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every needed job passed
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+          DECIDED: ${{ needs.changes.result }}
+          HEAVY: ${{ needs.changes.outputs.heavy }}
+        run: |
+          echo "heavy set: $HEAVY"
+          echo "results: $RESULTS"
+          if [ "$DECIDED" != success ]; then
+            echo "the decision of what to run did not finish ($DECIDED)" >&2
+            exit 1
+          fi
+          if echo "$RESULTS" | grep -Eq '"(failure|cancelled)"'; then
+            echo "a needed job failed or was cancelled" >&2
+            exit 1
+          fi
