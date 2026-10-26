@@ -28,12 +28,14 @@
 //! in one transaction, so no file is being undone, and none is left under a hidden name, once the
 //! wipe can be sent.
 
+mod broker;
 mod checked;
 mod effects;
 pub mod keystore;
 pub mod place;
 pub mod recovery;
 
+pub use broker::{BrokerAction, BrokerRecorder, BrokerState, MAX_BROKER_TEXT};
 pub use checked::{CheckedFrom, WhyMemory};
 pub use effects::{
     EffectClass, EffectEntry, EffectLedger, EffectState, EffectUndo, EffectUndoOutcome,
@@ -1321,6 +1323,8 @@ impl Journal {
             tx.open_table(effects::KEPT_FILES).map_err(storage)?;
             tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
             tx.open_table(effects::RESTORE_POINTS).map_err(storage)?;
+            tx.open_table(broker::BROKER).map_err(storage)?;
+            tx.open_table(broker::BROKER_KEYS).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;

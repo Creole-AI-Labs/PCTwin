@@ -628,6 +628,14 @@ impl CleanupKey {
     }
 }
 
+/// 2.2's key: lets the administrator helper's broker write its own record of the actions it takes
+/// (`pctwin_journal::Journal::broker`). It makes no grant: the broker acts only on the requests
+/// it checks itself.
+#[derive(Debug)]
+pub struct BrokerKey {
+    _sealed: Sealed,
+}
+
 /// Every role's key, once per program. The program's starting code takes them apart and gives
 /// each role its own key only.
 #[derive(Debug)]
@@ -636,6 +644,8 @@ pub struct RoleKeys {
     pub setting: SettingKey,
     pub capture: CaptureKey,
     pub undo: UndoKey,
+    /// 2.2's key: the administrator helper's broker writes its own record with it.
+    pub broker: BrokerKey,
     pub cleanup: CleanupKey,
 }
 
@@ -657,6 +667,7 @@ impl RoleKeys {
             setting: SettingKey { _sealed: Sealed },
             capture: CaptureKey { _sealed: Sealed },
             undo: UndoKey { _sealed: Sealed },
+            broker: BrokerKey { _sealed: Sealed },
             cleanup: CleanupKey { _sealed: Sealed },
         }
     }

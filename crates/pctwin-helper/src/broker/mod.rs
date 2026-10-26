@@ -33,6 +33,7 @@
 //! secret.
 
 pub mod actions;
+pub mod journal;
 pub mod receipt;
 pub mod restore;
 pub mod staging;
@@ -209,8 +210,8 @@ pub trait IntentJournal {
     ) -> Result<(), JournalUnavailable>;
 }
 
-/// No journal yet (until 2.3 is joined to the helper): nothing can be recorded, so nothing is
-/// changed.
+/// No journal: nothing can be recorded, so nothing is changed (for a helper whose journal could
+/// not be opened; the real one is [`journal::JournalIntents`]).
 pub struct NoJournal;
 
 impl IntentJournal for NoJournal {
@@ -340,8 +341,15 @@ impl Adapters for BuiltInAdapters {
         })
     }
 
-    fn observe(&mut self, _: &Action) -> Observed {
-        Observed::Unknown
+    /// A restore point a crash interrupted is asked for again: Windows makes at most one a day
+    /// for programs and says so, so asking twice never makes a second one silently, and the
+    /// answer stays honest. Installs and settings cannot be looked at by this build: unknown, so
+    /// the broker asks for recovery instead of acting.
+    fn observe(&mut self, action: &Action) -> Observed {
+        match action {
+            Action::CreateRestorePoint(_) => Observed::Absent,
+            Action::InstallVerifiedPackage(_) | Action::ApplyNamedSetting(_) => Observed::Unknown,
+        }
     }
 }
 

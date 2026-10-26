@@ -1262,7 +1262,10 @@ impl Journal {
         let tx = self.db.begin_read().map_err(storage)?;
         let effects = tx.open_table(EFFECTS).map_err(storage)?;
         let undo = tx.open_table(EFFECT_UNDO).map_err(storage)?;
-        Ok(effects.is_empty().map_err(storage)? && undo.is_empty().map_err(storage)?)
+        let broker = tx.open_table(crate::broker::BROKER).map_err(storage)?;
+        Ok(effects.is_empty().map_err(storage)?
+            && undo.is_empty().map_err(storage)?
+            && broker.is_empty().map_err(storage)?)
     }
 
     fn intend<I: RoleIntent>(

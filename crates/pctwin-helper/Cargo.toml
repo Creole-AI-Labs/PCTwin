@@ -15,6 +15,8 @@ workspace = true
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-grant = { path = "../pctwin-grant" }
 pctwin-helper-os = { path = "../pctwin-helper-os" }
+# The broker's intents and outcomes, kept durably in the helper's own journal (2.2 joined to 2.3).
+pctwin-journal = { path = "../pctwin-journal" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 serde = { version = "1", features = ["derive"] }
