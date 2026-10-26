@@ -181,6 +181,8 @@ export function Globe({ className }: Props) {
   return line("M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 0c5 5 5 13 0 18-5-5-5-13 0-18ZM3 12h18", className, 16);
 }
 
-export function Question({ className }: Props) {
-  return line("M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18ZM9 9a3 3 0 1 1 4 3v2m-1 3h.01", className, 16);
+/** Motion: a ball moving, with lines trailing behind it. */
+export function MotionLines({ className }: Props) {
+  return line("M16 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6ZM3 9h7M5 12h5M3 15h7", `flip ${className ?? ""}`, 16);
 }
+

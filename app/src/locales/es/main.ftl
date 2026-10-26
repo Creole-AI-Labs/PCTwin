@@ -33,7 +33,7 @@ home-move-body = Traslada tu configuración
 home-restore-body = Recupérala
 home-rescue-body = Salva lo importante
 home-history = Mi historial
-home-history-body = Tus traslados, y los archivos que enviaste y recibiste
+home-history-body = Tus traslados y sus informes
 home-update-title = Hay una nueva versión disponible.
 home-update-action = Actualizar ahora
 home-updating = Actualizando. PCTwin se cerrará y se volverá a abrir solo.
@@ -52,10 +52,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = Tu portátil
-header-settings =
-    .aria-label = Idioma y movimiento
-header-help =
-    .aria-label = Ayuda
 
 ## F06 Old or new laptop
 
@@ -1463,8 +1459,6 @@ qs-send-title = Enviar archivos
 qs-send-body = Elige archivos o carpetas de tu portátil.
 qs-receive-title = Recibir archivos
 qs-receive-body = Deja que un portátil cercano envíe archivos al tuyo.
-qs-history-title = Enviados y recibidos
-qs-history-body = Mira los archivos enviados y recibidos en tu portátil.
 qs-home-action = Elegir archivos
 qs-receiving = Listo para recibir. Los portátiles cercanos ven el tuyo como { $label }.
 qs-receive-stop = Dejar de recibir
@@ -1545,8 +1539,6 @@ qs-stop-keep = Seguir enviando
 history-title = Tus traslados, guardados en este portátil.
 history-body = Abre de nuevo un informe o sigue con un traslado guardado.
 history-row-move = { $from } → { $to }
-history-row-sent = Enviado a { $label }
-history-row-received = Recibido de { $label }
 history-status-finished = Completado
 history-status-steps-left =
     { NUMBER($count) ->
@@ -1556,7 +1548,6 @@ history-status-steps-left =
     }
 history-status-paused = En pausa
 history-status-stopped = Parado sin riesgo
-history-status-partial = No llegó todo
 history-open-report = Informe
 history-continue = Continuar
 history-export = Exportar historial
@@ -1667,6 +1658,20 @@ qs-done-already =
 qs-done-stopped-body = Los archivos que llegaron antes de parar se comprobaron y siguen donde se guardaron. No se envió nada más.
 qs-done-folder = Guardados en { $folder }
 qs-done-open-folder = Abrir carpeta
+qs-done-dates-new =
+    { NUMBER($count) ->
+        [one] Este archivo muestra la hora en que llegó, así que está arriba en la carpeta.
+        [many] Estos { $count } de archivos muestran la hora en que llegaron, así que están arriba en la carpeta.
+       *[other] Estos { $count } archivos muestran la hora en que llegaron, así que están arriba en la carpeta.
+    }
+qs-done-keep-dates = Conservar las fechas originales
+qs-done-dates-kept =
+    { NUMBER($count) ->
+        [one] { $count } archivo tiene de nuevo su fecha original.
+        [many] { $count } de archivos tienen de nuevo su fecha original.
+       *[other] { $count } archivos tienen de nuevo su fecha original.
+    }
+qs-done-dates-failed = No se pudieron devolver las fechas originales. Los archivos están bien y siguen en su sitio.
 qs-done-open-failed = No se pudo abrir la carpeta. Puede que se haya movido o borrado.
 qs-done-not-opened = PCTwin no abrió ni puso en marcha ningún archivo recibido.
 qs-done-problems-title = Archivos que necesitan atención
@@ -1682,7 +1687,6 @@ qs-done-send-missing-body = Solo los archivos que no llegaron. Primero vuelves a
 qs-done-done = Listo
 qs-stop-now = Parar el envío
 qs-stop-finished = Este envío ya terminó.
-history-open-files = Ver los archivos
 qs-route-receiving = Recibiendo
 qs-receiving-title = Los archivos están llegando.
 qs-receiving-body = Las copias llegan directamente de { $label }.

@@ -33,7 +33,7 @@ home-move-body = 迁移你的设置
 home-restore-body = 把它还原回来
 home-rescue-body = 保住重要的内容
 home-history = 我的记录
-home-history-body = 你的迁移，以及你发送和接收的文件
+home-history-body = 你的迁移及其报告
 home-update-title = 有新版本可用。
 home-update-action = 立即更新
 home-updating = 正在更新。PCTwin 会关闭并自动重新打开。
@@ -50,10 +50,6 @@ home-waiting =
 ## Header: this laptop, the language and motion control, Help
 
 header-this-laptop = 你的电脑
-header-settings =
-    .aria-label = 语言和动画
-header-help =
-    .aria-label = 帮助
 
 ## F06 Old or new laptop
 
@@ -1216,8 +1212,6 @@ qs-send-title = 发送文件
 qs-send-body = 选择你笔记本电脑上的文件或文件夹。
 qs-receive-title = 接收文件
 qs-receive-body = 让附近的笔记本电脑把文件发送到你的电脑。
-qs-history-title = 已发送和已接收
-qs-history-body = 查看在你的笔记本电脑上发送和接收的文件。
 qs-home-action = 选择文件
 qs-receiving = 已准备好接收。附近的笔记本电脑看到你的电脑名为{ $label }。
 qs-receive-stop = 停止接收
@@ -1292,8 +1286,6 @@ qs-stop-keep = 继续发送
 history-title = 你的迁移记录，保存在这台笔记本电脑上。
 history-body = 再次打开报告，或继续已保存的迁移。
 history-row-move = { $from } → { $to }
-history-row-sent = 已发送到{ $label }
-history-row-received = 已从{ $label }接收
 history-status-finished = 已完成
 history-status-steps-left =
     { NUMBER($count) ->
@@ -1301,7 +1293,6 @@ history-status-steps-left =
     }
 history-status-paused = 已暂停
 history-status-stopped = 已安全停止
-history-status-partial = 未全部送达
 history-open-report = 报告
 history-continue = 继续
 history-export = 导出历史记录
@@ -1404,6 +1395,16 @@ qs-done-already =
 qs-done-stopped-body = 停止前到达的文件已经过检查，仍保存在原来的位置。没有发送其他内容。
 qs-done-folder = 已保存在{ $folder }
 qs-done-open-folder = 打开文件夹
+qs-done-dates-new =
+    { NUMBER($count) ->
+       *[other] 这{ $count }个文件显示的是到达时间，所以排在文件夹最上面。
+    }
+qs-done-keep-dates = 保留原始日期
+qs-done-dates-kept =
+    { NUMBER($count) ->
+       *[other] { $count }个文件已恢复原始日期。
+    }
+qs-done-dates-failed = 无法恢复原始日期。文件完好无损，仍在原处。
 qs-done-open-failed = 无法打开文件夹。它可能已被移动或删除。
 qs-done-not-opened = PCTwin没有打开或运行任何接收的文件。
 qs-done-problems-title = 需要注意的文件
@@ -1419,7 +1420,6 @@ qs-done-send-missing-body = 只发送没有到达的文件。你需要先重新�
 qs-done-done = 完成
 qs-stop-now = 停止发送
 qs-stop-finished = 这次发送已经完成。
-history-open-files = 查看文件
 qs-route-receiving = 正在接收
 qs-receiving-title = 文件正在到达。
 qs-receiving-body = 副本直接来自{ $label }。

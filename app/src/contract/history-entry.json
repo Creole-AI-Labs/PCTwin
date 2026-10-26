@@ -13,7 +13,7 @@
   },
   {
     "id": "1792627200000-1",
-    "kind": "send",
+    "kind": "move",
     "other": null,
     "state": "finished",
     "stepsLeft": 0,

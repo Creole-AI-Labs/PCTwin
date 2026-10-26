@@ -1,8 +1,11 @@
-//! My PCTwin history (F08): the moves and Quick Sends done on this laptop, each with its report
-//! or receipt, kept in this laptop's app data folder only (no account, nothing sent anywhere).
-//! Entries are written here, from the engine's own results when a move or a send ends, never by
-//! the screens: so "finished" is said only when the whole thing finished. Export saves a plain
-//! copy (one line per thing, readable without PCTwin) where the person chooses.
+//! My PCTwin history (F08): the moves done on this laptop, each with its report, kept in this
+//! laptop's app data folder only (no account, nothing sent anywhere). Entries are written here,
+//! from the engine's own results when a move ends, never by the screens: so "finished" is said
+//! only when the whole move finished. Export saves a plain copy (one line per move, readable
+//! without PCTwin) where the person chooses.
+//!
+//! Quick Send keeps nothing here: what was sent or received is not remembered (decided 26 October
+//! 2026). Entries an earlier version kept for sends are removed the first time history is read.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +14,6 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::moving::{MoveProblem, ReportItem};
 use crate::pairing::LabelView;
-use crate::quicksend::ReceiptView;
 
 /// At most this many entries are kept; the oldest go first.
 const MAX_ENTRIES: usize = 500;
@@ -21,40 +23,57 @@ const MAX_ENTRIES: usize = 500;
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub id: String,
-    /// "move", "send" or "receive".
+    /// "move" (earlier versions also kept "send" and "receive"; see [`read_index`]).
     pub kind: String,
     /// When it ended, in UTC (RFC 3339).
     pub when: String,
     /// The old laptop's label as pairing showed it (the screens' label shape), when known.
     pub other: Option<serde_json::Value>,
-    /// "finished", "steps-left", "stopped" (moves) or "finished", "stopped", "partial" (sends).
+    /// "finished", "steps-left" or "stopped".
     pub state: String,
     /// A move with steps left: how many things still need the person.
     pub steps_left: u64,
 }
 
-/// What an entry kept: the move's report, or the send's receipt.
+/// What an entry kept: the move's report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Kept {
     Report { items: Vec<ReportItemStored> },
-    Receipt { receipt: ReceiptStored },
 }
 
 /// A report line as kept (the same shape the screens read).
 pub type ReportItemStored = serde_json::Value;
-/// A receipt as kept (the same shape the screens read).
-pub type ReceiptStored = serde_json::Value;
 
 fn dir_of<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("history"))
 }
 
+/// Whether `id` is an entry ID as [`add`] makes them (digits, then a dash, then digits): the only
+/// names this module ever turns into a file name, so an index changed by hand can never point at
+/// a file outside the history folder ("../x", an absolute path).
+fn plain_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+}
+
+/// The moves kept here. A Quick Send an earlier version kept is removed, with what it kept, the
+/// first time the list is read: sends are not remembered.
 fn read_index(dir: &Path) -> Vec<Entry> {
-    std::fs::read(dir.join("index.json"))
+    let index: Vec<Entry> = std::fs::read(dir.join("index.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let (moves, sends): (Vec<Entry>, Vec<Entry>) =
+        index.into_iter().partition(|e| e.kind == "move");
+    if !sends.is_empty()
+        && let Ok(bytes) = serde_json::to_vec(&moves)
+        && write_whole(&dir.join("index.json"), &bytes).is_ok()
+    {
+        for e in sends.iter().filter(|e| plain_id(&e.id)) {
+            let _ = std::fs::remove_file(dir.join(format!("{}.json", e.id)));
+        }
+    }
+    moves
 }
 
 /// Writes `bytes` to `path` in one step, so a crash never leaves half of it.
@@ -148,25 +167,6 @@ pub fn move_state(outcome: &crate::moving::MoveOutcome) -> (&'static str, u64) {
     }
 }
 
-/// A send's history state: "finished" only when every file is in place.
-pub fn send_state(receipt: &ReceiptView) -> &'static str {
-    use crate::quicksend::OutcomeView;
-    let whole = !receipt.lines.is_empty()
-        && receipt.lines.iter().all(|l| {
-            matches!(
-                l.outcome,
-                OutcomeView::Arrived { .. } | OutcomeView::AlreadyThere { .. }
-            )
-        });
-    if whole {
-        "finished"
-    } else if receipt.stopped {
-        "stopped"
-    } else {
-        "partial"
-    }
-}
-
 /// Keeps a move's report.
 pub fn report_kept(items: &[ReportItem]) -> Kept {
     Kept::Report {
@@ -174,13 +174,6 @@ pub fn report_kept(items: &[ReportItem]) -> Kept {
             .iter()
             .filter_map(|i| serde_json::to_value(i).ok())
             .collect(),
-    }
-}
-
-/// Keeps a send's receipt.
-pub fn receipt_kept(r: &ReceiptView) -> Kept {
-    Kept::Receipt {
-        receipt: serde_json::to_value(r).unwrap_or(serde_json::Value::Null),
     }
 }
 
@@ -195,7 +188,7 @@ pub fn history_list<R: Runtime>(app: AppHandle<R>) -> Vec<Entry> {
 #[tauri::command]
 pub fn history_open<R: Runtime>(app: AppHandle<R>, id: String) -> Result<Kept, MoveProblem> {
     let dir = dir_of(&app).ok_or(MoveProblem::Failed)?;
-    if !read_index(&dir).iter().any(|e| e.id == id) {
+    if !plain_id(&id) || !read_index(&dir).iter().any(|e| e.id == id) {
         return Err(MoveProblem::Failed);
     }
     let bytes = std::fs::read(dir.join(format!("{id}.json"))).map_err(|_| MoveProblem::Failed)?;
@@ -287,43 +280,73 @@ mod tests {
         assert_eq!(rfc3339(951_782_400), "2000-02-29T00:00:00Z");
     }
 
+    /// Quick Send keeps nothing (26 October 2026): sends an earlier version kept are removed,
+    /// with what they kept, the first time history is read; moves stay as they were.
     #[test]
-    fn a_send_is_finished_only_when_every_file_is_in_place() {
-        use crate::quicksend::{LineView, OutcomeView};
-        let line = |o| LineView {
-            path: "a".into(),
-            outcome: o,
+    fn sends_kept_by_an_earlier_version_are_forgotten_and_moves_stay() {
+        let dir = std::env::temp_dir().join(format!("pctwin-history-sends-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = |id: &str, kind: &str| Entry {
+            id: id.into(),
+            kind: kind.into(),
+            when: "2026-10-25T00:00:00Z".into(),
+            other: None,
+            state: "finished".into(),
+            steps_left: 0,
         };
-        let r = |lines, stopped| ReceiptView {
-            side: "sender",
-            lines,
-            stopped,
+        let old = vec![
+            entry("1", "move"),
+            entry("2", "send"),
+            entry("3", "receive"),
+        ];
+        std::fs::write(dir.join("index.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        for id in ["1", "2", "3"] {
+            std::fs::write(dir.join(format!("{id}.json")), b"{}").unwrap();
+        }
+        assert_eq!(read_index(&dir), vec![entry("1", "move")]);
+        assert!(dir.join("1.json").exists(), "the move's report stays");
+        assert!(!dir.join("2.json").exists(), "what a send kept is gone");
+        assert!(!dir.join("3.json").exists(), "what a receive kept is gone");
+        let on_disk: Vec<Entry> =
+            serde_json::from_slice(&std::fs::read(dir.join("index.json")).unwrap()).unwrap();
+        assert_eq!(
+            on_disk,
+            vec![entry("1", "move")],
+            "the list itself forgets them"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// PR #109 review: an index changed by hand cannot make the clean-up delete, or Open read, a
+    /// file outside the history folder.
+    #[test]
+    fn only_plain_entry_ids_become_file_names() {
+        let root = std::env::temp_dir().join(format!("pctwin-history-ids-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("history");
+        std::fs::create_dir_all(&dir).unwrap();
+        let outside = root.join("victim.json");
+        std::fs::write(&outside, b"keep me").unwrap();
+        let entry = |id: &str| Entry {
+            id: id.into(),
+            kind: "send".into(),
+            when: "2026-10-25T00:00:00Z".into(),
+            other: None,
+            state: "finished".into(),
+            steps_left: 0,
         };
-        assert_eq!(
-            send_state(&r(
-                vec![line(OutcomeView::Arrived {
-                    landed_as: "a".into()
-                })],
-                false
-            )),
-            "finished"
+        let absolute = root.join("victim").display().to_string();
+        let old = vec![entry("../victim"), entry(&absolute)];
+        std::fs::write(dir.join("index.json"), serde_json::to_vec(&old).unwrap()).unwrap();
+        assert!(read_index(&dir).is_empty());
+        assert!(
+            outside.exists(),
+            "nothing outside the history folder is removed"
         );
-        assert_eq!(send_state(&r(Vec::new(), false)), "partial");
-        assert_eq!(
-            send_state(&r(
-                vec![line(OutcomeView::NeedsAction {
-                    landed_as: "a".into(),
-                    why: "x".into(),
-                    word: None,
-                })],
-                false
-            )),
-            "partial"
-        );
-        assert_eq!(
-            send_state(&r(vec![line(OutcomeView::Declined)], true)),
-            "stopped"
-        );
+        assert!(plain_id("1792627200000-3"));
+        assert!(!plain_id("../victim") && !plain_id(&absolute) && !plain_id(""));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

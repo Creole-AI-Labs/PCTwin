@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { violations } from "./testing/a11y";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -173,29 +173,10 @@ describe("screens", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
-  it("Sent and received opens the history the app recorded, opens what a send brought again, and Back returns", async () => {
-    const l10n = localization("en");
-    tauri.invoke.mockImplementation((command: string) =>
-      Promise.resolve(
-        command === "history_list"
-          ? [{ id: "e1", kind: "receive", when: "2026-10-22T00:05:00Z", other: null, state: "finished", stepsLeft: 0 }]
-          : command === "history_open"
-            ? { kind: "receipt", receipt: { side: "receiver", stopped: false, lines: [{ path: "a.jpg", outcome: { kind: "arrived", landedAs: "a.jpg" } }] } }
-            : command === "recovery_check"
-              ? { unfinished: 0 }
-              : undefined,
-      ),
-    );
+  it("Quick Send home offers no history: what was sent or received is not remembered", () => {
     render(<App initialLanguage="en" />);
     fireEvent.click(screen.getByRole("button", { name: /Quick Send/ }));
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("qs-history-title")) }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("history-title"));
-    const row = await screen.findByText((t) => t.replace(/[⁦-⁩]/g, "") === l10n.getString("history-row-received", { label: l10n.getString("qs-peer-sending") }).replace(/[⁦-⁩]/g, ""));
-    expect(row).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: new RegExp(l10n.getString("history-open-files")) }));
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("qs-done-here-title"));
-    });
+    expect(screen.queryByRole("button", { name: /history|sent and received/i })).toBeNull();
   });
 
   it("My history on Home opens the history, and Back returns to Home", async () => {
@@ -209,37 +190,46 @@ describe("screens", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Send files,or move everything.");
   });
 
-  it("the header keeps language and motion behind one control showing the language's short name; Escape closes it", () => {
+  it("the header's language control opens the languages straight away; choosing one applies it and closes the list", () => {
     render(<App initialLanguage="en" />);
     const header = within(screen.getByRole("banner"));
     expect(header.getByText("Your laptop")).toBeTruthy();
-    const settings = header.getByRole("button", { name: "Language and motion" });
-    expect(settings.textContent).toBe("EN");
-    expect(settings.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("combobox", { name: "Language" })).toBeNull();
-    fireEvent.click(settings);
-    expect(settings.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy();
-    const motion = screen.getByRole<HTMLSelectElement>("combobox", { name: "Motion" });
-    expect([...motion.options].map((o) => o.textContent)).toEqual(["Motion: follow system", "Motion: reduced", "Motion: off"]);
-    fireEvent.change(motion, { target: { value: "off" } });
-    expect(motion.value).toBe("off");
-    fireEvent.keyDown(motion, { key: "Escape" });
-    expect(screen.queryByRole("combobox", { name: "Motion" })).toBeNull();
-    expect(document.activeElement).toBe(settings);
-    // Choosing a language shows its short name on the control.
-    fireEvent.click(settings);
+    const language = header.getByRole("button", { name: "Language" });
+    expect(language.textContent).toBe("EN");
+    expect(language.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(language);
+    expect(language.getAttribute("aria-expanded")).toBe("true");
+    const list = within(screen.getByRole("list", { name: "Language" }));
+    // Every language at once, with no motion choice mixed in; the current one is marked.
+    expect(list.getAllByRole("button").length).toBe(7);
+    expect(list.getByRole("button", { name: "English" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByText(/Motion:/)).toBeNull();
     act(() => {
-      fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "fr" } });
+      fireEvent.click(list.getByRole("button", { name: "Français" }));
     });
-    expect(document.querySelector(".header-settings > button")?.textContent).toBe("FR");
+    expect(screen.queryByRole("list", { name: /Lang/ })).toBeNull();
+    expect(header.getByRole("button", { name: "Langue" }).textContent).toBe("FR");
   });
 
-  it("Help in the header opens the help page, as the footer's does", () => {
-    const l10n = localization("en");
+  it("the motion icon sits where Help was and opens the three motion choices; Escape closes it", () => {
     render(<App initialLanguage="en" />);
-    fireEvent.click(within(screen.getByRole("banner")).getByRole("button", { name: "Help" }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(l10n.getString("help-home-title"));
+    const header = within(screen.getByRole("banner"));
+    expect(header.queryByRole("button", { name: "Help" })).toBeNull();
+    const motion = header.getByRole("button", { name: "Motion" });
+    expect(motion.textContent).toBe("");
+    expect(motion.querySelector("svg")).toBeTruthy();
+    fireEvent.click(motion);
+    const list = within(screen.getByRole("list", { name: "Motion" }));
+    expect(list.getAllByRole("button").map((b) => b.textContent)).toEqual(["Motion: follow system", "Motion: reduced", "Motion: off"]);
+    expect(list.getByRole("button", { name: "Motion: follow system" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(list.getByRole("button", { name: "Motion: off" }));
+    expect(screen.queryByRole("list", { name: "Motion" })).toBeNull();
+    expect(document.activeElement).toBe(motion);
+    fireEvent.click(motion);
+    expect(screen.getByRole("button", { name: "Motion: off" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Motion: off" }), { key: "Escape" });
+    expect(screen.queryByRole("list", { name: "Motion" })).toBeNull();
+    expect(document.activeElement).toBe(motion);
   });
 
   it("with nothing to pick up, the app opens on Welcome", async () => {
@@ -278,7 +268,7 @@ describe("screens", () => {
       expect(control.textContent).not.toMatch(paid);
     }
     expect(within(screen.getByRole("main")).getAllByRole("button").map((b) => b.querySelector("strong")?.textContent)).toEqual(["Quick Send", "Start a full move", "Restore setup", "Rescue a laptop", "My history"]);
-    expect(within(screen.getByRole("banner")).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["PCTwin home", "Language and motion", "Help"]);
+    expect(within(screen.getByRole("banner")).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["PCTwin home", "Language", "Motion"]);
     expect(within(screen.getByRole("contentinfo")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Help"]);
   });
 
@@ -339,9 +329,9 @@ describe("languages", () => {
 
   it("Arabic lays the page out right to left; the choice is remembered on this laptop", () => {
     render(<App initialLanguage="en" />);
-    fireEvent.click(screen.getByRole("button", { name: "Language and motion" }));
+    fireEvent.click(screen.getByRole("button", { name: "Language" }));
     act(() => {
-      fireEvent.change(screen.getByRole("combobox", { name: "Language" }), { target: { value: "ar" } });
+      fireEvent.click(screen.getByRole("button", { name: "العربية" }));
     });
     expect(document.documentElement.dir).toBe("rtl");
     expect(document.documentElement.lang).toBe("ar");
