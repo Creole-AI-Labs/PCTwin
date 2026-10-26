@@ -60,6 +60,13 @@ pub const PROTOCOL: u32 = 1;
 pub const MAX_REQUESTS: usize = 4096;
 
 /// The approved plan's generation and digest, from the helper's command line.
+///
+/// What this does not prove (security review, 26 October 2026): the app chooses what it puts on
+/// the command line, and the system's administrator prompt does not show the digest to the
+/// person, so the digest only binds the helper to the plan the app named, not to one the person
+/// saw. The real wall is the helper's fixed set of three actions (a verified package, a named
+/// setting from a short list, a restore point) and its own checks of each; later roles must not
+/// treat a sealed plan as the person's approval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LaunchSeal {
     pub generation: u64,

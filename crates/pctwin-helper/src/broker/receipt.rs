@@ -1,6 +1,12 @@
 //! What the helper hands back after an action: a receipt of what it observed, signed with a key
 //! only this session knows, because it crosses from the helper's process to the app's and is kept
 //! in the app's records. It reports; it never authorises anything.
+//!
+//! What the signature does not prove (security review, 26 October 2026; later roles must not rely
+//! on it): the receipt key is derived from the session token, and the app holds that token too.
+//! So a receipt shows it was not changed on its way or in the app's records by anyone without the
+//! token; it is no proof against the app itself, which could make one. Nothing may treat a
+//! receipt as permission or as evidence the app could not have forged.
 
 use serde::{Deserialize, Serialize};
 
