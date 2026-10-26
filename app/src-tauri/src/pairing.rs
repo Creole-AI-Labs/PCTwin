@@ -578,7 +578,7 @@ fn old_laptop_network(interfaces: &[Interface], chosen: Option<&str>) -> Result<
     })
 }
 
-/// Old laptop: starts pairing with a new random label, on `network` (the one the person chose)
+/// Old laptop: starts pairing with this laptop's kept name (or a random label if none was chosen), on `network` (the one the person chose)
 /// or on the likely Wi-Fi. When it cannot tell which network, the problem lists them. Only when
 /// this laptop is doing nothing in pairing: leave first (`pairing_stop`).
 #[tauri::command]
@@ -587,6 +587,7 @@ pub async fn pairing_old_start<R: Runtime>(
     state: State<'_, AppPairing>,
     network: Option<String>,
 ) -> Result<(), ProblemView> {
+    let kept = crate::laptop_name::kept(&app);
     let tell: Tell<OldView> = Arc::new(move |view| {
         let _ = app.emit(OLD_EVENT, view);
     });
@@ -600,7 +601,10 @@ pub async fn pairing_old_start<R: Runtime>(
                 if let Some(problem) = network_problem_here(Role::OldLaptop, Some(&interfaces)) {
                     return Err(problem);
                 }
-                let label = Label::random().map_err(|_| Problem::Failed)?;
+                let label = match kept {
+                    Some(label) => label,
+                    None => Label::random().map_err(|_| Problem::Failed)?,
+                };
                 OldJourney::start_on(label, config(), &chosen).await
             },
             tell,
@@ -632,20 +636,32 @@ pub async fn pairing_old_decline(
     Ok(())
 }
 
-/// Old laptop: a new random colour and animal.
+/// Old laptop: a new random colour and animal, kept as this laptop's name from now on.
 #[tauri::command]
-pub async fn pairing_old_shuffle(state: State<'_, AppPairing>) -> Result<(), ProblemView> {
-    state.old().await?.shuffle()?;
+pub async fn pairing_old_shuffle<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppPairing>,
+) -> Result<(), ProblemView> {
+    let journey = state.old().await?;
+    journey.shuffle()?;
+    if let Some(label) = journey.label() {
+        crate::laptop_name::keep(&app, &label);
+    }
     Ok(())
 }
 
-/// Old laptop: the name the person typed, for this session.
+/// Old laptop: the name the person typed, kept as this laptop's name from now on.
 #[tauri::command]
-pub async fn pairing_old_rename(
+pub async fn pairing_old_rename<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppPairing>,
     name: String,
 ) -> Result<(), ProblemView> {
-    state.old().await?.rename(&name)?;
+    let journey = state.old().await?;
+    journey.rename(&name)?;
+    if let Some(label) = journey.label() {
+        crate::laptop_name::keep(&app, &label);
+    }
     Ok(())
 }
 

@@ -36,6 +36,10 @@ import {
   qsResume,
   qsSend,
   qsStop,
+  laptopName,
+  laptopNameShuffle,
+  laptopNameType,
+  laptopNameUse,
   updateCheck,
   updateInstall,
   historyExport,
@@ -235,6 +239,10 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await qsStop();
       await updateCheck();
       await updateInstall();
+      await laptopName().catch(() => undefined);
+      await laptopNameShuffle().catch(() => undefined);
+      await laptopNameUse().catch(() => undefined);
+      await laptopNameType("Ezzy Laptop").catch(() => undefined);
       await historyList();
       await historyOpen("1792627200000-0").catch(() => undefined);
       await historyExport();

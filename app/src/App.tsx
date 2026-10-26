@@ -2,7 +2,7 @@ import { LocalizationProvider, Localized } from "@fluent/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import lockup from "./assets/pctwin-lockup.png";
 import { directionOf, localization, pickLanguage, saveLanguage, savedLanguage, type LanguageCode } from "./i18n";
-import { recoveryCheck, recoveryRun, thingsReady, toMoveProblem, updateCheck, updateInstall, type ReadyNote } from "./bridge";
+import { laptopName, laptopNameShuffle, laptopNameType, laptopNameUse, recoveryCheck, recoveryRun, thingsReady, toMoveProblem, toProblem, updateCheck, updateInstall, type Label, type Problem, type ReadyNote } from "./bridge";
 import ThingsReady from "./screens/ThingsReady";
 import { setTrayLabels, type WindowMode } from "./native";
 import { stop as stopPairing } from "./pairing";
@@ -18,6 +18,7 @@ import PutTogether from "./screens/PutTogether";
 import QuickHome from "./screens/QuickHome";
 import QuickHost from "./screens/QuickHost";
 import HistoryHost from "./screens/HistoryHost";
+import NameLaptop from "./screens/NameLaptop";
 import Welcome, { type UpdateState } from "./screens/Welcome";
 import WhichLaptop, { type Role } from "./screens/WhichLaptop";
 import { HeaderLanguage, HeaderMotion } from "./components/HeaderSettings";
@@ -49,7 +50,9 @@ type Screen =
   | { id: "help"; from: Screen }
   | { id: "soon"; which: Soon }
   // Quick Send home. `notice` is set when the person chose something the engine cannot do yet.
-  | { id: "quick"; notice: boolean };
+  | { id: "quick"; notice: boolean }
+  // Name this laptop: the first time PCTwin opens, before Home, until a name is chosen.
+  | { id: "name"; suggested: Label };
 
 /** The app frame: header with the language choice, one screen at a time, and the free-move footer. */
 export default function App({ initialLanguage }: { initialLanguage?: LanguageCode }) {
@@ -57,6 +60,8 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
   const [screen, setScreen] = useState<Screen>({ id: "welcome" });
   // A move that stopped part way on this laptop: Home shows "Resume your move" until it is tidied up.
   const [unfinished, setUnfinished] = useState(0);
+  // What went wrong on the naming page (a name that cannot be used), or null.
+  const [nameProblem, setNameProblem] = useState<Problem | null>(null);
   // A newer build of PCTwin, found when the app opened: Home offers it.
   const [update, setUpdate] = useState<UpdateState | undefined>(undefined);
   // The mini panel (360 x 240) is the window: no header above it.
@@ -78,6 +83,13 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
     recoveryCheck().then(
       ({ unfinished }) => {
         if (live && unfinished > 0) setUnfinished(unfinished);
+      },
+      () => undefined,
+    );
+    // A laptop with no name chosen yet opens on Name this laptop, before Home.
+    laptopName().then(
+      (names) => {
+        if (live && names.kept === null) setScreen((s) => (s.id === "welcome" ? { id: "name", suggested: names.suggested } : s));
       },
       () => undefined,
     );
@@ -219,6 +231,33 @@ export default function App({ initialLanguage }: { initialLanguage?: LanguageCod
                 onSend={() => { setScreen({ id: "qs", mode: "send" }); }}
                 onReceive={() => { setScreen({ id: "qs", mode: "receive" }); }}
                 onBack={() => { setScreen({ id: "welcome" }); }}
+              />
+            )}
+            {screen.id === "name" && (
+              <NameLaptop
+                suggested={screen.suggested}
+                problem={nameProblem}
+                onUse={() => {
+                  setNameProblem(null);
+                  laptopNameUse().then(
+                    () => { setScreen({ id: "welcome" }); },
+                    (error: unknown) => { setNameProblem(toProblem(error)); },
+                  );
+                }}
+                onShuffle={() => {
+                  setNameProblem(null);
+                  laptopNameShuffle().then(
+                    (suggested) => { setScreen({ id: "name", suggested }); },
+                    (error: unknown) => { setNameProblem(toProblem(error)); },
+                  );
+                }}
+                onType={(name) => {
+                  setNameProblem(null);
+                  return laptopNameType(name).then(
+                    () => { setScreen({ id: "welcome" }); return true; },
+                    (error: unknown) => { setNameProblem(toProblem(error)); return false; },
+                  );
+                }}
               />
             )}
             {screen.id === "history" && <HistoryHost onStart={startMove} onBack={() => { setScreen({ id: "welcome" }); }} />}

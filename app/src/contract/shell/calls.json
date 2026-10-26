@@ -348,6 +348,27 @@
     {
       "args": [],
       "name": "update_install"
+    },
+    {
+      "args": [],
+      "name": "laptop_name"
+    },
+    {
+      "args": [],
+      "name": "laptop_name_shuffle"
+    },
+    {
+      "args": [],
+      "name": "laptop_name_use"
+    },
+    {
+      "args": [
+        [
+          "name",
+          "Ezzy Laptop"
+        ]
+      ],
+      "name": "laptop_name_type"
     }
   ],
   "events": {
