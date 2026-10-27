@@ -6,10 +6,12 @@
 //! to send, then asks the cloud app to make each one online only again:
 //!
 //! - **only with that person's consent**, for that provider; nobody else's files are touched;
-//! - **only the person's own synced files**: a file is brought down only if it is inside that
-//!   app's allowed place in the person's home folder ([`crate::cloud::capture_scope`]); an app's
-//!   sign-in tokens, settings and the system's credential stores never are, whatever they are
-//!   called (third security review, finding 4);
+//! - **only the person's own synced files**: a file is brought down only if it is inside the
+//!   person's synced folder (found on the laptop, for any sync app, known or not) and is not the
+//!   app's own account state by its names or by what the system marks it as; once down, what it
+//!   holds is checked too, and account state (a data-protection blob, a keychain, token text) is
+//!   never sent ([`crate::cloud::account_state_by_name`],
+//!   [`crate::cloud::account_state_by_content`]; third security review, finding 4);
 //! - **space first**: each batch fits the old laptop's free space with [`KEEP_FREE_OLD`] to spare,
 //!   checked again before every batch; a file that can never fit stays safe in its cloud;
 //! - **the connection**: on a connection that may charge for data (or one PCTwin cannot tell),
@@ -32,7 +34,7 @@ use std::time::{Duration, Instant};
 
 use pctwin_record::{CloudProvider, ItemId};
 
-use crate::cloud::{Os, capture_scope, provider_name};
+use crate::cloud::{Os, account_state_by_content, account_state_by_name, provider_name};
 
 /// Space always left free on the old laptop's drive while copies are kept: a drive filled to the
 /// last byte stops a laptop working (the same room the move keeps on the new laptop).
@@ -51,7 +53,14 @@ pub trait CloudFiles {
     fn put_back(&mut self, path: &Path) -> io::Result<()>;
     /// Free space on the drive the cloud folder is on (`None`: not known).
     fn free_space(&self) -> Option<u64>;
+    /// Whether the system marks it as the app's own (Windows: hidden and system).
+    fn marked_as_apps_own(&self, path: &Path) -> io::Result<bool>;
+    /// Its first `n` bytes, once it is on the laptop.
+    fn head(&self, path: &Path, n: usize) -> io::Result<Vec<u8>>;
 }
+
+/// How much of a file is read to tell whether it is account state.
+pub const HEAD: usize = 4096;
 
 /// One person's choice to keep local copies of their online-only files from one provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,26 +70,34 @@ pub struct Consent {
     pub provider: CloudProvider,
     /// They also allowed it on a connection that may charge for data.
     pub on_metered: bool,
-    /// Their home folder on the old laptop: only that app's allowed place inside it is in scope.
+    /// Their home folder on the old laptop.
     pub home: PathBuf,
+    /// Their synced folder of this provider, as found on the laptop: only files inside it are
+    /// in scope.
+    pub root: PathBuf,
+}
+
+/// A path's parts below `base`, every one a plain name that is valid text; `None` otherwise.
+fn parts_below<'a>(path: &'a Path, base: &Path) -> Option<Vec<&'a str>> {
+    path.strip_prefix(base)
+        .ok()?
+        .components()
+        .map(|c| match c {
+            std::path::Component::Normal(n) => n.to_str(),
+            _ => None,
+        })
+        .collect()
 }
 
 impl Consent {
-    /// Whether `path` is one of this person's own synced files of this provider: inside the
-    /// app's allowed place in their home folder, named plainly (no `..`, no other drive), every
-    /// name valid text.
+    /// Whether `path` may be one of this person's own synced files: inside their synced folder,
+    /// named plainly (no `..`, no other drive), and not the app's own account state by its names.
     pub fn covers(&self, os: Os, path: &Path) -> bool {
-        let Ok(below) = path.strip_prefix(&self.home) else {
+        let Some(under_root) = parts_below(path, &self.root).filter(|p| !p.is_empty()) else {
             return false;
         };
-        let parts: Option<Vec<&str>> = below
-            .components()
-            .map(|c| match c {
-                std::path::Component::Normal(n) => n.to_str(),
-                _ => None,
-            })
-            .collect();
-        parts.is_some_and(|p| capture_scope(os, &p) == Some(self.provider))
+        let under_home = parts_below(path, &self.home);
+        account_state_by_name(os, under_home.as_deref(), &under_root).is_none()
     }
 }
 
@@ -325,7 +342,10 @@ impl KeepLocal {
             let consent = self.consent(&w);
             if consent.is_none() {
                 mark(&mut report, &w, Some(WhyNot::NoConsent));
-            } else if !consent.is_some_and(|c| c.covers(self.os, &w.path)) {
+            } else if !consent.is_some_and(|c| c.covers(self.os, &w.path))
+                || cloud.marked_as_apps_own(&w.path).unwrap_or(true)
+            {
+                // Anything that cannot be told apart from the app's own is not taken.
                 mark(&mut report, &w, Some(WhyNot::OutOfScope));
             } else if !cloud.is_online_only(&w.path).unwrap_or(true) {
                 mark(&mut report, &w, Some(WhyNot::AlreadyOnLaptop));
@@ -381,7 +401,18 @@ impl KeepLocal {
                 }
                 report.downloaded_bytes += w.size;
                 down.push(w);
-                if cloud.size_on_laptop(&w.path).ok() == Some(w.size) {
+                let name = w
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let holds_account_state = cloud.head(&w.path, HEAD).map_or(true, |head| {
+                    account_state_by_content(&name, &head).is_some()
+                });
+                if holds_account_state {
+                    // Down already, so it goes back below; never sent.
+                    mark(&mut report, w, Some(WhyNot::OutOfScope));
+                } else if cloud.size_on_laptop(&w.path).ok() == Some(w.size) {
                     mark(&mut report, w, Some(WhyNot::NotSent));
                     good.push((w.item, w.path.clone()));
                 } else {
@@ -517,6 +548,32 @@ impl CloudFiles for WindowsCloudFiles {
 
     fn free_space(&self) -> Option<u64> {
         free_space_of(&self.root, &pctwin_scan::volumes_this_laptop())
+    }
+
+    fn marked_as_apps_own(&self, path: &Path) -> io::Result<bool> {
+        self.in_scope(path)?;
+        let meta = std::fs::symlink_metadata(path)?;
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const HIDDEN_AND_SYSTEM: u32 = 0x2 | 0x4;
+            Ok(meta.file_attributes() & HIDDEN_AND_SYSTEM == HIDDEN_AND_SYSTEM)
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = meta;
+            Ok(false)
+        }
+    }
+
+    fn head(&self, path: &Path, n: usize) -> io::Result<Vec<u8>> {
+        use std::io::Read;
+        self.in_scope(path)?;
+        let mut out = Vec::with_capacity(n);
+        std::fs::File::open(path)?
+            .take(n as u64)
+            .read_to_end(&mut out)?;
+        Ok(out)
     }
 }
 

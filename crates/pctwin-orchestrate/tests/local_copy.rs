@@ -33,6 +33,12 @@ struct Fake {
     refuse_put_back: BTreeSet<PathBuf>,
     /// The cloud app accepts the request but does not make it online only in time.
     slow_put_back: BTreeSet<PathBuf>,
+    /// Marked by the system as the app's own (hidden and system).
+    apps_own: BTreeSet<PathBuf>,
+    /// What a file holds, when a test says (otherwise plain words).
+    content: BTreeMap<PathBuf, Vec<u8>>,
+    /// Files whose first bytes cannot be read.
+    fail_head: BTreeSet<PathBuf>,
     log: Vec<String>,
 }
 
@@ -115,6 +121,21 @@ impl CloudFiles for Fake {
     fn free_space(&self) -> Option<u64> {
         Some(self.free)
     }
+    fn marked_as_apps_own(&self, path: &Path) -> io::Result<bool> {
+        Ok(self.apps_own.contains(path))
+    }
+    fn head(&self, path: &Path, n: usize) -> io::Result<Vec<u8>> {
+        if self.fail_head.contains(path) {
+            return Err(io::Error::other("unreadable"));
+        }
+        let mut c = self
+            .content
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| b"a photo".to_vec());
+        c.truncate(n);
+        Ok(c)
+    }
 }
 
 fn consent() -> Consent {
@@ -123,6 +144,7 @@ fn consent() -> Consent {
         provider: CloudProvider::OneDrive,
         on_metered: false,
         home: home(),
+        root: home().join("OneDrive"),
     }
 }
 
@@ -587,28 +609,32 @@ fn sign_in_tokens_are_never_in_scope() {
         &[
             r"C:\Users\me\AppData\Local\Microsoft\OneDrive\settings\Personal\a.dat",
             r"C:\Users\me\OneDrive\..\AppData\Local\Microsoft\Credentials\x",
-            r"C:\Users\me\AppData\Local\Microsoft\Credentials\DFBE70A7E5CC19A398EBF1B96859CE5D",
-            r"C:\Users\me\AppData\Local\Packages\AppleInc.iCloud_nzyj5cx40ttqa\LocalState\token",
             r"C:\Users\me\ONEDRI~1\x",
             r"C:\Users\me\OneDrive.\x",
-            r"C:\Users\me\OneDrive \x",
             r"C:\Users\other\OneDrive\x",
-            // The person's Dropbox: in scope for Dropbox, not for the OneDrive consent.
-            r"C:\Users\me\Dropbox\x",
             r"D:\OneDrive\x",
         ]
     } else {
         &[
             "/home/me/.config/onedrive/refresh_token",
             "/home/me/OneDrive/../.config/onedrive/refresh_token",
-            "/home/me/Library/Keychains/login.keychain-db",
-            "/home/me/.dropbox/info.json",
             "/home/me/onedrive/x",
             "/home/other/OneDrive/x",
-            "/home/me/Dropbox/x",
         ]
     };
-    let files: Vec<_> = tokens.iter().map(|p| fake.add(p, 1)).collect();
+    let mut files: Vec<_> = tokens.iter().map(|p| fake.add(p, 1)).collect();
+    // Inside the synced folder: the app's own hidden folder, a keychain, a cookie database.
+    for p in [
+        ".849C9593-D756-4E56/settings.dat",
+        "login.keychain-db",
+        "Cookies",
+    ] {
+        files.push(fake.add(p, 1));
+    }
+    // Marked by the system as the app's own.
+    let marked = fake.add("desktop-sync-state.bin", 1);
+    fake.apps_own.insert(marked.1.clone());
+    files.push(marked);
     let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
     let mut sent = 0;
     let report = keep.run(
@@ -638,6 +664,68 @@ fn sign_in_tokens_are_never_in_scope() {
         &mut |b| b.iter().map(|(i, _)| (*i, true)).collect(),
     );
     assert!(report.files[&own.0].sent);
+}
+
+/// What a file holds is checked once it is down: token text or a data-protection blob is never
+/// sent, and is put back like any other.
+#[test]
+fn a_file_holding_tokens_is_never_sent() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let notes = fake.add("Apps/sync-notes.json", 20);
+    fake.content
+        .insert(notes.1.clone(), br#"{"refresh_token":"abc"}"#.to_vec());
+    let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(&notes)),
+        &|| Network::Unmetered,
+        &mut |_| panic!("never sent"),
+    );
+    assert_eq!(report.files[&notes.0].why_not, Some(WhyNot::OutOfScope));
+    assert_eq!(report.files[&notes.0].back_online_only, Some(true));
+    // What cannot be read cannot be told apart from account state: not sent either.
+    let blind = fake.add("Apps/unreadable.bin", 20);
+    fake.fail_head.insert(blind.1.clone());
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(&blind)),
+        &|| Network::Unmetered,
+        &mut |_| panic!("never sent"),
+    );
+    assert_eq!(report.files[&blind.0].why_not, Some(WhyNot::OutOfScope));
+}
+
+/// A sync app PCTwin has never heard of works the same: its folder, found on the laptop, is in
+/// scope; its own hidden files are not.
+#[test]
+fn an_unknown_sync_apps_folder_is_handled_the_same() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let root = home().join("SomeSync");
+    let mine = fake.add(&root.join("photo.jpg").to_string_lossy(), 1);
+    let state = fake.add(&root.join(".somesync").join("db").to_string_lossy(), 1);
+    let consent = Consent {
+        account_id: "me".into(),
+        provider: CloudProvider::Other,
+        on_metered: false,
+        home: home(),
+        root,
+    };
+    let mut w = wanted("me", &[mine.clone(), state.clone()]);
+    for x in &mut w {
+        x.provider = CloudProvider::Other;
+    }
+    let mut keep = KeepLocal::new(os(), vec![consent], 4 * GB);
+    let report = keep.run(&mut fake, w, &|| Network::Unmetered, &mut |b| {
+        b.iter().map(|(i, _)| (*i, true)).collect()
+    });
+    assert!(report.files[&mine.0].sent);
+    assert_eq!(report.files[&state.0].why_not, Some(WhyNot::OutOfScope));
 }
 
 /// Third review, finding 7: the Windows adapter touches only files inside the consented
@@ -711,4 +799,38 @@ fn attrib_is_the_systems_own_started_in_its_folder() {
     assert_eq!(c.get_current_dir(), Some(system32));
     let args: Vec<_> = c.get_args().collect();
     assert_eq!(args, ["-P", "+U", "x.txt"]);
+}
+
+/// An app that syncs the whole home folder: the known places of account state inside it are
+/// still never taken.
+#[test]
+fn a_whole_home_sync_still_leaves_account_state() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let cred = home()
+        .join("AppData")
+        .join("Local")
+        .join("Microsoft")
+        .join("Credentials")
+        .join("x");
+    let keys = home().join("Library").join("Keychains").join("x");
+    let state = fake.add(&cred.to_string_lossy(), 1);
+    let mac_keys = fake.add(&keys.to_string_lossy(), 1);
+    let mut consent = consent();
+    consent.root = home();
+    let mut keep = KeepLocal::new(os(), vec![consent], 4 * GB);
+    let which = if cfg!(target_os = "macos") {
+        &mac_keys
+    } else {
+        &state
+    };
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(which)),
+        &|| Network::Unmetered,
+        &mut |_| panic!("never sent"),
+    );
+    assert_eq!(report.files[&which.0].why_not, Some(WhyNot::OutOfScope));
 }
