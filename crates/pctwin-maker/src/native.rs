@@ -5,18 +5,33 @@ use std::path::Path;
 
 use crate::check::{Limits, SystemChecks, SystemSignature};
 use crate::facts::{Format, LinuxSource, Maker, Malware, Signature};
+use crate::oracle::{NoOracle, TrustOracle};
 use crate::run::{Runner, SystemRunner};
 
 /// The real checks: Windows' signature trust and Defender, a Mac's pkgutil and Gatekeeper,
-/// Linux's rpm.
+/// Linux's rpm. What Windows itself answers comes through `oracle`, which the caller gives (the
+/// administrator helper gives the real one; the default knows nothing, so every Windows check is
+/// "not checked").
 pub struct NativeChecks<R: Runner = SystemRunner> {
     pub runner: R,
+    pub oracle: Box<dyn TrustOracle>,
 }
 
 impl Default for NativeChecks {
     fn default() -> Self {
         Self {
             runner: SystemRunner,
+            oracle: Box::new(NoOracle),
+        }
+    }
+}
+
+impl NativeChecks {
+    /// The real tools, with Windows' own answers from `oracle`.
+    pub fn with_oracle(oracle: Box<dyn TrustOracle>) -> Self {
+        Self {
+            runner: SystemRunner,
+            oracle,
         }
     }
 }
@@ -43,7 +58,7 @@ impl<R: Runner> SystemChecks for NativeChecks<R> {
             Format::WindowsProgram | Format::WindowsInstaller => {
                 #[cfg(windows)]
                 {
-                    let w = crate::windows::check_signature(file, path);
+                    let w = crate::windows::check_signature(&*self.oracle, file, path);
                     SystemSignature {
                         signature: w.signature,
                         embedded: w.embedded,
@@ -112,7 +127,7 @@ impl<R: Runner> SystemChecks for NativeChecks<R> {
         match format {
             #[cfg(windows)]
             Format::WindowsProgram | Format::WindowsInstaller => {
-                crate::windows::scan(&self.runner, path, limits.scan_timeout)
+                crate::windows::scan(&self.runner, &*self.oracle, path, limits.scan_timeout)
             }
             Format::MacInstaller if cfg!(target_os = "macos") => {
                 let call = crate::mac::gatekeeper_call(path, true, limits.signature_timeout);
@@ -148,6 +163,7 @@ mod tests {
     fn native(out: &str) -> NativeChecks<Always> {
         NativeChecks {
             runner: Always(out.into()),
+            oracle: Box::new(NoOracle),
         }
     }
 
@@ -172,6 +188,8 @@ mod tests {
             &Limits::default(),
         );
         assert_ne!(s.signature, Signature::Trusted);
+        // With no answers from Windows given, nothing is checked (third review, finding 8).
+        assert!(matches!(s.signature, Signature::NotChecked { .. }), "{s:?}");
         if !cfg!(windows) {
             assert!(matches!(s.signature, Signature::NotChecked { .. }));
             assert!(!s.embedded);

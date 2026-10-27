@@ -308,6 +308,9 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             });
         })
         .setup(|app| {
+            // The change journal asks the system through the helper's probe, before any journal
+            // is opened (third review, finding 8).
+            pctwin_helper::os_probes::install();
             if !has_tray::<R>() {
                 return Ok(());
             }

@@ -3,14 +3,18 @@
 //! `-NoProfile`, and `SystemRoot` and `ProgramFiles` are values any program can set, so the
 //! answer could come from code the person, or anything running as them, put there):
 //!
-//! - Whether Windows trusts the signature: `WinVerifyTrust` on the file PCTwin holds open
-//!   ([`pctwin_helper_os::verify_file_trust`]), which reads the bytes through that handle, so the
-//!   bytes trusted are the bytes hashed (finding B2).
+//! - Whether Windows trusts the signature: `WinVerifyTrust` on the file PCTwin holds open, asked
+//!   through the [`TrustOracle`] the caller gives (the administrator helper gives the real one;
+//!   this crate never links the crate that makes system calls, third review, finding 8). For a
+//!   Windows program Windows reads the bytes through the held handle, so the bytes trusted are the
+//!   bytes hashed (finding B2). For a Windows Installer package it does not: its checker opens the
+//!   file again by name (third review, finding 3), so a package's answer counts only for the
+//!   helper's own copy ([`crate::check::check_staged`]).
 //! - Microsoft Defender's state: from Windows' management service (the `MSFT_MpComputerStatus`
 //!   class Defender publishes, the source `Get-MpComputerStatus` itself reads).
-//! - The scan: Defender's own `MpCmdRun.exe`, found where Windows records Defender
-//!   ([`pctwin_helper_os::defender_scanner`]) and started with only the system's own
-//!   environment values ([`pctwin_helper_os::minimal_env`]). The file is named as one argument.
+//! - The scan: Defender's own `MpCmdRun.exe`, found where Windows records Defender, started with
+//!   only the system's own environment values, in Windows' own `System32` folder (never the
+//!   caller's folder; third review, finding 7). The file is named as one argument.
 //!
 //! Defender's scan has no published table of exit codes. Its meaning is pinned by running it on
 //! this laptop (26 October 2026, Defender platform 4.18.26090.9, engine 1.1.26090.9):
@@ -34,6 +38,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::facts::{Coverage, Malware, Signature, WindowsSigner};
+use crate::oracle::{NOT_ASKED, TrustOracle};
 use crate::run::{Call, RunError};
 use crate::signer::signer_from_der;
 
@@ -48,12 +53,13 @@ pub const TRUST_E_BAD_DIGEST: i32 = 0x8009_6010_u32 as i32;
 pub const TRUST_E_SUBJECT_FORM_UNKNOWN: i32 = 0x800B_0003_u32 as i32;
 
 /// The call that scans one file with `scanner` (Defender's `MpCmdRun.exe`), changing nothing,
-/// with the environment `env` and nothing else.
+/// with the environment `env` and nothing else, started in `system32`.
 pub fn scan_call(
     scanner: &Path,
     path: &Path,
     env: Vec<(OsString, OsString)>,
     timeout: Duration,
+    system32: &Path,
 ) -> Call {
     Call {
         program: scanner.to_path_buf(),
@@ -67,6 +73,8 @@ pub fn scan_call(
         ],
         env,
         timeout,
+        stdin: None,
+        cwd: Some(system32.to_path_buf()),
     }
 }
 
@@ -126,12 +134,20 @@ pub fn trust_from(code: i32, signer: Option<&[u8]>) -> WinTrust {
     }
 }
 
-/// Asks Windows itself about the signature inside `file`, held open by the caller (`path` names
-/// it for the system's records only).
-#[cfg(windows)]
-pub fn check_signature(file: &std::fs::File, path: &Path) -> WinTrust {
-    let t = pctwin_helper_os::verify_file_trust(file, path);
-    trust_from(t.code, t.signer.as_deref())
+/// Asks Windows itself, through `oracle`, about the signature inside `file`, held open by the
+/// caller at `path`. With no answer from Windows (a stand-in oracle), the signature is not checked.
+pub fn check_signature(oracle: &dyn TrustOracle, file: &std::fs::File, path: &Path) -> WinTrust {
+    let (code, signer) = oracle.verify_file_trust(file, path);
+    if code == NOT_ASKED {
+        return WinTrust {
+            signature: Signature::NotChecked {
+                why: "Windows' own signature check was not available".into(),
+            },
+            embedded: false,
+            signer: None,
+        };
+    }
+    trust_from(code, signer.as_deref())
 }
 
 /// Defender's state.
@@ -298,26 +314,29 @@ fn found_some(tail: &str) -> bool {
         .is_some_and(|n| n > 0)
 }
 
-/// Scans a file with Defender: its state first, then its own scanner on the file.
+/// Scans a file with Defender: its state first, then its own scanner on the file, found, set up
+/// and started where `oracle` says Windows keeps them.
 #[cfg(windows)]
-pub fn scan(runner: &dyn crate::run::Runner, path: &Path, timeout: Duration) -> Malware {
+pub fn scan(
+    runner: &dyn crate::run::Runner,
+    oracle: &dyn TrustOracle,
+    path: &Path,
+    timeout: Duration,
+) -> Malware {
+    let (Some(scanner), Some(env), Some(system32)) = (
+        oracle.defender_scanner(),
+        oracle.minimal_env(),
+        oracle.system_dir(),
+    ) else {
+        return Malware::Unavailable {
+            why: "Microsoft Defender's scanner could not be found where Windows keeps it".into(),
+        };
+    };
     let state = judge_status(defender_status());
     if let DefenderState::Unavailable(why) = state {
         return Malware::Unavailable { why };
     }
-    let (scanner, env) = match (
-        pctwin_helper_os::defender_scanner(),
-        pctwin_helper_os::minimal_env(),
-    ) {
-        (Ok(s), Ok(e)) => (s, e),
-        _ => {
-            return Malware::Unavailable {
-                why: "Microsoft Defender's scanner could not be found where Windows keeps it"
-                    .into(),
-            };
-        }
-    };
-    let ran = runner.run(&scan_call(&scanner, path, env, timeout));
+    let ran = runner.run(&scan_call(&scanner, path, env, timeout, &system32));
     parse_scan(path, &state, &ran)
 }
 
@@ -555,8 +574,12 @@ mod tests {
         let scanner =
             Path::new(r"C:\ProgramData\Microsoft\Windows Defender\Platform\4\MpCmdRun.exe");
         let env = vec![(OsString::from("SystemRoot"), OsString::from(r"C:\Windows"))];
-        let s = scan_call(scanner, p, env.clone(), Duration::from_secs(1));
+        let system32 = Path::new(r"C:\Windows\System32");
+        let s = scan_call(scanner, p, env.clone(), Duration::from_secs(1), system32);
         assert_eq!(s.program, scanner);
+        // Started in Windows' own folder, never the caller's (third review, finding 7).
+        assert_eq!(s.cwd.as_deref(), Some(system32));
+        assert_eq!(s.stdin, None);
         assert_eq!(s.args[4], p.as_os_str());
         assert_eq!(s.args.len(), 6);
         assert_eq!(s.args[5], "-DisableRemediation");

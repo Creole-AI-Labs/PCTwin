@@ -133,6 +133,8 @@ fn main() -> ExitCode {
     // On a Mac, launchd starts the daemon with no arguments (its property list names the program
     // only, as Service Management requires): that, or --daemon, is daemon mode (found by the
     // fresh-context review: the daemon could never have started).
+    // The change journal asks the system through the helper's own probe (third review, finding 8).
+    pctwin_helper::os_probes::install();
     if raw == ["--daemon"] || (cfg!(target_os = "macos") && raw.is_empty()) {
         return daemon_main();
     }

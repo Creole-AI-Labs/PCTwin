@@ -5,6 +5,10 @@
 
 #![cfg(windows)]
 
+mod common;
+
+use common::os_checks;
+
 use std::path::{Path, PathBuf};
 
 use pctwin_maker::facts::*;
@@ -53,7 +57,7 @@ fn defender_ready() -> bool {
 
 #[test]
 fn reads_the_maker_of_real_signed_programs_as_windows_does() {
-    let native = NativeChecks::default();
+    let native = os_checks();
     let mut compared = 0;
     for p in signed_programs() {
         let ours = windows_maker_of(&p).unwrap();
@@ -165,7 +169,7 @@ fn a_real_signed_program_from_the_same_maker_is_approved() {
     let dir = tempfile::tempdir().unwrap();
     let copy = copy_into(&dir, &original);
     let e = expected_for(&original);
-    let v = check(&copy, &e, &NativeChecks::default(), &Limits::default()).unwrap();
+    let v = check(&copy, &e, &os_checks(), &Limits::default()).unwrap();
     eprintln!("{v:#?}");
     assert_eq!(v.signature, Signature::Trusted);
     assert_eq!(
@@ -198,7 +202,7 @@ fn a_real_signed_program_from_the_same_maker_is_approved() {
     s.certificate = Sha256([0; 32]);
     s.subject.organization = Some("Another Company".into());
     other.maker = Maker::Windows(s);
-    let v = check(&copy, &other, &NativeChecks::default(), &Limits::default()).unwrap();
+    let v = check(&copy, &other, &os_checks(), &Limits::default()).unwrap();
     assert!(matches!(v.same_maker, SameMaker::No { .. }));
     assert!(matches!(v.decide(), Decision::NeedsAction { why } if why.contains(&Why::OtherMaker)));
 }
@@ -224,7 +228,7 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
         }
     ));
     drop(f);
-    let sys = NativeChecks::default().signature(
+    let sys = os_checks().signature(
         &std::fs::File::open(&copy).unwrap(),
         &copy,
         Format::WindowsProgram,
@@ -249,7 +253,7 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
         }
     ));
     drop(f);
-    let sys = NativeChecks::default().signature(
+    let sys = os_checks().signature(
         &std::fs::File::open(&copy).unwrap(),
         &copy,
         Format::WindowsProgram,
@@ -263,7 +267,7 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
     let v = check(
         &copy,
         &expected_for(&original),
-        &NativeChecks::default(),
+        &os_checks(),
         &Limits::default(),
     )
     .unwrap();
@@ -285,7 +289,7 @@ fn a_program_signed_only_through_a_windows_catalog_is_not_approved() {
     let size = f.metadata().unwrap().len();
     assert_eq!(read_pe(&mut f, size).unwrap(), PeSignature::None);
     let e = expected_for(&signed_programs()[0]);
-    let v = check(&notepad, &e, &NativeChecks::default(), &Limits::default()).unwrap();
+    let v = check(&notepad, &e, &os_checks(), &Limits::default()).unwrap();
     eprintln!("{:?}", v.signature);
     // Windows is asked about the file alone: a catalog signature is no signature inside it.
     assert_eq!(v.signature, Signature::Missing);
@@ -298,7 +302,7 @@ fn real_installer_packages_name_the_signer_windows_names() {
         eprintln!("no installer cache readable here");
         return;
     };
-    let native = NativeChecks::default();
+    let native = os_checks();
     let mut seen = 0;
     for entry in entries.flatten().take(400) {
         let p = entry.path();
@@ -355,7 +359,7 @@ fn defender_meanings_pinned_with_the_eicar_test_file() {
         eprintln!("Microsoft Defender is not available here: not pinned on this machine");
         return;
     }
-    let native = NativeChecks::default();
+    let native = os_checks();
     let dir = tempfile::tempdir().unwrap();
     let limits = Limits::default();
     let clean = dir.path().join("a clean file.txt");
@@ -673,7 +677,7 @@ fn a_folder_link_swapped_during_the_check_never_approves_other_bytes() {
     let path = link.join("setup.exe");
     let exp = expected_for(&legit);
     let sw = Swapping {
-        inner: NativeChecks::default(),
+        inner: os_checks(),
         link: link.clone(),
         good,
         evil: bad,

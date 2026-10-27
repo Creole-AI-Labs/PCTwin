@@ -26,6 +26,8 @@ fn call(program: &str, args: &[&str], path: &Path, timeout: Duration) -> Call {
         args: a,
         env: vec![],
         timeout,
+        stdin: None,
+        cwd: None,
     }
 }
 

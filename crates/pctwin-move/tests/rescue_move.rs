@@ -20,8 +20,8 @@ use pctwin_orchestrate::rescue::{DriveIdentity, scan_rescued_drive};
 use pctwin_record::{FolderRole, Item, PersonTarget, Record};
 use pctwin_scan::{AccessFact, AccessReader, UnixMode};
 use pctwin_transfer::{
-    Cause, Channel, ChannelError, FsOpener, LandingPlace, Opener, ReceiveOutcome, Source,
-    role_label, shown_path,
+    Cause, Channel, ChannelError, LandingPlace, Opener, ReceiveOutcome, Source, role_label,
+    shown_path,
 };
 use tokio::sync::mpsc;
 
@@ -85,7 +85,12 @@ fn drive(files: usize) -> tempfile::TempDir {
 fn identity() -> DriveIdentity {
     DriveIdentity {
         volume_id: r"\\?\Volume{11111111-2222-3333-4444-555555555555}\".into(),
-        serial: Some("ABCD-1234".into()),
+        // The drive the test's folders are on, as the system's volume list names it.
+        serial: Some(
+            pctwin_orchestrate::rescue::volume_of(&std::env::temp_dir())
+                .unwrap()
+                .to_string(),
+        ),
         file_system: "NTFS".into(),
         total_bytes: 128_000_000_000,
     }
@@ -115,6 +120,8 @@ impl Steps for Ada {
 struct Flaky {
     bad: Vec<PathBuf>,
     opens: Mutex<BTreeMap<PathBuf, u32>>,
+    /// The rescue, whose own handles every file is read through.
+    scan: pctwin_orchestrate::rescue::RescueScan,
 }
 
 impl Opener for Flaky {
@@ -130,7 +137,7 @@ impl Opener for Flaky {
                 "the drive could not read this part of the disk",
             ));
         }
-        FsOpener.open(path)
+        Ok(Box::new(self.scan.open(path)?))
     }
 }
 
@@ -169,6 +176,7 @@ async fn rescue_move(d: &Path, bad: impl Fn(&Path) -> bool) -> Moved {
     let opener = Arc::new(Flaky {
         bad: sources.values().filter(|p| bad(p)).cloned().collect(),
         opens: Mutex::new(BTreeMap::new()),
+        scan: scan.clone(),
     });
     let jdir = tempfile::tempdir().unwrap();
     let journal = Journal::open(&jdir.path().join("journal.redb")).unwrap();

@@ -13,8 +13,13 @@
 //!   ([`CloudOutcome::ManagedByEmployer`]).
 //!
 //! A sync app's own sign-in state (its tokens and settings) is never copied in place of signing
-//! in: [`sign_in_state`] names those folders so no later step that copies app data can take them.
-//! Today app data is only counted, never listed, so none can be copied in the first place.
+//! in; the person signs in again on the new laptop. It is recognised by what it is, not by a list
+//! of apps (third security review, finding 4; Phase 2 adoption, changes 7 and 8: named lists are
+//! examples, PCTwin works from what it finds): by its names ([`account_state_by_name`]: anything
+//! hidden inside a synced folder, keychains, cookie, login and token databases) and by what it
+//! holds ([`account_state_by_content`]: Windows data-protection blobs, keychains, token text). A
+//! short catalogue of known places only adds to that. Anything PCTwin cannot tell is not taken:
+//! keeping local copies ([`crate::local_copy`]) brings down only files that pass both checks.
 
 use pctwin_record::{CloudProvider, Inclusion, Item, LeftOutReason, ManagedBy, Storage};
 use pctwin_types::{ItemResult, Reason};
@@ -177,43 +182,51 @@ pub enum Os {
     Linux,
 }
 
-/// Where each sync app keeps its sign-in state and settings, below a person's home folder.
-const SIGN_IN_STATE: [(Os, &[&str], CloudProvider); 15] = [
-    (
-        Os::Windows,
-        &["AppData", "Local", "Microsoft", "OneDrive"],
-        CloudProvider::OneDrive,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Local", "Dropbox"],
-        CloudProvider::Dropbox,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Roaming", "Dropbox"],
-        CloudProvider::Dropbox,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Local", "Google", "DriveFS"],
-        CloudProvider::GoogleDrive,
-    ),
+/// Why something is a sync app's own account state (its sign-in, tokens, settings), which PCTwin
+/// never copies: the person signs in again on the new laptop instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountState {
+    /// A place a known app keeps its sign-in state (the catalogue: it only adds places, it is
+    /// never the whole rule).
+    KnownPlace,
+    /// A hidden file or folder a sync app keeps for itself in the folder it syncs (`.dropbox`,
+    /// OneDrive's hidden folders), or one the system marks as the app's own (hidden and system).
+    AppsOwnFile,
+    /// A store of passwords or keys: a Windows data-protection blob, a macOS keychain, a
+    /// browser's or app's cookie, login or token database.
+    CredentialStore,
+    /// Text holding sign-in tokens (`refresh_token`, `access_token`, `id_token`).
+    Tokens,
+}
+
+/// Places known apps keep their sign-in state, below a person's home folder. Examples that add
+/// to the general rules ([`account_state_by_name`], [`account_state_by_content`]); an app not
+/// listed here is still recognised by those.
+const KNOWN_PLACES: [(Os, &[&str]); 17] = [
+    (Os::Windows, &["AppData", "Local", "Microsoft", "OneDrive"]),
+    (Os::Windows, &["AppData", "Local", "Dropbox"]),
+    (Os::Windows, &["AppData", "Roaming", "Dropbox"]),
+    (Os::Windows, &["AppData", "Local", "Google", "DriveFS"]),
     (
         Os::Windows,
         &["AppData", "Roaming", "Apple Computer", "iCloud"],
-        CloudProvider::ICloud,
     ),
     (
         Os::Windows,
         &["AppData", "Local", "Apple Inc", "iCloudDrive"],
-        CloudProvider::ICloud,
     ),
     (
-        Os::Mac,
-        &["Library", "Application Support", "CloudDocs"],
-        CloudProvider::ICloud,
+        Os::Windows,
+        &["AppData", "Local", "Microsoft", "Credentials"],
     ),
+    (
+        Os::Windows,
+        &["AppData", "Roaming", "Microsoft", "Credentials"],
+    ),
+    (Os::Windows, &["AppData", "Roaming", "Microsoft", "Protect"]),
+    (Os::Windows, &["AppData", "Local", "Microsoft", "Vault"]),
+    (Os::Mac, &["Library", "Keychains"]),
+    (Os::Mac, &["Library", "Application Support", "CloudDocs"]),
     (
         Os::Mac,
         &[
@@ -221,43 +234,108 @@ const SIGN_IN_STATE: [(Os, &[&str], CloudProvider); 15] = [
             "Group Containers",
             "UBF8T346G9.OneDriveSyncClientSuite",
         ],
-        CloudProvider::OneDrive,
     ),
     (
         Os::Mac,
         &["Library", "Containers", "com.microsoft.OneDrive-mac"],
-        CloudProvider::OneDrive,
     ),
-    (
-        Os::Mac,
-        &["Library", "Application Support", "OneDrive"],
-        CloudProvider::OneDrive,
-    ),
-    (Os::Mac, &[".dropbox"], CloudProvider::Dropbox),
     (
         Os::Mac,
         &["Library", "Application Support", "Google", "DriveFS"],
-        CloudProvider::GoogleDrive,
     ),
-    (Os::Linux, &[".config", "onedrive"], CloudProvider::OneDrive),
-    (Os::Linux, &[".dropbox"], CloudProvider::Dropbox),
-    (Os::Linux, &[".config", "rclone"], CloudProvider::Other),
+    (Os::Linux, &[".config", "onedrive"]),
+    (Os::Linux, &[".local", "share", "keyrings"]),
 ];
 
-/// Whether `under_home` (folders below a person's home folder, then a name) is a sync app's own
-/// sign-in state, which is never copied: the person signs in again on the new laptop. Names are
-/// compared ignoring case on Windows and macOS, exactly on Linux.
-pub fn sign_in_state(os: Os, under_home: &[&str]) -> Option<CloudProvider> {
+/// File names that are credential stores whatever app made them (browsers' and apps' cookie,
+/// login and token databases; keychains), compared ignoring case.
+const STORE_NAMES: [&str; 8] = [
+    "cookies",
+    "login data",
+    "web data",
+    "token.db",
+    "tokens.db",
+    "refresh_token",
+    "credentials.json",
+    "msal.cache",
+];
+
+/// Whether a path is account state, by its names alone (before anything is read): `under_home`
+/// is the path's parts below the person's home folder, when it is there; `under_root` its parts
+/// below the synced folder it is in. Any hidden part inside the synced folder, any part that is a
+/// known place, a keychain or a credential store's name, counts.
+pub fn account_state_by_name(
+    os: Os,
+    under_home: Option<&[&str]>,
+    under_root: &[&str],
+) -> Option<AccountState> {
     let same = |a: &str, b: &str| match os {
         Os::Windows | Os::Mac => a.eq_ignore_ascii_case(b),
         Os::Linux => a == b,
     };
-    SIGN_IN_STATE
-        .iter()
-        .find(|(o, prefix, _)| {
+    if let Some(parts) = under_home
+        && KNOWN_PLACES.iter().any(|(o, place)| {
             *o == os
-                && under_home.len() >= prefix.len()
-                && prefix.iter().zip(under_home).all(|(p, n)| same(p, n))
+                && parts.len() >= place.len()
+                && place.iter().zip(parts).all(|(p, n)| same(p, n))
         })
-        .map(|(_, _, provider)| *provider)
+    {
+        return Some(AccountState::KnownPlace);
+    }
+    if under_root.iter().any(|n| n.starts_with('.')) {
+        return Some(AccountState::AppsOwnFile);
+    }
+    let last = under_root
+        .last()
+        .map(|n| n.to_ascii_lowercase())
+        .unwrap_or_default();
+    if last.ends_with(".keychain") || last.ends_with(".keychain-db") {
+        return Some(AccountState::CredentialStore);
+    }
+    if STORE_NAMES.contains(&last.as_str()) {
+        return Some(AccountState::CredentialStore);
+    }
+    None
+}
+
+/// The first bytes of a Windows data-protection (DPAPI) blob: its version and the provider's ID.
+const DPAPI: [u8; 20] = [
+    0x01, 0x00, 0x00, 0x00, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15, 0xD1, 0x11, 0x8C, 0x7A, 0x00, 0xC0,
+    0x4F, 0xC2, 0x97, 0xEB,
+];
+
+/// Whether a file is account state by what it holds: `name` is its file name, `head` its first
+/// bytes (a few kilobytes are enough). A data-protection blob, a keychain, a database or text
+/// holding sign-in tokens counts, whatever app made it.
+pub fn account_state_by_content(name: &str, head: &[u8]) -> Option<AccountState> {
+    if head.starts_with(&DPAPI) || head.windows(DPAPI.len() - 4).any(|w| w == &DPAPI[4..]) {
+        return Some(AccountState::CredentialStore);
+    }
+    if head.starts_with(b"kych") {
+        return Some(AccountState::CredentialStore);
+    }
+    let lower_name = name.to_ascii_lowercase();
+    if head.starts_with(b"SQLite format 3\0")
+        && [
+            "cookie",
+            "token",
+            "login",
+            "credential",
+            "auth",
+            "session",
+            "account",
+        ]
+        .iter()
+        .any(|w| lower_name.contains(w))
+    {
+        return Some(AccountState::CredentialStore);
+    }
+    let text = String::from_utf8_lossy(head).to_ascii_lowercase();
+    if ["refresh_token", "access_token", "id_token"]
+        .iter()
+        .any(|k| text.contains(k))
+    {
+        return Some(AccountState::Tokens);
+    }
+    None
 }

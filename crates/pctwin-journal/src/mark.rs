@@ -17,6 +17,10 @@
 //! store that holds the record key but no counter, beside a journal that has counted, is refused
 //! too (the counter is made with the key, so it was removed).
 //!
+//! Closing undo is counted in every journal, also one that holds only Phase 1 file records (third
+//! security review, finding 9): such a journal gets its record key at the close. Before any undo,
+//! a journal with no counter at all is refused once the key store holds a count for it.
+//!
 //! What this is not: a wall against a program running as the person, which can write the key
 //! store as PCTwin does; and if writing the key store fails after a commit, the key store lags
 //! until the next write or open, so a copy that much older passes.
@@ -127,6 +131,46 @@ impl Journal {
         match self.record_key() {
             Err(JournalError::RolledBack) => Err(JournalError::RolledBack),
             _ => Ok(()),
+        }
+    }
+
+    /// Whether the journal has a counter at all (one was ever raised in it).
+    fn has_counter(&self) -> Result<bool, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        match tx.open_table(SEAL_MARK) {
+            Ok(table) => Ok(table.get(ROW).map_err(storage)?.is_some()),
+            Err(redb::TableError::TableDoesNotExist(_)) => Ok(false),
+            Err(e) => Err(storage(e)),
+        }
+    }
+
+    /// Before any undo (third review, finding 9): a journal that has a counter must be at least
+    /// as new as the key store says; one with no counter at all is refused once the key store
+    /// holds a count for it (a close, or a sealed write, was recorded somewhere: this is an older
+    /// copy). A journal that never counted, with nothing counted for it, undoes as before.
+    pub(crate) fn refuse_stale_for_undo(&self) -> Result<(), JournalError> {
+        if self.has_counter()? {
+            return self.record_key().map(|_| ());
+        }
+        let known = *self
+            .record_key
+            .mark
+            .lock()
+            .map_err(|_| damaged("the record counter's lock was broken"))?;
+        let kept = match known {
+            Some(m) => Some(m),
+            None => self
+                .record_key
+                .store
+                .get_mark(self.journal_id)
+                .map_err(|e| match e {
+                    KeyError::Missing => JournalError::RolledBack,
+                    KeyError::Unavailable => JournalError::RecordKeyUnavailable,
+                })?,
+        };
+        match kept {
+            Some(_) => Err(JournalError::RolledBack),
+            None => Ok(()),
         }
     }
 

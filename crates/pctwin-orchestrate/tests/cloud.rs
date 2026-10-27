@@ -6,7 +6,8 @@ mod common;
 
 use common::*;
 use pctwin_orchestrate::cloud::{
-    CloudOutcome, Os, SyncFact, Whose, cloud_outcome, provider_name, sign_in_state, sync_fact,
+    CloudOutcome, Os, SyncFact, Whose, account_state_by_content, account_state_by_name,
+    cloud_outcome, provider_name, sync_fact,
 };
 use pctwin_record::{CloudProvider, Inclusion, LeftOutReason, ManagedBy, Storage};
 use pctwin_types::{ItemResult, ItemStatus, Reason};
@@ -156,11 +157,13 @@ fn a_work_or_school_file_stays_with_the_employer() {
     }
 }
 
-/// T26-016: a sync app's own sign-in state is never copied in place of signing in, on every
-/// system, whatever the case of its folders.
+/// T26-016 and the third review's finding 4: a sync app's account state is recognised by what it
+/// is, for any app, known or not; the catalogue of known places only adds to that.
 #[test]
-fn a_sync_apps_sign_in_state_is_never_copied() {
-    let cases: [(Os, &[&str], CloudProvider); 12] = [
+fn account_state_is_recognised_by_what_it_is() {
+    use pctwin_orchestrate::cloud::AccountState::*;
+    // Known places, below the home folder, whatever the case on Windows and macOS.
+    for (os, parts) in [
         (
             Os::Windows,
             &[
@@ -169,110 +172,132 @@ fn a_sync_apps_sign_in_state_is_never_copied() {
                 "Microsoft",
                 "OneDrive",
                 "settings",
-                "Personal",
                 "a.dat",
-            ],
-            CloudProvider::OneDrive,
-        ),
-        (
-            Os::Windows,
-            &["appdata", "local", "microsoft", "onedrive"],
-            CloudProvider::OneDrive,
-        ),
-        (
-            Os::Windows,
-            &["AppData", "Local", "Dropbox", "info.json"],
-            CloudProvider::Dropbox,
-        ),
-        (
-            Os::Windows,
-            &["AppData", "Roaming", "Dropbox", "host.db"],
-            CloudProvider::Dropbox,
-        ),
-        (
-            Os::Windows,
-            &["AppData", "Local", "Google", "DriveFS", "a", "b"],
-            CloudProvider::GoogleDrive,
-        ),
-        (
-            Os::Windows,
-            &["AppData", "Roaming", "Apple Computer", "iCloud"],
-            CloudProvider::ICloud,
-        ),
-        (
-            Os::Mac,
-            &[
-                "Library",
-                "Application Support",
-                "CloudDocs",
-                "session",
-                "db",
-            ],
-            CloudProvider::ICloud,
-        ),
-        (
-            Os::Mac,
-            &[
-                "Library",
-                "Group Containers",
-                "UBF8T346G9.OneDriveSyncClientSuite",
-            ],
-            CloudProvider::OneDrive,
-        ),
-        (
-            Os::Mac,
-            &[
-                "Library",
-                "Containers",
-                "com.microsoft.OneDrive-mac",
-                "Data",
-            ],
-            CloudProvider::OneDrive,
-        ),
-        (Os::Mac, &[".dropbox", "info.json"], CloudProvider::Dropbox),
-        (
-            Os::Mac,
-            &["Library", "Application Support", "Google", "DriveFS"],
-            CloudProvider::GoogleDrive,
-        ),
-        (
-            Os::Linux,
-            &[".config", "onedrive", "refresh_token"],
-            CloudProvider::OneDrive,
-        ),
-    ];
-    for (os, parts, provider) in cases {
-        assert_eq!(sign_in_state(os, parts), Some(provider), "{os:?} {parts:?}");
-    }
-    // The person's own files in the cloud folder, and other programs' data, are not sign-in
-    // state.
-    for (os, parts) in [
-        (Os::Windows, &["OneDrive", "Documents", "a.txt"][..]),
-        (Os::Windows, &["AppData", "Local", "Microsoft", "Edge"][..]),
-        (Os::Windows, &["AppData", "Local", "Microsoft"][..]),
-        (Os::Windows, &["Dropbox", "info.json"][..]),
-        (
-            Os::Mac,
-            &[
-                "Library",
-                "Mobile Documents",
-                "com~apple~CloudDocs",
-                "a.txt",
             ][..],
         ),
         (
-            Os::Mac,
-            &["Library", "CloudStorage", "OneDrive-Personal", "a.txt"][..],
+            Os::Windows,
+            &["appdata", "local", "microsoft", "onedrive", "x"][..],
         ),
-        (Os::Linux, &[".config", "other"][..]),
-        (Os::Linux, &["AppData", "Local", "Dropbox"][..]),
-        (Os::Windows, &[".config", "onedrive"][..]),
-        (Os::Windows, &[][..]),
+        (
+            Os::Windows,
+            &["AppData", "Local", "Microsoft", "Credentials", "x"][..],
+        ),
+        (
+            Os::Windows,
+            &[
+                "AppData",
+                "Roaming",
+                "Microsoft",
+                "Protect",
+                "S-1-5-21",
+                "x",
+            ][..],
+        ),
+        (Os::Mac, &["Library", "Keychains", "login.keychain-db"][..]),
+        (Os::Linux, &[".config", "onedrive", "refresh_token"][..]),
     ] {
-        assert_eq!(sign_in_state(os, parts), None, "{os:?} {parts:?}");
+        assert_eq!(
+            account_state_by_name(os, Some(parts), &["x"]),
+            Some(KnownPlace),
+            "{parts:?}"
+        );
     }
-    // Linux names are kept exactly: another case is another folder.
-    assert_eq!(sign_in_state(Os::Linux, &[".Config", "onedrive"]), None);
+    // Any app's own hidden files inside the folder it syncs, known app or not.
+    for root in [
+        &[".dropbox", "info.json"][..],
+        &[".849C9593-D756", "x"][..],
+        &[".stfolder"][..],
+        &["a", ".sync", "x"][..],
+    ] {
+        assert_eq!(
+            account_state_by_name(Os::Windows, None, root),
+            Some(AppsOwnFile),
+            "{root:?}"
+        );
+    }
+    // Credential stores by their kind of name, wherever they are.
+    for last in [
+        "Cookies",
+        "login.keychain-db",
+        "work.keychain",
+        "Login Data",
+        "token.db",
+        "msal.cache",
+    ] {
+        assert_eq!(
+            account_state_by_name(Os::Mac, None, &["a", last]),
+            Some(CredentialStore),
+            "{last}"
+        );
+    }
+    // The person's own files are not.
+    for root in [
+        &["Documents", "thesis.docx"][..],
+        &["tokens of love.txt"][..],
+        &["Login notes.txt"][..],
+    ] {
+        assert_eq!(
+            account_state_by_name(Os::Windows, Some(&["OneDrive"]), root),
+            None,
+            "{root:?}"
+        );
+    }
+    // Another system's places are not this one's.
+    assert_eq!(
+        account_state_by_name(Os::Windows, Some(&["Library", "Keychains", "x"]), &["x"]),
+        None
+    );
+    // Linux names are exact: another case is another folder.
+    assert_eq!(
+        account_state_by_name(Os::Linux, Some(&[".Config", "onedrive", "x"]), &["x"]),
+        None
+    );
+
+    // By what they hold.
+    let mut dpapi = vec![
+        1u8, 0, 0, 0, 0xD0, 0x8C, 0x9D, 0xDF, 0x01, 0x15, 0xD1, 0x11, 0x8C, 0x7A, 0x00, 0xC0, 0x4F,
+        0xC2, 0x97, 0xEB,
+    ];
+    dpapi.extend_from_slice(&[7; 40]);
+    assert_eq!(
+        account_state_by_content("settings.dat", &dpapi),
+        Some(CredentialStore)
+    );
+    let mut inside = b"header".to_vec();
+    inside.extend_from_slice(&dpapi[4..]);
+    assert_eq!(
+        account_state_by_content("x.bin", &inside),
+        Some(CredentialStore)
+    );
+    assert_eq!(
+        account_state_by_content("any", b"kych\0\x01\0\0"),
+        Some(CredentialStore)
+    );
+    assert_eq!(
+        account_state_by_content("session.db", b"SQLite format 3\0rest"),
+        Some(CredentialStore)
+    );
+    assert_eq!(
+        account_state_by_content("Recipes.db", b"SQLite format 3\0rest"),
+        None
+    );
+    assert_eq!(
+        account_state_by_content("a.json", br#"{"Refresh_Token":"x"}"#),
+        Some(Tokens)
+    );
+    assert_eq!(
+        account_state_by_content("a.ini", b"access_token=abc"),
+        Some(Tokens)
+    );
+    assert_eq!(
+        account_state_by_content("a.ini", b"id_token=abc"),
+        Some(Tokens)
+    );
+    assert_eq!(
+        account_state_by_content("thesis.docx", b"PK\x03\x04 chapter one"),
+        None
+    );
 }
 
 #[test]

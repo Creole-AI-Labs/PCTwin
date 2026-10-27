@@ -7,6 +7,7 @@ import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 import "./people.css";
+import { shownName } from "../names";
 
 type Value = "choose" | "new" | "leave-out" | `existing:${string}`;
 
@@ -41,7 +42,7 @@ export default function PlaceOthers({ toPlace, onDone }: { toPlace: PeopleToPlac
         {toPlace.people.map((p) => (
           <Row
             key={p.id}
-            title={<bdi dir="auto">{p.name}</bdi>}
+            title={<bdi dir="auto">{shownName(p.name)}</bdi>}
             detail={l10n.getString("place-size", { count: p.files, size: formatBytes(p.bytes, pageLocale()) })}
             end={
               toPlace.canPlace ? (

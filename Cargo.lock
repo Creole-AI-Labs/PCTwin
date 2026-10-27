@@ -3770,7 +3770,6 @@ dependencies = [
  "getrandom 0.4.3",
  "keyring-core",
  "pctwin-grant",
- "pctwin-helper-os",
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-types",
@@ -3904,6 +3903,7 @@ name = "pctwin-orchestrate"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "cap-primitives",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-types",
@@ -3914,6 +3914,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "unicode-normalization",
+ "winapi-util",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./ProgressParts";
 import "./progress.css";
+import { shownName } from "../names";
 
 /**
  * M06 Who's moving?, on the old laptop: everyone with an account here. The mover is always
@@ -26,9 +27,9 @@ export default function WhoHere({ here, onContinue }: { here: PeopleHere; onCont
         {here.people
           .filter((p) => p.isYou)
           .map((p) => (
-            <Row key={p.id} title={<bdi dir="auto">{l10n.getString("who-here-you", { name: p.name })}</bdi>} detail={l10n.getString("who-here-you-hint")} />
+            <Row key={p.id} title={<bdi dir="auto">{l10n.getString("who-here-you", { name: shownName(p.name) })}</bdi>} detail={l10n.getString("who-here-you-hint")} />
           ))}
-        {!here.canMoveOthers && others.map((p) => <Row key={p.id} title={<bdi dir="auto">{p.name}</bdi>} />)}
+        {!here.canMoveOthers && others.map((p) => <Row key={p.id} title={<bdi dir="auto">{shownName(p.name)}</bdi>} />)}
       </RowList>
       {here.canMoveOthers && others.length > 0 && (
         <ul className="mv-people">
@@ -39,7 +40,7 @@ export default function WhoHere({ here, onContinue }: { here: PeopleHere; onCont
                 onChange={(on) => {
                   setTicked((t) => (on ? [...t, p.id] : t.filter((id) => id !== p.id)));
                 }}
-                label={<bdi dir="auto">{p.name}</bdi>}
+                label={<bdi dir="auto">{shownName(p.name)}</bdi>}
               />
             </li>
           ))}

@@ -8,11 +8,13 @@ import { LocalizationProvider } from "@fluent/react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DISPLAY_STATES, REFUSALS, arrive, parseProjection, shouldAnnounce, type IntentKind, type Projection, type Snapshot } from "../guard";
+import { DISPLAY_STATES, REFUSALS, arrive, parseProjection, settle, shouldAnnounce, type IntentKind, type Projection, type Snapshot } from "../guard";
 import * as g from "../guardSamples";
 import { localization, type LanguageCode } from "../i18n";
 import { violations } from "../testing/a11y";
 import GuardHost, { type GuardBridge } from "./GuardHost";
+import { Name } from "./GuardParts";
+import { shownName } from "../names";
 
 const l10n = localization("en");
 const text = (id: string, vars?: Record<string, string | number>) => l10n.getString(id, vars);
@@ -25,15 +27,18 @@ function wrap(children: ReactNode, language: LanguageCode = "en") {
 function fakeEngine(first: Snapshot | null = null) {
   let push: ((v: Projection | null) => void) | null = null;
   let answerView: ((s: Snapshot) => void) | null = null;
-  const sent: { job: string; epoch: number; generation: number; intent: IntentKind }[] = [];
+  const sent: { job: string; epoch: number; generation: number; press: string; intent: IntentKind }[] = [];
   let reply: Awaited<ReturnType<GuardBridge["intent"]>> = { ok: true, answer: "taken" };
   let hold = false;
+  let holdView = false;
+  const heldViews: ((s: Snapshot) => void)[] = [];
   const pendingReplies: (() => void)[] = [];
   const bridge: GuardBridge = {
     view: vi.fn(
       () =>
         new Promise<Snapshot>((resolve) => {
-          if (first) resolve(first);
+          if (holdView) heldViews.push(resolve);
+          else if (first) resolve(first);
           else answerView = resolve;
         }),
     ),
@@ -77,6 +82,17 @@ function fakeEngine(first: Snapshot | null = null) {
     },
     setFirst: (s: Snapshot) => {
       first = s;
+    },
+    /** From now on, each ask for the view waits until answered with `answerHeld`. */
+    holdViews: () => {
+      holdView = true;
+    },
+    heldCount: () => heldViews.length,
+    answerHeld: async (at: number, s: Snapshot) => {
+      await act(async () => {
+        heldViews[at](s);
+        await Promise.resolve();
+      });
     },
   };
 }
@@ -145,6 +161,61 @@ describe("which updates are kept (T28-003, T28-007)", () => {
     expect(arrive(shown, newer).shown).toEqual({ kind: "ready", view: newer });
   });
 
+  it("the engine's answer is checked like an event: an older view never replaces a newer one (third review, finding 7)", () => {
+    const shown = { kind: "ready" as const, view: newer };
+    expect(settle(shown, ready(g.changes), false)).toBe(shown);
+    expect(settle(shown, ready({ ...newer, epoch: newer.epoch - 1, version: 99 }), false)).toBe(shown);
+    expect(settle(shown, ready({ ...newer, version: newer.version + 1 }), false)).toEqual({ kind: "ready", view: { ...newer, version: newer.version + 1 } });
+    // The same version is the engine's own word for it: kept.
+    expect(settle(shown, ready(newer), false)).toEqual({ kind: "ready", view: newer });
+    // "No job" from before a newer event is not believed; from after it, it is.
+    expect(settle(shown, { kind: "unavailable" }, true)).toBe(shown);
+    expect(settle(shown, { kind: "unavailable" }, false)).toEqual({ kind: "unavailable" });
+    expect(settle({ kind: "checking" }, ready(g.changes), false)).toEqual({ kind: "ready", view: g.changes });
+  });
+
+  it("on screen: a late answer older than an event already shown does not move the screen back", async () => {
+    const engine = fakeEngine();
+    render(wrap(<GuardHost bridge={engine.bridge} />));
+    const later = { ...g.undoDone, job: g.changes.job, epoch: g.changes.epoch, version: g.changes.version + 1 };
+    engine.push(later);
+    await screen.findByRole("heading", { name: text("guard-undo-done-title") });
+    engine.answer(ready(g.changes));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("heading", { name: text("guard-undo-done-title") })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: text("guard-changes-title") })).toBeNull();
+  });
+
+  it("on screen: only the newest ask's answer counts, and an answer from before an event does not undo it", async () => {
+    const engine = fakeEngine(ready(g.changes));
+    engine.refuse("plan-changed");
+    render(wrap(<GuardHost bridge={engine.bridge} />));
+    const approve = await screen.findByRole("button", { name: text("guard-changes-approve") });
+    engine.holdViews();
+    // Two refusals, each asking for the view again, the first answer arriving last.
+    fireEvent.click(approve);
+    await waitFor(() => {
+      expect(engine.heldCount()).toBe(1);
+    });
+    fireEvent.click(approve);
+    await waitFor(() => {
+      expect(engine.heldCount()).toBe(2);
+    });
+    await engine.answerHeld(1, ready(g.changes));
+    await engine.answerHeld(0, { kind: "unavailable" });
+    expect(screen.getByRole("heading", { name: text("guard-changes-title") })).toBeTruthy();
+    // An ask on its way, then a newer event: the ask's "no job" answer is from before it.
+    fireEvent.click(approve);
+    await waitFor(() => {
+      expect(engine.heldCount()).toBe(3);
+    });
+    engine.push({ ...g.changes, version: g.changes.version + 1 });
+    await engine.answerHeld(2, { kind: "unavailable" });
+    expect(screen.getByRole("heading", { name: text("guard-changes-title") })).toBeTruthy();
+  });
+
   it("a gap in versions asks the engine again", () => {
     const shown = { kind: "ready" as const, view: g.changes };
     expect(arrive(shown, { ...g.changes, version: g.changes.version + 3 }).askAgain).toBe(true);
@@ -178,7 +249,26 @@ describe("intents (T28-002, T28-006, T28-024, T28-028)", () => {
     const engine = fakeEngine(ready(g.changes));
     render(wrap(<GuardHost bridge={engine.bridge} />));
     fireEvent.click(await screen.findByRole("button", { name: text("guard-changes-approve") }));
-    expect(engine.sent).toEqual([{ job: "job-sample", epoch: 2, generation: 3, intent: { kind: "approve" } }]);
+    expect(engine.sent).toEqual([{ job: "job-sample", epoch: 2, generation: 3, press: expect.any(String) as string, intent: { kind: "approve" } }]);
+  });
+
+  it("each press carries its own mark, so the engine takes every press once (third review, finding 6)", async () => {
+    const engine = fakeEngine(ready(g.changes));
+    render(wrap(<GuardHost bridge={engine.bridge} />));
+    const approve = await screen.findByRole("button", { name: text("guard-changes-approve") });
+    fireEvent.click(approve);
+    await waitFor(() => {
+      expect(engine.sent).toHaveLength(1);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(approve);
+    await waitFor(() => {
+      expect(engine.sent).toHaveLength(2);
+    });
+    expect(engine.sent[0].press).not.toBe(engine.sent[1].press);
+    expect(engine.sent[0].press.length).toBeGreaterThan(0);
   });
 
   it("a double-click and a held Enter key send one intent", async () => {
@@ -405,5 +495,27 @@ describe("language, privacy and the shipped build (T28-021, T28-023, T28-025, T2
       .filter(([, src]) => /from ["'][./]*(gallery\/|guardSamples)/.test(src))
       .map(([path]) => path);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("names that change text direction (third review, finding 10)", () => {
+  it("a direction character in a name is shown as a visible mark, everywhere a guard name is drawn", async () => {
+    const tricky = "holiday\u202Egpj.exe";
+    const view = { ...g.changes, screen: { ...g.changes.screen, changes: [{ name: tricky, action: "merge", undo: "can-reverse" }] } } as Projection;
+    const parsed = parseProjection(JSON.parse(JSON.stringify(view)));
+    expect(JSON.stringify(parsed)).not.toMatch(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/);
+    const engine = fakeEngine(ready(parsed ?? view));
+    render(wrap(<GuardHost bridge={engine.bridge} />));
+    await screen.findByRole("heading", { name: text("guard-changes-title") });
+    expect(document.body.textContent).toContain("holiday\uFFFDgpj.exe");
+    expect(document.body.textContent).not.toContain("\u202E");
+    // Letters of a right-to-left language are left as they are.
+    expect(shownName(g.RTL)).toBe(g.RTL);
+    // The Name part marks them itself too, whatever view it is given.
+    const { container } = render(wrap(<Name>{"a\u202Eb"}</Name>));
+    expect(container.textContent).toBe("a\uFFFDb");
+    for (const c of ["\u061C", "\u200E", "\u200F", "\u202A", "\u202B", "\u202C", "\u202D", "\u202E", "\u2066", "\u2067", "\u2068", "\u2069"]) {
+      expect(shownName(`a${c}b`)).toBe("a\uFFFDb");
+    }
   });
 });

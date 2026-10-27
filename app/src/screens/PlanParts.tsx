@@ -3,6 +3,7 @@ import { Localized, useLocalization } from "@fluent/react";
 import type { ReactNode } from "react";
 import { sizeParts, type FolderRole, type Size } from "../plan";
 import "./plan.css";
+import { shownName } from "../names";
 
 /** A card with a title, like the boxes in the mockups. */
 export function PlanBox({ title, children }: { title: ReactNode; children: ReactNode }) {
@@ -64,7 +65,7 @@ export function useFolderName() {
 
 /** The folder's name in the screen: a known role in words, an other folder by its own name, kept in its own direction. */
 export function FolderTitle({ role, path }: { role: FolderRole; path: string }): ReactNode {
-  if (role === "other") return <bdi dir="auto">{leaf(path)}</bdi>;
+  if (role === "other") return <bdi dir="auto">{shownName(leaf(path))}</bdi>;
   return (
     <Localized id={`plan-role-${role}`}>
       <span />
@@ -76,7 +77,7 @@ export function FolderTitle({ role, path }: { role: FolderRole; path: string }):
 export function PathText({ path, id }: { path: string; id?: string }) {
   return (
     <bdi dir="auto" id={id} className="plan-path">
-      {path}
+      {shownName(path)}
     </bdi>
   );
 }

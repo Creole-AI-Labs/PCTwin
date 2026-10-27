@@ -507,9 +507,11 @@ fn a_flatpak_app_is_installed_from_the_old_laptops_own_source() {
     .unwrap();
     assert!(flatpak_route(&flatpak_old(), Some(&other_app)).is_err());
     // The remote is added only with the old laptop's key, under PCTwin's own name for it.
-    let key_file = std::path::Path::new("/var/tmp/pctwin/key.gpg");
-    assert!(remote_add_call(&route, key_file, b"another key", t).is_err());
-    let add = remote_add_call(&route, key_file, &[0, 1, 2, 3, 4], t).unwrap();
+    assert!(remote_add_call(&route, b"another key", t).is_err());
+    let add = remote_add_call(&route, &[0, 1, 2, 3, 4], t).unwrap();
+    // The key goes in on Flatpak's standard input, the very bytes checked (third review,
+    // finding 7), never as a file Flatpak opens by name.
+    assert_eq!(add.stdin.as_deref(), Some(&[0u8, 1, 2, 3, 4][..]));
     let args: Vec<String> = add
         .args
         .iter()
@@ -521,7 +523,7 @@ fn a_flatpak_app_is_installed_from_the_old_laptops_own_source() {
             "remote-add",
             "--system",
             "--if-not-exists",
-            "--gpg-import=/var/tmp/pctwin/key.gpg",
+            "--gpg-import=-",
             route.remote_name.as_str(),
             "https://dl.flathub.org/repo/",
         ]
@@ -640,4 +642,34 @@ fn the_old_copys_maker_needs_a_signed_windows_file() {
     let msi = write(&dir, "app.msi", &c.into_inner().into_inner());
     let e = pctwin_maker::windows_maker_of(&msi).unwrap_err();
     assert!(e.contains("not signed"), "{e}");
+}
+
+/// Third review, finding 3: only the administrator helper's staging may say a file is its own
+/// administrators-only copy. No other code in PCTwin implements that.
+#[test]
+fn only_the_helpers_staging_vouches_for_its_own_copy() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut found = Vec::new();
+    let mut pending = vec![root.join("crates"), root.join("app/src-tauri/src")];
+    while let Some(dir) = pending.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if p.is_dir() {
+                if name != "target" && name != "tests" && !name.starts_with('.') {
+                    pending.push(p);
+                }
+            } else if name.ends_with(".rs") {
+                let text = std::fs::read_to_string(&p).unwrap();
+                if text.contains(&["HelperStaged", " for "].concat()) {
+                    found.push(p);
+                }
+            }
+        }
+    }
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].ends_with("pctwin-helper/src/broker/staging.rs"),
+        "{found:?}"
+    );
 }

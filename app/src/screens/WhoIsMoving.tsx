@@ -7,6 +7,7 @@ import FrameFooter from "./FrameFooter";
 import { TopStrip } from "./FrameParts";
 import { Heading } from "./PairParts";
 import "./people.css";
+import { shownName } from "../names";
 
 /** What a select shows for a person: a choice, or "not chosen" (also when the account chosen no longer exists). */
 function valueOf(destination: Destination, accounts: readonly Account[]): string {
@@ -185,7 +186,7 @@ function PersonRow({ person, accounts, onChoose }: { person: Person; accounts: r
         <Label id="people-col-old" />
         <span className="people-head">
           <strong className="people-name">
-            <bdi>{person.name}</bdi>
+            <bdi>{shownName(person.name)}</bdi>
           </strong>
           {person.isYou && (
             <Badge tone="neutral">

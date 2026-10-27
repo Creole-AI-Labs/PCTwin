@@ -10,9 +10,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use pctwin_orchestrate::rescue::{
-    DriveIdentity, Lock, PersonIdentity, ReadOnlyLevel, Reinserted, RescueError, check_not_target,
-    identity_from_findmnt, identity_from_win32_volume, lock_from_error, people_on_drive,
-    reidentify, scan_rescued_drive,
+    DriveIdentity, Lock, PersonIdentity, ReadOnlyLevel, Reinserted, RescueDrive, RescueError,
+    check_not_target, identity_from_findmnt, identity_from_win32_volume, lock_from_error,
+    people_on_drive, refuse_same_volume, reidentify, scan_rescued_drive, volume_of,
 };
 use pctwin_record::{FolderRole, Inclusion, Owner};
 use pctwin_scan::{AccessFact, AccessReader, OtherSystem, ReadPlan, UnixMode};
@@ -71,6 +71,17 @@ fn drive_id(serial: &str) -> DriveIdentity {
     }
 }
 
+/// The identity of the drive `root` is on, with its real serial number, as the system's volume
+/// list would give it.
+fn real_id(root: &Path) -> DriveIdentity {
+    drive_id(&volume_of(root).unwrap().to_string())
+}
+
+/// The drive at `root`, opened.
+fn opened(root: &Path) -> RescueDrive {
+    RescueDrive::open(root, &real_id(root)).unwrap()
+}
+
 /// The people on a dead laptop's drive are found from the drive itself: each by the account ID
 /// that owns their settings file, never by folder name; system folders are not people.
 #[test]
@@ -84,7 +95,7 @@ fn people_are_found_from_the_drive_itself() {
         ("Leftover", "S-1-5-21-1-2-3-1003"),
         (".hidden", "S-1-5-21-1-2-3-1004"),
     ]);
-    let people = people_on_drive(d.path(), OtherSystem::Windows, &mut owners);
+    let people = people_on_drive(&opened(d.path()), OtherSystem::Windows, &mut owners);
     let found: Vec<(&str, &PersonIdentity)> = people
         .iter()
         .map(|p| (p.label.as_str(), &p.identity))
@@ -106,12 +117,23 @@ fn people_are_found_from_the_drive_itself() {
     );
     // A person whose account cannot be read is still listed, keyed by their folder on this drive
     // only (never matched by name to anyone else).
-    assert_eq!(people[1].account_id(), "folder:Leftover");
+    // Its exact name ("Leftover", unit by unit) and which folder it is.
+    let exact = if cfg!(windows) {
+        "folder:004c006500660074006f007600650072:"
+    } else {
+        "folder:4c6566746f766572:"
+    };
+    assert!(
+        people[1].account_id().starts_with(exact),
+        "{}",
+        people[1].account_id()
+    );
+    assert_eq!(people[1].name, "Leftover");
     assert_eq!(people[0].account_id(), "S-1-5-21-1-2-3-1001");
     assert_eq!(people[0].home, d.path().join("Users").join("Ada"));
     // A hive owned by a system account says nothing about whose it is.
     let mut odd = Owners(vec![("Ada", "S-1-5-18"), ("Tunde", "BA")]);
-    let people = people_on_drive(d.path(), OtherSystem::Windows, &mut odd);
+    let people = people_on_drive(&opened(d.path()), OtherSystem::Windows, &mut odd);
     assert!(
         people
             .iter()
@@ -130,7 +152,7 @@ fn a_rescued_drive_becomes_an_ordinary_plan() {
         ("Ada", "S-1-5-21-1-2-3-1001"),
         ("Tunde", "S-1-5-21-1-2-3-1002"),
     ]);
-    let id = drive_id("1234-ABCD");
+    let id = real_id(d.path());
     let scan = scan_rescued_drive(d.path(), &id, &mut owners).unwrap();
     assert_eq!(scan.record.source_laptop, id.laptop_id());
     assert_eq!(scan.system, OtherSystem::Windows);
@@ -209,6 +231,9 @@ fn a_rescued_drive_becomes_an_ordinary_plan() {
     // The source of each item is its file on the drive.
     let src = scan.source_of(thesis).unwrap();
     assert_eq!(std::fs::read(&src).unwrap(), b"chapter one");
+    // ... read through the drive's own handles.
+    let read = std::io::read_to_string(scan.open(&src).unwrap()).unwrap();
+    assert_eq!(read, "chapter one");
     assert_eq!(snapshot(d.path()), before, "nothing on the drive changed");
     // The same drive scanned again gives the same laptop and item IDs.
     let again = scan_rescued_drive(d.path(), &id, &mut owners).unwrap();
@@ -239,7 +264,7 @@ fn snapshot(root: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
 fn a_drive_without_a_system_is_refused() {
     let d = tempfile::tempdir().unwrap();
     touch(&d.path().join("photos/a.jpg"), b"x");
-    let err = scan_rescued_drive(d.path(), &drive_id("1"), &mut Owners(vec![])).unwrap_err();
+    let err = scan_rescued_drive(d.path(), &real_id(d.path()), &mut Owners(vec![])).unwrap_err();
     assert_eq!(err, RescueError::NoSystemFound);
     assert_eq!(
         err.to_string(),
@@ -293,50 +318,32 @@ fn a_reinserted_drive_is_known_by_its_identity_not_its_letter() {
     assert_eq!(identity_from_findmnt("u ext4 x\n"), None);
 }
 
-/// A drive chosen both to read from and to write to is refused, by identity or by place.
+/// A drive chosen both to read from and to write to is refused, by the volume each target is
+/// really on (third security review, finding 2).
 #[test]
 fn a_drive_cannot_be_both_the_source_and_the_target() {
-    let src = drive_id("1234-ABCD");
-    let mount = PathBuf::from(r"E:\");
+    let d = tempfile::tempdir().unwrap();
+    let source = opened(d.path());
+    let inside = d.path().join("Rescued");
+    std::fs::create_dir_all(&inside).unwrap();
     assert_eq!(
-        check_not_target(
-            &src,
-            &mount,
-            &[(PathBuf::from(r"C:\Users\Ada"), Some(drive_id("C")))]
-        ),
-        Ok(())
-    );
-    assert_eq!(
-        check_not_target(
-            &src,
-            &mount,
-            &[(PathBuf::from(r"D:\Rescue"), Some(src.clone()))]
-        ),
+        check_not_target(&source, std::slice::from_ref(&inside)),
         Err(RescueError::SourceIsTarget)
     );
+    assert_eq!(check_not_target(&source, &[]), Ok(()));
+    let v = source.volume();
+    assert_eq!(refuse_same_volume(v, &[Some(v ^ 1)]), Ok(()));
     assert_eq!(
-        check_not_target(&src, &mount, &[(PathBuf::from(r"E:\Rescued"), None)]),
+        refuse_same_volume(v, &[Some(v ^ 1), Some(v)]),
         Err(RescueError::SourceIsTarget)
     );
-    if cfg!(windows) {
-        assert_eq!(
-            check_not_target(&src, &mount, &[(PathBuf::from(r"e:\rescued"), None)]),
-            Err(RescueError::SourceIsTarget)
-        );
-        // A drive mounted in a folder, named in another case.
-        let folder_mount = PathBuf::from(r"C:\Mounts\OldDrive");
-        assert_eq!(
-            check_not_target(
-                &src,
-                &folder_mount,
-                &[(PathBuf::from(r"c:\mounts\olddrive\Rescued"), None)]
-            ),
-            Err(RescueError::SourceIsTarget)
-        );
-    }
     assert_eq!(
         RescueError::SourceIsTarget.to_string(),
         "This drive is the one being rescued, so nothing can be put on it. Choose a folder on another drive."
+    );
+    assert_eq!(
+        RescueError::TargetUnknown.to_string(),
+        "PCTwin could not tell which drive this folder is on, so nothing is put there. Choose a folder on this laptop's own drive."
     );
 }
 
@@ -392,7 +399,7 @@ fn only_a_read_only_mount_is_called_untouched() {
 fn a_real_hive_owner_is_read_as_an_account_id() {
     let d = windows_drive();
     let mut reader = pctwin_scan::system_reader();
-    let people = people_on_drive(d.path(), OtherSystem::Windows, reader.as_mut());
+    let people = people_on_drive(&opened(d.path()), OtherSystem::Windows, reader.as_mut());
     let ada = people.iter().find(|p| p.label == "Ada").unwrap();
     // This test made the file, so its owner is this account (or the administrators group when
     // run elevated, which says nothing about whose it is).

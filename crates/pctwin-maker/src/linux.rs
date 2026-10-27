@@ -40,6 +40,8 @@ pub fn checksig_call(path: &Path, t: Duration) -> Call {
         ],
         env: vec![],
         timeout: t,
+        stdin: None,
+        cwd: None,
     }
 }
 
@@ -56,6 +58,8 @@ pub fn arch_call(path: &Path, t: Duration) -> Call {
         ],
         env: vec![],
         timeout: t,
+        stdin: None,
+        cwd: None,
     }
 }
 
@@ -298,20 +302,20 @@ pub fn valid_app_id(id: &str) -> bool {
         })
 }
 
-/// `flatpak remote-add --system --if-not-exists --gpg-import=<key file> <name> <address>`, only
-/// if `key_bytes` (the key copied from the old laptop, already written to `key_file`) is exactly
-/// the old laptop's key.
+/// `flatpak remote-add --system --if-not-exists --gpg-import=- <name> <address>`, only if
+/// `key_bytes` (the key copied from the old laptop) is exactly the old laptop's key. The key is
+/// handed to Flatpak on its standard input, the very bytes checked here, never as a file Flatpak
+/// would open by name, which could be changed between the check and the reading (third security
+/// review, finding 7).
 pub fn remote_add_call(
     route: &FlatpakRoute,
-    key_file: &Path,
     key_bytes: &[u8],
     t: Duration,
 ) -> Result<Call, String> {
     if Sha256(Sha256Hasher::digest(key_bytes).into()) != route.key {
         return Err("the key is not the old laptop's key for this remote".into());
     }
-    let mut import = std::ffi::OsString::from("--gpg-import=");
-    import.push(key_file.as_os_str());
+    let import = std::ffi::OsString::from("--gpg-import=-");
     Ok(Call {
         program: PathBuf::from("/usr/bin/flatpak"),
         args: vec![
@@ -324,6 +328,8 @@ pub fn remote_add_call(
         ],
         env: vec![],
         timeout: t,
+        stdin: Some(key_bytes.to_vec()),
+        cwd: None,
     })
 }
 
@@ -341,6 +347,8 @@ pub fn install_call(route: &FlatpakRoute, t: Duration) -> Call {
         ],
         env: vec![],
         timeout: t,
+        stdin: None,
+        cwd: None,
     }
 }
 

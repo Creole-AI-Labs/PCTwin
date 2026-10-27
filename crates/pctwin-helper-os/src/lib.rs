@@ -50,11 +50,11 @@
 //!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`, `os_net_user_add`,
 //!   `os_expire_password`, `os_create_dir_with_sddl`, `os_create_profile`,
 //!   `os_set_process_sddl`, `os_windows_dir`, `os_machine_text`; and, added 27 October 2026
-//!   for the join of 2.2 and 2.3 (awaiting the user's approval of the fence's two new members),
+//!   for the join of 2.2 and 2.3 (approved by the user, 27 October 2026),
 //!   `os_token_elevated` (whether this program is elevated: an app is never started from one)
 //!   and `os_session_on_screen` (whether the helper's session is still on the screen: switching
 //!   person ends the broker's grants); and, added 27 October 2026 after the second review
-//!   (awaiting the user's approval), `os_win_verify_trust` (Windows' own signature check on a
+//!   (approved by the user, 27 October 2026), `os_win_verify_trust` (Windows' own signature check on a
 //!   held file, replacing PowerShell, whose answer code in the person's folders could replace)
 //!   and `os_disk_hotplug` (whether a disk can be unplugged: an NVMe disk in a Thunderbolt or USB4
 //!   case reports a bus inside the laptop).

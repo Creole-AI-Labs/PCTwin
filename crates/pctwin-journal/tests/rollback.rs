@@ -140,3 +140,65 @@ fn the_newest_journal_is_trusted() {
         assert_eq!(j.effect(id).unwrap().unwrap().id, id);
     }
 }
+
+/// A committed Phase 1 file write (no sealed record of a change at all).
+fn a_file_write(j: &Journal) -> u64 {
+    let id = j.plan(&common::planned(1)).unwrap();
+    let path = common::planned(1).path;
+    j.staged(id, ".pctwin-t.part", &[]).unwrap();
+    j.verified(id, [1; 32], None).unwrap();
+    j.applied(id, &path).unwrap();
+    j.committed(
+        id,
+        pctwin_journal::Landed {
+            size: common::planned(1).size,
+            modified_ns: None,
+            file: None,
+        },
+    )
+    .unwrap();
+    id
+}
+
+/// Third review, finding 9 (the Chief's decision): a journal holding only Phase 1 file records is
+/// counted too. A copy from before undo closed, put back after the old laptop was wiped, never
+/// reopens undo (which would remove the only copies left).
+#[test]
+fn a_copy_of_a_file_only_journal_from_before_undo_closed_is_refused() {
+    let (d, path, j) = common::journal();
+    a_file_write(&j);
+    let j = rolled_back(d.path(), &path, j, |j| {
+        j.close_undo(&mut |_, _| unreachable!()).unwrap();
+    });
+    assert_eq!(j.undo_gate().unwrap(), pctwin_journal::UndoGate::Open);
+    assert!(matches!(j.begin_undo(), Err(JournalError::RolledBack)));
+}
+
+/// A file-only journal as PCTwin left it still undoes, before and after it is reopened, until
+/// it is closed.
+#[test]
+fn a_file_only_journal_undoes_until_closed() {
+    let (_d, path, j) = common::journal();
+    a_file_write(&j);
+    drop(j.begin_undo().unwrap());
+    drop(j);
+    let j = common::open(&path).unwrap();
+    drop(j.begin_undo().unwrap());
+    j.close_undo(&mut |_, _| unreachable!()).unwrap();
+    drop(j);
+    let j = common::open(&path).unwrap();
+    assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
+}
+
+/// A journal that counts, put back from before a later sealed write, does not begin undo.
+#[test]
+fn a_counted_journal_put_back_does_not_begin_undo() {
+    let (d, path, j) = common::journal();
+    let id = an_install(&j);
+    let j = rolled_back(d.path(), &path, j, |j| {
+        j.installs(&keys().install)
+            .observed(id, &Found::App(Presence::Absent), false)
+            .unwrap();
+    });
+    assert!(matches!(j.begin_undo(), Err(JournalError::RolledBack)));
+}

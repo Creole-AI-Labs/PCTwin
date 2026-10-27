@@ -4,6 +4,7 @@ import { Button, ResultChip } from "../components/kit";
 import { whyMemoryKey, type ReportItem } from "../move";
 import { TopStrip } from "./FrameParts";
 import { Heading, EvidenceLine, ReasonText } from "./ProgressParts";
+import { shownName } from "../names";
 
 /** How many items show at once; "Show more" adds this many. A report has no cap, only pages. */
 const PAGE = 100;
@@ -43,7 +44,7 @@ export default function Report({ items, onBack }: { items: ReportItem[]; onBack:
               {visible.map((item) => (
                 <tr key={item.id}>
                   <th scope="row">
-                    <bdi dir="auto">{item.name}</bdi>
+                    <bdi dir="auto">{shownName(item.name)}</bdi>
                   </th>
                   <td>
                     <ResultChip result={item.status} />

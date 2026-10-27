@@ -11,6 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use common::*;
+use pctwin_orchestrate::cloud::Os;
 use pctwin_orchestrate::local_copy::{
     Batch, CloudFiles, Consent, KEEP_FREE_OLD, KeepLocal, Network, Stopped, Wanted, WhyNot,
     plan_batches,
@@ -32,22 +33,65 @@ struct Fake {
     refuse_put_back: BTreeSet<PathBuf>,
     /// The cloud app accepts the request but does not make it online only in time.
     slow_put_back: BTreeSet<PathBuf>,
+    /// Marked by the system as the app's own (hidden and system).
+    apps_own: BTreeSet<PathBuf>,
+    /// What a file holds, when a test says (otherwise plain words).
+    content: BTreeMap<PathBuf, Vec<u8>>,
+    /// Files whose first bytes cannot be read.
+    fail_head: BTreeSet<PathBuf>,
     log: Vec<String>,
+}
+
+/// The person's home folder on the old laptop, and its system.
+fn home() -> PathBuf {
+    PathBuf::from(if cfg!(windows) {
+        r"C:\Users\me"
+    } else {
+        "/home/me"
+    })
+}
+
+fn os() -> Os {
+    if cfg!(windows) {
+        Os::Windows
+    } else if cfg!(target_os = "macos") {
+        Os::Mac
+    } else {
+        Os::Linux
+    }
+}
+
+/// A file in the person's OneDrive folder.
+fn at(p: &str) -> PathBuf {
+    home().join("OneDrive").join(p)
+}
+
+/// How the log names a file: its path below the OneDrive folder.
+fn shown(path: &Path) -> String {
+    path.strip_prefix(home().join("OneDrive"))
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 impl Fake {
     fn add(&mut self, p: &str, size: u64) -> (ItemId, PathBuf, u64) {
-        let path = PathBuf::from(p);
+        let path = at(p);
         self.online.insert(path.clone());
         self.sizes.insert(path.clone(), size);
-        let id = online_only(person("me"), CloudProvider::OneDrive, &[p], size).id;
+        // The item's own name: the path with anything but letters and digits made plain.
+        let name: String = p
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        let id = online_only(person("me"), CloudProvider::OneDrive, &[&name], size).id;
         (id, path, size)
     }
 }
 
 impl CloudFiles for Fake {
     fn bring_down(&mut self, path: &Path) -> io::Result<()> {
-        self.log.push(format!("down {}", path.display()));
+        self.log.push(format!("down {}", shown(path)));
         if self.fail_down.contains(path) {
             return Err(io::Error::other("no connection"));
         }
@@ -64,7 +108,7 @@ impl CloudFiles for Fake {
         Ok(self.sizes[path])
     }
     fn put_back(&mut self, path: &Path) -> io::Result<()> {
-        self.log.push(format!("back {}", path.display()));
+        self.log.push(format!("back {}", shown(path)));
         if self.refuse_put_back.contains(path) {
             return Err(io::Error::other("refused"));
         }
@@ -77,6 +121,21 @@ impl CloudFiles for Fake {
     fn free_space(&self) -> Option<u64> {
         Some(self.free)
     }
+    fn marked_as_apps_own(&self, path: &Path) -> io::Result<bool> {
+        Ok(self.apps_own.contains(path))
+    }
+    fn head(&self, path: &Path, n: usize) -> io::Result<Vec<u8>> {
+        if self.fail_head.contains(path) {
+            return Err(io::Error::other("unreadable"));
+        }
+        let mut c = self
+            .content
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| b"a photo".to_vec());
+        c.truncate(n);
+        Ok(c)
+    }
 }
 
 fn consent() -> Consent {
@@ -84,6 +143,8 @@ fn consent() -> Consent {
         account_id: "me".into(),
         provider: CloudProvider::OneDrive,
         on_metered: false,
+        home: home(),
+        root: home().join("OneDrive"),
     }
 }
 
@@ -157,7 +218,7 @@ fn each_file_comes_down_is_sent_and_goes_back() {
     };
     let a = fake.add("a.mp4", 2 * GB);
     let b = fake.add("b.mp4", 2 * GB);
-    let mut keep = KeepLocal::new(vec![consent()], 4 * GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
     let mut sent = Vec::new();
     let report = keep.run(
         &mut fake,
@@ -195,7 +256,7 @@ fn nothing_comes_down_without_that_persons_consent() {
         ..Fake::default()
     };
     let a = fake.add("a.txt", 10);
-    let mut keep = KeepLocal::new(vec![consent()], 4 * GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
     let mut theirs = wanted("tunde", std::slice::from_ref(&a));
     let mut dropbox = wanted("me", std::slice::from_ref(&a));
     dropbox[0].provider = CloudProvider::Dropbox;
@@ -223,7 +284,7 @@ fn a_metered_connection_stops_further_downloads() {
     };
     let a = fake.add("a", GB);
     let b = fake.add("b", GB);
-    let mut keep = KeepLocal::new(vec![consent()], GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], GB);
     let calls = std::cell::Cell::new(0);
     let report = keep.run(
         &mut fake,
@@ -268,6 +329,7 @@ fn a_metered_connection_stops_further_downloads() {
     };
     let d = fake.add("d", GB);
     let mut ok = KeepLocal::new(
+        os(),
         vec![Consent {
             on_metered: true,
             ..consent()
@@ -295,8 +357,8 @@ fn a_full_drive_stops_before_the_next_batch() {
     let a = fake.add("a", GB);
     let b = fake.add("b", GB);
     // The cloud app does not put a back in time, so its gigabyte stays used.
-    fake.slow_put_back.insert(PathBuf::from("a"));
-    let mut keep = KeepLocal::new(vec![consent()], GB);
+    fake.slow_put_back.insert(at("a"));
+    let mut keep = KeepLocal::new(os(), vec![consent()], GB);
     let report = keep.run(
         &mut fake,
         wanted("me", &[a.clone(), b.clone()]),
@@ -312,7 +374,7 @@ fn a_full_drive_stops_before_the_next_batch() {
     };
     let a = fake.add("a", GB);
     let b = fake.add("b", GB);
-    fake.slow_put_back.insert(PathBuf::from("a"));
+    fake.slow_put_back.insert(at("a"));
     let report = keep.run(
         &mut fake,
         wanted("me", &[a.clone(), b.clone()]),
@@ -346,7 +408,7 @@ fn every_failure_is_said_plainly() {
     fake.stays_online.insert(fake_down.1.clone());
     fake.refuse_put_back.insert(refused.1.clone());
     fake.slow_put_back.insert(slow.1.clone());
-    let mut keep = KeepLocal::new(vec![consent()], 100 * GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], 100 * GB);
     let all = [
         failed.clone(),
         fake_down.clone(),
@@ -407,7 +469,7 @@ fn a_file_already_on_the_laptop_is_never_put_back() {
     };
     let a = fake.add("a", GB);
     fake.online.remove(&a.1);
-    let mut keep = KeepLocal::new(vec![consent()], GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], GB);
     let report = keep.run(
         &mut fake,
         wanted("me", std::slice::from_ref(&a)),
@@ -426,7 +488,7 @@ fn a_download_of_another_size_is_not_sent() {
         ..Fake::default()
     };
     let a = fake.add("a", GB);
-    let mut keep = KeepLocal::new(vec![consent()], 2 * GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], 2 * GB);
     let mut w = wanted("me", std::slice::from_ref(&a));
     w[0].size = GB + 1;
     let report = keep.run(&mut fake, w, &|| Network::Unmetered, &mut |_| {
@@ -446,7 +508,12 @@ fn the_windows_adapter_on_an_ordinary_file() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("plain.txt");
     std::fs::write(&p, b"hello").unwrap();
-    let mut w = WindowsCloudFiles::new(dir.path(), std::time::Duration::from_millis(300));
+    let system32 = std::path::Path::new(r"C:\Windows\System32");
+    let mut w = WindowsCloudFiles::new(
+        dir.path(),
+        std::time::Duration::from_millis(300),
+        Some(system32),
+    );
     assert!(!w.is_online_only(&p).unwrap());
     w.bring_down(&p).unwrap();
     assert_eq!(w.size_on_laptop(&p).unwrap(), 5);
@@ -467,7 +534,7 @@ fn a_file_too_big_for_the_old_laptop_stays_in_its_cloud() {
     };
     let huge = fake.add("huge", 20 * GB);
     let a = fake.add("a", GB);
-    let mut keep = KeepLocal::new(vec![consent()], 4 * GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
     let report = keep.run(
         &mut fake,
         wanted("me", &[huge.clone(), a.clone()]),
@@ -493,7 +560,7 @@ fn a_send_claim_outside_the_batch_is_ignored() {
     };
     let a = fake.add("a", GB);
     let c = fake.add("c", GB);
-    let mut keep = KeepLocal::new(vec![consent()], GB);
+    let mut keep = KeepLocal::new(os(), vec![consent()], GB);
     let mut all = wanted("me", std::slice::from_ref(&a));
     all.extend(wanted("tunde", std::slice::from_ref(&c)));
     let report = keep.run(&mut fake, all, &|| Network::Unmetered, &mut |_batch| {
@@ -528,4 +595,242 @@ fn free_space_comes_from_the_deepest_volume() {
     );
     assert_eq!(free_space_of(Path::new("/home/a"), &vols), Some(1));
     assert_eq!(free_space_of(Path::new("/home/a"), &vols[1..]), None);
+}
+
+/// Third review, finding 4: a sync app's sign-in tokens and the system's credential stores are
+/// never brought down or sent, whatever they are called, even with consent.
+#[test]
+fn sign_in_tokens_are_never_in_scope() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let tokens: &[&str] = if cfg!(windows) {
+        &[
+            r"C:\Users\me\AppData\Local\Microsoft\OneDrive\settings\Personal\a.dat",
+            r"C:\Users\me\OneDrive\..\AppData\Local\Microsoft\Credentials\x",
+            r"C:\Users\me\ONEDRI~1\x",
+            r"C:\Users\me\OneDrive.\x",
+            r"C:\Users\other\OneDrive\x",
+            r"D:\OneDrive\x",
+        ]
+    } else {
+        &[
+            "/home/me/.config/onedrive/refresh_token",
+            "/home/me/OneDrive/../.config/onedrive/refresh_token",
+            "/home/me/onedrive/x",
+            "/home/other/OneDrive/x",
+        ]
+    };
+    let mut files: Vec<_> = tokens.iter().map(|p| fake.add(p, 1)).collect();
+    // Inside the synced folder: the app's own hidden folder, a keychain, a cookie database.
+    for p in [
+        ".849C9593-D756-4E56/settings.dat",
+        "login.keychain-db",
+        "Cookies",
+    ] {
+        files.push(fake.add(p, 1));
+    }
+    // Marked by the system as the app's own.
+    let marked = fake.add("desktop-sync-state.bin", 1);
+    fake.apps_own.insert(marked.1.clone());
+    files.push(marked);
+    let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
+    let mut sent = 0;
+    let report = keep.run(
+        &mut fake,
+        wanted("me", &files),
+        &|| Network::Unmetered,
+        &mut |b| {
+            sent += b.len();
+            b.iter().map(|(i, _)| (*i, true)).collect()
+        },
+    );
+    assert_eq!(sent, 0, "a token was sent");
+    assert!(fake.log.is_empty(), "{:?}", fake.log);
+    for (id, _, _) in &files {
+        assert_eq!(report.files[id].why_not, Some(WhyNot::OutOfScope));
+    }
+    assert_eq!(
+        report.words_for(&files[0].0).unwrap(),
+        "Not copied. PCTwin keeps copies only of the files you keep in OneDrive, never the app's own sign-in or settings. Sign in to OneDrive on the new laptop."
+    );
+    // The person's own files in that folder are in scope.
+    let own = fake.add("Documents/thesis.docx", 1);
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(&own)),
+        &|| Network::Unmetered,
+        &mut |b| b.iter().map(|(i, _)| (*i, true)).collect(),
+    );
+    assert!(report.files[&own.0].sent);
+}
+
+/// What a file holds is checked once it is down: token text or a data-protection blob is never
+/// sent, and is put back like any other.
+#[test]
+fn a_file_holding_tokens_is_never_sent() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let notes = fake.add("Apps/sync-notes.json", 20);
+    fake.content
+        .insert(notes.1.clone(), br#"{"refresh_token":"abc"}"#.to_vec());
+    let mut keep = KeepLocal::new(os(), vec![consent()], 4 * GB);
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(&notes)),
+        &|| Network::Unmetered,
+        &mut |_| panic!("never sent"),
+    );
+    assert_eq!(report.files[&notes.0].why_not, Some(WhyNot::OutOfScope));
+    assert_eq!(report.files[&notes.0].back_online_only, Some(true));
+    // What cannot be read cannot be told apart from account state: not sent either.
+    let blind = fake.add("Apps/unreadable.bin", 20);
+    fake.fail_head.insert(blind.1.clone());
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(&blind)),
+        &|| Network::Unmetered,
+        &mut |_| panic!("never sent"),
+    );
+    assert_eq!(report.files[&blind.0].why_not, Some(WhyNot::OutOfScope));
+}
+
+/// A sync app PCTwin has never heard of works the same: its folder, found on the laptop, is in
+/// scope; its own hidden files are not.
+#[test]
+fn an_unknown_sync_apps_folder_is_handled_the_same() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let root = home().join("SomeSync");
+    let mine = fake.add(&root.join("photo.jpg").to_string_lossy(), 1);
+    let state = fake.add(&root.join(".somesync").join("db").to_string_lossy(), 1);
+    let consent = Consent {
+        account_id: "me".into(),
+        provider: CloudProvider::Other,
+        on_metered: false,
+        home: home(),
+        root,
+    };
+    let mut w = wanted("me", &[mine.clone(), state.clone()]);
+    for x in &mut w {
+        x.provider = CloudProvider::Other;
+    }
+    let mut keep = KeepLocal::new(os(), vec![consent], 4 * GB);
+    let report = keep.run(&mut fake, w, &|| Network::Unmetered, &mut |b| {
+        b.iter().map(|(i, _)| (*i, true)).collect()
+    });
+    assert!(report.files[&mine.0].sent);
+    assert_eq!(report.files[&state.0].why_not, Some(WhyNot::OutOfScope));
+}
+
+/// Third review, finding 7: the Windows adapter touches only files inside the consented
+/// person's cloud folder, never one outside it or reached through a link.
+#[cfg(windows)]
+#[test]
+fn the_windows_adapter_stays_in_the_consented_folder() {
+    use pctwin_orchestrate::local_copy::WindowsCloudFiles;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("OneDrive");
+    let outside = dir.path().join("Other");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let theirs = outside.join("secret.txt");
+    std::fs::write(&theirs, b"theirs").unwrap();
+    let ok = std::process::Command::new("cmd")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(root.join("link"))
+        .arg(&outside)
+        .output()
+        .unwrap();
+    assert!(ok.status.success(), "{ok:?}");
+    let system32 = std::path::Path::new(r"C:\Windows\System32");
+    let mut w =
+        WindowsCloudFiles::new(&root, std::time::Duration::from_millis(100), Some(system32));
+    assert!(w.bring_down(&theirs).is_err(), "outside the folder");
+    // Refused before attrib is ever asked: not a wait that ran out.
+    assert_eq!(
+        w.put_back(&theirs).unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    let through = root.join("link").join("secret.txt");
+    assert!(w.bring_down(&through).is_err(), "through a link");
+    assert_eq!(
+        w.put_back(&through).unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    let dotdot = root.join("..").join("Other").join("secret.txt");
+    assert!(w.bring_down(&dotdot).is_err());
+    // A file of its own is touched, and attrib runs from the system folder given, never one an
+    // environment value names: with no system folder known, nothing is put back.
+    let mine = root.join("mine.txt");
+    std::fs::write(&mine, b"mine").unwrap();
+    assert!(w.bring_down(&mine).is_ok());
+    let mut none = WindowsCloudFiles::new(&root, std::time::Duration::from_millis(100), None);
+    let e = none.put_back(&mine).unwrap_err();
+    assert!(e.to_string().contains("system folder"), "{e}");
+    let fake = tempfile::tempdir().unwrap();
+    let mut elsewhere = WindowsCloudFiles::new(
+        &root,
+        std::time::Duration::from_millis(100),
+        Some(fake.path()),
+    );
+    assert!(
+        elsewhere.put_back(&mine).is_err(),
+        "no attrib in that folder"
+    );
+}
+
+/// The cloud app is asked with Windows' own attrib, from the system folder given, started there.
+#[test]
+fn attrib_is_the_systems_own_started_in_its_folder() {
+    use pctwin_orchestrate::local_copy::attrib_command;
+    let system32 = Path::new(if cfg!(windows) {
+        r"C:\Windows\System32"
+    } else {
+        "/sys32"
+    });
+    let c = attrib_command(system32, Path::new("x.txt"));
+    assert_eq!(c.get_program(), system32.join("attrib.exe").as_os_str());
+    assert_eq!(c.get_current_dir(), Some(system32));
+    let args: Vec<_> = c.get_args().collect();
+    assert_eq!(args, ["-P", "+U", "x.txt"]);
+}
+
+/// An app that syncs the whole home folder: the known places of account state inside it are
+/// still never taken.
+#[test]
+fn a_whole_home_sync_still_leaves_account_state() {
+    let mut fake = Fake {
+        free: 100 * GB,
+        ..Fake::default()
+    };
+    let cred = home()
+        .join("AppData")
+        .join("Local")
+        .join("Microsoft")
+        .join("Credentials")
+        .join("x");
+    let keys = home().join("Library").join("Keychains").join("x");
+    let state = fake.add(&cred.to_string_lossy(), 1);
+    let mac_keys = fake.add(&keys.to_string_lossy(), 1);
+    let mut consent = consent();
+    consent.root = home();
+    let mut keep = KeepLocal::new(os(), vec![consent], 4 * GB);
+    let which = if cfg!(target_os = "macos") {
+        &mac_keys
+    } else {
+        &state
+    };
+    let report = keep.run(
+        &mut fake,
+        wanted("me", std::slice::from_ref(which)),
+        &|| Network::Unmetered,
+        &mut |_| panic!("never sent"),
+    );
+    assert_eq!(report.files[&which.0].why_not, Some(WhyNot::OutOfScope));
 }

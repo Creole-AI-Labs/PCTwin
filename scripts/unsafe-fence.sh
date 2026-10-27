@@ -3,12 +3,12 @@
 #   pctwin-lease      fn fcntl_int                        (approved by the user, October 2026)
 #   pctwin-helper-os  the os_* functions listed below     (approved by the user, 20 October 2026)
 #                     (os_token_elevated and os_session_on_screen added 27 October 2026, for the
-#                     join of Phase 2.2 and 2.3; awaiting the user's approval)
+#                     join of Phase 2.2 and 2.3; approved by the user, 27 October 2026)
 #                     (os_win_verify_trust added 27 October 2026, second review findings B2 and
 #                     B3: Windows' own signature check on a held file, replacing PowerShell;
-#                     awaiting the user's approval)
+#                     approved by the user, 27 October 2026)
 #                     (os_disk_hotplug added 27 October 2026, second review low finding: whether
-#                     a disk can be unplugged; awaiting the user's approval)
+#                     a disk can be unplugged; approved by the user, 27 October 2026)
 #
 # Every other crate must say `[lints] workspace = true`, which brings in the workspace's
 # `unsafe_code = "forbid"`. A crate that sets its own unsafe_code, or whose sources contain an

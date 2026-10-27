@@ -75,7 +75,10 @@ deny = [
   # The hand-over walks a person's held files through folder handles that never follow a link,
   # and reads a file again only if it is still the file walked (fresh-context review of making
   # sign-ins, 24 October 2026).
-  { crate = "cap-primitives", wrappers = ["cap-std", "pctwin-move"] },
+  # The dead-laptop rescue reads the rescued drive the same way: every folder and file through its
+  # parent's handle, never through a link, only on the drive's own volume (third security
+  # review, finding 1, 27 October 2026).
+  { crate = "cap-primitives", wrappers = ["cap-std", "pctwin-move", "pctwin-orchestrate"] },
   # Undo puts copies in the Trash itself, checked and by handle (21 October 2026), so no crate may.
   { crate = "trash" },
   # The first crate allowed to use unsafe (approved, October 2026; see scripts/unsafe-fence.sh).
@@ -87,11 +90,10 @@ deny = [
   # through the system's own prompt and makes its private channel and token (since 22 October;
   # the unsafe code stays fenced inside pctwin-helper-os, covered by the helper's reviews).
   # Only it may use Service Management, and the autostart plugin's own wrapper on a Mac.
-  # Also the maker check (Windows' own signature check on a held file, and where Defender is) and
-  # the journal (whether a disk can be unplugged), added 27 October 2026 after the second
-  # security review (findings B2, B3 and the low placement finding), awaiting the user's
-  # approval: the unsafe code itself stays fenced in pctwin-helper-os.
-  { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app", "pctwin-maker", "pctwin-journal"] },
+  # The maker check and the change journal take the system's answers they need as interfaces,
+  # handed to them by the helper and the app (third security review, finding 8): they do not link
+  # this crate.
+  { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os", "smappservice-rs"] },
   # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
   { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },
