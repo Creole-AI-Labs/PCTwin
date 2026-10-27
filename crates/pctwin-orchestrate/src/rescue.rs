@@ -47,7 +47,9 @@ use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use serde::Deserialize;
 
 use cap_primitives::fs as cap;
 use pctwin_record::{
@@ -56,6 +58,7 @@ use pctwin_record::{
 };
 
 use crate::cloud::{Os, account_state_by_name};
+use pctwin_catalogue::{Catalogue, Row};
 use pctwin_scan::{AccessFact, AccessReader, Category, OtherSystem, ReadPlan, category};
 
 /// A drive, as the system identifies it. No drive letter or mount point is part of it.
@@ -484,6 +487,8 @@ pub struct RescuedPerson {
     pub label: String,
     /// Their folder's name exactly as the drive holds it.
     pub name: OsString,
+    /// The names from the drive's top folder down to their folder (`Users`, `Ada`), as found.
+    pub at: Vec<OsString>,
     pub home: PathBuf,
     /// Which folder it is on the drive.
     pub folder: FileKey,
@@ -525,25 +530,102 @@ impl RescuedPerson {
     }
 }
 
-/// Folders under the home folders that are not people.
-fn not_a_person(system: OtherSystem, name: &str) -> bool {
-    let n = name.to_lowercase();
-    n.starts_with('.')
-        || match system {
-            OtherSystem::Windows => matches!(
-                n.as_str(),
-                "public" | "default" | "default user" | "all users" | "defaultapppool"
-            ),
-            OtherSystem::MacOs => matches!(n.as_str(), "shared" | "guest"),
-            OtherSystem::Linux => matches!(n.as_str(), "lost+found"),
-        }
+/// The system a layout row is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LayoutSystem {
+    Windows,
+    Mac,
+    Linux,
 }
 
-fn homes_name(system: OtherSystem) -> &'static str {
-    match system {
-        OtherSystem::Windows | OtherSystem::MacOs => "Users",
-        OtherSystem::Linux => "home",
+impl LayoutSystem {
+    fn of(system: OtherSystem) -> Self {
+        match system {
+            OtherSystem::Windows => Self::Windows,
+            OtherSystem::MacOs => Self::Mac,
+            OtherSystem::Linux => Self::Linux,
+        }
     }
+}
+
+/// One of a person's usual folders, by its name on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsualFolder {
+    pub name: String,
+    pub role: FolderRole,
+}
+
+/// One row of the `rescue-layouts` catalogue: what a system's drives usually hold. It only adds
+/// to what is found on the drive itself ([`people_on_drive`]): places homes usually live, the
+/// shared folder, known folders there that are not people, and the usual folders' roles.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct LayoutRow {
+    pub system: LayoutSystem,
+    /// Folders (names from the drive's top) where homes usually live.
+    #[serde(default)]
+    pub homes: Vec<Vec<String>>,
+    /// The shared folder, by its names from the drive's top.
+    #[serde(default)]
+    pub shared: Option<Vec<String>>,
+    /// Folders beside the homes that are the system's, not a person's (compared ignoring case).
+    #[serde(default)]
+    pub not_people: Vec<String>,
+    /// The usual folders at the top of a home, and the role each plays.
+    #[serde(default)]
+    pub folders: Vec<UsualFolder>,
+}
+
+fn plain_name(n: &str) -> bool {
+    !n.is_empty() && n != "." && n != ".." && !n.contains(['/', '\\', '\0']) && n.len() <= 255
+}
+
+fn plain_path(names: &[String]) -> bool {
+    !names.is_empty() && names.len() <= 8 && names.iter().all(|n| plain_name(n))
+}
+
+impl Row for LayoutRow {
+    const CATALOGUE: &'static str = "rescue-layouts";
+    const FIELDS: &'static [&'static str] = &["system", "homes", "shared", "not-people", "folders"];
+    fn check(&self) -> Result<(), String> {
+        let ok = self.homes.len() <= 16
+            && self.homes.iter().all(|h| plain_path(h))
+            && self.shared.as_ref().is_none_or(|s| plain_path(s))
+            && self.not_people.len() <= 64
+            && self.not_people.iter().all(|n| plain_name(n))
+            && self.folders.len() <= 64
+            && self.folders.iter().all(|f| plain_name(&f.name));
+        if ok {
+            Ok(())
+        } else {
+            Err("a row's names are plain folder names".into())
+        }
+    }
+}
+
+/// The layouts compiled into this build.
+pub fn shipped_layouts() -> &'static Catalogue<LayoutRow> {
+    static ROWS: OnceLock<Catalogue<LayoutRow>> = OnceLock::new();
+    ROWS.get_or_init(|| Catalogue::shipped(include_str!("../catalogues/rescue-layouts.json")))
+}
+
+/// The row for `system`, when the catalogue has one.
+fn layout(layouts: &Catalogue<LayoutRow>, system: OtherSystem) -> Option<&LayoutRow> {
+    let want = LayoutSystem::of(system);
+    layouts
+        .read([want], |s, row| row.system == *s)
+        .known
+        .into_iter()
+        .next()
+        .map(|(_, row)| row)
+}
+
+/// Folders that are never a person, by their kind: hidden ones, and a file system's own
+/// `lost+found`.
+fn never_a_person(name: &str) -> bool {
+    name.starts_with('.') || name == "lost+found"
 }
 
 /// An account ID that names a person (a local, Microsoft or work account), not the system.
@@ -551,33 +633,155 @@ fn is_person_sid(sid: &str) -> bool {
     sid.starts_with("S-1-5-21-") || sid.starts_with("S-1-12-1-")
 }
 
-/// Everyone with a home folder on `drive`, in name order. A home folder that is a link, or is on
-/// another volume, is not a person on this drive and is left out.
+/// Most folders looked at, at the drive's top and in each, while finding where homes live.
+const MAX_TOP: usize = 256;
+const MAX_IN_TOP: usize = 4096;
+/// The largest account list read from a Linux drive.
+const MAX_PASSWD: u64 = 1024 * 1024;
+
+/// A small text file on the drive, read through its handles; `None` if it is not there, not a
+/// plain file, or too large.
+fn small_text(drive: &RescueDrive, names: &[&str]) -> Option<String> {
+    let names: Vec<&OsStr> = names.iter().map(OsStr::new).collect();
+    let f = drive.open_file(&names).ok()?;
+    if f.metadata().ok()?.len() > MAX_PASSWD {
+        return None;
+    }
+    let mut text = String::new();
+    io::Read::read_to_string(&mut io::Read::take(f, MAX_PASSWD), &mut text).ok()?;
+    Some(text)
+}
+
+/// Where homes live on `drive`, found from the drive itself, then the catalogue's usual places:
+/// each a folder's names from the top. Windows: every folder at the top holding a folder with a
+/// settings file (`NTUSER.DAT`, which every Windows profile has). Linux: the folders holding the
+/// homes the drive's own account list (`etc/passwd`) names for people. A Mac: the usual places.
+pub fn home_places(
+    drive: &RescueDrive,
+    system: OtherSystem,
+    row: Option<&LayoutRow>,
+) -> Vec<Vec<OsString>> {
+    let mut out: Vec<Vec<OsString>> = Vec::new();
+    let mut add = |p: Vec<OsString>| {
+        if !p.is_empty() && !out.contains(&p) {
+            out.push(p);
+        }
+    };
+    match system {
+        OtherSystem::Windows => {
+            let mut top = drive.list(&[]).unwrap_or_default();
+            top.sort();
+            for t in top.into_iter().take(MAX_TOP) {
+                let mut inside = drive.list(&[t.as_os_str()]).unwrap_or_default();
+                inside.sort();
+                let holds_a_profile = inside.iter().take(MAX_IN_TOP).any(|c| {
+                    drive
+                        .open_file(&[t.as_os_str(), c.as_os_str(), OsStr::new("NTUSER.DAT")])
+                        .is_ok()
+                });
+                if holds_a_profile {
+                    add(vec![t]);
+                }
+            }
+        }
+        OtherSystem::Linux => {
+            if let Some(passwd) = small_text(drive, &["etc", "passwd"]) {
+                let range = pctwin_scan::uid_range_from_login_defs(
+                    small_text(drive, &["etc", "login.defs"]).as_deref(),
+                );
+                for person in pctwin_scan::people_from_passwd(&passwd, range, Path::new("")) {
+                    let names: Option<Vec<OsString>> = person
+                        .home
+                        .components()
+                        .filter(|c| !matches!(c, Component::RootDir))
+                        .map(|c| match c {
+                            Component::Normal(n) => Some(n.to_os_string()),
+                            _ => None,
+                        })
+                        .collect();
+                    if let Some(mut names) = names
+                        && names.len() >= 2
+                    {
+                        names.pop();
+                        add(names);
+                    }
+                }
+            }
+        }
+        OtherSystem::MacOs => {}
+    }
+    for h in row.map(|r| r.homes.as_slice()).unwrap_or_default() {
+        add(h.iter().map(OsString::from).collect());
+    }
+    out
+}
+
+/// Everyone with a home folder on `drive`, in name order, from the shipped layouts.
 pub fn people_on_drive(
     drive: &RescueDrive,
     system: OtherSystem,
     reader: &mut dyn AccessReader,
 ) -> Vec<RescuedPerson> {
-    let homes = OsStr::new(homes_name(system));
-    let Ok(names) = drive.list(&[homes]) else {
-        return Vec::new();
-    };
-    let mut people: Vec<RescuedPerson> = names
-        .into_iter()
-        .filter_map(|name| {
+    people_on_drive_with(shipped_layouts(), drive, system, reader).0
+}
+
+/// Everyone with a home folder on `drive` ([`home_places`]), in name order, and the folders
+/// beside them that a layout row says are the system's (found, not a person: reported, never
+/// read as someone's). A folder there that no row explains is a person, known by their folder
+/// if their account cannot be read: nothing found is dropped. A home folder that is a link, or
+/// is on another volume, is not a person on this drive and is left out.
+pub fn people_on_drive_with(
+    layouts: &Catalogue<LayoutRow>,
+    drive: &RescueDrive,
+    system: OtherSystem,
+    reader: &mut dyn AccessReader,
+) -> (Vec<RescuedPerson>, Vec<PathBuf>) {
+    let row = layout(layouts, system);
+    let shared: Option<Vec<OsString>> = row
+        .and_then(|r| r.shared.as_ref())
+        .map(|s| s.iter().map(OsString::from).collect());
+    let mut people = Vec::new();
+    let mut not_people = Vec::new();
+    for parent in home_places(drive, system, row) {
+        let parent_names: Vec<&OsStr> = parent.iter().map(OsString::as_os_str).collect();
+        let Ok(names) = drive.list(&parent_names) else {
+            continue;
+        };
+        for name in names {
             let label = name.to_string_lossy().into_owned();
-            if not_a_person(system, &label) {
-                return None;
+            if never_a_person(&label) {
+                continue;
             }
-            let (home_dir, keys) = drive.folders(&[homes, &name]).ok()?;
-            let folder = *keys.last()?;
-            let home = drive.root().join(homes).join(&name);
+            let mut at = parent.clone();
+            at.push(name.clone());
+            let home = at.iter().fold(drive.root().to_path_buf(), |p, n| p.join(n));
+            if shared.as_ref() == Some(&at) {
+                continue;
+            }
+            let known_not = row.is_some_and(|r| {
+                r.not_people
+                    .iter()
+                    .any(|n| n.to_lowercase() == label.to_lowercase())
+            });
+            let at_names: Vec<&OsStr> = at.iter().map(OsString::as_os_str).collect();
+            let Ok((home_dir, keys)) = drive.folders(&at_names) else {
+                continue;
+            };
+            if known_not {
+                not_people.push(home);
+                continue;
+            }
+            let Some(folder) = keys.last().copied() else {
+                continue;
+            };
             let identity = match system {
                 OtherSystem::Windows => {
                     let hive = OsStr::new("NTUSER.DAT");
+                    let mut file = at_names.clone();
+                    file.push(hive);
                     // The settings file must be a plain file in this folder, on this drive,
                     // before its owner is read.
-                    let plain = drive.open_file(&[homes, &name, hive]).is_ok();
+                    let plain = drive.open_file(&file).is_ok();
                     match plain.then(|| reader.read(&home.join(hive), None)) {
                         Some(AccessFact::Known(a)) => a
                             .owner
@@ -588,17 +792,25 @@ pub fn people_on_drive(
                 }
                 OtherSystem::MacOs | OtherSystem::Linux => unix_owner(&home_dir),
             };
-            Some(RescuedPerson {
+            people.push(RescuedPerson {
                 label,
                 name,
+                at,
                 home,
                 folder,
                 identity,
-            })
-        })
-        .collect();
-    people.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.name.cmp(&b.name)));
-    people
+            });
+        }
+    }
+    people.sort_by(|a, b| {
+        a.label
+            .cmp(&b.label)
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.at.cmp(&b.at))
+    });
+    people.dedup_by(|a, b| a.folder == b.folder);
+    not_people.sort();
+    (people, not_people)
 }
 
 #[cfg(unix)]
@@ -616,46 +828,6 @@ fn unix_owner(_home: &File) -> PersonIdentity {
     PersonIdentity::FolderOnly
 }
 
-/// Each person's own folders on a drive of `system`, by their names on disk (the names on disk
-/// are the same in every language on Windows and macOS).
-fn own_folders(system: OtherSystem) -> &'static [(&'static str, FolderRole)] {
-    match system {
-        OtherSystem::Windows => &[
-            ("Desktop", FolderRole::Desktop),
-            ("Documents", FolderRole::Documents),
-            ("Downloads", FolderRole::Downloads),
-            ("Pictures", FolderRole::Pictures),
-            ("Music", FolderRole::Music),
-            ("Videos", FolderRole::Videos),
-        ],
-        OtherSystem::MacOs => &[
-            ("Desktop", FolderRole::Desktop),
-            ("Documents", FolderRole::Documents),
-            ("Downloads", FolderRole::Downloads),
-            ("Pictures", FolderRole::Pictures),
-            ("Music", FolderRole::Music),
-            ("Movies", FolderRole::Videos),
-        ],
-        OtherSystem::Linux => &[
-            ("Desktop", FolderRole::Desktop),
-            ("Documents", FolderRole::Documents),
-            ("Downloads", FolderRole::Downloads),
-            ("Pictures", FolderRole::Pictures),
-            ("Music", FolderRole::Music),
-            ("Videos", FolderRole::Videos),
-        ],
-    }
-}
-
-/// The shared folder of a drive of `system`, when it has one (below the top folder).
-fn shared_folder(system: OtherSystem) -> Option<[&'static str; 2]> {
-    match system {
-        OtherSystem::Windows => Some(["Users", "Public"]),
-        OtherSystem::MacOs => Some(["Users", "Shared"]),
-        OtherSystem::Linux => None,
-    }
-}
-
 /// One folder to read on the drive: whose, under which role, its names from the top, and, for a
 /// folder at the top of a home that is not one of the usual six, its own name (its things are
 /// recorded below the home under that name).
@@ -664,6 +836,8 @@ struct Place_ {
     role: FolderRole,
     names: Vec<OsString>,
     below_home: Option<OsString>,
+    /// How many of `names` lead to the home (or the shared folder) itself.
+    home_depth: usize,
 }
 
 /// A folder at the top of a home that holds apps' own data: read and counted, never moved.
@@ -704,6 +878,9 @@ pub struct RescueScan {
     /// Folders that could not be read (another person's without permission, damaged areas, a
     /// link that leads off the drive).
     pub unreadable: Vec<PathBuf>,
+    /// Folders beside the homes that a layout row says are the system's, not a person's:
+    /// found, not moved, and reported.
+    pub not_people: Vec<PathBuf>,
     roots: BTreeMap<(String, FolderRole), PathBuf>,
     drive: Arc<RescueDrive>,
 }
@@ -773,17 +950,27 @@ pub fn scan_rescued_drive(
     identity: &DriveIdentity,
     reader: &mut dyn AccessReader,
 ) -> Result<RescueScan, RescueError> {
+    scan_rescued_drive_with(shipped_layouts(), root, identity, reader)
+}
+
+/// [`scan_rescued_drive`] with these layouts (a delivered catalogue, or a test's).
+pub fn scan_rescued_drive_with(
+    layouts: &Catalogue<LayoutRow>,
+    root: &Path,
+    identity: &DriveIdentity,
+    reader: &mut dyn AccessReader,
+) -> Result<RescueScan, RescueError> {
     let drive = Arc::new(RescueDrive::open(root, identity)?);
     let system = pctwin_scan::other_system(root).ok_or(RescueError::NoSystemFound)?;
     let laptop = identity.laptop_id();
-    let people = people_on_drive(&drive, system, reader);
+    let row = layout(layouts, system);
+    let (people, not_people) = people_on_drive_with(layouts, &drive, system, reader);
     let mut record = Record::new(laptop);
     let mut unreadable = Vec::new();
     let mut roots = BTreeMap::new();
     let storage = Storage::OtherDrive {
         drive: "rescue".into(),
     };
-    let homes = OsString::from(homes_name(system));
     // Every folder at the top of each person's home is read, not only the usual six: the usual
     // ones under their own role, every other one below the home under its own name (Phase 2
     // adoption, changes 7 and 8: PCTwin works from what it finds). What could not be read is
@@ -793,8 +980,9 @@ pub fn scan_rescued_drive(
         let owner = Owner::Person {
             account_id: p.account_id(),
         };
-        let home = [homes.clone(), p.name.clone()];
-        let names = match drive.list(&[homes.as_os_str(), p.name.as_os_str()]) {
+        let home = p.at.clone();
+        let home_names: Vec<&OsStr> = home.iter().map(OsString::as_os_str).collect();
+        let names = match drive.list(&home_names) {
             Ok(names) => names,
             Err(_) => {
                 unreadable.push(p.home.clone());
@@ -804,10 +992,12 @@ pub fn scan_rescued_drive(
         let mut names = names;
         names.sort();
         for name in names {
-            let own = own_folders(system)
-                .iter()
-                .find(|(n, _)| OsStr::new(n) == name.as_os_str())
-                .map(|(_, role)| *role);
+            let own = row.and_then(|r| {
+                r.folders
+                    .iter()
+                    .find(|f| OsStr::new(&f.name) == name.as_os_str())
+                    .map(|f| f.role)
+            });
             let mut at = home.to_vec();
             at.push(name.clone());
             places.push(Place_ {
@@ -815,15 +1005,17 @@ pub fn scan_rescued_drive(
                 role: own.unwrap_or(FolderRole::Home),
                 names: at,
                 below_home: own.is_none().then_some(name),
+                home_depth: home.len(),
             });
         }
     }
-    if let Some(shared) = shared_folder(system) {
+    if let Some(shared) = row.and_then(|r| r.shared.as_ref()) {
         places.push(Place_ {
             owner: Owner::Shared,
             role: FolderRole::Public,
             names: shared.iter().map(OsString::from).collect(),
             below_home: None,
+            home_depth: shared.len(),
         });
     }
     let os = match system {
@@ -839,6 +1031,7 @@ pub fn scan_rescued_drive(
             role,
             names,
             below_home,
+            home_depth,
         } = place_;
         let names: Vec<&OsStr> = names.iter().map(OsString::as_os_str).collect();
         let folder = names
@@ -869,7 +1062,7 @@ pub fn scan_rescued_drive(
         unreadable.extend(scan.unreadable);
         let home_parts: Vec<String> = names
             .iter()
-            .skip(2)
+            .skip(home_depth)
             .map(|n| n.to_string_lossy().into_owned())
             .collect();
         for mut item in scan.items {
@@ -942,6 +1135,7 @@ pub fn scan_rescued_drive(
         record,
         read_plan: RESCUE_READ,
         unreadable,
+        not_people,
         roots,
         drive,
     })

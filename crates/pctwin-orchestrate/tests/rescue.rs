@@ -424,3 +424,146 @@ fn unreadable_hardware_is_said_honestly() {
         Lock::AppleChip.words()
     );
 }
+
+/// Phase 2 adoption, changes 7 and 8: where homes live is found on the drive itself. A Windows
+/// profile in a place no layout row names is still found (it has a settings file); the shared
+/// folder and the system's own folders come from the layout rows, and the system's are reported.
+#[test]
+fn homes_are_found_wherever_the_drive_keeps_them() {
+    use pctwin_orchestrate::rescue::{people_on_drive_with, shipped_layouts};
+    let d = windows_drive();
+    touch(&d.path().join("Profiles/Zara/NTUSER.DAT"), b"hive");
+    touch(&d.path().join("Profiles/Zara/Documents/z.txt"), b"z");
+    touch(&d.path().join("Data/notes/readme.txt"), b"not a home");
+    assert!(
+        shipped_layouts().report().is_clean(),
+        "{:?}",
+        shipped_layouts().report()
+    );
+    let (people, not_people) = people_on_drive_with(
+        shipped_layouts(),
+        &opened(d.path()),
+        OtherSystem::Windows,
+        &mut Owners(vec![]),
+    );
+    let labels: Vec<&str> = people.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(labels, ["Ada", "Leftover", "Tunde", "Zara", "bisi"]);
+    let zara = people.iter().find(|p| p.label == "Zara").unwrap();
+    assert_eq!(zara.at, ["Profiles", "Zara"]);
+    assert_eq!(not_people, [d.path().join("Users").join("Default")]);
+
+    let r = scan_rescued_drive(d.path(), &real_id(d.path()), &mut Owners(vec![])).unwrap();
+    assert_eq!(r.not_people, [d.path().join("Users").join("Default")]);
+    assert!(r.record.items.iter().any(|i| {
+        i.path
+            .parts()
+            .last()
+            .is_some_and(|n| n.display() == "z.txt")
+    }));
+}
+
+/// The no-row proof: with no layout rows at all, nothing on the drive is dropped. Every folder
+/// beside a profile is someone's, known by its folder, the usual folders are read under the home
+/// by their own names, and nothing is called the system's.
+#[test]
+fn with_no_layout_rows_nothing_found_is_dropped() {
+    use pctwin_catalogue::Catalogue;
+    use pctwin_orchestrate::rescue::{LayoutRow, scan_rescued_drive_with};
+    let d = windows_drive();
+    let none = Catalogue::<LayoutRow>::shipped(
+        r#"{"format":1,"catalogue":"rescue-layouts","version":1,"rows":[]}"#,
+    );
+    let r =
+        scan_rescued_drive_with(&none, d.path(), &real_id(d.path()), &mut Owners(vec![])).unwrap();
+    let labels: Vec<&str> = r.people.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        ["Ada", "Default", "Leftover", "Public", "Tunde", "bisi"]
+    );
+    assert!(r.not_people.is_empty());
+    let shared = r.record.items.iter().any(|i| i.owner == Owner::Shared);
+    assert!(!shared, "with no row, no folder is called the shared one");
+    // Ada's thesis is still moved, under her home by its folder's name.
+    assert!(r.record.items.iter().any(|i| {
+        i.place.role == FolderRole::Home
+            && i.inclusion == Inclusion::Included
+            && i.path
+                .parts()
+                .last()
+                .is_some_and(|n| n.display() == "thesis.docx")
+    }));
+}
+
+/// The new-row proof: a layout added only as a signed row (another place for homes, another
+/// usual folder, another system folder) works with no code change.
+#[test]
+fn a_new_signed_layout_row_works_with_no_code_change() {
+    use pctwin_catalogue::{Catalogue, test_key};
+    use pctwin_orchestrate::rescue::{LayoutRow, scan_rescued_drive_with};
+    let d = windows_drive();
+    touch(&d.path().join("Accounts/Kemi/Scans/s.pdf"), b"pdf");
+    let bytes = br#"{"format":1,"catalogue":"rescue-layouts","version":2,"rows":[
+        {"system":"windows","homes":[["Users"],["Accounts"]],"shared":["Users","Public"],
+         "not-people":["Default","Leftover"],
+         "folders":[{"name":"Documents","role":"documents"},{"name":"Scans","role":"pictures"}]},
+        {"system":"windows","homes":[[".."]]},
+        {"system":"beos"}
+    ]}"#;
+    let sig = test_key::sign(bytes, "rescue-layouts", 2);
+    let rows = Catalogue::<LayoutRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    assert_eq!(rows.rows().len(), 1);
+    assert_eq!(rows.report().skipped.len(), 2);
+    let r =
+        scan_rescued_drive_with(&rows, d.path(), &real_id(d.path()), &mut Owners(vec![])).unwrap();
+    let labels: Vec<&str> = r.people.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(labels, ["Ada", "Kemi", "Tunde", "bisi"]);
+    assert_eq!(
+        r.not_people,
+        [
+            d.path().join("Users").join("Default"),
+            d.path().join("Users").join("Leftover")
+        ]
+    );
+    assert!(r.record.items.iter().any(|i| {
+        i.place.role == FolderRole::Pictures
+            && i.path
+                .parts()
+                .last()
+                .is_some_and(|n| n.display() == "s.pdf")
+    }));
+}
+
+/// A Linux drive's homes come from its own account list, wherever they are.
+#[test]
+fn a_linux_drives_homes_come_from_its_account_list() {
+    use pctwin_orchestrate::rescue::{home_places, shipped_layouts};
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path();
+    touch(&r.join("etc/os-release"), b"ID=debian");
+    touch(
+        &r.join("etc/passwd"),
+        b"root:x:0:0:root:/root:/bin/bash\nada:x:1000:1000:Ada,,,:/srv/people/ada:/bin/bash\nsvc:x:999:999::/var/lib/svc:/usr/sbin/nologin\nbo:x:1001:1001::/home/bo:/bin/zsh\n",
+    );
+    touch(&r.join("srv/people/ada/Documents/a.txt"), b"a");
+    touch(&r.join("home/bo/b.txt"), b"b");
+    touch(&r.join("home/lost+found/x"), b"x");
+    let drive = opened(r);
+    let places = home_places(
+        &drive,
+        OtherSystem::Linux,
+        shipped_layouts()
+            .rows()
+            .iter()
+            .find(|row| row.homes == [["home"]]),
+    );
+    assert_eq!(
+        places,
+        [
+            vec![std::ffi::OsString::from("srv"), "people".into()],
+            vec!["home".into()]
+        ]
+    );
+    let scan = scan_rescued_drive(r, &real_id(r), &mut Owners(vec![])).unwrap();
+    let labels: Vec<&str> = scan.people.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(labels, ["ada", "bo"]);
+}

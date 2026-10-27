@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "catalogue": "rescue-layouts",
+  "version": 1,
+  "rows": [
+    {"system": "windows", "homes": [["Users"]], "shared": ["Users", "Public"], "not-people": ["Default", "Default User", "All Users", "defaultapppool"], "folders": [{"name": "Desktop", "role": "desktop"}, {"name": "Documents", "role": "documents"}, {"name": "Downloads", "role": "downloads"}, {"name": "Pictures", "role": "pictures"}, {"name": "Music", "role": "music"}, {"name": "Videos", "role": "videos"}]},
+    {"system": "mac", "homes": [["Users"]], "shared": ["Users", "Shared"], "not-people": ["Guest"], "folders": [{"name": "Desktop", "role": "desktop"}, {"name": "Documents", "role": "documents"}, {"name": "Downloads", "role": "downloads"}, {"name": "Pictures", "role": "pictures"}, {"name": "Music", "role": "music"}, {"name": "Movies", "role": "videos"}]},
+    {"system": "linux", "homes": [["home"]], "folders": [{"name": "Desktop", "role": "desktop"}, {"name": "Documents", "role": "documents"}, {"name": "Downloads", "role": "downloads"}, {"name": "Pictures", "role": "pictures"}, {"name": "Music", "role": "music"}, {"name": "Videos", "role": "videos"}]}
+  ]
+}
