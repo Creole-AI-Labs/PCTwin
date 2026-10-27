@@ -2,3 +2,5 @@
 //! as adopted with its `ADOPTION.md`, changes 1 to 8).
 
 pub mod component;
+pub mod content;
+pub mod sniff;

@@ -15,6 +15,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
 blake3 = "1.8"
+base64 = "0.22.1"
+pctwin-settings = { path = "../pctwin-settings" }
+# Other apps' SQLite databases: read and backed up through SQLite's own online backup, never
+# copied raw while live. Bundled SQLite (3.54.1 with 0.41), past the WAL-reset race fixed in
+# 3.51.3 (research notes, 27 October 2026). MIT; SQLite itself is public domain.
+rusqlite = { version = "0.41.0", features = ["bundled", "backup"] }
+# Private snapshot folders for reading a live database's tables (already in the tree).
+tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"
