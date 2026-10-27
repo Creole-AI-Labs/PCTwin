@@ -517,9 +517,7 @@ fn compare_linux(old: &LinuxSource, found: &LinuxSource) -> SameMaker {
             // only matches as the end of the other, and only because rpm itself already trusts
             // the key (the signature fact), which a look-alike short ID cannot fake.
             let (a, b) = (a.to_ascii_lowercase(), b.to_ascii_lowercase());
-            let ok = is_hex_key(&a)
-                && is_hex_key(&b)
-                && (a == b || (a.len() > b.len() && a.ends_with(&b)) || b.ends_with(&a));
+            let ok = is_hex_key(&a) && is_hex_key(&b) && (a.ends_with(&b) || b.ends_with(&a));
             if ok {
                 SameMaker::Yes {
                     by: MatchedBy::SameKey,

@@ -224,8 +224,6 @@ pub fn parse_pkg(ran: &Result<Ran, RunError>) -> PkgSignature {
         || status.starts_with("signed Apple Software")
     {
         Signature::Trusted
-    } else if status.starts_with("signed by a certificate") || status.contains("untrusted") {
-        Signature::NotTrusted { why: status.into() }
     } else if status.is_empty() {
         Signature::NotChecked {
             why: format!("pkgutil could not check it: {}", first_line(&r.stderr)),
@@ -393,6 +391,28 @@ Runtime Version=14.0.0
             parse_display(&err(&intel, 0).unwrap()).arch,
             Some(Arch::X64)
         );
+        let old = DISPLAY.replace("universal (x86_64 arm64)", "thin (i386)");
+        assert_eq!(parse_display(&err(&old, 0).unwrap()).arch, Some(Arch::X86));
+        let both = DISPLAY.replace("universal (x86_64 arm64)", "universal (i386 x86_64)");
+        let set = ArchSet {
+            x86: true,
+            x64: true,
+            arm64: false,
+        };
+        assert_eq!(
+            parse_display(&err(&both, 0).unwrap()).arch,
+            Some(Arch::Several(set))
+        );
+        let three = DISPLAY.replace("universal (x86_64 arm64)", "universal (i386 arm64)");
+        let set = ArchSet {
+            x86: true,
+            x64: false,
+            arm64: true,
+        };
+        assert_eq!(
+            parse_display(&err(&three, 0).unwrap()).arch,
+            Some(Arch::Several(set))
+        );
         let odd = DISPLAY.replace("universal (x86_64 arm64)", "thin (ppc)");
         assert_eq!(parse_display(&err(&odd, 0).unwrap()).arch, None);
         let adhoc = DISPLAY.replace("TeamIdentifier=SKMME9E2Y8", "TeamIdentifier=not set");
@@ -552,6 +572,7 @@ Runtime Version=14.0.0
             parse_pkg(&Err(RunError::TimedOut)).signature,
             Signature::NotChecked { .. }
         ));
+        assert!(!parse_pkg(&Err(RunError::TimedOut)).notarised);
         let bad_team = PKG.replace("(SKMME9E2Y8)", "(short)");
         assert_eq!(parse_pkg(&out(&bad_team, 0)).team, None);
         assert_eq!(
@@ -564,14 +585,14 @@ Runtime Version=14.0.0
     struct Canned(Vec<(&'static str, Result<Ran, RunError>)>);
     impl Runner for Canned {
         fn run(&self, call: &Call) -> Result<Ran, RunError> {
-            let key = format!(
-                "{} {}",
-                call.program.display(),
-                call.args[0].to_string_lossy()
-            );
+            let args: Vec<String> = call.args[..call.args.len() - 1]
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            let key = format!("{} {}", call.program.display(), args.join(" "));
             self.0
                 .iter()
-                .find(|(k, _)| key.ends_with(k))
+                .find(|(k, _)| key.contains(k))
                 .map(|(_, r)| r.clone())
                 .unwrap_or(Err(RunError::NotStarted(key)))
         }
@@ -583,7 +604,7 @@ Runtime Version=14.0.0
         let app = Canned(vec![
             ("codesign -dv", err(DISPLAY, 0)),
             ("codesign --verify", err("", 0)),
-            ("spctl --assess", err(ok, 0)),
+            ("spctl --assess --type execute", err(ok, 0)),
         ]);
         let f = check_app(&app, Path::new("/x.app"), Duration::from_secs(1));
         assert_eq!(f.signature, Signature::Trusted);
@@ -600,7 +621,7 @@ Runtime Version=14.0.0
             ("codesign -dv", err(DISPLAY, 0)),
             ("codesign --verify", err("", 0)),
             (
-                "spctl --assess",
+                "spctl --assess --type execute",
                 err("/x.app: rejected\nsource=Unnotarized Developer ID\n", 3),
             ),
         ]);
@@ -618,7 +639,7 @@ Runtime Version=14.0.0
         let pkg = Canned(vec![
             ("pkgutil --check-signature", out(PKG, 0)),
             (
-                "spctl --assess",
+                "spctl --assess --type install",
                 err("/x.pkg: accepted\nsource=Notarized Developer ID\n", 0),
             ),
         ]);
@@ -628,7 +649,7 @@ Runtime Version=14.0.0
         let pkg_rejected = Canned(vec![
             ("pkgutil --check-signature", out(PKG, 0)),
             (
-                "spctl --assess",
+                "spctl --assess --type install",
                 err("/x.pkg: rejected\nsource=Unnotarized Developer ID\n", 3),
             ),
         ]);
@@ -642,7 +663,10 @@ Runtime Version=14.0.0
                 "pkgutil --check-signature",
                 out("   Status: no signature\n", 1),
             ),
-            ("spctl --assess", err("/x.pkg: rejected\n", 3)),
+            (
+                "spctl --assess --type install",
+                err("/x.pkg: rejected\n", 3),
+            ),
         ]);
         let f = check_pkg(&unsigned, Path::new("/x.pkg"), Duration::from_secs(1));
         assert_eq!(f.signature, Signature::Missing);

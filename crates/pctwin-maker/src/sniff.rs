@@ -356,7 +356,9 @@ mod tests {
         assert_eq!(sniff(b"PK\x03\x04", &[]).format, Format::Zip);
         let fp = sniff(b"[Flatpak Ref]\nName=org.example.App\n", &[]);
         assert_eq!(fp.format, Format::FlatpakRef);
-        assert!(fp.arch.is_some_and(|a| a.runs_on(Arch::Arm64)));
+        for a in [Arch::X86, Arch::X64, Arch::Arm64] {
+            assert!(fp.arch.is_some_and(|f| f.runs_on(a)));
+        }
 
         let mut koly = b"koly".to_vec();
         koly.resize(TAIL, 0);

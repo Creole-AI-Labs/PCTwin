@@ -462,3 +462,49 @@ fn a_flatpak_reference_is_judged_by_its_remote_and_key() {
     let v = check(&big, &e, &fake, &Limits::default()).unwrap();
     assert!(matches!(v.signature, Signature::Broken { why } if why.contains("too large")));
 }
+
+#[test]
+fn a_flatpak_reference_of_exactly_the_limit_is_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut full = REF.to_owned();
+    full.push_str(&"#".repeat(pctwin_maker::linux::MAX_FLATPAKREF - REF.len()));
+    let p = write(&dir, "full.flatpakref", full.as_bytes());
+    let e = Expected {
+        system: System::Linux,
+        maker: Maker::Mac(MacTeam {
+            team_id: "ABCDE12345".into(),
+        }),
+        formats: vec![Format::FlatpakRef],
+        arch: Arch::X64,
+        bytes: None,
+    };
+    let v = check(
+        &p,
+        &e,
+        &Fake::new(Signature::Missing, false),
+        &Limits::default(),
+    )
+    .unwrap();
+    assert_eq!(v.signature, Signature::Trusted);
+}
+
+#[test]
+fn the_old_copys_maker_needs_a_signed_windows_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let page = write(&dir, "app.exe", b"<html>");
+    let e = pctwin_maker::windows_maker_of(&page).unwrap_err();
+    assert!(e.contains("not a Windows program"), "{e}");
+    let unsigned = write(&dir, "app2.exe", &tiny_pe());
+    let e = pctwin_maker::windows_maker_of(&unsigned).unwrap_err();
+    assert!(e.contains("not signed"), "{e}");
+    let mut c = cfb::CompoundFile::create(std::io::Cursor::new(Vec::new())).unwrap();
+    c.set_storage_clsid(
+        "/",
+        uuid::Uuid::from_u128(0x000C1084_0000_0000_C000_000000000046),
+    )
+    .unwrap();
+    c.flush().unwrap();
+    let msi = write(&dir, "app.msi", &c.into_inner().into_inner());
+    let e = pctwin_maker::windows_maker_of(&msi).unwrap_err();
+    assert!(e.contains("not signed"), "{e}");
+}

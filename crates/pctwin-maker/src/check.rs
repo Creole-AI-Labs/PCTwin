@@ -592,4 +592,37 @@ mod tests {
         assert_eq!(s, Signature::Broken { why: "bad".into() });
         assert_eq!(m, None);
     }
+
+    #[test]
+    fn the_same_bytes_in_another_file_are_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.exe");
+        let b = dir.path().join("b.exe");
+        std::fs::write(&a, b"same").unwrap();
+        std::fs::write(&b, b"same").unwrap();
+        let mut held_file = open_held(&a).unwrap();
+        let first = fingerprint(&mut held_file).unwrap();
+        let held = same_file::Handle::from_file(held_file.try_clone().unwrap()).unwrap();
+        let facts = || Facts {
+            format: Format::WindowsProgram,
+            arch: None,
+            signature: Signature::Missing,
+            same_maker: SameMaker::Unknown { why: String::new() },
+            malware: Malware::Unavailable { why: String::new() },
+            found_maker: None,
+        };
+        let e = Expected {
+            system: System::Windows,
+            maker: Maker::Mac(MacTeam {
+                team_id: "ABCDE12345".into(),
+            }),
+            formats: vec![Format::WindowsProgram],
+            arch: Arch::X64,
+            bytes: None,
+        };
+        let same = finish(&a, &e, &mut held_file, &held, first, facts()).unwrap();
+        assert_eq!(same.steady, Steady::Yes);
+        let other = finish(&b, &e, &mut held_file, &held, first, facts()).unwrap();
+        assert_eq!(other.steady, Steady::Changed);
+    }
 }

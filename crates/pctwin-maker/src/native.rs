@@ -114,3 +114,94 @@ impl<R: Runner> SystemChecks for NativeChecks<R> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run::{Call, Ran, RunError};
+
+    /// Answers every call with the same output.
+    struct Always(String);
+    impl Runner for Always {
+        fn run(&self, _: &Call) -> Result<Ran, RunError> {
+            Ok(Ran {
+                code: Some(0),
+                stdout: self.0.clone(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    fn native(out: &str) -> NativeChecks<Always> {
+        NativeChecks {
+            runner: Always(out.into()),
+        }
+    }
+
+    const P: &str = "/x/setup";
+
+    #[test]
+    fn windows_files_are_asked_of_windows_only_on_windows() {
+        let json = r#"{"status":"Valid","kind":"Authenticode","message":"","signer":""}"#;
+        let s = native(json).signature(Path::new(P), Format::WindowsInstaller, &Limits::default());
+        if cfg!(windows) {
+            assert_eq!(s.signature, Signature::Trusted);
+            assert!(s.embedded);
+        } else {
+            assert!(matches!(s.signature, Signature::NotChecked { .. }));
+            assert!(!s.embedded);
+        }
+    }
+
+    #[test]
+    fn packages_without_a_checkable_signature() {
+        let n = native("");
+        for f in [Format::DebPackage, Format::LinuxProgram] {
+            let s = n.signature(Path::new(P), f, &Limits::default());
+            assert_eq!(s.signature, Signature::Missing);
+            assert!(!s.embedded);
+            assert!(s.maker.is_none());
+        }
+        for f in [Format::MacDiskImage, Format::Zip, Format::Unknown] {
+            let s = n.signature(Path::new(P), f, &Limits::default());
+            assert!(matches!(s.signature, Signature::NotChecked { .. }));
+            assert!(!s.embedded);
+        }
+    }
+
+    #[test]
+    fn rpm_is_asked_of_linux_only_on_linux() {
+        let ok = "x.rpm:\n    Header V4 RSA/SHA256 Signature, key ID 24901d0c: OK\n    Header SHA256 digest: OK\n";
+        let n = native(ok);
+        let s = n.signature(Path::new(P), Format::RpmPackage, &Limits::default());
+        let m = n.malware(
+            Path::new(P),
+            Format::RpmPackage,
+            &s.signature,
+            &Limits::default(),
+        );
+        if cfg!(target_os = "linux") {
+            assert_eq!(s.signature, Signature::Trusted);
+            assert!(s.embedded);
+            assert!(matches!(m, Malware::CoveredBySystemTrust { .. }));
+        } else {
+            assert!(matches!(s.signature, Signature::NotChecked { .. }));
+            assert!(matches!(m, Malware::Unavailable { .. }));
+        }
+        let mac = n.signature(Path::new(P), Format::MacInstaller, &Limits::default());
+        if !cfg!(target_os = "macos") {
+            assert!(matches!(mac.signature, Signature::NotChecked { .. }));
+        }
+    }
+
+    #[test]
+    fn other_kinds_have_no_malware_check() {
+        let m = native("").malware(
+            Path::new(P),
+            Format::Zip,
+            &Signature::Trusted,
+            &Limits::default(),
+        );
+        assert!(matches!(m, Malware::Unavailable { .. }));
+    }
+}

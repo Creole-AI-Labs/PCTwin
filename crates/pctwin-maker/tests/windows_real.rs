@@ -371,3 +371,190 @@ fn defender_meanings_pinned_with_the_eicar_test_file() {
     }
     let _ = std::fs::remove_file(&test);
 }
+
+#[test]
+fn a_changed_old_copy_names_no_maker() {
+    let original = signed_programs().remove(0);
+    let dir = tempfile::tempdir().unwrap();
+    let copy = copy_into(&dir, &original);
+    let mut bytes = std::fs::read(&copy).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0x01;
+    std::fs::write(&copy, &bytes).unwrap();
+    let e = windows_maker_of(&copy).unwrap_err();
+    assert!(e.contains("changed after it was signed"), "{e}");
+}
+
+/// The signing certificate and the signature bytes of a real signed program.
+fn real_signature() -> (Vec<u8>, x509_cert::Certificate) {
+    use object::read::pe::PeFile64;
+    let p = signed_programs()
+        .into_iter()
+        .find(|p| {
+            let d = std::fs::read(p).unwrap();
+            PeFile64::parse(&d[..]).is_ok()
+        })
+        .expect("a 64-bit signed program");
+    let data = std::fs::read(&p).unwrap();
+    let pe = PeFile64::parse(&data[..]).unwrap();
+    let entry = authenticode::AttributeCertificateIterator::new(&pe)
+        .unwrap()
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap();
+    let bytes = entry.data.to_vec();
+    let sig = authenticode::AuthenticodeSignature::from_bytes(&bytes).unwrap();
+    let leaf = signer_cert(&bytes);
+    let _ = sig;
+    (bytes, leaf)
+}
+
+fn signed_data(bytes: &[u8]) -> cms::signed_data::SignedData {
+    use der::Decode;
+    let mut r = der::SliceReader::new(bytes).unwrap();
+    let info = cms::content_info::ContentInfo::decode(&mut r).unwrap();
+    info.content.decode_as().unwrap()
+}
+
+fn signer_cert(bytes: &[u8]) -> x509_cert::Certificate {
+    let sd = signed_data(bytes);
+    let cms::signed_data::SignerIdentifier::IssuerAndSerialNumber(id) =
+        &sd.signer_infos.0.as_slice()[0].sid
+    else {
+        panic!("signer by key")
+    };
+    sd.certificates
+        .unwrap()
+        .0
+        .iter()
+        .find_map(|c| match c {
+            cms::cert::CertificateChoices::Certificate(c)
+                if c.tbs_certificate.issuer == id.issuer
+                    && c.tbs_certificate.serial_number == id.serial_number =>
+            {
+                Some(c.clone())
+            }
+            _ => None,
+        })
+        .unwrap()
+}
+
+/// The signature with its certificate list changed.
+fn with_certificates(
+    bytes: &[u8],
+    change: impl FnOnce(&mut Vec<cms::cert::CertificateChoices>),
+) -> Vec<u8> {
+    use der::Encode;
+    let mut sd = signed_data(bytes);
+    let mut certs: Vec<_> = sd.certificates.take().unwrap().0.into_vec();
+    change(&mut certs);
+    sd.certificates = Some(cms::signed_data::CertificateSet(
+        der::asn1::SetOfVec::try_from(certs).unwrap(),
+    ));
+    let info = cms::content_info::ContentInfo {
+        content_type: const_oid::db::rfc5911::ID_SIGNED_DATA,
+        content: der::Any::encode_from(&sd).unwrap(),
+    };
+    info.to_der().unwrap()
+}
+
+#[test]
+fn the_signer_is_the_one_certificate_with_its_issuer_and_serial() {
+    use pctwin_maker::signer::read_signature;
+    let (bytes, leaf) = real_signature();
+    let ours = read_signature(&bytes).unwrap().signer.unwrap();
+    let theirs = pctwin_maker::signer::signer_from_certificate(&leaf).unwrap();
+    assert_eq!(ours, theirs);
+
+    // Another certificate from the same issuer, with another serial, is not the signer.
+    let other_serial = with_certificates(&bytes, |certs| {
+        let mut twin = leaf.clone();
+        twin.tbs_certificate.serial_number =
+            x509_cert::serial_number::SerialNumber::new(&[0x42]).unwrap();
+        certs.push(cms::cert::CertificateChoices::Certificate(twin));
+    });
+    assert_eq!(read_signature(&other_serial).unwrap().signer.unwrap(), ours);
+
+    // Two certificates both naming the signer: refused.
+    let twice = with_certificates(&bytes, |certs| {
+        let mut twin = leaf.clone();
+        twin.signature = der::asn1::BitString::from_bytes(&[1, 2, 3]).unwrap();
+        certs.push(cms::cert::CertificateChoices::Certificate(twin));
+    });
+    let e = read_signature(&twice).unwrap().signer.unwrap_err();
+    assert!(e.contains("two certificates"), "{e}");
+
+    // The signer's certificate missing.
+    let missing = with_certificates(&bytes, |certs| {
+        certs.retain(|c| !matches!(c, cms::cert::CertificateChoices::Certificate(c) if c == &leaf));
+    });
+    let e = read_signature(&missing).unwrap().signer.unwrap_err();
+    assert!(e.contains("missing"), "{e}");
+
+    // A signed digest of the wrong length is not a signature.
+    let mut wrong = bytes.clone();
+    let digest = authenticode::AuthenticodeSignature::from_bytes(&bytes)
+        .unwrap()
+        .digest()
+        .to_vec();
+    let at = wrong
+        .windows(digest.len())
+        .position(|w| w == &digest[..])
+        .unwrap();
+    // Shorten the OCTET STRING's length by one and drop a byte: the length is then wrong.
+    if wrong[at - 1] as usize == digest.len() {
+        wrong[at - 1] -= 1;
+        wrong.remove(at);
+        assert!(read_signature(&wrong).is_err());
+    }
+}
+
+/// The certificate with its subject's names replaced.
+fn with_subject(leaf: &x509_cert::Certificate, rdns: Vec<(&str, &str)>) -> x509_cert::Certificate {
+    use std::str::FromStr;
+    let text: Vec<String> = rdns.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    let mut c = leaf.clone();
+    c.tbs_certificate.subject = x509_cert::name::Name::from_str(&text.join(",")).unwrap();
+    c
+}
+
+#[test]
+fn subject_names_are_read_whatever_their_order() {
+    use pctwin_maker::signer::signer_from_certificate;
+    let (_, leaf) = real_signature();
+    // A part PCTwin does not read (a department) comes first.
+    let c = with_subject(
+        &leaf,
+        vec![
+            ("OU", "Tools"),
+            ("CN", "Example Ltd"),
+            ("O", "Example Ltd"),
+            ("C", "NG"),
+        ],
+    );
+    let s = signer_from_certificate(&c).unwrap().subject;
+    assert_eq!(s.organization.as_deref(), Some("Example Ltd"));
+    assert_eq!(s.common_name.as_deref(), Some("Example Ltd"));
+    assert_eq!(s.country.as_deref(), Some("NG"));
+    // The same name twice is fine; two different ones are refused.
+    let c = with_subject(
+        &leaf,
+        vec![
+            ("CN", "Example Ltd"),
+            ("CN", "Example Ltd"),
+            ("O", "Example Ltd"),
+        ],
+    );
+    assert!(signer_from_certificate(&c).is_ok());
+    let c = with_subject(
+        &leaf,
+        vec![
+            ("CN", "Example Ltd"),
+            ("CN", "Other Ltd"),
+            ("O", "Example Ltd"),
+        ],
+    );
+    let e = signer_from_certificate(&c).unwrap_err();
+    assert!(e.contains("twice"), "{e}");
+}

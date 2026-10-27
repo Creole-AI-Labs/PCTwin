@@ -79,7 +79,7 @@ pub fn parse_checksig(ran: &Result<Ran, RunError>) -> RpmCheck {
     let text = format!("{}\n{}", r.stdout, r.stderr);
     let mut sigs = Vec::new();
     let mut digests_ok = true;
-    let mut digests = 0;
+    let mut saw_digest = false;
     for line in text.lines().map(str::trim) {
         let Some((what, result)) = line.rsplit_once(": ") else {
             continue;
@@ -88,7 +88,7 @@ pub fn parse_checksig(ran: &Result<Ran, RunError>) -> RpmCheck {
         if what.contains("Signature") {
             sigs.push((what, result));
         } else if what.contains("digest") {
-            digests += 1;
+            saw_digest = true;
             digests_ok &= result == "OK";
         }
     }
@@ -97,7 +97,7 @@ pub fn parse_checksig(ran: &Result<Ran, RunError>) -> RpmCheck {
         Signature::Broken {
             why: "rpm says the package does not match its signature or digest".into(),
         }
-    } else if digests == 0 {
+    } else if !saw_digest {
         Signature::NotChecked {
             why: "rpm gave an answer PCTwin cannot read".into(),
         }
@@ -302,7 +302,9 @@ mod tests {
         assert_eq!(parse_arch(&out("x86_64")), Some(Arch::X64));
         assert_eq!(parse_arch(&out("aarch64\n")), Some(Arch::Arm64));
         assert_eq!(parse_arch(&out("i686")), Some(Arch::X86));
-        assert!(parse_arch(&out("noarch")).is_some_and(|a| a.runs_on(Arch::Arm64)));
+        for a in [Arch::X86, Arch::X64, Arch::Arm64] {
+            assert!(parse_arch(&out("noarch")).is_some_and(|f| f.runs_on(a)));
+        }
         assert_eq!(parse_arch(&out("ppc64le")), None);
         let failed = Ok(Ran {
             code: Some(1),
@@ -374,5 +376,17 @@ RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
         assert_eq!(c.args.last().unwrap(), p.as_os_str());
         assert_eq!(c.args.len(), 3);
         assert_eq!(arch_call(p, Duration::from_secs(1)).args.len(), 5);
+    }
+
+    #[test]
+    fn flatpak_reference_edges() {
+        // A blank line or comment before the keys is fine.
+        let spaced = REF.replace("Title=Example", "\n# a comment\nTitle=Example");
+        assert!(parse_flatpakref(spaced.as_bytes()).is_ok());
+        // Exactly the size limit is read.
+        let mut full = REF.to_owned();
+        full.push_str(&"#".repeat(MAX_FLATPAKREF - REF.len()));
+        assert_eq!(full.len(), MAX_FLATPAKREF);
+        assert!(parse_flatpakref(full.as_bytes()).is_ok());
     }
 }

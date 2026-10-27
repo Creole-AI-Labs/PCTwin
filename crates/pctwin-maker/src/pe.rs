@@ -102,8 +102,8 @@ fn layout(head: &[u8], size: u64) -> Result<Layout, String> {
     sections.sort_unstable_by_key(|s| s.0);
     let check_sum = (opt + 64) as u64;
     let security_dir = security_dir as u64;
-    if !(check_sum + 4 <= security_dir && security_dir + 8 <= after_header && after_header <= size)
-    {
+    // The checksum always comes before the directories (fixed offsets), so only these can be wrong.
+    if !(security_dir + 8 <= after_header && after_header <= size) {
         return Err(bad("header parts out of order"));
     }
     let mut total = after_header;
@@ -371,5 +371,116 @@ mod tests {
             b[0x400..0x404].copy_from_slice(&len.to_le_bytes());
             assert!(matches!(read(&b), PeSignature::Broken(w) if w.contains("first entry")));
         }
+    }
+
+    /// The same program as a 32-bit PE: a shorter optional header.
+    fn tiny_pe32(table: bool) -> Vec<u8> {
+        let mut b = vec![0u8; 0x400];
+        b[0] = b'M';
+        b[1] = b'Z';
+        b[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        b[0x80..0x84].copy_from_slice(b"PE\0\0");
+        let coff = 0x84;
+        b[coff..coff + 2].copy_from_slice(&0x014Cu16.to_le_bytes());
+        b[coff + 2..coff + 4].copy_from_slice(&1u16.to_le_bytes());
+        b[coff + 16..coff + 18].copy_from_slice(&224u16.to_le_bytes());
+        let opt = coff + 20;
+        b[opt..opt + 2].copy_from_slice(&0x10Bu16.to_le_bytes());
+        b[opt + 60..opt + 64].copy_from_slice(&0x200u32.to_le_bytes());
+        b[opt + 92..opt + 96].copy_from_slice(&16u32.to_le_bytes());
+        let sec = opt + 224;
+        b[sec + 16..sec + 20].copy_from_slice(&0x200u32.to_le_bytes());
+        b[sec + 20..sec + 24].copy_from_slice(&0x200u32.to_le_bytes());
+        if table {
+            let dir = opt + 96 + 32;
+            b[dir..dir + 4].copy_from_slice(&0x400u32.to_le_bytes());
+            b[dir + 4..dir + 8].copy_from_slice(&16u32.to_le_bytes());
+            b.extend([0u8; 16]);
+        }
+        b
+    }
+
+    #[test]
+    fn layout_of_a_32_bit_program_matches_the_authenticode_crate() {
+        use object::read::pe::PeFile32;
+        let b = tiny_pe32(true);
+        let pe = PeFile32::parse(&b[..]).unwrap();
+        let theirs = authenticode::PeTrait::offsets(&pe).unwrap();
+        let ours = layout(&b, b.len() as u64).unwrap();
+        assert_eq!(ours.check_sum, theirs.check_sum as u64);
+        assert_eq!(ours.security_dir, theirs.security_data_dir as u64);
+        assert_eq!(ours.after_header, theirs.after_header as u64);
+        assert_eq!(ours.table, Some((0x400, 16)));
+        assert_eq!(layout(&tiny_pe32(false), 0x400).unwrap().table, None);
+    }
+
+    #[test]
+    fn a_table_needs_a_fifth_directory_an_address_and_a_size() {
+        let opt = 0x84 + 20;
+        // Only four directories: there is no certificate table to read.
+        let mut b = tiny_pe(Some(&[0u8; 16]));
+        b[opt + 108..opt + 112].copy_from_slice(&4u32.to_le_bytes());
+        assert_eq!(layout(&b, b.len() as u64).unwrap().table, None);
+        b[opt + 108..opt + 112].copy_from_slice(&5u32.to_le_bytes());
+        assert!(layout(&b, b.len() as u64).unwrap().table.is_some());
+        let dir = opt + 112 + 32;
+        let mut no_address = tiny_pe(Some(&[0u8; 16]));
+        no_address[dir..dir + 4].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(read(&no_address), PeSignature::None);
+        let mut no_size = tiny_pe(Some(&[0u8; 16]));
+        no_size[dir + 4..dir + 8].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(read(&no_size), PeSignature::None);
+    }
+
+    #[test]
+    fn the_largest_number_of_sections_is_allowed() {
+        let mut b = tiny_pe(None);
+        b.resize(0x1200, 0);
+        b[0x86..0x88].copy_from_slice(&96u16.to_le_bytes());
+        // Every other section is empty (its table entry lies over the first section's bytes).
+        let first_entry_end = 0x84 + 20 + 240 + 40;
+        b[first_entry_end..].fill(0);
+        assert_eq!(read(&b), PeSignature::None);
+    }
+
+    #[test]
+    fn header_bounds_are_exact() {
+        let opt = 0x84 + 20;
+        let security_dir = (opt + 112 + 32) as u32;
+        let set_header =
+            |b: &mut Vec<u8>, v: u32| b[opt + 60..opt + 64].copy_from_slice(&v.to_le_bytes());
+        // The header may end right after the directory, or right at the end of the file.
+        let mut b = tiny_pe(None);
+        set_header(&mut b, security_dir + 8);
+        assert_eq!(
+            layout(&b, b.len() as u64).unwrap().after_header,
+            u64::from(security_dir + 8)
+        );
+        let mut b = tiny_pe(None);
+        b.truncate(0x200);
+        b[0x84 + 2..0x84 + 4].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(read(&b), PeSignature::None);
+        // Not inside the directory.
+        let mut b = tiny_pe(None);
+        set_header(&mut b, security_dir + 4);
+        assert!(matches!(read(&b), PeSignature::Broken(_)));
+    }
+
+    #[test]
+    fn table_and_entry_sizes_are_exact() {
+        // A table of exactly the largest size is read (and is not a signature).
+        let mut b = tiny_pe(None);
+        let dir = 0x84 + 20 + 112 + 32;
+        let len = crate::signer::MAX_SIGNATURE as u32;
+        b[dir..dir + 4].copy_from_slice(&0x400u32.to_le_bytes());
+        b[dir + 4..dir + 8].copy_from_slice(&len.to_le_bytes());
+        b.resize(0x400 + len as usize, 0);
+        assert!(matches!(read(&b), PeSignature::Broken(w) if w.contains("first entry")));
+        // An entry exactly filling the table, or holding nothing at all, is read as a signature.
+        let mut b = tiny_pe(Some(&[0u8; 16]));
+        b[0x400..0x404].copy_from_slice(&24u32.to_le_bytes());
+        assert!(matches!(read(&b), PeSignature::Broken(w) if w.contains("cannot be read")));
+        b[0x400..0x404].copy_from_slice(&8u32.to_le_bytes());
+        assert!(matches!(read(&b), PeSignature::Broken(w) if w.contains("cannot be read")));
     }
 }

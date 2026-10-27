@@ -218,3 +218,16 @@ fn text_of(atv: &AttributeTypeAndValue) -> Result<String, String> {
     };
     s.map_err(|e| format!("a name in the certificate cannot be read ({e})"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_limit_is_exact() {
+        let at_limit = read_signature(&vec![0u8; MAX_SIGNATURE]).unwrap_err();
+        assert!(at_limit.contains("cannot be read"), "{at_limit}");
+        let over = read_signature(&vec![0u8; MAX_SIGNATURE + 1]).unwrap_err();
+        assert!(over.contains("too large"), "{over}");
+    }
+}

@@ -235,4 +235,36 @@ mod tests {
     fn not_a_compound_file_is_an_error() {
         assert!(read_msi(std::io::Cursor::new(b"hello".to_vec())).is_err());
     }
+
+    #[test]
+    fn a_signature_stream_of_exactly_the_limit_is_read() {
+        let b = compound(
+            MSI_CLSID,
+            &[("/\u{5}DigitalSignature", vec![0u8; MAX_SIGNATURE])],
+        );
+        let r = read_msi(std::io::Cursor::new(b)).unwrap();
+        assert!(matches!(r.signature, MsiSignature::Broken(w) if w.contains("cannot be read")));
+    }
+
+    #[test]
+    fn only_the_first_256_properties_are_looked_at() {
+        let mut b = vec![0u8; 48];
+        b[0] = 0xFE;
+        b[1] = 0xFF;
+        b[44..48].copy_from_slice(&48u32.to_le_bytes());
+        let n = 300u32;
+        let mut section = Vec::new();
+        section.extend(0u32.to_le_bytes());
+        section.extend(n.to_le_bytes());
+        let text_at = 8 + 8 * n;
+        for i in 0..n {
+            section.extend((if i == 290 { 7u32 } else { 99 }).to_le_bytes());
+            section.extend(text_at.to_le_bytes());
+        }
+        section.extend(0x1Eu32.to_le_bytes());
+        section.extend(4u32.to_le_bytes());
+        section.extend(b"x64\0");
+        b.extend(section);
+        assert_eq!(template(&b), None);
+    }
 }
