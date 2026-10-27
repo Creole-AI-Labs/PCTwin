@@ -32,6 +32,7 @@ fn swap<'a>(private: &'a str, earlier: Option<&'a [u8]>) -> Swap<'a> {
         private,
         ours: hash(OURS),
         earlier,
+        only_unhide: false,
     }
 }
 
@@ -262,4 +263,49 @@ fn a_late_write_into_the_moved_copy_is_kept() {
         std::fs::read(dir.path().join("vlcrc (kept by PCTwin)")).unwrap(),
         [OURS, b" and more"].concat()
     );
+}
+
+/// Second review, finding S1: only bringing a file out of hiding never puts anything back: the
+/// moved file goes back under its name, or (PCTwin's own version, the name taken) is removed.
+#[test]
+fn only_unhiding_puts_the_moved_file_back_and_nothing_else() {
+    for (aside, under_name, want_name, want_beside) in [
+        (OURS, None, Some(OURS), None),
+        (
+            b"the person's".as_slice(),
+            None,
+            Some(b"the person's".as_slice()),
+            None,
+        ),
+        (OURS, Some(EARLIER), Some(EARLIER), None),
+        (
+            b"the person's".as_slice(),
+            Some(b"newer".as_slice()),
+            Some(b"newer".as_slice()),
+            Some(b"the person's".as_slice()),
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let p = private_name().unwrap();
+        put(dir.path(), &p, aside);
+        if let Some(b) = under_name {
+            put(dir.path(), "vlcrc", b);
+        }
+        let mut s = swap(&p, Some(EARLIER));
+        s.only_unhide = true;
+        let got = replace_if_unchanged(dir.path(), "vlcrc", &s, &mut |_| {}).unwrap();
+        assert_eq!(got, Swapped::Kept);
+        assert_eq!(
+            std::fs::read(dir.path().join("vlcrc")).ok().as_deref(),
+            want_name
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("vlcrc (kept by PCTwin)"))
+                .ok()
+                .as_deref(),
+            want_beside
+        );
+        assert!(!dir.path().join(&p).exists());
+        assert!(!dir.path().join(format!("{p}.new")).exists());
+    }
 }

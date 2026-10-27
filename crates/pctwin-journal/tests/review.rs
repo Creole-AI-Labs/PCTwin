@@ -243,11 +243,21 @@ fn a_swapping_record_names_only_undos_own_names() {
     let (_d, path, j) = common::journal();
     let id = an_install(&j);
     drop(j);
-    for (p, private) in [
-        ("../vlcrc", ".pctwin-undo-0123456789abcdef0123456789abcdef"),
-        ("vlcrc", "vlcrc.bak"),
+    for (step, p, private) in [
+        (
+            "swapping",
+            "../vlcrc",
+            ".pctwin-undo-0123456789abcdef0123456789abcdef",
+        ),
+        ("swapping", "vlcrc", "vlcrc.bak"),
+        (
+            "put-back",
+            "../vlcrc",
+            ".pctwin-undo-0123456789abcdef0123456789abcdef",
+        ),
+        ("put-back", "vlcrc", "vlcrc.bak"),
     ] {
-        let json = format!(r#"{{"step":"swapping","path":"{p}","private":"{private}"}}"#);
+        let json = format!(r#"{{"step":"{step}","path":"{p}","private":"{private}"}}"#);
         forge(&path, "effect-undo", "effect-undo", id, json.as_bytes());
         let j = common::open(&path).unwrap();
         assert!(
@@ -302,4 +312,39 @@ fn this_laptops_own_folder_is_local() {
         pctwin_journal::place::judge(dir.path()),
         pctwin_journal::Placement::Local
     );
+}
+
+/// Second review, finding S1: a record saying a file is settled names only undo's own names, as
+/// a record of moving it aside does: refused when written, damaged when forged.
+#[test]
+fn a_settled_record_names_only_undos_own_names() {
+    let (_d, _p, j) = common::journal();
+    let id = an_install(&j);
+    j.installs(&keys().install)
+        .observed(
+            id,
+            &pctwin_journal::Found::App(pctwin_journal::Presence::Absent),
+            false,
+        )
+        .unwrap();
+    j.installs(&keys().install)
+        .receipt(id, &pctwin_journal::Receipt::Done)
+        .unwrap();
+    let permit = j.begin_undo().unwrap();
+    for (p, private) in [
+        ("../vlcrc", ".pctwin-undo-0123456789abcdef0123456789abcdef"),
+        ("vlcrc", "vlcrc.bak"),
+    ] {
+        assert!(matches!(
+            j.installs(&keys().install).record_undo(
+                &permit,
+                id,
+                &pctwin_journal::EffectUndo::PutBack {
+                    path: p.into(),
+                    private: private.into()
+                }
+            ),
+            Err(JournalError::BadName)
+        ));
+    }
 }

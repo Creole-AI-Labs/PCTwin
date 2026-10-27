@@ -89,6 +89,18 @@ struct Racy {
     crash_at: Option<pctwin_executor::files::Moment>,
     /// The person removes the file just before it is put back.
     remove_before_put: bool,
+    /// The person saves on the real file just before it is put back (second review, S1).
+    person_saves_real: bool,
+    /// Windows: another program (a backup, an indexer) reads the moved copy without letting it
+    /// be moved, from the moment it is aside until putting it back gives up (second review, S1).
+    lock_aside: bool,
+    /// Putting a file back fails this many times: the first moves it aside and then fails (a
+    /// full disk writing the earlier version), the rest fail at once.
+    fail_after_aside: u32,
+    /// How many times putting a file back was asked for.
+    asked: u32,
+    /// The other program's open copies (dropped by the test when it lets go).
+    held: Vec<std::fs::File>,
 }
 
 impl Racy {
@@ -102,6 +114,11 @@ impl Racy {
             real: None,
             crash_at: None,
             remove_before_put: false,
+            person_saves_real: false,
+            lock_aside: false,
+            fail_after_aside: 0,
+            asked: 0,
+            held: Vec::new(),
         }
     }
 }
@@ -194,17 +211,44 @@ impl Adapter for Racy {
                 .put_file(&self.place, "vlcrc", b"the person's new edit");
             self.armed = false;
         }
+        self.asked += 1;
         if let Some(dir) = self.real.clone() {
             if std::mem::take(&mut self.remove_before_put) {
                 std::fs::remove_file(dir.join(path)).unwrap();
             }
+            if std::mem::take(&mut self.person_saves_real) {
+                std::fs::write(dir.join(path), b"the person's new edit").unwrap();
+            }
+            if self.fail_after_aside > 0 {
+                self.fail_after_aside -= 1;
+                if dir.join(path).exists() && !dir.join(swap.private).exists() {
+                    std::fs::rename(dir.join(path), dir.join(swap.private)).unwrap();
+                }
+                return Err("There is not enough space on the disk.".into());
+            }
             let crash_at = self.crash_at.take();
-            return pctwin_executor::files::replace_if_unchanged(&dir, path, swap, &mut |m| {
+            let lock_aside = self.lock_aside;
+            let mut lock: Option<std::fs::File> = None;
+            let private = swap.private.to_string();
+            let got = pctwin_executor::files::replace_if_unchanged(&dir, path, swap, &mut |m| {
                 if Some(m) == crash_at {
                     panic!("the laptop lost power");
                 }
-            })
-            .map_err(|e| e.to_string());
+                #[cfg(windows)]
+                if lock_aside && m == pctwin_executor::files::Moment::Aside {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    // Others may read it, but not move or remove it.
+                    lock = std::fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(0x1)
+                        .open(dir.join(&private))
+                        .ok();
+                }
+            });
+            self.held.extend(lock);
+            #[cfg(not(windows))]
+            let _ = (lock_aside, &private);
+            return got.map_err(|e| e.to_string());
         }
         self.inner.replace_settings_file(p, path, swap)
     }
@@ -546,4 +590,257 @@ fn a_file_removed_before_it_is_put_back_is_left_removed() {
         "{got:?}"
     );
     assert!(!dir.path().join("vlcrc").exists());
+}
+
+fn names_in(dir: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    v.sort();
+    v
+}
+
+fn hidden_in(dir: &std::path::Path) -> Vec<String> {
+    names_in(dir)
+        .into_iter()
+        .filter(|n| n.starts_with(".pctwin-undo-"))
+        .collect()
+}
+
+/// A settings file moved aside, with the place on the real file system: the laptop after a copy
+/// of VLC's settings, and the adapter that puts files back there.
+fn vlc_moved_on_disk(j: &Journal) -> (tempfile::TempDir, Racy) {
+    let mut laptop = Laptop::ok();
+    let p = place("vlc");
+    laptop.put_file(&p, "vlcrc", b"defaults");
+    laptop.put_source(&p, "vlcrc", b"old laptop vlcrc");
+    moved(j, &mut laptop, vec![recipe(vec![copy("vlc")])]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("vlcrc"), b"old laptop vlcrc").unwrap();
+    let mut real = Racy::new(laptop, p);
+    real.real = Some(dir.path().to_path_buf());
+    (dir, real)
+}
+
+/// Second review, finding S1: the person saves between undo's look and putting the file back,
+/// and another program holds the moved copy so it cannot be put back yet. Undo must not forget
+/// where the person's file is: the record stays part way (closing undo waits), the person is told
+/// the hidden name, and the next undo puts their file back under its name and says it was kept.
+#[cfg(windows)]
+#[test]
+fn a_held_moved_copy_keeps_undo_part_way_until_the_persons_file_is_back() {
+    let (_d, _p, j) = journal();
+    let (dir, mut real) = vlc_moved_on_disk(&j);
+    real.person_saves_real = true;
+    real.lock_aside = true;
+    let permit = j.begin_undo().unwrap();
+    let first = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+    let id = first[0].id;
+    let hidden = hidden_in(dir.path());
+    assert_eq!(hidden.len(), 1, "{:?}", names_in(dir.path()));
+    let EffectUndoOutcome::NotDone { why } = &first[0].outcome else {
+        panic!("{first:?}")
+    };
+    assert!(why.contains(&hidden[0]) && why.contains("vlcrc"), "{why}");
+    assert!(matches!(
+        j.effect_undo_of(id).unwrap(),
+        Some(pctwin_journal::EffectUndo::Swapping { private, .. }) if private == hidden[0]
+    ));
+    assert_eq!(j.effects_part_way().unwrap(), vec![id]);
+    // It was tried a few times in a row before undo stopped for now.
+    assert!(real.asked >= 3, "{}", real.asked);
+    // Closing undo waits while the person's file is hidden.
+    drop(permit);
+    real.lock_aside = false;
+    real.held.clear();
+    assert!(matches!(
+        j.close_undo(&mut |_, _| unreachable!()),
+        Err(pctwin_journal::CloseError::EffectsPartWay { ids }) if ids == vec![id]
+    ));
+    let permit = j.begin_undo().unwrap();
+    let second = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("vlcrc")).unwrap(),
+        b"the person's new edit"
+    );
+    assert!(
+        hidden_in(dir.path()).is_empty(),
+        "{:?}",
+        names_in(dir.path())
+    );
+    assert!(j.effects_part_way().unwrap().is_empty());
+    assert!(
+        matches!(second[0].outcome, EffectUndoOutcome::Kept { .. }),
+        "{second:?}"
+    );
+}
+
+/// Second review, finding S1, on every system: putting the file back fails after it was moved
+/// aside (a full disk writing the earlier version). The record stays part way with the same
+/// private name, the person is told where their file is, and the next undo finishes the job with
+/// that name: PCTwin's unchanged version is replaced by the earlier one.
+#[test]
+fn an_error_after_the_move_aside_is_finished_next_time_with_the_same_name() {
+    let (_d, _p, j) = journal();
+    let (dir, mut real) = vlc_moved_on_disk(&j);
+    real.fail_after_aside = 3;
+    let permit = j.begin_undo().unwrap();
+    let first = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+    let id = first[0].id;
+    assert_eq!(real.asked, 3);
+    let hidden = hidden_in(dir.path());
+    assert_eq!(hidden.len(), 1);
+    assert!(!dir.path().join("vlcrc").exists());
+    let EffectUndoOutcome::NotDone { why } = &first[0].outcome else {
+        panic!("{first:?}")
+    };
+    assert!(why.contains(&hidden[0]), "{why}");
+    assert_eq!(j.effects_part_way().unwrap(), vec![id]);
+    // Asked again in the same run of undo (or after a restart): the same name is used.
+    let second = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+    assert!(
+        hidden_in(dir.path()).is_empty(),
+        "{:?}",
+        names_in(dir.path())
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("vlcrc")).unwrap(),
+        b"defaults"
+    );
+    assert_eq!(second[0].outcome, EffectUndoOutcome::Restored);
+    assert!(j.effects_part_way().unwrap().is_empty());
+}
+
+/// Second review, finding S1: a transient error that clears within the tries is never seen.
+#[test]
+fn a_brief_error_is_tried_again_at_once() {
+    let (_d, _p, j) = journal();
+    let (dir, mut real) = vlc_moved_on_disk(&j);
+    real.fail_after_aside = 2;
+    let permit = j.begin_undo().unwrap();
+    let got = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book()).unwrap();
+    assert_eq!(got[0].outcome, EffectUndoOutcome::Restored);
+    assert_eq!(
+        std::fs::read(dir.path().join("vlcrc")).unwrap(),
+        b"defaults"
+    );
+    assert!(hidden_in(dir.path()).is_empty());
+}
+
+/// Second review, finding S1: the journal itself refuses anything over a file being put back
+/// except "settled" for that same file and name.
+#[test]
+fn only_a_settled_file_may_follow_one_being_put_back() {
+    use pctwin_journal::EffectUndo::*;
+    let (_d, _p, j) = journal();
+    let mut laptop = Laptop::ok();
+    let p = place("vlc");
+    laptop.put_file(&p, "vlcrc", b"defaults");
+    laptop.put_source(&p, "vlcrc", b"old laptop vlcrc");
+    moved(&j, &mut laptop, vec![recipe(vec![copy("vlc")])]);
+    let id = j.effects_checked(SCOPE).unwrap().effects[0].id;
+    let permit = j.begin_undo().unwrap();
+    let r = rebuild(&j);
+    let a = ".pctwin-undo-0123456789abcdef0123456789abcdef".to_string();
+    let b = ".pctwin-undo-fedcba9876543210fedcba9876543210".to_string();
+    let swapping = |path: &str, private: &str| Swapping {
+        path: path.into(),
+        private: private.into(),
+    };
+    let put_back = |path: &str, private: &str| PutBack {
+        path: path.into(),
+        private: private.into(),
+    };
+    // Settled before anything was moved aside: refused.
+    assert!(
+        r.settings
+            .record_undo(&permit, id, &put_back("vlcrc", &a))
+            .is_err()
+    );
+    r.settings
+        .record_undo(&permit, id, &swapping("vlcrc", &a))
+        .unwrap();
+    for next in [
+        Done {
+            outcome: EffectUndoOutcome::NotDone { why: "x".into() },
+        },
+        Done {
+            outcome: EffectUndoOutcome::Restored,
+        },
+        Reversing,
+        swapping("vlcrc", &b),
+        swapping("other", &a),
+        put_back("vlcrc", &b),
+        put_back("other", &a),
+    ] {
+        assert!(
+            r.settings.record_undo(&permit, id, &next).is_err(),
+            "{next:?}"
+        );
+    }
+    assert_eq!(j.effects_part_way().unwrap(), vec![id]);
+    r.settings
+        .record_undo(&permit, id, &put_back("vlcrc", &a))
+        .unwrap();
+    // Still part way until the end is recorded; the next file may follow.
+    assert_eq!(j.effects_part_way().unwrap(), vec![id]);
+    assert!(r.settings.record_undo(&permit, id, &Reversing).is_err());
+    r.settings
+        .record_undo(&permit, id, &swapping("vlcrc", &b))
+        .unwrap();
+    r.settings
+        .record_undo(&permit, id, &put_back("vlcrc", &b))
+        .unwrap();
+    r.settings
+        .record_undo(
+            &permit,
+            id,
+            &Done {
+                outcome: EffectUndoOutcome::Restored,
+            },
+        )
+        .unwrap();
+    assert!(j.effects_part_way().unwrap().is_empty());
+}
+
+/// Second review, finding S1: a file was moved aside, the laptop lost power, and then the checked
+/// instructions can no longer be found. Undo leaves the change as it is, but first brings the
+/// file out of hiding under its own name; only then is it finished.
+#[test]
+fn a_hidden_file_comes_back_even_when_undo_may_not_put_it_back() {
+    use pctwin_executor::files::Moment;
+    for (at, person) in [
+        (Moment::Aside, false),
+        (Moment::Checked, false),
+        (Moment::Aside, true),
+    ] {
+        let (_d, _p, j) = journal();
+        let (dir, mut real) = vlc_moved_on_disk(&j);
+        real.crash_at = Some(at);
+        real.person_saves_real = person;
+        let permit = j.begin_undo().unwrap();
+        let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &common::book())
+        }));
+        assert!(crashed.is_err());
+        assert_eq!(hidden_in(dir.path()).len(), 1);
+        let none: Vec<pctwin_recipe::Recipe> = Vec::new();
+        let got = undo_effects(&rebuild(&j), &permit, &mut real, SCOPE, &none).unwrap();
+        assert_eq!(
+            got[0].outcome,
+            EffectUndoOutcome::Kept {
+                why: pctwin_executor::NO_RECIPE.into()
+            },
+            "{at:?}"
+        );
+        let want: &[u8] = if person {
+            b"the person's new edit"
+        } else {
+            b"old laptop vlcrc"
+        };
+        assert_eq!(std::fs::read(dir.path().join("vlcrc")).unwrap(), want);
+        assert_eq!(names_in(dir.path()), vec!["vlcrc".to_string()], "{at:?}");
+        assert!(j.effects_part_way().unwrap().is_empty());
+    }
 }
