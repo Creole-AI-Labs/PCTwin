@@ -19,6 +19,22 @@
 //! exceptions and friendly names. [`codec`] and [`mechanism`] are the generic machinery rows use.
 //!
 //! [`store`] reads and writes both on one laptop; [`ownership`] keeps one writer per domain.
+//!
+//! **Nothing that could run or fetch is written (fourth review, finding F1).** Writing is scoped
+//! to the one allow-list discovery reads ([`found::Address::writable`]); the general rule
+//! ([`classify::run_or_fetch`]) keeps back, by the value's shape and the key's kind and never by
+//! app name, every value that is or holds a path or address in any spelling (another computer,
+//! a web or app address, an environment variable, a relative place, a key named like a file), a
+//! command line, and anything a catalogue action-hint row marks as run or loaded; only one full
+//! local path to data is pointed at the moved file. Every write is checked again on the new
+//! laptop ([`generic::may_write`]).
+//!
+//! **What is still not covered (the 2.4 plan's residual, written down on purpose).** Copying a
+//! third-party app's settings generically can carry an app-specific command that no general
+//! rule recognises: a plain word such as `calc` that one app happens to run, a value it builds
+//! into a command line itself, or bytes it decodes into a path. The classifier keeps back
+//! everything run-able it can see; the report says the rest moved as data, and the catalogue's
+//! action-hint and exception rows close such cases one app at a time as they are found.
 
 pub mod apps;
 pub mod catalogue;

@@ -617,3 +617,68 @@ fn f10_a_file_too_large_to_plan_is_reported() {
         FileOutcome::NotMoved(Why::TooLarge)
     );
 }
+
+/// Every parser behind the gate, fuzzed here as well as by `fuzz/settings_parsers` (which CI runs
+/// on a nightly compiler): seeds mutated with brackets, quotes and comment marks, run on a 1 MB
+/// stack (the Windows main thread's). Never a panic, never a stack overflow.
+#[test]
+fn f2_every_parser_behind_the_gate_survives_mutated_input_on_a_small_stack() {
+    let t = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let seeds: &[(&str, String)] = &[
+                ("f.json", r#"{"a":[1,"C:\\Users\\ada\\Documents\\f.txt",{"b":null}], // c
+ "t":true,}"#.to_string()),
+                ("f.toml", "a = 1\n[s]\nb = 'C:\\Users\\ada\\Documents\\f.txt'\nc = [1,2]\n[[t]]\nx={y=1}\n".to_string()),
+                ("f.ini", "[s]\nk=\"C:\\Users\\ada\\Documents\\f.txt\" ; c\nx=1\n".to_string()),
+                ("f.xml", r#"<r a="C:\Users\ada\Documents\f.txt"><o name="n" value="1"/><p>x</p><![CDATA[x]]><!-- c --></r>"#.to_string()),
+            ];
+            let mut s = 0x9e37_79b9_7f4a_7c15u64;
+            let mut rnd = move || {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                s
+            };
+            let marks = b"[]{}<>\"'\\=\n\r&;#/*!-<>[[[[{{{{";
+            for (name, seed) in seeds {
+                for _ in 0..800 {
+                    let mut b = seed.as_bytes().to_vec();
+                    for _ in 0..(rnd() % 8 + 1) {
+                        let p = (rnd() as usize) % (b.len() + 1);
+                        match rnd() % 5 {
+                            0 if !b.is_empty() => {
+                                let q = p.min(b.len() - 1);
+                                b[q] = marks[(rnd() as usize) % marks.len()];
+                            }
+                            1 => b.insert(p, marks[(rnd() as usize) % marks.len()]),
+                            2 if p < b.len() => {
+                                b.remove(p);
+                            }
+                            3 => {
+                                // A run of openers: deep nesting in the middle of anything.
+                                let o = marks[(rnd() as usize) % 6];
+                                let n = (rnd() % 600) as usize;
+                                b.splice(p..p, std::iter::repeat_n(o, n));
+                            }
+                            _ => {
+                                let q = (rnd() as usize) % (b.len() + 1);
+                                let (lo, hi) = (p.min(q), p.max(q));
+                                let chunk = b[lo..hi].to_vec();
+                                b.splice(p..p, chunk);
+                            }
+                        }
+                    }
+                    let _ = file_plan(name, &b);
+                    let text = String::from_utf8_lossy(&b);
+                    let _ = pctwin_settings::plist::parse(&text);
+                    let _ = pctwin_settings::wifi::parse_profile(&text);
+                    let _ = parse_dconf_dump(&text);
+                    let _ = pctwin_settings::gvariant::strings(&text);
+                    let _ = Catalogue::from_json(&b);
+                }
+            }
+        })
+        .unwrap();
+    t.join().expect("no panic and no stack overflow");
+}

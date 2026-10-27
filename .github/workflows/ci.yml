@@ -295,7 +295,7 @@ jobs:
       - name: Fuzz each target for a minute
         shell: bash
         run: |
-          for t in messages inventory_frames inventory_v2 record paths pairing_messages typed_digits landing_messages; do
+          for t in messages inventory_frames inventory_v2 record paths pairing_messages typed_digits landing_messages settings_parsers; do
             echo "== $t"
             cargo +nightly fuzz run "$t" -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
           done
