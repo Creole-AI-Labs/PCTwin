@@ -18,12 +18,18 @@ use std::collections::{BTreeMap, HashSet};
 
 use pctwin_types::format::{Format, FormatError};
 use serde::{Deserialize, Serialize};
+pub mod apps;
 pub mod inventory;
+
+pub use apps::{
+    AppArch, AppList, AppMaker, AppNote, AppPlace, AppSystem, AppsNotRead, FoundApp, FoundWhere,
+    PackageSigning, RegistryView, SignerId,
+};
 
 pub use inventory::{
     EncodedInventory, INVENTORY_FORMAT, InventoryReader, MAX_HELD, MAX_PAGE_BYTES, MAX_PAGE_HELD,
     MAX_PATH_BYTES, MAX_PATH_DEPTH, PAGE_ITEMS, decode_inventory, encode_inventory,
-    encode_inventory_ordered, fits_one_move,
+    encode_inventory_ordered, encode_inventory_with_apps, fits_one_move, needs_format_4,
 };
 use sha2::{Digest, Sha256};
 
@@ -665,6 +671,12 @@ pub struct Record {
     /// only when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory: Option<Fingerprint>,
+    /// Every app found on the old laptop, with who made each (Phase 2.1, discovery first). It
+    /// counts in the fingerprint, so the plan the person approves names the very apps listed.
+    /// Written only when there are any, so a record without apps is written and fingerprinted
+    /// exactly as before.
+    #[serde(default, skip_serializing_if = "AppList::is_empty")]
+    pub apps: AppList,
 }
 
 /// Most items in the personal order (the most recently used are kept).
@@ -694,6 +706,7 @@ impl Record {
             },
             personal: Vec::new(),
             inventory: None,
+            apps: AppList::default(),
         }
     }
 
@@ -762,6 +775,7 @@ impl Record {
 
     /// The rules every record keeps.
     pub fn validate(&self) -> Result<(), RecordError> {
+        self.apps.validate()?;
         let mut ids = HashSet::new();
         let mut people = HashSet::new();
         for item in &self.items {
@@ -787,6 +801,18 @@ impl Record {
             .any(|id| !ids.contains(id) || !ordered.insert(*id))
         {
             return Err(RecordError::BadPersonalOrder);
+        }
+        // An app's installers on the old laptop are files of this record.
+        if self
+            .apps
+            .found
+            .iter()
+            .flat_map(|a| &a.installers)
+            .any(|id| !ids.contains(id))
+        {
+            return Err(RecordError::BadInventory(
+                "an app names an installer that is not in the list",
+            ));
         }
         let mut existing = HashSet::new();
         let mut created = HashSet::new();

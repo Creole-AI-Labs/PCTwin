@@ -27,8 +27,8 @@ pub mod sniff;
 pub mod windows;
 
 pub use check::{
-    CheckError, Expected, HelperStaged, Limits, SystemChecks, SystemSignature, check, check_staged,
-    windows_maker_of,
+    CheckError, Expected, HelperStaged, Limits, OldCopy, OldMaker, SystemChecks, SystemSignature,
+    check, check_staged, windows_maker_of, windows_old_copy,
 };
 pub use facts::{
     Arch, ArchFact, ArchSet, Bytes, Coverage, Decision, Format, FormatFact, LinuxSource, MacTeam,

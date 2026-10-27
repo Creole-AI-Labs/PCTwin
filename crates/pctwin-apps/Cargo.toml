@@ -1,0 +1,32 @@
+[package]
+name = "pctwin-apps"
+description = "Phase 2.1: finds every app on the old laptop with who made it, finds where to get each again, fetches it in a locked-down process, installs it through the administrator helper, and checks the result"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pctwin-catalogue = { path = "../pctwin-catalogue" }
+pctwin-grant = { path = "../pctwin-grant" }
+pctwin-maker = { path = "../pctwin-maker" }
+pctwin-record = { path = "../pctwin-record" }
+pctwin-types = { path = "../pctwin-types" }
+plist = "1.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10.9"
+thiserror = "2.0.21"
+url = "2.5.8"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[dev-dependencies]
+pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
+tempfile = "3"
+
+[lints]
+workspace = true
