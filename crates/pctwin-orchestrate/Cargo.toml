@@ -1,0 +1,31 @@
+[package]
+name = "pctwin-orchestrate"
+description = "More move types: cloud files, a smaller new laptop, several people and old laptops, dead-laptop rescue, and the plan that orders the work"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# A child job's digest, so a result for another job is told apart (an identity, not a secret).
+blake3 = "1.8"
+pctwin-record = { path = "../pctwin-record" }
+pctwin-scan = { path = "../pctwin-scan" }
+# Every item ends one honest result; a plan only ever names the needs-action ones.
+pctwin-types = { path = "../pctwin-types" }
+serde = { version = "1", features = ["derive"] }
+# Whether a rescued drive is mounted read-only, as the system reports it (vetted; safe calls).
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
+thiserror = "2.0.21"
+# Names from two old laptops are compared as the new laptop will hold them.
+unicode-normalization = "0.1.25"
+
+[dev-dependencies]
+proptest = "1.11.0"
+serde_json = "1"
+tempfile = "3"
+
+[lints]
+workspace = true

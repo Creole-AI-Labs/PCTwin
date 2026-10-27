@@ -3882,14 +3882,33 @@ dependencies = [
  "pctwin-helper",
  "pctwin-journal",
  "pctwin-link",
+ "pctwin-orchestrate",
  "pctwin-pairing",
  "pctwin-record",
+ "pctwin-scan",
  "pctwin-transfer",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "pctwin-orchestrate"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "pctwin-record",
+ "pctwin-scan",
+ "pctwin-types",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.21",
+ "unicode-normalization",
 ]
 
 [[package]]
