@@ -28,8 +28,7 @@ use pctwin_settings::found::Address;
 use pctwin_types::{ItemResult, ItemStatus, Reason};
 use serde::{Deserialize, Serialize};
 
-use crate::extras::SpecialStep;
-use crate::plan::{AppEntry, FullPlan, SPECIAL_NOT_YET, Title, needs_of};
+use crate::plan::{AppEntry, FullPlan, SPECIAL_NOT_YET, Title, needs_of, special_reason};
 
 /// How one app ended, with what the person still has to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -452,17 +451,12 @@ pub fn rebuild(
         .special
         .iter()
         .map(|s| {
-            let r = match s.step {
-                SpecialStep::SignIn | SpecialStep::Relink => ItemResult::because(Reason::SignIn),
-                // Copies of special categories join with 2.5; until then they are not claimed.
-                SpecialStep::Copy | SpecialStep::ExportFirst | SpecialStep::NotYet => {
-                    ItemResult::because(Reason::FinishByHand)
-                }
-            };
+            // Copying a component's files is not joined to the move yet: never claimed.
+            let r = ItemResult::because(special_reason(s.step).unwrap_or(Reason::FinishByHand));
             (Title::Name(s.name.clone()), r)
         })
         .collect();
-    if plan.from.is_some() && plan.special.is_empty() {
+    if plan.from.is_some() && !plan.special_searched {
         special.push((
             Title::Key(SPECIAL_NOT_YET),
             ItemResult::because(Reason::FinishByHand),

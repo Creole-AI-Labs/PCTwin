@@ -357,8 +357,13 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
         "WheelScrollLines",
         RegValue::Sz("3".into()),
     );
+    // An app's data in the old home (2.5 finds it by general rules, by its content).
+    let mail = old.path().join("AppData").join("Roaming").join("LabMail");
+    std::fs::create_dir_all(&mail).unwrap();
+    std::fs::write(mail.join("folders.json"), br#"{"inbox": 12, "sent": 3}"#).unwrap();
+    std::fs::write(mail.join("signature.txt"), b"Ada, from the lab").unwrap();
     // Only read on the old laptop.
-    let extras = from_discovery(
+    let mut extras = from_discovery(
         System::Windows,
         discover_registry(&*old_reg),
         vec![OldFolder {
@@ -366,6 +371,15 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             path: old_docs.display().to_string(),
         }],
     );
+    let (special, special_not_moved) =
+        pctwin_fullmove::extras::special_here(&mover(), old.path(), &record.apps.found);
+    assert!(
+        special.iter().any(|s| s.name.contains("LabMail")),
+        "2.5 found the app's data: {special:#?}"
+    );
+    extras.special = special;
+    extras.special_searched = true;
+    extras.special_not_moved = special_not_moved;
     let extras_bytes = extras.encode();
 
     // The new laptop: its folders, one of the apps already, and a value of its own.
@@ -502,10 +516,18 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
             .any(|c| c.kind == Kind::Settings && c.undo == Promise::CanReverse),
         "{changes:#?}"
     );
+    // 2.5 looked: each component is on the plan with its step, never as copied.
+    assert!(
+        !changes
+            .iter()
+            .any(|c| c.title == Title::Key(SPECIAL_NOT_YET))
+    );
     assert!(
         changes
             .iter()
-            .any(|c| c.title == Title::Key(SPECIAL_NOT_YET))
+            .filter(|c| c.kind == Kind::Special)
+            .all(|c| c.needs.is_some() && c.special.is_some()),
+        "{changes:#?}"
     );
     // The token never left the plan's discovery as something to write.
     assert!(
@@ -580,10 +602,13 @@ async fn a_full_move_rebuilds_apps_and_settings_honestly_and_undo_keeps_a_later_
     for (label, _, r) in &done.settings {
         assert_eq!(r.status(), ItemStatus::Converted, "{label}: {r:?}");
     }
+    assert!(!done.special.is_empty());
     assert!(
         done.special
             .iter()
-            .all(|(_, r)| r.reason() == Some(Reason::FinishByHand))
+            .all(|(_, r)| r.status() == ItemStatus::NeedsAction),
+        "special categories are never claimed copied until their files move: {:?}",
+        done.special
     );
     // Every item ends with one of the six words, none of them unverified success.
     assert_eq!(

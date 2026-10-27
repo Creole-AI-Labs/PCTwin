@@ -3780,6 +3780,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "pctwin-apps",
+ "pctwin-catalogue",
  "pctwin-executor",
  "pctwin-gate",
  "pctwin-grant",
@@ -3788,6 +3789,7 @@ dependencies = [
  "pctwin-recipe",
  "pctwin-record",
  "pctwin-settings",
+ "pctwin-special",
  "pctwin-transfer",
  "pctwin-types",
  "serde",

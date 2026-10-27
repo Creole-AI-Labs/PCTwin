@@ -21,6 +21,9 @@ pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-record = { path = "../pctwin-record" }
 # 2.4: settings found by discovery, sorted by kind, planned and applied.
 pctwin-settings = { path = "../pctwin-settings" }
+# 2.5: special categories found by general rules and classified by content (the published API).
+pctwin-catalogue = { path = "../pctwin-catalogue" }
+pctwin-special = { path = "../pctwin-special" }
 pctwin-types = { path = "../pctwin-types" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

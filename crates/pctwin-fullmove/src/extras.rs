@@ -110,14 +110,23 @@ pub enum SpecialStep {
     Relink,
     /// Not moved by this version of PCTwin: the person is told, never silently left.
     NotYet,
+    /// PCTwin could not tell what it is: the person looks at it on the old laptop.
+    LookAtIt,
 }
 
 /// One special-category component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct SpecialLine {
+    /// The app's name, as 2.5 shows it.
     pub name: String,
     pub step: SpecialStep,
+    /// How many files it holds (they move together or not at all).
+    #[serde(default)]
+    pub files: u64,
+    /// Secret material (keys, password stores): moved only if the person chooses it.
+    #[serde(default)]
+    pub secret: bool,
 }
 
 /// Everything the old laptop sends beside its list.
@@ -133,6 +142,12 @@ pub struct Extras {
     pub not_moved: Vec<NotMovedCount>,
     pub folders: Vec<OldFolder>,
     pub special: Vec<SpecialLine>,
+    /// Whether the special categories were looked for at all (2.5 discovery ran).
+    #[serde(default)]
+    pub special_searched: bool,
+    /// Things 2.5 found and does not move (caches, the system's own), counted.
+    #[serde(default)]
+    pub special_not_moved: u64,
 }
 
 /// Why the old laptop's extras were refused.
@@ -160,6 +175,8 @@ impl Extras {
             not_moved: Vec::new(),
             folders: Vec::new(),
             special: Vec::new(),
+            special_searched: false,
+            special_not_moved: 0,
         }
     }
 
@@ -247,7 +264,45 @@ pub fn from_discovery(system: System, d: Discovery, folders: Vec<OldFolder>) -> 
         settings,
         folders,
         special: Vec::new(),
+        special_searched: false,
+        special_not_moved: 0,
     }
+}
+
+/// The special categories of the person `owner` (home folder `home`, apps `apps`) on this laptop,
+/// as 2.5 plans them (only reading): one line per component, with the person's step. Copying a
+/// component's files is not joined to the move yet, so a component that would copy says "not
+/// moved yet"; a sign-in, a relink, an export first, or something to look at says that step.
+pub fn special_here(
+    owner: &pctwin_record::Owner,
+    home: &std::path::Path,
+    apps: &[pctwin_record::FoundApp],
+) -> (Vec<SpecialLine>, u64) {
+    use pctwin_special::component::Custody;
+    let system = pctwin_special::roots::System::here();
+    let cat = pctwin_catalogue::Catalogue::<pctwin_special::catalogue::SpecialRow>::shipped(
+        pctwin_special::catalogue::SHIPPED,
+    );
+    let plan = pctwin_special::api::plan(owner, home, apps, system, system, &cat);
+    let mut lines: Vec<SpecialLine> = plan
+        .components
+        .iter()
+        .filter(|p| text_ok(&p.app))
+        .map(|p| SpecialLine {
+            name: p.app.clone(),
+            step: match p.component.custody {
+                Custody::Portable => SpecialStep::NotYet,
+                Custody::ServiceHeld => SpecialStep::SignIn,
+                Custody::MachineBound => SpecialStep::Relink,
+                Custody::NeedsExport => SpecialStep::ExportFirst,
+                Custody::Unresolved => SpecialStep::LookAtIt,
+            },
+            files: p.component.members.len() as u64,
+            secret: p.component.secret,
+        })
+        .collect();
+    lines.truncate(MAX_SPECIAL);
+    (lines, plan.not_moved.len() as u64)
 }
 
 /// This laptop's kind of system, as settings know it.
@@ -263,7 +318,12 @@ pub fn this_system() -> System {
 
 /// The old laptop: reads (only reads) every setting in the signed-in person's own settings
 /// stores, with the person's `folders` here.
-pub fn here(folders: Vec<OldFolder>) -> Extras {
+pub fn here(
+    folders: Vec<OldFolder>,
+    owner: &pctwin_record::Owner,
+    home: Option<&std::path::Path>,
+    apps: &[pctwin_record::FoundApp],
+) -> Extras {
     let system = this_system();
     #[cfg(windows)]
     let found = pctwin_settings::found::discover_registry(
@@ -277,7 +337,14 @@ pub fn here(folders: Vec<OldFolder>) -> Extras {
     let found = pctwin_settings::found::discover_dconf(
         &mut pctwin_settings::mechanism::Mechanisms::real(System::Gnome),
     );
-    from_discovery(system, found, folders)
+    let mut x = from_discovery(system, found, folders);
+    if let Some(home) = home {
+        let (special, not_moved) = special_here(owner, home, apps);
+        x.special = special;
+        x.special_searched = true;
+        x.special_not_moved = not_moved;
+    }
+    x
 }
 
 #[cfg(test)]

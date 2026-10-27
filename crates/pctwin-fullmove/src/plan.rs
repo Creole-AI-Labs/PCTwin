@@ -80,6 +80,22 @@ pub struct Change {
     pub count: u64,
     /// Planned as needing the person, and why (it is not done by PCTwin).
     pub needs: Option<Reason>,
+    /// A special category's step (special categories only).
+    pub special: Option<SpecialStep>,
+    /// How many files a special category's component holds.
+    pub files: u64,
+}
+
+/// What a special category's step ends as: a component that would copy is not joined to the
+/// move yet, so it is never claimed copied.
+pub fn special_reason(step: SpecialStep) -> Option<Reason> {
+    match step {
+        SpecialStep::SignIn | SpecialStep::Relink => Some(Reason::SignIn),
+        SpecialStep::Copy
+        | SpecialStep::ExportFirst
+        | SpecialStep::NotYet
+        | SpecialStep::LookAtIt => Some(Reason::FinishByHand),
+    }
 }
 
 /// One app and its plan.
@@ -132,6 +148,10 @@ pub struct FullPlan {
     /// laptop's own planning together).
     pub not_moved: Vec<NotMovedCount>,
     pub special: Vec<SpecialLine>,
+    /// Whether the old laptop looked for special categories (2.5).
+    pub special_searched: bool,
+    /// Things 2.5 found there and does not move, counted.
+    pub special_not_moved: u64,
     /// The old laptop's kind of system; `None` when it sent no extras (an older PCTwin).
     pub from: Option<System>,
     /// The extras exactly as they arrived ([`crate::extras::digest`]).
@@ -285,6 +305,8 @@ impl FullPlan {
                     count: x.settings.len() as u64,
                 }],
                 special: x.special.clone(),
+                special_searched: x.special_searched,
+                special_not_moved: x.special_not_moved,
                 from: Some(x.system),
                 extras_digest: Some(digest),
                 ..Self::default()
@@ -337,6 +359,8 @@ impl FullPlan {
             groups,
             not_moved,
             special: x.special.clone(),
+            special_searched: x.special_searched,
+            special_not_moved: x.special_not_moved,
             from: Some(x.system),
             extras_digest: Some(digest),
             settings,
@@ -363,6 +387,8 @@ impl FullPlan {
                 undo,
                 count: 0,
                 needs,
+                special: None,
+                files: 0,
             });
         }
         for g in &self.groups {
@@ -373,14 +399,12 @@ impl FullPlan {
                 undo: Promise::CanReverse,
                 count: g.count,
                 needs: None,
+                special: None,
+                files: 0,
             });
         }
         for s in &self.special {
-            let needs = match s.step {
-                SpecialStep::Copy => None,
-                SpecialStep::SignIn | SpecialStep::Relink => Some(Reason::SignIn),
-                SpecialStep::ExportFirst | SpecialStep::NotYet => Some(Reason::FinishByHand),
-            };
+            let needs = special_reason(s.step);
             out.push(Change {
                 title: Title::Name(s.name.clone()),
                 kind: Kind::Special,
@@ -396,11 +420,13 @@ impl FullPlan {
                 },
                 count: 0,
                 needs,
+                special: Some(s.step),
+                files: s.files,
             });
         }
         // Until the special categories join (2.5), their app data is not moved yet: said, never
         // silent.
-        if self.from.is_some() && self.special.is_empty() {
+        if self.from.is_some() && !self.special_searched {
             out.push(Change {
                 title: Title::Key(SPECIAL_NOT_YET),
                 kind: Kind::Special,
@@ -408,6 +434,8 @@ impl FullPlan {
                 undo: Promise::MustKeep,
                 count: 0,
                 needs: Some(Reason::FinishByHand),
+                special: Some(SpecialStep::NotYet),
+                files: 0,
             });
         }
         out
