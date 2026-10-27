@@ -1,0 +1,1504 @@
+[
+  {
+    "kind": "unavailable"
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "not-started",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "preparing",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "changes": [
+          {
+            "action": "install",
+            "name": "<b>VLC</b>",
+            "undo": "can-reverse"
+          },
+          {
+            "action": "merge",
+            "name": "<b>VLC</b>",
+            "undo": "can-remove-app"
+          },
+          {
+            "action": "replace",
+            "name": "<b>VLC</b>",
+            "undo": "must-keep"
+          },
+          {
+            "action": "leave-alone",
+            "name": "<b>VLC</b>",
+            "undo": "needs-you-service"
+          },
+          {
+            "action": "replace",
+            "name": "Dark mode",
+            "undo": "needs-you-maker"
+          }
+        ],
+        "downloadBytes": 1000,
+        "drives": [
+          {
+            "drive": "C:",
+            "fits": true,
+            "free": 200,
+            "needed": 300,
+            "parts": [
+              {
+                "bytes": 60,
+                "usedFor": "files"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "app-downloads"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "unpacking"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "undo-record"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "partly-copied"
+              }
+            ],
+            "shortBy": 0
+          },
+          {
+            "drive": "C:",
+            "fits": false,
+            "free": 200,
+            "needed": 300,
+            "parts": [
+              {
+                "bytes": 60,
+                "usedFor": "files"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "app-downloads"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "unpacking"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "undo-record"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "partly-copied"
+              }
+            ],
+            "shortBy": 100
+          },
+          {
+            "drive": "C:",
+            "fits": null,
+            "free": null,
+            "needed": 300,
+            "parts": [
+              {
+                "bytes": 60,
+                "usedFor": "files"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "app-downloads"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "unpacking"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "undo-record"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "partly-copied"
+              }
+            ],
+            "shortBy": 0
+          }
+        ],
+        "kind": "changes",
+        "more": 2,
+        "permissions": [
+          "read-other-people",
+          "make-accounts",
+          "shared-folders",
+          "install-for-everyone",
+          "restore-point"
+        ],
+        "restorePoint": true
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-person",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "changes": [],
+        "downloadBytes": null,
+        "drives": [],
+        "kind": "changes",
+        "more": 0,
+        "permissions": [],
+        "restorePoint": false
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-system",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "changed",
+        "lines": [
+          {
+            "name": "Thesis.docx",
+            "why": "changed-on-old-laptop"
+          },
+          {
+            "name": "Thesis.docx",
+            "why": "app-updated"
+          },
+          {
+            "name": "Thesis.docx",
+            "why": "destination-changed"
+          },
+          {
+            "name": "Thesis.docx",
+            "why": "new-scope"
+          },
+          {
+            "name": "Thesis.docx",
+            "why": "permission-ended"
+          }
+        ],
+        "more": 0
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-maker",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "drives": [
+          {
+            "drive": "C:",
+            "fits": false,
+            "free": 200,
+            "needed": 300,
+            "parts": [
+              {
+                "bytes": 60,
+                "usedFor": "files"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "app-downloads"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "unpacking"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "undo-record"
+              },
+              {
+                "bytes": 60,
+                "usedFor": "partly-copied"
+              }
+            ],
+            "shortBy": 100
+          }
+        ],
+        "kind": "space",
+        "offload": {
+          "approved": false,
+          "connected": true,
+          "drive": "Backup",
+          "free": null
+        },
+        "proposal": [
+          {
+            "bytes": 30,
+            "items": 3,
+            "to": "leave-in-cloud"
+          },
+          {
+            "bytes": 30,
+            "items": 3,
+            "to": "offload-drive"
+          },
+          {
+            "bytes": 30,
+            "items": 3,
+            "to": "leave-on-old-laptop"
+          }
+        ],
+        "safeIn": [
+          {
+            "files": 4,
+            "provider": "OneDrive"
+          },
+          {
+            "files": 1,
+            "provider": null
+          }
+        ]
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "working",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "drives": [],
+        "kind": "space",
+        "offload": null,
+        "proposal": [],
+        "safeIn": []
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "checking",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "owners",
+        "more": 0,
+        "rows": [
+          {
+            "account": "ada",
+            "laptop": "Kitchen",
+            "ownFolder": false,
+            "person": "Ada"
+          },
+          {
+            "account": null,
+            "laptop": "Work",
+            "ownFolder": true,
+            "person": "Ada"
+          }
+        ]
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "applying",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "report",
+        "lines": [
+          {
+            "laptop": "Kitchen",
+            "line": 0,
+            "what": {
+              "count": 3,
+              "kind": "items"
+            },
+            "why": "failed"
+          },
+          {
+            "laptop": "Kitchen",
+            "line": 1,
+            "what": {
+              "kind": "app",
+              "name": "Zoom"
+            },
+            "why": "laptop-not-connected"
+          },
+          {
+            "laptop": "Kitchen",
+            "line": 2,
+            "what": {
+              "count": 1,
+              "kind": "settings"
+            },
+            "why": "waits-for-another"
+          },
+          {
+            "laptop": "Kitchen",
+            "line": 3,
+            "what": {
+              "count": 1,
+              "kind": "items"
+            },
+            "why": "not-started"
+          }
+        ],
+        "more": 1,
+        "safeIn": []
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "pause-requested",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "undo-preview",
+        "lines": [
+          {
+            "name": "a.txt",
+            "plan": "put-back"
+          },
+          {
+            "name": "a.txt",
+            "plan": "remove-app"
+          },
+          {
+            "name": "a.txt",
+            "plan": "keep-changed"
+          },
+          {
+            "name": "a.txt",
+            "plan": "elsewhere"
+          },
+          {
+            "name": "a.txt",
+            "plan": "leave-alone"
+          }
+        ],
+        "more": 0
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "paused",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "undo-done",
+        "lines": [
+          {
+            "detail": null,
+            "name": "a",
+            "result": {
+              "kind": "restored"
+            }
+          },
+          {
+            "detail": null,
+            "name": "b",
+            "result": {
+              "kind": "removed"
+            }
+          },
+          {
+            "detail": null,
+            "name": "c",
+            "result": {
+              "kind": "as-before"
+            }
+          },
+          {
+            "detail": "it changed since the move",
+            "name": "d",
+            "result": {
+              "kind": "kept-changed"
+            }
+          },
+          {
+            "detail": "in use",
+            "name": "e",
+            "result": {
+              "kind": "kept-other"
+            }
+          },
+          {
+            "detail": "changed",
+            "name": "f",
+            "result": {
+              "at": "f (kept).txt",
+              "kind": "kept-at"
+            }
+          },
+          {
+            "detail": null,
+            "name": "g",
+            "result": {
+              "kind": "done-elsewhere"
+            }
+          },
+          {
+            "detail": "locked",
+            "name": "h",
+            "result": {
+              "kind": "not-done-yet"
+            }
+          }
+        ],
+        "more": 0
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "source-unavailable",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "intro"
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "blocked",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "drives": [
+            {
+              "drive": "E:",
+              "fileSystem": "NTFS",
+              "isTarget": false,
+              "size": 512
+            },
+            {
+              "drive": "E:",
+              "fileSystem": "NTFS",
+              "isTarget": true,
+              "size": 512
+            }
+          ],
+          "kind": "pick-drive",
+          "refused": 1
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "partial",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "drives": [
+            {
+              "drive": "E:",
+              "fileSystem": "NTFS",
+              "isTarget": false,
+              "size": 512
+            }
+          ],
+          "kind": "pick-drive",
+          "refused": null
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "retrying",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "no-system"
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "reconciling",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "salvage",
+          "more": 0,
+          "readOnly": "system-read-only",
+          "readable": 10,
+          "unreadable": [
+            "x"
+          ]
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "failed",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "salvage",
+          "more": 0,
+          "readOnly": "pctwin-reads-only",
+          "readable": 10,
+          "unreadable": []
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "complete",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "locked",
+          "lock": "bit-locker"
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "cancelled",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "locked",
+          "lock": "file-vault"
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "not-started",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "rescue",
+        "stage": {
+          "kind": "locked",
+          "lock": "apple-chip"
+        }
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "preparing",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "downloadBytes": 300,
+        "files": 3,
+        "kind": "local-copy",
+        "oldFreeBytes": 900,
+        "provider": "OneDrive",
+        "state": "choosing"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-person",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "downloadBytes": 300,
+        "files": 3,
+        "kind": "local-copy",
+        "oldFreeBytes": 900,
+        "provider": "OneDrive",
+        "state": "working"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-system",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "downloadBytes": 300,
+        "files": 3,
+        "kind": "local-copy",
+        "oldFreeBytes": 900,
+        "provider": "OneDrive",
+        "state": "paused-metered"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-maker",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "downloadBytes": 300,
+        "files": 3,
+        "kind": "local-copy",
+        "oldFreeBytes": 900,
+        "provider": "OneDrive",
+        "state": "paused-no-space"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "working",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "downloadBytes": 300,
+        "files": 3,
+        "kind": "local-copy",
+        "oldFreeBytes": null,
+        "provider": "OneDrive",
+        "state": "done"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "checking",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "read-other-people"
+        ],
+        "restorePoint": {
+          "at": "10:04",
+          "kind": "made"
+        },
+        "stage": "explain"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "applying",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "make-accounts"
+        ],
+        "restorePoint": {
+          "at": "08:15",
+          "kind": "earlier-exists"
+        },
+        "stage": "waiting-for-system"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "pause-requested",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "shared-folders"
+        ],
+        "restorePoint": {
+          "kind": "not-chosen"
+        },
+        "stage": "denied"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "paused",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "install-for-everyone"
+        ],
+        "restorePoint": {
+          "kind": "not-made",
+          "why": "not-windows"
+        },
+        "stage": "closed-without-answer"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "source-unavailable",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "restore-point"
+        ],
+        "restorePoint": {
+          "kind": "not-made",
+          "why": "protection-off"
+        },
+        "stage": "given"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "blocked",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "read-other-people"
+        ],
+        "restorePoint": {
+          "kind": "not-made",
+          "why": "needs-admin"
+        },
+        "stage": "ended-by-sleep"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "partial",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": 10,
+        "unit": "bytes"
+      },
+      "screen": {
+        "kind": "permission",
+        "reasons": [
+          "make-accounts"
+        ],
+        "restorePoint": {
+          "kind": "not-made",
+          "why": "unconfirmed"
+        },
+        "stage": "ended-other-session"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "retrying",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": {
+        "done": 5,
+        "total": null,
+        "unit": "items"
+      },
+      "screen": {
+        "kind": "permission",
+        "reasons": [],
+        "restorePoint": {
+          "kind": "not-made",
+          "why": "failed"
+        },
+        "stage": "given"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "not-started",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "preparing",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-person",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-system",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "awaiting-maker",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "working",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "checking",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "applying",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "pause-requested",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "paused",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "source-unavailable",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "blocked",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "partial",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "retrying",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "reconciling",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "failed",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "complete",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  },
+  {
+    "kind": "ready",
+    "view": {
+      "allowed": [
+        "approve",
+        "back"
+      ],
+      "display": "cancelled",
+      "epoch": 2,
+      "generation": 3,
+      "job": "job-1",
+      "progress": null,
+      "screen": {
+        "kind": "reconciling"
+      },
+      "version": 9
+    }
+  }
+]

@@ -41,6 +41,7 @@ import {
   parseReportItem,
   parseTidied,
 } from "../bridge";
+import { parseAnswer, parseRefusal, parseSnapshot } from "../guard";
 
 const FILES = import.meta.glob<unknown>("./*.json", { import: "default", eager: true });
 
@@ -78,6 +79,15 @@ const PARSERS: Partial<Record<string, (value: unknown) => unknown>> = {
   peer: parsePeer,
   "qs-problem": parseQsProblem,
   tidied: parseTidied,
+  "guard-snapshot": parseSnapshot,
+  "guard-refused": (v: unknown) => {
+    const r = parseRefusal(v);
+    return r === null ? null : { kind: r };
+  },
+  "guard-answer": (v: unknown) => {
+    const a = parseAnswer(v);
+    return a === null ? null : { kind: a };
+  },
 };
 
 const families = Object.entries(FILES).map(([path, examples]) => [path.replace(/^\.\/|\.json$/g, ""), examples] as const);

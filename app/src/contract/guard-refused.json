@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "unavailable"
+  },
+  {
+    "kind": "wrong-job"
+  },
+  {
+    "kind": "old-session"
+  },
+  {
+    "kind": "plan-changed"
+  },
+  {
+    "kind": "not-now"
+  },
+  {
+    "kind": "not-shown"
+  }
+]
