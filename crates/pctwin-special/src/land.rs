@@ -503,3 +503,132 @@ pub fn reconcile(
         }
     }
 }
+
+/// How undoing a landing ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Undone {
+    /// Every file PCTwin placed is gone; nothing was there before (it landed in a new folder).
+    Removed,
+    /// Files changed since the move (the person's later work) are kept; the rest are gone.
+    KeptChanged { kept: usize },
+    /// Not done this time, and why; asking again tries again.
+    NotDone(String),
+    /// Already undone.
+    AlreadyUndone,
+}
+
+/// Undoes landing `effect` (T25-054): each file PCTwin placed is removed only while it is still
+/// exactly what PCTwin wrote (compare before removing, through the gate); a file the person changed
+/// since is kept, and they are told. Folders are removed only when empty. Recorded in the journal
+/// (part way first, then how it ended), with leave from its undo gate. Windows first: the gate's
+/// checked removal is built for Windows; elsewhere it is "not done this time".
+pub fn undo_landing(
+    rec: &Recorder<'_, Imports>,
+    right: &impl pctwin_journal::UndoRight,
+    dest: &Destination,
+    effect: u64,
+) -> Result<Undone, LandError> {
+    use pctwin_journal::{EffectUndo, EffectUndoOutcome};
+    let journal = rec.journal();
+    if let Some(EffectUndo::Done { outcome }) = journal.effect_undo_of(effect)?
+        && outcome.is_final()
+    {
+        return Ok(Undone::AlreadyUndone);
+    }
+    let entry = journal
+        .effect(effect)?
+        .ok_or(LandError::BadPlace("no such effect".into()))?;
+    let StoredEffect::Import { to, .. } = &entry.effect else {
+        return Err(LandError::Denied("not an import"));
+    };
+    let EffectState::Receipted {
+        found: Found::Files(placed),
+        ..
+    } = &entry.state
+    else {
+        return Ok(Undone::NotDone(
+            "the landing is not finished; reconcile it first".into(),
+        ));
+    };
+    let folder = to.path.parts().collect::<Vec<_>>().join("/");
+    if !matches!(journal.effect_undo_of(effect)?, Some(EffectUndo::Reversing)) {
+        rec.record_undo(right, effect, &EffectUndo::Reversing)?;
+    }
+    let result = remove_placed(right, dest, &folder, placed);
+    let (undone, outcome) = match result {
+        Ok(0) => (Undone::Removed, EffectUndoOutcome::Restored),
+        Ok(kept) => (
+            Undone::KeptChanged { kept },
+            EffectUndoOutcome::Kept {
+                why: format!("{kept} file(s) changed since the move were kept"),
+            },
+        ),
+        Err(why) => (
+            Undone::NotDone(why.clone()),
+            EffectUndoOutcome::NotDone { why },
+        ),
+    };
+    rec.record_undo(right, effect, &EffectUndo::Done { outcome })?;
+    Ok(undone)
+}
+
+/// Removes the placed files still unchanged; returns how many were kept.
+#[cfg(windows)]
+fn remove_placed(
+    right: &impl pctwin_journal::UndoRight,
+    dest: &Destination,
+    folder: &str,
+    placed: &[pctwin_journal::FileHash],
+) -> Result<usize, String> {
+    use pctwin_gate::Removed;
+    let mut kept = 0usize;
+    let mut folders = std::collections::BTreeSet::new();
+    for h in placed {
+        let Some((stored, _)) = IncomingPath::parse(&format!("{folder}/{}", h.path))
+            .ok()
+            .and_then(|p| dest.find(&p))
+        else {
+            continue;
+        };
+        let Some(stat) = dest.stat(&stored).map_err(|e| e.kind().to_string())? else {
+            continue;
+        };
+        let want = h.hash;
+        let verify = |f: &mut std::fs::File| -> std::io::Result<bool> {
+            let mut bytes = Vec::new();
+            f.read_to_end(&mut bytes)?;
+            Ok(pctwin_journal::content_hash(&bytes) == want)
+        };
+        match dest
+            .remove_if_unchanged(right, &stored, stat.id, verify, || Ok(()))
+            .map_err(|e| e.to_string())?
+        {
+            Removed::Removed | Removed::Gone => {}
+            _ => kept += 1,
+        }
+        let mut parts: Vec<&str> = stored.split('/').collect();
+        while parts.len() > 1 {
+            parts.pop();
+            folders.insert(parts.join("/"));
+        }
+    }
+    // Deepest first; only empty folders go.
+    let mut folders: Vec<String> = folders.into_iter().collect();
+    folders.sort_by_key(|f| std::cmp::Reverse(f.matches('/').count()));
+    for f in folders {
+        if f.matches('/').count() + 1 >= folder.split('/').count() {
+            let _ = dest.remove_empty_folder(&f);
+        }
+    }
+    Ok(kept)
+}
+
+#[cfg(not(windows))]
+fn remove_placed(
+    _right: &impl pctwin_journal::UndoRight,
+    _dest: &Destination,
+    _folder: &str,
+    _placed: &[pctwin_journal::FileHash],
+) -> Result<usize, String> {
+    Err("undo of brought-in app data is built for Windows first".into())
+}

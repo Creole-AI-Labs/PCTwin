@@ -180,6 +180,16 @@ pub fn chromium_profile(root: &Path) {
     pe[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
     pe[0x80..0x84].copy_from_slice(b"PE\0\0");
     put(&d.join("Extensions/abc/1.0/native.dll"), &pe);
+    put(
+        &d.join("Extensions/abc/1.0/manifest.json"),
+        br#"{"manifest_version": 3, "name": "Synthetic add-on", "version": "1.0"}"#,
+    );
+    put(
+        &d.join("Extensions/abc/1.0/background.js"),
+        b"console.log('hi');\n",
+    );
+    // A program that is not part of an add-on.
+    put(&d.join("Tools/helper.exe"), &pe);
 }
 
 /// A password manager's database and its XML key file (invented bytes).

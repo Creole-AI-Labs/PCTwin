@@ -70,6 +70,9 @@ pub enum Skip {
     Program,
     /// A link: never followed.
     Link,
+    /// A browser add-on (a folder with a WebExtension manifest): code, installed again from its
+    /// store through 2.1, never copied.
+    AddOn,
     /// Past the walk's depth or count limit: found, not read.
     NotRead,
 }
@@ -81,6 +84,7 @@ impl Skip {
             Skip::Rebuilt => "an index the database rebuilds by itself",
             Skip::Program => "a program or add-on: apps are installed again, never copied",
             Skip::Link => "a link to somewhere else: links are not followed",
+            Skip::AddOn => "a browser add-on: it is installed again from its store, never copied",
             Skip::NotRead => "found, not read: too deep or too many files here",
         }
     }
@@ -135,6 +139,29 @@ fn read_ends(path: &Path, len: u64) -> std::io::Result<(Vec<u8>, Vec<u8>)> {
     Ok((head, tail))
 }
 
+/// A folder holding a WebExtension manifest (`manifest.json` with a `manifest_version`): the
+/// standard format of browser add-ons, the same for every browser.
+fn is_add_on(dir: &Path) -> bool {
+    let m = dir.join("manifest.json");
+    let Ok(meta) = std::fs::symlink_metadata(&m) else {
+        return false;
+    };
+    if !meta.is_file() || meta.len() > 1024 * 1024 {
+        return false;
+    }
+    let Ok(bytes) = std::fs::read(&m) else {
+        return false;
+    };
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
+    if pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json).is_err() {
+        return false;
+    }
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|v| v.get("manifest_version").map(serde_json::Value::is_u64))
+        .unwrap_or(false)
+}
+
 fn is_cache_folder(name: &str, path: &Path) -> bool {
     if name.to_lowercase().contains("cache") {
         return true;
@@ -187,7 +214,12 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
             continue;
         }
         if meta.is_dir() {
-            if WEB_ENGINE_STORAGE.contains(&name.to_lowercase().as_str()) {
+            if is_add_on(&path) {
+                w.not_moved.push(NotMoved {
+                    rel: child,
+                    why: Skip::AddOn,
+                });
+            } else if WEB_ENGINE_STORAGE.contains(&name.to_lowercase().as_str()) {
                 w.web.push(child);
             } else if is_cache_folder(&name, &path) {
                 w.not_moved.push(NotMoved {

@@ -188,7 +188,11 @@ fn with_no_catalogue_rows_everything_is_classified_by_its_content() {
         Skip::Cache
     );
     assert_eq!(
-        skipped(chromey, "User Data/Default/Extensions/abc/1.0/native.dll"),
+        skipped(chromey, "User Data/Default/Extensions/abc/1.0"),
+        Skip::AddOn
+    );
+    assert_eq!(
+        skipped(chromey, "User Data/Default/Tools/helper.exe"),
         Skip::Program
     );
 
