@@ -501,18 +501,25 @@ fn a_new_signed_layout_row_works_with_no_code_change() {
     use pctwin_catalogue::{Catalogue, test_key};
     use pctwin_orchestrate::rescue::{LayoutRow, scan_rescued_drive_with};
     let d = windows_drive();
-    touch(&d.path().join("Accounts/Kemi/Scans/s.pdf"), b"pdf");
+    touch(&d.path().join("Data/Accounts/Kemi/Scans/s.pdf"), b"pdf");
+    touch(
+        &d.path().join("Data/Accounts/Kemi/AppData/Local/state.txt"),
+        b"s",
+    );
     let bytes = br#"{"format":1,"catalogue":"rescue-layouts","version":2,"rows":[
-        {"system":"windows","homes":[["Users"],["Accounts"]],"shared":["Users","Public"],
+        {"system":"linux","homes":[["home"]]},
+        {"system":"windows","homes":[["Users"],["Data","Accounts"]],"shared":["Users","Public"],
          "not-people":["Default","Leftover"],
          "folders":[{"name":"Documents","role":"documents"},{"name":"Scans","role":"pictures"}]},
         {"system":"windows","homes":[[".."]]},
+        {"system":"windows","homes":[[]]},
+        {"system":"windows","shared":[".."]},
         {"system":"beos"}
     ]}"#;
     let sig = test_key::sign(bytes, "rescue-layouts", 2);
     let rows = Catalogue::<LayoutRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
-    assert_eq!(rows.rows().len(), 1);
-    assert_eq!(rows.report().skipped.len(), 2);
+    assert_eq!(rows.rows().len(), 2);
+    assert_eq!(rows.report().skipped.len(), 4);
     let r =
         scan_rescued_drive_with(&rows, d.path(), &real_id(d.path()), &mut Owners(vec![])).unwrap();
     let labels: Vec<&str> = r.people.iter().map(|p| p.label.as_str()).collect();
@@ -531,6 +538,47 @@ fn a_new_signed_layout_row_works_with_no_code_change() {
                 .last()
                 .is_some_and(|n| n.display() == "s.pdf")
     }));
+    // A home three folders down still has its apps' own data counted, never moved.
+    let state = r
+        .record
+        .items
+        .iter()
+        .find(|i| {
+            i.path
+                .parts()
+                .last()
+                .is_some_and(|n| n.display() == "state.txt")
+        })
+        .unwrap();
+    assert_ne!(state.inclusion, Inclusion::Included);
+}
+
+/// The same home reached through two places (a row naming it in another case, on a system that
+/// ignores case) is one person, never two.
+#[test]
+fn a_home_reached_twice_is_one_person() {
+    use pctwin_catalogue::Catalogue;
+    use pctwin_orchestrate::rescue::{LayoutRow, people_on_drive_with};
+    let d = windows_drive();
+    if !d.path().join("USERS").is_dir() {
+        // This file system tells case apart: there are two folders, not one.
+        return;
+    }
+    let rows = Catalogue::<LayoutRow>::shipped(
+        r#"{"format":1,"catalogue":"rescue-layouts","version":1,"rows":[
+        {"system":"windows","homes":[["USERS"]]}]}"#,
+    );
+    let (people, _) = people_on_drive_with(
+        &rows,
+        &opened(d.path()),
+        OtherSystem::Windows,
+        &mut Owners(vec![]),
+    );
+    let labels: Vec<&str> = people.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        ["Ada", "Default", "Leftover", "Public", "Tunde", "bisi"]
+    );
 }
 
 /// A Linux drive's homes come from its own account list, wherever they are.
@@ -547,6 +595,8 @@ fn a_linux_drives_homes_come_from_its_account_list() {
     touch(&r.join("srv/people/ada/Documents/a.txt"), b"a");
     touch(&r.join("home/bo/b.txt"), b"b");
     touch(&r.join("home/lost+found/x"), b"x");
+    // In the usual place but not in the account list: still someone's, never dropped.
+    touch(&r.join("home/cy/c.txt"), b"c");
     let drive = opened(r);
     let places = home_places(
         &drive,
@@ -565,5 +615,31 @@ fn a_linux_drives_homes_come_from_its_account_list() {
     );
     let scan = scan_rescued_drive(r, &real_id(r), &mut Owners(vec![])).unwrap();
     let labels: Vec<&str> = scan.people.iter().map(|p| p.label.as_str()).collect();
-    assert_eq!(labels, ["ada", "bo"]);
+    assert_eq!(labels, ["ada", "bo", "cy"]);
+    // Ada's Documents are her usual folder there too.
+    assert!(scan.record.items.iter().any(|i| {
+        i.place.role == FolderRole::Documents
+            && i.path
+                .parts()
+                .last()
+                .is_some_and(|n| n.display() == "a.txt")
+    }));
+
+    // An account list too large to be one is not read: only the usual place is.
+    let big = tempfile::tempdir().unwrap();
+    let b = big.path();
+    touch(&b.join("etc/os-release"), b"ID=debian");
+    let mut passwd = b"ada:x:1000:1000::/srv/people/ada:/bin/bash\n".to_vec();
+    passwd.resize(1024 * 1024 + 1, b'\n');
+    touch(&b.join("etc/passwd"), &passwd);
+    touch(&b.join("srv/people/ada/a.txt"), b"a");
+    let places = home_places(
+        &opened(b),
+        OtherSystem::Linux,
+        shipped_layouts()
+            .rows()
+            .iter()
+            .find(|row| row.homes == [["home"]]),
+    );
+    assert_eq!(places, [vec![std::ffi::OsString::from("home")]]);
 }

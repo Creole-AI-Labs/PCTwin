@@ -289,7 +289,8 @@ pub fn name_stores(
 ) -> MailAccounts {
     let reading = rows.read(found, |(s, _), row| {
         let n = squash(&s.found_name);
-        !n.is_empty() && row.found_as.iter().any(|f| squash(f) == n)
+        // Every row's names have letters or digits (checked on load): an empty one never matches.
+        row.found_as.iter().any(|f| squash(f) == n)
     });
     let count = |prefs: &[String], kinds: &[String]| {
         prefs

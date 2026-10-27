@@ -211,7 +211,9 @@ impl ProviderRow {
 
     fn knows(&self, found_name: &str) -> bool {
         let found = squash(found_name);
-        !found.is_empty() && self.found_as.iter().any(|f| squash(f) == found)
+        // Every row's names have letters or digits (checked on load), so an empty one never
+        // matches.
+        self.found_as.iter().any(|f| squash(f) == found)
     }
 }
 

@@ -350,6 +350,8 @@ fn routes_add_folders_a_service_records_and_each_folder_is_kept_once() {
             Path::new("/h/Dropbox"),
         ]
     );
+    // A plain folder route says nothing about work: the person's own.
+    assert!(mac.iter().all(|f| !f.work));
 }
 
 /// A folder one way calls personal and another calls work is a work folder.
@@ -412,6 +414,7 @@ fn work_accounts_follow_the_row() {
         "Contoso",
         "PersonalStuff",
         "SharedLibraries-Contoso",
+        "(Contoso)",
     ] {
         assert!(one.is_work(work), "{work:?}");
     }

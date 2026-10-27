@@ -127,3 +127,11 @@ fn catalog_ids_are_checked() {
         assert!(!catalog_id_ok(bad), "{bad}");
     }
 }
+
+/// Recipe IDs keep their own rule (a survivor of the catalog mutation run, which first matched
+/// the recipe ID check): no `_`.
+#[test]
+fn recipe_ids_refuse_underscores() {
+    assert!(pctwin_recipe::RecipeId::new("org.example.app").is_ok());
+    assert!(pctwin_recipe::RecipeId::new("org_example").is_err());
+}

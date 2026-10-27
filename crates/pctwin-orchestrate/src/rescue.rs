@@ -699,9 +699,8 @@ pub fn home_places(
                             _ => None,
                         })
                         .collect();
-                    if let Some(mut names) = names
-                        && names.len() >= 2
-                    {
+                    // The folder holding the home (a home at the top holds nothing: left out).
+                    if let Some(mut names) = names {
                         names.pop();
                         add(names);
                     }

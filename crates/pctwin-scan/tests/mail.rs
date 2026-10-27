@@ -23,7 +23,9 @@ fn mapi_accounts_are_counted_from_the_profile_keys_of_any_version() {
 {k}\\9375CFF0413111d3B88A00104B2A6676\\00000002\r\n    Account Name    REG_BINARY    61006400\r\n\
 {k}\\9375CFF0413111d3B88A00104B2A6676\\00000003\r\n\
 {k}\\9375CFF0413111d3B88A00104B2A6676\\00000003\\Extra\r\n\
-{k}\\9375CFF0413111d3B88A00104B2A6676\\0000000G\r\n"
+{k}\\9375CFF0413111d3B88A00104B2A6676\\0000000G\r\n\
+{k}\\9375CFF0413111d3B88A00104B2A6676\\00000003\\0000000A\r\n\
+{k}\\9375CFF0413111d3B88A00104B2A6676\\\r\n"
         );
         assert_eq!(mapi_accounts_in(&out), 2, "{version}");
     }
@@ -40,7 +42,8 @@ HKEY_CURRENT_USER\\Software\\Microsoft\\Office\\16.\r\n\
 HKEY_CURRENT_USER\\Software\\Microsoft\\Office\\.0\r\n\
 HKEY_CURRENT_USER\\Software\\Microsoft\\Office\\1a.0\r\n\
 HKEY_CURRENT_USER\\Software\\Microsoft\\Office\\16.x\r\n\
-    16.0    REG_SZ    x\r\n";
+    16.0    REG_SZ    x\r\n\
+    Path    REG_SZ    C:\\Office\\16.0\r\n";
     let keys = office_version_keys(out);
     let last: Vec<&str> = keys
         .iter()
@@ -193,12 +196,13 @@ fn a_new_signed_row_names_a_found_store() {
         {"name":"","found-as":["x"]},
         {"name":"No names","found-as":[]},
         {"name":"Bad kind","found-as":["y"],"account-kinds":["im ap"]},
+        {"name":"Empty kind","found-as":["z"],"account-kinds":[""]},
         {"name":"Dashes","found-as":["--"]}
     ]}"#;
     let sig = test_key::sign(bytes, "mail-clients", 2);
     let rows = Catalogue::<MailClientRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
     assert_eq!(rows.rows().len(), 1);
-    assert_eq!(rows.report().skipped.len(), 4);
+    assert_eq!(rows.report().skipped.len(), 5);
     let mail = name_stores(
         &rows,
         vec![(
@@ -224,6 +228,14 @@ fn the_walk_finds_mail_by_shape_and_never_inside_a_store_already_found() {
     std::fs::create_dir_all(root.join("Office")).unwrap();
     std::fs::write(root.join("Office").join("Archive.pst"), b"!BDN....").unwrap();
     std::fs::write(root.join("Office").join("Fake.pst"), b"nope").unwrap();
+    // A note that happens to start like mail is never opened: its name says it is not mail.
+    std::fs::write(
+        root.join("Office").join("letter.txt"),
+        b"From the desk\nof Ada",
+    )
+    .unwrap();
+    // Inside a maildir only the maildir counts, not what is in its folders.
+    std::fs::write(md.join("cur").join("1.eml"), b"x").unwrap();
     let store = root.join("Bird");
     std::fs::create_dir_all(&store).unwrap();
     std::fs::write(store.join("Inbox.mbox"), b"From x\nhi").unwrap();
