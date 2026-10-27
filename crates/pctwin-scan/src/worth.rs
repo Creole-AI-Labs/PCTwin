@@ -9,7 +9,7 @@ use pctwin_record::{Inclusion, Item, ItemId, ItemKind, ItemPath, LeftOutReason, 
 use serde::{Deserialize, Serialize};
 
 use crate::marks::MarkSample;
-use crate::recognise::What;
+use crate::recognise::{Recogniser, Trait, What};
 use crate::rules::Kind;
 
 /// How much something is worth to the person, most first.
@@ -68,10 +68,14 @@ pub fn worth(
         .last()
         .map(|n| n.display().to_lowercase())
         .unwrap_or_default();
+    // What a kind can be fetched again by is its row's trait (installed games download again;
+    // a server's mail comes back by itself; an installer downloaded once comes again).
+    let table = Recogniser::shipped();
     match what {
-        // Installed games download again; Outlook's offline mail comes back from the server.
-        Some(What::InstalledGames | What::EmailCache) => Worth::Redownloadable,
-        Some(What::DiscImage) if downloaded => Worth::Redownloadable,
+        Some(w) if table.has(w, Trait::FetchAgain) => Worth::Redownloadable,
+        Some(w) if downloaded && table.has(w, Trait::FetchAgainIfDownloaded) => {
+            Worth::Redownloadable
+        }
         None if downloaded && INSTALLERS.iter().any(|s| name.ends_with(s)) => Worth::Redownloadable,
         _ => Worth::Irreplaceable,
     }

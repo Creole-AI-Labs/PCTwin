@@ -88,9 +88,12 @@ pub use people::{
     Person, list_people, people_from_dscl, people_from_passwd, people_from_profile_list,
     uid_range_from_login_defs,
 };
-pub use recognise::{Recognised, Recogniser, TableError, What};
+pub use recognise::{KindRow, MarkerRow, Named, Recognised, Recogniser, Trait, What, WhatRow};
 pub use rules::{Kind, Row, Rules, RulesError, System, Where};
-pub use scan::{Category, Counts, Scan, Stamp, category, scan_folder, scan_managed_folder};
+pub use scan::{
+    Categories, Category, CategoryRow, Counts, Scan, Stamp, category, scan_folder,
+    scan_managed_folder, shipped_categories,
+};
 pub use state::{
     Changes, DoneFolder, NextOwner, STATE_FORMAT, ScanState, StateError, changes_between,
 };

@@ -2022,6 +2022,7 @@ fn the_table_names_places_in_the_record_and_changes_nothing() {
     assert_eq!(s.record, before);
     let what_of = |end: &str| {
         named
+            .named
             .iter()
             .filter(|r| {
                 let item = s.record.items.iter().find(|i| i.id == r.item).unwrap();
@@ -2038,6 +2039,14 @@ fn the_table_names_places_in_the_record_and_changes_nothing() {
         what_of("disk.vhdx"),
         [pctwin_scan::What::VirtualMachineDisk]
     );
+    // Folders at the top of a place that no row names are found, not named (never dropped).
+    let found: Vec<String> = named
+        .found_not_named
+        .iter()
+        .map(|id| shown(s.record.items.iter().find(|i| i.id == *id).unwrap()))
+        .collect();
+    assert!(found.iter().any(|f| f.ends_with("Backup")), "{found:?}");
+    assert!(!found.iter().any(|f| f.ends_with("disk.vhdx")));
 }
 
 /// Folders with the same names and sizes all the way down look like copies (one group, not one

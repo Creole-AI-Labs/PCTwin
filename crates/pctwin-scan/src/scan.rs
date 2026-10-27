@@ -5,7 +5,11 @@ use pctwin_record::{
     Inclusion, Item, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason, ManagedBy,
     Owner, Place, Portability,
 };
-use serde::Serialize;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use pctwin_catalogue::{Catalogue, Row};
+use serde::{Deserialize, Serialize};
 
 use crate::measure::{is_cloud_only, is_icloud_stub_name, measure};
 use crate::rules::{Kind, Rules};
@@ -297,8 +301,12 @@ fn extension(name: &str) -> Option<String> {
 }
 
 /// What kind of file a name says it is, by its extension, as the scan counts it ([`Counts`]). The
-/// after-move check counts the same way, so the two can be held side by side.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// after-move check counts the same way, so the two can be held side by side. Which extensions
+/// are which kind is data: the `file-categories` catalogue ([`CategoryRow`]); a file whose kind
+/// no row names is [`Category::Other`], counted and moved like any other and ranked after the
+/// named kinds when the most important things go first (the general rule: never dropped).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Category {
     Photo,
     Video,
@@ -307,24 +315,71 @@ pub enum Category {
     Other,
 }
 
-/// The [`Category`] of a file called `name`.
-pub fn category(name: &str) -> Category {
-    let Some(ext) = extension(name) else {
-        return Category::Other;
-    };
-    match ext.as_str() {
-        "jpg" | "jpeg" | "jpe" | "png" | "gif" | "bmp" | "tif" | "tiff" | "heic" | "heif"
-        | "webp" | "avif" | "jxl" | "dng" | "cr2" | "cr3" | "crw" | "nef" | "nrw" | "arw"
-        | "srf" | "sr2" | "raf" | "orf" | "rw2" | "pef" | "srw" | "x3f" | "3fr" | "erf" | "kdc"
-        | "dcr" | "mos" | "mef" | "iiq" => Category::Photo,
-        "mp4" | "m4v" | "mov" | "avi" | "mkv" | "wmv" | "webm" | "3gp" | "mts" | "m2ts" | "mpg"
-        | "mpeg" | "flv" => Category::Video,
-        "mp3" | "m4a" | "aac" | "flac" | "wav" | "ogg" | "oga" | "opus" | "wma" | "aiff"
-        | "aif" | "alac" | "mid" | "midi" => Category::Music,
-        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "odt" | "ods" | "odp"
-        | "rtf" | "txt" | "md" | "csv" | "pages" | "numbers" | "key" | "epub" => Category::Document,
-        _ => Category::Other,
+/// One row of the `file-categories` catalogue: a kind of file and its extensions.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CategoryRow {
+    pub category: Category,
+    /// Lower case, without the dot.
+    pub extensions: Vec<String>,
+}
+
+impl Row for CategoryRow {
+    const CATALOGUE: &'static str = "file-categories";
+    const FIELDS: &'static [&'static str] = &["category", "extensions"];
+    fn check(&self) -> Result<(), String> {
+        if self.category == Category::Other {
+            return Err("`other` is for what no row names".into());
+        }
+        let ok = self.extensions.len() <= 1000
+            && self.extensions.iter().all(|e| {
+                !e.is_empty()
+                    && e.len() <= 16
+                    && e.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            });
+        if ok {
+            Ok(())
+        } else {
+            Err("extensions are lower-case letters and digits".into())
+        }
     }
+}
+
+/// The extensions of a catalogue, ready to look up: the first row naming an extension wins.
+#[derive(Debug, Clone, Default)]
+pub struct Categories(HashMap<String, Category>);
+
+impl Categories {
+    pub fn from_catalogue(rows: &Catalogue<CategoryRow>) -> Self {
+        let mut map = HashMap::new();
+        for row in rows.rows() {
+            for e in &row.extensions {
+                map.entry(e.clone()).or_insert(row.category);
+            }
+        }
+        Self(map)
+    }
+
+    /// The [`Category`] of a file called `name`.
+    pub fn of(&self, name: &str) -> Category {
+        extension(name)
+            .and_then(|e| self.0.get(&e).copied())
+            .unwrap_or(Category::Other)
+    }
+}
+
+/// The rows compiled into this build.
+pub fn shipped_categories() -> &'static Catalogue<CategoryRow> {
+    static ROWS: OnceLock<Catalogue<CategoryRow>> = OnceLock::new();
+    ROWS.get_or_init(|| Catalogue::shipped(include_str!("../catalogues/file-categories.json")))
+}
+
+/// The [`Category`] of a file called `name`, by the shipped rows.
+pub fn category(name: &str) -> Category {
+    static MAP: OnceLock<Categories> = OnceLock::new();
+    MAP.get_or_init(|| Categories::from_catalogue(shipped_categories()))
+        .of(name)
 }
 
 pub(crate) fn count(category: Category, counts: &mut Counts) {

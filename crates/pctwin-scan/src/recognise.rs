@@ -1,104 +1,168 @@
-//! What each place is (`rules/what.txt`): markers and folder shapes that name a place for the
-//! screens (camera photos, a phone backup, an old backup of the laptop), run over the mover's own
-//! record after the sweep, so another person's things are never looked at. A label never changes
-//! what is included, whose it is or where it lands; it names, orders and weighs.
+//! What each place is (`rules/what.json`, the `place-kinds` catalogue): markers and folder
+//! shapes that name a place for the screens (camera photos, a phone backup, an old backup of the
+//! laptop), run over the mover's own record after the sweep, so another person's things are never
+//! looked at. A label never changes what is included, whose it is or where it lands; it names,
+//! orders and weighs.
+//!
+//! Kinds of place are rows too (Phase 2 adoption, changes 7 and 8): a `kind` row gives a kind's
+//! ID, its name and its traits (a closed set the code acts on: `old-backup`, `fetch-again`,
+//! `fetch-again-if-downloaded`); a `marker` row says how a place of that kind looks:
+//!
+//! - `system`: `windows`, `mac`, `linux` or `any`;
+//! - `shape`: `folder` (a folder with this name), `folder-suffix` (a folder whose name ends with
+//!   this, a package such as `.photoslibrary`), `holds` (a folder that directly holds a file or
+//!   folder with this name) or `file-suffix` (a file whose name ends with this);
+//! - `what`: a kind's ID.
+//!
+//! Names are compared ignoring case; the first marker row that matches names the place. A row
+//! this version cannot use (an unknown kind, shape or system, a newer field) is skipped and
+//! reported ([`Recogniser::report`]), never a reason to stop: a newer table never stops an older
+//! app. The shipped table is compiled into the app, so it is covered by the app's own signature;
+//! a test pins its fingerprint, so a change to it is a change to the app. Folders at the top of
+//! a place that no row names are listed as found, not named ([`Named::found_not_named`]).
 
 use std::collections::HashMap;
 
+use pctwin_catalogue::{Catalogue, Report, Row};
 use pctwin_record::{Item, ItemId, ItemKind, ItemPath, Record};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::rules::System;
 
-/// What a place is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum What {
-    /// Photos straight from a camera or phone.
-    CameraPhotos,
-    PhotosLibrary,
-    LightroomCatalog,
-    MusicLibrary,
-    /// An iPhone or iPad backup.
-    PhoneBackup,
-    TimeMachine,
-    FileHistory,
-    WindowsImageBackup,
-    /// The older copy of Windows an upgrade leaves.
-    OldWindows,
-    VirtualMachineDisk,
-    /// A Linux system kept inside Windows (WSL).
-    LinuxOnWindows,
-    Containers,
-    GameSaves,
-    InstalledGames,
-    Screenshots,
-    /// A backup program's image of a whole drive.
-    DiskImageBackup,
-    /// An installer or disc image.
-    DiscImage,
-    /// Mail kept on the laptop, the person's own.
-    EmailArchive,
-    /// Outlook's offline copy of mail kept on a server: it comes back by itself.
-    EmailCache,
-    PasswordVault,
-    MoneyRecords,
-    CodeProject,
-    NotesVault,
-    VideoProject,
-    MusicProject,
-    DesignFile,
-    EbookLibrary,
+/// What a place is: a kind's ID from the table (1 to [`What::MAX_ID`] bytes of `a-z`, `0-9` and
+/// `-`). The kinds the shipped table holds are named here too.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct What {
+    len: u8,
+    id: [u8; What::MAX_ID],
 }
 
+#[allow(non_upper_case_globals)]
 impl What {
-    fn from_text(text: &str) -> Option<Self> {
-        Some(match text {
-            "camera-photos" => Self::CameraPhotos,
-            "photos-library" => Self::PhotosLibrary,
-            "lightroom-catalog" => Self::LightroomCatalog,
-            "music-library" => Self::MusicLibrary,
-            "phone-backup" => Self::PhoneBackup,
-            "time-machine" => Self::TimeMachine,
-            "file-history" => Self::FileHistory,
-            "windows-image-backup" => Self::WindowsImageBackup,
-            "old-windows" => Self::OldWindows,
-            "virtual-machine-disk" => Self::VirtualMachineDisk,
-            "linux-on-windows" => Self::LinuxOnWindows,
-            "containers" => Self::Containers,
-            "game-saves" => Self::GameSaves,
-            "installed-games" => Self::InstalledGames,
-            "screenshots" => Self::Screenshots,
-            "disk-image-backup" => Self::DiskImageBackup,
-            "disc-image" => Self::DiscImage,
-            "email-archive" => Self::EmailArchive,
-            "email-cache" => Self::EmailCache,
-            "password-vault" => Self::PasswordVault,
-            "money-records" => Self::MoneyRecords,
-            "code-project" => Self::CodeProject,
-            "notes-vault" => Self::NotesVault,
-            "video-project" => Self::VideoProject,
-            "music-project" => Self::MusicProject,
-            "design-file" => Self::DesignFile,
-            "ebook-library" => Self::EbookLibrary,
-            _ => return None,
-        })
+    pub const MAX_ID: usize = 31;
+    /// Photos straight from a camera or phone.
+    pub const CameraPhotos: Self = Self::fixed("camera-photos");
+    pub const PhotosLibrary: Self = Self::fixed("photos-library");
+    pub const LightroomCatalog: Self = Self::fixed("lightroom-catalog");
+    pub const MusicLibrary: Self = Self::fixed("music-library");
+    /// An iPhone or iPad backup.
+    pub const PhoneBackup: Self = Self::fixed("phone-backup");
+    pub const TimeMachine: Self = Self::fixed("time-machine");
+    pub const FileHistory: Self = Self::fixed("file-history");
+    pub const WindowsImageBackup: Self = Self::fixed("windows-image-backup");
+    /// The older copy of Windows an upgrade leaves.
+    pub const OldWindows: Self = Self::fixed("old-windows");
+    pub const VirtualMachineDisk: Self = Self::fixed("virtual-machine-disk");
+    /// A Linux system kept inside Windows (WSL).
+    pub const LinuxOnWindows: Self = Self::fixed("linux-on-windows");
+    pub const Containers: Self = Self::fixed("containers");
+    pub const GameSaves: Self = Self::fixed("game-saves");
+    pub const InstalledGames: Self = Self::fixed("installed-games");
+    pub const Screenshots: Self = Self::fixed("screenshots");
+    /// A backup program's image of a whole drive.
+    pub const DiskImageBackup: Self = Self::fixed("disk-image-backup");
+    /// An installer or disc image.
+    pub const DiscImage: Self = Self::fixed("disc-image");
+    /// Mail kept on the laptop, the person's own.
+    pub const EmailArchive: Self = Self::fixed("email-archive");
+    /// Outlook's offline copy of mail kept on a server: it comes back by itself.
+    pub const EmailCache: Self = Self::fixed("email-cache");
+    pub const PasswordVault: Self = Self::fixed("password-vault");
+    pub const MoneyRecords: Self = Self::fixed("money-records");
+    pub const CodeProject: Self = Self::fixed("code-project");
+    pub const NotesVault: Self = Self::fixed("notes-vault");
+    pub const VideoProject: Self = Self::fixed("video-project");
+    pub const MusicProject: Self = Self::fixed("music-project");
+    pub const DesignFile: Self = Self::fixed("design-file");
+    pub const EbookLibrary: Self = Self::fixed("ebook-library");
+
+    const fn fixed(id: &str) -> Self {
+        let b = id.as_bytes();
+        assert!(Self::ok(b), "a fixed kind ID is valid");
+        let mut out = [0u8; Self::MAX_ID];
+        let mut i = 0;
+        while i < b.len() {
+            out[i] = b[i];
+            i += 1;
+        }
+        Self {
+            len: b.len() as u8,
+            id: out,
+        }
     }
 
-    /// An old backup of a laptop: worth keeping, but likely the same things again.
+    const fn ok(b: &[u8]) -> bool {
+        if b.is_empty() || b.len() > Self::MAX_ID || b[0] == b'-' {
+            return false;
+        }
+        let mut i = 0;
+        while i < b.len() {
+            if !(b[i].is_ascii_lowercase() || b[i].is_ascii_digit() || b[i] == b'-') {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    /// A kind by its ID, checked.
+    pub fn new(id: &str) -> Option<Self> {
+        Self::ok(id.as_bytes()).then(|| Self::fixed(id))
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.id[..usize::from(self.len)]).unwrap_or("")
+    }
+
+    /// An old backup of a laptop: worth keeping, but likely the same things again (the kind's
+    /// `old-backup` trait in the shipped table).
     pub fn is_old_backup(self) -> bool {
-        matches!(
-            self,
-            Self::PhoneBackup
-                | Self::TimeMachine
-                | Self::FileHistory
-                | Self::WindowsImageBackup
-                | Self::OldWindows
-        )
+        Recogniser::shipped().has(self, Trait::OldBackup)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl std::fmt::Debug for What {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "What({})", self.as_str())
+    }
+}
+
+impl Serialize for What {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for What {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::new(&s).ok_or_else(|| serde::de::Error::custom("not a kind of place"))
+    }
+}
+
+/// What the code does with a kind (a closed set: code per trait, never per kind).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Trait {
+    /// An old backup of a laptop.
+    OldBackup,
+    /// Can be fetched again (installed games; a server's mail).
+    FetchAgain,
+    /// Can be fetched again when its folder's files were all downloaded (an installer).
+    FetchAgainIfDownloaded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum RowSystem {
+    Windows,
+    Mac,
+    Linux,
+    Any,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 enum Shape {
     Folder,
     FolderSuffix,
@@ -106,32 +170,82 @@ enum Shape {
     FileSuffix,
 }
 
+/// A kind of place.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KindRow {
+    pub id: What,
+    /// Its name, to show.
+    pub name: String,
+    #[serde(default)]
+    pub traits: Vec<Trait>,
+}
+
+/// How a place of a kind looks.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MarkerRow {
+    system: RowSystem,
+    shape: Shape,
+    marker: String,
+    what: What,
+}
+
+/// One row of the `place-kinds` catalogue.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub enum WhatRow {
+    Kind(KindRow),
+    Marker(MarkerRow),
+}
+
+impl Row for WhatRow {
+    const CATALOGUE: &'static str = "place-kinds";
+    const FIELDS: &'static [&'static str] = &["kind", "marker"];
+    fn check(&self) -> Result<(), String> {
+        match self {
+            WhatRow::Kind(k) => {
+                if k.name.trim().is_empty()
+                    || k.name.len() > 64
+                    || k.name.chars().any(char::is_control)
+                {
+                    return Err("a kind's name is 1 to 64 plain characters".into());
+                }
+            }
+            WhatRow::Marker(m) => {
+                if m.marker.trim().is_empty() || m.marker.len() > 128 {
+                    return Err("an empty marker".into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One marker this build uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Row {
+struct Marker {
     shape: Shape,
     /// Lower case: names are compared ignoring case.
     marker: String,
     what: What,
+    /// Its place among the table's rows that loaded, from 1 (the file's own row when nothing
+    /// was skipped, as in the shipped table).
     line: usize,
 }
-
-/// Why the table could not be read.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
-#[error("what.txt line {line}: {why}")]
-pub struct TableError {
-    pub line: usize,
-    pub why: String,
-}
-
-const TABLE: &str = include_str!("../rules/what.txt");
 
 /// The table, read once, for one system.
 #[derive(Debug, Clone)]
 pub struct Recogniser {
-    rows: Vec<Row>,
+    kinds: Vec<KindRow>,
+    markers: Vec<Marker>,
+    report: Report,
+    /// Marker rows naming a kind no kind row gives (row number, the kind): skipped.
+    unknown_kinds: Vec<(usize, What)>,
 }
 
-/// A place the table named: the item, what it is, and the table's line that named it.
+/// A place the table named: the item, what it is, and the table's row that named it (its place
+/// among the rows that loaded, from 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Recognised {
     pub item: ItemId,
@@ -139,58 +253,83 @@ pub struct Recognised {
     pub line: usize,
 }
 
+/// What the table made of a record: every place it named, and every folder at the top of a
+/// place that it did not (found, not named; listed so the table can grow).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Named {
+    pub named: Vec<Recognised>,
+    pub found_not_named: Vec<ItemId>,
+}
+
+const TABLE: &str = include_str!("../rules/what.json");
+
 impl Recogniser {
-    /// The table shipped with PCTwin, for the system this build runs on.
-    pub fn shipped() -> Self {
-        // The shipped table is checked by a test; a broken one must never be half-applied.
-        Self::parse(TABLE, System::this()).expect("the shipped table reads")
+    /// The table shipped with PCTwin, for the system this build runs on. Never panics: a table
+    /// that cannot be read names nothing, and says why in [`Recogniser::report`].
+    pub fn shipped() -> &'static Self {
+        static SHIPPED: std::sync::OnceLock<Recogniser> = std::sync::OnceLock::new();
+        SHIPPED.get_or_init(|| Self::from_catalogue(&Catalogue::shipped(TABLE), System::this()))
     }
 
-    /// Reads a table for `system`.
-    pub fn parse(text: &str, system: System) -> Result<Self, TableError> {
-        let mut rows = Vec::new();
-        for (i, line) in text.lines().enumerate() {
-            let line_no = i + 1;
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
+    /// Reads a table's text for `system` (rows it cannot use are skipped and reported).
+    pub fn parse(text: &str, system: System) -> Self {
+        Self::from_catalogue(&Catalogue::shipped(text), system)
+    }
+
+    /// The table in a loaded catalogue (shipped or delivered), for `system`.
+    pub fn from_catalogue(table: &Catalogue<WhatRow>, system: System) -> Self {
+        let kinds: Vec<KindRow> = table
+            .rows()
+            .iter()
+            .filter_map(|r| match r {
+                WhatRow::Kind(k) => Some(k.clone()),
+                WhatRow::Marker(_) => None,
+            })
+            .collect();
+        let mut markers = Vec::new();
+        let mut unknown_kinds = Vec::new();
+        for (i, r) in table.rows().iter().enumerate() {
+            let WhatRow::Marker(m) = r else { continue };
+            if !kinds.iter().any(|k| k.id == m.what) {
+                unknown_kinds.push((i + 1, m.what));
                 continue;
             }
-            let bad = |why: &str| TableError {
-                line: line_no,
-                why: why.to_string(),
+            let for_us = match m.system {
+                RowSystem::Any => true,
+                RowSystem::Windows => system == System::Windows,
+                RowSystem::Mac => system == System::Mac,
+                RowSystem::Linux => system == System::Linux,
             };
-            let fields: Vec<&str> = trimmed.split('|').map(str::trim).collect();
-            let [sys, shape, marker, what] = fields[..] else {
-                return Err(bad("a row has four parts separated by |"));
-            };
-            let row_system = match sys {
-                "windows" => System::Windows,
-                "mac" => System::Mac,
-                "linux" => System::Linux,
-                "any" => System::Any,
-                _ => return Err(bad("unknown system")),
-            };
-            let shape = match shape {
-                "folder" => Shape::Folder,
-                "folder-suffix" => Shape::FolderSuffix,
-                "holds" => Shape::Holds,
-                "file-suffix" => Shape::FileSuffix,
-                _ => return Err(bad("unknown shape")),
-            };
-            if marker.is_empty() {
-                return Err(bad("an empty marker"));
-            }
-            let what = What::from_text(what).ok_or_else(|| bad("unknown kind of place"))?;
-            if row_system == System::Any || row_system == system {
-                rows.push(Row {
-                    shape,
-                    marker: marker.to_lowercase(),
-                    what,
-                    line: line_no,
+            if for_us {
+                markers.push(Marker {
+                    shape: m.shape,
+                    marker: m.marker.to_lowercase(),
+                    what: m.what,
+                    line: i + 1,
                 });
             }
         }
-        Ok(Self { rows })
+        Self {
+            kinds,
+            markers,
+            report: table.report().clone(),
+            unknown_kinds,
+        }
+    }
+
+    /// What could not be used: rows skipped by the catalogue, and markers of unknown kinds.
+    pub fn report(&self) -> (&Report, &[(usize, What)]) {
+        (&self.report, &self.unknown_kinds)
+    }
+
+    /// A kind's row.
+    pub fn kind(&self, what: What) -> Option<&KindRow> {
+        self.kinds.iter().find(|k| k.id == what)
+    }
+
+    /// Whether a kind has a trait.
+    pub fn has(&self, what: What, t: Trait) -> bool {
+        self.kind(what).is_some_and(|k| k.traits.contains(&t))
     }
 
     /// What a folder named `name`, directly holding `children`, is (the first row that matches).
@@ -200,7 +339,7 @@ impl Recogniser {
         children: impl IntoIterator<Item = &'a str> + Clone,
     ) -> Option<(What, usize)> {
         let name = name.to_lowercase();
-        self.rows.iter().find_map(|r| {
+        self.markers.iter().find_map(|r| {
             let hit = match r.shape {
                 Shape::Folder => name == r.marker,
                 Shape::FolderSuffix => name.ends_with(&r.marker),
@@ -217,16 +356,17 @@ impl Recogniser {
     /// What a file named `name` is.
     pub fn file(&self, name: &str) -> Option<(What, usize)> {
         let name = name.to_lowercase();
-        self.rows
+        self.markers
             .iter()
             .find(|r| r.shape == Shape::FileSuffix && name.ends_with(&r.marker))
             .map(|r| (r.what, r.line))
     }
 
-    /// Every folder and file of `record` the table names. Only the record is read (the mover's
-    /// own and shared things), never the drive. A folder inside one already named is not named
-    /// again (the photos inside a phone backup are the backup's).
-    pub fn record(&self, record: &Record) -> Vec<Recognised> {
+    /// Every folder and file of `record` the table names, and every folder at the top of a place
+    /// it does not. Only the record is read (the mover's own and shared things), never the drive.
+    /// A folder inside one already named is not named again (the photos inside a phone backup are
+    /// the backup's).
+    pub fn record(&self, record: &Record) -> Named {
         // Each folder's children's names, by the folder's own ID.
         let mut children: HashMap<ItemId, Vec<&str>> = HashMap::new();
         for i in &record.items {
@@ -279,7 +419,17 @@ impl Recogniser {
                 kept.push((i, r));
             }
         }
-        kept.into_iter().map(|(_, r)| r).collect()
+        let found_not_named = record
+            .items
+            .iter()
+            .filter(|i| i.kind == ItemKind::Folder && i.path.parts().len() == 1)
+            .filter(|i| !kept.iter().any(|(k, _)| k.id == i.id))
+            .map(|i| i.id)
+            .collect();
+        Named {
+            named: kept.into_iter().map(|(_, r)| r).collect(),
+            found_not_named,
+        }
     }
 }
 
@@ -287,12 +437,20 @@ impl Recogniser {
 mod tests {
     use super::*;
 
+    fn table(system: System) -> Recogniser {
+        Recogniser::parse(TABLE, system)
+    }
+
     #[test]
-    fn the_shipped_table_reads_on_every_system() {
+    fn the_shipped_table_reads_whole_on_every_system() {
         for system in [System::Windows, System::Mac, System::Linux] {
-            let r = Recogniser::parse(TABLE, system).unwrap();
-            assert!(r.rows.len() >= 18, "{system:?}");
+            let r = table(system);
+            assert!(r.markers.len() >= 18, "{system:?}");
+            assert!(r.report.is_clean(), "{:?}", r.report);
+            assert!(r.unknown_kinds.is_empty());
+            assert_eq!(r.kinds.len(), 27);
         }
+        assert!(Recogniser::shipped().report().0.is_clean());
     }
 
     /// The table is part of the app: a change to it is a change to the app, made on purpose.
@@ -301,14 +459,14 @@ mod tests {
         let fingerprint = blake3::hash(TABLE.replace("\r\n", "\n").as_bytes());
         assert_eq!(
             fingerprint.to_hex().as_str(),
-            include_str!("../rules/what.txt.blake3").trim(),
-            "rules/what.txt changed: review it, then update rules/what.txt.blake3"
+            include_str!("../rules/what.json.blake3").trim(),
+            "rules/what.json changed: review it, then update rules/what.json.blake3"
         );
     }
 
     #[test]
     fn folders_and_files_are_named_by_their_markers() {
-        let r = Recogniser::parse(TABLE, System::Windows).unwrap();
+        let r = table(System::Windows);
         assert_eq!(r.folder("DCIM", []).map(|w| w.0), Some(What::CameraPhotos));
         assert_eq!(r.folder("dcim", []).map(|w| w.0), Some(What::CameraPhotos));
         assert_eq!(
@@ -324,7 +482,7 @@ mod tests {
         assert_eq!(r.file("notes.txt"), None);
         // Mac-only rows are not used on Windows.
         assert_eq!(r.folder("Pictures.photoslibrary", []), None);
-        let mac = Recogniser::parse(TABLE, System::Mac).unwrap();
+        let mac = table(System::Mac);
         assert_eq!(
             mac.folder("Pictures.photoslibrary", []).map(|w| w.0),
             Some(What::PhotosLibrary)
@@ -333,7 +491,7 @@ mod tests {
 
     #[test]
     fn the_person_s_own_work_and_records_are_named() {
-        let r = Recogniser::parse(TABLE, System::Windows).unwrap();
+        let r = table(System::Windows);
         for (file, what) in [
             ("Passwords.kdbx", What::PasswordVault),
             ("archive 2019.PST", What::EmailArchive),
@@ -367,7 +525,7 @@ mod tests {
         );
         // Mac-only rows stay on the Mac.
         assert_eq!(r.file("Installer.dmg"), None);
-        let mac = Recogniser::parse(TABLE, System::Mac).unwrap();
+        let mac = table(System::Mac);
         assert_eq!(
             mac.folder("Song.logicx", []).map(|w| w.0),
             Some(What::MusicProject)
@@ -376,15 +534,65 @@ mod tests {
     }
 
     #[test]
-    fn a_broken_table_is_refused_whole() {
-        for bad in [
-            "any | folder | DCIM",
-            "beos | folder | DCIM | camera-photos",
-            "any | shape | DCIM | camera-photos",
-            "any | folder |  | camera-photos",
-            "any | folder | DCIM | holiday-snaps",
+    fn traits_come_from_the_kind_rows() {
+        let r = Recogniser::shipped();
+        for old in [
+            What::PhoneBackup,
+            What::TimeMachine,
+            What::FileHistory,
+            What::WindowsImageBackup,
+            What::OldWindows,
         ] {
-            assert!(Recogniser::parse(bad, System::Windows).is_err(), "{bad}");
+            assert!(old.is_old_backup(), "{old:?}");
         }
+        assert!(!What::CameraPhotos.is_old_backup());
+        assert!(r.has(What::InstalledGames, Trait::FetchAgain));
+        assert!(r.has(What::EmailCache, Trait::FetchAgain));
+        assert!(r.has(What::DiscImage, Trait::FetchAgainIfDownloaded));
+        assert!(!r.has(What::EmailArchive, Trait::FetchAgain));
+        assert_eq!(r.kind(What::PhoneBackup).unwrap().name, "Phone backup");
+    }
+
+    /// A newer table never stops an older app: rows it cannot use are skipped and reported, and
+    /// every other row still works.
+    #[test]
+    fn rows_this_version_cannot_use_are_skipped_and_reported() {
+        let text = r#"{"format":1,"catalogue":"place-kinds","version":9,"rows":[
+            {"kind":{"id":"camera-photos","name":"Camera photos"}},
+            {"kind":{"id":"holo-captures","name":"Holo captures","traits":["glows"]}},
+            {"marker":{"system":"any","shape":"folder","marker":"DCIM","what":"camera-photos"}},
+            {"marker":{"system":"any","shape":"folder","marker":"Holo","what":"holo-captures"}},
+            {"marker":{"system":"beos","shape":"folder","marker":"x","what":"camera-photos"}},
+            {"marker":{"system":"any","shape":"blob","marker":"x","what":"camera-photos"}},
+            {"marker":{"system":"any","shape":"folder","marker":" ","what":"camera-photos"}},
+            {"marker":{"system":"any","shape":"folder","marker":"x","what":"Not An Id"}},
+            {"teleporter":{"x":1}}
+        ]}"#;
+        let r = Recogniser::parse(text, System::Windows);
+        let (report, unknown) = r.report();
+        let skipped: Vec<usize> = report.skipped.iter().map(|s| s.row).collect();
+        assert_eq!(skipped, [1, 4, 5, 6, 7, 8]);
+        // The Holo marker's kind did not load (its trait is unknown): skipped too.
+        assert_eq!(unknown, [(3, What::new("holo-captures").unwrap())]);
+        assert_eq!(r.folder("DCIM", []).map(|w| w.0), Some(What::CameraPhotos));
+        assert_eq!(r.folder("Holo", []), None);
+        // A table that is not a table at all names nothing, and never panics.
+        let none = Recogniser::parse("not json", System::Windows);
+        assert!(none.report().0.refused.is_some());
+        assert_eq!(none.folder("DCIM", []), None);
+    }
+
+    #[test]
+    fn kind_ids_are_checked() {
+        assert_eq!(What::new("camera-photos"), Some(What::CameraPhotos));
+        for bad in ["", "-x", "X", "a b", &"a".repeat(32)] {
+            assert_eq!(What::new(bad), None, "{bad:?}");
+        }
+        assert_eq!(What::new(&"a".repeat(31)).unwrap().as_str().len(), 31);
+        assert_eq!(
+            serde_json::to_string(&What::DiscImage).unwrap(),
+            "\"disc-image\""
+        );
+        assert_eq!(format!("{:?}", What::DiscImage), "What(disc-image)");
     }
 }
