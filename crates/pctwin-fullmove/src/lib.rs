@@ -1,0 +1,24 @@
+//! The full move (Phase 2, "Queue of joining work"): the parts built for apps (2.1), the
+//! administrator helper (2.2), undo (2.3), settings (2.4), special categories (2.5) and finishing
+//! (2.7), joined to the move of files and people, so one move does all of it with one plan, one
+//! approval, one administrator prompt and an honest result word for every item.
+//!
+//! - [`extras`]: what the old laptop sends beside its list (settings found by discovery, its own
+//!   folders, the special categories), read strictly on the new laptop; only reading happens on
+//!   the old laptop.
+//! - [`plan`]: on the new laptop, before the approval: every app with where it comes from (or
+//!   why it needs the person), every setting that moves or why not, every special category, and
+//!   what undo can do for each change. Its digest joins the plan the person approves.
+//! - [`run`]: after the files arrived: settings through the executor and the effect journal,
+//!   apps through an [`run::Installer`] (the administrator helper on Windows; a fake in tests),
+//!   and one result word per item.
+//! - [`undo`]: what undo would do, looked at now, and undo itself, which keeps a setting the
+//!   person changed after the move.
+//!
+//! Nothing here decides alone that something worked: every result comes from the executor's
+//! read-back, the helper's receipt and the laptop's own list after an install.
+
+pub mod extras;
+pub mod plan;
+pub mod run;
+pub mod undo;

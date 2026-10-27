@@ -21,6 +21,7 @@
 // pctwin-transfer. Tests make files to test on, so they are exempt.
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
+pub mod extras;
 pub mod greeting;
 pub mod handover;
 pub mod held_journal;
@@ -432,6 +433,10 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
         send_inventory(link, record, version).await?;
         landing::send_mover(link, who.mover).await?;
         landing::send_people(link, who.people).await?;
+        // From move protocol 6: what the full move rebuilds beside the files.
+        if version >= pctwin_transfer::EXTRAS_SINCE {
+            extras::send(link, who.extras).await?;
+        }
         let rules = landing::receive_rules(link).await?;
         // The plan is approved: the way back opens, for exactly this plan.
         let port = back.open(&resume::plan_print(&record.items, &rules)).await;
@@ -458,11 +463,13 @@ pub async fn send_by_rules<C: Channel, B: Comeback>(
 }
 
 /// Who is in the move, as the old laptop tells the new one: the person moving (their account ID
-/// here) and the other people, by name.
+/// here) and the other people, by name; and the full move's extras ([`extras`]: empty when there
+/// are none), sent to a new laptop on move protocol 6 or later.
 #[derive(Debug, Clone, Copy)]
 pub struct Who<'a> {
     pub mover: &'a str,
     pub people: &'a [landing::NamedPerson],
+    pub extras: &'a [u8],
 }
 
 /// Runs the old laptop's sending of `plan` over `link` (the version agreed): one outcome per
@@ -643,6 +650,11 @@ pub trait Steps {
     /// The other people whose things are in the move, by name, as the old laptop said (the app's
     /// way of moving), before anyone is placed.
     fn people(&mut self, _people: &[landing::NamedPerson]) {}
+
+    /// The full move's extras as the old laptop sent them ([`extras`]; move protocol 6 and later,
+    /// the app's way of moving), before anyone is placed: unread bytes from the other laptop,
+    /// for the part that rebuilds them to check. Not called with an older laptop.
+    fn extras(&mut self, _bytes: Vec<u8>) {}
 
     /// Files the person chose, at their approval, to leave out (whole folders of theirs, say):
     /// they are left out of the plan as their own choice, and `landing` gives them no place.
@@ -879,6 +891,9 @@ async fn receive_plan_told<C: Channel, S: Steps>(
         steps.mover(&mover);
         let people = landing::receive_people(link).await?;
         steps.people(&people);
+        if version >= pctwin_transfer::EXTRAS_SINCE {
+            steps.extras(extras::receive(link).await?);
+        }
     }
     let mut people = BTreeSet::new();
     let owners: Vec<String> = record

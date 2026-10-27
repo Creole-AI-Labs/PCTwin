@@ -80,13 +80,14 @@ async fn sent_by(ours: Versions) -> Vec<u8> {
 }
 
 #[test]
-fn this_release_speaks_versions_three_to_five() {
+fn this_release_speaks_versions_three_to_six() {
     // 3 sends the list in pages (PAGED_FROM), kept for a laptop one version behind; 4 adds Hold
-    // (HOLD_SINCE); 5 adds the apps (APPS_SINCE). 2 was never released, and its one-document
-    // list had no memory bounds.
+    // (HOLD_SINCE); 5 adds the apps (APPS_SINCE); 6 the full move's extras (EXTRAS_SINCE). 2 was
+    // never released, and its one-document list had no memory bounds.
     assert_eq!(MOVE_PROTOCOL.oldest(), 3);
-    assert_eq!(MOVE_PROTOCOL.newest(), 5);
+    assert_eq!(MOVE_PROTOCOL.newest(), 6);
     assert_eq!(pctwin_transfer::APPS_SINCE, 5);
+    assert_eq!(pctwin_transfer::EXTRAS_SINCE, 6);
     assert_eq!(pctwin_transfer::PAGED_FROM, 3);
     assert_eq!(pctwin_transfer::HOLD_SINCE, 4);
 }

@@ -35,10 +35,19 @@ pub const VERSION_WAIT: Duration = Duration::from_secs(30);
 /// given out in test builds, so 5 keeps speaking 4 and 3: with a laptop on 4, an old laptop whose
 /// list holds either asks for PCTwin to be updated there, before anything is sent
 /// ([`APPS_SINCE`]).
+///
+/// Version 6 (27 October 2026) adds what the full move rebuilds beside the files: after the list
+/// of people, the old laptop sends one bounded, paged message of settings found, its own folders
+/// and the special categories ([`EXTRAS_SINCE`]). With a laptop on 5 or older nothing more is
+/// sent, and the new laptop rebuilds no settings.
 pub const MOVE_PROTOCOL: Versions = Versions {
     oldest: 3,
-    newest: 5,
+    newest: 6,
 };
+
+/// The first move protocol version in which the old laptop sends the full move's extras
+/// (settings found, its folders, the special categories) after the list of people.
+pub const EXTRAS_SINCE: u16 = 6;
 
 /// The first move protocol version whose list (the scan inventory version 4) carries the apps
 /// found on the old laptop and cloud services by their ID.

@@ -1,0 +1,37 @@
+[package]
+name = "pctwin-fullmove"
+description = "The full move: joins apps, settings and special categories to the move of files and people, with one plan, one approval, an honest result for every item and undo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The digest that binds the person's approval to exactly the extras and changes shown.
+blake3 = "1.8"
+# 2.1: where each app comes from, and the honest result after an install.
+pctwin-apps = { path = "../pctwin-apps" }
+# 2.3: settings applied through the approved plan, journaled, and undone with compare-and-write.
+pctwin-executor = { path = "../pctwin-executor" }
+pctwin-grant = { path = "../pctwin-grant" }
+pctwin-journal = { path = "../pctwin-journal" }
+pctwin-recipe = { path = "../pctwin-recipe" }
+pctwin-record = { path = "../pctwin-record" }
+# 2.4: settings found by discovery, sorted by kind, planned and applied.
+pctwin-settings = { path = "../pctwin-settings" }
+pctwin-types = { path = "../pctwin-types" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+pctwin-gate = { path = "../pctwin-gate" }
+pctwin-move = { path = "../pctwin-move" }
+pctwin-transfer = { path = "../pctwin-transfer" }
+tempfile = "3"
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true

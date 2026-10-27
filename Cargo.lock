@@ -3740,6 +3740,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-fullmove"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "pctwin-apps",
+ "pctwin-executor",
+ "pctwin-gate",
+ "pctwin-grant",
+ "pctwin-journal",
+ "pctwin-move",
+ "pctwin-recipe",
+ "pctwin-record",
+ "pctwin-settings",
+ "pctwin-transfer",
+ "pctwin-types",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "pctwin-gate"
 version = "0.1.0"
 dependencies = [
