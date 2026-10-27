@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 blake3 = "1.8"
+# Each Phase 2 role's key: only the installs, settings or imports role's own key makes its recorder.
+pctwin-grant = { path = "../pctwin-grant" }
 getrandom = "0.4.3"
 pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-record = { path = "../pctwin-record" }
@@ -21,7 +23,21 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 thiserror = "2.0.21"
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1.5", features = ["fs"] }
+# The person's user number checks the Linux record key's file is theirs alone.
+rustix = { version = "1.1.5", features = ["fs", "process"] }
+
+# The key that seals each effect record, kept where the system keeps the person's secrets
+# (security review finding 3): Windows' Credential Manager (DPAPI), macOS' login Keychain.
+[target.'cfg(windows)'.dependencies]
+keyring-core = "1"
+# The bus of the disk the journal's folder is on (USB hard disks report themselves "fixed"), from
+# the system's storage list (security review finding 4). Safe Rust; already used by the helper.
+wmi = "0.18.4"
+windows-native-keyring-store = { version = "1.1", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring-core = "1"
+apple-native-keyring-store = { version = "1", default-features = false, features = ["keychain"] }
 
 [dev-dependencies]
 redb = "4.3"

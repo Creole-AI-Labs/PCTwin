@@ -82,7 +82,7 @@ impl<'a> SplitLedger<'a> {
             return Ok(Some(n));
         }
         if held.len() + 1 >= 1 << (64 - SHIFT) {
-            return Err(JournalError::Damaged("too many holding places".into()));
+            return Err(JournalError::Damaged("too many holding places"));
         }
         held.push((
             label.to_string(),
@@ -102,9 +102,7 @@ impl<'a> SplitLedger<'a> {
             None => f(self.mine, inner),
             Some(n) => {
                 let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
-                let (_, journal) = held
-                    .get(n)
-                    .ok_or_else(|| JournalError::Damaged("no such entry".into()))?;
+                let (_, journal) = held.get(n).ok_or(JournalError::Damaged("no such entry"))?;
                 f(journal, inner)
             }
         }
@@ -114,9 +112,7 @@ impl<'a> SplitLedger<'a> {
 /// Entry `inner` of holding place `n` as the receiver sees it.
 fn joined(n: usize, inner: u64) -> Result<u64, JournalError> {
     if inner >> SHIFT != 0 {
-        return Err(JournalError::Damaged(
-            "too many entries in one journal".into(),
-        ));
+        return Err(JournalError::Damaged("too many entries in one journal"));
     }
     Ok(((n as u64 + 1) << SHIFT) | inner)
 }
@@ -141,7 +137,7 @@ impl Ledger for SplitLedger<'_> {
                 let held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
                 let (_, journal) = held
                     .get(n)
-                    .ok_or_else(|| JournalError::Damaged("no such holding place".into()))?;
+                    .ok_or(JournalError::Damaged("no such holding place"))?;
                 journal.folders_made_in(scope, destination)
             }
         }
@@ -155,9 +151,7 @@ impl Ledger for SplitLedger<'_> {
             None => {
                 let id = self.mine.plan(write)?;
                 if id >> SHIFT != 0 {
-                    return Err(JournalError::Damaged(
-                        "too many entries in one journal".into(),
-                    ));
+                    return Err(JournalError::Damaged("too many entries in one journal"));
                 }
                 Ok(id)
             }

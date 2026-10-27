@@ -6,8 +6,9 @@
 //! itself ([`Broker::seal`]); the helper keeps it only if it matches. After that, each request
 //! ([`BrokerRequest`]) goes through, in order (plan section 4):
 //!
-//! 1. the protocol version, the session still open and not revoked, the plan sealed and its lease
-//!    not over;
+//! 1. the protocol version, the session still open and not revoked, the plan sealed, its lease
+//!    not over (each action renews the lease) and the session's fixed deadline not passed
+//!    ([`pctwin_grant::MAX_SESSION`] from sealing; nothing renews it);
 //! 2. the request's one-use nonce (a request said twice is refused);
 //! 3. the role it comes from: it must be one that may ask for privileged work, and the one that
 //!    owns this action;
@@ -32,10 +33,12 @@
 //! secret.
 
 pub mod actions;
+pub mod journal;
 pub mod receipt;
 pub mod restore;
 pub mod staging;
 pub mod tool;
+pub mod watch;
 
 #[cfg(test)]
 mod tests;
@@ -59,6 +62,13 @@ pub const PROTOCOL: u32 = 1;
 pub const MAX_REQUESTS: usize = 4096;
 
 /// The approved plan's generation and digest, from the helper's command line.
+///
+/// What this does not prove (security review, 26 October 2026): the app chooses what it puts on
+/// the command line, and the system's administrator prompt does not show the digest to the
+/// person, so the digest only binds the helper to the plan the app named, not to one the person
+/// saw. The real wall is the helper's fixed set of three actions (a verified package, a named
+/// setting from a short list, a restore point) and its own checks of each; later roles must not
+/// treat a sealed plan as the person's approval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LaunchSeal {
     pub generation: u64,
@@ -201,8 +211,8 @@ pub trait IntentJournal {
     ) -> Result<(), JournalUnavailable>;
 }
 
-/// No journal yet (until 2.3 is joined to the helper): nothing can be recorded, so nothing is
-/// changed.
+/// No journal: nothing can be recorded, so nothing is changed (for a helper whose journal could
+/// not be opened; the real one is [`journal::JournalIntents`]).
 pub struct NoJournal;
 
 impl IntentJournal for NoJournal {
@@ -332,8 +342,15 @@ impl Adapters for BuiltInAdapters {
         })
     }
 
-    fn observe(&mut self, _: &Action) -> Observed {
-        Observed::Unknown
+    /// A restore point a crash interrupted is asked for again: Windows makes at most one a day
+    /// for programs and says so, so asking twice never makes a second one silently, and the
+    /// answer stays honest. Installs and settings cannot be looked at by this build: unknown, so
+    /// the broker asks for recovery instead of acting.
+    fn observe(&mut self, action: &Action) -> Observed {
+        match action {
+            Action::CreateRestorePoint(_) => Observed::Absent,
+            Action::InstallVerifiedPackage(_) | Action::ApplyNamedSetting(_) => Observed::Unknown,
+        }
     }
 }
 
@@ -349,6 +366,8 @@ pub struct Broker<'a> {
     launch: LaunchSeal,
     plan: Option<ApprovedPlan>,
     lease: Option<Expiry>,
+    /// The session's fixed end, set when the plan is sealed and never renewed.
+    deadline: Option<Expiry>,
     nonces: BTreeSet<Hex16>,
     closed: bool,
     revoker: Revoker,
@@ -374,6 +393,7 @@ impl<'a> Broker<'a> {
             launch,
             plan: None,
             lease: None,
+            deadline: None,
             nonces: BTreeSet::new(),
             closed: false,
             revoker: Revoker::default(),
@@ -415,8 +435,9 @@ impl<'a> Broker<'a> {
         {
             return Err(Denial::WrongPlan);
         }
-        self.lease =
-            Some(Expiry::after(MAX_LIFETIME, (self.clock)()).map_err(|_| Denial::Expired)?);
+        let now = (self.clock)();
+        self.lease = Some(Expiry::after(MAX_LIFETIME, now).map_err(|_| Denial::Expired)?);
+        self.deadline = Some(Expiry::session_from(now).map_err(|_| Denial::Expired)?);
         self.plan = Some(plan);
         Ok(())
     }
@@ -426,6 +447,7 @@ impl<'a> Broker<'a> {
         self.closed = true;
         self.plan = None;
         self.lease = None;
+        self.deadline = None;
         self.staging.clear();
     }
 
@@ -438,13 +460,14 @@ impl<'a> Broker<'a> {
             self.close();
             return Err(Denial::Revoked);
         }
-        match self.lease {
-            None => Err(Denial::NotSealed),
-            Some(lease) if lease.is_over((self.clock)()) => {
+        let now = (self.clock)();
+        match (self.lease, self.deadline) {
+            (Some(lease), Some(deadline)) if lease.is_over(now) || deadline.is_over(now) => {
                 self.close();
                 Err(Denial::Expired)
             }
-            Some(_) => Ok(()),
+            (Some(_), Some(_)) => Ok(()),
+            _ => Err(Denial::NotSealed),
         }
     }
 

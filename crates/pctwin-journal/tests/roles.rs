@@ -6,6 +6,7 @@
 //! own drive (T23-009).
 
 mod common;
+use common::keys;
 
 use pctwin_journal::place::{FsKind, Placement, classify, linux_kind, removable_in};
 use pctwin_journal::{
@@ -68,21 +69,36 @@ fn import() -> ImportIntent {
 
 /// Each role's effect, finished.
 fn three(j: &Journal) -> (u64, u64, u64) {
-    let i = j.installs().intend(&planned(), &app()).unwrap();
-    j.installs()
+    let i = j
+        .installs(&keys().install)
+        .intend(&planned(), &app())
+        .unwrap();
+    j.installs(&keys().install)
         .observed(i, &Found::App(Presence::Present { version: None }), false)
         .unwrap();
-    j.installs().receipt(i, &Receipt::Done).unwrap();
-    let s = j.settings().intend(&planned(), &set()).unwrap();
-    j.settings()
+    j.installs(&keys().install)
+        .receipt(i, &Receipt::Done)
+        .unwrap();
+    let s = j
+        .settings(&keys().setting)
+        .intend(&planned(), &set())
+        .unwrap();
+    j.settings(&keys().setting)
         .observed(s, &Found::Setting(Some(SettingValue::Int(1))), false)
         .unwrap();
-    j.settings().receipt(s, &Receipt::Done).unwrap();
-    let m = j.imports().intend(&planned(), &import()).unwrap();
-    j.imports()
+    j.settings(&keys().setting)
+        .receipt(s, &Receipt::Done)
+        .unwrap();
+    let m = j
+        .imports(&keys().capture)
+        .intend(&planned(), &import())
+        .unwrap();
+    j.imports(&keys().capture)
         .observed(m, &Found::Files(vec![]), false)
         .unwrap();
-    j.imports().receipt(m, &Receipt::Done).unwrap();
+    j.imports(&keys().capture)
+        .receipt(m, &Receipt::Done)
+        .unwrap();
     (i, s, m)
 }
 
@@ -99,7 +115,10 @@ fn each_effect_is_stamped_with_the_role_that_recorded_it() {
 #[test]
 fn a_role_cannot_observe_finish_or_undo_another_roles_effect() {
     let (_d, _p, j) = common::journal();
-    let i = j.installs().intend(&planned(), &app()).unwrap();
+    let i = j
+        .installs(&keys().install)
+        .intend(&planned(), &app())
+        .unwrap();
     let wrong = |r: Result<(), JournalError>, owner: Role| {
         assert!(
             matches!(r, Err(JournalError::WrongRole { belongs_to, .. }) if belongs_to == owner),
@@ -107,22 +126,37 @@ fn a_role_cannot_observe_finish_or_undo_another_roles_effect() {
         );
     };
     let present = Found::App(Presence::Present { version: None });
-    wrong(j.settings().observed(i, &present, false), Role::Install);
-    wrong(j.imports().observed(i, &present, false), Role::Install);
-    j.installs().observed(i, &present, false).unwrap();
-    wrong(j.settings().receipt(i, &Receipt::Done), Role::Install);
-    j.installs().receipt(i, &Receipt::Done).unwrap();
-    let permit = j.begin_undo().unwrap();
     wrong(
-        j.settings().record_undo(&permit, i, &EffectUndo::Reversing),
+        j.settings(&keys().setting).observed(i, &present, false),
         Role::Install,
     );
     wrong(
-        j.imports().record_undo(&permit, i, &EffectUndo::Reversing),
+        j.imports(&keys().capture).observed(i, &present, false),
+        Role::Install,
+    );
+    j.installs(&keys().install)
+        .observed(i, &present, false)
+        .unwrap();
+    wrong(
+        j.settings(&keys().setting).receipt(i, &Receipt::Done),
+        Role::Install,
+    );
+    j.installs(&keys().install)
+        .receipt(i, &Receipt::Done)
+        .unwrap();
+    let permit = j.begin_undo().unwrap();
+    wrong(
+        j.settings(&keys().setting)
+            .record_undo(&permit, i, &EffectUndo::Reversing),
+        Role::Install,
+    );
+    wrong(
+        j.imports(&keys().capture)
+            .record_undo(&permit, i, &EffectUndo::Reversing),
         Role::Install,
     );
     assert_eq!(j.effect_undo_of(i).unwrap(), None, "nothing was written");
-    j.installs()
+    j.installs(&keys().install)
         .record_undo(&permit, i, &EffectUndo::Reversing)
         .unwrap();
 }
@@ -136,7 +170,7 @@ fn every_effect_has_its_class_and_the_class_bounds_undo() {
     assert_eq!(class(s), EffectClass::SettingsChange);
     assert_eq!(class(m), EffectClass::PrivateDataImport);
     let empty = j
-        .settings()
+        .settings(&keys().setting)
         .intend(
             &planned(),
             &SettingsIntent::Copy {
@@ -148,7 +182,7 @@ fn every_effect_has_its_class_and_the_class_bounds_undo() {
         .unwrap();
     assert_eq!(class(empty), EffectClass::OwnedStagedFile);
     let over = j
-        .settings()
+        .settings(&keys().setting)
         .intend(
             &planned(),
             &SettingsIntent::Copy {
@@ -163,7 +197,7 @@ fn every_effect_has_its_class_and_the_class_bounds_undo() {
         .unwrap();
     assert_eq!(class(over), EffectClass::ExistingTargetReplacement);
     let remote = j
-        .imports()
+        .imports(&keys().capture)
         .intend(
             &planned(),
             &ImportIntent::Remote {
@@ -173,7 +207,7 @@ fn every_effect_has_its_class_and_the_class_bounds_undo() {
         .unwrap();
     assert_eq!(class(remote), EffectClass::RemoteServiceEffect);
     let licence = j
-        .installs()
+        .installs(&keys().install)
         .intend(
             &planned(),
             &InstallIntent::Licence {
@@ -215,13 +249,13 @@ fn an_external_identity_is_short_plain_text_or_nothing_is_recorded() {
         "line\nbreak".into(),
     ] {
         assert!(matches!(
-            j.imports()
+            j.imports(&keys().capture)
                 .intend(&planned(), &ImportIntent::Remote { identity: bad }),
-            Err(JournalError::BadName(_))
+            Err(JournalError::BadName)
         ));
     }
     assert!(j.effects().unwrap().is_empty());
-    j.imports()
+    j.imports(&keys().capture)
         .intend(
             &planned(),
             &ImportIntent::Remote {
@@ -235,7 +269,7 @@ fn an_external_identity_is_short_plain_text_or_nothing_is_recorded() {
 fn an_external_effect_is_observed_by_whether_it_happened() {
     let (_d, _p, j) = common::journal();
     let r = j
-        .imports()
+        .imports(&keys().capture)
         .intend(
             &planned(),
             &ImportIntent::Remote {
@@ -244,10 +278,11 @@ fn an_external_effect_is_observed_by_whether_it_happened() {
         )
         .unwrap();
     assert!(matches!(
-        j.imports().observed(r, &Found::Files(vec![]), false),
+        j.imports(&keys().capture)
+            .observed(r, &Found::Files(vec![]), false),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.imports()
+    j.imports(&keys().capture)
         .observed(r, &Found::External { happened: true }, false)
         .unwrap();
 }
@@ -255,7 +290,10 @@ fn an_external_effect_is_observed_by_whether_it_happened() {
 #[test]
 fn imported_files_keep_what_was_there_before_whole() {
     let (_d, _p, j) = common::journal();
-    let m = j.imports().intend(&planned(), &import()).unwrap();
+    let m = j
+        .imports(&keys().capture)
+        .intend(&planned(), &import())
+        .unwrap();
     let StoredEffect::Import { before, .. } = j.effect(m).unwrap().unwrap().effect else {
         panic!("not an import");
     };
@@ -267,7 +305,7 @@ fn what_support_sees_carries_no_value_key_path_package_or_identity() {
     let (_d, _p, j) = common::journal();
     let secret_value = "hunter2-wifi-passphrase";
     let s = j
-        .settings()
+        .settings(&keys().setting)
         .intend(
             &planned(),
             &SettingsIntent::Apply {
@@ -278,7 +316,7 @@ fn what_support_sees_carries_no_value_key_path_package_or_identity() {
         )
         .unwrap();
     let r = j
-        .imports()
+        .imports(&keys().capture)
         .intend(
             &planned(),
             &ImportIntent::Remote {
@@ -286,7 +324,10 @@ fn what_support_sees_carries_no_value_key_path_package_or_identity() {
             },
         )
         .unwrap();
-    let m = j.imports().intend(&planned(), &import()).unwrap();
+    let m = j
+        .imports(&keys().capture)
+        .intend(&planned(), &import())
+        .unwrap();
     for id in [s, r, m] {
         let view = j.effect(id).unwrap().unwrap().support_view();
         let shown = format!("{view:?}");
@@ -322,9 +363,12 @@ fn tamper(path: &std::path::Path, id: u64, edit: impl Fn(String) -> String) {
         let mut t = tx
             .open_table(redb::TableDefinition::<u64, &[u8]>::new("effects"))
             .unwrap();
-        let old = String::from_utf8(t.get(id).unwrap().unwrap().value().to_vec()).unwrap();
-        let new = edit(old);
-        t.insert(id, new.as_bytes()).unwrap();
+        // A record is its seal (32 bytes), then its words; the words are changed, the seal kept.
+        let stored = t.get(id).unwrap().unwrap().value().to_vec();
+        let (seal, json) = stored.split_at(32);
+        let new = edit(String::from_utf8(json.to_vec()).unwrap());
+        t.insert(id, [seal, new.as_bytes()].concat().as_slice())
+            .unwrap();
     }
     tx.commit().unwrap();
 }
@@ -332,8 +376,14 @@ fn tamper(path: &std::path::Path, id: u64, edit: impl Fn(String) -> String) {
 #[test]
 fn a_record_changed_by_hand_never_supplies_a_path_or_a_role() {
     let (_d, path, j) = common::journal();
-    let m = j.imports().intend(&planned(), &import()).unwrap();
-    let s = j.settings().intend(&planned(), &set()).unwrap();
+    let m = j
+        .imports(&keys().capture)
+        .intend(&planned(), &import())
+        .unwrap();
+    let s = j
+        .settings(&keys().setting)
+        .intend(&planned(), &set())
+        .unwrap();
     drop(j);
     // A path that climbs out of its folder.
     tamper(&path, m, |r| {
@@ -343,12 +393,13 @@ fn a_record_changed_by_hand_never_supplies_a_path_or_a_role() {
     tamper(&path, s, |r| {
         r.replace(r#""role":"settings""#, r#""role":"install""#)
     });
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.effect(m), Err(JournalError::Damaged(_))));
     assert!(matches!(j.effect(s), Err(JournalError::Damaged(_))));
     assert!(matches!(j.effects(), Err(JournalError::Damaged(_))));
     assert!(matches!(
-        j.installs().observed(s, &Found::Setting(None), true),
+        j.installs(&keys().install)
+            .observed(s, &Found::Setting(None), true),
         Err(JournalError::Damaged(_))
     ));
 }
@@ -362,7 +413,7 @@ fn a_truncated_journal_is_reported_and_left_exactly_as_it_was() {
     std::fs::write(&path, &bytes[..bytes.len() / 3]).unwrap();
     let cut = std::fs::read(&path).unwrap();
     assert!(matches!(
-        Journal::open(&path),
+        common::open(&path),
         Err(JournalError::Damaged(_) | JournalError::Storage(_))
     ));
     assert_eq!(
@@ -456,11 +507,11 @@ fn the_volume_holding_a_folder_is_the_longest_mount_it_lies_inside() {
 fn a_journal_opens_in_a_temporary_folder_on_this_laptop() {
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(pctwin_journal::place::judge(dir.path()), Placement::Local);
-    drop(Journal::open(&dir.path().join("journal.redb")).unwrap());
+    drop(common::open(&dir.path().join("journal.redb")).unwrap());
     // A folder that does not exist cannot be judged: refused, nothing made.
     let missing = dir.path().join("nowhere").join("journal.redb");
     assert!(matches!(
-        Journal::open(&missing),
+        common::open(&missing),
         Err(JournalError::UnsafePlace(Placement::Unknown))
     ));
     assert!(!missing.exists());
@@ -472,7 +523,7 @@ fn an_effect_undone_elsewhere_is_never_claimed_undone_here() {
     // remote effect's undo is recorded as kept with words, and stays final.
     let (_d, _p, j) = common::journal();
     let r = j
-        .imports()
+        .imports(&keys().capture)
         .intend(
             &planned(),
             &ImportIntent::Remote {
@@ -480,15 +531,17 @@ fn an_effect_undone_elsewhere_is_never_claimed_undone_here() {
             },
         )
         .unwrap();
-    j.imports()
+    j.imports(&keys().capture)
         .observed(r, &Found::External { happened: true }, false)
         .unwrap();
-    j.imports().receipt(r, &Receipt::Done).unwrap();
+    j.imports(&keys().capture)
+        .receipt(r, &Receipt::Done)
+        .unwrap();
     let permit = j.begin_undo().unwrap();
     let kept = EffectUndoOutcome::Kept {
         why: "only the service can undo this".into(),
     };
-    j.imports()
+    j.imports(&keys().capture)
         .record_undo(
             &permit,
             r,
@@ -503,8 +556,11 @@ fn an_effect_undone_elsewhere_is_never_claimed_undone_here() {
 #[test]
 fn a_recorded_observation_changed_by_hand_never_supplies_a_path() {
     let (_d, path, j) = common::journal();
-    let m = j.imports().intend(&planned(), &import()).unwrap();
-    j.imports()
+    let m = j
+        .imports(&keys().capture)
+        .intend(&planned(), &import())
+        .unwrap();
+    j.imports(&keys().capture)
         .observed(
             m,
             &Found::Files(vec![pctwin_journal::FileHash {
@@ -524,6 +580,6 @@ fn a_recorded_observation_changed_by_hand_never_supplies_a_path() {
             &r[at + "inbox.mbox".len()..]
         )
     });
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.effect(m), Err(JournalError::Damaged(_))));
 }

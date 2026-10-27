@@ -4,6 +4,8 @@
 //! done that was not seen done.
 
 mod common;
+#[allow(unused_imports)]
+use common::{keys, rebuild};
 
 use common::{
     Faulty, Laptop, SCOPE, copy, install, journal, place, plan_of, removable, run_with, set,
@@ -42,7 +44,7 @@ fn an_install_is_recorded_before_it_runs_and_observed_after() {
     );
     let e = &j.effects_of(SCOPE).unwrap()[0];
     assert_eq!(e.planned.step, 0);
-    assert_eq!(e.planned.recipe.id.as_str(), "x");
+    assert!(e.planned.recipe.id.as_str().starts_with('x'));
     let StoredEffect::Install { before, undo, .. } = &e.effect else {
         panic!("not an install");
     };
@@ -66,7 +68,7 @@ fn an_app_already_there_is_never_installed_again_and_is_recorded_as_there_before
     let mut laptop = Laptop::ok();
     laptop.installed.insert("VideoLAN.VLC".into(), "3.0".into());
     let plan = plan_of(vec![removable(vec![install("VideoLAN.VLC")])]);
-    let run = run_with(&plan, &mut laptop, &j);
+    let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(run.results[0].1.status(), ItemStatus::Reinstalled);
     assert!(!laptop.done.iter().any(|d| d.starts_with("install")));
     let StoredEffect::Install { before, .. } = &j.effects().unwrap()[0].effect else {
@@ -91,7 +93,7 @@ fn a_setting_keeps_its_value_from_before_or_not_set() {
         set("theme", SettingValue::Text("dark".into())),
         set("font", SettingValue::Int(14)),
     ])]);
-    let run = run_with(&plan, &mut laptop, &j);
+    let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(run.results[0].1.status(), ItemStatus::Converted);
     let effects = j.effects().unwrap();
     assert!(matches!(
@@ -115,7 +117,9 @@ fn a_settings_copy_keeps_every_file_that_was_there_whole_and_records_what_it_wro
     laptop.put_source(&p, "extra.ini", b"more");
     let plan = plan_of(vec![common::recipe(vec![copy("vlc")])]);
     assert_eq!(
-        run_with(&plan, &mut laptop, &j).results[0].1.status(),
+        run_with(&plan, &mut laptop, &rebuild(&j)).results[0]
+            .1
+            .status(),
         ItemStatus::Converted
     );
     let e = &j.effects().unwrap()[0];
@@ -169,7 +173,7 @@ fn nothing_is_changed_when_what_is_there_cannot_be_read_first() {
             )])]),
             _ => plan_of(vec![common::recipe(vec![copy("c")])]),
         };
-        let run = run_with(&plan, &mut laptop, &j);
+        let run = run_with(&plan, &mut laptop, &rebuild(&j));
         assert_eq!(run.results[0].1.reason(), Some(Reason::NotVerified));
         assert!(laptop.done.is_empty(), "{blind}: {:?}", laptop.done);
         assert!(j.effects().unwrap().is_empty());
@@ -185,7 +189,7 @@ fn settings_too_large_to_keep_stop_the_copy_before_it_changes_anything() {
     laptop.put_file(&p, "data", &vec![0u8; pctwin_journal::MAX_KEPT_FILE + 1]);
     laptop.put_source(&p, "data", b"x");
     let plan = plan_of(vec![common::recipe(vec![copy("big")])]);
-    let run = run_with(&plan, &mut laptop, &j);
+    let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(run.results[0].1.reason(), Some(Reason::NotVerified));
     assert_eq!(laptop.done, ["restore point"], "nothing else changed");
     assert_eq!(run.stopped, None);
@@ -236,7 +240,7 @@ fn planned(step: u32) -> PlannedEffect {
 }
 
 fn intend_install(j: &Journal) -> u64 {
-    j.installs()
+    j.installs(&keys().install)
         .intend(
             &planned(0),
             &InstallIntent::App {
@@ -254,10 +258,10 @@ fn after_a_crash_an_install_that_happened_is_found_and_never_run_again() {
     let (_d, path, j) = journal();
     let id = intend_install(&j);
     drop(j); // the power went out after the install ran
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let mut laptop = Laptop::ok();
     laptop.installed.insert("A.B".into(), "1.0".into());
-    let got = recover(&j, &mut laptop).unwrap();
+    let got = recover(&rebuild(&j), &mut laptop).unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].outcome, RecoveredAs::Receipt(Receipt::Done));
     assert!(!laptop.done.iter().any(|d| d.starts_with("install")));
@@ -277,9 +281,9 @@ fn after_a_crash_an_install_that_did_not_happen_fails_and_is_not_run_again() {
     let (_d, path, j) = journal();
     let id = intend_install(&j);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let mut laptop = Laptop::ok();
-    let got = recover(&j, &mut laptop).unwrap();
+    let got = recover(&rebuild(&j), &mut laptop).unwrap();
     assert_eq!(
         got[0].outcome,
         RecoveredAs::Receipt(Receipt::Failed {
@@ -301,25 +305,28 @@ fn after_a_crash_what_cannot_be_looked_at_is_left_for_next_time() {
     let (_d, path, j) = journal();
     let id = intend_install(&j);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let mut laptop = Laptop::ok();
     laptop.blind.insert("app");
-    let got = recover(&j, &mut laptop).unwrap();
+    let got = recover(&rebuild(&j), &mut laptop).unwrap();
     assert!(matches!(&got[0].outcome, RecoveredAs::Left(why) if !why.is_empty()));
     assert_eq!(j.effect(id).unwrap().unwrap().state, EffectState::Intended);
     // Next time it can be looked at.
     laptop.blind.clear();
     laptop.installed.insert("A.B".into(), "1.0".into());
-    let got = recover(&j, &mut laptop).unwrap();
+    let got = recover(&rebuild(&j), &mut laptop).unwrap();
     assert_eq!(got[0].outcome, RecoveredAs::Receipt(Receipt::Done));
-    assert!(recover(&j, &mut laptop).unwrap().is_empty(), "done once");
+    assert!(
+        recover(&rebuild(&j), &mut laptop).unwrap().is_empty(),
+        "done once"
+    );
 }
 
 #[test]
 fn after_a_crash_an_observation_without_a_receipt_gets_its_receipt_from_what_was_seen() {
     let (_d, path, j) = journal();
     let id = j
-        .settings()
+        .settings(&keys().setting)
         .intend(
             &planned(0),
             &SettingsIntent::Apply {
@@ -329,15 +336,15 @@ fn after_a_crash_an_observation_without_a_receipt_gets_its_receipt_from_what_was
             },
         )
         .unwrap();
-    j.settings()
+    j.settings(&keys().setting)
         .observed(id, &Found::Setting(Some(SettingValue::Bool(false))), false)
         .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     // Whatever the laptop says now, the recorded observation decides: it was not set as wanted.
     let mut laptop = Laptop::ok();
     laptop.settings.insert("k".into(), SettingValue::Bool(true));
-    let got = recover(&j, &mut laptop).unwrap();
+    let got = recover(&rebuild(&j), &mut laptop).unwrap();
     assert_eq!(
         got[0].outcome,
         RecoveredAs::Receipt(Receipt::Failed {
@@ -368,8 +375,8 @@ fn a_run_reconciles_first_and_running_again_finishes_without_installing_twice() 
         assert!(run.stopped.is_some());
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
-    let run = run_with(&plan, &mut laptop, &j);
+    let j = common::open(&path).unwrap();
+    let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(run.recovered.len(), 1);
     assert_eq!(
         run.recovered[0].outcome,
@@ -406,7 +413,7 @@ fn a_run_whose_recovery_cannot_write_changes_nothing() {
     let (_d, path, j) = journal();
     intend_install(&j);
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let ledger = Faulty::new(&j, 0);
     let mut laptop = Laptop::ok();
     let plan = plan_of(vec![removable(vec![install("C.D")])]);
@@ -428,19 +435,30 @@ fn a_change_that_cannot_be_seen_afterwards_is_not_counted_and_recovery_looks_aga
         fn platform(&self) -> pctwin_recipe::Platform {
             self.0.platform()
         }
-        fn install(&mut self, c: Catalog, p: &str) -> Result<(), Reason> {
-            self.0.install(c, p)
+        fn install(
+            &mut self,
+            g: pctwin_grant::InstallGrant,
+            c: Catalog,
+            p: &str,
+        ) -> Result<(), Reason> {
+            self.0.install(g, c, p)
         }
         fn copy_settings(
             &mut self,
+            g: pctwin_grant::SettingGrant,
             f: &pctwin_recipe::SettingsPlace,
             t: &pctwin_recipe::SettingsPlace,
         ) -> Result<(), Reason> {
-            self.0.copy_settings(f, t)
+            self.0.copy_settings(g, f, t)
         }
-        fn apply_setting(&mut self, k: &str, v: &SettingValue) -> Result<(), Reason> {
+        fn apply_setting(
+            &mut self,
+            g: pctwin_grant::SettingGrant,
+            k: &str,
+            v: &SettingValue,
+        ) -> Result<(), Reason> {
             self.1 = true;
-            self.0.apply_setting(k, v)
+            self.0.apply_setting(g, k, v)
         }
         fn verify(&mut self, c: &pctwin_recipe::Check) -> bool {
             self.0.verify(c)
@@ -469,20 +487,25 @@ fn a_change_that_cannot_be_seen_afterwards_is_not_counted_and_recovery_looks_aga
         fn uninstall(&mut self, c: Catalog, p: &str) -> Result<(), String> {
             self.0.uninstall(c, p)
         }
-        fn write_setting(&mut self, k: &str, v: Option<&SettingValue>) -> Result<(), String> {
-            self.0.write_setting(k, v)
+        fn write_setting_if(
+            &mut self,
+            k: &str,
+            e: &SettingValue,
+            v: Option<&SettingValue>,
+        ) -> Result<pctwin_executor::SettingWrite, String> {
+            self.0.write_setting_if(k, e, v)
         }
-        fn put_settings_file(
+        fn replace_settings_file(
             &mut self,
             pl: &pctwin_recipe::SettingsPlace,
             p: &str,
-            b: Option<&[u8]>,
-        ) -> Result<(), String> {
-            self.0.put_settings_file(pl, p, b)
+            s: &pctwin_executor::files::Swap<'_>,
+        ) -> Result<pctwin_executor::files::Swapped, String> {
+            self.0.replace_settings_file(pl, p, s)
         }
     }
     let mut laptop = GoesBlind(Laptop::ok(), false);
-    let run = plan.run(&mut laptop, &j, SCOPE, &common::actor());
+    let run = plan.run(&mut laptop, &rebuild(&j), SCOPE, &common::actor());
     assert_eq!(run.results[0].1.reason(), Some(Reason::NotVerified));
     assert_eq!(
         j.unfinished_effects().unwrap().len(),
@@ -490,7 +513,7 @@ fn a_change_that_cannot_be_seen_afterwards_is_not_counted_and_recovery_looks_aga
         "left for recovery"
     );
     let mut sighted = laptop.0;
-    let got = recover(&j, &mut sighted).unwrap();
+    let got = recover(&rebuild(&j), &mut sighted).unwrap();
     assert_eq!(got[0].outcome, RecoveredAs::Receipt(Receipt::Done));
 }
 
@@ -525,7 +548,7 @@ fn a_catalog_check_that_passes_is_not_enough_when_the_app_is_not_there() {
     let run = run_with(
         &plan_of(vec![removable(vec![install("A.B")])]),
         &mut laptop,
-        &j,
+        &rebuild(&j),
     );
     assert_eq!(run.results[0].1.reason(), Some(Reason::NotVerified));
 }

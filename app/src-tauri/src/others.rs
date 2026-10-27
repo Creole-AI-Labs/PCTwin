@@ -183,10 +183,12 @@ fn launch(
         }) {
             return Ok(Launched::Refused);
         }
-        Ok(match launch_elevated(mover, approve, laptop, stopped)? {
-            Some(c) => Launched::Connected(c),
-            None => Launched::Refused,
-        })
+        Ok(
+            match launch_elevated(mover, approve, laptop, None, stopped)? {
+                Some(c) => Launched::Connected(c),
+                None => Launched::Refused,
+            },
+        )
     }
 }
 
@@ -241,12 +243,14 @@ fn launch_daemon(
 }
 
 /// Windows and Linux: starts the helper with the system's prompt and connects to it. `None`: the
-/// administrator said no.
+/// administrator said no. `plan`: the approved plan's seal (`<generation>:<digest>`), for the
+/// helper's permission broker (Phase 2); then `approve` may be empty.
 #[cfg(not(target_os = "macos"))]
-fn launch_elevated(
+pub(crate) fn launch_elevated(
     mover: &str,
     approve: &[String],
     laptop: LaptopId,
+    plan: Option<&str>,
     stopped: &dyn Fn() -> bool,
 ) -> Result<Option<Client<pctwin_helper::client::Channel>>, MoveProblem> {
     let token = pctwin_helper_os::random_token().map_err(|_| MoveProblem::Failed)?;
@@ -267,13 +271,17 @@ fn launch_elevated(
         session_arg,
         "--mover",
         mover,
-        "--approve",
-        approve.as_str(),
         "--channel",
         channel.as_str(),
         "--laptop",
         laptop.as_str(),
     ];
+    if !approve.is_empty() {
+        args.extend(["--approve", approve.as_str()]);
+    }
+    if let Some(seal) = plan {
+        args.extend(["--plan", seal]);
+    }
     let dir_text = dir.as_ref().map(|d| d.display().to_string());
     if let Some(d) = &dir_text {
         args.extend(["--dir", d.as_str()]);

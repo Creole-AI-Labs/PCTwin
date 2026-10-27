@@ -110,6 +110,10 @@ deny = [
     # The journal asks which file system its own folder is on (statfs), so it is never kept on
     # a network drive (26 October 2026).
     "pctwin-journal",
+    # Undo puts a settings file back only if it is unchanged, by moving it aside without
+    # replacing anything (renameat2 / renameatx_np) and opening it without following a link
+    # (security review finding 2, 26 October 2026).
+    "pctwin-executor",
     # The app raises its own open-file limit on Mac and Linux (RLIMIT_NOFILE, limits.rs), so a
     # move with many connections never runs out of handles.
     "pctwin-app",

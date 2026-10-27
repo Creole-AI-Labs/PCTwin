@@ -36,13 +36,20 @@
 
 use std::marker::PhantomData;
 
+use pctwin_grant::{
+    CaptureKey, GrantError, InstallGrant, InstallKey, Now, ObjectRef, PlanSeal, SettingGrant,
+    SettingKey,
+};
 use pctwin_recipe::{Catalog, RecipeRef, SettingValue, SettingsPlace, UndoDeclaration};
 use pctwin_record::ItemId;
 use pctwin_types::Reason;
-use redb::{ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 
-use crate::{Actor, GATE, Journal, JournalError, Scope, UNDO_GATE, UndoRight, damaged, storage};
+use crate::keystore::{KeyError, TagKey};
+use crate::{
+    Actor, GATE, Journal, JournalError, Scope, UNDO_GATE, UndoRight, damaged, storage, unreadable,
+};
 
 /// Every effect, by number.
 pub(crate) const EFFECTS: TableDefinition<u64, &[u8]> = TableDefinition::new("effects");
@@ -419,6 +426,11 @@ pub enum EffectUndo {
     /// About to put it back: recorded before anything is changed, so after a crash undo knows
     /// it may be part way, and closing undo waits for it.
     Reversing,
+    /// About to put the settings file `path` (inside the effect's place) back, moving it aside
+    /// first to the private name `private` (`.pctwin-undo-` and 32 hexadecimal digits) in its
+    /// folder: recorded before it is moved, so after a crash undo finds it there and finishes
+    /// (security review finding 2). Recorded again for each file.
+    Swapping { path: String, private: String },
     /// Done; never written over, unless it could not be done this time.
     Done { outcome: EffectUndoOutcome },
 }
@@ -561,7 +573,7 @@ fn external(
     identity: &str,
 ) -> Result<(StoredEffect, Vec<&'static SettingsFile>), JournalError> {
     if identity.is_empty() || identity.len() > MAX_IDENTITY || !pctwin_recipe::text_ok(identity) {
-        return Err(JournalError::BadName(identity.chars().take(40).collect()));
+        return Err(JournalError::BadName);
     }
     Ok((
         StoredEffect::External {
@@ -601,28 +613,108 @@ pub enum Settings {}
 #[derive(Debug, Clone, Copy)]
 pub enum Imports {}
 
-/// A role marker: which intent it records. Sealed.
+/// A role marker: which intent it records, and whose key makes its recorder. Sealed.
 pub trait RoleMarker: sealed::Sealed {
     type Intent: RoleIntent;
+    /// The role's own key ([`pctwin_grant`]): only code given it can make the recorder.
+    type Key;
 }
 impl sealed::Sealed for Installs {}
 impl sealed::Sealed for Settings {}
 impl sealed::Sealed for Imports {}
 impl RoleMarker for Installs {
     type Intent = InstallIntent;
+    type Key = InstallKey;
 }
 impl RoleMarker for Settings {
     type Intent = SettingsIntent;
+    type Key = SettingKey;
 }
 impl RoleMarker for Imports {
     type Intent = ImportIntent;
+    type Key = CaptureKey;
 }
 
 /// One role's way to write effects: it records only its own kind of intent, and refuses to
 /// observe, finish or undo any other role's effect ([`JournalError::WrongRole`]). Made with
-/// [`Journal::installs`], [`Journal::settings`] or [`Journal::imports`].
+/// [`Journal::installs`], [`Journal::settings`] or [`Journal::imports`], each of which needs that
+/// role's own key: code that was not given the key cannot make the recorder, and there is no
+/// other way to write an effect (Phase 2 adoption, change 1; security review, 26 October 2026).
+///
+/// # The walls, proven by the compiler
+///
+/// With its own key, a role writes its own effects:
+///
+/// ```
+/// use pctwin_grant::RoleKeys;
+/// use pctwin_journal::{Journal, Rebuild};
+/// let keys = RoleKeys::mint().unwrap();
+/// let dir = tempfile::tempdir().unwrap();
+/// let j = Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _installs = j.installs(&keys.install);
+/// let _imports = j.imports(&keys.capture);
+/// let _executor = Rebuild::new(&j, &keys.install, &keys.setting);
+/// ```
+///
+/// Holding the journal is not enough: there is no recorder without a key (review proof P3),
+///
+/// ```compile_fail,E0061
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _installs = j.installs();
+/// ```
+///
+/// another role's key does not fit,
+///
+/// ```compile_fail,E0308
+/// let keys = pctwin_grant::RoleKeys::mint().unwrap();
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _installs = j.installs(&keys.setting);
+/// ```
+///
+/// nor does it make the executor's pair,
+///
+/// ```compile_fail,E0308
+/// let keys = pctwin_grant::RoleKeys::mint().unwrap();
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// let _r = pctwin_journal::Rebuild::new(&j, &keys.capture, &keys.setting);
+/// ```
+///
+/// the journal itself is not a ledger an effect can be finished through,
+///
+/// ```compile_fail,E0277
+/// use pctwin_journal::{EffectLedger, Found, Presence, RebuildRole};
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// EffectLedger::observed(&j, RebuildRole::Install, 1, &Found::App(Presence::Absent), true).unwrap();
+/// ```
+///
+/// its own steps are its own,
+///
+/// ```compile_fail,E0624
+/// use pctwin_journal::{Receipt, Role};
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// j.receipt(Role::Install, 1, &Receipt::Done).unwrap();
+/// ```
+///
+/// ```compile_fail,E0624
+/// use pctwin_journal::{RestorePoint, Scope};
+/// # let dir = tempfile::tempdir().unwrap();
+/// let j = pctwin_journal::Journal::open(&dir.path().join("j.redb")).unwrap();
+/// j.record_restore_point(Scope([1; 16]), &RestorePoint::NotWindows).unwrap();
+/// ```
+///
+/// and the executor's ledger has no way to name an import:
+///
+/// ```compile_fail,E0599
+/// let _ = pctwin_journal::RebuildRole::Import;
+/// ```
 pub struct Recorder<'j, R: RoleMarker> {
     journal: &'j Journal,
+    key: &'j R::Key,
     _role: PhantomData<R>,
 }
 
@@ -632,7 +724,7 @@ impl<R: RoleMarker> std::fmt::Debug for Recorder<'_, R> {
     }
 }
 
-impl<R: RoleMarker> Recorder<'_, R> {
+impl<'j, R: RoleMarker> Recorder<'j, R> {
     /// Records a change about to be made, with what was there before it; returns its effect
     /// number (never reused). Files from before are kept whole in the same transaction. Nothing
     /// is recorded if a path is not inside its place or is listed twice, or an identity is not
@@ -670,11 +762,108 @@ impl<R: RoleMarker> Recorder<'_, R> {
         self.journal
             .record_effect_undo(R::Intent::ROLE, right, id, undo)
     }
+
+    /// The journal, for reading (reading is open to every part of PCTwin; writing is not).
+    pub fn journal(&self) -> &'j Journal {
+        self.journal
+    }
+}
+
+impl Recorder<'_, Installs> {
+    /// A permission for the installs role's adapter to install one exact package of the approved
+    /// plan (see [`pctwin_grant::InstallKey::grant`]): only this recorder's key makes one.
+    pub fn grant(
+        &self,
+        seal: PlanSeal,
+        artifact: ObjectRef,
+        lifetime: std::time::Duration,
+        now: Now,
+    ) -> Result<InstallGrant, GrantError> {
+        self.key.grant(seal, artifact, lifetime, now)
+    }
+
+    /// Records the restore point answer for move `scope` (asked before its first install or
+    /// setting): once, never written over.
+    pub fn record_restore_point(
+        &self,
+        scope: Scope,
+        point: &RestorePoint,
+    ) -> Result<(), JournalError> {
+        self.journal.record_restore_point(scope, point)
+    }
+}
+
+impl Recorder<'_, Settings> {
+    /// A permission for the settings role's adapter to change one named setting or settings
+    /// place of the approved plan (see [`pctwin_grant::SettingKey::grant`]).
+    pub fn grant(
+        &self,
+        seal: PlanSeal,
+        setting: ObjectRef,
+        lifetime: std::time::Duration,
+        now: Now,
+    ) -> Result<SettingGrant, GrantError> {
+        self.key.grant(seal, setting, lifetime, now)
+    }
+
+    /// Records the restore point answer for move `scope`: once, never written over.
+    pub fn record_restore_point(
+        &self,
+        scope: Scope,
+        point: &RestorePoint,
+    ) -> Result<(), JournalError> {
+        self.journal.record_restore_point(scope, point)
+    }
+}
+
+/// The installs and settings roles' recorders together: what the program's starting code hands
+/// the executor (which runs the recipes of 2.1 and 2.4), and nothing more. It cannot reach the
+/// imports role's effects: that needs the imports role's own key.
+#[derive(Debug)]
+pub struct Rebuild<'j> {
+    pub installs: Recorder<'j, Installs>,
+    pub settings: Recorder<'j, Settings>,
+}
+
+impl<'j> Rebuild<'j> {
+    /// Both recorders of `journal`, made from the two roles' own keys.
+    pub fn new(journal: &'j Journal, install: &'j InstallKey, setting: &'j SettingKey) -> Self {
+        Self {
+            installs: journal.installs(install),
+            settings: journal.settings(setting),
+        }
+    }
+
+    /// The journal, for reading.
+    pub fn journal(&self) -> &'j Journal {
+        self.installs.journal
+    }
+}
+
+/// Which of the two rebuilding roles an effect belongs to: the only roles the executor can
+/// write for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildRole {
+    Install,
+    Settings,
+}
+
+impl RebuildRole {
+    /// The rebuilding role of an effect, or `None` for an import (the imports role's own).
+    pub fn of(role: Role) -> Option<Self> {
+        match role {
+            Role::Install => Some(RebuildRole::Install),
+            Role::Settings => Some(RebuildRole::Settings),
+            Role::Import => None,
+        }
+    }
 }
 
 /// The steps an effect is recorded through, as the executor (which runs the installs and
-/// settings roles' recipes) uses them. [`Journal`] is the real one; a test can make the record
-/// fail at any step.
+/// settings roles' recipes) uses them. [`Rebuild`] is the real one, and only it can be made from
+/// a journal (with the two roles' keys); a test can wrap it to make the record fail at any step.
+/// An effect is observed or finished only through one of the two recorders ([`RebuildRole`] has
+/// no imports member), so the imports role's effects are out of reach.
 pub trait EffectLedger {
     /// See [`Recorder::intend`] (installs).
     fn intend_install(
@@ -688,59 +877,92 @@ pub trait EffectLedger {
         planned: &PlannedEffect,
         intent: &SettingsIntent,
     ) -> Result<u64, JournalError>;
-    /// See [`Recorder::observed`], for `role`'s effect.
+    /// See [`Recorder::observed`], through the recorder of `role`.
     fn observed(
         &self,
-        role: Role,
+        role: RebuildRole,
         id: u64,
         found: &Found,
         after_restart: bool,
     ) -> Result<(), JournalError>;
-    /// See [`Recorder::receipt`], for `role`'s effect.
-    fn receipt(&self, role: Role, id: u64, receipt: &Receipt) -> Result<(), JournalError>;
+    /// See [`Recorder::receipt`], through the recorder of `role`.
+    fn receipt(&self, role: RebuildRole, id: u64, receipt: &Receipt) -> Result<(), JournalError>;
     /// See [`Journal::unfinished_effects`].
     fn unfinished_effects(&self) -> Result<Vec<EffectEntry>, JournalError>;
     /// See [`Journal::restore_point`].
     fn restore_point(&self, scope: Scope) -> Result<Option<RestorePoint>, JournalError>;
-    /// See [`Journal::record_restore_point`].
+    /// Records the move's restore point answer, through the installs recorder.
     fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError>;
+    /// A permission for one install step, from the installs recorder's key.
+    fn install_grant(
+        &self,
+        seal: PlanSeal,
+        artifact: ObjectRef,
+    ) -> Result<InstallGrant, GrantError>;
+    /// A permission for one settings step, from the settings recorder's key.
+    fn setting_grant(&self, seal: PlanSeal, setting: ObjectRef)
+    -> Result<SettingGrant, GrantError>;
 }
 
-impl EffectLedger for Journal {
+/// How long a permission handed to an adapter for one step lasts: the longest allowed, since an
+/// installer may take a while; the adapter checks it before it starts.
+pub const STEP_GRANT: std::time::Duration = pctwin_grant::MAX_LIFETIME;
+
+impl EffectLedger for Rebuild<'_> {
     fn intend_install(
         &self,
         planned: &PlannedEffect,
         intent: &InstallIntent,
     ) -> Result<u64, JournalError> {
-        self.installs().intend(planned, intent)
+        self.installs.intend(planned, intent)
     }
     fn intend_setting(
         &self,
         planned: &PlannedEffect,
         intent: &SettingsIntent,
     ) -> Result<u64, JournalError> {
-        self.settings().intend(planned, intent)
+        self.settings.intend(planned, intent)
     }
     fn observed(
         &self,
-        role: Role,
+        role: RebuildRole,
         id: u64,
         found: &Found,
         after_restart: bool,
     ) -> Result<(), JournalError> {
-        Journal::observed(self, role, id, found, after_restart)
+        match role {
+            RebuildRole::Install => self.installs.observed(id, found, after_restart),
+            RebuildRole::Settings => self.settings.observed(id, found, after_restart),
+        }
     }
-    fn receipt(&self, role: Role, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
-        Journal::receipt(self, role, id, receipt)
+    fn receipt(&self, role: RebuildRole, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
+        match role {
+            RebuildRole::Install => self.installs.receipt(id, receipt),
+            RebuildRole::Settings => self.settings.receipt(id, receipt),
+        }
     }
     fn unfinished_effects(&self) -> Result<Vec<EffectEntry>, JournalError> {
-        Journal::unfinished_effects(self)
+        self.journal().unfinished_effects()
     }
     fn restore_point(&self, scope: Scope) -> Result<Option<RestorePoint>, JournalError> {
-        Journal::restore_point(self, scope)
+        self.journal().restore_point(scope)
     }
     fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError> {
-        Journal::record_restore_point(self, scope, point)
+        self.installs.record_restore_point(scope, point)
+    }
+    fn install_grant(
+        &self,
+        seal: PlanSeal,
+        artifact: ObjectRef,
+    ) -> Result<InstallGrant, GrantError> {
+        self.installs.grant(seal, artifact, STEP_GRANT, Now::real())
+    }
+    fn setting_grant(
+        &self,
+        seal: PlanSeal,
+        setting: ObjectRef,
+    ) -> Result<SettingGrant, GrantError> {
+        self.settings.grant(seal, setting, STEP_GRANT, Now::real())
     }
 }
 
@@ -751,7 +973,7 @@ fn settings_path(path: &str) -> Result<(), JournalError> {
         return Ok(());
     }
     for part in path.split('/') {
-        crate::plain_name(part).map_err(|_| JournalError::BadName(path.into()))?;
+        crate::plain_name(part).map_err(|_| JournalError::BadName)?;
     }
     Ok(())
 }
@@ -762,28 +984,77 @@ fn distinct_paths<'a>(paths: impl Iterator<Item = &'a str>) -> Result<(), Journa
     for p in paths {
         settings_path(p)?;
         if !seen.insert(p) {
-            return Err(JournalError::BadName(p.into()));
+            return Err(JournalError::BadName);
         }
     }
     Ok(())
 }
 
-/// Reads one effect. A record that does not read, or whose paths are not plain paths inside
-/// their place (a record changed by hand), is damaged: never a source of paths.
+/// The names records are sealed under, so one kind can never pass for another.
+const EFFECT_SEAL: &str = "effects";
+const UNDO_SEAL: &str = "effect-undo";
+
+/// A record as stored: its keyed tag ([`TagKey`]), then its JSON.
+fn seal(key: &TagKey, kind: &str, id: u64, json: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(32 + json.len());
+    out.extend_from_slice(&key.tag(kind, id, json));
+    out.extend_from_slice(json);
+    out
+}
+
+/// A stored record's JSON, only if its tag is right: one changed by hand, or sealed under
+/// another number or kind, is damaged.
+fn unseal<'b>(
+    key: &TagKey,
+    kind: &str,
+    id: u64,
+    bytes: &'b [u8],
+) -> Result<&'b [u8], JournalError> {
+    let (tag, json) = bytes
+        .split_first_chunk::<32>()
+        .ok_or(damaged("a record is too short to be one of PCTwin's"))?;
+    if key.verify(kind, id, json, tag) {
+        Ok(json)
+    } else {
+        Err(damaged("a record was changed outside PCTwin"))
+    }
+}
+
+/// Reads one effect. A record whose tag is wrong, that does not read, whose names are not ones a
+/// recipe could hold, or whose paths are not plain paths inside their place (a record changed
+/// by hand), is damaged: never a source of paths, packages or undo rules.
 fn read_effect(
     table: &impl ReadableTable<u64, &'static [u8]>,
     id: u64,
+    key: &TagKey,
 ) -> Result<EffectEntry, JournalError> {
     let found = table
         .get(id)
         .map_err(storage)?
         .ok_or(JournalError::NoSuchEntry(id))?;
-    parse_effect(found.value())
+    parse_effect(id, found.value(), key)
 }
 
-fn parse_effect(bytes: &[u8]) -> Result<EffectEntry, JournalError> {
+fn parse_effect(id: u64, bytes: &[u8], key: &TagKey) -> Result<EffectEntry, JournalError> {
     let entry: EffectEntry =
-        serde_json::from_slice(bytes).map_err(|e| damaged(format!("an effect record: {e}")))?;
+        serde_json::from_slice(unseal(key, EFFECT_SEAL, id, bytes)?).map_err(unreadable)?;
+    if entry.id != id {
+        return Err(damaged("an effect record is filed under another number"));
+    }
+    // The names undo would hand to the system: only ones a checked recipe could hold.
+    let names_ok = match &entry.effect {
+        StoredEffect::Install { package, .. } => pctwin_recipe::package_ok(package),
+        StoredEffect::ApplySetting { key, .. } => pctwin_recipe::key_ok(key),
+        StoredEffect::External { identity, .. } => {
+            !identity.is_empty()
+                && identity.len() <= MAX_IDENTITY
+                && pctwin_recipe::text_ok(identity)
+        }
+        StoredEffect::CopySettings { .. } | StoredEffect::Import { .. } => true,
+    };
+    if !names_ok {
+        return Err(damaged("an effect record names something no recipe could"));
+    }
     let bad = |_| damaged("an effect record names a place outside its folder");
     match &entry.effect {
         StoredEffect::CopySettings { before, .. } | StoredEffect::Import { before, .. } => {
@@ -834,10 +1105,56 @@ fn parse_effect(bytes: &[u8]) -> Result<EffectEntry, JournalError> {
 fn write_effect(
     table: &mut redb::Table<'_, u64, &'static [u8]>,
     entry: &EffectEntry,
+    key: &TagKey,
 ) -> Result<(), JournalError> {
-    let bytes = serde_json::to_vec(entry).map_err(storage)?;
+    let json = serde_json::to_vec(entry).map_err(storage)?;
+    let bytes = seal(key, EFFECT_SEAL, entry.id, &json);
     table.insert(entry.id, bytes.as_slice()).map_err(storage)?;
     Ok(())
+}
+
+/// Reads one record of undoing effect `id`, only if its tag is right and any name in it is a
+/// path inside its place and one of undo's private names.
+fn read_undo(id: u64, bytes: &[u8], key: &TagKey) -> Result<EffectUndo, JournalError> {
+    let undo: EffectUndo =
+        serde_json::from_slice(unseal(key, UNDO_SEAL, id, bytes)?).map_err(unreadable)?;
+    if let EffectUndo::Swapping { path, private } = &undo
+        && (settings_path(path).is_err() || !is_private_name(private))
+    {
+        return Err(damaged("an undo record names a place outside its folder"));
+    }
+    Ok(undo)
+}
+
+/// Whether `name` is one of undo's private names: `.pctwin-undo-` and 32 lowercase hexadecimal
+/// digits.
+pub fn is_private_name(name: &str) -> bool {
+    name.strip_prefix(".pctwin-undo-").is_some_and(|t| {
+        t.len() == 32
+            && t.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
+}
+
+fn write_undo(
+    table: &mut redb::Table<'_, u64, &'static [u8]>,
+    id: u64,
+    undo: &EffectUndo,
+    key: &TagKey,
+) -> Result<(), JournalError> {
+    let json = serde_json::to_vec(undo).map_err(storage)?;
+    table
+        .insert(id, seal(key, UNDO_SEAL, id, &json).as_slice())
+        .map_err(storage)?;
+    Ok(())
+}
+
+/// The effects in one read, each checked on its own: those whose record is right, and the
+/// numbers of those that are damaged (which never drive anything).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct CheckedEffects {
+    pub effects: Vec<EffectEntry>,
+    pub damaged: Vec<u64>,
 }
 
 fn scope_key(scope: Scope) -> String {
@@ -849,21 +1166,25 @@ fn may_follow(before: Option<&EffectUndo>, next: &EffectUndo) -> bool {
     match before {
         None => true,
         Some(EffectUndo::Done { outcome }) => !outcome.is_final(),
-        Some(EffectUndo::Reversing) => matches!(next, EffectUndo::Done { .. }),
+        Some(EffectUndo::Reversing | EffectUndo::Swapping { .. }) => {
+            !matches!(next, EffectUndo::Reversing)
+        }
     }
 }
 
-/// The effects whose undo is part way (Reversing) in this table, in order.
+/// The effects whose undo is part way (Reversing) in this table, in order. A record that cannot
+/// be checked (its key not found, or its tag wrong) counts as part way: closing undo waits.
 pub(crate) fn part_way_in(
     table: &impl ReadableTable<u64, &'static [u8]>,
+    key: Option<&TagKey>,
 ) -> Result<Vec<u64>, JournalError> {
     let mut out = Vec::new();
     for row in table.iter().map_err(storage)? {
         let (k, v) = row.map_err(storage)?;
-        let stage: EffectUndo = serde_json::from_slice(v.value())
-            .map_err(|e| damaged(format!("an effect undo record: {e}")))?;
-        if stage == EffectUndo::Reversing {
-            out.push(k.value());
+        let id = k.value();
+        let stage = key.map(|key| read_undo(id, v.value(), key));
+        if !matches!(stage, Some(Ok(EffectUndo::Done { .. }))) {
+            out.push(id);
         }
     }
     Ok(out)
@@ -882,28 +1203,69 @@ fn own(role: Role, entry: &EffectEntry) -> Result<(), JournalError> {
 }
 
 impl Journal {
-    /// The installs role's recorder (2.1).
-    pub fn installs(&self) -> Recorder<'_, Installs> {
+    /// The installs role's recorder (2.1), made only with its own key.
+    pub fn installs<'j>(&'j self, key: &'j InstallKey) -> Recorder<'j, Installs> {
         Recorder {
             journal: self,
+            key,
             _role: PhantomData,
         }
     }
 
-    /// The settings role's recorder (2.4).
-    pub fn settings(&self) -> Recorder<'_, Settings> {
+    /// The settings role's recorder (2.4), made only with its own key.
+    pub fn settings<'j>(&'j self, key: &'j SettingKey) -> Recorder<'j, Settings> {
         Recorder {
             journal: self,
+            key,
             _role: PhantomData,
         }
     }
 
-    /// The imports role's recorder (2.5).
-    pub fn imports(&self) -> Recorder<'_, Imports> {
+    /// The imports role's recorder (2.5), made only with its own key.
+    pub fn imports<'j>(&'j self, key: &'j CaptureKey) -> Recorder<'j, Imports> {
         Recorder {
             journal: self,
+            key,
             _role: PhantomData,
         }
+    }
+
+    /// The key that seals this journal's effect records: given when it was opened, or kept by
+    /// the system ([`crate::keystore`]), found once and held.
+    pub(crate) fn record_key(&self) -> Result<TagKey, JournalError> {
+        let mut held = self
+            .record_key
+            .held
+            .lock()
+            .map_err(|_| damaged("the record key's lock was broken"))?;
+        if let Some(key) = held.as_ref() {
+            return Ok(key.clone());
+        }
+        let key = match &self.record_key.given {
+            Some(key) => key.clone(),
+            None => {
+                let may_make = self.holds_no_effect()?;
+                crate::keystore::key_for(self.record_key.store.as_ref(), self.journal_id, may_make)
+                    .map_err(|e| match e {
+                        KeyError::Missing => JournalError::RecordKeyMissing,
+                        KeyError::Unavailable => JournalError::RecordKeyUnavailable,
+                    })?
+            }
+        };
+        *held = Some(key.clone());
+        Ok(key)
+    }
+
+    /// Whether no effect, and no undo of one, was ever recorded here (only then may a new key be
+    /// made).
+    fn holds_no_effect(&self) -> Result<bool, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let effects = tx.open_table(EFFECTS).map_err(storage)?;
+        let undo = tx.open_table(EFFECT_UNDO).map_err(storage)?;
+        let broker = tx.open_table(crate::broker::BROKER).map_err(storage)?;
+        Ok(effects.is_empty().map_err(storage)?
+            && undo.is_empty().map_err(storage)?
+            && broker.is_empty().map_err(storage)?)
     }
 
     fn intend<I: RoleIntent>(
@@ -913,6 +1275,7 @@ impl Journal {
         intent: &I,
     ) -> Result<u64, JournalError> {
         let (effect, keep) = intent.store()?;
+        let key = self.record_key()?;
         let tx = self.db.begin_write().map_err(storage)?;
         let id = {
             let mut counters = tx.open_table(crate::COUNTERS).map_err(storage)?;
@@ -935,7 +1298,7 @@ impl Journal {
                 state: EffectState::Intended,
             };
             let mut effects = tx.open_table(EFFECTS).map_err(storage)?;
-            write_effect(&mut effects, &entry)?;
+            write_effect(&mut effects, &entry, &key)?;
             let mut unfinished = tx.open_table(EFFECTS_UNFINISHED).map_err(storage)?;
             unfinished.insert(id, ()).map_err(storage)?;
             id
@@ -998,13 +1361,14 @@ impl Journal {
         id: u64,
         next: impl FnOnce(&EffectEntry) -> Result<EffectState, JournalError>,
     ) -> Result<(), JournalError> {
+        let key = self.record_key()?;
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let mut effects = tx.open_table(EFFECTS).map_err(storage)?;
-            let mut entry = read_effect(&effects, id)?;
+            let mut entry = read_effect(&effects, id, &key)?;
             own(role, &entry)?;
             entry.state = next(&entry)?;
-            write_effect(&mut effects, &entry)?;
+            write_effect(&mut effects, &entry, &key)?;
             if matches!(entry.state, EffectState::Receipted { .. }) {
                 let mut unfinished = tx.open_table(EFFECTS_UNFINISHED).map_err(storage)?;
                 unfinished.remove(id).map_err(storage)?;
@@ -1017,7 +1381,11 @@ impl Journal {
     pub fn effect(&self, id: u64) -> Result<Option<EffectEntry>, JournalError> {
         let tx = self.db.begin_read().map_err(storage)?;
         let effects = tx.open_table(EFFECTS).map_err(storage)?;
-        match read_effect(&effects, id) {
+        if effects.get(id).map_err(storage)?.is_none() {
+            return Ok(None);
+        }
+        let key = self.record_key()?;
+        match read_effect(&effects, id, &key) {
             Ok(e) => Ok(Some(e)),
             Err(JournalError::NoSuchEntry(_)) => Ok(None),
             Err(e) => Err(e),
@@ -1028,10 +1396,39 @@ impl Journal {
     pub fn effects(&self) -> Result<Vec<EffectEntry>, JournalError> {
         let tx = self.db.begin_read().map_err(storage)?;
         let effects = tx.open_table(EFFECTS).map_err(storage)?;
+        if effects.is_empty().map_err(storage)? {
+            return Ok(Vec::new());
+        }
+        let key = self.record_key()?;
         let mut out = Vec::new();
         for row in effects.iter().map_err(storage)? {
-            let (_, v) = row.map_err(storage)?;
-            out.push(parse_effect(v.value())?);
+            let (k, v) = row.map_err(storage)?;
+            out.push(parse_effect(k.value(), v.value(), &key)?);
+        }
+        Ok(out)
+    }
+
+    /// Every effect of move `scope` whose record is right, in the order intended, and the
+    /// numbers of every damaged record (of any move: a damaged record's move cannot be trusted).
+    /// Undo works from this, so one damaged record never stops the rest, and never drives
+    /// anything. Fails only when the records cannot be read at all, or their key is not found
+    /// ([`JournalError::RecordKeyMissing`]).
+    pub fn effects_checked(&self, scope: Scope) -> Result<CheckedEffects, JournalError> {
+        let tx = self.db.begin_read().map_err(storage)?;
+        let effects = tx.open_table(EFFECTS).map_err(storage)?;
+        let mut out = CheckedEffects::default();
+        if effects.is_empty().map_err(storage)? {
+            return Ok(out);
+        }
+        let key = self.record_key()?;
+        for row in effects.iter().map_err(storage)? {
+            let (k, v) = row.map_err(storage)?;
+            match parse_effect(k.value(), v.value(), &key) {
+                Ok(e) if e.planned.scope == scope => out.effects.push(e),
+                Ok(_) => {}
+                Err(JournalError::Damaged(_)) => out.damaged.push(k.value()),
+                Err(e) => return Err(e),
+            }
         }
         Ok(out)
     }
@@ -1051,9 +1448,13 @@ impl Journal {
         let unfinished = tx.open_table(EFFECTS_UNFINISHED).map_err(storage)?;
         let effects = tx.open_table(EFFECTS).map_err(storage)?;
         let mut out = Vec::new();
+        if unfinished.is_empty().map_err(storage)? {
+            return Ok(out);
+        }
+        let key = self.record_key()?;
         for row in unfinished.iter().map_err(storage)? {
             let (k, _) = row.map_err(storage)?;
-            out.push(read_effect(&effects, k.value())?);
+            out.push(read_effect(&effects, k.value(), &key)?);
         }
         Ok(out)
     }
@@ -1081,6 +1482,12 @@ impl Journal {
         undo: &EffectUndo,
     ) -> Result<(), JournalError> {
         self.check_right(right)?;
+        if let EffectUndo::Swapping { path, private } = undo
+            && (settings_path(path).is_err() || !is_private_name(private))
+        {
+            return Err(JournalError::BadName);
+        }
+        let key = self.record_key()?;
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let gate = tx.open_table(GATE).map_err(storage)?;
@@ -1088,7 +1495,7 @@ impl Journal {
                 return Err(JournalError::UndoClosed);
             }
             let effects = tx.open_table(EFFECTS).map_err(storage)?;
-            let entry = read_effect(&effects, id)?;
+            let entry = read_effect(&effects, id, &key)?;
             own(role, &entry)?;
             if !matches!(entry.state, EffectState::Receipted { .. }) {
                 return Err(JournalError::OutOfOrder {
@@ -1100,22 +1507,23 @@ impl Journal {
             let before: Option<EffectUndo> = table
                 .get(id)
                 .map_err(storage)?
-                .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+                .map(|v| read_undo(id, v.value(), &key))
                 .transpose()?;
             if !may_follow(before.as_ref(), undo) {
                 return Err(JournalError::OutOfOrder {
                     from: match before {
                         Some(EffectUndo::Reversing) => "reversing",
+                        Some(EffectUndo::Swapping { .. }) => "swapping",
                         _ => "done",
                     },
                     to: match undo {
                         EffectUndo::Reversing => "reversing",
+                        EffectUndo::Swapping { .. } => "swapping",
                         EffectUndo::Done { .. } => "done",
                     },
                 });
             }
-            let bytes = serde_json::to_vec(undo).map_err(storage)?;
-            table.insert(id, bytes.as_slice()).map_err(storage)?;
+            write_undo(&mut table, id, undo, &key)?;
         }
         tx.commit().map_err(storage)
     }
@@ -1124,18 +1532,30 @@ impl Journal {
     pub fn effect_undo_of(&self, id: u64) -> Result<Option<EffectUndo>, JournalError> {
         let tx = self.db.begin_read().map_err(storage)?;
         let table = tx.open_table(EFFECT_UNDO).map_err(storage)?;
-        table
-            .get(id)
-            .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
-            .transpose()
+        let Some(v) = table.get(id).map_err(storage)? else {
+            return Ok(None);
+        };
+        read_undo(id, v.value(), &self.record_key()?).map(Some)
     }
 
-    /// Effects whose undo is part way, in order (closing undo refuses while there are any).
+    /// Effects whose undo is part way, in order (closing undo refuses while there are any). One
+    /// whose record cannot be checked counts as part way.
     pub fn effects_part_way(&self) -> Result<Vec<u64>, JournalError> {
         let tx = self.db.begin_read().map_err(storage)?;
         let table = tx.open_table(EFFECT_UNDO).map_err(storage)?;
-        part_way_in(&table)
+        let key = self.key_if_any(&table);
+        part_way_in(&table, key.as_ref())
+    }
+
+    /// The record key, if `table` holds any record to check with it (and it can be had).
+    pub(crate) fn key_if_any(
+        &self,
+        table: &impl ReadableTable<u64, &'static [u8]>,
+    ) -> Option<TagKey> {
+        match table.is_empty() {
+            Ok(false) => self.record_key().ok(),
+            _ => None,
+        }
     }
 
     /// The restore point answer recorded for move `scope`, if it was asked for.
@@ -1145,19 +1565,13 @@ impl Journal {
         table
             .get(scope_key(scope).as_str())
             .map_err(storage)?
-            .map(|v| {
-                serde_json::from_slice(v.value())
-                    .map_err(|e| damaged(format!("a restore point record: {e}")))
-            })
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
-    /// Records the restore point answer for move `scope`: once, never written over.
-    pub fn record_restore_point(
-        &self,
-        scope: Scope,
-        point: &RestorePoint,
-    ) -> Result<(), JournalError> {
+    /// Records the restore point answer for move `scope`: once, never written over. Only through
+    /// the installs or settings recorder.
+    fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError> {
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let mut table = tx.open_table(RESTORE_POINTS).map_err(storage)?;

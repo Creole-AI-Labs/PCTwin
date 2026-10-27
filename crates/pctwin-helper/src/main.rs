@@ -205,11 +205,27 @@ fn run(args: &Args) -> Result<(), String> {
     let mut system = pctwin_helper::newlaptop::System {
         mover: Account::Sid(mover.clone()),
     };
-    // Phase 2.2: the permission broker, for the plan named on the command line. Until the undo
-    // journal (2.3) is joined to it, nothing can be recorded first, so it changes nothing.
-    let (mut authority, mut journal, mut adapters) = (
+    // Phase 2.2: the permission broker, for the plan named on the command line. Its intents and
+    // outcomes go to the helper's own journal (2.3), in its administrators-only folder, sealed
+    // with a key the system keeps for the administrator; if that journal cannot be opened,
+    // nothing can be recorded first, so the broker changes nothing.
+    let keys = pctwin_grant::RoleKeys::mint().ok_or("the role keys were already taken")?;
+    let helper_journal = match args.plan {
+        Some(_) => pctwin_helper_os::admin_only_folder("journal")
+            .ok()
+            .and_then(|dir| pctwin_journal::Journal::open(&dir.join("helper.redb")).ok()),
+        None => None,
+    };
+    let mut real_journal = helper_journal
+        .as_ref()
+        .map(|j| pctwin_helper::broker::journal::JournalIntents::new(j.broker(&keys.broker)));
+    let mut no_journal = pctwin_helper::broker::NoJournal;
+    let journal: &mut dyn pctwin_helper::broker::IntentJournal = match real_journal.as_mut() {
+        Some(j) => j,
+        None => &mut no_journal,
+    };
+    let (mut authority, mut adapters) = (
         pctwin_helper::broker::SessionElevation,
-        pctwin_helper::broker::NoJournal,
         pctwin_helper::broker::BuiltInAdapters,
     );
     let clock = pctwin_grant::Now::real;
@@ -220,15 +236,19 @@ fn run(args: &Args) -> Result<(), String> {
         Some(seal) => {
             let packages =
                 pctwin_helper_os::admin_only_folder("packages").map_err(|e| e.to_string())?;
-            session.with_broker(pctwin_helper::broker::Broker::new(
+            let broker = pctwin_helper::broker::Broker::new(
                 seal,
                 &args.session,
                 pctwin_helper::broker::staging::Staging::new(packages),
                 &mut authority,
-                &mut journal,
+                journal,
                 &mut adapters,
                 &clock,
-            ))
+            );
+            // Sleep, hibernation and switching person end the broker's grants (T22-023); signing
+            // out ends the helper itself.
+            let _watcher = pctwin_helper::broker::watch::start(broker.revoker());
+            session.with_broker(broker)
         }
         None => session,
     };

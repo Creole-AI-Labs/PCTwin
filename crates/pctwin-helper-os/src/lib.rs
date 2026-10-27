@@ -49,7 +49,11 @@
 //!   `os_open_process`, `os_process_token`, `os_client_token`, `os_token_user`,
 //!   `os_image_path`, `os_volume_drive_type`, `os_native_machine`, `os_net_user_add`,
 //!   `os_expire_password`, `os_create_dir_with_sddl`, `os_create_profile`,
-//!   `os_set_process_sddl`, `os_windows_dir`, `os_machine_text`.
+//!   `os_set_process_sddl`, `os_windows_dir`, `os_machine_text`; and, added 27 October 2026
+//!   for the join of 2.2 and 2.3 (awaiting the user's approval of the fence's two new members),
+//!   `os_token_elevated` (whether this program is elevated: an app is never started from one)
+//!   and `os_session_on_screen` (whether the helper's session is still on the screen: switching
+//!   person ends the broker's grants).
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`, `os_od_create_user`, `os_authorization_holds`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -308,6 +312,35 @@ pub fn current_account() -> Result<Account, Error> {
     #[cfg(unix)]
     {
         Ok(Account::Uid(rustix::process::getuid().as_raw()))
+    }
+}
+
+/// Whether this program runs with an administrator's full rights: Windows, its token is elevated;
+/// Mac and Linux, it runs as root. (The 2.7 launch check refuses to start an app from such a
+/// program: an app is always started as the person; acceptance case T22-020.)
+pub fn this_process_elevated() -> Result<bool, Error> {
+    #[cfg(windows)]
+    {
+        win::this_process_elevated()
+    }
+    #[cfg(unix)]
+    {
+        Ok(rustix::process::geteuid().is_root())
+    }
+}
+
+/// Windows: whether this program's own session is the one on the screen and keyboard (after the
+/// person switches to another account, it is not). Elsewhere it cannot be told here: `Err`.
+pub fn session_on_screen() -> Result<bool, Error> {
+    #[cfg(windows)]
+    {
+        win::session_on_screen()
+    }
+    #[cfg(not(windows))]
+    {
+        Err(Error::BadInput(
+            "this system cannot say which session is on the screen",
+        ))
     }
 }
 

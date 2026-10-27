@@ -340,15 +340,12 @@ fn a_name_that_is_not_a_plain_name_in_the_folder_is_refused() {
             private: bad.into(),
         };
         assert!(
-            matches!(
-                j.record_undo(&permit, a, &undo),
-                Err(JournalError::BadName(_))
-            ),
+            matches!(j.record_undo(&permit, a, &undo), Err(JournalError::BadName)),
             "{bad:?}"
         );
         assert!(matches!(
             j.record_removals(&permit, &[(a, undo)]),
-            Err(JournalError::BadName(_))
+            Err(JournalError::BadName)
         ));
     }
     j.record_undo(&permit, a, &removing(1)).unwrap();
@@ -364,7 +361,7 @@ fn a_name_that_is_not_a_plain_name_in_the_folder_is_refused() {
                     to: bad.into()
                 }
             ),
-            Err(JournalError::BadName(_))
+            Err(JournalError::BadName)
         ));
         assert!(matches!(
             j.record_undo(
@@ -378,7 +375,7 @@ fn a_name_that_is_not_a_plain_name_in_the_folder_is_refused() {
                     complete: false
                 }
             ),
-            Err(JournalError::BadName(_))
+            Err(JournalError::BadName)
         ));
     }
     assert_eq!(j.undo_of(a).unwrap(), Some(removing(1)));
@@ -664,7 +661,7 @@ fn only_a_trash_folder_and_a_plain_name_in_it_are_recorded() {
         assert!(
             matches!(
                 j.record_undo(&permit, a, &trashing(1, trash, to)),
-                Err(JournalError::BadName(_))
+                Err(JournalError::BadName)
             ),
             "{trash} {to}"
         );

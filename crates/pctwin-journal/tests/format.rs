@@ -3,9 +3,7 @@
 //! through a held handle) is upgraded only when it holds no undo record, and is otherwise refused
 //! rather than misread.
 
-use pctwin_journal::{
-    Actor, FileId, Journal, JournalError, Landed, Permission, PlannedWrite, UndoGate,
-};
+use pctwin_journal::{Actor, FileId, JournalError, Landed, Permission, PlannedWrite, UndoGate};
 use pctwin_record::{ItemId, LaptopId};
 use redb::{ReadableDatabase, TableDefinition};
 use std::path::Path;
@@ -57,7 +55,7 @@ fn set_format(path: &Path, format: u32) {
 fn format_1_journal(dir: &Path) -> (std::path::PathBuf, String) {
     let path = dir.join("journal.redb");
     let tag = {
-        let j = Journal::open(&path).unwrap();
+        let j = open(&path).unwrap();
         let id = j.plan(&planned()).unwrap();
         j.staged(
             id,
@@ -94,10 +92,10 @@ fn a_new_journal_is_written_in_the_current_format_which_is_3() {
     assert_eq!(pctwin_journal::FORMAT, 3);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
-    drop(Journal::open(&path).unwrap());
+    drop(open(&path).unwrap());
     assert_eq!(format_on_disk(&path), Some(3));
     // And it opens again as it is.
-    drop(Journal::open(&path).unwrap());
+    drop(open(&path).unwrap());
     assert_eq!(format_on_disk(&path), Some(3));
 }
 
@@ -107,7 +105,7 @@ fn a_format_2_journal_is_upgraded_in_place_keeping_everything_and_its_gate() {
     let (path, tag) = format_1_journal(dir.path());
     set_format(&path, 2);
     {
-        let j = Journal::open(&path).unwrap();
+        let j = open(&path).unwrap();
         assert_eq!(j.temp_tag(1), tag);
         assert_eq!(j.entries().unwrap().len(), 1);
         assert_eq!(j.undo_gate().unwrap(), UndoGate::Closed);
@@ -122,7 +120,7 @@ fn a_format_1_journal_with_no_undo_record_is_upgraded_in_place_keeping_everythin
     let (path, tag) = format_1_journal(dir.path());
     assert_eq!(format_on_disk(&path), Some(1));
     {
-        let j = Journal::open(&path).unwrap();
+        let j = open(&path).unwrap();
         assert_eq!(j.temp_tag(1), tag, "the journal keeps its own number");
         assert_eq!(j.entries().unwrap().len(), 1);
         assert_eq!(
@@ -137,7 +135,7 @@ fn a_format_1_journal_with_no_undo_record_is_upgraded_in_place_keeping_everythin
 
 fn assert_refused_and_untouched(path: &Path) {
     for _ in 0..2 {
-        match Journal::open(path) {
+        match open(path) {
             Err(JournalError::OlderFormatWithUndo { found: 1 }) => {}
             other => panic!("expected the format-1 journal refused, got {other:?}"),
         }
@@ -187,9 +185,9 @@ fn a_journal_in_any_newer_format_is_refused_and_left_as_it_is() {
     for newer in [4, 99, u32::MAX] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("journal.redb");
-        drop(Journal::open(&path).unwrap());
+        drop(open(&path).unwrap());
         set_format(&path, newer);
-        match Journal::open(&path) {
+        match open(&path) {
             Err(JournalError::NewerFormat { found }) => assert_eq!(found, newer),
             other => panic!("expected format {newer} refused, got {other:?}"),
         }
@@ -201,12 +199,9 @@ fn a_journal_in_any_newer_format_is_refused_and_left_as_it_is() {
 fn a_journal_claiming_format_0_is_reported_damaged() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
-    drop(Journal::open(&path).unwrap());
+    drop(open(&path).unwrap());
     set_format(&path, 0);
-    assert!(matches!(
-        Journal::open(&path),
-        Err(JournalError::Damaged(_))
-    ));
+    assert!(matches!(open(&path), Err(JournalError::Damaged(_))));
     assert_eq!(format_on_disk(&path), Some(0));
 }
 
@@ -218,7 +213,7 @@ fn the_saved_format_2_example_still_opens() {
     let saved = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/formats/journal-2.redb");
     if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_journal::FORMAT == 2 {
         let _ = std::fs::remove_file(&saved);
-        let j = Journal::open(&saved).unwrap();
+        let j = open(&saved).unwrap();
         let id = j.plan(&planned()).unwrap();
         j.staged(
             id,
@@ -242,7 +237,7 @@ fn the_saved_format_2_example_still_opens() {
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("journal.redb");
     std::fs::copy(&saved, &copy).unwrap();
-    let j = Journal::open(&copy).unwrap();
+    let j = open(&copy).unwrap();
     let entries = j.entries().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].write, planned());
@@ -300,7 +295,7 @@ fn the_saved_format_3_example_still_opens() {
     }]);
     if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_journal::FORMAT == 3 {
         let _ = std::fs::remove_file(&saved);
-        let j = Journal::open(&saved).unwrap();
+        let j = open(&saved).unwrap();
         let id = j.plan(&planned()).unwrap();
         j.staged(id, "Documents/.pctwin-x.part", &[]).unwrap();
         j.verified(id, [1; 32], None).unwrap();
@@ -314,16 +309,22 @@ fn the_saved_format_3_example_still_opens() {
             },
         )
         .unwrap();
-        j.record_restore_point(Scope([7; 16]), &point).unwrap();
+        j.installs(&keys().install)
+            .record_restore_point(Scope([7; 16]), &point)
+            .unwrap();
         let (p, intent) = effect();
-        let e = j.settings().intend(&p, &intent).unwrap();
-        j.settings().observed(e, &found, false).unwrap();
-        j.settings().receipt(e, &Receipt::Done).unwrap();
+        let e = j.settings(&keys().setting).intend(&p, &intent).unwrap();
+        j.settings(&keys().setting)
+            .observed(e, &found, false)
+            .unwrap();
+        j.settings(&keys().setting)
+            .receipt(e, &Receipt::Done)
+            .unwrap();
     }
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("journal.redb");
     std::fs::copy(&saved, &copy).unwrap();
-    let j = Journal::open(&copy).unwrap();
+    let j = open(&copy).unwrap();
     assert_eq!(j.entries().unwrap()[0].write, planned());
     assert_eq!(j.restore_point(Scope([7; 16])).unwrap(), Some(point));
     let effects = j.effects().unwrap();
@@ -344,4 +345,24 @@ fn the_saved_format_3_example_still_opens() {
     );
     drop(j);
     assert_eq!(format_on_disk(&copy), Some(3));
+}
+
+/// This test program's role keys: made once (a program gets them only once) and lent to every
+/// test.
+pub fn keys() -> &'static pctwin_grant::RoleKeys {
+    static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
+}
+
+/// Opens a journal with this test program's record key (never the system's key store, so tests
+/// leave nothing behind in it).
+pub fn open(
+    path: &std::path::Path,
+) -> Result<pctwin_journal::Journal, pctwin_journal::JournalError> {
+    pctwin_journal::Journal::open_with_record_key(path, test_key())
+}
+
+/// The record key every test journal is sealed with.
+pub fn test_key() -> pctwin_journal::keystore::TagKey {
+    pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32])
 }

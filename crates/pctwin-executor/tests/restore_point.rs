@@ -4,6 +4,8 @@
 //! here only the rule and the record.
 
 mod common;
+#[allow(unused_imports)]
+use common::{keys, rebuild};
 
 use common::{Faulty, Laptop, SCOPE, install, journal, plan_of, recipe, removable, run_with, set};
 use pctwin_journal::{RestorePoint, Scope};
@@ -25,19 +27,19 @@ fn it_is_asked_once_before_the_first_change_and_its_answer_kept() {
         removable(vec![install("A.B")]),
         recipe(vec![set("k", SettingValue::Int(1))]),
     ]);
-    let run = run_with(&plan, &mut laptop, &j);
+    let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(run.restore_point, Some(answer.clone()));
     assert_eq!(laptop.restore_asked, 1);
     assert_eq!(laptop.done[0], "restore point", "before any change");
     assert_eq!(j.restore_point(SCOPE).unwrap(), Some(answer.clone()));
     // The same move run again (after a restart): not asked again.
     drop(j);
-    let j = pctwin_journal::Journal::open(&path).unwrap();
-    let run = run_with(&plan, &mut laptop, &j);
+    let j = common::open(&path).unwrap();
+    let run = run_with(&plan, &mut laptop, &rebuild(&j));
     assert_eq!(laptop.restore_asked, 1);
     assert_eq!(run.restore_point, Some(answer));
     // Another move asks for its own.
-    plan.run(&mut laptop, &j, Scope([9; 16]), &common::actor());
+    plan.run(&mut laptop, &rebuild(&j), Scope([9; 16]), &common::actor());
     assert_eq!(laptop.restore_asked, 2);
 }
 
@@ -59,7 +61,7 @@ fn every_honest_answer_is_kept_as_it_was_given() {
             ..Laptop::ok()
         };
         let plan = plan_of(vec![recipe(vec![set("k", SettingValue::Int(1))])]);
-        let run = run_with(&plan, &mut laptop, &j);
+        let run = run_with(&plan, &mut laptop, &rebuild(&j));
         // A safety net that could not be made does not stop the move: the journal is the
         // first one.
         assert_eq!(run.results[0].1.status(), ItemStatus::Converted);
@@ -82,7 +84,7 @@ fn a_move_that_changes_nothing_asks_for_none() {
             what: ChecklistKey::new("sign-in").unwrap(),
         },
     ])]);
-    run_with(&only_checks_and_lists, &mut laptop, &j);
+    run_with(&only_checks_and_lists, &mut laptop, &rebuild(&j));
     let mut mac = Laptop {
         platform: Some(Platform {
             os: Os::Macos,
@@ -93,7 +95,7 @@ fn a_move_that_changes_nothing_asks_for_none() {
     run_with(
         &plan_of(vec![removable(vec![install("A.B")])]),
         &mut mac,
-        &j,
+        &rebuild(&j),
     );
     assert_eq!(laptop.restore_asked + mac.restore_asked, 0);
     assert_eq!(j.restore_point(SCOPE).unwrap(), None);

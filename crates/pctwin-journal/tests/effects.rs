@@ -5,6 +5,7 @@
 //! record is reported, never trusted.
 
 mod common;
+use common::keys;
 
 use pctwin_journal::{
     EffectEntry, EffectState, EffectUndo, EffectUndoOutcome, Found, InstallIntent, Journal,
@@ -84,17 +85,21 @@ fn present() -> Found {
 fn an_install_goes_intent_observed_receipt_and_is_read_back_after_reopening() {
     let (_d, path, j) = common::journal();
     let id = j
-        .installs()
+        .installs(&keys().install)
         .intend(&planned(0), &install(Presence::Absent))
         .unwrap();
     let e = j.effect(id).unwrap().unwrap();
     assert_eq!(e.state, EffectState::Intended);
     assert_eq!(j.unfinished_effects().unwrap().len(), 1);
-    j.installs().observed(id, &present(), false).unwrap();
+    j.installs(&keys().install)
+        .observed(id, &present(), false)
+        .unwrap();
     assert_eq!(j.unfinished_effects().unwrap().len(), 1, "no receipt yet");
-    j.installs().receipt(id, &Receipt::Done).unwrap();
+    j.installs(&keys().install)
+        .receipt(id, &Receipt::Done)
+        .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(j.unfinished_effects().unwrap().is_empty());
     let EffectEntry {
         planned: p,
@@ -123,13 +128,22 @@ fn an_install_goes_intent_observed_receipt_and_is_read_back_after_reopening() {
 #[test]
 fn effect_numbers_are_never_reused_and_kept_apart_from_file_writes() {
     let (_d, path, j) = common::journal();
-    let a = j.settings().intend(&planned(0), &setting(None)).unwrap();
+    let a = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
     let w = common::committed(&j, 1);
-    let b = j.settings().intend(&planned(1), &setting(None)).unwrap();
+    let b = j
+        .settings(&keys().setting)
+        .intend(&planned(1), &setting(None))
+        .unwrap();
     assert!(b > a);
     drop(j);
-    let j = Journal::open(&path).unwrap();
-    let c = j.settings().intend(&planned(2), &setting(None)).unwrap();
+    let j = common::open(&path).unwrap();
+    let c = j
+        .settings(&keys().setting)
+        .intend(&planned(2), &setting(None))
+        .unwrap();
     assert!(c > b);
     assert_eq!(j.effects().unwrap().len(), 3);
     assert_eq!(j.entries().unwrap().len(), 1);
@@ -139,21 +153,27 @@ fn effect_numbers_are_never_reused_and_kept_apart_from_file_writes() {
 #[test]
 fn steps_cannot_be_skipped_repeated_or_taken_back() {
     let (_d, _p, j) = common::journal();
-    let id = j.settings().intend(&planned(0), &setting(None)).unwrap();
+    let id = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
     assert!(matches!(
-        j.settings().receipt(id, &Receipt::Done),
+        j.settings(&keys().setting).receipt(id, &Receipt::Done),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.settings()
+    j.settings(&keys().setting)
         .observed(id, &Found::Setting(Some(SettingValue::Bool(true))), false)
         .unwrap();
     assert!(matches!(
-        j.settings().observed(id, &Found::Setting(None), false),
+        j.settings(&keys().setting)
+            .observed(id, &Found::Setting(None), false),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.settings().receipt(id, &Receipt::Done).unwrap();
+    j.settings(&keys().setting)
+        .receipt(id, &Receipt::Done)
+        .unwrap();
     assert!(matches!(
-        j.settings().receipt(
+        j.settings(&keys().setting).receipt(
             id,
             &Receipt::Failed {
                 reason: Reason::NotVerified
@@ -162,11 +182,13 @@ fn steps_cannot_be_skipped_repeated_or_taken_back() {
         Err(JournalError::OutOfOrder { .. })
     ));
     assert!(matches!(
-        j.settings().observed(id, &Found::Setting(None), true),
+        j.settings(&keys().setting)
+            .observed(id, &Found::Setting(None), true),
         Err(JournalError::OutOfOrder { .. })
     ));
     assert!(matches!(
-        j.settings().observed(999, &Found::Setting(None), true),
+        j.settings(&keys().setting)
+            .observed(999, &Found::Setting(None), true),
         Err(JournalError::NoSuchEntry(999))
     ));
 }
@@ -174,21 +196,28 @@ fn steps_cannot_be_skipped_repeated_or_taken_back() {
 #[test]
 fn an_observation_of_another_kind_is_refused() {
     let (_d, _p, j) = common::journal();
-    let s = j.settings().intend(&planned(0), &setting(None)).unwrap();
+    let s = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
     let i = j
-        .installs()
+        .installs(&keys().install)
         .intend(&planned(1), &install(Presence::Absent))
         .unwrap();
-    let c = j.settings().intend(&planned(2), &copy(&[])).unwrap();
+    let c = j
+        .settings(&keys().setting)
+        .intend(&planned(2), &copy(&[]))
+        .unwrap();
     for (id, wrong) in [(s, present()), (c, present()), (s, Found::Files(vec![]))] {
         assert!(matches!(
-            j.settings().observed(id, &wrong, false),
+            j.settings(&keys().setting).observed(id, &wrong, false),
             Err(JournalError::OutOfOrder { .. })
         ));
         assert_eq!(j.effect(id).unwrap().unwrap().state, EffectState::Intended);
     }
     assert!(matches!(
-        j.installs().observed(i, &Found::Setting(None), false),
+        j.installs(&keys().install)
+            .observed(i, &Found::Setting(None), false),
         Err(JournalError::OutOfOrder { .. })
     ));
     assert_eq!(j.effect(i).unwrap().unwrap().state, EffectState::Intended);
@@ -198,14 +227,14 @@ fn an_observation_of_another_kind_is_refused() {
 fn settings_files_there_before_are_kept_in_the_journal_with_their_hashes() {
     let (_d, path, j) = common::journal();
     let id = j
-        .settings()
+        .settings(&keys().setting)
         .intend(
             &planned(0),
             &copy(&[("vlcrc", b"old settings"), ("sub/x.ini", b"")]),
         )
         .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let StoredEffect::CopySettings { before, .. } = j.effect(id).unwrap().unwrap().effect else {
         panic!("not a copy");
     };
@@ -239,7 +268,7 @@ fn settings_files_there_before_are_kept_in_the_journal_with_their_hashes() {
 fn a_kept_file_damaged_on_disk_is_reported_never_handed_back() {
     let (_d, path, j) = common::journal();
     let id = j
-        .settings()
+        .settings(&keys().setting)
         .intend(&planned(0), &copy(&[("vlcrc", b"old")]))
         .unwrap();
     let StoredEffect::CopySettings { before, .. } = j.effect(id).unwrap().unwrap().effect else {
@@ -255,7 +284,7 @@ fn a_kept_file_damaged_on_disk_is_reported_never_handed_back() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(
         j.kept_bytes(&before[0].hash),
         Err(JournalError::Damaged(_))
@@ -265,7 +294,10 @@ fn a_kept_file_damaged_on_disk_is_reported_never_handed_back() {
 #[test]
 fn a_damaged_effect_record_is_reported() {
     let (_d, path, j) = common::journal();
-    let id = j.settings().intend(&planned(0), &setting(None)).unwrap();
+    let id = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
     drop(j);
     {
         let db = redb::Database::open(&path).unwrap();
@@ -276,7 +308,7 @@ fn a_damaged_effect_record_is_reported() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.effect(id), Err(JournalError::Damaged(_))));
     assert!(matches!(j.effects(), Err(JournalError::Damaged(_))));
     assert!(matches!(
@@ -284,7 +316,8 @@ fn a_damaged_effect_record_is_reported() {
         Err(JournalError::Damaged(_))
     ));
     assert!(matches!(
-        j.settings().observed(id, &Found::Setting(None), true),
+        j.settings(&keys().setting)
+            .observed(id, &Found::Setting(None), true),
         Err(JournalError::Damaged(_))
     ));
 }
@@ -297,15 +330,17 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
     ] {
         assert!(
             matches!(
-                j.settings().intend(&planned(0), &copy(&[(bad, b"x")])),
-                Err(JournalError::BadName(_))
+                j.settings(&keys().setting)
+                    .intend(&planned(0), &copy(&[(bad, b"x")])),
+                Err(JournalError::BadName)
             ),
             "{bad:?}"
         );
     }
     let big = vec![0u8; pctwin_journal::MAX_KEPT_FILE + 1];
     assert!(matches!(
-        j.settings().intend(&planned(0), &copy(&[("big", &big)])),
+        j.settings(&keys().setting)
+            .intend(&planned(0), &copy(&[("big", &big)])),
         Err(JournalError::TooLarge)
     ));
     let many: Vec<(String, Vec<u8>)> = (0..=pctwin_journal::MAX_KEPT_FILES)
@@ -316,7 +351,8 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
         .map(|(p, b)| (p.as_str(), b.as_slice()))
         .collect();
     assert!(matches!(
-        j.settings().intend(&planned(0), &copy(&many)),
+        j.settings(&keys().setting)
+            .intend(&planned(0), &copy(&many)),
         Err(JournalError::TooLarge)
     ));
     let chunk = vec![1u8; pctwin_journal::MAX_KEPT_FILE];
@@ -328,24 +364,27 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
         .map(|n| (n.as_str(), chunk.as_slice()))
         .collect();
     assert!(matches!(
-        j.settings().intend(&planned(0), &copy(&total)),
+        j.settings(&keys().setting)
+            .intend(&planned(0), &copy(&total)),
         Err(JournalError::TooLarge)
     ));
     // The same path twice is not one place's files.
     assert!(matches!(
-        j.settings()
+        j.settings(&keys().setting)
             .intend(&planned(0), &copy(&[("a", b"1"), ("a", b"2")])),
-        Err(JournalError::BadName(_))
+        Err(JournalError::BadName)
     ));
     assert!(j.effects().unwrap().is_empty());
     // An exactly-full file and an empty place are fine.
     let full = vec![2u8; pctwin_journal::MAX_KEPT_FILE];
-    j.settings()
+    j.settings(&keys().setting)
         .intend(&planned(0), &copy(&[("full", &full)]))
         .unwrap();
-    j.settings().intend(&planned(1), &copy(&[])).unwrap();
+    j.settings(&keys().setting)
+        .intend(&planned(1), &copy(&[]))
+        .unwrap();
     // A place that is one file is kept under the empty path.
-    j.settings()
+    j.settings(&keys().setting)
         .intend(&planned(2), &copy(&[("", b"one file")]))
         .unwrap();
     let exactly: Vec<(String, Vec<u8>)> = (0..pctwin_journal::MAX_KEPT_FILES)
@@ -355,7 +394,9 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
         .iter()
         .map(|(p, b)| (p.as_str(), b.as_slice()))
         .collect();
-    j.settings().intend(&planned(3), &copy(&exactly)).unwrap();
+    j.settings(&keys().setting)
+        .intend(&planned(3), &copy(&exactly))
+        .unwrap();
     let names: Vec<String> = (0..pctwin_journal::MAX_KEPT_TOTAL / pctwin_journal::MAX_KEPT_FILE)
         .map(|n| format!("c{n}"))
         .collect();
@@ -363,43 +404,51 @@ fn unsafe_settings_file_paths_and_oversized_copies_are_refused_and_nothing_is_re
         .iter()
         .map(|n| (n.as_str(), full.as_slice()))
         .collect();
-    j.settings().intend(&planned(4), &copy(&at_total)).unwrap();
+    j.settings(&keys().setting)
+        .intend(&planned(4), &copy(&at_total))
+        .unwrap();
 }
 
 #[test]
 fn undo_of_an_effect_needs_a_receipt_a_right_and_an_open_gate() {
     let (_d, _p, j) = common::journal();
-    let id = j.settings().intend(&planned(0), &setting(None)).unwrap();
+    let id = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
     let permit = j.begin_undo().unwrap();
     assert!(matches!(
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&permit, id, &EffectUndo::Reversing),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.settings()
+    j.settings(&keys().setting)
         .observed(id, &Found::Setting(Some(SettingValue::Bool(true))), false)
         .unwrap();
     assert!(matches!(
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&permit, id, &EffectUndo::Reversing),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.settings().receipt(id, &Receipt::Done).unwrap();
+    j.settings(&keys().setting)
+        .receipt(id, &Receipt::Done)
+        .unwrap();
     // A right from another journal is refused.
     let (_d2, _p2, other) = common::journal();
     let foreign = other.begin_undo().unwrap();
     assert!(matches!(
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&foreign, id, &EffectUndo::Reversing),
         Err(JournalError::OtherJournal)
     ));
     let (lending, lent) = pctwin_journal::UndoRight::lend(&permit);
     assert!(matches!(
-        j.settings().record_undo(&lent, id, &EffectUndo::Reversing),
+        j.settings(&keys().setting)
+            .record_undo(&lent, id, &EffectUndo::Reversing),
         Err(JournalError::OtherJournal)
     ));
     drop(lending);
-    j.settings()
+    j.settings(&keys().setting)
         .record_undo(&permit, id, &EffectUndo::Reversing)
         .unwrap();
     assert_eq!(j.effect_undo_of(id).unwrap(), Some(EffectUndo::Reversing));
@@ -412,15 +461,15 @@ fn effect_undo_stages_go_one_way() {
     let permit = j.begin_undo().unwrap();
     let done = |o: EffectUndoOutcome| EffectUndo::Done { outcome: o };
     // Not started: Reversing, or straight to Done (nothing to put back).
-    j.settings()
+    j.settings(&keys().setting)
         .record_undo(&permit, id, &EffectUndo::Reversing)
         .unwrap();
     assert!(matches!(
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&permit, id, &EffectUndo::Reversing),
         Err(JournalError::OutOfOrder { .. })
     ));
-    j.settings()
+    j.settings(&keys().setting)
         .record_undo(
             &permit,
             id,
@@ -430,10 +479,10 @@ fn effect_undo_stages_go_one_way() {
         )
         .unwrap();
     // "Not done this time" may start again.
-    j.settings()
+    j.settings(&keys().setting)
         .record_undo(&permit, id, &EffectUndo::Reversing)
         .unwrap();
-    j.settings()
+    j.settings(&keys().setting)
         .record_undo(&permit, id, &done(EffectUndoOutcome::Restored))
         .unwrap();
     // A final Done is never written over.
@@ -443,7 +492,7 @@ fn effect_undo_stages_go_one_way() {
         done(EffectUndoOutcome::NotDone { why: "x".into() }),
     ] {
         assert!(matches!(
-            j.settings().record_undo(&permit, id, &next),
+            j.settings(&keys().setting).record_undo(&permit, id, &next),
             Err(JournalError::OutOfOrder { .. })
         ));
     }
@@ -452,17 +501,22 @@ fn effect_undo_stages_go_one_way() {
         Some(done(EffectUndoOutcome::Restored))
     );
     let other = receipted_setting(&j, 1);
-    j.settings()
+    j.settings(&keys().setting)
         .record_undo(&permit, other, &done(EffectUndoOutcome::AsBefore))
         .unwrap();
 }
 
 fn receipted_setting(j: &Journal, step: u32) -> u64 {
-    let id = j.settings().intend(&planned(step), &setting(None)).unwrap();
-    j.settings()
+    let id = j
+        .settings(&keys().setting)
+        .intend(&planned(step), &setting(None))
+        .unwrap();
+    j.settings(&keys().setting)
         .observed(id, &Found::Setting(Some(SettingValue::Bool(true))), false)
         .unwrap();
-    j.settings().receipt(id, &Receipt::Done).unwrap();
+    j.settings(&keys().setting)
+        .receipt(id, &Receipt::Done)
+        .unwrap();
     id
 }
 
@@ -488,7 +542,7 @@ fn closing_undo_refuses_while_an_app_or_setting_is_being_put_back_and_then_shuts
     let id = receipted_setting(&j, 0);
     {
         let permit = j.begin_undo().unwrap();
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&permit, id, &EffectUndo::Reversing)
             .unwrap();
     }
@@ -499,7 +553,7 @@ fn closing_undo_refuses_while_an_app_or_setting_is_being_put_back_and_then_shuts
     assert_eq!(j.undo_gate().unwrap(), pctwin_journal::UndoGate::Open);
     {
         let permit = j.begin_undo().unwrap();
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(
                 &permit,
                 id,
@@ -513,7 +567,7 @@ fn closing_undo_refuses_while_an_app_or_setting_is_being_put_back_and_then_shuts
     j.close_undo(&mut |_, _| unreachable!()).unwrap();
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert!(matches!(j.begin_undo(), Err(JournalError::UndoClosed)));
     // What was there before stays kept for good, even with undo closed.
     assert!(j.effect(other).unwrap().is_some());
@@ -532,7 +586,7 @@ fn closing_checks_effects_again_inside_its_own_transaction() {
             .unwrap();
     }
     let r = j.close_undo(&mut |ticket, _| {
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(ticket, id, &EffectUndo::Reversing)
             .unwrap();
         Ok(pctwin_journal::Resolved::Removed)
@@ -559,7 +613,7 @@ fn closing_asks_nothing_of_the_files_while_an_effect_is_part_way() {
         let permit = j.begin_undo().unwrap();
         j.record_removals(&permit, &[(w, common::removing(1))])
             .unwrap();
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&permit, id, &EffectUndo::Reversing)
             .unwrap();
     }
@@ -578,21 +632,25 @@ fn the_restore_point_answer_is_kept_once_per_move() {
         at: 1_790_000_000,
         number: 41,
     };
-    j.record_restore_point(SCOPE, &made).unwrap();
+    j.installs(&keys().install)
+        .record_restore_point(SCOPE, &made)
+        .unwrap();
     assert!(matches!(
-        j.record_restore_point(SCOPE, &RestorePoint::NotWindows),
+        j.installs(&keys().install)
+            .record_restore_point(SCOPE, &RestorePoint::NotWindows),
         Err(JournalError::OutOfOrder { .. })
     ));
     let other = Scope([8; 16]);
-    j.record_restore_point(
-        other,
-        &RestorePoint::NotMade {
-            why: "System Restore is turned off on this laptop".into(),
-        },
-    )
-    .unwrap();
+    j.installs(&keys().install)
+        .record_restore_point(
+            other,
+            &RestorePoint::NotMade {
+                why: "System Restore is turned off on this laptop".into(),
+            },
+        )
+        .unwrap();
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert_eq!(j.restore_point(SCOPE).unwrap(), Some(made));
     assert!(matches!(
         j.restore_point(other).unwrap(),
@@ -603,12 +661,17 @@ fn the_restore_point_answer_is_kept_once_per_move() {
 #[test]
 fn effects_of_one_move_are_listed_in_order_without_another_moves() {
     let (_d, _p, j) = common::journal();
-    let a = j.settings().intend(&planned(0), &setting(None)).unwrap();
+    let a = j
+        .settings(&keys().setting)
+        .intend(&planned(0), &setting(None))
+        .unwrap();
     let mut elsewhere = planned(1);
     elsewhere.scope = Scope([9; 16]);
-    j.settings().intend(&elsewhere, &setting(None)).unwrap();
+    j.settings(&keys().setting)
+        .intend(&elsewhere, &setting(None))
+        .unwrap();
     let b = j
-        .installs()
+        .installs(&keys().install)
         .intend(&planned(2), &install(Presence::Absent))
         .unwrap();
     let ids: Vec<u64> = j

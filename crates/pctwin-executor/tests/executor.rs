@@ -1,6 +1,8 @@
 //! The executor runs only an approved plan, through typed steps, and every item ends honestly.
 
 mod common;
+#[allow(unused_imports)]
+use common::{keys, rebuild};
 
 use common::{Laptop, app, approved, install_and_check, laptop_id, recipe, run};
 use pctwin_executor::{Plan, PlanError, PlannedItem};

@@ -126,6 +126,7 @@ impl Adapters for FakeAdapters {
         self.restore_points += 1;
         Effect::RestorePoint(restore::RestorePointResult::EarlierExists {
             at: "20261026080000.000000+000".into(),
+            number: 5,
         })
     }
     fn observe(&mut self, _: &Action) -> Observed {
@@ -989,7 +990,12 @@ fn the_built_in_adapters_claim_nothing_they_cannot_do() {
             ..
         }
     ));
-    assert_eq!(a.observe(&restore_point()), Observed::Unknown);
+    assert_eq!(a.observe(&restore_point()), Observed::Absent);
+    assert_eq!(a.observe(&hibernate()), Observed::Unknown);
+    assert_eq!(
+        a.observe(&install_action(1, InstallScope::Machine)),
+        Observed::Unknown
+    );
     #[cfg(not(windows))]
     assert_eq!(
         a.restore_point(&stop),
@@ -1251,4 +1257,230 @@ fn t22_005_an_oversized_request_is_refused_unread() {
         crate::protocol::send_request(&mut Vec::new(), &crate::Request::SealPlan { plan: huge }),
         Err(crate::protocol::FrameError::TooLong)
     ));
+}
+
+/// Review finding 6: however busy, a session ends at a fixed deadline set when the plan was
+/// sealed: acting renews the lease, never the deadline.
+#[test]
+fn a_busy_session_still_ends_at_its_fixed_deadline() {
+    let mut rig = Rig::new();
+    rig.plan.operations = (0..24)
+        .map(|n| PlannedOperation {
+            action_id: id(&format!("rp.{n}")),
+            action: restore_point(),
+        })
+        .collect();
+    let requests: Vec<BrokerRequest> = (0..24).map(|n| rig.request(&format!("rp.{n}"))).collect();
+    let step = Duration::from_secs(14 * 60);
+    let times: Vec<Now> = (1..=24u32)
+        .map(|n| rig.at(step * n, i64::from(n) * 14 * 60))
+        .collect();
+    let now = Rc::clone(&rig.now);
+    let mut b = rig.broker();
+    let mut ended = None;
+    for (n, (r, t)) in requests.iter().zip(&times).enumerate() {
+        now.set(*t);
+        match b.handle(r) {
+            Answer::Done(_) => {}
+            Answer::Denied(d) => {
+                ended = Some((n, d));
+                break;
+            }
+        }
+    }
+    let (n, why) = ended.expect("the session ended");
+    assert_eq!(why, Denial::Expired);
+    // Every action inside the deadline was done; the first after it was not.
+    let ended_at = step * (n as u32 + 1);
+    assert!(ended_at > pctwin_grant::MAX_SESSION, "{ended_at:?}");
+    assert!(ended_at <= pctwin_grant::MAX_SESSION + step, "{ended_at:?}");
+    assert!(b.is_closed());
+}
+
+/// This test program's role keys, made once and lent to each test.
+fn role_keys() -> &'static pctwin_grant::RoleKeys {
+    static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
+}
+
+/// A journal whose outcome writes fail: the helper stopping between the change and its outcome.
+struct StopsBeforeOutcome<'a>(&'a mut dyn IntentJournal);
+
+impl IntentJournal for StopsBeforeOutcome<'_> {
+    fn lookup(&mut self, k: &Hex32) -> Result<Recorded, JournalUnavailable> {
+        self.0.lookup(k)
+    }
+    fn record_intent(&mut self, i: &Intent) -> Result<JournalRef, JournalUnavailable> {
+        self.0.record_intent(i)
+    }
+    fn record_outcome(&mut self, _: JournalRef, _: &Outcome) -> Result<(), JournalUnavailable> {
+        Err(JournalUnavailable)
+    }
+}
+
+/// Join of 2.2 and 2.3 (b), with the real journal on disk: the intent is durable before the
+/// change; the helper stops before the outcome; the next helper, on the same journal, checks
+/// what is really there before anything is retried, and never installs twice; asked once more,
+/// the finished result is handed back from the journal.
+#[test]
+fn the_real_journal_keeps_the_intent_first_and_a_crash_is_reconciled() {
+    let journal_dir = tempfile::tempdir().unwrap();
+    let path = journal_dir.path().join("helper.redb");
+    let open = || {
+        pctwin_journal::Journal::open_with_record_key(
+            &path,
+            pctwin_journal::keystore::TagKey::from_bytes([3; 32]),
+        )
+        .unwrap()
+    };
+    let mut rig = Rig::new();
+    let first = rig.request("install.app");
+    let retry = rig.request("install.app");
+    let again = rig.request("install.app");
+    let launch = rig.launch();
+    // The first helper: the change is made; it stops before writing the outcome.
+    {
+        let j = open();
+        let mut inner = journal::JournalIntents::new(j.broker(&role_keys().broker));
+        let mut stopping = StopsBeforeOutcome(&mut inner);
+        let mut b = Broker::new(
+            launch,
+            TOKEN,
+            rig.staging.take().unwrap(),
+            &mut rig.authority,
+            &mut stopping,
+            &mut rig.adapters,
+            &*rig.clock,
+        );
+        b.seal(rig.plan.clone()).unwrap();
+        let r = done(b.handle(&first));
+        assert!(!r.recorded);
+    }
+    assert_eq!(rig.adapters.installs, 1);
+    {
+        let j = open();
+        let key = super::Hex32(*first_key(&rig, &first).as_bytes());
+        assert!(matches!(
+            j.broker(&role_keys().broker).lookup(&key.0).unwrap(),
+            pctwin_journal::BrokerState::Unfinished(_)
+        ));
+    }
+    // The next helper: the app is there now.
+    rig.adapters.observed = Observed::Present;
+    for (request, replayed_from_record) in [(&retry, false), (&again, true)] {
+        let j = open();
+        let mut intents = journal::JournalIntents::new(j.broker(&role_keys().broker));
+        let mut staging = Staging::new(rig._dir.path().to_path_buf());
+        assert_eq!(staging.admit(&mut &PACKAGE[..], sha(PACKAGE)).unwrap(), 1);
+        let mut b = Broker::new(
+            launch,
+            TOKEN,
+            staging,
+            &mut rig.authority,
+            &mut intents,
+            &mut rig.adapters,
+            &*rig.clock,
+        );
+        b.seal(rig.plan.clone()).unwrap();
+        let r = done(b.handle(request));
+        assert_eq!(r.outcome, Outcome::AlreadyInPlace);
+        assert!(r.replayed && r.recorded, "{replayed_from_record}");
+    }
+    assert_eq!(rig.adapters.installs, 1, "never installed twice");
+    // The outcome is on disk now.
+    let j = open();
+    assert!(matches!(
+        j.broker(&role_keys().broker)
+            .lookup(first_key(&rig, &first).as_bytes())
+            .unwrap(),
+        pctwin_journal::BrokerState::Finished(_, _)
+    ));
+}
+
+/// The broker's one key for a request, as the broker makes it.
+fn first_key(rig: &Rig, request: &BrokerRequest) -> blake3::Hash {
+    let _ = rig;
+    let mut h = blake3::Hasher::new_derive_key("PCTwin broker idempotency 2026-10-26 v1");
+    h.update(&request.plan_digest.0);
+    h.update(&(request.action_id.as_str().len() as u64).to_be_bytes());
+    h.update(request.action_id.as_str().as_bytes());
+    h.update(&request.action.identity().0);
+    h.finalize()
+}
+
+/// Join (b): an action that finishes is recorded under its own number, outcome and all, and the
+/// receipt names that number.
+#[test]
+fn the_real_journal_records_a_finished_action_under_its_number() {
+    let journal_dir = tempfile::tempdir().unwrap();
+    let path = journal_dir.path().join("helper.redb");
+    let j = pctwin_journal::Journal::open_with_record_key(
+        &path,
+        pctwin_journal::keystore::TagKey::from_bytes([4; 32]),
+    )
+    .unwrap();
+    let mut rig = Rig::new();
+    let first = rig.request("restore-point");
+    let other = rig.request("setting.hibernate");
+    let launch = rig.launch();
+    let mut intents = journal::JournalIntents::new(j.broker(&role_keys().broker));
+    let mut b = Broker::new(
+        launch,
+        TOKEN,
+        rig.staging.take().unwrap(),
+        &mut rig.authority,
+        &mut intents,
+        &mut rig.adapters,
+        &*rig.clock,
+    );
+    b.seal(rig.plan.clone()).unwrap();
+    let r = done(b.handle(&first));
+    let s = done(b.handle(&other));
+    drop(b);
+    assert!(r.recorded && s.recorded);
+    assert_eq!((r.journal, s.journal), (1, 2));
+    assert!(matches!(
+        j.broker(&role_keys().broker)
+            .lookup(first_key(&rig, &first).as_bytes())
+            .unwrap(),
+        pctwin_journal::BrokerState::Finished(1, _)
+    ));
+}
+
+/// T22-023 through the broker: once the session watcher sees the laptop sleep (or another
+/// person's session come to the screen), the broker's grants are over: nothing more is done.
+#[test]
+fn t22_023_a_sleep_seen_by_the_watcher_ends_the_grants() {
+    let mut rig = Rig::new();
+    let first = rig.request("restore-point");
+    let then = rig.request("setting.hibernate");
+    let mut b = rig.broker();
+    assert!(matches!(b.handle(&first), Answer::Done(_)));
+    let base = (std::time::Instant::now(), std::time::SystemTime::now());
+    let looks = [
+        watch::Look {
+            mono: base.0,
+            wall: base.1,
+            on_screen: Some(true),
+        },
+        watch::Look {
+            mono: base.0 + Duration::from_secs(2),
+            wall: base.1 + Duration::from_secs(7_200),
+            on_screen: Some(true),
+        },
+    ];
+    let mut n = 0;
+    let why = watch::watch(
+        &b.revoker(),
+        watch::TICK,
+        || {
+            n += 1;
+            looks[n - 1]
+        },
+        |_| {},
+    );
+    assert_eq!(why, Some(watch::Ended::Slept));
+    assert_eq!(denied(b.handle(&then)), Denial::Revoked);
+    drop(b);
+    assert_eq!(rig.adapters.settings, 0);
 }

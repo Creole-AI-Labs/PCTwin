@@ -4,6 +4,8 @@
 //! when PCTwin installed it and its recipe says removal is safe, and never with its user data.
 
 mod common;
+#[allow(unused_imports)]
+use common::{keys, rebuild};
 
 use common::{Laptop, SCOPE, copy, install, journal, place, plan_of, recipe, removable, set};
 use pctwin_executor::{Undone, undo_effects};
@@ -12,14 +14,14 @@ use pctwin_recipe::{SettingValue, SideEffect, UndoDeclaration};
 
 fn moved(j: &Journal, laptop: &mut Laptop, recipes: Vec<pctwin_recipe::Recipe>) {
     let plan = plan_of(recipes);
-    let run = plan.run(laptop, j, SCOPE, &common::actor());
+    let run = plan.run(laptop, &rebuild(j), SCOPE, &common::actor());
     assert_eq!(run.stopped, None);
     laptop.done.clear();
 }
 
 fn undo(j: &Journal, laptop: &mut Laptop) -> Vec<EffectUndoOutcome> {
     let permit = j.begin_undo().unwrap();
-    undo_effects(j, &permit, laptop, SCOPE)
+    undo_effects(&rebuild(j), &permit, laptop, SCOPE, &common::book())
         .unwrap()
         .into_iter()
         .map(|Undone { outcome, .. }| outcome)
@@ -74,9 +76,11 @@ fn an_app_whose_recipe_does_not_allow_removal_is_kept_and_the_person_told_why() 
     ] {
         let (_d, _p, j) = journal();
         let mut laptop = Laptop::ok();
-        let r = recipe(vec![install("A.B")])
-            .with_undo(undo_decl.clone())
-            .unwrap();
+        let r = common::made(
+            recipe(vec![install("A.B")])
+                .with_undo(undo_decl.clone())
+                .unwrap(),
+        );
         moved(&j, &mut laptop, vec![r]);
         let got = undo(&j, &mut laptop);
         assert_eq!(
@@ -335,7 +339,7 @@ fn a_damaged_earlier_version_is_never_written_back() {
             .unwrap();
         tx.commit().unwrap();
     }
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let got = undo(&j, &mut laptop);
     assert!(matches!(&got[0], EffectUndoOutcome::Kept { why } if why.contains("damaged")));
     assert_eq!(laptop.file(&p, "vlcrc").unwrap(), b"old laptop");
@@ -355,12 +359,12 @@ fn after_a_crash_part_way_a_setting_is_looked_at_again_and_finished() {
     let id = j.effects().unwrap()[0].id;
     {
         let permit = j.begin_undo().unwrap();
-        j.settings()
+        j.settings(&keys().setting)
             .record_undo(&permit, id, &EffectUndo::Reversing)
             .unwrap();
     }
     drop(j); // the power went out before the setting was written back
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     assert_eq!(undo(&j, &mut laptop), [EffectUndoOutcome::Restored]);
     assert_eq!(laptop.settings.get("k"), Some(&SettingValue::Int(1)));
     // And if it had already been written back before the power went out:
@@ -374,13 +378,13 @@ fn after_a_crash_part_way_a_setting_is_looked_at_again_and_finished() {
     let id2 = j2.effects().unwrap()[0].id;
     {
         let permit = j2.begin_undo().unwrap();
-        j2.settings()
+        j2.settings(&keys().setting)
             .record_undo(&permit, id2, &EffectUndo::Reversing)
             .unwrap();
     }
     laptop2.settings.remove("k");
     drop(j2);
-    let j2 = Journal::open(&path2).unwrap();
+    let j2 = common::open(&path2).unwrap();
     assert_eq!(undo(&j2, &mut laptop2), [EffectUndoOutcome::Restored]);
     assert!(laptop2.done.is_empty());
 }
@@ -393,12 +397,12 @@ fn after_a_crash_part_way_an_app_removal_is_never_run_again_by_itself() {
     let id = j.effects().unwrap()[0].id;
     {
         let permit = j.begin_undo().unwrap();
-        j.installs()
+        j.installs(&keys().install)
             .record_undo(&permit, id, &EffectUndo::Reversing)
             .unwrap();
     }
     drop(j);
-    let j = Journal::open(&path).unwrap();
+    let j = common::open(&path).unwrap();
     let got = undo(&j, &mut laptop);
     assert!(matches!(&got[0], EffectUndoOutcome::NotDone { why } if why.contains("again")));
     assert!(
@@ -415,13 +419,13 @@ fn after_a_crash_part_way_an_app_removal_is_never_run_again_by_itself() {
     let id2 = j2.effects().unwrap()[0].id;
     {
         let permit = j2.begin_undo().unwrap();
-        j2.installs()
+        j2.installs(&keys().install)
             .record_undo(&permit, id2, &EffectUndo::Reversing)
             .unwrap();
     }
     laptop2.installed.clear();
     drop(j2);
-    let j2 = Journal::open(&path2).unwrap();
+    let j2 = common::open(&path2).unwrap();
     assert_eq!(undo(&j2, &mut laptop2), [EffectUndoOutcome::Uninstalled]);
 }
 
@@ -564,18 +568,29 @@ impl pctwin_executor::Adapter for Watched<'_> {
     fn platform(&self) -> pctwin_recipe::Platform {
         self.laptop.platform()
     }
-    fn install(&mut self, c: pctwin_recipe::Catalog, p: &str) -> Result<(), pctwin_types::Reason> {
-        self.laptop.install(c, p)
+    fn install(
+        &mut self,
+        g: pctwin_grant::InstallGrant,
+        c: pctwin_recipe::Catalog,
+        p: &str,
+    ) -> Result<(), pctwin_types::Reason> {
+        self.laptop.install(g, c, p)
     }
     fn copy_settings(
         &mut self,
+        g: pctwin_grant::SettingGrant,
         f: &pctwin_recipe::SettingsPlace,
         t: &pctwin_recipe::SettingsPlace,
     ) -> Result<(), pctwin_types::Reason> {
-        self.laptop.copy_settings(f, t)
+        self.laptop.copy_settings(g, f, t)
     }
-    fn apply_setting(&mut self, k: &str, v: &SettingValue) -> Result<(), pctwin_types::Reason> {
-        self.laptop.apply_setting(k, v)
+    fn apply_setting(
+        &mut self,
+        g: pctwin_grant::SettingGrant,
+        k: &str,
+        v: &SettingValue,
+    ) -> Result<(), pctwin_types::Reason> {
+        self.laptop.apply_setting(g, k, v)
     }
     fn verify(&mut self, c: &pctwin_recipe::Check) -> bool {
         self.laptop.verify(c)
@@ -606,18 +621,23 @@ impl pctwin_executor::Adapter for Watched<'_> {
         self.part_way();
         self.laptop.uninstall(c, p)
     }
-    fn write_setting(&mut self, k: &str, v: Option<&SettingValue>) -> Result<(), String> {
+    fn write_setting_if(
+        &mut self,
+        k: &str,
+        e: &SettingValue,
+        v: Option<&SettingValue>,
+    ) -> Result<pctwin_executor::SettingWrite, String> {
         self.part_way();
-        self.laptop.write_setting(k, v)
+        self.laptop.write_setting_if(k, e, v)
     }
-    fn put_settings_file(
+    fn replace_settings_file(
         &mut self,
         pl: &pctwin_recipe::SettingsPlace,
         p: &str,
-        b: Option<&[u8]>,
-    ) -> Result<(), String> {
+        s: &pctwin_executor::files::Swap<'_>,
+    ) -> Result<pctwin_executor::files::Swapped, String> {
         self.part_way();
-        self.laptop.put_settings_file(pl, p, b)
+        self.laptop.replace_settings_file(pl, p, s)
     }
 }
 
@@ -641,7 +661,8 @@ fn every_undo_change_is_recorded_as_part_way_before_it_is_made() {
             checked: 0,
         };
         let permit = j.begin_undo().unwrap();
-        let got = undo_effects(&j, &permit, &mut watched, SCOPE).unwrap();
+        let got =
+            undo_effects(&rebuild(&j), &permit, &mut watched, SCOPE, &common::book()).unwrap();
         assert!(!got[0].outcome.needs_action(), "{kind}: {got:?}");
         assert!(watched.checked > 0, "{kind}");
         assert!(j.effects_part_way().unwrap().is_empty(), "{kind}: finished");

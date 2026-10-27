@@ -28,18 +28,22 @@
 //! in one transaction, so no file is being undone, and none is left under a hidden name, once the
 //! wipe can be sent.
 
+mod broker;
 mod checked;
 mod effects;
+pub mod keystore;
 pub mod place;
 pub mod recovery;
 
+pub use broker::{BrokerAction, BrokerRecorder, BrokerState, MAX_BROKER_TEXT};
 pub use checked::{CheckedFrom, WhyMemory};
 pub use effects::{
     EffectClass, EffectEntry, EffectLedger, EffectState, EffectUndo, EffectUndoOutcome,
     ExternalClass, FileHash, Found, ImportIntent, Imports, InstallIntent, Installs, KeptFile,
-    MAX_IDENTITY, MAX_KEPT_FILE, MAX_KEPT_FILES, MAX_KEPT_TOTAL, PlannedEffect, Presence, Receipt,
-    Recorder, RestorePoint, Role, RoleIntent, RoleMarker, Settings, SettingsFile, SettingsIntent,
-    StoredEffect, SupportView, UndoRoute, content_hash,
+    MAX_IDENTITY, MAX_KEPT_FILE, MAX_KEPT_FILES, MAX_KEPT_TOTAL, PlannedEffect, Presence, Rebuild,
+    RebuildRole, Receipt, Recorder, RestorePoint, Role, RoleIntent, RoleMarker, STEP_GRANT,
+    Settings, SettingsFile, SettingsIntent, StoredEffect, SupportView, UndoRoute, content_hash,
+    is_private_name,
 };
 pub use place::Placement;
 
@@ -62,7 +66,9 @@ use serde::{Deserialize, Serialize};
 ///   upgrades it to 3 in the same transaction as the open: it holds no effect, and its file
 ///   records, folders and gate mean the same in both. Raised because a format-2 PCTwin knows
 ///   nothing of effect undo: it would close undo, and allow the wipe, while a setting was half
-///   put back, so it must refuse this journal instead. Once format 3 ships, any change of shape
+///   put back, so it must refuse this journal instead. Each effect record and each record of undoing one is
+///   stored sealed: a 32-byte keyed BLAKE3 tag ([`keystore`]), then its JSON (added 26 October
+///   2026, before format 3 shipped, so without a new number). Once format 3 ships, any change of shape
 ///   of an effect record needs a new number.
 /// - **2**: undo removes a copy through the handle it was checked on (Windows) or by first moving
 ///   its name aside to a private name and checking it there (Linux and macOS): the undo stages
@@ -132,8 +138,10 @@ const SWEPT_UPTO: &str = "swept-upto";
 /// Why the journal could not be used.
 #[derive(Debug, thiserror::Error)]
 pub enum JournalError {
+    /// Fixed plain words only: never a path, a name or a library's message, since this text may
+    /// be shown or logged (security review finding 5).
     #[error("the move's record on this laptop is damaged: {0}")]
-    Damaged(String),
+    Damaged(&'static str),
     #[error("PCTwin is already running on this laptop")]
     InUse,
     #[error("the move's record was made by a newer PCTwin (format {found}); update PCTwin")]
@@ -167,8 +175,9 @@ pub enum JournalError {
     EscapeRefused,
     /// A name in an undo record that is not one plain name in the copy's folder (or a settings
     /// file's path that is not inside its place, or is listed twice).
-    #[error("not a plain file name: {0:?}")]
-    BadName(String),
+    /// Carries nothing: the name may be a path or an identity, which never leaves PCTwin.
+    #[error("not a plain file name")]
+    BadName,
     /// The settings files there before a copy are too large to keep a safe copy of, so the
     /// copy must not be made.
     #[error(
@@ -181,6 +190,16 @@ pub enum JournalError {
         "that change belongs to another part of PCTwin ({belongs_to:?}), so it was not touched"
     )]
     WrongRole { effect: u64, belongs_to: Role },
+    /// The key that seals this journal's records of changes is not where it was kept (security
+    /// review finding 3; acceptance case T23-007): nothing is erased and no new key is made over
+    /// it; the records are not trusted, and nothing new is recorded, until it is back.
+    #[error(
+        "PCTwin cannot find the key that checks its record of the move on this laptop, so it changed nothing; sign in as the person who started the move"
+    )]
+    RecordKeyMissing,
+    /// The system's key store could not be read or written now.
+    #[error("PCTwin could not reach this laptop's key store, so it changed nothing; try again")]
+    RecordKeyUnavailable,
     /// The journal's folder is not on a drive that is part of this laptop (or it could not be
     /// told): nothing was opened or made there.
     #[error("{}", .0.why_not().unwrap_or("this place cannot hold the move's record"))]
@@ -191,8 +210,13 @@ fn storage(e: impl std::fmt::Display) -> JournalError {
     JournalError::Storage(e.to_string())
 }
 
-fn damaged(e: impl std::fmt::Display) -> JournalError {
-    JournalError::Damaged(e.to_string())
+fn damaged(why: &'static str) -> JournalError {
+    JournalError::Damaged(why)
+}
+
+/// A record that does not read: the library's message (which may quote the record) is dropped.
+fn unreadable(_: impl std::fmt::Display) -> JournalError {
+    JournalError::Damaged("a record could not be read")
 }
 
 /// Another thread stopped with a panic while it held the undo count.
@@ -760,7 +784,7 @@ fn may_follow(before: Option<&Undo>, next: &Undo) -> bool {
 /// An error unless `trash` is a Trash folder's absolute path: `<home>/.Trash` or
 /// `<drive>/.Trashes/<number>`, with no `.` or `..` in it.
 fn trash_folder(trash: &str) -> Result<(), JournalError> {
-    let bad = || Err(JournalError::BadName(trash.into()));
+    let bad = || Err(JournalError::BadName);
     if !trash.starts_with('/') || trash.contains(['\\', '\0']) {
         return bad();
     }
@@ -782,7 +806,7 @@ fn trash_folder(trash: &str) -> Result<(), JournalError> {
 /// An error unless `name` is one plain name (no folder, not `.` or `..`, nothing hidden in it).
 fn plain_name(name: &str) -> Result<(), JournalError> {
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
-        return Err(JournalError::BadName(name.into()));
+        return Err(JournalError::BadName);
     }
     Ok(())
 }
@@ -1153,6 +1177,8 @@ pub struct Journal {
     undo: Mutex<UndoUse>,
     /// Woken when a permit is given back.
     undo_free: Condvar,
+    /// The key that seals effect records ([`keystore`]).
+    record_key: keystore::Held,
     /// The offer to leave part-way files that an answer is awaited for (kept in memory only: an
     /// offer never outlives the PCTwin that showed it).
     escape: Mutex<Option<StoredOffer>>,
@@ -1208,7 +1234,7 @@ impl Journal {
         }
         let db = Database::create(path).map_err(|e| match e {
             redb::DatabaseError::DatabaseAlreadyOpen => JournalError::InUse,
-            other => JournalError::Damaged(other.to_string()),
+            _ => JournalError::Damaged("the move's record could not be opened"),
         })?;
         let journal_id = Self::prepare(&db)?;
         Ok(Self {
@@ -1216,8 +1242,18 @@ impl Journal {
             journal_id,
             undo: Mutex::new(UndoUse::default()),
             undo_free: Condvar::new(),
+            record_key: keystore::Held::system(),
             escape: Mutex::new(None),
         })
+    }
+
+    /// Opens the journal at `path` as [`Journal::open`] does, with the key that seals its effect
+    /// records given here instead of kept by the system (tests, and tools that keep the key
+    /// elsewhere).
+    pub fn open_with_record_key(path: &Path, key: keystore::TagKey) -> Result<Self, JournalError> {
+        let mut j = Self::open(path)?;
+        j.record_key = keystore::Held::given(key);
+        Ok(j)
     }
 
     /// Checks the format and makes every table; returns the journal's own number.
@@ -1246,7 +1282,7 @@ impl Journal {
                     }
                     meta.insert("format", FORMAT).map_err(storage)?;
                 }
-                Some(other) => return Err(damaged(format!("unknown format {other}"))),
+                Some(_) => return Err(damaged("its format number is not one PCTwin knows")),
                 None => {
                     meta.insert("format", FORMAT).map_err(storage)?;
                 }
@@ -1287,6 +1323,8 @@ impl Journal {
             tx.open_table(effects::KEPT_FILES).map_err(storage)?;
             tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
             tx.open_table(effects::RESTORE_POINTS).map_err(storage)?;
+            tx.open_table(broker::BROKER).map_err(storage)?;
+            tx.open_table(broker::BROKER_KEYS).map_err(storage)?;
             journal_id
         };
         tx.commit().map_err(storage)?;
@@ -1495,7 +1533,7 @@ impl Journal {
         };
         serde_json::from_slice(v.value())
             .map(Some)
-            .map_err(|e| damaged(format!("a check record: {e}")))
+            .map_err(unreadable)
     }
 
     /// The real name it is getting, `final_path` inside the destination: recorded before the file
@@ -1718,8 +1756,7 @@ impl Journal {
         let mut out = Vec::new();
         for row in table.iter().map_err(storage)? {
             let (k, v) = row.map_err(storage)?;
-            let show: Show = serde_json::from_slice(v.value())
-                .map_err(|e| damaged(format!("a pending show: {e}")))?;
+            let show: Show = serde_json::from_slice(v.value()).map_err(unreadable)?;
             out.push((read_entry(&entries, k.value())?, show));
         }
         Ok(out)
@@ -1732,7 +1769,7 @@ impl Journal {
         match table.get(id).map_err(storage)? {
             Some(v) => serde_json::from_slice(v.value())
                 .map(Some)
-                .map_err(|e| damaged(format!("a pending show: {e}"))),
+                .map_err(unreadable),
             None => Ok(None),
         }
     }
@@ -1905,7 +1942,7 @@ impl Journal {
         entries
             .get(id)
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -1921,7 +1958,7 @@ impl Journal {
         let mut out = Vec::new();
         for row in entries.range(after.saturating_add(1)..).map_err(storage)? {
             let (_, v) = row.map_err(storage)?;
-            out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
+            out.push(serde_json::from_slice(v.value()).map_err(unreadable)?);
         }
         Ok(out)
     }
@@ -1947,7 +1984,7 @@ impl Journal {
         let mut out = Vec::new();
         for row in folders.iter().map_err(storage)? {
             let (_, v) = row.map_err(storage)?;
-            out.push(serde_json::from_slice(v.value()).map_err(damaged)?);
+            out.push(serde_json::from_slice(v.value()).map_err(unreadable)?);
         }
         Ok(out)
     }
@@ -1959,7 +1996,7 @@ impl Journal {
         match gate.get(UNDO_GATE).map_err(storage)?.map(|v| v.value()) {
             None => Ok(UndoGate::Open),
             Some(CLOSED) => Ok(UndoGate::Closed),
-            Some(other) => Err(damaged(format!("unknown undo gate {other}"))),
+            Some(_) => Err(damaged("the undo gate holds a value PCTwin does not know")),
         }
     }
 
@@ -2103,7 +2140,8 @@ impl Journal {
             }
             // Nor beside an app or setting part way put back.
             let effect_undo = tx.open_table(effects::EFFECT_UNDO).map_err(storage)?;
-            let part_way = effects::part_way_in(&effect_undo)?;
+            let key = self.key_if_any(&effect_undo);
+            let part_way = effects::part_way_in(&effect_undo, key.as_ref())?;
             if !part_way.is_empty() {
                 return Err(CloseError::EffectsPartWay { ids: part_way });
             }
@@ -2267,7 +2305,7 @@ impl Journal {
         table
             .get(id)
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -2285,7 +2323,7 @@ impl Journal {
             let made = tx.open_table(FOLDERS).map_err(storage)?;
             if made.get((destination, folder)).map_err(storage)?.is_none() {
                 return Err(JournalError::Damaged(
-                    "undo of a folder PCTwin did not make".into(),
+                    "undo of a folder PCTwin did not make",
                 ));
             }
             let mut table = tx.open_table(UNDO_FOLDERS).map_err(storage)?;
@@ -2308,7 +2346,7 @@ impl Journal {
         table
             .get((destination, folder))
             .map_err(storage)?
-            .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+            .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
             .transpose()
     }
 
@@ -2574,7 +2612,7 @@ fn put_undo(
     let before: Option<Undo> = table
         .get(id)
         .map_err(storage)?
-        .map(|v| serde_json::from_slice(v.value()).map_err(damaged))
+        .map(|v| serde_json::from_slice(v.value()).map_err(unreadable))
         .transpose()?;
     if !may_follow(before.as_ref(), undo) {
         return Err(JournalError::OutOfOrder {
@@ -2595,16 +2633,14 @@ fn pending_in(
     let mut out = Vec::new();
     for row in table.iter().map_err(storage)? {
         let (k, v) = row.map_err(storage)?;
-        let stage: Undo = serde_json::from_slice(v.value()).map_err(damaged)?;
+        let stage: Undo = serde_json::from_slice(v.value()).map_err(unreadable)?;
         if stage.is_done() {
             continue;
         }
         let id = k.value();
         let entry = read_entry(entries, id)?;
         let Some(State::Committed { final_path, .. }) = entry.state.copy_on_disk() else {
-            return Err(damaged(format!(
-                "undo of entry {id}, which is not finished"
-            )));
+            return Err(damaged("an undo record names a copy that was not finished"));
         };
         out.push(Pending {
             id,
@@ -2654,7 +2690,7 @@ fn read_entry(
         .get(id)
         .map_err(storage)?
         .ok_or(JournalError::NoSuchEntry(id))?;
-    serde_json::from_slice(found.value()).map_err(damaged)
+    serde_json::from_slice(found.value()).map_err(unreadable)
 }
 
 fn write_entry(

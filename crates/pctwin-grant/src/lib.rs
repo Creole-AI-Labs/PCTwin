@@ -145,6 +145,11 @@ use serde::{Deserialize, Serialize};
 /// The longest any grant lasts. A move asks again for what it still needs after this.
 pub const MAX_LIFETIME: Duration = Duration::from_secs(15 * 60);
 
+/// The longest one administrator helper session may act, from when its plan is sealed, however
+/// often it acts (security review finding 6). A move that needs longer starts the helper again,
+/// with the system's own prompt.
+pub const MAX_SESSION: Duration = Duration::from_secs(4 * 60 * 60);
+
 /// The most things one grant may name.
 pub const MAX_OBJECTS: usize = 4096;
 
@@ -311,7 +316,17 @@ pub struct Expiry {
 impl Expiry {
     /// Ends `lifetime` after `now`; `lifetime` must be above zero and at most [`MAX_LIFETIME`].
     pub fn after(lifetime: Duration, now: Now) -> Result<Self, GrantError> {
-        if lifetime.is_zero() || lifetime > MAX_LIFETIME {
+        Self::within(lifetime, MAX_LIFETIME, now)
+    }
+
+    /// A session's fixed end, [`MAX_SESSION`] after `now` (when its plan is sealed), read from
+    /// both clocks as a grant's is. Nothing renews it.
+    pub fn session_from(now: Now) -> Result<Self, GrantError> {
+        Self::within(MAX_SESSION, MAX_SESSION, now)
+    }
+
+    fn within(lifetime: Duration, most: Duration, now: Now) -> Result<Self, GrantError> {
+        if lifetime.is_zero() || lifetime > most {
             return Err(GrantError::Lifetime);
         }
         Ok(Self {
@@ -613,6 +628,14 @@ impl CleanupKey {
     }
 }
 
+/// 2.2's key: lets the administrator helper's broker write its own record of the actions it takes
+/// (`pctwin_journal::Journal::broker`). It makes no grant: the broker acts only on the requests
+/// it checks itself.
+#[derive(Debug)]
+pub struct BrokerKey {
+    _sealed: Sealed,
+}
+
 /// Every role's key, once per program. The program's starting code takes them apart and gives
 /// each role its own key only.
 #[derive(Debug)]
@@ -621,6 +644,8 @@ pub struct RoleKeys {
     pub setting: SettingKey,
     pub capture: CaptureKey,
     pub undo: UndoKey,
+    /// 2.2's key: the administrator helper's broker writes its own record with it.
+    pub broker: BrokerKey,
     pub cleanup: CleanupKey,
 }
 
@@ -642,6 +667,7 @@ impl RoleKeys {
             setting: SettingKey { _sealed: Sealed },
             capture: CaptureKey { _sealed: Sealed },
             undo: UndoKey { _sealed: Sealed },
+            broker: BrokerKey { _sealed: Sealed },
             cleanup: CleanupKey { _sealed: Sealed },
         }
     }
@@ -810,6 +836,19 @@ mod tests {
             mono + Duration::from_secs(1),
             wall - Duration::from_secs(1)
         )));
+    }
+
+    /// Review finding 6: a session's end is fixed, longer than a grant's, on both clocks.
+    #[test]
+    fn a_session_ends_at_its_fixed_deadline() {
+        let mono = Instant::now();
+        let wall = SystemTime::now();
+        let e = Expiry::session_from(Now::at(mono, wall)).unwrap();
+        let nearly = MAX_SESSION - Duration::from_secs(1);
+        assert!(!e.is_over(Now::at(mono + nearly, wall + nearly)));
+        assert!(e.is_over(Now::at(mono + MAX_SESSION, wall)));
+        assert!(e.is_over(Now::at(mono, wall + MAX_SESSION)));
+        assert!(MAX_SESSION > MAX_LIFETIME);
     }
 
     #[test]

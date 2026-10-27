@@ -6,9 +6,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use pctwin_executor::{Adapter, Plan, PlannedItem, Run};
+use pctwin_grant::{GrantError, InstallGrant, Now, ObjectRef, PlanSeal, SettingGrant};
 use pctwin_journal::{
     Actor, EffectEntry, EffectLedger, Found, InstallIntent, Journal, JournalError, Permission,
-    PlannedEffect, Presence, Receipt, RestorePoint, Role, Scope, SettingsFile, SettingsIntent,
+    PlannedEffect, Presence, Rebuild, RebuildRole, Receipt, RestorePoint, Scope, SettingsFile,
+    SettingsIntent,
 };
 use pctwin_recipe::{
     Arch, Catalog, Check, Os, Platform, Recipe, RecipeId, RelPath, SettingValue, SettingsPlace,
@@ -61,18 +63,43 @@ pub fn app(name: &str) -> Item {
     }
 }
 
+thread_local! {
+    /// Every recipe this test made, by ID: the checked recipes undo looks up again.
+    static MADE: RefCell<BTreeMap<String, Recipe>> = RefCell::default();
+}
+
+/// Adds `r` to the checked recipes undo finds again.
+pub fn made(r: Recipe) -> Recipe {
+    MADE.with(|m| m.borrow_mut().insert(r.id.as_str().to_string(), r.clone()));
+    r
+}
+
+/// A recipe with an ID of its own in this test ("x", "x2", "x3" ...).
 pub fn recipe(steps: Vec<Step>) -> Recipe {
-    Recipe::new(RecipeId::new("x").unwrap(), 1, vec![WIN], steps).unwrap()
+    let n = MADE.with(|m| m.borrow().len()) + 1;
+    let id = if n == 1 {
+        "x".to_string()
+    } else {
+        format!("x{n}")
+    };
+    made(Recipe::new(RecipeId::new(&id).unwrap(), 1, vec![WIN], steps).unwrap())
+}
+
+/// The checked recipes undo finds again: every one this test made.
+pub fn book() -> Vec<Recipe> {
+    MADE.with(|m| m.borrow().values().cloned().collect())
 }
 
 /// A recipe whose app undo may remove.
 pub fn removable(steps: Vec<Step>) -> Recipe {
-    recipe(steps)
-        .with_undo(UndoDeclaration {
-            uninstall: true,
-            side_effects: vec![],
-        })
-        .unwrap()
+    made(
+        recipe(steps)
+            .with_undo(UndoDeclaration {
+                uninstall: true,
+                side_effects: vec![],
+            })
+            .unwrap(),
+    )
 }
 
 pub fn install(package: &str) -> Step {
@@ -140,17 +167,30 @@ pub fn plan_of(recipes: Vec<Recipe>) -> Plan {
     .unwrap()
 }
 
+/// This test program's role keys: made once (a program gets them only once) and lent to every
+/// test.
+pub fn keys() -> &'static pctwin_grant::RoleKeys {
+    static KEYS: std::sync::OnceLock<pctwin_grant::RoleKeys> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| pctwin_grant::RoleKeys::mint().expect("the keys are made once"))
+}
+
+/// The installs and settings recorders of `j`, as the program's starting code hands them to the
+/// executor.
+pub fn rebuild(j: &Journal) -> Rebuild<'_> {
+    Rebuild::new(j, &keys().install, &keys().setting)
+}
+
 pub fn journal() -> (tempfile::TempDir, std::path::PathBuf, Journal) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.redb");
-    let j = Journal::open(&path).unwrap();
+    let j = open(&path).unwrap();
     (dir, path, j)
 }
 
 /// Runs `plan` on `laptop` with a fresh journal; the items' results.
 pub fn run(plan: &Plan, laptop: &mut Laptop) -> Vec<(ItemId, ItemResult)> {
     let (_d, _p, j) = journal();
-    plan.run(laptop, &j, SCOPE, &actor()).results
+    plan.run(laptop, &rebuild(&j), SCOPE, &actor()).results
 }
 
 pub fn run_with(plan: &Plan, laptop: &mut Laptop, ledger: &dyn EffectLedger) -> Run {
@@ -207,6 +247,8 @@ pub struct Laptop {
     pub install_check_lies: bool,
     /// Putting a setting or a settings file back reports success and changes nothing.
     pub restore_lies: bool,
+    /// Every permission an install or settings step was handed: (role, step, step digest).
+    pub grants: Vec<(&'static str, u64, [u8; 32])>,
 }
 
 impl Laptop {
@@ -255,7 +297,10 @@ impl Adapter for Laptop {
     fn platform(&self) -> Platform {
         self.platform.unwrap_or(WIN)
     }
-    fn install(&mut self, _: Catalog, package: &str) -> Result<(), Reason> {
+    fn install(&mut self, grant: InstallGrant, _: Catalog, package: &str) -> Result<(), Reason> {
+        assert!(!grant.expiry().is_over(Now::real()), "a live permission");
+        let a = grant.artifact();
+        self.grants.push(("install", a.handle(), a.digest()));
         self.note(format!("install {package}"));
         if let Some(reason) = self.fail_install {
             return Err(reason);
@@ -265,7 +310,15 @@ impl Adapter for Laptop {
         }
         Ok(())
     }
-    fn copy_settings(&mut self, from: &SettingsPlace, to: &SettingsPlace) -> Result<(), Reason> {
+    fn copy_settings(
+        &mut self,
+        grant: SettingGrant,
+        from: &SettingsPlace,
+        to: &SettingsPlace,
+    ) -> Result<(), Reason> {
+        assert!(!grant.expiry().is_over(Now::real()), "a live permission");
+        let s = grant.setting();
+        self.grants.push(("copy", s.handle(), s.digest()));
         self.note("copy".into());
         if !self.copy_lies {
             for (path, bytes) in self.files_at(&self.source.clone(), from) {
@@ -274,7 +327,15 @@ impl Adapter for Laptop {
         }
         Ok(())
     }
-    fn apply_setting(&mut self, key: &str, value: &SettingValue) -> Result<(), Reason> {
+    fn apply_setting(
+        &mut self,
+        grant: SettingGrant,
+        key: &str,
+        value: &SettingValue,
+    ) -> Result<(), Reason> {
+        assert!(!grant.expiry().is_over(Now::real()), "a live permission");
+        let s = grant.setting();
+        self.grants.push(("set", s.handle(), s.digest()));
         self.note(format!("set {key}"));
         self.settings.insert(key.into(), value.clone());
         Ok(())
@@ -341,26 +402,36 @@ impl Adapter for Laptop {
         }
         Ok(())
     }
-    fn write_setting(&mut self, key: &str, value: Option<&SettingValue>) -> Result<(), String> {
+    fn write_setting_if(
+        &mut self,
+        key: &str,
+        expect: &SettingValue,
+        value: Option<&SettingValue>,
+    ) -> Result<pctwin_executor::SettingWrite, String> {
         self.note(format!("restore {key}"));
         if self.fail_restore {
             return Err("the setting could not be written".into());
         }
+        // Compared and written in one step, as a system transaction does.
+        if self.settings.get(key) != Some(expect) {
+            return Ok(pctwin_executor::SettingWrite::Changed);
+        }
         if self.restore_lies {
-            return Ok(());
+            return Ok(pctwin_executor::SettingWrite::Written);
         }
         match value {
             Some(v) => self.settings.insert(key.into(), v.clone()),
             None => self.settings.remove(key),
         };
-        Ok(())
+        Ok(pctwin_executor::SettingWrite::Written)
     }
-    fn put_settings_file(
+    fn replace_settings_file(
         &mut self,
         place: &SettingsPlace,
         path: &str,
-        bytes: Option<&[u8]>,
-    ) -> Result<(), String> {
+        swap: &pctwin_executor::files::Swap<'_>,
+    ) -> Result<pctwin_executor::files::Swapped, String> {
+        use pctwin_executor::files::Swapped;
         self.note(format!("restore file {path}"));
         if let Some(left) = self.puts_before_failing {
             if left == 0 {
@@ -371,23 +442,31 @@ impl Adapter for Laptop {
         if self.fail_restore {
             return Err("the file could not be written".into());
         }
-        if self.restore_lies {
-            return Ok(());
+        // Checked and replaced in one step, as the real one does by moving it aside first.
+        let k = (key(place), path.to_string());
+        let Some(now) = self.files.get(&k) else {
+            return Ok(Swapped::Gone);
+        };
+        if *blake3::hash(now).as_bytes() != swap.ours {
+            return Ok(Swapped::Kept);
         }
-        match bytes {
+        if self.restore_lies {
+            return Ok(Swapped::Restored);
+        }
+        match swap.earlier {
             Some(b) => self.put_file(place, path, b),
             None => {
-                self.files.remove(&(key(place), path.to_string()));
+                self.files.remove(&k);
             }
         }
-        Ok(())
+        Ok(Swapped::Restored)
     }
 }
 
 /// A journal that records its calls in a shared log, and whose writes fail once `writes`
 /// successful writes have been made (a full disk, or a journal that cannot be written).
 pub struct Faulty<'j> {
-    pub inner: &'j Journal,
+    pub inner: Rebuild<'j>,
     pub writes: Cell<usize>,
     pub log: Rc<RefCell<Vec<String>>>,
     /// Refuses only this kind of write (every other one is written).
@@ -397,7 +476,7 @@ pub struct Faulty<'j> {
 impl<'j> Faulty<'j> {
     pub fn new(inner: &'j Journal, writes: usize) -> Self {
         Self {
-            inner,
+            inner: rebuild(inner),
             writes: Cell::new(writes),
             log: Rc::default(),
             only: None,
@@ -426,7 +505,7 @@ impl EffectLedger for Faulty<'_> {
         intent: &InstallIntent,
     ) -> Result<u64, JournalError> {
         self.write("intend")?;
-        self.inner.intend_install(planned, intent)
+        self.inner.installs.intend(planned, intent)
     }
     fn intend_setting(
         &self,
@@ -434,30 +513,49 @@ impl EffectLedger for Faulty<'_> {
         intent: &SettingsIntent,
     ) -> Result<u64, JournalError> {
         self.write("intend")?;
-        self.inner.intend_setting(planned, intent)
+        self.inner.settings.intend(planned, intent)
     }
     fn observed(
         &self,
-        role: Role,
+        role: RebuildRole,
         id: u64,
         found: &Found,
         after_restart: bool,
     ) -> Result<(), JournalError> {
         self.write("observed")?;
-        EffectLedger::observed(self.inner, role, id, found, after_restart)
+        EffectLedger::observed(&self.inner, role, id, found, after_restart)
     }
-    fn receipt(&self, role: Role, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
+    fn receipt(&self, role: RebuildRole, id: u64, receipt: &Receipt) -> Result<(), JournalError> {
         self.write("receipt")?;
-        EffectLedger::receipt(self.inner, role, id, receipt)
+        EffectLedger::receipt(&self.inner, role, id, receipt)
     }
     fn unfinished_effects(&self) -> Result<Vec<EffectEntry>, JournalError> {
-        self.inner.unfinished_effects()
+        self.inner.journal().unfinished_effects()
     }
     fn restore_point(&self, scope: Scope) -> Result<Option<RestorePoint>, JournalError> {
-        self.inner.restore_point(scope)
+        self.inner.journal().restore_point(scope)
+    }
+    fn install_grant(&self, seal: PlanSeal, a: ObjectRef) -> Result<InstallGrant, GrantError> {
+        self.inner.install_grant(seal, a)
+    }
+    fn setting_grant(&self, seal: PlanSeal, s: ObjectRef) -> Result<SettingGrant, GrantError> {
+        self.inner.setting_grant(seal, s)
     }
     fn record_restore_point(&self, scope: Scope, point: &RestorePoint) -> Result<(), JournalError> {
         self.write("restore-point")?;
-        EffectLedger::record_restore_point(self.inner, scope, point)
+        EffectLedger::record_restore_point(&self.inner, scope, point)
     }
+}
+
+/// Opens a journal with this test program's record key (never the system's key store, so tests
+/// leave nothing behind in it).
+pub fn open(
+    path: &std::path::Path,
+) -> Result<pctwin_journal::Journal, pctwin_journal::JournalError> {
+    pctwin_journal::Journal::open_with_record_key(path, test_key())
+}
+
+/// The record key every test journal is sealed with.
+pub fn test_key() -> pctwin_journal::keystore::TagKey {
+    pctwin_journal::keystore::TagKey::from_bytes([0x5a; 32])
 }

@@ -1222,6 +1222,43 @@ jobs:
 
   # The dependency, workflow and code-scanning checks (security.yml), with CodeQL for the
   # languages the change touches.
+  admin-e2e:
+    # The join of Phase 2.2 and 2.3, end to end as an administrator (GitHub's Windows runners run
+    # elevated): a tiny Windows Installer package built with Windows' own tools is installed
+    # through the broker with its intent in the helper's journal first; the helper stops before
+    # the outcome; the next helper finds the intent, checks Windows' list and does not install
+    # again; a restore point is asked for and its answer recorded. Only that one test runs.
+    needs: changes
+    if: needs.changes.outputs.labs == 'true'
+    name: Admin end to end (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: toolchain
+        continue-on-error: true
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - name: Toolchain, second try (a download that failed)
+        if: steps.toolchain.outcome == 'failure'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master, 2026-10
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build the test
+        shell: bash
+        run: cargo test -p pctwin-helper --test admin_e2e --locked --no-run
+      - name: Install, stop, recover, never twice; a restore point
+        timeout-minutes: 15
+        shell: bash
+        run: >-
+          cargo test -p pctwin-helper --test admin_e2e --locked --
+          --ignored --exact an_elevated_install_stopped_before_its_outcome_is_never_done_twice
+          --nocapture
+
   security:
     needs: changes
     if: needs.changes.outputs.security == 'true'
@@ -1251,6 +1288,7 @@ jobs:
       - lab-pack
       - lab-handoff
       - lab-two-machines
+      - admin-e2e
       - security
     runs-on: ubuntu-latest
     timeout-minutes: 5
