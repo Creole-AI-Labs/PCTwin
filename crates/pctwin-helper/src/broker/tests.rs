@@ -126,6 +126,7 @@ impl Adapters for FakeAdapters {
         self.restore_points += 1;
         Effect::RestorePoint(restore::RestorePointResult::EarlierExists {
             at: "20261026080000.000000+000".into(),
+            number: 5,
         })
     }
     fn observe(&mut self, _: &Action) -> Observed {

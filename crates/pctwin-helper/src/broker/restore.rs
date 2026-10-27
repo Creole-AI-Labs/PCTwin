@@ -25,10 +25,11 @@ pub const WINDOWS_WAIT_SECS: u64 = 24 * 60 * 60;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum RestorePointResult {
-    /// A new restore point was made, at this time (as Windows writes it).
-    Made { at: String },
+    /// A new restore point was made, at this time (as Windows writes it), with its number in
+    /// Windows' list.
+    Made { at: String, number: u32 },
     /// Windows made none because it made one recently, at this time.
-    EarlierExists { at: String },
+    EarlierExists { at: String, number: u32 },
     /// None was made.
     NotMade { reason: NotMadeReason },
 }
@@ -134,7 +135,10 @@ pub fn create_honestly(system: &mut dyn RestorePoints, now_secs: i64) -> Restore
     };
     let newest = |points: &[Point]| points.iter().max_by_key(|p| p.sequence).cloned();
     if let Some(new) = newest(&after).filter(|n| before.iter().all(|b| b.sequence != n.sequence)) {
-        return RestorePointResult::Made { at: new.created };
+        return RestorePointResult::Made {
+            at: new.created,
+            number: new.sequence,
+        };
     }
     match newest(&after) {
         Some(recent)
@@ -143,7 +147,10 @@ pub fn create_honestly(system: &mut dyn RestorePoints, now_secs: i64) -> Restore
                 t <= now_secs + 300 && now_secs - t <= WINDOWS_WAIT_SECS as i64 + 300
             }) =>
         {
-            RestorePointResult::EarlierExists { at: recent.created }
+            RestorePointResult::EarlierExists {
+                at: recent.created,
+                number: recent.sequence,
+            }
         }
         _ => not_made(NotMadeReason::Unconfirmed),
     }
@@ -335,7 +342,8 @@ mod tests {
         assert_eq!(
             create_honestly(&mut sys, now()),
             RestorePointResult::Made {
-                at: "20261026120000.000000+060".into()
+                at: "20261026120000.000000+060".into(),
+                number: 5,
             }
         );
         assert_eq!(sys.asked, [DESCRIPTION]);
@@ -357,7 +365,10 @@ mod tests {
         );
         assert_eq!(
             create_honestly(&mut sys, now()),
-            RestorePointResult::EarlierExists { at: recent.into() }
+            RestorePointResult::EarlierExists {
+                at: recent.into(),
+                number: 5,
+            }
         );
         // Exactly at the edge of Windows' wait, with its five minutes of slack.
         let edge = now() - WINDOWS_WAIT_SECS as i64 - 300;

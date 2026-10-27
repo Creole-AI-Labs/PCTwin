@@ -24,6 +24,7 @@ mod moving;
 mod others;
 mod pairing;
 mod quicksend;
+pub mod rebuild;
 mod recovery;
 mod restart;
 mod updates;

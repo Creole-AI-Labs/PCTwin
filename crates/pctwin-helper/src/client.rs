@@ -138,6 +138,15 @@ pub struct Scanned {
     pub privacy_blocked: u64,
 }
 
+/// What the broker answered an action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Acted {
+    /// It acted (or handed back an earlier result): its signed receipt.
+    Done(Box<crate::broker::receipt::Receipt>),
+    /// It did not act, and why.
+    Denied(crate::broker::Denial),
+}
+
 /// An open session with the helper.
 pub struct Client<S: Read + Write> {
     stream: S,
@@ -338,6 +347,38 @@ impl<S: Read + Write> Client<S> {
             },
         )?;
         self.expect_answer(|a| matches!(a, Answer::AtSignIn))?;
+        Ok(())
+    }
+
+    /// Phase 2 broker: gives the helper the approved plan, once, right after opening. `Ok(Err)`:
+    /// the broker refused it (not the plan named when it was started, say).
+    pub fn seal_plan(
+        &mut self,
+        plan: &crate::broker::actions::ApprovedPlan,
+    ) -> Result<Result<(), crate::broker::Denial>, ClientError> {
+        send_request(&mut self.stream, &Request::SealPlan { plan: plan.clone() })?;
+        match self.expect_answer(|a| matches!(a, Answer::Sealed | Answer::Denied(_)))? {
+            Answer::Denied(why) => Ok(Err(why)),
+            _ => Ok(Ok(())),
+        }
+    }
+
+    /// Phase 2 broker: asks for one action of the sealed plan; the helper's signed receipt, or
+    /// why it did not act.
+    pub fn act(&mut self, request: &crate::broker::BrokerRequest) -> Result<Acted, ClientError> {
+        send_request(&mut self.stream, &Request::Act(Box::new(request.clone())))?;
+        match self.expect_answer(|a| matches!(a, Answer::Receipt(_) | Answer::Denied(_)))? {
+            Answer::Receipt(r) => Ok(Acted::Done(r)),
+            Answer::Denied(why) => Ok(Acted::Denied(why)),
+            _ => Err(ClientError::OutOfTurn),
+        }
+    }
+
+    /// Phase 2 broker: the move was stopped (or the person's session changed): nothing new
+    /// starts in this helper session, ever.
+    pub fn revoke(&mut self) -> Result<(), ClientError> {
+        send_request(&mut self.stream, &Request::Revoke)?;
+        self.expect_answer(|a| matches!(a, Answer::Denied(_)))?;
         Ok(())
     }
 

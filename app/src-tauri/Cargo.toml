@@ -38,6 +38,10 @@ pctwin-doctor = { path = "../../crates/pctwin-doctor" }
 pctwin-gate = { path = "../../crates/pctwin-gate" }
 pctwin-helper = { path = "../../crates/pctwin-helper" }
 pctwin-helper-os = { path = "../../crates/pctwin-helper-os" }
+# Phase 2 roles (the broker's requests name the role that asks).
+pctwin-grant = { path = "../../crates/pctwin-grant" }
+# The broker request's one-use number.
+getrandom = "0.4.3"
 pctwin-journal = { path = "../../crates/pctwin-journal" }
 pctwin-journey = { path = "../../crates/pctwin-journey" }
 pctwin-link = { path = "../../crates/pctwin-link" }
