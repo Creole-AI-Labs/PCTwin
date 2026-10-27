@@ -677,6 +677,9 @@ fn families() -> Vec<(&'static str, Value)> {
                 can_move_others: true,
             }]),
         ),
+        ("guard-snapshot", json(crate::guard_examples::snapshots())),
+        ("guard-refused", json(crate::guard_examples::refusals())),
+        ("guard-answer", json(crate::guard_examples::answers())),
         (
             "interrupted",
             json([crate::recovery::Interrupted { unfinished: 3 }]),
@@ -912,6 +915,8 @@ fn calls() -> Value {
             { "name": "laptop_name_shuffle", "args": [] },
             { "name": "laptop_name_use", "args": [] },
             { "name": "laptop_name_type", "args": [["name", "Ezzy Laptop"]] },
+            { "name": "guard_view", "args": [] },
+            { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "intent": { "kind": "try-again", "line": 0 } }]] },
         ],
         "events": {
             "old": OLD_EVENT,
@@ -932,6 +937,7 @@ fn calls() -> Value {
             "qsProblem": crate::quicksend::PROBLEM_EVENT,
             "qsPicked": crate::quicksend::PICKED_EVENT,
             "qsDragging": crate::quicksend::DRAGGING_EVENT,
+            "guard": crate::guard::EVENT,
         },
         // What the screens may name when they ask for a help code: the engine's closed lists.
         "helpTopics": crate::help::HelpTopic::ALL,

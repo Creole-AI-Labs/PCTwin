@@ -55,6 +55,8 @@ const COMMANDS: &[&str] = &[
     "laptop_name_shuffle",
     "laptop_name_use",
     "laptop_name_type",
+    "guard_view",
+    "guard_intent",
 ];
 
 fn main() {

@@ -65,6 +65,9 @@ import {
   setTrayLabels,
   setWindowMode,
   toProblem,
+  guardIntent,
+  guardView,
+  listenGuard,
   type NewEvent,
   type OldEvent,
 } from "./bridge";
@@ -259,6 +262,8 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
       await recoveryCheck();
       await recoveryRun();
       await thingsReady();
+      await guardView();
+      await guardIntent({ job: "job-1", epoch: 2, generation: 3, intent: { kind: "try-again", line: 0 } });
     } finally {
       delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
     }
@@ -278,6 +283,7 @@ describe("the engine's names (contract/shell/calls.json, written by the engine)"
     await listenPairingNew(() => undefined);
     await listenMove(() => undefined);
     await listenQuickSend(() => undefined);
+    await listenGuard(() => undefined);
     expect([...tauri.handlers.keys()].sort()).toEqual(Object.values(calls.events).sort());
   });
 });

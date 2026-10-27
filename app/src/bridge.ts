@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ITEM_STATUSES, KINDS, REPORT_NOTES, WHY_MEMORY, parseResult, type PersonOutcome, type Counts, type Evidence, type GroupName, type MoveGroup, type MoveOutcome, type MoveProgress, type Range, type ReportItem, type WhyMemory } from "./move";
 import { NEEDS_ACTION_WORDS, type OfferedFile, type Outcome as QsOutcome, type PickedItem, type Receipt, type SendProgress } from "./quicksend";
+import { parseAnswer, parseProjection, parseRefusal, parseSnapshot, type Answer, type IntentKind, type Projection, type Refusal, type Snapshot } from "./guard";
 import { FOLDER_ROLES, LEFT_OUT_REASONS, type FolderRole, type LeftOut, type PlanGroup, type PlanPreview, type PlanView, type Size } from "./plan";
 
 /* ---------- Shapes ---------- */
@@ -1034,3 +1035,33 @@ export async function openInBrowser(url: string): Promise<void> {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 }
+
+/* ---------- The flow guard (src-tauri/src/guard.rs): the Phase 2 screens ---------- */
+
+/** What the engine shows for its job now. A reply that does not parse is "status unavailable". */
+export async function guardView(): Promise<Snapshot> {
+  try {
+    return parseSnapshot(await send("guard_view")) ?? { kind: "unavailable" };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}
+
+/**
+ * Sends one intent, bound to the job, session and plan generation shown; the engine checks it again.
+ * A refusal comes back as its key only; anything unexpected is "status unavailable". Nothing is logged.
+ */
+export async function guardIntent(intent: { job: string; epoch: number; generation: number; intent: IntentKind }): Promise<{ ok: true; answer: Answer } | { ok: false; refusal: Refusal }> {
+  try {
+    const answer = parseAnswer(await send("guard_intent", { intent }));
+    return answer ? { ok: true, answer } : { ok: false, refusal: "unavailable" };
+  } catch (error: unknown) {
+    return { ok: false, refusal: parseRefusal(error) ?? "unavailable" };
+  }
+}
+
+/** The engine's updates for the Phase 2 screens. One that does not parse asks for the view again. */
+export const listenGuard = (handler: (view: Projection | null) => void): Promise<UnlistenFn> =>
+  listen<unknown>("guard-view", (e) => {
+    handler(parseProjection(e.payload));
+  });

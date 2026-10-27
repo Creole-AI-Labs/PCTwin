@@ -1677,3 +1677,306 @@ qs-problem-room-title = { $folder } में पर्याप्त जगह
 qs-problem-room-body = इन फ़ाइलों को { $needed } चाहिए, और वहाँ { $room } इस्तेमाल हो सकता है। कुछ भी सहेजा नहीं गया। जगह खाली करें या कोई दूसरा फ़ोल्डर चुनें, फिर से कोशिश करें।
 qs-done-refused-title = पाने वाले लैपटॉप ने ये फ़ाइलें नहीं लीं।
 qs-done-refused-body = हो सकता है उस पर पर्याप्त जगह न हो। कुछ भी नहीं भेजा गया।
+
+## चरण 2 की स्क्रीन (कार्य सूची 2.8): साझा हिस्से
+
+guard-state-not-started = अभी शुरू नहीं हुआ
+guard-state-preparing = तैयारी हो रही है
+guard-state-awaiting-person = आपकी पसंद का इंतज़ार है
+guard-state-awaiting-system = आपके सिस्टम की मंज़ूरी का इंतज़ार है
+guard-state-awaiting-maker = ऐप बनाने वाले या ऑनलाइन सेवा का इंतज़ार है
+guard-state-working = काम हो रहा है
+guard-state-checking = जो किया गया, उसकी जाँच हो रही है
+guard-state-applying = चीज़ें अपनी जगह रखी जा रही हैं
+guard-state-pause-requested = अगले सुरक्षित मोड़ पर रुकेगा। अभी रुका नहीं है।
+guard-state-paused = सुरक्षित मोड़ पर रुका हुआ
+guard-state-source-unavailable = पुराना लैपटॉप या ड्राइव जुड़ा नहीं है
+guard-state-blocked = पहले कुछ ठीक करना होगा
+guard-state-partial = आंशिक रूप से हो गया
+guard-state-retrying = फिर से कोशिश हो रही है
+guard-state-reconciling = जाँच हो रही है कि काम कहाँ तक पहुँचा
+guard-state-failed = यह नहीं हो पाया
+guard-state-complete = हो गया
+guard-state-cancelled = रोक दिया गया। जो पहले हो चुका था, वह रखा गया है।
+guard-refused-unavailable = PCTwin अभी यह जाँच नहीं कर सका। कुछ नहीं किया गया। थोड़ी देर में फिर से कोशिश करें।
+guard-refused-wrong-job = यह किसी दूसरे स्थानांतरण के लिए था। कुछ नहीं किया गया।
+guard-refused-old-session = यह स्क्रीन पुरानी हो चुकी थी, इसलिए कुछ नहीं किया गया। अभी की सही स्थिति यह है।
+guard-refused-plan-changed = आपके देखते-देखते योजना बदल गई, इसलिए कुछ नहीं किया गया। इसे फिर से देखें।
+guard-refused-not-now = इस चरण पर यह नहीं हो सकता। कुछ नहीं किया गया।
+guard-refused-not-shown = वह विकल्प अब इस स्क्रीन पर नहीं है। कुछ नहीं किया गया।
+guard-progress-label = प्रगति
+guard-progress-mark = { $percent }% पूरा
+guard-progress-of = { $total } में से { $done }
+guard-progress-unknown-total = अब तक { $done }। कुल संख्या अभी पता नहीं है।
+guard-progress-none = अभी तक कुछ नापा नहीं गया है।
+guard-and-more =
+    { $count ->
+        [one] और { $count } ज़्यादा, रिपोर्ट में दिए गए हैं।
+       *[other] और { $count } ज़्यादा, रिपोर्ट में दिए गए हैं।
+    }
+guard-not-known-yet = अभी पता नहीं है
+guard-free = { $free } खाली
+guard-free-unknown = खाली जगह पता नहीं है
+guard-items-size = { $items } आइटम, { $size }
+guard-try-again = फिर से कोशिश करें
+guard-pause = रोकें
+guard-resume = जारी रखें
+guard-check-again = फिर से जाँच करें
+guard-strip-plan = आपकी योजना
+guard-strip-report = आपकी रिपोर्ट
+guard-strip-permission = मंज़ूरी
+guard-strip-rescue = रेस्क्यू
+guard-strip-undo = पूर्ववत करें
+guard-strip-checking = जाँच
+
+## X09 रीस्टार्ट के बाद जाँच, और स्थिति उपलब्ध नहीं
+
+guard-checking-title = जाँच हो रही है कि काम कहाँ तक पहुँचा
+guard-checking-body = PCTwin देख रहा है कि बंद होने से पहले क्या पूरा हो चुका था। पता चलते ही आपके विकल्प वापस आ जाएँगे।
+guard-unavailable-title = स्थिति उपलब्ध नहीं है
+guard-unavailable-body = PCTwin अभी नहीं बता सकता कि यह स्थानांतरण क्या कर रहा है। जब तक वह बता नहीं पाता, कुछ भी पूरा हुआ नहीं दिखाया जाएगा। थोड़ी देर में फिर से जाँच करें।
+
+## 2.9 कुछ भी बदलने से पहले
+
+guard-changes-title = कुछ भी बदलने से पहले
+guard-changes-body = यह वह सब है जो स्थानांतरण इस लैपटॉप पर बदलेगा, और हर चीज़ के लिए पूर्ववत करना क्या कर सकता है। अभी कुछ नहीं बदला है।
+guard-changes-download = इंटरनेट से डाउनलोड
+guard-changes-download-none = कुछ नहीं
+guard-changes-permissions = सिस्टम की मंज़ूरी
+guard-changes-one-prompt = आपका सिस्टम एक बार पूछता है
+guard-changes-no-prompt = ज़रूरत नहीं
+guard-changes-restore-point = Windows रिस्टोर पॉइंट
+guard-changes-restore-point-first = पहले माँगा जाएगा
+guard-changes-restore-point-none = इस्तेमाल नहीं होगा
+guard-changes-install =
+    { $count ->
+        [one] इंस्टॉल करने के लिए: { $count } ऐप
+       *[other] इंस्टॉल करने के लिए: { $count } ऐप्स
+    }
+guard-changes-merge =
+    { $count ->
+        [one] यहाँ जो है उसके साथ जोड़ा जाएगा: { $count } आइटम
+       *[other] यहाँ जो है उसके साथ जोड़े जाएँगे: { $count } आइटम
+    }
+guard-changes-replace =
+    { $count ->
+        [one] बदलने के लिए, पुराना वर्शन रखते हुए: { $count } आइटम
+       *[other] बदलने के लिए, पुराने वर्शन रखते हुए: { $count } आइटम
+    }
+guard-changes-leave-alone =
+    { $count ->
+        [one] जैसा है वैसा छोड़ा जाएगा: { $count } आइटम
+       *[other] जैसे हैं वैसे छोड़े जाएँगे: { $count } आइटम
+    }
+guard-changes-space = सबसे व्यस्त समय में हर ड्राइव पर जगह
+guard-changes-why-prompt = आपका सिस्टम क्यों पूछेगा
+guard-changes-approve = ये बदलाव मंज़ूर करें
+guard-undo-legend-can = PCTwin इसे पूर्ववत कर सकता है।
+guard-undo-legend-keeps = PCTwin इसे रखता है। पूर्ववत करना इसे नहीं छूता।
+guard-undo-legend-you = आपको करना होगा। इसे सिर्फ़ इसकी सेवा या बनाने वाला ही पूर्ववत कर सकता है।
+guard-undo-can-reverse = PCTwin इसे पूर्ववत कर सकता है
+guard-undo-can-remove-app = PCTwin इसे हटा सकता है, आपका काम रखते हुए
+guard-undo-must-keep = रखा गया: यह पहले से यहाँ था
+guard-undo-needs-you-service = आपको करना होगा: इसे सिर्फ़ ऑनलाइन सेवा पूर्ववत कर सकती है
+guard-undo-needs-you-maker = आपको करना होगा: साइन-इन और लाइसेंस बनाने वाले के होते हैं
+guard-drive-needs = { $needed } चाहिए। { $free } खाली।
+guard-drive-needs-free-unknown = { $needed } चाहिए। ड्राइव यह नहीं बताती कि कितनी जगह खाली है।
+guard-drive-fits = आ जाएगा
+guard-drive-short = { $short } कम है
+guard-drive-unknown = पता नहीं
+guard-permission-read-other-people = पुराने लैपटॉप पर दूसरे लोगों की फ़ाइलें पढ़ने के लिए
+guard-permission-make-accounts = इस लैपटॉप पर उनके अकाउंट बनाने के लिए
+guard-permission-shared-folders = ऐसे साझा फ़ोल्डरों में चीज़ें रखने के लिए जिन्हें आपका अकाउंट नहीं बदल सकता
+guard-permission-install-for-everyone = इस लैपटॉप पर सबके लिए ऐप इंस्टॉल करने के लिए
+guard-permission-restore-point = पहले Windows रिस्टोर पॉइंट बनाने के लिए
+
+## X06 और H10 मंज़ूरी के बाद कुछ बदल गया
+
+guard-changed-title =
+    { $count ->
+        [one] आपकी मंज़ूरी के बाद { $count } चीज़ बदल गई
+       *[other] आपकी मंज़ूरी के बाद { $count } चीज़ें बदल गईं
+    }
+guard-changed-body = सिर्फ़ इन्हें दोबारा देखना ज़रूरी है। बाकी सब मंज़ूर रहता है और आगे बढ़ता है।
+guard-changed-changed-on-old-laptop = यह पुराने लैपटॉप पर बदल गया।
+guard-changed-app-updated = ऐप ने खुद को अपडेट कर लिया।
+guard-changed-destination-changed = जहाँ यह जाना है, वह जगह बदल गई।
+guard-changed-new-scope = यह नया है: कोई और व्यक्ति या लैपटॉप स्थानांतरण में जुड़ गया।
+guard-changed-permission-ended = इसकी मंज़ूरी खत्म हो गई है।
+guard-changed-leave-out = इन्हें छोड़ दें
+guard-changed-approve = इन्हें फिर से मंज़ूर करें
+
+## M31, M05 नए लैपटॉप पर जगह
+
+guard-space-title = नए लैपटॉप पर जगह
+guard-space-title-short = नए लैपटॉप पर जगह कम है
+guard-space-body = PCTwin ने हर ड्राइव पर आने वाली हर चीज़ गिनी, पूर्ववत करने के लिए ज़रूरी जगह समेत। जगह में आने के लिए आपकी चुनी हुई कोई चीज़ नहीं छोड़ी जाती।
+guard-space-proposal = जो नहीं आ पा रहा, उसके लिए PCTwin का सुझाव
+guard-keep-off-leave-in-cloud = उनके क्लाउड में छोड़े गए, जहाँ वे सुरक्षित हैं
+guard-keep-off-offload-drive = आपकी दूसरी ड्राइव पर रखे गए
+guard-keep-off-leave-on-old-laptop = पुराने लैपटॉप पर छोड़े गए। इनके स्थानांतरित होने तक उसे संभालकर रखें।
+guard-offload-title = आपकी दूसरी ड्राइव
+guard-offload-connected = जुड़ी है
+guard-offload-not-connected = जुड़ी नहीं है
+guard-offload-approved = आपने यह ड्राइव चुनी है। इस पर रखी फ़ाइलें नए लैपटॉप पर नहीं हैं: उन्हें खोलने के लिए इसे जोड़ें।
+guard-offload-ask = PCTwin कुछ चीज़ें इस ड्राइव पर रख सकता है। इसके लिए उसे इस ड्राइव पर आपकी अलग से हाँ चाहिए।
+guard-offload-use = यह ड्राइव इस्तेमाल करें
+guard-space-approve = यह योजना मंज़ूर करें
+guard-safe-in = { $provider } में सुरक्षित
+guard-safe-in-cloud = आपके क्लाउड में सुरक्षित
+guard-safe-in-detail =
+    { $count ->
+        [one] { $count } फ़ाइल सिर्फ़ ऑनलाइन रखी है। नए लैपटॉप पर साइन इन करने पर यह वापस आ जाएगी।
+       *[other] { $count } फ़ाइलें सिर्फ़ ऑनलाइन रखी हैं। नए लैपटॉप पर साइन इन करने पर वे वापस आ जाएँगी।
+    }
+guard-your-cloud = आपका क्लाउड
+
+## M09 सिर्फ़ ऑनलाइन रखी फ़ाइलों की कॉपी रखना
+
+guard-local-title = क्या आप सिर्फ़ ऑनलाइन रखी अपनी फ़ाइलों की कॉपी रखना चाहते हैं?
+guard-local-body =
+    { $count ->
+        [one] { $provider } में { $count } फ़ाइल सिर्फ़ ऑनलाइन रखी है। आप उसकी एक कॉपी नए लैपटॉप पर भी रख सकते हैं।
+       *[other] { $provider } में { $count } फ़ाइलें सिर्फ़ ऑनलाइन रखी हैं। आप उनकी एक कॉपी नए लैपटॉप पर भी रख सकते हैं।
+    }
+guard-local-download = पुराने लैपटॉप पर डाउनलोड करने के लिए
+guard-local-old-space = पुराने लैपटॉप पर जगह
+guard-local-how = PCTwin उन्हें थोड़ी-थोड़ी करके नीचे लाता है, भेजता है, और फिर पुराने लैपटॉप पर उन्हें दोबारा सिर्फ़ ऑनलाइन कर देता है।
+guard-local-paused-metered = रुका हुआ: इस कनेक्शन पर डेटा का पैसा लग सकता है। मुफ़्त कनेक्शन पर यह अपने आप जारी रहेगा, या आप अनुमति दें तो अभी।
+guard-local-paused-no-space = रुका हुआ: पुराने लैपटॉप पर अगली कुछ फ़ाइलों के लिए जगह नहीं बची। बाकी { $provider } में सुरक्षित रहती हैं।
+guard-local-done = हो गया। कॉपियाँ नए लैपटॉप पर हैं।
+guard-local-keep = कॉपी रखें
+guard-local-leave = उन्हें { $provider } में ही रहने दें
+guard-local-allow-metered = इस कनेक्शन पर अनुमति दें
+
+## M07 कौन कहाँ जाएगा
+
+guard-owners-title = कौन कहाँ जाएगा
+guard-owners-body = हर व्यक्ति की चीज़ें इस लैपटॉप पर उसके अपने अकाउंट में जाती हैं। सिर्फ़ नाम मिलने से यह कभी तय नहीं होता।
+guard-owners-from = { $laptop } से
+guard-owners-to-account = इस लैपटॉप के अकाउंट { $account } में
+guard-owners-new-account = इस लैपटॉप के नए अकाउंट में
+guard-owners-own-folder = उनके अपने “{ $laptop } से” फ़ोल्डर, क्योंकि नाम टकरा रहे हैं
+guard-owners-usual-folders = उनके आम फ़ोल्डर
+guard-owners-approve = मंज़ूर करें
+
+## X12 जो पूरा नहीं हुआ
+
+guard-report-title-partial = ज़्यादातर चीज़ें स्थानांतरित हो गईं। कुछ नहीं हुईं।
+guard-report-title-done = इस हिस्से की सारी चीज़ें स्थानांतरित हो गईं।
+guard-report-body-partial = नीचे दी हर चीज़ अभी पुराने लैपटॉप पर है। तैयार हों तो हर एक को फिर से आज़माएँ। जो पहले ही स्थानांतरित हो चुका है, वह वहीं रहेगा।
+guard-report-body-done = फिर से आज़माने के लिए कुछ नहीं बचा।
+guard-line-app = ऐप { $name }
+guard-line-items =
+    { $count ->
+        [one] { $count } आइटम
+       *[other] { $count } आइटम
+    }
+guard-line-settings =
+    { $count ->
+        [one] { $count } सेटिंग
+       *[other] { $count } सेटिंग्स
+    }
+guard-line-why-failed = { $laptop } से: यह पूरा नहीं हुआ।
+guard-line-why-laptop-not-connected = { $laptop } से: वह लैपटॉप जुड़ा नहीं है। उसे उसी Wi-Fi से जोड़ें और चालू रखें।
+guard-line-why-waits-for-another = { $laptop } से: यह एक दूसरे चरण का इंतज़ार कर रहा है जो पूरा नहीं हुआ। पहले उसे ठीक करें।
+guard-line-why-not-started = { $laptop } से: स्थानांतरण शुरू होने से पहले ही रुक गया।
+
+## M25, H10 सिस्टम की मंज़ूरी, और रिस्टोर पॉइंट
+
+guard-permission-title-explain = PCTwin को आपके सिस्टम से एक मंज़ूरी चाहिए
+guard-permission-title-waiting-for-system = अपने सिस्टम के सवाल का जवाब दें
+guard-permission-title-denied = आपने मना कर दिया
+guard-permission-title-closed-without-answer = सवाल बिना जवाब के बंद कर दिया गया
+guard-permission-title-given = इस स्थानांतरण के लिए मंज़ूर
+guard-permission-title-ended-by-sleep = लैपटॉप के स्लीप में जाने पर मंज़ूरी खत्म हो गई
+guard-permission-title-ended-other-session = किसी और के साइन इन करने पर मंज़ूरी खत्म हो गई
+guard-permission-body-explain = आपका सिस्टम पूरे स्थानांतरण के लिए एक ही बार पूछता है। इसे सिर्फ़ नीचे दिए चरण इस्तेमाल करते हैं, और यह स्थानांतरण के साथ खत्म हो जाती है।
+guard-permission-body-waiting-for-system = आपके सिस्टम की अपनी विंडो खुली है। अगर वह माँगे तो पासवर्ड वहीं डालें।
+guard-permission-body-denied = सिर्फ़ वही चरण छोड़े जाएँगे जिन्हें इसकी ज़रूरत थी। बाकी सब आगे बढ़ता है।
+guard-permission-body-closed-without-answer = इसे बंद करना हाँ नहीं है, इसलिए जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। फिर से माँगें, या इसके बिना आगे बढ़ें।
+guard-permission-body-given = PCTwin इसे सिर्फ़ नीचे दिए चरणों के लिए इस्तेमाल करता है, और यह इस स्थानांतरण के साथ खत्म हो जाती है।
+guard-permission-body-ended-by-sleep = इसके बाद जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। आगे बढ़ने के लिए फिर से माँगें।
+guard-permission-body-ended-other-session = इसके बाद जिसे इसकी ज़रूरत है वह कुछ नहीं किया गया। अपने अकाउंट पर लौटने पर फिर से माँगें।
+guard-permission-never-password = PCTwin कभी आपका पासवर्ड नहीं माँगता और कभी उसे देखता नहीं। सिर्फ़ आपका सिस्टम देखता है।
+guard-permission-not-now = इसके बिना आगे बढ़ें
+guard-permission-ask = अपने सिस्टम पर जाएँ
+guard-permission-ask-again = फिर से माँगें
+guard-restore-title = Windows रिस्टोर पॉइंट
+guard-restore-made = { $time } पर बनाया गया।
+guard-restore-earlier-exists = Windows के पास { $time } का एक पहले से है, इसलिए उसने दूसरा नहीं बनाया।
+guard-restore-not-chosen = नहीं बनाया गया: आपने न बनाना चुना।
+guard-restore-not-made-not-windows = नहीं बनाया गया: रिस्टोर पॉइंट सिर्फ़ Windows पर होते हैं।
+guard-restore-not-made-protection-off = नहीं बनाया गया: इस ड्राइव के लिए System Protection बंद है। आप इसे System Properties में चालू कर सकते हैं।
+guard-restore-not-made-needs-admin = नहीं बनाया गया: इसके लिए आपके सिस्टम की मंज़ूरी चाहिए।
+guard-restore-not-made-unconfirmed = नहीं बनाया गया: Windows ने हाँ कहा, पर कोई रिस्टोर पॉइंट नहीं मिल रहा।
+guard-restore-not-made-failed = नहीं बनाया गया: Windows एक नहीं बना सका।
+
+## T01 से T04 ऐसे लैपटॉप से रेस्क्यू जो चालू नहीं होता
+
+guard-rescue-title-intro = जो लैपटॉप चालू नहीं होता, उससे ज़रूरी चीज़ें बचाएँ
+guard-rescue-title-pick-drive = बचाने के लिए ड्राइव चुनें
+guard-rescue-title-locked = यह ड्राइव लॉक है
+guard-rescue-title-no-system = यह किसी लैपटॉप की ड्राइव नहीं है
+guard-rescue-title-salvage = जो पढ़ा जा सका, वह यह है
+guard-rescue-body-intro = पुराने लैपटॉप से ड्राइव निकालें और ड्राइव एडेप्टर या एन्क्लोज़र से उसे इस लैपटॉप से जोड़ें।
+guard-rescue-body-pick-drive = पुराने लैपटॉप की ड्राइव चुनें। जिस ड्राइव पर चीज़ें जानी हैं, वह वही नहीं हो सकती जिसे आप बचा रहे हैं।
+guard-rescue-body-locked = पहले इसे अपने सिस्टम में अनलॉक करें। फिर दोबारा जाँचें।
+guard-rescue-body-no-system = इस ड्राइव पर लैपटॉप का सिस्टम और होम फ़ोल्डर नहीं हैं। अगर यह आम USB ड्राइव है, तो इसे नए लैपटॉप पर इस्तेमाल करें।
+guard-rescue-body-salvage = सूची देखें, फिर जो पढ़ा जा सका उसे इस्तेमाल करें।
+guard-rescue-can = रेस्क्यू क्या कर सकता है
+guard-rescue-can-body = ऐसी ड्राइव से, जो अब भी चलती है, आपकी फ़ाइलें और ड्राइव पर मिले लोग और सेटिंग्स पढ़ना।
+guard-rescue-cannot = वह क्या नहीं कर सकता
+guard-rescue-cannot-body = ड्राइव की मरम्मत करना, खराब हिस्से पढ़ना, या ऐसी ड्राइव खोलना जिसकी चाबी आपके पास नहीं है।
+guard-rescue-read-only-title = ड्राइव सिर्फ़ पढ़ी जाती है
+guard-rescue-read-only-promise = PCTwin इसे सिर्फ़ पढ़ता है। इस पर कुछ भी बदला, ठीक या फ़ॉर्मैट नहीं किया जाता।
+guard-rescue-system-read-only = आपके सिस्टम ने इसे सिर्फ़ पढ़ने के लिए खोला, इसलिए इस पर कुछ नहीं बदल सकता।
+guard-rescue-pctwin-reads-only = PCTwin ने इसे सिर्फ़ पढ़ा। आपके सिस्टम ने इसे बदलाव के लिए खोल रखा था, इसलिए दूसरे ऐप अब भी इसे बदल सकते थे।
+guard-rescue-refused-target = वह ड्राइव वही है जिस पर चीज़ें रखी जाती हैं, इसलिए उसे बचाया भी नहीं जा सकता। दूसरी ड्राइव चुनें।
+guard-rescue-drive-detail = { $size }, { $fs }
+guard-rescue-drive-is-target = स्थानांतरण की चीज़ें इस ड्राइव पर जाती हैं।
+guard-rescue-drive-cannot = बचाई नहीं जा सकती
+guard-rescue-choose = यह ड्राइव बचाएँ
+guard-rescue-bit-locker-step-1 = File Explorer में ड्राइव खोलें।
+guard-rescue-bit-locker-step-2 = Windows के माँगने पर उसकी रिकवरी चाबी डालें। वह अक्सर मालिक के Microsoft अकाउंट में सेव होती है, aka.ms/myrecoverykey पर।
+guard-rescue-bit-locker-step-3 = यहाँ लौटें और फिर से जाँच करें चुनें।
+guard-rescue-file-vault-step-1 = इसे Mac पर मालिक के लॉगिन पासवर्ड या रिकवरी चाबी से अनलॉक करें।
+guard-rescue-file-vault-step-2 = यहाँ लौटें और फिर से जाँच करें चुनें।
+guard-rescue-apple-chip-step-1 = यह Mac अपनी ड्राइव को सिर्फ़ अपने लिए लॉक रखता है, इसलिए ड्राइव निकालने से काम नहीं चलता।
+guard-rescue-apple-chip-step-2 = अगर Mac अब भी Recovery में चालू होता है, तो केबल के साथ Share Disk इस्तेमाल करें। अगर वह बिल्कुल चालू नहीं होता, तो सिर्फ़ Apple का रिपेयर सेंटर मदद कर सकता है।
+guard-rescue-never-key = PCTwin कभी चाबी नहीं माँगता और कभी उसे रखता नहीं।
+guard-rescue-readable =
+    { $count ->
+        [one] { $n } आइटम पढ़ा जा सकता है।
+       *[other] { $n } आइटम पढ़े जा सकते हैं।
+    }
+guard-rescue-unreadable =
+    { $count ->
+        [one] { $count } आइटम पढ़ा नहीं जा सका
+       *[other] { $count } आइटम पढ़े नहीं जा सके
+    }
+guard-rescue-look = ड्राइव ढूँढें
+guard-rescue-check-again = फिर से जाँच करें
+guard-rescue-use = जो पढ़ा जा सका उसे इस्तेमाल करें
+
+## R05, R06 पूर्ववत करना
+
+guard-undo-preview-title = पूर्ववत करना क्या करेगा
+guard-undo-preview-body = PCTwin ने अभी हर बदलाव को देखा। स्थानांतरण के बाद आपने जो बदला, वह रखा जाता है। जब तक आप पूर्ववत करें नहीं चुनते, कुछ नहीं होता।
+guard-undo-plan-put-back = जैसा था वैसा वापस रखा गया
+guard-undo-plan-remove-app = ऐप हटाया गया, आपका काम रखा गया
+guard-undo-plan-keep-changed = रखा गया: आपने इसे बदला है
+guard-undo-plan-elsewhere = आपको करना होगा: कहीं और किया गया
+guard-undo-plan-leave-alone = छोड़ दिया गया: यह पहले से यहाँ था
+guard-undo-keep = सब कुछ जैसा है वैसा रखें
+guard-undo-run = पूर्ववत करें
+guard-undo-running-title = बदलाव पूर्ववत किए जा रहे हैं
+guard-undo-done-title = पूर्ववत करने पर क्या हुआ
+guard-undo-result-restored = वापस लाया गया
+guard-undo-result-removed = हटाया गया
+guard-undo-result-as-before = पहले जैसा ही था
+guard-undo-result-kept-changed = रखा गया क्योंकि आपने इसे बदला है
+guard-undo-result-kept-other = रखा गया, और जानकारी देखें
+guard-undo-result-kept-at = { $name } नाम से रखा गया
+guard-undo-result-done-elsewhere = कहीं और किया गया: इसे सिर्फ़ इसकी सेवा या बनाने वाला ही पूर्ववत कर सकता है
+guard-undo-result-not-done-yet = अभी नहीं हुआ। पूर्ववत करना अगली बार फिर कोशिश करेगा।

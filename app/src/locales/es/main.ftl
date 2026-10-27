@@ -1725,3 +1725,318 @@ qs-problem-room-title = No hay espacio suficiente en { $folder }.
 qs-problem-room-body = Estos archivos necesitan { $needed }, y allí se pueden usar { $room }. No se guardó nada. Libera espacio o elige otra carpeta e inténtalo de nuevo.
 qs-done-refused-title = El portátil que recibe no aceptó estos archivos.
 qs-done-refused-body = Puede que no tenga espacio suficiente. No se envió nada.
+
+## Pantallas de la fase 2 (lista de tareas 2.8): partes comunes
+
+guard-state-not-started = Aún no ha empezado
+guard-state-preparing = Preparando
+guard-state-awaiting-person = Esperando tu elección
+guard-state-awaiting-system = Esperando la aprobación de tu sistema
+guard-state-awaiting-maker = Esperando al creador de la aplicación o del servicio en línea
+guard-state-working = Trabajando
+guard-state-checking = Comprobando lo que se hizo
+guard-state-applying = Poniendo las cosas en su sitio
+guard-state-pause-requested = Se pausará en el próximo punto seguro. Todavía no está en pausa.
+guard-state-paused = En pausa en un punto seguro
+guard-state-source-unavailable = El portátil antiguo o el disco no está conectado
+guard-state-blocked = Primero hay que arreglar algo
+guard-state-partial = Hecho en parte
+guard-state-retrying = Intentando de nuevo
+guard-state-reconciling = Comprobando hasta dónde se llegó
+guard-state-failed = Esto no funcionó
+guard-state-complete = Listo
+guard-state-cancelled = Detenido. Lo que ya se hizo se conserva.
+guard-refused-unavailable = PCTwin no pudo comprobar esto ahora mismo. No se hizo nada. Inténtalo de nuevo en un momento.
+guard-refused-wrong-job = Esto era de otro traslado. No se hizo nada.
+guard-refused-old-session = Esta pantalla estaba desactualizada, así que no se hizo nada. Esto es lo que es cierto ahora.
+guard-refused-plan-changed = El plan cambió mientras lo mirabas, así que no se hizo nada. Míralo de nuevo.
+guard-refused-not-now = Eso no se puede hacer en este paso. No se hizo nada.
+guard-refused-not-shown = Esa opción ya no está en esta pantalla. No se hizo nada.
+guard-progress-label = Progreso
+guard-progress-mark = { $percent } % completado
+guard-progress-of = { $done } de { $total }
+guard-progress-unknown-total = { $done } hasta ahora. Aún no se sabe el total.
+guard-progress-none = Todavía no se ha medido nada.
+guard-and-more =
+    { $count ->
+        [one] Y { $count } más, en el informe.
+        [many] Y { $count } más, en el informe.
+       *[other] Y { $count } más, en el informe.
+    }
+guard-not-known-yet = Aún no se sabe
+guard-free = { $free } libres
+guard-free-unknown = Espacio libre desconocido
+guard-items-size = { $items } elementos, { $size }
+guard-try-again = Intentar de nuevo
+guard-pause = Pausar
+guard-resume = Seguir
+guard-check-again = Comprobar de nuevo
+guard-strip-plan = Tu plan
+guard-strip-report = Tu informe
+guard-strip-permission = Aprobación
+guard-strip-rescue = Rescate
+guard-strip-undo = Deshacer
+guard-strip-checking = Comprobando
+
+## X09 comprobación tras un reinicio, y estado no disponible
+
+guard-checking-title = Comprobando hasta dónde se llegó
+guard-checking-body = PCTwin está mirando lo que estaba terminado antes de cerrarse. Tus opciones vuelven en cuanto lo sepa.
+guard-unavailable-title = Estado no disponible
+guard-unavailable-body = PCTwin no puede decir ahora mismo qué está haciendo este traslado. No se muestra nada como hecho hasta que pueda. Vuelve a comprobar en un momento.
+
+## 2.9 Antes de cambiar nada
+
+guard-changes-title = Antes de cambiar nada
+guard-changes-body = Esto es todo lo que el traslado cambiará en este portátil, y lo que deshacer puede hacer con cada cosa. Todavía no ha cambiado nada.
+guard-changes-download = Descargar de internet
+guard-changes-download-none = Nada
+guard-changes-permissions = Aprobación del sistema
+guard-changes-one-prompt = Tu sistema pregunta una sola vez
+guard-changes-no-prompt = No hace falta
+guard-changes-restore-point = Punto de restauración de Windows
+guard-changes-restore-point-first = Se pide primero
+guard-changes-restore-point-none = No se usa
+guard-changes-install =
+    { $count ->
+        [one] Por instalar: { $count } aplicación
+        [many] Por instalar: { $count } de aplicaciones
+       *[other] Por instalar: { $count } aplicaciones
+    }
+guard-changes-merge =
+    { $count ->
+        [one] Se añade junto a lo que hay aquí: { $count } elemento
+        [many] Se añaden junto a lo que hay aquí: { $count } de elementos
+       *[other] Se añaden junto a lo que hay aquí: { $count } elementos
+    }
+guard-changes-replace =
+    { $count ->
+        [one] Por reemplazar, conservando la versión anterior: { $count } elemento
+        [many] Por reemplazar, conservando las versiones anteriores: { $count } de elementos
+       *[other] Por reemplazar, conservando las versiones anteriores: { $count } elementos
+    }
+guard-changes-leave-alone =
+    { $count ->
+        [one] Se deja como está: { $count } elemento
+        [many] Se dejan como están: { $count } de elementos
+       *[other] Se dejan como están: { $count } elementos
+    }
+guard-changes-space = Espacio en cada disco en el momento de más uso
+guard-changes-why-prompt = Por qué preguntará tu sistema
+guard-changes-approve = Aprobar estos cambios
+guard-undo-legend-can = PCTwin puede deshacerlo.
+guard-undo-legend-keeps = PCTwin lo conserva. Deshacer no lo toca.
+guard-undo-legend-you = Te toca a ti. Solo su servicio o su creador puede deshacerlo.
+guard-undo-can-reverse = PCTwin puede deshacerlo
+guard-undo-can-remove-app = PCTwin puede quitarla, conservando tu trabajo
+guard-undo-must-keep = Se conserva: ya estaba aquí
+guard-undo-needs-you-service = Te toca a ti: solo el servicio en línea puede deshacerlo
+guard-undo-needs-you-maker = Te toca a ti: los inicios de sesión y las licencias son del creador
+guard-drive-needs = Necesita { $needed }. { $free } libres.
+guard-drive-needs-free-unknown = Necesita { $needed }. El disco no dice cuánto hay libre.
+guard-drive-fits = Cabe
+guard-drive-short = Faltan { $short }
+guard-drive-unknown = No se sabe
+guard-permission-read-other-people = Para leer los archivos de otras personas en el portátil antiguo
+guard-permission-make-accounts = Para crear sus cuentas en este portátil
+guard-permission-shared-folders = Para poner cosas en carpetas compartidas que tu cuenta no puede cambiar
+guard-permission-install-for-everyone = Para instalar aplicaciones para todos en este portátil
+guard-permission-restore-point = Para crear primero un punto de restauración de Windows
+
+## X06 y H10 algo cambió después de la aprobación
+
+guard-changed-title =
+    { $count ->
+        [one] { $count } cosa cambió después de que aprobaras
+        [many] { $count } de cosas cambiaron después de que aprobaras
+       *[other] { $count } cosas cambiaron después de que aprobaras
+    }
+guard-changed-body = Solo estas necesitan que las mires de nuevo. Todo lo demás sigue aprobado y continúa.
+guard-changed-changed-on-old-laptop = Cambió en el portátil antiguo.
+guard-changed-app-updated = La aplicación se actualizó sola.
+guard-changed-destination-changed = Cambió el lugar al que va.
+guard-changed-new-scope = Es nuevo: otra persona u otro portátil se unió al traslado.
+guard-changed-permission-ended = La aprobación para esto terminó.
+guard-changed-leave-out = Dejar estas fuera
+guard-changed-approve = Aprobar estas de nuevo
+
+## M31, M05 espacio en el portátil nuevo
+
+guard-space-title = Espacio en el portátil nuevo
+guard-space-title-short = Al portátil nuevo le falta espacio
+guard-space-body = PCTwin contó todo lo que llega a cada disco, incluido el espacio para deshacer. No se descarta nada de lo que elegiste para que quepa.
+guard-space-proposal = Lo que PCTwin sugiere para lo que no cabe
+guard-keep-off-leave-in-cloud = Se dejan en su nube, donde están seguros
+guard-keep-off-offload-drive = Se ponen en tu otro disco
+guard-keep-off-leave-on-old-laptop = Se dejan en el portátil antiguo. Consérvalo hasta que se trasladen.
+guard-offload-title = Tu otro disco
+guard-offload-connected = Conectado
+guard-offload-not-connected = No conectado
+guard-offload-approved = Elegiste este disco. Los archivos que hay en él no están en el portátil nuevo: conéctalo para abrirlos.
+guard-offload-ask = PCTwin puede poner algunas cosas en este disco. Necesita tu sí para este disco en concreto.
+guard-offload-use = Usar este disco
+guard-space-approve = Aprobar este plan
+guard-safe-in = A salvo en { $provider }
+guard-safe-in-cloud = A salvo en tu nube
+guard-safe-in-detail =
+    { $count ->
+        [one] { $count } archivo está guardado solo en línea. Vuelve cuando inicies sesión en el portátil nuevo.
+        [many] { $count } de archivos están guardados solo en línea. Vuelven cuando inicies sesión en el portátil nuevo.
+       *[other] { $count } archivos están guardados solo en línea. Vuelven cuando inicies sesión en el portátil nuevo.
+    }
+guard-your-cloud = tu nube
+
+## M09 conservar una copia de los archivos que solo están en línea
+
+guard-local-title = ¿Conservar una copia de tus archivos que solo están en línea?
+guard-local-body =
+    { $count ->
+        [one] { $count } archivo de { $provider } está guardado solo en línea. También puedes conservar una copia en el portátil nuevo.
+        [many] { $count } de archivos de { $provider } están guardados solo en línea. También puedes conservar una copia en el portátil nuevo.
+       *[other] { $count } archivos de { $provider } están guardados solo en línea. También puedes conservar una copia en el portátil nuevo.
+    }
+guard-local-download = Por descargar en el portátil antiguo
+guard-local-old-space = Espacio en el portátil antiguo
+guard-local-how = PCTwin los baja unos pocos cada vez, los envía y luego vuelve a dejarlos solo en línea en el portátil antiguo.
+guard-local-paused-metered = En pausa: esta conexión puede cobrar por los datos. Sigue sola con una conexión gratuita, o ahora mismo si lo permites.
+guard-local-paused-no-space = En pausa: el portátil antiguo se ha quedado sin espacio para los próximos archivos. El resto sigue a salvo en { $provider }.
+guard-local-done = Listo. Las copias están en el portátil nuevo.
+guard-local-keep = Conservar una copia
+guard-local-leave = Dejarlos en { $provider }
+guard-local-allow-metered = Permitir en esta conexión
+
+## M07 quién va adónde
+
+guard-owners-title = Quién va adónde
+guard-owners-body = Las cosas de cada persona van a su propia cuenta en este portátil. Que los nombres coincidan nunca decide nada por sí solo.
+guard-owners-from = De { $laptop }
+guard-owners-to-account = A la cuenta { $account } de este portátil
+guard-owners-new-account = A una cuenta nueva de este portátil
+guard-owners-own-folder = Sus propias carpetas «De { $laptop }», porque los nombres coinciden
+guard-owners-usual-folders = Sus carpetas de siempre
+guard-owners-approve = Aprobar
+
+## X12 lo que no se terminó
+
+guard-report-title-partial = Casi todo se trasladó. Unas pocas cosas no.
+guard-report-title-done = Todo lo de esta parte se trasladó.
+guard-report-body-partial = Todo lo de abajo sigue en el portátil antiguo. Inténtalo de nuevo con cada cosa cuando quieras. Lo que ya se trasladó se queda.
+guard-report-body-done = No queda nada por intentar de nuevo.
+guard-line-app = La aplicación { $name }
+guard-line-items =
+    { $count ->
+        [one] { $count } elemento
+        [many] { $count } de elementos
+       *[other] { $count } elementos
+    }
+guard-line-settings =
+    { $count ->
+        [one] { $count } ajuste
+        [many] { $count } de ajustes
+       *[other] { $count } ajustes
+    }
+guard-line-why-failed = De { $laptop }: no se terminó.
+guard-line-why-laptop-not-connected = De { $laptop }: ese portátil no está conectado. Conéctalo a la misma red Wi-Fi y mantenlo encendido.
+guard-line-why-waits-for-another = De { $laptop }: espera a otro paso que no se terminó. Arregla primero ese.
+guard-line-why-not-started = De { $laptop }: el traslado se detuvo antes de empezar.
+
+## M25, H10 la aprobación del sistema, y el punto de restauración
+
+guard-permission-title-explain = PCTwin necesita una aprobación de tu sistema
+guard-permission-title-waiting-for-system = Responde a la pregunta de tu sistema
+guard-permission-title-denied = Dijiste que no
+guard-permission-title-closed-without-answer = La pregunta se cerró sin respuesta
+guard-permission-title-given = Aprobado para este traslado
+guard-permission-title-ended-by-sleep = La aprobación terminó cuando el portátil se suspendió
+guard-permission-title-ended-other-session = La aprobación terminó cuando otra persona inició sesión
+guard-permission-body-explain = Tu sistema pregunta una sola vez para todo el traslado. Solo la usan los pasos que se indican abajo, y termina con el traslado.
+guard-permission-body-waiting-for-system = La ventana de tu propio sistema está abierta. Escribe allí tu contraseña si la pide.
+guard-permission-body-denied = Solo se dejan fuera los pasos que la necesitaban. Todo lo demás continúa.
+guard-permission-body-closed-without-answer = Cerrarla no es un sí, así que no se hizo nada de lo que la necesita. Pregunta de nuevo, o sigue sin ella.
+guard-permission-body-given = PCTwin la usa solo para los pasos que se indican abajo, y termina con este traslado.
+guard-permission-body-ended-by-sleep = Después de eso no se hizo nada de lo que la necesita. Pregunta de nuevo para seguir.
+guard-permission-body-ended-other-session = Después de eso no se hizo nada de lo que la necesita. Pregunta de nuevo cuando vuelvas a tu cuenta.
+guard-permission-never-password = PCTwin nunca te pide la contraseña y nunca la ve. Solo la ve tu sistema.
+guard-permission-not-now = Seguir sin ella
+guard-permission-ask = Continuar con tu sistema
+guard-permission-ask-again = Preguntar de nuevo
+guard-restore-title = Punto de restauración de Windows
+guard-restore-made = Creado a las { $time }.
+guard-restore-earlier-exists = Windows ya tiene uno de { $time }, así que no creó otro.
+guard-restore-not-chosen = No se creó: elegiste no hacerlo.
+guard-restore-not-made-not-windows = No se creó: los puntos de restauración solo existen en Windows.
+guard-restore-not-made-protection-off = No se creó: System Protection está desactivada para este disco. Puedes activarla en System Properties.
+guard-restore-not-made-needs-admin = No se creó: necesita la aprobación de tu sistema.
+guard-restore-not-made-unconfirmed = No se creó: Windows dijo que sí, pero no se encuentra ningún punto de restauración.
+guard-restore-not-made-failed = No se creó: Windows no pudo crear uno.
+
+## T01 a T04 rescate de un portátil que no arranca
+
+guard-rescue-title-intro = Salva lo importante de un portátil que no arranca
+guard-rescue-title-pick-drive = Elige el disco que quieres rescatar
+guard-rescue-title-locked = Este disco está bloqueado
+guard-rescue-title-no-system = Este no es el disco de un portátil
+guard-rescue-title-salvage = Esto es lo que se pudo leer
+guard-rescue-body-intro = Saca el disco del portátil antiguo y conéctalo a este con un adaptador o una carcasa para discos.
+guard-rescue-body-pick-drive = Elige el disco del portátil antiguo. El disco al que van las cosas no puede ser el que rescatas.
+guard-rescue-body-locked = Desbloquéalo primero en tu sistema. Después, comprueba de nuevo.
+guard-rescue-body-no-system = Este disco no tiene el sistema de un portátil ni carpetas personales. Si es un disco USB normal, úsalo mejor en el portátil nuevo.
+guard-rescue-body-salvage = Revisa la lista y usa lo que se pudo leer.
+guard-rescue-can = Lo que puede hacer un rescate
+guard-rescue-can-body = Leer tus archivos, y las personas y los ajustes que haya en el disco, de un disco que todavía funciona.
+guard-rescue-cannot = Lo que no puede hacer
+guard-rescue-cannot-body = Reparar el disco, leer las partes dañadas o abrir un disco cuya clave no tienes.
+guard-rescue-read-only-title = El disco solo se lee
+guard-rescue-read-only-promise = PCTwin solo lo lee. No se cambia, repara ni formatea nada en él.
+guard-rescue-system-read-only = Tu sistema lo abrió en solo lectura, así que nada en él puede cambiar.
+guard-rescue-pctwin-reads-only = PCTwin solo lo leyó. Tu sistema lo tenía abierto para hacer cambios, así que otras aplicaciones aún podían cambiarlo.
+guard-rescue-refused-target = Ese disco es donde se ponen las cosas, así que no se puede rescatar también. Elige otro disco.
+guard-rescue-drive-detail = { $size }, { $fs }
+guard-rescue-drive-is-target = Las cosas del traslado van a este disco.
+guard-rescue-drive-cannot = No se puede rescatar
+guard-rescue-choose = Rescatar este disco
+guard-rescue-bit-locker-step-1 = Abre el disco en File Explorer.
+guard-rescue-bit-locker-step-2 = Escribe su clave de recuperación cuando Windows la pida. Suele estar guardada en la cuenta de Microsoft del propietario, en aka.ms/myrecoverykey.
+guard-rescue-bit-locker-step-3 = Vuelve aquí y elige Comprobar de nuevo.
+guard-rescue-file-vault-step-1 = Desbloquéalo en un Mac con la contraseña de inicio de sesión del propietario o su clave de recuperación.
+guard-rescue-file-vault-step-2 = Vuelve aquí y elige Comprobar de nuevo.
+guard-rescue-apple-chip-step-1 = Este Mac mantiene su disco bloqueado solo para él, así que sacar el disco no sirve.
+guard-rescue-apple-chip-step-2 = Si el Mac todavía arranca en Recovery, usa Share Disk con un cable. Si no arranca en absoluto, solo un centro de reparación de Apple puede ayudar.
+guard-rescue-never-key = PCTwin nunca pide la clave y nunca la guarda.
+guard-rescue-readable =
+    { $count ->
+        [one] Se puede leer { $n } elemento.
+        [many] Se pueden leer { $n } de elementos.
+       *[other] Se pueden leer { $n } elementos.
+    }
+guard-rescue-unreadable =
+    { $count ->
+        [one] No se pudo leer { $count } elemento
+        [many] No se pudieron leer { $count } de elementos
+       *[other] No se pudieron leer { $count } elementos
+    }
+guard-rescue-look = Buscar el disco
+guard-rescue-check-again = Comprobar de nuevo
+guard-rescue-use = Usar lo que se pudo leer
+
+## R05, R06 deshacer
+
+guard-undo-preview-title = Lo que hará deshacer
+guard-undo-preview-body = PCTwin acaba de mirar cada cambio. Todo lo que cambiaste después del traslado se conserva. No pasa nada hasta que elijas Deshacer.
+guard-undo-plan-put-back = Se deja como estaba
+guard-undo-plan-remove-app = Aplicación quitada, tu trabajo conservado
+guard-undo-plan-keep-changed = Se conserva: lo cambiaste
+guard-undo-plan-elsewhere = Te toca a ti: se hace en otro sitio
+guard-undo-plan-leave-alone = Se deja como está: ya estaba aquí
+guard-undo-keep = Dejarlo todo como está
+guard-undo-run = Deshacer
+guard-undo-running-title = Deshaciendo los cambios
+guard-undo-done-title = Lo que hizo deshacer
+guard-undo-result-restored = Restaurado
+guard-undo-result-removed = Quitado
+guard-undo-result-as-before = Ya estaba como antes
+guard-undo-result-kept-changed = Se conserva porque lo cambiaste
+guard-undo-result-kept-other = Se conserva, mira Más detalles
+guard-undo-result-kept-at = Se conserva como { $name }
+guard-undo-result-done-elsewhere = Hecho en otro sitio: solo su servicio o su creador puede deshacerlo
+guard-undo-result-not-done-yet = Aún no se hizo. Deshacer lo intentará la próxima vez.

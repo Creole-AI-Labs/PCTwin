@@ -369,9 +369,31 @@
         ]
       ],
       "name": "laptop_name_type"
+    },
+    {
+      "args": [],
+      "name": "guard_view"
+    },
+    {
+      "args": [
+        [
+          "intent",
+          {
+            "epoch": 2,
+            "generation": 3,
+            "intent": {
+              "kind": "try-again",
+              "line": 0
+            },
+            "job": "job-1"
+          }
+        ]
+      ],
+      "name": "guard_intent"
     }
   ],
   "events": {
+    "guard": "guard-view",
     "moveFinished": "move-finished",
     "moveFound": "move-found",
     "moveLink": "move-link",

@@ -12,6 +12,15 @@
 
 #[cfg(test)]
 mod contract;
+// The engine's 2.2, 2.3 and 2.6 runners publish into the guard and take its intents as they are
+// wired in (Task List 2.8 follow-up); until then the conversions and the publishing side are
+// exercised by their tests only.
+#[allow(dead_code)]
+mod guard;
+#[cfg(test)]
+mod guard_examples;
+#[allow(dead_code)]
+mod guard_views;
 mod help;
 mod history;
 #[cfg(test)]
@@ -236,6 +245,8 @@ fn invoke_handler<R: Runtime>() -> impl Fn(Invoke<R>) -> bool + Send + Sync + 's
         laptop_name::laptop_name_shuffle,
         laptop_name::laptop_name_use,
         laptop_name::laptop_name_type,
+        guard::guard_view,
+        guard::guard_intent,
     ]
 }
 
@@ -269,6 +280,7 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         .manage(moving::new_state())
         .manage(quicksend::new_state())
         .manage(laptop_name::new_state())
+        .manage(guard::new_state())
         .invoke_handler(invoke_handler())
         // Release check (Phase 0 exit gate: "the blank app opens"): with PCTWIN_SMOKE_TEST set to a
         // file path, the app opens as usual, writes which page its window loaded once the screens
