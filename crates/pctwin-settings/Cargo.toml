@@ -18,6 +18,8 @@ blake3 = "1.8"
 getrandom = "0.4.3"
 pctwin-executor = { path = "../pctwin-executor" }
 pctwin-grant = { path = "../pctwin-grant" }
+# The Wi-Fi tool's folder is made owner-only from its first moment (fourth review, finding F3).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
 pctwin-journal = { path = "../pctwin-journal" }
 pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-types = { path = "../pctwin-types" }

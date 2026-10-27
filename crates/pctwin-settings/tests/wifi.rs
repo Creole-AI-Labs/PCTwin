@@ -340,3 +340,85 @@ fn an_oversized_profile_file_is_not_read() {
     assert!(export_all(&mut Big, tmp.path(), true).unwrap().is_empty());
     assert!(leftovers(tmp.path()).is_empty());
 }
+
+/// Fourth review, finding F3: the folder the password is written into in plain text inherited
+/// its parent's access. It is now owner-only and protected from its first moment, read back.
+#[test]
+fn f3_the_wifi_folder_is_owner_only_from_its_first_moment() {
+    struct Acl(Vec<String>);
+    impl Runner for Acl {
+        fn run(&mut self, _t: Tool, args: &[&str]) -> Result<Output, String> {
+            for a in args {
+                if let Some(p) = a
+                    .strip_prefix("folder=")
+                    .or_else(|| a.strip_prefix("filename="))
+                {
+                    let p = Path::new(p.trim_matches('"'));
+                    let dir = if a.starts_with("filename=") {
+                        p.parent().unwrap().to_path_buf()
+                    } else {
+                        p.to_path_buf()
+                    };
+                    #[cfg(windows)]
+                    self.0
+                        .push(pctwin_helper_os::folder_access_list(&dir).unwrap());
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let m = std::fs::metadata(&dir).unwrap().permissions().mode();
+                        self.0.push(format!("{:o}", m & 0o777));
+                    }
+                }
+            }
+            Ok(Output {
+                ok: true,
+                stdout: String::new(),
+            })
+        }
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let n = Network {
+        name: "Example-Home".into(),
+        ssid: "Example-Home".into(),
+        hidden: false,
+        auto_connect: true,
+        security: Security::Personal {
+            auth: "WPA2PSK".into(),
+            encryption: "AES".into(),
+        },
+        secret: Some(Secret::new(Zeroizing::new("correct-horse-example".into()))),
+    };
+    let mut r = Acl(Vec::new());
+    let _ = import(&mut r, parent.path(), &n);
+    assert!(r.0.len() >= 2, "{:?}", r.0);
+    for acl in &r.0 {
+        #[cfg(windows)]
+        {
+            assert!(pctwin_settings::wifi::private_sddl(acl), "{acl}");
+            assert!(acl.starts_with("D:P"), "{acl}");
+            assert!(!acl.contains(";ID;") && !acl.contains("ID;;"), "{acl}");
+        }
+        #[cfg(unix)]
+        assert_eq!(acl, "700");
+    }
+}
+
+#[test]
+fn f3_an_inherited_or_shared_access_list_is_not_private() {
+    use pctwin_settings::wifi::private_sddl;
+    let me = "S-1-5-21-1-2-3-1001";
+    assert!(private_sddl(&format!(
+        "D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)"
+    )));
+    assert!(private_sddl(&format!("D:PAI(A;OICI;FA;;;{me})")));
+    // Not protected, inherited, or a second account or group.
+    assert!(!private_sddl(&format!("D:(A;OICI;FA;;;{me})")));
+    assert!(!private_sddl(&format!("D:P(A;OICIID;FA;;;{me})")));
+    assert!(!private_sddl(&format!(
+        "D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;BA)"
+    )));
+    assert!(!private_sddl(&format!("D:P(A;OICI;FA;;;{me})(A;;FR;;;WD)")));
+    assert!(!private_sddl("D:P(D;;FA;;;WD)"));
+    assert!(!private_sddl("D:P"));
+    assert!(!private_sddl("O:SY"));
+}

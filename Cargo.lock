@@ -4057,6 +4057,7 @@ dependencies = [
  "getrandom 0.4.3",
  "pctwin-executor",
  "pctwin-grant",
+ "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-recipe",
  "pctwin-record",

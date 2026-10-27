@@ -84,6 +84,25 @@ pub use win::{
     caller_of, clean_command, defender_scanner, disk_hotplug, minimal_env, program_folder,
     system_folder, verify_file_trust,
 };
+#[cfg(windows)]
+pub use win::{folder_access_list, private_folder};
+
+/// A new folder `path` that only this account may open (mode 0700 from its first moment); never
+/// one that exists.
+#[cfg(unix)]
+pub fn private_folder(path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(path)
+        .map_err(|e| {
+            if e.kind() == io::ErrorKind::AlreadyExists {
+                Error::NameTaken
+            } else {
+                Error::Io(e)
+            }
+        })
+}
 
 #[cfg(unix)]
 mod unix;

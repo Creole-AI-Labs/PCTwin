@@ -275,12 +275,73 @@ fn fresh_folder(parent: &Path) -> Result<TempFolder, WifiError> {
         getrandom::fill(&mut b).map_err(|_| WifiError::Tool)?;
         let name: String = b.iter().map(|x| format!("{x:02x}")).collect();
         let path = parent.join(format!("{FOLDER_PREFIX}{name}"));
-        // `create_dir` fails if it exists: never a folder someone else prepared.
-        if std::fs::create_dir(&path).is_ok() {
-            return Ok(TempFolder(path));
+        // Owner-only and protected from its first moment (the password is written into it in
+        // plain text): never a folder someone else prepared, never one that inherits its
+        // parent's access. If that cannot be done, nothing goes on.
+        match pctwin_helper_os::private_folder(&path) {
+            Ok(()) => {
+                let folder = TempFolder(path);
+                check_private(&folder.0)?;
+                return Ok(folder);
+            }
+            Err(pctwin_helper_os::Error::NameTaken) => continue,
+            Err(_) => return Err(WifiError::Tool),
         }
     }
     Err(WifiError::Tool)
+}
+
+/// Reads the folder's access back: protected, nothing inherited, only this account and the
+/// system (Windows); only this account (elsewhere).
+fn check_private(path: &Path) -> Result<(), WifiError> {
+    #[cfg(windows)]
+    {
+        let sddl = pctwin_helper_os::folder_access_list(path).map_err(|_| WifiError::Tool)?;
+        if !private_sddl(&sddl) {
+            return Err(WifiError::Tool);
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::symlink_metadata(path)
+            .map_err(|_| WifiError::Tool)?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err(WifiError::Tool);
+        }
+    }
+    Ok(())
+}
+
+/// Whether an access list (its text form) is protected, inherits nothing, and allows only the
+/// system and one account.
+pub fn private_sddl(sddl: &str) -> bool {
+    let Some(dacl) = sddl.strip_prefix("D:") else {
+        return false;
+    };
+    let Some(aces) = dacl.strip_prefix('P') else {
+        return false;
+    };
+    let aces = aces.trim_start_matches(|c: char| c.is_ascii_uppercase());
+    let list: Vec<&str> = aces
+        .split(')')
+        .filter(|a| !a.is_empty())
+        .map(|a| a.trim_start_matches('('))
+        .collect();
+    let mut accounts = std::collections::BTreeSet::new();
+    for ace in &list {
+        let f: Vec<&str> = ace.split(';').collect();
+        // type;flags;rights;object;inherited object;account
+        if f.len() != 6 || f[0] != "A" || f[1].contains("ID") {
+            return false;
+        }
+        if f[5] != "SY" {
+            accounts.insert(f[5]);
+        }
+    }
+    !list.is_empty() && accounts.len() <= 1
 }
 
 /// A folder removed with everything in it when dropped (also on failure).
