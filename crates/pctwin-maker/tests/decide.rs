@@ -20,6 +20,8 @@ fn signer(s: Subject, cert: u8) -> WindowsSigner {
         subject: s,
         certificate: Sha256([cert; 32]),
         issuer: "CN=Some CA".into(),
+        issuer_organization: Some("Some CA Ltd".into()),
+        public_key: Some(Sha256([cert; 32])),
     }
 }
 
@@ -344,37 +346,155 @@ fn windows_a_look_alike_company_is_another_maker() {
     ));
 }
 
+/// Second review, finding B4: every part of the name the old certificate carries must be on the
+/// new one, exactly; a part missing on the new one is another maker, never a match.
 #[test]
-fn windows_extended_validation_parts_count_where_both_have_them() {
+fn windows_every_part_of_the_old_name_must_be_kept() {
     let mut ev = example();
     ev.registration_number = Some("RC123".into());
     ev.jurisdiction_country = Some("NG".into());
     ev.jurisdiction_state = Some("Lagos".into());
     let old = Maker::Windows(signer(ev.clone(), 1));
-    // A renewal without extended validation.
+    // The same name renewed: yes. Parts only the new one carries do not block it.
     assert!(matches!(
-        compare(&old, &Maker::Windows(signer(example(), 2))),
+        compare(&old, &Maker::Windows(signer(ev.clone(), 2))),
         SameMaker::Yes { .. }
     ));
-    // Missing locality and state on one side do not block either.
-    let mut bare = example();
-    bare.locality = None;
-    bare.state = None;
+    let plain_old = Maker::Windows(signer(example(), 1));
     assert!(matches!(
-        compare(&old, &Maker::Windows(signer(bare, 2))),
+        compare(&plain_old, &Maker::Windows(signer(ev.clone(), 2))),
         SameMaker::Yes { .. }
     ));
-    for change in [
-        |s: &mut Subject| s.registration_number = Some("RC999".into()),
-        |s: &mut Subject| s.jurisdiction_country = Some("GH".into()),
-        |s: &mut Subject| s.jurisdiction_state = Some("Ogun".into()),
+    type Change = Box<dyn Fn(&mut Subject)>;
+    let changes: Vec<Change> = vec![
+        // Missing on the new one.
+        Box::new(|s| s.registration_number = None),
+        Box::new(|s| s.jurisdiction_country = None),
+        Box::new(|s| s.jurisdiction_state = None),
+        Box::new(|s| s.locality = None),
+        Box::new(|s| s.state = None),
+        // Different on the new one.
+        Box::new(|s| s.registration_number = Some("RC999".into())),
+        Box::new(|s| s.jurisdiction_country = Some("GH".into())),
+        Box::new(|s| s.jurisdiction_state = Some("Ogun".into())),
+        Box::new(|s| s.common_name = Some("Example Ltd ".into())),
+        Box::new(|s| s.common_name = Some("EXAMPLE LTD".into())),
+        Box::new(|s| s.common_name = Some("\u{0415}xample Ltd".into())),
+    ];
+    // An old certificate without a common name, organisation or country names no company:
+    // nothing matches it but itself.
+    for strip in [
+        |s: &mut Subject| s.common_name = None,
+        |s: &mut Subject| s.organization = None,
+        |s: &mut Subject| s.country = None,
     ] {
+        let mut thin = ev.clone();
+        strip(&mut thin);
+        let thin_old = Maker::Windows(signer(thin.clone(), 1));
+        assert!(
+            matches!(
+                compare(&thin_old, &Maker::Windows(signer(thin.clone(), 2))),
+                SameMaker::No { .. }
+            ),
+            "{thin:?}"
+        );
+    }
+    for change in changes {
         let mut other = ev.clone();
         change(&mut other);
-        assert!(matches!(
-            compare(&old, &Maker::Windows(signer(other, 2))),
-            SameMaker::No { .. }
-        ));
+        assert!(
+            matches!(
+                compare(&old, &Maker::Windows(signer(other.clone(), 2))),
+                SameMaker::No { .. }
+            ),
+            "{other:?}"
+        );
+    }
+}
+
+/// Second review, finding B4 (the reviewer's cases): the same name renewed must also be tied to
+/// the old certificate, by the same key or the same certificate authority family; the same name
+/// from another authority with another key is "unknown", never yes.
+#[test]
+fn windows_a_renewal_is_tied_by_key_or_authority() {
+    let mut old_s = subject("Acme Inc", "Acme Inc", "San Jose", "California", "US");
+    old_s.registration_number = Some("1234567".into());
+    old_s.jurisdiction_country = Some("US".into());
+    old_s.jurisdiction_state = Some("Delaware".into());
+    let at = |s: Subject, cert: u8, ca: Option<&str>, key: Option<u8>| {
+        Maker::Windows(WindowsSigner {
+            subject: s,
+            certificate: Sha256([cert; 32]),
+            issuer: "CN=whoever".into(),
+            issuer_organization: ca.map(Into::into),
+            public_key: key.map(|k| Sha256([k; 32])),
+        })
+    };
+    let old = at(old_s.clone(), 1, Some("DigiCert Inc"), Some(1));
+    // Same authority family, new key: yes.
+    assert!(matches!(
+        compare(&old, &at(old_s.clone(), 2, Some("DigiCert Inc"), Some(2))),
+        SameMaker::Yes {
+            by: MatchedBy::SameCompany
+        }
+    ));
+    // Same key, another authority: yes.
+    assert!(matches!(
+        compare(
+            &old,
+            &at(old_s.clone(), 2, Some("Sectigo Limited"), Some(1))
+        ),
+        SameMaker::Yes {
+            by: MatchedBy::SameCompany
+        }
+    ));
+    // Same name, another authority, another key: unknown.
+    for (ca, key) in [
+        (Some("Sectigo Limited"), Some(2)),
+        (None, Some(2)),
+        (Some("Sectigo Limited"), None),
+        (None, None),
+    ] {
+        assert!(
+            matches!(
+                compare(&old, &at(old_s.clone(), 2, ca, key)),
+                SameMaker::Unknown { .. }
+            ),
+            "{ca:?} {key:?}"
+        );
+    }
+    // Neither side naming an authority, or no key on either side, never ties them.
+    let bare_old = at(old_s.clone(), 1, None, None);
+    assert!(matches!(
+        compare(&bare_old, &at(old_s.clone(), 2, None, None)),
+        SameMaker::Unknown { .. }
+    ));
+    let blank_ca = at(old_s.clone(), 1, Some(" "), None);
+    assert!(matches!(
+        compare(&blank_ca, &at(old_s.clone(), 2, Some(" "), None)),
+        SameMaker::Unknown { .. }
+    ));
+    // The reviewer's cases: the same name and place without the extended-validation parts from
+    // another authority, and the bare name from a self-made authority, are not yes.
+    let ov = subject("Acme Inc", "Acme Inc", "San Jose", "California", "US");
+    for found in [
+        at(ov, 2, Some("Sectigo Limited"), Some(3)),
+        at(
+            Subject {
+                common_name: Some("Acme Inc".into()),
+                organization: Some("Acme Inc".into()),
+                country: Some("US".into()),
+                ..Subject::default()
+            },
+            2,
+            Some("Evil"),
+            Some(4),
+        ),
+    ] {
+        assert!(
+            matches!(compare(&old, &found), SameMaker::No { .. }),
+            "{found:?}"
+        );
     }
 }
 

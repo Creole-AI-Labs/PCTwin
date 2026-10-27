@@ -470,6 +470,8 @@ mod tests {
             subject: Subject::default(),
             certificate: Sha256([cert; 32]),
             issuer: String::new(),
+            issuer_organization: None,
+            public_key: None,
         }
     }
 

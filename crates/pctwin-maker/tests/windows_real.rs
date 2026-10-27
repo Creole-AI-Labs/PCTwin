@@ -90,6 +90,13 @@ fn reads_the_maker_of_real_signed_programs_as_windows_does() {
             Some("Microsoft Corporation")
         );
         assert_eq!(s.subject.country.as_deref(), Some("US"));
+        // Second review, B4: the authority family and the key are read, to tie renewals.
+        assert_eq!(
+            s.issuer_organization.as_deref(),
+            Some("Microsoft Corporation")
+        );
+        assert!(s.public_key.is_some());
+        assert_ne!(s.public_key, Some(s.certificate.clone()));
     }
 }
 

@@ -39,6 +39,8 @@ fn maker() -> Maker {
         },
         certificate: Sha256([1; 32]),
         issuer: "CN=CA".into(),
+        issuer_organization: Some("Some CA Ltd".into()),
+        public_key: Some(Sha256([2; 32])),
     })
 }
 
