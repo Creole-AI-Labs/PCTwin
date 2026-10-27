@@ -416,27 +416,47 @@ Url=https://dl.flathub.org/repo/
 GPGKey=AAECAwQ=
 ";
 
-#[test]
-fn a_flatpak_reference_is_judged_by_its_remote_and_key() {
-    let dir = tempfile::tempdir().unwrap();
-    let p = write(&dir, "app.flatpakref", REF.as_bytes());
-    let old = Maker::Linux(LinuxSource::Flatpak {
+fn flatpak_old() -> Maker {
+    Maker::Linux(LinuxSource::Flatpak {
         remote_url: "https://dl.flathub.org/repo/".into(),
         app_id: "org.example.App".into(),
         key: Sha256(H::digest([0u8, 1, 2, 3, 4]).into()),
-    });
-    let e = Expected {
+    })
+}
+
+fn flatpak_expected() -> Expected {
+    Expected {
         system: System::Linux,
-        maker: old.clone(),
+        maker: flatpak_old(),
         formats: vec![Format::FlatpakRef],
         arch: Arch::X64,
         bytes: None,
-    };
+    }
+}
+
+/// Second review, finding B1: a downloaded reference is never trusted and never installed, even
+/// one naming exactly the old laptop's remote and key; reading it alone is never "trusted".
+#[test]
+fn a_flatpak_reference_is_never_installed() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = flatpak_expected();
     let fake = Fake::new(Signature::Missing, false);
+    let p = write(&dir, "app.flatpakref", REF.as_bytes());
     let v = check(&p, &e, &fake, &Limits::default()).unwrap();
     assert_eq!(fake.calls.get(), 0);
-    assert_eq!(v.found_maker, Some(old));
-    assert!(matches!(v.decide(), Decision::Install { .. }), "{v:?}");
+    assert_eq!(v.found_maker, Some(flatpak_old()));
+    assert!(matches!(v.signature, Signature::NotChecked { .. }), "{v:?}");
+    assert!(matches!(v.decide(), Decision::NeedsAction { .. }), "{v:?}");
+
+    // The reviewer's proof: a second group of the same name pointing at another server.
+    let evil = format!(
+        "{REF}[Flatpak Ref]\nName=org.example.App\nUrl=https://evil.example/repo/\n\
+         GPGKey=ZXZpbGtleQ==\nRuntimeRepo=https://evil.example/r.flatpakrepo\n"
+    );
+    let p = write(&dir, "evil.flatpakref", evil.as_bytes());
+    let v = check(&p, &e, &fake, &Limits::default()).unwrap();
+    assert!(matches!(v.signature, Signature::Broken { .. }), "{v:?}");
+    assert!(matches!(v.decide(), Decision::NeedsAction { .. }), "{v:?}");
 
     // A different key (a look-alike remote serving the same app ID).
     let other = write(
@@ -445,7 +465,7 @@ fn a_flatpak_reference_is_judged_by_its_remote_and_key() {
         REF.replace("AAECAwQ=", "AAECAwU=").as_bytes(),
     );
     let v = check(&other, &e, &fake, &Limits::default()).unwrap();
-    assert!(matches!(v.decide(), Decision::NeedsAction { why } if why == vec![Why::OtherMaker]));
+    assert!(matches!(v.decide(), Decision::NeedsAction { why } if why.contains(&Why::OtherMaker)));
 
     // No key.
     let nokey = write(
@@ -463,6 +483,116 @@ fn a_flatpak_reference_is_judged_by_its_remote_and_key() {
     let big = write(&dir, "big.flatpakref", big.as_bytes());
     let v = check(&big, &e, &fake, &Limits::default()).unwrap();
     assert!(matches!(v.signature, Signature::Broken { why } if why.contains("too large")));
+}
+
+/// Second review, finding B1: a Flatpak app is installed by its ID from the old laptop's own
+/// remote and key; a reference can only say which app is meant, never where from.
+#[test]
+fn a_flatpak_app_is_installed_from_the_old_laptops_own_source() {
+    use pctwin_maker::linux::{flatpak_route, install_call, parse_flatpakref, remote_add_call};
+    let t = std::time::Duration::from_secs(60);
+    let route = flatpak_route(&flatpak_old(), None).unwrap();
+    // A reference naming another remote, address and key changes nothing.
+    let evil = parse_flatpakref(
+        b"[Flatpak Ref]\nName=org.example.App\nUrl=https://evil.example/repo/\nGPGKey=ZXZpbA==\n",
+    )
+    .unwrap();
+    assert_eq!(flatpak_route(&flatpak_old(), Some(&evil)).unwrap(), route);
+    assert_eq!(route.remote_url, "https://dl.flathub.org/repo/");
+    assert_eq!(route.app_id, "org.example.App");
+    // ... but one pointing at another app is refused.
+    let other_app = parse_flatpakref(
+        b"[Flatpak Ref]\nName=org.evil.App\nUrl=https://dl.flathub.org/repo/\nGPGKey=AAECAwQ=\n",
+    )
+    .unwrap();
+    assert!(flatpak_route(&flatpak_old(), Some(&other_app)).is_err());
+    // The remote is added only with the old laptop's key, under PCTwin's own name for it.
+    let key_file = std::path::Path::new("/var/tmp/pctwin/key.gpg");
+    assert!(remote_add_call(&route, key_file, b"another key", t).is_err());
+    let add = remote_add_call(&route, key_file, &[0, 1, 2, 3, 4], t).unwrap();
+    let args: Vec<String> = add
+        .args
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        args,
+        [
+            "remote-add",
+            "--system",
+            "--if-not-exists",
+            "--gpg-import=/var/tmp/pctwin/key.gpg",
+            route.remote_name.as_str(),
+            "https://dl.flathub.org/repo/",
+        ]
+    );
+    let install = install_call(&route, t);
+    let args: Vec<String> = install
+        .args
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        args,
+        [
+            "install",
+            "--system",
+            "--noninteractive",
+            route.remote_name.as_str(),
+            "org.example.App"
+        ]
+    );
+    assert!(!args.iter().any(|a| a.contains("flatpakref")));
+    // The remote's name is made from its address and key: another key or address, another name.
+    let other_key = Maker::Linux(LinuxSource::Flatpak {
+        remote_url: "https://dl.flathub.org/repo/".into(),
+        app_id: "org.example.App".into(),
+        key: Sha256([9; 32]),
+    });
+    let other_url = Maker::Linux(LinuxSource::Flatpak {
+        remote_url: "https://dl.flathub.org/repx/".into(),
+        app_id: "org.example.App".into(),
+        key: Sha256(H::digest([0u8, 1, 2, 3, 4]).into()),
+    });
+    let n1 = flatpak_route(&other_key, None).unwrap().remote_name;
+    let n2 = flatpak_route(&other_url, None).unwrap().remote_name;
+    assert!(route.remote_name.starts_with("pctwin-") && route.remote_name.len() == 23);
+    assert_ne!(n1, route.remote_name);
+    assert_ne!(n2, route.remote_name);
+    // Only a Flatpak app on the old laptop, from a secure address, with a real app ID.
+    let mac = Maker::Mac(MacTeam {
+        team_id: "ABCDE12345".into(),
+    });
+    assert!(flatpak_route(&mac, None).is_err());
+    for (url, id) in [
+        ("http://dl.flathub.org/repo/", "org.example.App"),
+        ("https://dl.flathub.org/re po/", "org.example.App"),
+        ("https://dl.flathub.org/repo/", "--user"),
+        ("https://dl.flathub.org/repo/", "org.example"),
+        ("https://dl.flathub.org/repo/", "org.-example.App"),
+        ("https://dl.flathub.org/repo/", "org.ex ample.App"),
+        ("https://dl.flathub.org/repo/", "org..App"),
+    ] {
+        let m = Maker::Linux(LinuxSource::Flatpak {
+            remote_url: url.into(),
+            app_id: id.into(),
+            key: Sha256([1; 32]),
+        });
+        assert!(flatpak_route(&m, None).is_err(), "{url} {id}");
+    }
+    let long = format!("org.example.{}", "a".repeat(250));
+    let m = Maker::Linux(LinuxSource::Flatpak {
+        remote_url: "https://dl.flathub.org/repo/".into(),
+        app_id: long,
+        key: Sha256([1; 32]),
+    });
+    assert!(flatpak_route(&m, None).is_err());
+    let ok = Maker::Linux(LinuxSource::Flatpak {
+        remote_url: "https://dl.flathub.org/repo/".into(),
+        app_id: "org.gnome.Text_Editor-2".into(),
+        key: Sha256([1; 32]),
+    });
+    assert!(flatpak_route(&ok, None).is_ok());
 }
 
 #[test]
@@ -487,7 +617,8 @@ fn a_flatpak_reference_of_exactly_the_limit_is_read() {
         &Limits::default(),
     )
     .unwrap();
-    assert_eq!(v.signature, Signature::Trusted);
+    // Read whole, and still never trusted on its own word.
+    assert!(matches!(v.signature, Signature::NotChecked { .. }), "{v:?}");
 }
 
 #[test]

@@ -7,8 +7,12 @@
 //! - RPM: `rpm --checksig --verbose` checks the package's signature against keys this system has
 //!   imported. A key the system does not know is "not trusted", never trusted on the download's
 //!   word.
-//! - Flatpak: a `.flatpakref` file names the app, its remote and the remote's signing key; Flatpak
-//!   refuses anything from that remote not signed by that key. The key must be the old laptop's.
+//! - Flatpak (second review, finding B1): a downloaded `.flatpakref` file is a pointer only and is
+//!   never installed. It can name any remote, address and key (and Flatpak merges a second group
+//!   of the same name into the first, the last value winning), so nothing in it is trusted. A
+//!   Flatpak app is installed only by its ID, from the old laptop's own remote and key: the old
+//!   laptop is the anchor ([`flatpak_route`]); the reference may only say which app is meant, and
+//!   only if that is the old laptop's app.
 //! - A `.deb` or AppImage downloaded from a website carries no signature the system checks: it
 //!   ends needs-action, with the data still moved.
 
@@ -163,7 +167,9 @@ pub fn check_rpm(runner: &dyn Runner, path: &Path, t: Duration) -> (RpmCheck, Op
     (check, arch)
 }
 
-/// Reads a `.flatpakref` file: the maker it names, if it names one with a key.
+/// Reads a `.flatpakref` file: the app, remote and key it names (for the report and as a hint
+/// only; see the module notes). The whole file is read, and a file with a second group, or a key
+/// named twice, is refused: Flatpak would merge it.
 pub fn parse_flatpakref(bytes: &[u8]) -> Result<LinuxSource, String> {
     if bytes.len() > MAX_FLATPAKREF {
         return Err("the Flatpak reference is too large".into());
@@ -176,7 +182,7 @@ pub fn parse_flatpakref(bytes: &[u8]) -> Result<LinuxSource, String> {
     let (mut name, mut url, mut key) = (None, None, None);
     for line in lines {
         if line.starts_with('[') {
-            break;
+            return Err("the Flatpak reference has a second group".into());
         }
         let Some((k, v)) = line.split_once('=') else {
             continue;
@@ -210,6 +216,132 @@ pub fn parse_flatpakref(bytes: &[u8]) -> Result<LinuxSource, String> {
         app_id: name,
         key: Sha256(Sha256Hasher::digest(&key).into()),
     })
+}
+
+/// How a Flatpak app is installed: by its ID, from the old laptop's own remote and key. Every
+/// value comes from the old laptop; a downloaded reference can never supply the remote, its
+/// address or its key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlatpakRoute {
+    /// The remote's address on the old laptop.
+    pub remote_url: String,
+    /// The app's ID on the old laptop.
+    pub app_id: String,
+    /// SHA-256 of the old laptop's key for that remote.
+    pub key: Sha256,
+    /// The remote's name on this laptop: PCTwin's own, made from the address and key, so a
+    /// remote of another address or key can never be taken for it.
+    pub remote_name: String,
+}
+
+/// The route for the old laptop's Flatpak app `old`. `hint` is what a downloaded reference names,
+/// if one was found: it is used only to refuse a reference that points at another app; its
+/// remote, address and key are never used.
+pub fn flatpak_route(
+    old: &crate::facts::Maker,
+    hint: Option<&LinuxSource>,
+) -> Result<FlatpakRoute, String> {
+    let crate::facts::Maker::Linux(LinuxSource::Flatpak {
+        remote_url,
+        app_id,
+        key,
+    }) = old
+    else {
+        return Err("the app on the old laptop is not a Flatpak app".into());
+    };
+    if !remote_url.starts_with("https://")
+        || remote_url.len() > 2048
+        || remote_url.contains(char::is_whitespace)
+    {
+        return Err("the old laptop's Flatpak remote is not a secure address".into());
+    }
+    if !valid_app_id(app_id) {
+        return Err("the old laptop's Flatpak app has no usable name".into());
+    }
+    if let Some(LinuxSource::Flatpak { app_id: hinted, .. }) = hint
+        && hinted != app_id
+    {
+        return Err("the download points at another app".into());
+    }
+    let mut h = Sha256Hasher::new();
+    h.update((remote_url.len() as u64).to_be_bytes());
+    h.update(remote_url.as_bytes());
+    h.update(key.0);
+    let tag: [u8; 32] = h.finalize().into();
+    let remote_name = format!(
+        "pctwin-{}",
+        tag[..8]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    Ok(FlatpakRoute {
+        remote_url: remote_url.clone(),
+        app_id: app_id.clone(),
+        key: *key,
+        remote_name,
+    })
+}
+
+/// A Flatpak app ID: reverse-DNS, at least three parts, each letters, digits, `_` or `-` (not at
+/// the start of a part), at most 255 characters (Flatpak's own rule).
+pub fn valid_app_id(id: &str) -> bool {
+    id.len() <= 255
+        && id.split('.').count() >= 3
+        && id.split('.').all(|part| {
+            part.bytes()
+                .next()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        })
+}
+
+/// `flatpak remote-add --system --if-not-exists --gpg-import=<key file> <name> <address>`, only
+/// if `key_bytes` (the key copied from the old laptop, already written to `key_file`) is exactly
+/// the old laptop's key.
+pub fn remote_add_call(
+    route: &FlatpakRoute,
+    key_file: &Path,
+    key_bytes: &[u8],
+    t: Duration,
+) -> Result<Call, String> {
+    if Sha256(Sha256Hasher::digest(key_bytes).into()) != route.key {
+        return Err("the key is not the old laptop's key for this remote".into());
+    }
+    let mut import = std::ffi::OsString::from("--gpg-import=");
+    import.push(key_file.as_os_str());
+    Ok(Call {
+        program: PathBuf::from("/usr/bin/flatpak"),
+        args: vec![
+            "remote-add".into(),
+            "--system".into(),
+            "--if-not-exists".into(),
+            import,
+            route.remote_name.clone().into(),
+            route.remote_url.clone().into(),
+        ],
+        env: vec![],
+        timeout: t,
+    })
+}
+
+/// `flatpak install --system --noninteractive <PCTwin's remote> <app ID>`: by ID, from the remote
+/// made from the old laptop's address and key, never from a reference file.
+pub fn install_call(route: &FlatpakRoute, t: Duration) -> Call {
+    Call {
+        program: PathBuf::from("/usr/bin/flatpak"),
+        args: vec![
+            "install".into(),
+            "--system".into(),
+            "--noninteractive".into(),
+            route.remote_name.clone().into(),
+            route.app_id.clone().into(),
+        ],
+        env: vec![],
+        timeout: t,
+    }
 }
 
 #[cfg(test)]
@@ -362,9 +494,12 @@ RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
                 "{to}"
             );
         }
-        // A second section is not read.
+        // A second group, of any name, is refused: Flatpak would merge one of the same name.
         let later = REF.replace("GPGKey=AAECAwQ=\n", "") + "[Other]\nGPGKey=AAECAwQ=\n";
         assert!(parse_flatpakref(later.as_bytes()).is_err());
+        let again = REF.to_owned()
+            + "[Flatpak Ref]\nName=org.example.App\nUrl=https://evil.example/repo/\nGPGKey=ZXZpbA==\n";
+        assert!(parse_flatpakref(again.as_bytes()).is_err());
         assert!(parse_flatpakref(&vec![b' '; MAX_FLATPAKREF + 1]).is_err());
         assert!(parse_flatpakref(b"[Flatpak Ref]\xff").is_err());
     }

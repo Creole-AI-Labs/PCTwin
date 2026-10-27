@@ -228,6 +228,7 @@ impl Adapter for Racy {
             }
             let crash_at = self.crash_at.take();
             let lock_aside = self.lock_aside;
+            #[cfg_attr(not(windows), expect(unused_mut, reason = "only Windows holds it"))]
             let mut lock: Option<std::fs::File> = None;
             let private = swap.private.to_string();
             let got = pctwin_executor::files::replace_if_unchanged(&dir, path, swap, &mut |m| {

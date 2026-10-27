@@ -226,7 +226,10 @@ pub fn check(
             },
         };
     } else if format == Format::FlatpakRef {
-        // The reference itself names its maker; Flatpak checks the app against its key.
+        // A downloaded reference is a pointer only (second review, finding B1): it can name any
+        // remote, address and key, so it is never trusted and never installed. A Flatpak app is
+        // installed by its ID from the old laptop's own remote and key
+        // ([`crate::linux::flatpak_route`]); here the reference is only read for the report.
         let maker = if first.size > crate::linux::MAX_FLATPAKREF as u64 {
             Err("the Flatpak reference is too large".to_owned())
         } else {
@@ -234,7 +237,11 @@ pub fn check(
         };
         let found = maker.as_ref().ok().cloned();
         let signature = match &maker {
-            Ok(_) => Signature::Trusted,
+            Ok(_) => Signature::NotChecked {
+                why: "a Flatpak reference is only a pointer; PCTwin installs the app by its name \
+                      from the old laptop's own source instead"
+                    .into(),
+            },
             Err(why) => Signature::Broken { why: why.clone() },
         };
         return finish(
