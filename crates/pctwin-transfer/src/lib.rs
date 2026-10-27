@@ -118,8 +118,8 @@ pub use undo::{
     close_undo, undo, undo_items, undo_preview, undo_with,
 };
 pub use version::{
-    APPS_SINCE, COPY_SINCE, EXTRAS_SINCE, HOLD_SINCE, KEYED_SINCE, MOVE_PROTOCOL, PERSONAL_SINCE, SET_DOWN_SINCE,
-    STOP_SINCE, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
+    APPS_SINCE, COPY_SINCE, EXTRAS_SINCE, HOLD_SINCE, KEYED_SINCE, MOVE_PROTOCOL, PERSONAL_SINCE,
+    SET_DOWN_SINCE, STOP_SINCE, VERSION_WAIT, VersionGap, Versions, agree_version, choose_version,
 };
 
 use std::fs::File;

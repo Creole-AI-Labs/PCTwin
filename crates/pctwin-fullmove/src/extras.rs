@@ -270,9 +270,9 @@ pub fn here(folders: Vec<OldFolder>) -> Extras {
         &pctwin_settings::registry::WinHive::current_user(),
     );
     #[cfg(target_os = "macos")]
-    let found = pctwin_settings::found::discover_mac(&mut pctwin_settings::mechanism::Mechanisms::real(
-        System::Mac,
-    ));
+    let found = pctwin_settings::found::discover_mac(
+        &mut pctwin_settings::mechanism::Mechanisms::real(System::Mac),
+    );
     #[cfg(all(unix, not(target_os = "macos")))]
     let found = pctwin_settings::found::discover_dconf(
         &mut pctwin_settings::mechanism::Mechanisms::real(System::Gnome),

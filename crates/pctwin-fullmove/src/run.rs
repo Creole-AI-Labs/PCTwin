@@ -86,8 +86,14 @@ impl Installer for NoInstaller {
 pub enum Progress {
     /// Asking for the administrator and the restore point.
     Permission,
-    Apps { done: u64, total: u64 },
-    Settings { done: u64, total: u64 },
+    Apps {
+        done: u64,
+        total: u64,
+    },
+    Settings {
+        done: u64,
+        total: u64,
+    },
 }
 
 /// What undo needs to find and check this move's settings again, saved beside the journal.
@@ -222,11 +228,12 @@ pub fn os_of(system: System) -> Os {
 }
 
 /// The record the executor's plan is approved from: one setting item per recipe, on this laptop,
-/// for the person moving. It is made from the plan the person approved and nothing else.
-fn settings_record(laptop: LaptopId, mover: &str, n: usize) -> Result<(Record, Vec<Item>), String> {
-    let owner = Owner::Person {
-        account_id: mover.to_string(),
-    };
+/// standing for the signed-in person's settings. It is made from the plan the person approved
+/// and nothing else.
+fn settings_record(laptop: LaptopId, n: usize) -> Result<(Record, Vec<Item>), String> {
+    // The settings are the signed-in person's own (the actor says whose); the items stand for
+    // them only inside this plan.
+    let owner = Owner::Shared;
     let place = Place {
         role: FolderRole::Documents,
         storage: Storage::SystemDrive,
@@ -295,7 +302,7 @@ fn apply_settings(
         Ok(r) => r,
         Err(e) => return fail_all(e.to_string()),
     };
-    let (record, items) = match settings_record(laptop, &actor.for_account, labelled.len()) {
+    let (record, items) = match settings_record(laptop, labelled.len()) {
         Ok(r) => r,
         Err(e) => return fail_all(e),
     };
@@ -402,10 +409,7 @@ pub fn rebuild(
     // An install the installer gave no answer for is never counted as done.
     for e in &to_install {
         if !apps.iter().any(|(n, _)| *n == e.app.name) {
-            apps.push((
-                e.app.name.clone(),
-                AppResult::because(Reason::NotVerified),
-            ));
+            apps.push((e.app.name.clone(), AppResult::because(Reason::NotVerified)));
         }
     }
     // Settings.
@@ -432,7 +436,13 @@ pub fn rebuild(
     let settings_lines = if ran.lines.is_empty() && !plan.groups.is_empty() {
         plan.groups
             .iter()
-            .map(|g| (g.label.clone(), g.count, ItemResult::because(Reason::NotVerified)))
+            .map(|g| {
+                (
+                    g.label.clone(),
+                    g.count,
+                    ItemResult::because(Reason::NotVerified),
+                )
+            })
             .collect()
     } else {
         ran.lines

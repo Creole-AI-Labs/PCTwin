@@ -12,9 +12,7 @@
 use std::collections::BTreeMap;
 
 use pctwin_executor::{Adapter, Undone, undo_effects};
-use pctwin_journal::{
-    EffectUndoOutcome, Journal, JournalError, Rebuild, Scope, StoredEffect,
-};
+use pctwin_journal::{EffectUndoOutcome, Journal, JournalError, Rebuild, Scope, StoredEffect};
 use serde::Serialize;
 
 use crate::run::UndoBook;
@@ -62,7 +60,10 @@ pub struct Line {
 }
 
 /// The settings of `book`'s move as the journal holds them: (executor key, what PCTwin set).
-fn applied(journal: &Journal, scope: Scope) -> std::result::Result<Vec<(u64, String, pctwin_recipe::SettingValue)>, JournalError> {
+fn applied(
+    journal: &Journal,
+    scope: Scope,
+) -> std::result::Result<Vec<(u64, String, pctwin_recipe::SettingValue)>, JournalError> {
     Ok(journal
         .effects_of(scope)?
         .into_iter()

@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use pctwin_apps::routes::{self, AppPlan, Disposition, Here, Hints, Route, Target, WingetBy};
-use pctwin_record::{AppList, FolderRole, FoundApp, FoundWhere, Owner, Record};
 use pctwin_recipe::SettingValue;
+use pctwin_record::{AppList, FolderRole, FoundApp, FoundWhere, Owner, Record};
 use pctwin_settings::System;
 use pctwin_settings::catalogue::Catalogue;
 use pctwin_settings::classify::{Ctx, FolderMap};
@@ -166,9 +166,10 @@ fn same_app(old: &FoundApp, here: &FoundApp) -> bool {
             FoundWhere::WindowsPackage { family_name: a, .. },
             FoundWhere::WindowsPackage { family_name: b, .. },
         ) => a == b,
-        (FoundWhere::MacBundle { bundle_id: a, .. }, FoundWhere::MacBundle { bundle_id: b, .. }) => {
-            a == b
-        }
+        (
+            FoundWhere::MacBundle { bundle_id: a, .. },
+            FoundWhere::MacBundle { bundle_id: b, .. },
+        ) => a == b,
         (FoundWhere::Deb { package: a }, FoundWhere::Deb { package: b })
         | (FoundWhere::Rpm { package: a }, FoundWhere::Rpm { package: b }) => a == b,
         (FoundWhere::Flatpak { app_id: a, .. }, FoundWhere::Flatpak { app_id: b, .. }) => a == b,
@@ -210,7 +211,12 @@ fn installed_system(installed: &AppList) -> pctwin_record::AppSystem {
 pub fn needs_of(plan: &AppPlan) -> Option<Reason> {
     match plan.disposition {
         Disposition::NeedsAction => Some(Reason::ManualInstall),
-        Disposition::Install if !plan.routes.iter().any(|r| matches!(r, Route::Winget { .. })) => {
+        Disposition::Install
+            if !plan
+                .routes
+                .iter()
+                .any(|r| matches!(r, Route::Winget { .. })) =>
+        {
             Some(Reason::ManualInstall)
         }
         _ => None,
@@ -484,7 +490,8 @@ mod tests {
 
     #[test]
     fn every_app_gets_one_line_honestly_and_another_persons_apps_are_not_in_the_movers_plan() {
-        let mut record = Record::new(LaptopId::from_hex("01010101010101010101010101010101").unwrap());
+        let mut record =
+            Record::new(LaptopId::from_hex("01010101010101010101010101010101").unwrap());
         record.apps.found = vec![
             app("Writer", Owner::Shared, signed(), Some("{A}")),
             app("Unsigned Tool", person("1000"), AppMaker::Unsigned, None),
@@ -566,12 +573,15 @@ mod tests {
             Some(Some(SettingValue::Text("forest".into())))
         });
         assert_eq!(set.groups[0].action, Action::Replace);
-        assert_ne!(fresh.digest(), set.digest(), "what is shown is what is approved");
+        assert_ne!(
+            fresh.digest(),
+            set.digest(),
+            "what is shown is what is approved"
+        );
         // The special categories not moved yet are said.
-        assert!(fresh
-            .changes()
-            .iter()
-            .any(|c| c.title == Title::Key(SPECIAL_NOT_YET) && c.needs == Some(Reason::FinishByHand)));
+        assert!(fresh.changes().iter().any(
+            |c| c.title == Title::Key(SPECIAL_NOT_YET) && c.needs == Some(Reason::FinishByHand)
+        ));
         assert!(fresh.changes_anything());
     }
 }

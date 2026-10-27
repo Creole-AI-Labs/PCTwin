@@ -33,5 +33,9 @@ pctwin-transfer = { path = "../pctwin-transfer" }
 tempfile = "3"
 tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "sync", "time"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+# Removes the test lab's own registry key afterwards.
+winreg = "0.55"
+
 [lints]
 workspace = true

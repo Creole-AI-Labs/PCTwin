@@ -128,7 +128,14 @@ mod tests {
 
     #[test]
     fn extras_arrive_exactly_as_sent_in_bounded_pages() {
-        for len in [0, 1, PAGE_BYTES - 1, PAGE_BYTES, PAGE_BYTES + 1, PAGE_BYTES * 3 + 7] {
+        for len in [
+            0,
+            1,
+            PAGE_BYTES - 1,
+            PAGE_BYTES,
+            PAGE_BYTES + 1,
+            PAGE_BYTES * 3 + 7,
+        ] {
             let bytes: Vec<u8> = (0..len).map(|n| (n % 251) as u8).collect();
             let mut pipe = Pipe::default();
             run(send(&mut pipe, &bytes)).unwrap();
