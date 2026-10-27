@@ -644,11 +644,20 @@ fn the_old_copys_maker_needs_a_signed_windows_file() {
     assert!(e.contains("not signed"), "{e}");
 }
 
-/// Third review, finding 3: only the administrator helper's staging may say a file is its own
-/// administrators-only copy. No other code in PCTwin implements that.
+/// Third review, finding 3, sealed in the fourth: only the administrator helper's staging may say
+/// a file is its own administrators-only copy. `HelperStaged` needs the seal's trait, and only
+/// this crate and the helper may depend on the seal (`cargo deny check bans` enforces it); the
+/// one implementation outside this crate's tests is the helper's staging.
 #[test]
 fn only_the_helpers_staging_vouches_for_its_own_copy() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let deny = std::fs::read_to_string(root.join("deny.toml")).unwrap();
+    assert!(
+        deny.contains(
+            r#"{ crate = "pctwin-staged-seal", wrappers = ["pctwin-maker", "pctwin-helper"] }"#
+        ),
+        "the seal's ban is gone from deny.toml"
+    );
     let mut found = Vec::new();
     let mut pending = vec![root.join("crates"), root.join("app/src-tauri/src")];
     while let Some(dir) = pending.pop() {
@@ -659,17 +668,21 @@ fn only_the_helpers_staging_vouches_for_its_own_copy() {
                 if name != "target" && name != "tests" && !name.starts_with('.') {
                     pending.push(p);
                 }
-            } else if name.ends_with(".rs") {
+            } else if name == "Cargo.toml" {
                 let text = std::fs::read_to_string(&p).unwrap();
-                if text.contains(&["HelperStaged", " for "].concat()) {
-                    found.push(p);
+                if text.contains("pctwin-staged-seal = ") {
+                    found.push(
+                        p.parent()
+                            .unwrap()
+                            .file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
                 }
             }
         }
     }
-    assert_eq!(found.len(), 1, "{found:?}");
-    assert!(
-        found[0].ends_with("pctwin-helper/src/broker/staging.rs"),
-        "{found:?}"
-    );
+    found.sort();
+    assert_eq!(found, ["pctwin-helper", "pctwin-maker"]);
 }

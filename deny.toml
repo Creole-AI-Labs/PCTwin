@@ -97,6 +97,9 @@ deny = [
   # handed to them by the helper and the app (third security review, finding 8): they do not link
   # this crate.
   { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app"] },
+  # The seal on the maker check's HelperStaged (fourth review): only the helper's staging may
+  # vouch for a package as its own held copy, and the maker check's own tests.
+  { crate = "pctwin-staged-seal", wrappers = ["pctwin-maker", "pctwin-helper"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os", "smappservice-rs"] },
   # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
   { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },

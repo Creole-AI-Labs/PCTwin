@@ -22,6 +22,8 @@ pctwin-journal = { path = "../pctwin-journal" }
 # The maker check of a package, made by the helper itself on its own copy before an elevated
 # install (second review, findings B2 and B3).
 pctwin-maker = { path = "../pctwin-maker" }
+# The one implementation of the maker check's sealed HelperStaged.
+pctwin-staged-seal = { path = "../pctwin-staged-seal" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 serde = { version = "1", features = ["derive"] }

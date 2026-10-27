@@ -3759,6 +3759,7 @@ dependencies = [
  "pctwin-maker",
  "pctwin-record",
  "pctwin-scan",
+ "pctwin-staged-seal",
  "rustix",
  "serde",
  "serde_json",
@@ -3890,6 +3891,7 @@ dependencies = [
  "libc",
  "object",
  "pctwin-helper-os",
+ "pctwin-staged-seal",
  "pctwin-types",
  "same-file",
  "serde",
@@ -4085,6 +4087,10 @@ dependencies = [
  "winreg",
  "zeroize",
 ]
+
+[[package]]
+name = "pctwin-staged-seal"
+version = "0.1.0"
 
 [[package]]
 name = "pctwin-transfer"

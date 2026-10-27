@@ -183,9 +183,9 @@ enum OwnRead {
 /// installed. Windows' installer-package checker reads a package by its name, not through the
 /// held file (third review, finding 3), so its answer is about the bytes the helper holds only
 /// when nobody else can change what that name leads to: here, and nowhere else. Implemented only
-/// by the helper's staging (`pctwin-helper`, `broker::staging::VerifiedArtifact`); a test checks
-/// that no other code implements it.
-pub trait HelperStaged {
+/// by the helper's staging (`pctwin-helper`, `broker::staging::VerifiedArtifact`): it is sealed
+/// ([`pctwin_staged_seal::Sealed`]), and only this crate and the helper may depend on the seal.
+pub trait HelperStaged: pctwin_staged_seal::Sealed {
     /// Where the copy is, in the helper's administrators-only folder.
     fn staged_path(&self) -> &Path;
 }

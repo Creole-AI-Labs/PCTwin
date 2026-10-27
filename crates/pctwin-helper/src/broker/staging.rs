@@ -152,6 +152,8 @@ pub struct VerifiedArtifact {
 
 /// The helper's own copy, in its administrators-only folder, held unchanged: the only file whose
 /// Windows Installer signature the maker check counts (third review, finding 3).
+impl pctwin_staged_seal::Sealed for VerifiedArtifact {}
+
 impl pctwin_maker::HelperStaged for VerifiedArtifact {
     fn staged_path(&self) -> &Path {
         &self.path
