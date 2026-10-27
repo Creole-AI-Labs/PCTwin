@@ -375,7 +375,7 @@ pub fn pref_to_setting(v: &Plist) -> Result<(PrefKind, SettingValue), Why> {
             PrefKind::Xml,
             SettingValue::Text(plist::to_xml(v).ok_or(Why::Kind)?),
         ),
-        Plist::Other => return Err(Why::Kind),
+        Plist::Data(_) | Plist::Other => return Err(Why::Kind),
     })
 }
 

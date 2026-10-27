@@ -13,7 +13,10 @@ pub enum Plist {
     Integer(i64),
     Real(f64),
     Bool(bool),
-    /// Data and dates: not used by settings.
+    /// Raw data (`<data>`, base64 in the text): never written by PCTwin, but every printable run
+    /// in it is judged ([`crate::judge::runs`]); data that cannot be decoded is refused.
+    Data(Vec<u8>),
+    /// Dates: not used by settings.
     Other,
 }
 
@@ -102,6 +105,7 @@ fn value(n: roxmltree::Node<'_, '_>, depth: usize) -> Result<Plist, String> {
             }
             Plist::Real(f)
         }
+        "data" => Plist::Data(base64(&text()).ok_or("bad data")?),
         "true" => Plist::Bool(true),
         "false" => Plist::Bool(false),
         _ => Plist::Other,
@@ -134,7 +138,7 @@ pub fn to_xml(v: &Plist) -> Option<String> {
         Plist::Real(r) => format!("<real>{r}</real>"),
         Plist::Bool(true) => "<true/>".into(),
         Plist::Bool(false) => "<false/>".into(),
-        Plist::Other => return None,
+        Plist::Data(_) | Plist::Other => return None,
     })
 }
 
@@ -175,4 +179,51 @@ pub fn strings(v: &Plist) -> Vec<String> {
         }
     }
     out
+}
+
+/// Every raw data value inside a property list value, in order.
+pub fn data(v: &Plist) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        match v {
+            Plist::Dict(items) => stack.extend(items.iter().rev().map(|(_, x)| x)),
+            Plist::Array(items) => stack.extend(items.iter().rev()),
+            Plist::Data(d) => out.push(d.clone()),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Standard base64 (blanks ignored, `=` padding optional), as a property list's `<data>` holds.
+pub fn base64(t: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let (mut acc, mut bits) = (0u32, 0u32);
+    let mut ended = false;
+    for c in t.bytes().filter(|c| !c.is_ascii_whitespace()) {
+        if c == b'=' {
+            ended = true;
+            continue;
+        }
+        if ended {
+            return None;
+        }
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }

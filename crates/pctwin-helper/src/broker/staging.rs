@@ -48,6 +48,63 @@ pub enum StageError {
     Io,
 }
 
+/// A folder the helper made administrators-only and read back as such: the one thing a
+/// [`Staging`] can be made from. Outside the tests there is no way to get one for any other
+/// folder (fifth review, finding 6: a [`VerifiedArtifact`] vouches, as `HelperStaged`, that its
+/// file is the helper's own copy in such a folder, so a crate depending on this one must not be
+/// able to stage into a folder its account can write).
+#[derive(Debug)]
+pub struct HelperFolder(PathBuf);
+
+impl HelperFolder {
+    /// The helper's folder `name` inside `Program Files\PCTwin`, made administrators-only
+    /// (`pctwin_helper_os::admin_only_folder`), its access list read back from the system and
+    /// refused unless it is exactly that ([`admin_only_sddl`]).
+    #[cfg(windows)]
+    pub fn admin_only(name: &str) -> Result<Self, String> {
+        let path = pctwin_helper_os::admin_only_folder(name).map_err(|e| e.to_string())?;
+        let acl = pctwin_helper_os::folder_access_list(&path).map_err(|e| e.to_string())?;
+        if !admin_only_sddl(&acl) {
+            return Err(format!(
+                "{} is not open to administrators only",
+                path.display()
+            ));
+        }
+        Ok(Self(path))
+    }
+
+    /// Any folder, for tests only: compiled into the helper's own tests, and into other crates'
+    /// tests through the `test-staging` feature, which a release build refuses.
+    #[cfg(any(test, feature = "test-staging"))]
+    pub fn for_tests(path: PathBuf) -> Self {
+        Self(path)
+    }
+
+    /// Where it is.
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+/// Whether a folder's access list (its text form, read back) is exactly the administrators-only
+/// list the helper makes its folders with: protected, full access for the system and the
+/// administrators, nobody else, nothing inherited.
+pub fn admin_only_sddl(sddl: &str) -> bool {
+    let Some(rest) = sddl.strip_prefix("D:P") else {
+        return false;
+    };
+    let rest = rest.strip_prefix("AI").unwrap_or(rest);
+    if !rest.starts_with('(') || !rest.ends_with(')') {
+        return false;
+    }
+    let mut aces: Vec<String> = rest[1..rest.len() - 1]
+        .split(")(")
+        .map(str::to_ascii_uppercase)
+        .collect();
+    aces.sort();
+    aces == ["A;OICI;FA;;;BA", "A;OICI;FA;;;SY"]
+}
+
 /// The helper's own packages, by handle.
 pub struct Staging {
     root: PathBuf,
@@ -57,11 +114,12 @@ pub struct Staging {
 }
 
 impl Staging {
-    /// Packages kept in `root`, a folder of the helper's own that only administrators and the
-    /// system can open (`pctwin_helper_os::admin_only_folder` on Windows). Everything already in
-    /// it is removed first (only the one helper of a move uses it, and none is running before it
-    /// starts); a link there is removed itself, never followed.
-    pub fn new(root: PathBuf) -> Self {
+    /// Packages kept in `folder`, a folder of the helper's own that only administrators and the
+    /// system can open ([`HelperFolder::admin_only`]). Everything already in it is removed first
+    /// (only the one helper of a move uses it, and none is running before it starts); a link
+    /// there is removed itself, never followed.
+    pub fn new(folder: HelperFolder) -> Self {
+        let root = folder.0;
         if let Ok(list) = std::fs::read_dir(&root) {
             for entry in list.flatten() {
                 let _ = std::fs::remove_file(entry.path());
@@ -79,7 +137,7 @@ impl Staging {
     pub(crate) fn with_limit(root: PathBuf, limit: u64) -> Self {
         Self {
             limit,
-            ..Self::new(root)
+            ..Self::new(HelperFolder(root))
         }
     }
 
@@ -387,7 +445,7 @@ mod tests {
     #[test]
     fn a_package_is_kept_only_with_its_approved_bytes() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Staging::new(dir.path().to_path_buf());
+        let mut s = Staging::new(HelperFolder::for_tests(dir.path().to_path_buf()));
         let bytes = b"a package".to_vec();
         let h = s.admit(&mut bytes.as_slice(), sha(&bytes)).unwrap();
         assert_eq!(h, 1);
@@ -425,7 +483,7 @@ mod tests {
     #[test]
     fn a_package_swapped_after_checking_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Staging::new(dir.path().to_path_buf());
+        let mut s = Staging::new(HelperFolder::for_tests(dir.path().to_path_buf()));
         let bytes = b"the real package".to_vec();
         let h = s.admit(&mut bytes.as_slice(), sha(&bytes)).unwrap();
         // Checked once (as when the request was validated) ...
@@ -450,7 +508,7 @@ mod tests {
     #[test]
     fn while_held_nobody_can_change_it() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Staging::new(dir.path().to_path_buf());
+        let mut s = Staging::new(HelperFolder::for_tests(dir.path().to_path_buf()));
         let bytes = b"held package".to_vec();
         let h = s.admit(&mut bytes.as_slice(), sha(&bytes)).unwrap();
         let path = s.path_of(h).unwrap().to_path_buf();
@@ -474,7 +532,7 @@ mod tests {
     #[test]
     fn a_link_in_place_of_the_package_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Staging::new(dir.path().to_path_buf());
+        let mut s = Staging::new(HelperFolder::for_tests(dir.path().to_path_buf()));
         let bytes = b"pkg".to_vec();
         let h = s.admit(&mut bytes.as_slice(), sha(&bytes)).unwrap();
         let path = s.path_of(h).unwrap().to_path_buf();
@@ -503,7 +561,7 @@ mod tests {
     fn a_stale_package_from_a_crash_never_jams_staging() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("p1.pkg"), b"left by a crash").unwrap();
-        let mut s = Staging::new(dir.path().to_path_buf());
+        let mut s = Staging::new(HelperFolder::for_tests(dir.path().to_path_buf()));
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
         // Even a file appearing later under a name an earlier scheme used is never in the way.
         std::fs::write(dir.path().join("p1.pkg"), b"left by a crash").unwrap();
@@ -528,6 +586,28 @@ mod tests {
             StageError::TooLarge
         );
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
-        assert_eq!(Staging::new(dir.path().to_path_buf()).limit, MAX_PACKAGE);
+        assert_eq!(
+            Staging::new(HelperFolder::for_tests(dir.path().to_path_buf())).limit,
+            MAX_PACKAGE
+        );
+    }
+
+    /// Fifth review, finding 6: only the exact administrators-only list passes the read-back.
+    #[test]
+    fn only_an_administrators_only_folder_reads_back_as_the_helpers() {
+        assert!(admin_only_sddl("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"));
+        assert!(admin_only_sddl("D:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)"));
+        for s in [
+            "D:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            "D:P(A;OICI;FA;;;SY)",
+            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;BU)",
+            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-21-1-2-3-1001)",
+            "D:P(A;OICIID;FA;;;SY)(A;OICI;FA;;;BA)",
+            "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;WD)",
+            "D:P",
+            "",
+        ] {
+            assert!(!admin_only_sddl(s), "{s}");
+        }
     }
 }

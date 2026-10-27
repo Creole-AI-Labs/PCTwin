@@ -3783,6 +3783,7 @@ dependencies = [
  "pctwin-catalogue",
  "pctwin-gate",
  "pctwin-grant",
+ "pctwin-helper",
  "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-maker",
@@ -4114,6 +4115,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.6+spec-1.1.0",
+ "url",
  "winreg",
  "zeroize",
 ]

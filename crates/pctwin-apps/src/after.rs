@@ -18,6 +18,7 @@
 //!   kind. 2.5 never trusts it: it looks at the laptop itself ([`InstallReceipt::still_true`]) and
 //!   asks its own role for its own grant (T21-049, T21-050).
 
+pub use pctwin_helper::broker::actions::InstallScope;
 use pctwin_record::{AppNote, FoundApp, FoundWhere, RegistryView};
 use pctwin_types::{ItemResult, ItemStatus, Reason};
 
@@ -41,25 +42,46 @@ fn text<'a>(e: &'a RawEntry, name: &str) -> Option<&'a str> {
     }
 }
 
-/// Finds `app` in the new laptop's entries.
-pub fn probe(app: &FoundApp, entries: &[RawEntry]) -> Probe {
+/// Whether an entry in `view` can stand for an install of `scope`: a machine install only in the
+/// machine's own lists (64- or 32-bit), which only an administrator can write; a per-person
+/// install only in the person's own list (fifth review, finding 5: the person, or any program
+/// running as them, can write that list, so it never proves a machine install).
+pub fn view_fits(scope: InstallScope, view: RegistryView) -> bool {
+    match scope {
+        InstallScope::Machine => matches!(view, RegistryView::Machine | RegistryView::Machine32),
+        InstallScope::User => view == RegistryView::Person,
+    }
+}
+
+/// Finds `app`, installed for `scope`, in the new laptop's entries: only entries in a list that
+/// fits the scope ([`view_fits`]) are looked at.
+pub fn probe(app: &FoundApp, scope: InstallScope, entries: &[RawEntry]) -> Probe {
+    let fits: Vec<&RawEntry> = entries
+        .iter()
+        .filter(|e| view_fits(scope, e.view))
+        .collect();
+    let entries = fits.as_slice();
     let code = match &app.found {
         FoundWhere::WindowsEntry { product_code, .. } => product_code.as_deref(),
         _ => None,
     };
-    let hit = entries.iter().filter(|e| e.shown()).find(|e| match code {
-        Some(c) => e.product_code().is_some_and(|p| p.eq_ignore_ascii_case(c)),
-        None => {
-            text(e, "displayname") == Some(app.name.as_str())
-                && text(e, "publisher").is_some()
-                && text(e, "publisher") == app.publisher.as_deref()
-        }
-    });
+    let hit = entries
+        .iter()
+        .copied()
+        .filter(|e| e.shown())
+        .find(|e| match code {
+            Some(c) => e.product_code().is_some_and(|p| p.eq_ignore_ascii_case(c)),
+            None => {
+                text(e, "displayname") == Some(app.name.as_str())
+                    && text(e, "publisher").is_some()
+                    && text(e, "publisher") == app.publisher.as_deref()
+            }
+        });
     // An MSI app whose product code changed between versions (most upgrades keep it, some
     // makers change it every release) is found by its exact name and publisher instead.
     let hit = hit.or_else(|| {
         code.and_then(|_| {
-            entries.iter().filter(|e| e.shown()).find(|e| {
+            entries.iter().copied().filter(|e| e.shown()).find(|e| {
                 text(e, "displayname").is_some_and(|n| names_match(n, &app.name))
                     && text(e, "publisher").is_some()
                     && text(e, "publisher") == app.publisher.as_deref()
@@ -253,11 +275,14 @@ pub enum NotTrue {
     /// The laptop's own list no longer shows the app (or another version of it).
     NotThere,
     OtherVersion,
+    /// The laptop shows it in another list than the one the install was observed in (a
+    /// per-person entry where a machine install was observed).
+    OtherView,
 }
 
 impl InstallReceipt {
     /// 2.5's own check: this move, this laptop, and the laptop itself still shows the app at that
-    /// version (`now`: 2.5's own fresh probe). A receipt from another move, laptop or version, or
+    /// version, in the same list (`now`: 2.5's own fresh probe, made for the receipt's scope). A receipt from another move, laptop or version, or
     /// one forged, fails here whatever it says.
     pub fn still_true(&self, job: [u8; 16], device: [u8; 16], now: &Probe) -> Result<(), NotTrue> {
         if self.job != job {
@@ -271,6 +296,9 @@ impl InstallReceipt {
         }
         if now.version != self.version {
             return Err(NotTrue::OtherVersion);
+        }
+        if self.view.is_none() || now.view != self.view {
+            return Err(NotTrue::OtherView);
         }
         Ok(())
     }
@@ -327,7 +355,11 @@ mod tests {
             entry(CODE, "PuTTY release 0.85 (64-bit)", "0.85.0.0", true),
             entry("Fake", "PuTTY release 0.85 (64-bit) Tools", "9.9", false),
         ];
-        let p = probe(&putty(Some(CODE), "0.85.0.0"), &after);
+        let p = probe(
+            &putty(Some(CODE), "0.85.0.0"),
+            InstallScope::Machine,
+            &after,
+        );
         assert!(p.found);
         assert_eq!(p.key.as_deref(), Some(CODE));
         assert_eq!(p.version.as_deref(), Some("0.85.0.0"));
@@ -339,17 +371,31 @@ mod tests {
             "0.86.0.0",
             true,
         )];
-        assert!(probe(&putty(Some(CODE), "0.85.0.0"), &newer).found);
+        assert!(
+            probe(
+                &putty(Some(CODE), "0.85.0.0"),
+                InstallScope::Machine,
+                &newer
+            )
+            .found
+        );
         // Without a product code, only the exact name and publisher.
-        assert!(probe(&putty(None, "0.85"), &after).found);
+        assert!(probe(&putty(None, "0.85"), InstallScope::Machine, &after).found);
         let other_publisher = {
             let mut e = entry("X", "PuTTY release 0.85 (64-bit)", "0.85", false);
             e.values
                 .insert("publisher".into(), RegValue::Text("Someone".into()));
             vec![e]
         };
-        assert!(!probe(&putty(None, "0.85"), &other_publisher).found);
-        assert!(!probe(&putty(None, "0.85"), &[]).found);
+        assert!(
+            !probe(
+                &putty(None, "0.85"),
+                InstallScope::Machine,
+                &other_publisher
+            )
+            .found
+        );
+        assert!(!probe(&putty(None, "0.85"), InstallScope::Machine, &[]).found);
     }
 
     #[test]
@@ -359,7 +405,7 @@ mod tests {
         hidden
             .values
             .insert("systemcomponent".into(), RegValue::Number(1));
-        assert!(!probe(&app, &[hidden]).found);
+        assert!(!probe(&app, InstallScope::Machine, &[hidden]).found);
         let other = entry(
             "{11111111-1111-1111-1111-111111111111}",
             "Other tool",
@@ -367,7 +413,12 @@ mod tests {
             true,
         );
         let ours = entry(CODE, "PuTTY release 0.85 (64-bit)", "0.85.0.0", true);
-        assert_eq!(probe(&app, &[other, ours]).key.as_deref(), Some(CODE));
+        assert_eq!(
+            probe(&app, InstallScope::Machine, &[other, ours])
+                .key
+                .as_deref(),
+            Some(CODE)
+        );
     }
 
     #[test]
@@ -375,6 +426,7 @@ mod tests {
         let app = putty(Some(CODE), "0.85.0.0");
         let here = probe(
             &app,
+            InstallScope::Machine,
             &[entry(CODE, "PuTTY release 0.85 (64-bit)", "0.85.0.0", true)],
         );
         let done = Installed::Done {
@@ -415,7 +467,13 @@ mod tests {
             &[],
             Opened::Yes
         )));
-        assert!(not(result(&app, done, &probe(&app, &[]), &[], Opened::Yes)));
+        assert!(not(result(
+            &app,
+            done,
+            &probe(&app, InstallScope::Machine, &[]),
+            &[],
+            Opened::Yes
+        )));
         assert!(not(result(
             &app,
             done,
@@ -523,11 +581,49 @@ mod tests {
         );
         let other = Probe {
             version: Some("0.70".into()),
-            ..here
+            ..here.clone()
         };
         assert_eq!(
             r.still_true([1; 16], [3; 16], &other),
             Err(NotTrue::OtherVersion)
         );
+        let person = Probe {
+            view: Some(RegistryView::Person),
+            ..here.clone()
+        };
+        assert_eq!(
+            r.still_true([1; 16], [3; 16], &person),
+            Err(NotTrue::OtherView)
+        );
+        let unrecorded = InstallReceipt { view: None, ..r };
+        assert_eq!(
+            unrecorded.still_true([1; 16], [3; 16], &here),
+            Err(NotTrue::OtherView)
+        );
+    }
+
+    /// Fifth review, finding 5: a per-person entry (which the person, or any program running as
+    /// them, can write) never proves a machine install; a machine entry never proves a
+    /// per-person one.
+    #[test]
+    fn a_machine_install_is_only_found_in_the_machines_own_lists() {
+        let app = putty(None, "0.85");
+        let mut person = entry("k", "PuTTY release 0.85 (64-bit)", "0.85", false);
+        person.view = RegistryView::Person;
+        let p = probe(&app, InstallScope::Machine, std::slice::from_ref(&person));
+        assert!(!p.found);
+        let done = Installed::Done {
+            restart_needed: false,
+        };
+        assert_ne!(
+            result(&app, done, &p, &[], Opened::NotChecked).status(),
+            ItemStatus::Reinstalled
+        );
+        assert!(probe(&app, InstallScope::User, std::slice::from_ref(&person)).found);
+        let mut m32 = entry("k", "PuTTY release 0.85 (64-bit)", "0.85", false);
+        m32.view = RegistryView::Machine32;
+        let p = probe(&app, InstallScope::Machine, &[person.clone(), m32.clone()]);
+        assert_eq!(p.view, Some(RegistryView::Machine32));
+        assert!(!probe(&app, InstallScope::User, &[m32]).found);
     }
 }

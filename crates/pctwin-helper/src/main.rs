@@ -236,8 +236,7 @@ fn run(args: &Args) -> Result<(), String> {
         .with_new_laptop(&mut system);
     let mut session = match args.plan {
         Some(seal) => {
-            let packages =
-                pctwin_helper_os::admin_only_folder("packages").map_err(|e| e.to_string())?;
+            let packages = pctwin_helper::broker::staging::HelperFolder::admin_only("packages")?;
             let broker = pctwin_helper::broker::Broker::new(
                 seal,
                 &args.session,

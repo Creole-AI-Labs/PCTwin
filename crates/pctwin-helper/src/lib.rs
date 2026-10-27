@@ -11,6 +11,11 @@
 //! one move and ends with it. Its private channel and the check of who is calling are in
 //! `pctwin-helper-os`; everything here is safe Rust.
 
+// Fifth review, finding 6: staging into any folder is for tests; a release build with it is
+// refused outright.
+#[cfg(all(feature = "test-staging", not(debug_assertions)))]
+compile_error!("the test-staging feature is for tests only, never a release build");
+
 pub mod accepting;
 pub mod account;
 pub mod broker;

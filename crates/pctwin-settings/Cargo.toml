@@ -26,6 +26,8 @@ roxmltree = "0.21.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2.0.21"
+# Addresses in settings are read as browsers read them (WHATWG), never by a list of schemes.
+url = "2.5.8"
 # TOML settings files, read structurally (already in the tree through Tauri).
 toml = "1"
 # Wi-Fi passwords are wiped from memory when they are no longer needed.

@@ -108,10 +108,16 @@ fn v6_public(a: Ipv6Addr) -> bool {
         return v4_public(v4);
     }
     let s = a.segments();
-    // NAT64 (64:ff9b::/96 and 64:ff9b:1::/48) carries an IPv4 address in its last 32 bits.
-    if s[0] == 0x64 && s[1] == 0xff9b {
+    // The well-known NAT64 prefix (64:ff9b::/96) carries an IPv4 address in its last 32 bits.
+    if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
         let v4 = Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8);
         return v4_public(v4);
+    }
+    // The rest of 64:ff9b::/32, including the local-use NAT64 prefix 64:ff9b:1::/48 (a network's
+    // own translator, which can place the IPv4 address anywhere: fifth review, finding 9), and
+    // IPv4-translated addresses ::ffff:0:a.b.c.d (::ffff:0:0:0/96) are never the internet.
+    if (s[0] == 0x64 && s[1] == 0xff9b) || s[..6] == [0, 0, 0, 0, 0xffff, 0] {
+        return false;
     }
     // 6to4 (2002::/16) carries one in bits 16 to 47.
     if s[0] == 0x2002 {
@@ -231,6 +237,62 @@ pub fn redacted(u: &Url) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fifth review, finding 9: local-use NAT64 and IPv4-translated forms are refused, whatever
+    /// address they carry; the well-known NAT64 prefix is judged by the address inside.
+    #[test]
+    fn local_use_nat64_and_translated_forms_are_refused() {
+        for a in [
+            "64:ff9b:1:7f00:0:100:808:808",
+            "64:ff9b:1::808:808",
+            "64:ff9b:2::808:808",
+            "::ffff:0:7f00:1",
+            "::ffff:0:808:808",
+            "64:ff9b::7f00:1",
+            "64:ff9b::a00:1",
+        ] {
+            let ip: IpAddr = a.parse().unwrap();
+            assert!(!address_ok(ip), "{a}");
+        }
+        assert!(address_ok("64:ff9b::808:808".parse().unwrap()));
+        assert!(address_ok("2606:4700::1111".parse().unwrap()));
+    }
+
+    /// Surviving mutant P2: a user name alone (no password) is refused too.
+    #[test]
+    fn a_user_name_without_a_password_is_refused() {
+        assert_eq!(
+            check_url("https://user@example.com/a.msi"),
+            Err(Refused::Credentials)
+        );
+        assert_eq!(
+            check_url("https://:pw@example.com/a.msi"),
+            Err(Refused::Credentials)
+        );
+    }
+
+    /// Surviving mutant P13: a redirect to a host that only ends with the allowed name (or holds
+    /// it) is another site.
+    #[test]
+    fn a_redirect_host_must_match_exactly() {
+        let first = check_url("https://example.com/a.msi").unwrap();
+        for to in [
+            "https://evilexample.com/a.msi",
+            "https://www.evilexample.com/a.msi",
+            "https://example.com.evil.net/a.msi",
+        ] {
+            let mut r = Redirects::new(&first, Hosts::SameHost);
+            assert_eq!(r.follow(to), Err(Refused::OtherSite), "{to}");
+        }
+        let mut r = Redirects::new(&first, Hosts::github());
+        assert_eq!(
+            r.follow("https://evil-objects.githubusercontent.com/x"),
+            Err(Refused::OtherSite)
+        );
+        assert!(r.follow("https://objects.githubusercontent.com/x").is_ok());
+        let mut r = Redirects::new(&first, Hosts::SameHost);
+        assert!(r.follow("https://EXAMPLE.com/b.msi").is_ok());
+    }
 
     #[test]
     fn only_ordinary_secure_addresses_are_used() {

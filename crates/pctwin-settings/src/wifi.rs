@@ -285,6 +285,9 @@ pub trait PrivateFolders {
     fn make(&self, path: &Path) -> Result<(), FolderError>;
     /// The folder's access list as Windows writes it (`D:P(A;OICI;FA;;;S-1-...)`), read back.
     fn access_list(&self, path: &Path) -> Option<String>;
+    /// The person's own account as the access list names it (their SID on Windows), from the
+    /// system, never from the access list itself (`pctwin_helper_os::current_account`).
+    fn me(&self) -> Option<String>;
 }
 
 /// Private folders through the standard library: mode 0700 from the first moment (Mac and
@@ -308,6 +311,9 @@ impl PrivateFolders for UnixPrivateFolders {
             })
     }
     fn access_list(&self, _: &Path) -> Option<String> {
+        None
+    }
+    fn me(&self) -> Option<String> {
         None
     }
 }
@@ -341,7 +347,8 @@ fn check_private(folders: &dyn PrivateFolders, path: &Path) -> Result<(), WifiEr
     #[cfg(windows)]
     {
         let sddl = folders.access_list(path).ok_or(WifiError::Tool)?;
-        if !private_sddl(&sddl) {
+        let me = folders.me().ok_or(WifiError::Tool)?;
+        if !private_sddl(&sddl, &me) {
             return Err(WifiError::Tool);
         }
     }
@@ -361,33 +368,33 @@ fn check_private(folders: &dyn PrivateFolders, path: &Path) -> Result<(), WifiEr
     Ok(())
 }
 
-/// Whether an access list (its text form) is protected, inherits nothing, and allows only the
-/// system and one account.
-pub fn private_sddl(sddl: &str) -> bool {
+/// Whether an access list (its text form) is exactly what the private folder is made with
+/// (`pctwin_helper_os::private_folder`): protected, nothing inherited, and full access for the
+/// person `me` and the system, nobody else (fifth review, finding 8: a list for Everyone, all
+/// users or any other one account is never private).
+pub fn private_sddl(sddl: &str, me: &str) -> bool {
     let Some(dacl) = sddl.strip_prefix("D:") else {
         return false;
     };
     let Some(aces) = dacl.strip_prefix('P') else {
         return false;
     };
-    let aces = aces.trim_start_matches(|c: char| c.is_ascii_uppercase());
-    let list: Vec<&str> = aces
-        .split(')')
-        .filter(|a| !a.is_empty())
-        .map(|a| a.trim_start_matches('('))
-        .collect();
-    let mut accounts = std::collections::BTreeSet::new();
-    for ace in &list {
-        let f: Vec<&str> = ace.split(';').collect();
-        // type;flags;rights;object;inherited object;account
-        if f.len() != 6 || f[0] != "A" || f[1].contains("ID") {
-            return false;
-        }
-        if f[5] != "SY" {
-            accounts.insert(f[5]);
-        }
+    // `AI` (inheritance computed) is the only other flag Windows writes back.
+    let aces = aces.strip_prefix("AI").unwrap_or(aces);
+    if !aces.starts_with('(') || !aces.ends_with(')') || me.is_empty() {
+        return false;
     }
-    !list.is_empty() && accounts.len() <= 1
+    let mut list: Vec<String> = aces[1..aces.len() - 1]
+        .split(")(")
+        .map(str::to_ascii_uppercase)
+        .collect();
+    list.sort();
+    let mut want = vec![
+        format!("A;OICI;FA;;;{}", me.to_ascii_uppercase()),
+        "A;OICI;FA;;;SY".to_string(),
+    ];
+    want.sort();
+    list == want
 }
 
 /// A folder removed with everything in it when dropped (also on failure).

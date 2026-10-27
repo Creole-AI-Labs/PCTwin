@@ -33,11 +33,13 @@ fuzz_target!(|data: &[u8]| {
     let cat = Catalogue::starter().unwrap();
     let map = FolderMap(vec![(r"C:\Users\ada\Documents".into(), r"D:\Docs".into())]);
     let (running, versions, renames) = (BTreeSet::new(), BTreeMap::new(), BTreeMap::new());
+    let facts = pctwin_settings::judge::Facts::new(["exe", "bat"], Some(vec!["https"]));
     let ctx = FileCtx {
         classify: Ctx {
             paths: &map,
             same_screens: false,
             hints: &cat.action_hints,
+            facts: &facts,
         },
         from: System::Windows,
         to: System::Windows,

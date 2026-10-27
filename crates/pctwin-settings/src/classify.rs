@@ -29,6 +29,7 @@ use pctwin_recipe::{SettingValue, text_ok};
 
 use crate::apps::glob;
 use crate::catalogue::ActionHint;
+use crate::judge::{Facts, Kind, address, is_drive, normalise, path_danger, word_runs};
 use crate::value::full_path;
 
 /// Why a found setting was not moved. Shown to the person in plain words ([`Why::words`]);
@@ -162,6 +163,8 @@ pub struct Ctx<'a> {
     /// The catalogue's action-hint rows ([`crate::catalogue::Catalogue::action_hints`]): they
     /// only add caution to the general rule, which keeps back what it can see without them.
     pub hints: &'a [ActionHint],
+    /// What the new laptop itself says can run ([`crate::judge::Facts::system`] in use).
+    pub facts: &'a Facts,
 }
 
 /// The longest text a setting may carry ([`pctwin_types::limits`]).
@@ -398,7 +401,10 @@ pub fn action_kind(hints: &[ActionHint], store: &str, name: &str) -> Option<Acti
 
 /// Whether a word ends the way the catalogue's hints say programs end (`.exe`, `.sh` ...).
 fn program_end(hints: &[ActionHint], token: &str) -> bool {
-    let l = token.trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    // Windows drops trailing dots and spaces from a file's name (`x.exe.` is `x.exe`).
+    let l = token
+        .trim_end_matches(['\\', '/', '.', ' '])
+        .to_ascii_lowercase();
     hints.iter().filter_map(|h| h.ending.as_deref()).any(|e| {
         let e = e.to_ascii_lowercase();
         l.len() > e.len() && l.ends_with(&e)
@@ -415,11 +421,10 @@ fn plain_number(t: &str) -> bool {
 }
 
 /// A path or an address found in a text, in any spelling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Spot {
-    /// Another computer (`\\server\share`, `//server/share`, `file://server/...`) or a web or
-    /// app address (`https:`, `ftp:`, `mailto:`, `shell:`, `ms-settings:` ...).
-    Remote,
+    /// Another computer, or a web or app address ([`address`]).
+    Remote(Why),
     /// A place on this computer PCTwin cannot check: written with an environment variable
     /// (`%SystemRoot%`, `$HOME`), relative (`..\x`, `bin\x`, `~/x`), or `C:x`.
     Unchecked,
@@ -427,48 +432,21 @@ enum Spot {
     Local,
 }
 
-fn is_drive(b: &[u8]) -> bool {
-    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
-}
-
-/// The scheme of what may be an address (`https` in `https://x`), when `t` starts with one. One
-/// letter is a drive; a digit after the colon is a time or a number pair (`12:30`, `Arial:12`).
-fn scheme(t: &str) -> Option<&str> {
-    let (s, rest) = t.split_once(':')?;
-    let ok = s.len() >= 2
-        && s.len() <= 32
-        && s.as_bytes()[0].is_ascii_alphabetic()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'.' | b'-'));
-    let next = rest.as_bytes().first();
-    (ok && next.is_some_and(|c| !c.is_ascii_digit() && !c.is_ascii_whitespace())).then_some(s)
-}
-
-/// What one word of a text (or the whole text) points at.
-fn spot(token: &str) -> Option<Spot> {
-    let t = token.trim_matches(['"', '\'']);
+/// What one word of a text (or the whole text, normalised) points at.
+fn spot(facts: &Facts, t: &str) -> Option<Spot> {
     let b = t.as_bytes();
     if t.is_empty() {
         return None;
     }
-    if t.starts_with("\\\\") || t.starts_with("//") {
-        return Some(Spot::Remote);
+    if t.len() > 5 && t.is_char_boundary(5) && t[..5].eq_ignore_ascii_case("file:") {
+        return Some(if t[5..].starts_with("///") {
+            Spot::Local
+        } else {
+            Spot::Remote(Why::Fetches)
+        });
     }
-    if let Some(s) = scheme(t) {
-        if s.eq_ignore_ascii_case("file") {
-            return Some(if t[5..].starts_with("///") {
-                Spot::Local
-            } else {
-                Spot::Remote
-            });
-        }
-        // An address that names a place to reach: another computer (`//host`), a mailbox
-        // (`@`), a path or a query. A word before a colon alone (`HH:mm:ss`, a time format) is
-        // not one.
-        let rest = &t[s.len() + 1..];
-        if rest.starts_with("//") || rest.contains(['@', '/', '\\', '?', '=', '(']) {
-            return Some(Spot::Remote);
-        }
+    if let Some(why) = address(facts, t) {
+        return Some(Spot::Remote(why));
     }
     if is_drive(b) {
         return Some(if matches!(b.get(2), Some(b'\\' | b'/')) {
@@ -554,17 +532,31 @@ fn file_like(token: &str) -> bool {
     })
 }
 
-/// Whether a text could make the new laptop run or fetch something, and why (the general rule
-/// of the fourth review, finding F1: by the key's kind and the value, never by app name).
-///
-/// Anything that is, or holds, a path or an address in any spelling, a command line, or a value
-/// of a key whose name or store marks something to run or load, is kept back. `None` means plain
-/// text, a plain number, or a single full local path (which the caller points at the moved file
-/// when it is plain data, or leaves out when it is not moved).
+/// Whether a text could make the new laptop run or fetch something, and why, by this laptop's
+/// own facts ([`Facts::system`]): [`danger`] with them. Kept for callers that have no [`Ctx`].
 pub fn run_or_fetch(hints: &[ActionHint], store: &str, name: &str, t: &str) -> Option<Why> {
+    danger(Facts::system(), hints, store, name, t)
+}
+
+/// Whether a text could make the new laptop run or fetch something, and why (the general rule of
+/// the fourth review, finding F1, judged as in the fifth review: [`crate::judge`]): by the key's
+/// kind, the value and the new laptop's own facts, never by app name. The catalogue's hints only
+/// add caution.
+///
+/// Anything that is, or holds, a path or an address in any spelling, a command line, a program
+/// by the new laptop's facts, or a value of a key whose name or store marks something to run or
+/// load, is kept back. `None` means plain text, a plain number, or a single full local path to
+/// data (which the caller points at the moved file, or leaves out when it is not moved).
+pub fn danger(
+    facts: &Facts,
+    hints: &[ActionHint],
+    store: &str,
+    name: &str,
+    raw: &str,
+) -> Option<Why> {
     let action = action_kind(hints, store, name);
-    let t = t.trim();
-    if t.is_empty() || plain_number(t) {
+    let t = normalise(raw);
+    if t.is_empty() || plain_number(&t) {
         return None;
     }
     if action == Some(Action::Run) {
@@ -572,27 +564,32 @@ pub fn run_or_fetch(hints: &[ActionHint], store: &str, name: &str, t: &str) -> O
     }
     // One full local path (spaces allowed): data, unless it is a program or a file the system
     // loads.
-    if path_in(unquoted(t)).is_some() {
-        return (program_end(hints, t) || action == Some(Action::File))
-            .then_some(Why::StartsProgram);
+    if let Some(hit) = path_in(&t) {
+        if program_end(hints, &hit.path) || action == Some(Action::File) {
+            return Some(Why::StartsProgram);
+        }
+        return path_danger(facts, &hit.path);
     }
-    if command_shaped(t) {
+    if command_shaped(&t) {
         return Some(Why::StartsProgram);
     }
     let mut spots = Vec::new();
-    for tok in tokens(t) {
-        if program_end(hints, tok) || (action == Some(Action::File) && file_like(tok)) {
+    for tok in tokens(&t).map(normalise).chain(std::iter::once(t.clone())) {
+        if program_end(hints, &tok)
+            || word_runs(facts, &tok)
+            || (action == Some(Action::File) && file_like(&tok))
+        {
             return Some(Why::StartsProgram);
         }
-        spots.extend(spot(tok));
+        if let Some(hit) = path_in(&tok)
+            && let Some(why) = path_danger(facts, &hit.path)
+        {
+            return Some(why);
+        }
+        spots.extend(spot(facts, &tok));
     }
-    // The whole text too: a path with spaces in it is one place.
-    spots.extend(spot(t));
-    if program_end(hints, t) {
-        return Some(Why::StartsProgram);
-    }
-    if spots.contains(&Spot::Remote) {
-        return Some(Why::Fetches);
+    if let Some(Spot::Remote(why)) = spots.iter().find(|s| matches!(s, Spot::Remote(_))) {
+        return Some(why.clone());
     }
     if action == Some(Action::File) && !spots.is_empty() {
         return Some(Why::StartsProgram);
@@ -656,16 +653,37 @@ fn path_in(t: &str) -> Option<PathHit> {
 }
 
 /// Whether PCTwin may write the text `t` to the key `name` in `store`, checked again on the new
-/// laptop at the moment of writing with the same rule as planning ([`run_or_fetch`]). A single
-/// full local path passes: it was pointed at the moved file when it was planned.
+/// laptop at the moment of writing with the same rule as planning, by this laptop's own facts.
+/// A single full local path to data passes: it was pointed at the moved file when it was
+/// planned.
 pub fn may_write_text(hints: &[ActionHint], store: &str, name: &str, t: &str) -> Result<(), Why> {
+    may_write_text_with(Facts::system(), hints, store, name, t)
+}
+
+/// [`may_write_text`] with the facts given.
+pub fn may_write_text_with(
+    facts: &Facts,
+    hints: &[ActionHint],
+    store: &str,
+    name: &str,
+    t: &str,
+) -> Result<(), Why> {
     if !text_ok(t) {
         return Err(Why::HiddenText);
     }
     if t.len() > MAX_VALUE {
         return Err(Why::TooLarge);
     }
-    match run_or_fetch(hints, store, name, t) {
+    if let Some(why) = looks_secret(t) {
+        return Err(why);
+    }
+    if is_sid(t) {
+        return Err(Why::AccountBound);
+    }
+    if hardware_path(t) {
+        return Err(Why::HardwarePath);
+    }
+    match danger(facts, hints, store, name, t) {
         None => Ok(()),
         Some(why) => Err(why),
     }
@@ -676,8 +694,7 @@ pub fn classify(store: &str, name: &str, value: &SettingValue, ctx: &Ctx<'_>) ->
     classify_kind(store, name, value, false, ctx)
 }
 
-/// [`classify`], for a value that is raw bytes written as hex (`binary`): only a known credential
-/// form is looked for in it, since random-looking bytes are normal there.
+/// [`classify`], for a value that may be raw bytes written as hex (`binary`).
 pub fn classify_kind(
     store: &str,
     name: &str,
@@ -685,26 +702,38 @@ pub fn classify_kind(
     binary: bool,
     ctx: &Ctx<'_>,
 ) -> Fate {
+    classify_as(
+        if binary { Kind::Bytes } else { Kind::Text },
+        store,
+        name,
+        value,
+        ctx,
+    )
+}
+
+/// The name's own rules (the store, credentials, identities, caches, window places), which hold
+/// whatever the value is. `Ok(recent)`: none holds; `recent` says the name is a recent list.
+fn name_rules(store: &str, name: &str, ctx: &Ctx<'_>) -> Result<bool, Why> {
     if let Some(why) = store_kind(store) {
-        return Fate::NotMoved(why);
+        return Err(why);
     }
     let w = words(name);
     let joined: String = w.concat();
     let any = |list: &[&str]| w.iter().any(|x| list.contains(&x.as_str()));
     if any(SECRET_WORDS) || SECRET_JOINED.iter().any(|j| joined.contains(j)) {
-        return Fate::NotMoved(Why::Secret);
+        return Err(Why::Secret);
     }
     let names_id = any(ID_WORDS) || joined.ends_with("guid") || joined.ends_with("uuid");
     if names_id && any(MACHINE_WORDS)
         || ["machineid", "deviceid", "installid", "hwid", "uuid", "guid"].contains(&joined.as_str())
     {
-        return Fate::NotMoved(Why::MachineId);
+        return Err(Why::MachineId);
     }
     if (names_id && any(ACCOUNT_WORDS)) || w.iter().any(|x| x == "sid") {
-        return Fate::NotMoved(Why::AccountBound);
+        return Err(Why::AccountBound);
     }
     if any(CACHE_WORDS) {
-        return Fate::NotMoved(Why::Cache);
+        return Err(Why::Cache);
     }
     let last = w.last().map(String::as_str).unwrap_or("");
     let place = PLACE_LAST.contains(&last)
@@ -712,28 +741,77 @@ pub fn classify_kind(
         // macOS keeps window frames as `NSWindow Frame <name>`.
         || joined.contains("windowframe");
     if place && !ctx.same_screens {
-        return Fate::NotMoved(Why::WindowPlace);
+        return Err(Why::WindowPlace);
     }
-    let recent = any(RECENT_WORDS) || RECENT_WORDS.iter().any(|r| joined.contains(r));
-    match value {
-        SettingValue::Text(t) if binary => {
+    Ok(any(RECENT_WORDS) || RECENT_WORDS.iter().any(|r| joined.contains(r)))
+}
+
+/// What happens to a value of `kind` (the one judging pipeline, [`crate::judge`]): the name's
+/// rules, then every text the value holds. A text or a list may have its paths pointed at the
+/// moved files; raw bytes and composite values are copied whole only when every text inside
+/// them would be copied as it is.
+pub fn classify_as(
+    kind: Kind,
+    store: &str,
+    name: &str,
+    value: &SettingValue,
+    ctx: &Ctx<'_>,
+) -> Fate {
+    let recent = match name_rules(store, name, ctx) {
+        Ok(r) => r,
+        Err(why) => return Fate::NotMoved(why),
+    };
+    let SettingValue::Text(t) = value else {
+        return Fate::Copy(value.clone());
+    };
+    match kind {
+        Kind::Text => text_fate(store, name, t, value, recent, ctx),
+        Kind::List => match crate::judge::texts(Kind::List, value) {
+            Ok(_) => text_fate(store, name, t, value, recent, ctx),
+            Err(why) => Fate::NotMoved(why),
+        },
+        Kind::Bytes => {
             if t.len() > MAX_VALUE {
-                Fate::NotMoved(Why::TooLarge)
-            } else if t
-                .to_ascii_lowercase()
+                return Fate::NotMoved(Why::TooLarge);
+            }
+            if t.to_ascii_lowercase()
                 .starts_with("01000000d08c9ddf0115d1118c7a00c04fc297eb")
             {
-                Fate::NotMoved(Why::Secret)
-            } else if action_kind(ctx.hints, store, name).is_some() {
-                // Raw bytes of a key that runs or loads something can hold a path too.
-                Fate::NotMoved(Why::StartsProgram)
-            } else {
-                Fate::Copy(value.clone())
+                return Fate::NotMoved(Why::Secret);
             }
+            if action_kind(ctx.hints, store, name).is_some() {
+                // Raw bytes of a key that runs or loads something can hold a path too.
+                return Fate::NotMoved(Why::StartsProgram);
+            }
+            parts(kind, store, name, value, ctx)
         }
-        SettingValue::Text(t) => text_fate(store, name, t, value, recent, ctx),
-        _ => Fate::Copy(value.clone()),
+        Kind::Plist | Kind::GVariant => parts(kind, store, name, value, ctx),
     }
+}
+
+/// A value made of several texts (raw bytes, a dictionary, a list, a tuple): copied whole only
+/// when every text in it would be copied as it is. A path inside one is never rewritten in
+/// place.
+fn parts(kind: Kind, store: &str, name: &str, whole: &SettingValue, ctx: &Ctx<'_>) -> Fate {
+    let texts = match crate::judge::texts(kind, whole) {
+        Ok(t) => t,
+        Err(why) => return Fate::NotMoved(why),
+    };
+    for leaf in &texts {
+        match text_fate(
+            store,
+            name,
+            leaf,
+            &SettingValue::Text(leaf.clone()),
+            false,
+            ctx,
+        ) {
+            Fate::Copy(_) => {}
+            Fate::Rewritten(_) => return Fate::NotMoved(Why::PathNotMoved),
+            Fate::NotMoved(why) => return Fate::NotMoved(why),
+        }
+    }
+    Fate::Copy(whole.clone())
 }
 
 fn text_fate(
@@ -793,7 +871,7 @@ fn text_fate(
         };
     }
     // Anything that could make the new laptop run or fetch something stays behind.
-    if let Some(why) = run_or_fetch(ctx.hints, store, name, t) {
+    if let Some(why) = danger(ctx.facts, ctx.hints, store, name, t) {
         return Fate::NotMoved(why);
     }
     // What is left is plain text or one full local path to data: pointed at the moved file.
