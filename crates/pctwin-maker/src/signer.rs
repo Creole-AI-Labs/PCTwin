@@ -181,10 +181,33 @@ pub fn signer_from_certificate(cert: &Certificate) -> Result<WindowsSigner, Stri
             }
         }
     }
+    let mut issuer_organization = None;
+    for atv in cert
+        .tbs_certificate
+        .issuer
+        .0
+        .iter()
+        .flat_map(|rdn| rdn.0.iter())
+    {
+        if atv.oid == OID_O {
+            let text = text_of(atv)?;
+            if issuer_organization.as_ref().is_some_and(|had| *had != text) {
+                return Err("the certificate names its issuer twice, differently".into());
+            }
+            issuer_organization = Some(text);
+        }
+    }
+    let key = cert
+        .tbs_certificate
+        .subject_public_key_info
+        .to_der()
+        .map_err(|e| e.to_string())?;
     Ok(WindowsSigner {
         subject,
         certificate: Sha256(Sha256Hasher::digest(&der).into()),
         issuer: cert.tbs_certificate.issuer.to_string(),
+        issuer_organization,
+        public_key: Some(Sha256(Sha256Hasher::digest(&key).into())),
     })
 }
 

@@ -32,6 +32,16 @@
 //! again (the same rule gives the same answer, so it is safe to repeat); an interrupted app
 //! removal is never run again by itself: it ends "not done this time", and asking for undo again
 //! starts it afresh.
+//!
+//! A settings file is moved aside to a private name while it is put back. Until putting it back
+//! says the file is settled ([`EffectUndo::PutBack`]), nothing else is recorded over it (the
+//! journal refuses it): an error leaves undo part way, so closing undo and the old laptop's wipe
+//! wait, the person is told the hidden name where their file is, and the next undo finishes it
+//! with that same name (second review, finding S1).
+//!
+//! A journal put back from an older copy of its file is refused as a whole
+//! ([`pctwin_journal::JournalError::RolledBack`]), so a finished undo is never run again from it
+//! (second review, finding S2).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -66,6 +76,19 @@ const NOT_CHECKED: &str =
     "PCTwin has not finished checking this change yet; try undo again in a moment";
 const ELSEWHERE: &str = "this was done with the app's maker or an online service; only they can \
      undo it, so PCTwin left it as it is";
+/// How many times one file is tried in a row before undo stops for now (another program, such as
+/// a backup or an indexer, may hold it for a moment).
+const TRIES: u32 = 3;
+
+/// Why a settings file could not be finished, naming where the person's file is meanwhile.
+fn hidden_why(path: &str, private: &str) -> String {
+    format!(
+        "PCTwin could not finish putting back the settings file \"{path}\". Your file is safe: \
+         it is in the same folder under the hidden name \"{private}\". Choose undo again to \
+         finish, or rename that file back to \"{path}\" yourself"
+    )
+}
+
 const KEPT_DAMAGED: &str =
     "the copy PCTwin kept of your earlier settings is damaged, so they were left as they are";
 /// Why a record that was changed outside PCTwin was not undone.
@@ -197,16 +220,26 @@ pub fn undo_effects(
             entry: &e,
             resumed: matches!(
                 before,
-                Some(EffectUndo::Reversing | EffectUndo::Swapping { .. })
+                Some(
+                    EffectUndo::Reversing
+                        | EffectUndo::Swapping { .. }
+                        | EffectUndo::PutBack { .. }
+                )
             ),
-            swapping: match &before {
-                Some(EffectUndo::Swapping { path, private }) => {
-                    Some((path.clone(), private.clone()))
-                }
-                _ => None,
-            },
         };
         let rule = rule_of(&e, recipes);
+        // A settings file a crash or an error left part way put back is settled first, whatever
+        // else is true now: until then the person's file may be under its private name only, and
+        // nothing else is recorded (closing undo waits).
+        if let Some(EffectUndo::Swapping { path, private }) = &before
+            && let Err(stuck) = u.settle_left(path, private, found, rule.is_ok())?
+        {
+            out.push(Undone {
+                id: e.id,
+                outcome: stuck,
+            });
+            continue;
+        }
         let outcome = match (&e.effect, rule) {
             // Only its maker or service can undo it, whatever the recipe says.
             (StoredEffect::External { .. }, _) => kept(ELSEWHERE),
@@ -229,7 +262,17 @@ pub fn undo_effects(
                 StoredEffect::CopySettings { to, before, .. } => {
                     let kept: BTreeMap<&str, [u8; 32]> =
                         before.iter().map(|f| (f.path.as_str(), f.hash)).collect();
-                    u.files(to, &kept, found)?
+                    match u.files(to, &kept, found)? {
+                        Ok(outcome) => outcome,
+                        // A file is part way: said, and nothing recorded over it.
+                        Err(stuck) => {
+                            out.push(Undone {
+                                id: e.id,
+                                outcome: stuck,
+                            });
+                            continue;
+                        }
+                    }
                 }
                 // Not reached: an install, an external change and an import (not this role's,
                 // skipped above) are matched before.
@@ -260,8 +303,6 @@ struct One<'a, 'j> {
     entry: &'a EffectEntry,
     /// Its undo was recorded part way before (a crash): Reversing is already on disk.
     resumed: bool,
-    /// A settings file a crash left part way put back: its path and private name.
-    swapping: Option<(String, String)>,
 }
 
 fn not_done(why: &str) -> EffectUndoOutcome {
@@ -367,12 +408,89 @@ impl One<'_, '_> {
         })
     }
 
+    /// Puts one settings file back as `swap` says (its private name already recorded as
+    /// [`EffectUndo::Swapping`]), trying a few times in a row; only when that says the file is
+    /// settled is [`EffectUndo::PutBack`] recorded. `Err` with what to tell the person (naming
+    /// where their file is) when it could not be finished: the record stays part way.
+    fn settle(
+        &mut self,
+        place: &SettingsPlace,
+        path: &str,
+        swap: &Swap<'_>,
+    ) -> Result<Result<Swapped, EffectUndoOutcome>, JournalError> {
+        let mut tries = 0;
+        let swapped = loop {
+            match self.adapter.replace_settings_file(place, path, swap) {
+                Ok(s) => break s,
+                Err(_) => {
+                    tries += 1;
+                    if tries >= TRIES {
+                        return Ok(Err(not_done(&hidden_why(path, swap.private))));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50 * u64::from(tries)));
+                }
+            }
+        };
+        record(
+            self.rebuild,
+            self.permit,
+            self.role,
+            self.entry.id,
+            &EffectUndo::PutBack {
+                path: path.to_string(),
+                private: swap.private.to_string(),
+            },
+        )?;
+        Ok(Ok(swapped))
+    }
+
+    /// Settles the settings file a crash or an error left part way put back (recorded as
+    /// [`EffectUndo::Swapping`]): put back as planned when its earlier version can be had and
+    /// the checked instructions still allow it, otherwise only brought out of hiding. Undo then
+    /// looks at the place afresh.
+    fn settle_left(
+        &mut self,
+        path: &str,
+        private: &str,
+        found: &Found,
+        allowed: bool,
+    ) -> Result<Result<(), EffectUndoOutcome>, JournalError> {
+        let (StoredEffect::CopySettings { to, before, .. }, Found::Files(written)) =
+            (&self.entry.effect, found)
+        else {
+            return Err(JournalError::Damaged(
+                "an undo record names a file PCTwin did not write",
+            ));
+        };
+        let Some(ours) = written.iter().find(|f| f.path == path).map(|f| f.hash) else {
+            return Err(JournalError::Damaged(
+                "an undo record names a file PCTwin did not write",
+            ));
+        };
+        let kept: BTreeMap<&str, [u8; 32]> =
+            before.iter().map(|f| (f.path.as_str(), f.hash)).collect();
+        let earlier = if allowed {
+            self.earlier(&kept, path)?.ok()
+        } else {
+            None
+        };
+        let swap = Swap {
+            private,
+            ours,
+            earlier: earlier.as_ref().and_then(|b| b.as_deref()),
+            only_unhide: earlier.is_none(),
+        };
+        Ok(self.settle(to, path, &swap)?.map(|_| ()))
+    }
+
+    /// Puts the settings files of one copy back. `Err` with what to tell the person when a file
+    /// is left part way (nothing is recorded over it).
     fn files(
         &mut self,
         place: &SettingsPlace,
         before: &BTreeMap<&str, [u8; 32]>,
         found: &Found,
-    ) -> Result<EffectUndoOutcome, JournalError> {
+    ) -> Result<Result<EffectUndoOutcome, EffectUndoOutcome>, JournalError> {
         let Found::Files(written) = found else {
             return Err(JournalError::Damaged(
                 "a settings copy's record holds another kind of observation",
@@ -380,33 +498,8 @@ impl One<'_, '_> {
         };
         let written: BTreeMap<&str, [u8; 32]> =
             written.iter().map(|f| (f.path.as_str(), f.hash)).collect();
-        // A file a crash left part way put back is finished first (it may be under its private
-        // name, so the place does not show it).
-        if let Some((path, private)) = self.swapping.take() {
-            let Some(ours) = written.get(path.as_str()) else {
-                return Err(JournalError::Damaged(
-                    "an undo record names a file PCTwin did not write",
-                ));
-            };
-            let earlier = match self.earlier(before, &path)? {
-                Ok(b) => b,
-                Err(outcome) => return Ok(outcome),
-            };
-            let swap = Swap {
-                private: &private,
-                ours: *ours,
-                earlier: earlier.as_deref(),
-            };
-            if self
-                .adapter
-                .replace_settings_file(place, &path, &swap)
-                .is_err()
-            {
-                return Ok(not_done(NOT_PUT_BACK));
-            }
-        }
         let Ok(now) = self.adapter.read_settings_files(place) else {
-            return Ok(not_done(NOT_READ));
+            return Ok(Ok(not_done(NOT_READ)));
         };
         let now: BTreeMap<String, [u8; 32]> = now
             .into_iter()
@@ -433,26 +526,32 @@ impl One<'_, '_> {
             )
         };
         if to_restore.is_empty() {
-            return Ok(match (changed, self.resumed) {
+            return Ok(Ok(match (changed, self.resumed) {
                 (0, false) => EffectUndoOutcome::AsBefore,
                 (0, true) => EffectUndoOutcome::Restored,
                 (n, _) => EffectUndoOutcome::Kept { why: kept_why(n) },
-            });
+            }));
         }
         // Every earlier version is read (and checked) before anything is changed.
         let mut restores = Vec::with_capacity(to_restore.len());
         for path in &to_restore {
             match self.earlier(before, path)? {
                 Ok(bytes) => restores.push((*path, bytes)),
-                Err(outcome) => return Ok(outcome),
+                Err(outcome) => return Ok(Ok(outcome)),
             }
         }
         // Each file is put back only if it is still PCTwin's version, checked and replaced in
         // one step that cannot lose a save made meanwhile; its private name is recorded first.
         let mut put_back = Vec::with_capacity(restores.len());
         for (path, bytes) in &restores {
+            let Some(ours) = written.get(path) else {
+                // PCTwin's copy left no file here, so there is nothing of its own to swap: the
+                // earlier file is not made again over whatever may come; said, not hidden.
+                changed += 1;
+                continue;
+            };
             let Ok(private) = files::private_name() else {
-                return Ok(not_done(NOT_PUT_BACK));
+                return Ok(Ok(not_done(NOT_PUT_BACK)));
             };
             record(
                 self.rebuild,
@@ -465,24 +564,20 @@ impl One<'_, '_> {
                 },
             )?;
             self.resumed = true;
-            let Some(ours) = written.get(path) else {
-                // PCTwin's copy left no file here, so there is nothing of its own to swap: the
-                // earlier file is not made again over whatever may come; said, not hidden.
-                changed += 1;
-                continue;
-            };
             let swap = Swap {
                 private: &private,
                 ours: *ours,
                 earlier: bytes.as_deref(),
+                only_unhide: false,
             };
-            match self.adapter.replace_settings_file(place, path, &swap) {
+            match self.settle(place, path, &swap)? {
                 Ok(Swapped::Restored) => put_back.push(*path),
                 // Gone with nothing before it: as it was before the move.
                 Ok(Swapped::Gone) if bytes.is_none() => put_back.push(*path),
                 // Changed or removed meanwhile: the person's is kept.
                 Ok(Swapped::Kept | Swapped::Gone) => changed += 1,
-                Err(_) => return Ok(not_done(NOT_PUT_BACK)),
+                // Left part way: nothing is recorded over it.
+                Err(stuck) => return Ok(Err(stuck)),
             }
         }
         let restores: Vec<_> = restores
@@ -491,7 +586,7 @@ impl One<'_, '_> {
             .collect();
         // Read back: every file put back is exactly as it was before the move.
         let Ok(back) = self.adapter.read_settings_files(place) else {
-            return Ok(not_done(NOT_READ));
+            return Ok(Ok(not_done(NOT_READ)));
         };
         let back: BTreeMap<String, [u8; 32]> = back
             .into_iter()
@@ -501,15 +596,15 @@ impl One<'_, '_> {
             .iter()
             .any(|(path, _)| back.get(*path) != before.get(path))
         {
-            return Ok(not_done(NOT_PUT_BACK));
+            return Ok(Ok(not_done(NOT_PUT_BACK)));
         }
-        Ok(if changed == 0 {
+        Ok(Ok(if changed == 0 {
             EffectUndoOutcome::Restored
         } else {
             EffectUndoOutcome::Kept {
                 why: kept_why(changed),
             }
-        })
+        }))
     }
 
     /// The earlier version of `path` (none when there was no file), read and checked from what

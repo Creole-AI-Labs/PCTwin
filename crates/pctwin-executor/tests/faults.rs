@@ -312,8 +312,8 @@ fn a_putting_back_that_fails_part_way_keeps_exactly_what_is_left_for_next_time()
             .iter()
             .filter(|d| d.starts_with("restore file"))
             .count(),
-        2,
-        "one put back, one failed"
+        4,
+        "one put back, one failed (tried three times in a row)"
     );
     // Next time, what is left is finished; what was already put back is left as it is.
     laptop.puts_before_failing = None;

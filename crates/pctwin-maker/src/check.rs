@@ -73,7 +73,16 @@ pub struct SystemSignature {
 
 /// The system's own checks. The real ones call the system's tools; tests stand in for them.
 pub trait SystemChecks {
-    fn signature(&self, path: &Path, format: Format, limits: &Limits) -> SystemSignature;
+    /// The signature of `file`, held open by the check, at `path`. A check that can be asked
+    /// about the open file (Windows) must use `file`, never reopen `path`: the bytes trusted are
+    /// then the bytes the check hashed (second review, finding B2).
+    fn signature(
+        &self,
+        file: &File,
+        path: &Path,
+        format: Format,
+        limits: &Limits,
+    ) -> SystemSignature;
     fn malware(
         &self,
         path: &Path,
@@ -226,7 +235,10 @@ pub fn check(
             },
         };
     } else if format == Format::FlatpakRef {
-        // The reference itself names its maker; Flatpak checks the app against its key.
+        // A downloaded reference is a pointer only (second review, finding B1): it can name any
+        // remote, address and key, so it is never trusted and never installed. A Flatpak app is
+        // installed by its ID from the old laptop's own remote and key
+        // ([`crate::linux::flatpak_route`]); here the reference is only read for the report.
         let maker = if first.size > crate::linux::MAX_FLATPAKREF as u64 {
             Err("the Flatpak reference is too large".to_owned())
         } else {
@@ -234,7 +246,11 @@ pub fn check(
         };
         let found = maker.as_ref().ok().cloned();
         let signature = match &maker {
-            Ok(_) => Signature::Trusted,
+            Ok(_) => Signature::NotChecked {
+                why: "a Flatpak reference is only a pointer; PCTwin installs the app by its name \
+                      from the old laptop's own source instead"
+                    .into(),
+            },
             Err(why) => Signature::Broken { why: why.clone() },
         };
         return finish(
@@ -278,7 +294,7 @@ pub fn check(
         );
     }
 
-    let sys = system.signature(path, format, limits);
+    let sys = system.signature(&file, path, format, limits);
     let (signature, found) = match own {
         OwnRead::NotRead => (sys.signature.clone(), sys.maker.clone()),
         own => combine_windows(own, &sys),
@@ -470,6 +486,8 @@ mod tests {
             subject: Subject::default(),
             certificate: Sha256([cert; 32]),
             issuer: String::new(),
+            issuer_organization: None,
+            public_key: None,
         }
     }
 

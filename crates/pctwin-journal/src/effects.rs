@@ -429,8 +429,15 @@ pub enum EffectUndo {
     /// About to put the settings file `path` (inside the effect's place) back, moving it aside
     /// first to the private name `private` (`.pctwin-undo-` and 32 hexadecimal digits) in its
     /// folder: recorded before it is moved, so after a crash undo finds it there and finishes
-    /// (security review finding 2). Recorded again for each file.
+    /// (security review finding 2). Recorded again for each file. While it is the last step,
+    /// the person's file may be under the private name only: nothing but a [`EffectUndo::PutBack`]
+    /// of the same file and name may follow it (second review, finding S1), so an error leaves
+    /// it part way, closing undo waits, and the next undo finishes it with the same name.
     Swapping { path: String, private: String },
+    /// The settings file `path` that was moved aside to `private` is settled: it is back under
+    /// its name (or beside it), or gone with the earlier version in its place, and the private
+    /// name is no longer used. Recorded only after putting it back said so.
+    PutBack { path: String, private: String },
     /// Done; never written over, unless it could not be done this time.
     Done { outcome: EffectUndoOutcome },
 }
@@ -1118,7 +1125,7 @@ fn write_effect(
 fn read_undo(id: u64, bytes: &[u8], key: &TagKey) -> Result<EffectUndo, JournalError> {
     let undo: EffectUndo =
         serde_json::from_slice(unseal(key, UNDO_SEAL, id, bytes)?).map_err(unreadable)?;
-    if let EffectUndo::Swapping { path, private } = &undo
+    if let EffectUndo::Swapping { path, private } | EffectUndo::PutBack { path, private } = &undo
         && (settings_path(path).is_err() || !is_private_name(private))
     {
         return Err(damaged("an undo record names a place outside its folder"));
@@ -1162,13 +1169,32 @@ fn scope_key(scope: Scope) -> String {
 }
 
 /// Whether `next` may be recorded after `before` (none: not started).
+///
+/// A file being put back ([`EffectUndo::Swapping`]) may only be left by saying it is settled,
+/// with the same path and private name ([`EffectUndo::PutBack`]); until then the person's file
+/// may be under the private name only, so nothing else (not even "not done this time") may be
+/// written over it. A settled file may be followed by the next file or the end.
 fn may_follow(before: Option<&EffectUndo>, next: &EffectUndo) -> bool {
-    match before {
-        None => true,
-        Some(EffectUndo::Done { outcome }) => !outcome.is_final(),
-        Some(EffectUndo::Reversing | EffectUndo::Swapping { .. }) => {
+    match (before, next) {
+        (_, EffectUndo::PutBack { path, private }) => matches!(
+            before,
+            Some(EffectUndo::Swapping { path: p, private: x }) if p == path && x == private
+        ),
+        (Some(EffectUndo::Swapping { .. }), _) => false,
+        (None, _) => true,
+        (Some(EffectUndo::Done { outcome }), _) => !outcome.is_final(),
+        (Some(EffectUndo::Reversing | EffectUndo::PutBack { .. }), next) => {
             !matches!(next, EffectUndo::Reversing)
         }
+    }
+}
+
+fn step_name(undo: &EffectUndo) -> &'static str {
+    match undo {
+        EffectUndo::Reversing => "reversing",
+        EffectUndo::Swapping { .. } => "swapping",
+        EffectUndo::PutBack { .. } => "put-back",
+        EffectUndo::Done { .. } => "done",
     }
 }
 
@@ -1232,7 +1258,15 @@ impl Journal {
 
     /// The key that seals this journal's effect records: given when it was opened, or kept by
     /// the system ([`crate::keystore`]), found once and held.
+    /// Refused ([`JournalError::RolledBack`]) when the journal is older than the last sealed write
+    /// PCTwin made to it ([`crate::mark`]).
     pub(crate) fn record_key(&self) -> Result<TagKey, JournalError> {
+        let key = self.record_key_only()?;
+        self.check_mark(&key)?;
+        Ok(key)
+    }
+
+    fn record_key_only(&self) -> Result<TagKey, JournalError> {
         let mut held = self
             .record_key
             .held
@@ -1303,7 +1337,7 @@ impl Journal {
             unfinished.insert(id, ()).map_err(storage)?;
             id
         };
-        tx.commit().map_err(storage)?;
+        self.commit_sealed(tx, &key)?;
         Ok(id)
     }
 
@@ -1374,7 +1408,7 @@ impl Journal {
                 unfinished.remove(id).map_err(storage)?;
             }
         }
-        tx.commit().map_err(storage)
+        self.commit_sealed(tx, &key)
     }
 
     /// One effect, if there is one with this number.
@@ -1482,7 +1516,7 @@ impl Journal {
         undo: &EffectUndo,
     ) -> Result<(), JournalError> {
         self.check_right(right)?;
-        if let EffectUndo::Swapping { path, private } = undo
+        if let EffectUndo::Swapping { path, private } | EffectUndo::PutBack { path, private } = undo
             && (settings_path(path).is_err() || !is_private_name(private))
         {
             return Err(JournalError::BadName);
@@ -1511,21 +1545,13 @@ impl Journal {
                 .transpose()?;
             if !may_follow(before.as_ref(), undo) {
                 return Err(JournalError::OutOfOrder {
-                    from: match before {
-                        Some(EffectUndo::Reversing) => "reversing",
-                        Some(EffectUndo::Swapping { .. }) => "swapping",
-                        _ => "done",
-                    },
-                    to: match undo {
-                        EffectUndo::Reversing => "reversing",
-                        EffectUndo::Swapping { .. } => "swapping",
-                        EffectUndo::Done { .. } => "done",
-                    },
+                    from: before.as_ref().map_or("none", step_name),
+                    to: step_name(undo),
                 });
             }
             write_undo(&mut table, id, undo, &key)?;
         }
-        tx.commit().map_err(storage)
+        self.commit_sealed(tx, &key)
     }
 
     /// How far undoing effect `id` got, if it was started.
@@ -1541,6 +1567,8 @@ impl Journal {
     /// Effects whose undo is part way, in order (closing undo refuses while there are any). One
     /// whose record cannot be checked counts as part way.
     pub fn effects_part_way(&self) -> Result<Vec<u64>, JournalError> {
+        // A journal put back from an older copy says nothing about what is part way.
+        self.refuse_if_rolled_back()?;
         let tx = self.db.begin_read().map_err(storage)?;
         let table = tx.open_table(EFFECT_UNDO).map_err(storage)?;
         let key = self.key_if_any(&table);

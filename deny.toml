@@ -87,7 +87,11 @@ deny = [
   # through the system's own prompt and makes its private channel and token (since 22 October;
   # the unsafe code stays fenced inside pctwin-helper-os, covered by the helper's reviews).
   # Only it may use Service Management, and the autostart plugin's own wrapper on a Mac.
-  { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app"] },
+  # Also the maker check (Windows' own signature check on a held file, and where Defender is) and
+  # the journal (whether a disk can be unplugged), added 27 October 2026 after the second
+  # security review (findings B2, B3 and the low placement finding), awaiting the user's
+  # approval: the unsafe code itself stays fenced in pctwin-helper-os.
+  { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app", "pctwin-maker", "pctwin-journal"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os", "smappservice-rs"] },
   # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
   { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },

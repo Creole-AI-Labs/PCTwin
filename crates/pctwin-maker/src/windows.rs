@@ -1,9 +1,16 @@
-//! Windows' own checks: whether Windows trusts the signature (WinVerifyTrust, reached through
-//! PowerShell's `Get-AuthenticodeSignature`, so PCTwin needs no unsafe code of its own for it), and
-//! Microsoft Defender's single-file scan.
+//! Windows' own checks, asked of Windows itself with no tool or script in between (second
+//! review, finding B3: PowerShell loads modules from the person's own folders first, even with
+//! `-NoProfile`, and `SystemRoot` and `ProgramFiles` are values any program can set, so the
+//! answer could come from code the person, or anything running as them, put there):
 //!
-//! The file's path is never part of any command text: PowerShell reads it from an environment
-//! value, and Defender gets it as one argument.
+//! - Whether Windows trusts the signature: `WinVerifyTrust` on the file PCTwin holds open
+//!   ([`pctwin_helper_os::verify_file_trust`]), which reads the bytes through that handle, so the
+//!   bytes trusted are the bytes hashed (finding B2).
+//! - Microsoft Defender's state: from Windows' management service (the `MSFT_MpComputerStatus`
+//!   class Defender publishes, the source `Get-MpComputerStatus` itself reads).
+//! - The scan: Defender's own `MpCmdRun.exe`, found where Windows records Defender
+//!   ([`pctwin_helper_os::defender_scanner`]) and started with only the system's own
+//!   environment values ([`pctwin_helper_os::minimal_env`]). The file is named as one argument.
 //!
 //! Defender's scan has no published table of exit codes. Its meaning is pinned by running it on
 //! this laptop (26 October 2026, Defender platform 4.18.26090.9, engine 1.1.26090.9):
@@ -14,95 +21,42 @@
 //! So the exit code alone cannot tell a finding from a failure; both the code and the matching
 //! line are required, and anything else is "not fully checked". With `-DisableRemediation` the
 //! scan writes no detection event (1116) to Defender's log, so the log cannot be the source.
+//!
+//! What the scan does not prove: Defender reads the file by its name. The answer counts for an
+//! install only when the file is the administrator helper's own copy in its administrators-only
+//! folder, held so nobody can change it (the helper produces that verdict itself; see
+//! `pctwin-helper`'s broker).
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
 
 use crate::facts::{Coverage, Malware, Signature, WindowsSigner};
-use crate::run::{Call, RunError, Runner};
+use crate::run::{Call, RunError};
 use crate::signer::signer_from_der;
-
-/// The environment value PowerShell reads the file's path from.
-pub const PATH_VAR: &str = "PCTWIN_MAKER_FILE";
 
 /// How old Defender's threat knowledge may be, in days, before a scan is not enough (T21-033).
 pub const MAX_SIGNATURE_AGE_DAYS: u64 = 7;
 
-const SIGNATURE_SCRIPT: &str = "$ErrorActionPreference = 'Stop'
-$s = Get-AuthenticodeSignature -LiteralPath $env:PCTWIN_MAKER_FILE
-$c = $s.SignerCertificate
-$der = ''
-if ($c) { $der = [Convert]::ToBase64String($c.RawData) }
-[pscustomobject]@{ status = [string]$s.Status; kind = [string]$s.SignatureType; message = [string]$s.StatusMessage; signer = $der } | ConvertTo-Json -Compress";
+/// Windows: the file has no signature inside it (it may be signed through a catalog only).
+pub const TRUST_E_NOSIGNATURE: i32 = 0x800B_0100_u32 as i32;
+/// Windows: the file's bytes are not the bytes signed.
+pub const TRUST_E_BAD_DIGEST: i32 = 0x8009_6010_u32 as i32;
+/// Windows: it does not know this kind of file.
+pub const TRUST_E_SUBJECT_FORM_UNKNOWN: i32 = 0x800B_0003_u32 as i32;
 
-const STATUS_SCRIPT: &str = "$ErrorActionPreference = 'Stop'
-Get-MpComputerStatus | Select-Object AMServiceEnabled, AntivirusEnabled, AMRunningMode, AntivirusSignatureAge, AMEngineVersion, AntivirusSignatureVersion | ConvertTo-Json -Compress";
-
-fn system_root() -> PathBuf {
-    std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
-}
-
-fn program_files() -> PathBuf {
-    std::env::var_os("ProgramFiles")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"))
-}
-
-/// Windows PowerShell 5.1, which every Windows 10 and 11 has.
-pub fn powershell() -> PathBuf {
-    system_root().join(r"System32\WindowsPowerShell\v1.0\powershell.exe")
-}
-
-/// Defender's command-line tool.
-pub fn mpcmdrun() -> PathBuf {
-    program_files().join(r"Windows Defender\MpCmdRun.exe")
-}
-
-/// A fixed script, passed encoded so nothing in it is read by the command line.
-fn powershell_call(script: &str, env: Vec<(OsString, OsString)>, timeout: Duration) -> Call {
-    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+/// The call that scans one file with `scanner` (Defender's `MpCmdRun.exe`), changing nothing,
+/// with the environment `env` and nothing else.
+pub fn scan_call(
+    scanner: &Path,
+    path: &Path,
+    env: Vec<(OsString, OsString)>,
+    timeout: Duration,
+) -> Call {
     Call {
-        program: powershell(),
-        args: [
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-EncodedCommand",
-        ]
-        .into_iter()
-        .map(OsString::from)
-        .chain([OsString::from(STANDARD.encode(utf16))])
-        .collect(),
-        env,
-        timeout,
-    }
-}
-
-/// The call that asks Windows whether it trusts the file's signature.
-pub fn signature_call(path: &Path, timeout: Duration) -> Call {
-    powershell_call(
-        SIGNATURE_SCRIPT,
-        vec![(PATH_VAR.into(), path.as_os_str().to_owned())],
-        timeout,
-    )
-}
-
-/// The call that asks for Defender's state.
-pub fn status_call(timeout: Duration) -> Call {
-    powershell_call(STATUS_SCRIPT, vec![], timeout)
-}
-
-/// The call that scans one file, changing nothing.
-pub fn scan_call(path: &Path, timeout: Duration) -> Call {
-    Call {
-        program: mpcmdrun(),
+        program: scanner.to_path_buf(),
         args: vec![
             "-Scan".into(),
             "-ScanType".into(),
@@ -111,7 +65,7 @@ pub fn scan_call(path: &Path, timeout: Duration) -> Call {
             path.as_os_str().to_owned(),
             "-DisableRemediation".into(),
         ],
-        env: vec![],
+        env,
         timeout,
     }
 }
@@ -120,62 +74,64 @@ pub fn scan_call(path: &Path, timeout: Duration) -> Call {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WinTrust {
     pub signature: Signature,
-    /// Whether the signature is inside the file (not through a Windows catalog).
+    /// Whether the signature is inside the file. Windows is asked about the file alone, never a
+    /// catalog, so a trusted answer is always about the maker's own signature inside it.
     pub embedded: bool,
-    /// The signer Windows read, when there is one.
+    /// The signer Windows read, when it trusts the signature.
     pub signer: Option<Result<WindowsSigner, String>>,
 }
 
-#[derive(Deserialize)]
-struct SigJson {
-    status: String,
-    kind: String,
-    message: String,
-    signer: String,
+/// Reads Windows' answer (`code`, 0 when trusted) and, when trusted, the signing certificate's
+/// bytes as Windows read them.
+pub fn trust_from(code: i32, signer: Option<&[u8]>) -> WinTrust {
+    match code {
+        0 => WinTrust {
+            signature: Signature::Trusted,
+            embedded: true,
+            signer: Some(
+                signer
+                    .ok_or_else(|| "Windows trusted the file but named no signer".to_owned())
+                    .and_then(signer_from_der),
+            ),
+        },
+        TRUST_E_NOSIGNATURE => WinTrust {
+            signature: Signature::Missing,
+            embedded: false,
+            signer: None,
+        },
+        TRUST_E_BAD_DIGEST => WinTrust {
+            signature: Signature::Broken {
+                why: "Windows says the file was changed after it was signed".into(),
+            },
+            embedded: true,
+            signer: None,
+        },
+        TRUST_E_SUBJECT_FORM_UNKNOWN => WinTrust {
+            signature: Signature::NotChecked {
+                why: "Windows does not check this kind of file".into(),
+            },
+            embedded: false,
+            signer: None,
+        },
+        other => WinTrust {
+            signature: Signature::NotTrusted {
+                why: format!(
+                    "Windows does not trust this signature (code {:#010x})",
+                    other as u32
+                ),
+            },
+            embedded: true,
+            signer: None,
+        },
+    }
 }
 
-/// Reads PowerShell's answer about a signature.
-pub fn parse_signature(ran: &Result<crate::run::Ran, RunError>) -> WinTrust {
-    let not_checked = |why: String| WinTrust {
-        signature: Signature::NotChecked { why },
-        embedded: false,
-        signer: None,
-    };
-    let ran = match ran {
-        Ok(r) => r,
-        Err(e) => return not_checked(format!("Windows' signature check gave no answer: {e}")),
-    };
-    if ran.code != Some(0) {
-        return not_checked(format!(
-            "Windows' signature check failed: {}",
-            first_line(&ran.stderr)
-        ));
-    }
-    let Ok(j) = serde_json::from_str::<SigJson>(ran.stdout.trim()) else {
-        return not_checked("Windows' signature check gave an answer PCTwin cannot read".into());
-    };
-    let signer = (!j.signer.is_empty()).then(|| {
-        STANDARD
-            .decode(j.signer.as_bytes())
-            .map_err(|e| e.to_string())
-            .and_then(|der| signer_from_der(&der))
-    });
-    let signature = match j.status.as_str() {
-        "Valid" => Signature::Trusted,
-        "NotSigned" => Signature::Missing,
-        "HashMismatch" => Signature::Broken {
-            why: "Windows says the file was changed after it was signed".into(),
-        },
-        "NotTrusted" | "UnknownError" | "Incompatible" => Signature::NotTrusted { why: j.message },
-        other => Signature::NotChecked {
-            why: format!("Windows could not check this file ({other})"),
-        },
-    };
-    WinTrust {
-        signature,
-        embedded: j.kind == "Authenticode",
-        signer,
-    }
+/// Asks Windows itself about the signature inside `file`, held open by the caller (`path` names
+/// it for the system's records only).
+#[cfg(windows)]
+pub fn check_signature(file: &std::fs::File, path: &Path) -> WinTrust {
+    let t = pctwin_helper_os::verify_file_trust(file, path);
+    trust_from(t.code, t.signer.as_deref())
 }
 
 /// Defender's state.
@@ -190,36 +146,28 @@ pub enum DefenderState {
     Unavailable(String),
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct StatusJson {
+/// Defender's state as Windows' management service gives it (`MSFT_MpComputerStatus`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename = "MSFT_MpComputerStatus", rename_all = "PascalCase")]
+pub struct DefenderStatus {
     #[serde(rename = "AMServiceEnabled")]
-    am_service_enabled: Option<bool>,
-    antivirus_enabled: Option<bool>,
+    pub am_service_enabled: Option<bool>,
+    pub antivirus_enabled: Option<bool>,
     #[serde(rename = "AMRunningMode")]
-    am_running_mode: Option<String>,
-    antivirus_signature_age: Option<u64>,
+    pub am_running_mode: Option<String>,
+    pub antivirus_signature_age: Option<u64>,
     #[serde(rename = "AMEngineVersion")]
-    am_engine_version: Option<String>,
-    antivirus_signature_version: Option<String>,
+    pub am_engine_version: Option<String>,
+    pub antivirus_signature_version: Option<String>,
 }
 
 /// Reads Defender's state.
-pub fn parse_status(ran: &Result<crate::run::Ran, RunError>) -> DefenderState {
-    let ran = match ran {
-        Ok(r) if r.code == Some(0) => r,
-        Ok(r) => {
-            return DefenderState::Unavailable(format!(
-                "Microsoft Defender did not answer: {}",
-                first_line(&r.stderr)
-            ));
+pub fn judge_status(status: Result<DefenderStatus, String>) -> DefenderState {
+    let j = match status {
+        Ok(j) => j,
+        Err(why) => {
+            return DefenderState::Unavailable(format!("Microsoft Defender did not answer: {why}"));
         }
-        Err(e) => {
-            return DefenderState::Unavailable(format!("Microsoft Defender did not answer: {e}"));
-        }
-    };
-    let Ok(j) = serde_json::from_str::<StatusJson>(ran.stdout.trim()) else {
-        return DefenderState::Unavailable("Microsoft Defender's state cannot be read".into());
     };
     if j.am_service_enabled != Some(true) || j.antivirus_enabled != Some(true) {
         return DefenderState::Unavailable("Microsoft Defender's scanning is turned off".into());
@@ -239,6 +187,33 @@ pub fn parse_status(ran: &Result<crate::run::Ran, RunError>) -> DefenderState {
             j.am_running_mode.as_deref().unwrap_or("unknown"),
         ),
         signature_age_days: age,
+    }
+}
+
+/// Asks Windows' management service for Defender's state, on a thread of its own so the
+/// caller's own COM setup never matters, trying a few times (the service can be busy).
+#[cfg(windows)]
+pub fn defender_status() -> Result<DefenderStatus, String> {
+    let mut last = String::new();
+    for wait in [0u64, 200, 1000] {
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+        match std::thread::spawn(ask_defender_status).join() {
+            Ok(Ok(s)) => return Ok(s),
+            Ok(Err(e)) => last = e,
+            Err(_) => last = "the question stopped part way".into(),
+        }
+    }
+    Err(last)
+}
+
+#[cfg(windows)]
+fn ask_defender_status() -> Result<DefenderStatus, String> {
+    let wmi = wmi::WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Defender")
+        .map_err(|e| e.to_string())?;
+    let mut all: Vec<DefenderStatus> = wmi.query().map_err(|e| e.to_string())?;
+    match (all.pop(), all.is_empty()) {
+        (Some(one), true) => Ok(one),
+        _ => Err("Microsoft Defender's state is not one answer".into()),
     }
 }
 
@@ -323,18 +298,26 @@ fn found_some(tail: &str) -> bool {
         .is_some_and(|n| n > 0)
 }
 
-/// Asks Windows about a file's signature.
-pub fn check_signature(runner: &dyn Runner, path: &Path, timeout: Duration) -> WinTrust {
-    parse_signature(&runner.run(&signature_call(path, timeout)))
-}
-
-/// Scans a file with Defender.
-pub fn scan(runner: &dyn Runner, path: &Path, timeout: Duration) -> Malware {
-    let state = parse_status(&runner.run(&status_call(Duration::from_secs(60))));
+/// Scans a file with Defender: its state first, then its own scanner on the file.
+#[cfg(windows)]
+pub fn scan(runner: &dyn crate::run::Runner, path: &Path, timeout: Duration) -> Malware {
+    let state = judge_status(defender_status());
     if let DefenderState::Unavailable(why) = state {
         return Malware::Unavailable { why };
     }
-    let ran = runner.run(&scan_call(path, timeout));
+    let (scanner, env) = match (
+        pctwin_helper_os::defender_scanner(),
+        pctwin_helper_os::minimal_env(),
+    ) {
+        (Ok(s), Ok(e)) => (s, e),
+        _ => {
+            return Malware::Unavailable {
+                why: "Microsoft Defender's scanner could not be found where Windows keeps it"
+                    .into(),
+            };
+        }
+    };
+    let ran = runner.run(&scan_call(&scanner, path, env, timeout));
     parse_scan(path, &state, &ran)
 }
 
@@ -458,123 +441,125 @@ mod tests {
         ));
     }
 
-    // Shape captured from this laptop's Get-MpComputerStatus, 26 October 2026.
-    const STATUS: &str = r#"{"AMServiceEnabled":true,"AntivirusEnabled":true,"AMRunningMode":"Normal","AntivirusSignatureAge":0,"AMEngineVersion":"1.1.26090.9","AntivirusSignatureVersion":"1.461.209.0"}"#;
+    // As this laptop's Defender reported itself, 26 October 2026.
+    fn status() -> DefenderStatus {
+        DefenderStatus {
+            am_service_enabled: Some(true),
+            antivirus_enabled: Some(true),
+            am_running_mode: Some("Normal".into()),
+            antivirus_signature_age: Some(0),
+            am_engine_version: Some("1.1.26090.9".into()),
+            antivirus_signature_version: Some("1.461.209.0".into()),
+        }
+    }
 
     #[test]
     fn defender_state() {
         assert_eq!(
-            parse_status(&ran(0, STATUS)),
+            judge_status(Ok(status())),
             DefenderState::Ready {
                 description: "Microsoft Defender (engine 1.1.26090.9, threat knowledge 1.461.209.0, Normal mode)".into(),
                 signature_age_days: 0
             }
         );
-        let off = STATUS.replace(r#""AntivirusEnabled":true"#, r#""AntivirusEnabled":false"#);
+        for change in [
+            |s: &mut DefenderStatus| s.antivirus_enabled = Some(false),
+            |s: &mut DefenderStatus| s.antivirus_enabled = None,
+            |s: &mut DefenderStatus| s.am_service_enabled = Some(false),
+            |s: &mut DefenderStatus| s.am_service_enabled = None,
+            |s: &mut DefenderStatus| s.antivirus_signature_age = None,
+        ] {
+            let mut s = status();
+            change(&mut s);
+            assert!(
+                matches!(judge_status(Ok(s.clone())), DefenderState::Unavailable(_)),
+                "{s:?}"
+            );
+        }
         assert!(matches!(
-            parse_status(&ran(0, &off)),
-            DefenderState::Unavailable(_)
-        ));
-        let svc = STATUS.replace(r#""AMServiceEnabled":true"#, r#""AMServiceEnabled":false"#);
-        assert!(matches!(
-            parse_status(&ran(0, &svc)),
-            DefenderState::Unavailable(_)
-        ));
-        let undated = STATUS.replace(r#""AntivirusSignatureAge":0,"#, "");
-        assert!(matches!(
-            parse_status(&ran(0, &undated)),
-            DefenderState::Unavailable(_)
-        ));
-        assert!(matches!(
-            parse_status(&ran(1, STATUS)),
-            DefenderState::Unavailable(_)
-        ));
-        assert!(matches!(
-            parse_status(&ran(0, "not json")),
-            DefenderState::Unavailable(_)
-        ));
-        assert!(matches!(
-            parse_status(&Err(RunError::TimedOut)),
+            judge_status(Err("no service".into())),
             DefenderState::Unavailable(_)
         ));
     }
 
-    fn sig_json(status: &str, kind: &str, signer: &str) -> String {
-        format!(r#"{{"status":"{status}","kind":"{kind}","message":"msg","signer":"{signer}"}}"#)
+    /// The state is read from Windows' management service, for real (second review, B3).
+    #[cfg(windows)]
+    #[test]
+    fn defenders_state_comes_from_windows_itself() {
+        let s = defender_status().expect("Defender's state on this laptop");
+        assert!(s.am_service_enabled.is_some(), "{s:?}");
+        assert!(s.antivirus_signature_age.is_some(), "{s:?}");
     }
 
     #[test]
-    fn signature_statuses() {
-        let cases = [
-            ("Valid", Signature::Trusted),
-            ("NotSigned", Signature::Missing),
-            (
-                "HashMismatch",
-                Signature::Broken {
-                    why: "Windows says the file was changed after it was signed".into(),
-                },
-            ),
-            ("NotTrusted", Signature::NotTrusted { why: "msg".into() }),
-            ("UnknownError", Signature::NotTrusted { why: "msg".into() }),
-            ("Incompatible", Signature::NotTrusted { why: "msg".into() }),
-        ];
-        for (status, want) in cases {
-            let t = parse_signature(&ran(0, &sig_json(status, "Authenticode", "")));
-            assert_eq!(t.signature, want, "{status}");
-            assert!(t.embedded);
-            assert_eq!(t.signer, None);
-        }
-        let t = parse_signature(&ran(0, &sig_json("NotSupportedFileFormat", "None", "")));
+    fn signature_answers() {
+        let t = trust_from(0, None);
+        assert_eq!(t.signature, Signature::Trusted);
+        assert!(t.embedded);
+        assert!(matches!(t.signer, Some(Err(_))));
+        let t = trust_from(0, Some(b"not a certificate"));
+        assert!(matches!(t.signer, Some(Err(_))));
+        let t = trust_from(TRUST_E_NOSIGNATURE, None);
+        assert_eq!(t.signature, Signature::Missing);
+        assert!(!t.embedded);
+        assert_eq!(t.signer, None);
+        let t = trust_from(TRUST_E_BAD_DIGEST, Some(b"x"));
+        assert!(matches!(t.signature, Signature::Broken { .. }));
+        assert_eq!(t.signer, None);
+        let t = trust_from(TRUST_E_SUBJECT_FORM_UNKNOWN, None);
         assert!(matches!(t.signature, Signature::NotChecked { .. }));
         assert!(!t.embedded);
-        let catalog = parse_signature(&ran(0, &sig_json("Valid", "Catalog", "")));
-        assert!(!catalog.embedded);
-        assert!(matches!(
-            parse_signature(&ran(1, "")).signature,
-            Signature::NotChecked { .. }
-        ));
-        assert!(matches!(
-            parse_signature(&ran(0, "garbage")).signature,
-            Signature::NotChecked { .. }
-        ));
-        assert!(matches!(
-            parse_signature(&Err(RunError::TimedOut)).signature,
-            Signature::NotChecked { .. }
-        ));
-        // A signer that is not base64, or not a certificate, is read as an error, not dropped.
-        let bad = parse_signature(&ran(0, &sig_json("Valid", "Authenticode", "!!!")));
-        assert!(matches!(bad.signer, Some(Err(_))));
-        let bad = parse_signature(&ran(0, &sig_json("Valid", "Authenticode", "AAAA")));
-        assert!(matches!(bad.signer, Some(Err(_))));
+        // An untrusted root, a revoked or expired certificate, an explicit distrust.
+        for code in [
+            0x800B_0109_u32,
+            0x800B_010C,
+            0x800B_0101,
+            0x800B_0111,
+            0x8009_2010,
+        ] {
+            let t = trust_from(code as i32, Some(b"x"));
+            assert!(
+                matches!(&t.signature, Signature::NotTrusted { why } if why.contains(&format!("{code:#010x}"))),
+                "{t:?}"
+            );
+            assert_eq!(t.signer, None);
+        }
+    }
+
+    /// Second review, finding B3: no answer comes from PowerShell or an environment value any
+    /// more. (The words are put together here so this test's own text does not hold them.)
+    #[test]
+    fn no_script_host_or_environment_value_is_used() {
+        let words = [
+            ["power", "shell.exe"].concat(),
+            ["-encoded", "command"].concat(),
+            ["get-authenticode", "signature"].concat(),
+            ["env::", "var"].concat(),
+        ];
+        for src in [
+            include_str!("windows.rs"),
+            include_str!("native.rs"),
+            include_str!("check.rs"),
+            include_str!("run.rs"),
+        ] {
+            let lower = src.to_ascii_lowercase();
+            for word in &words {
+                assert!(!lower.contains(word.as_str()), "{word}");
+            }
+        }
     }
 
     #[test]
-    fn the_path_never_enters_the_command_text() {
+    fn the_scan_is_one_fixed_call_with_only_the_given_environment() {
         let p = Path::new(r"C:\x\'; Remove-Item -Recurse C:\ ; '.exe");
-        let c = signature_call(p, Duration::from_secs(1));
-        assert!(
-            c.args
-                .iter()
-                .all(|a| !a.to_string_lossy().contains("Remove-Item"))
-        );
-        assert_eq!(
-            c.env,
-            vec![(OsString::from(PATH_VAR), p.as_os_str().to_owned())]
-        );
-        assert!(
-            c.program
-                .ends_with(r"WindowsPowerShell\v1.0\powershell.exe")
-        );
-        let encoded = c.args.last().unwrap().to_string_lossy().into_owned();
-        let bytes = STANDARD.decode(encoded).unwrap();
-        let utf16: Vec<u16> = bytes
-            .chunks(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
-        assert_eq!(String::from_utf16(&utf16).unwrap(), SIGNATURE_SCRIPT);
-        let s = scan_call(p, Duration::from_secs(1));
+        let scanner =
+            Path::new(r"C:\ProgramData\Microsoft\Windows Defender\Platform\4\MpCmdRun.exe");
+        let env = vec![(OsString::from("SystemRoot"), OsString::from(r"C:\Windows"))];
+        let s = scan_call(scanner, p, env.clone(), Duration::from_secs(1));
+        assert_eq!(s.program, scanner);
         assert_eq!(s.args[4], p.as_os_str());
         assert_eq!(s.args.len(), 6);
         assert_eq!(s.args[5], "-DisableRemediation");
+        assert_eq!(s.env, env);
     }
 }

@@ -17,8 +17,9 @@ pub const MAX_OUTPUT: usize = 1024 * 1024;
 pub struct Call {
     pub program: PathBuf,
     pub args: Vec<OsString>,
-    /// Extra environment values (a file's path is passed this way to PowerShell, so it is never
-    /// part of the command text).
+    /// The tool's whole environment: nothing of this process's own is passed on (a value such
+    /// as `PATH` or `SystemRoot` set by whoever started PCTwin could make a tool load other
+    /// code; second review, finding B3).
     pub env: Vec<(OsString, OsString)>,
     pub timeout: Duration,
 }
@@ -81,6 +82,7 @@ impl Runner for SystemRunner {
     fn run(&self, call: &Call) -> Result<Ran, RunError> {
         let mut cmd = Command::new(&call.program);
         cmd.args(&call.args)
+            .env_clear()
             .envs(call.env.iter().map(|(k, v)| (k, v)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -165,14 +167,30 @@ mod tests {
         assert_eq!(r.code, Some(3));
         assert!(r.stdout.contains("kept"), "{r:?}");
         assert!(r.stderr.contains("oops"), "{r:?}");
+        // Nothing of this process's own environment is passed on (second review, B3).
+        #[cfg(windows)]
+        let r = SystemRunner
+            .run(&shell("echo [%USERNAME%] [%PATH%]"))
+            .unwrap();
+        #[cfg(unix)]
+        let r = SystemRunner
+            .run(&shell("echo \"[$HOME] [$PATH]\""))
+            .unwrap();
+        #[cfg(windows)]
+        assert!(r.stdout.contains("[%USERNAME%] [%PATH%]"), "{r:?}");
+        #[cfg(unix)]
+        assert!(
+            !r.stdout.contains("/home") && !r.stdout.contains("/Users"),
+            "{r:?}"
+        );
     }
 
     #[test]
     fn a_tool_that_hangs_is_stopped() {
         #[cfg(windows)]
-        let mut c = shell("ping -n 30 127.0.0.1 > nul");
+        let mut c = shell(r"C:\Windows\System32\PING.EXE -n 30 127.0.0.1 > nul");
         #[cfg(unix)]
-        let mut c = shell("sleep 30");
+        let mut c = shell("/bin/sleep 30");
         c.timeout = Duration::from_millis(300);
         let start = Instant::now();
         assert_eq!(SystemRunner.run(&c), Err(RunError::TimedOut));

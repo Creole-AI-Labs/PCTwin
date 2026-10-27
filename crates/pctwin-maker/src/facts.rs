@@ -66,6 +66,14 @@ pub struct WindowsSigner {
     pub certificate: Sha256,
     /// The issuer, as text, for the report only; never used to decide.
     pub issuer: String,
+    /// The organisation named in the issuer (the certificate authority's company), which ties a
+    /// renewed certificate to the same authority family ([`compare`]).
+    #[serde(default)]
+    pub issuer_organization: Option<String>,
+    /// SHA-256 of the certificate's public key (its whole SubjectPublicKeyInfo): a renewal that
+    /// kept the same key is the same maker whichever authority certified it.
+    #[serde(default)]
+    pub public_key: Option<Sha256>,
 }
 
 /// A Mac maker: Apple's Team ID for the developer.
@@ -92,6 +100,10 @@ pub enum LinuxSource {
 /// The maker of an app, taken from the old laptop's own copy.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "system")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a handful of makers per move; boxing would only add noise"
+)]
 pub enum Maker {
     Windows(WindowsSigner),
     Mac(MacTeam),
@@ -425,11 +437,20 @@ pub fn approved_bytes_match(decision: &Decision, found: &Bytes) -> bool {
 
 /// Compares the maker found in the download with the old laptop's copy.
 ///
-/// Windows: the same certificate, or a renewed one naming the same company in the same place
-/// (common name, organisation and country must be there and equal; locality, state, registration
-/// number and jurisdiction must be equal wherever both certificates carry them). A company name
-/// alone, or a name in a different place, is not the same maker. This is only meaningful together
-/// with a trusted signature, which [`Verdict::decide`] requires separately.
+/// Windows: the same certificate, or a renewed one (second review, finding B4) that
+///
+/// - names the same company in the same place: every part of the name the old certificate
+///   carries (common name, organisation, locality, state, country, registration number,
+///   jurisdiction) is there on the new one and exactly equal (so a trailing dot, another script's
+///   look-alike letter or another case is another maker); the old one must carry at least the
+///   common name, organisation and country; and
+/// - is tied to the old one: the same public key, or certified by the same authority family (the
+///   same organisation named as issuer on both).
+///
+/// The same name in the same place from another authority with another key is "unknown", never
+/// yes: a second company of that name could have bought it. Anything else is another maker. This
+/// is only meaningful together with a trusted signature, which [`Verdict::decide`] requires
+/// separately.
 pub fn compare(old: &Maker, found: &Maker) -> SameMaker {
     match (old, found) {
         (Maker::Windows(a), Maker::Windows(b)) => compare_windows(a, b),
@@ -466,29 +487,41 @@ fn compare_windows(old: &WindowsSigner, found: &WindowsSigner) -> SameMaker {
         };
     }
     let (a, b) = (&old.subject, &found.subject);
-    let required = |x: &Option<String>, y: &Option<String>| match (x, y) {
-        (Some(x), Some(y)) => !x.trim().is_empty() && x == y,
-        _ => false,
-    };
-    let where_both = |x: &Option<String>, y: &Option<String>| match (x, y) {
+    let named = |x: &Option<String>| x.as_ref().is_some_and(|x| !x.trim().is_empty());
+    // Every part the old certificate carries is on the new one, exactly.
+    let kept = |x: &Option<String>, y: &Option<String>| match (x, y) {
+        (None, _) => true,
         (Some(x), Some(y)) => x == y,
-        _ => true,
+        (Some(_), None) => false,
     };
-    let same = required(&a.common_name, &b.common_name)
-        && required(&a.organization, &b.organization)
-        && required(&a.country, &b.country)
-        && where_both(&a.locality, &b.locality)
-        && where_both(&a.state, &b.state)
-        && where_both(&a.registration_number, &b.registration_number)
-        && where_both(&a.jurisdiction_country, &b.jurisdiction_country)
-        && where_both(&a.jurisdiction_state, &b.jurisdiction_state);
-    if same {
+    let same_name = named(&a.common_name)
+        && named(&a.organization)
+        && named(&a.country)
+        && kept(&a.common_name, &b.common_name)
+        && kept(&a.organization, &b.organization)
+        && kept(&a.country, &b.country)
+        && kept(&a.locality, &b.locality)
+        && kept(&a.state, &b.state)
+        && kept(&a.registration_number, &b.registration_number)
+        && kept(&a.jurisdiction_country, &b.jurisdiction_country)
+        && kept(&a.jurisdiction_state, &b.jurisdiction_state);
+    if !same_name {
+        return SameMaker::No {
+            found: describe_subject(b),
+        };
+    }
+    let same_key = old.public_key.is_some() && old.public_key == found.public_key;
+    let same_authority =
+        named(&old.issuer_organization) && old.issuer_organization == found.issuer_organization;
+    if same_key || same_authority {
         SameMaker::Yes {
             by: MatchedBy::SameCompany,
         }
     } else {
-        SameMaker::No {
-            found: describe_subject(b),
+        SameMaker::Unknown {
+            why: "a company with the same name signed it, but with a new key from another \
+                  certificate authority, so PCTwin cannot tell it is the same maker"
+                .into(),
         }
     }
 }

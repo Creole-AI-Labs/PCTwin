@@ -1,5 +1,5 @@
 //! The maker check on this Windows laptop, for real: Windows' own signed programs and installers,
-//! Windows' signature check (PowerShell's Get-AuthenticodeSignature) and Microsoft Defender.
+//! Windows' own signature check (WinVerifyTrust on the held file) and Microsoft Defender.
 //! Where a file or Defender is missing (a stripped-down machine), the test says so and checks
 //! what it can.
 
@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 
 use pctwin_maker::facts::*;
 use pctwin_maker::pe::{PeSignature, read_pe};
-use pctwin_maker::run::SystemRunner;
-use pctwin_maker::windows::{DefenderState, parse_status, status_call};
+use pctwin_maker::windows::{DefenderState, defender_status, judge_status};
 use pctwin_maker::{Expected, Limits, NativeChecks, SystemChecks, check, windows_maker_of};
 
 fn system32(name: &str) -> PathBuf {
@@ -47,8 +46,7 @@ fn laptop_arch() -> Arch {
 }
 
 fn defender_ready() -> bool {
-    use pctwin_maker::run::Runner;
-    let state = parse_status(&SystemRunner.run(&status_call(std::time::Duration::from_secs(60))));
+    let state = judge_status(defender_status());
     eprintln!("Defender: {state:?}");
     matches!(state, DefenderState::Ready { .. })
 }
@@ -61,17 +59,15 @@ fn reads_the_maker_of_real_signed_programs_as_windows_does() {
         let ours = windows_maker_of(&p).unwrap();
         eprintln!("{}: {:?}", p.display(), ours.subject);
         assert!(ours.subject.organization.is_some(), "{}", p.display());
-        let sys = native.signature(&p, Format::WindowsProgram, &Limits::default());
+        let sys = native.signature(
+            &std::fs::File::open(&p).unwrap(),
+            &p,
+            Format::WindowsProgram,
+            &Limits::default(),
+        );
         assert_eq!(sys.signature, Signature::Trusted, "{}", p.display());
-        if !sys.embedded {
-            // Also in a Windows catalog: Windows reports the catalog's signer, not the file's.
-            eprintln!("{}: Windows checked it through a catalog", p.display());
-            let v = check(&p, &expected_for(&p), &native, &Limits::default()).unwrap();
-            assert!(
-                matches!(&v.signature, Signature::NotTrusted { why } if why.contains("catalog"))
-            );
-            continue;
-        }
+        // Windows is asked about the signature inside the file only, never a catalog.
+        assert!(sys.embedded, "{}", p.display());
         compared += 1;
         let Some(Ok(Maker::Windows(theirs))) = sys.maker else {
             panic!("Windows named no signer for {}", p.display())
@@ -90,6 +86,13 @@ fn reads_the_maker_of_real_signed_programs_as_windows_does() {
             Some("Microsoft Corporation")
         );
         assert_eq!(s.subject.country.as_deref(), Some("US"));
+        // Second review, B4: the authority family and the key are read, to tie renewals.
+        assert_eq!(
+            s.issuer_organization.as_deref(),
+            Some("Microsoft Corporation")
+        );
+        assert!(s.public_key.is_some());
+        assert_ne!(s.public_key, Some(s.certificate));
     }
 }
 
@@ -221,7 +224,12 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
         }
     ));
     drop(f);
-    let sys = NativeChecks::default().signature(&copy, Format::WindowsProgram, &Limits::default());
+    let sys = NativeChecks::default().signature(
+        &std::fs::File::open(&copy).unwrap(),
+        &copy,
+        Format::WindowsProgram,
+        &Limits::default(),
+    );
     assert_eq!(
         sys.signature,
         Signature::Trusted,
@@ -241,7 +249,12 @@ fn one_changed_byte_breaks_the_signature_and_the_checksum_is_left_out() {
         }
     ));
     drop(f);
-    let sys = NativeChecks::default().signature(&copy, Format::WindowsProgram, &Limits::default());
+    let sys = NativeChecks::default().signature(
+        &std::fs::File::open(&copy).unwrap(),
+        &copy,
+        Format::WindowsProgram,
+        &Limits::default(),
+    );
     assert!(
         matches!(sys.signature, Signature::Broken { .. }),
         "{:?}",
@@ -274,7 +287,8 @@ fn a_program_signed_only_through_a_windows_catalog_is_not_approved() {
     let e = expected_for(&signed_programs()[0]);
     let v = check(&notepad, &e, &NativeChecks::default(), &Limits::default()).unwrap();
     eprintln!("{:?}", v.signature);
-    assert!(matches!(&v.signature, Signature::NotTrusted { why } if why.contains("catalog")));
+    // Windows is asked about the file alone: a catalog signature is no signature inside it.
+    assert_eq!(v.signature, Signature::Missing);
     assert!(matches!(v.decide(), Decision::NeedsAction { .. }));
 }
 
@@ -301,7 +315,12 @@ fn real_installer_packages_name_the_signer_windows_names() {
         let pctwin_maker::msi::MsiSignature::Signed(Ok(ours)) = read.signature else {
             continue;
         };
-        let sys = native.signature(&p, Format::WindowsInstaller, &Limits::default());
+        let sys = native.signature(
+            &std::fs::File::open(&p).unwrap(),
+            &p,
+            Format::WindowsInstaller,
+            &Limits::default(),
+        );
         let Some(Ok(Maker::Windows(theirs))) = sys.maker else {
             panic!("Windows named no signer for {}", p.display())
         };
@@ -564,4 +583,112 @@ fn subject_names_are_read_whatever_their_order() {
     );
     let e = signer_from_certificate(&c).unwrap_err();
     assert!(e.contains("twice"), "{e}");
+}
+
+fn junction(link: &Path, target: &Path) {
+    let _ = std::process::Command::new("cmd")
+        .args(["/d", "/c", "rmdir"])
+        .arg(link)
+        .output();
+    let o = std::process::Command::new("cmd")
+        .args(["/d", "/c", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{o:?}");
+}
+
+/// Swaps a folder link to the good copy around each of Windows' own checks, as the reviewer did.
+struct Swapping {
+    inner: NativeChecks,
+    link: PathBuf,
+    good: PathBuf,
+    evil: PathBuf,
+}
+
+impl SystemChecks for Swapping {
+    fn signature(
+        &self,
+        file: &std::fs::File,
+        p: &Path,
+        f: Format,
+        l: &Limits,
+    ) -> pctwin_maker::SystemSignature {
+        junction(&self.link, &self.good);
+        let r = self.inner.signature(file, p, f, l);
+        junction(&self.link, &self.evil);
+        r
+    }
+    fn malware(&self, p: &Path, f: Format, s: &Signature, l: &Limits) -> Malware {
+        junction(&self.link, &self.good);
+        let r = self.inner.malware(p, f, s, l);
+        junction(&self.link, &self.evil);
+        r
+    }
+}
+
+/// Second review, finding B2 (the reviewer's proof): a program with one code byte changed and its
+/// signed digest rewritten to match, behind a folder link that is pointed at the real program
+/// whenever Windows is asked. Windows is now asked about the held file itself, so the changed
+/// program is never approved and its bytes never pass as approved.
+#[test]
+fn a_folder_link_swapped_during_the_check_never_approves_other_bytes() {
+    use object::read::pe::PeFile64;
+    use sha2::{Digest, Sha256 as H};
+    let legit = signed_programs().remove(0);
+    let bytes = std::fs::read(&legit).unwrap();
+    let Ok(pe) = PeFile64::parse(&bytes[..]) else {
+        eprintln!("not a 64-bit program here");
+        return;
+    };
+    let mut h = H::new();
+    authenticode::authenticode_digest(&pe, &mut h).unwrap();
+    let old_digest = h.finalize().to_vec();
+    let mut evil = bytes.clone();
+    let first = pe.section_table().iter().next().unwrap();
+    let at = first.pointer_to_raw_data.get(object::LittleEndian) as usize + 0x40;
+    evil[at] ^= 0xFF;
+    let pe2 = PeFile64::parse(&evil[..]).unwrap();
+    let mut h2 = H::new();
+    authenticode::authenticode_digest(&pe2, &mut h2).unwrap();
+    let new_digest = h2.finalize().to_vec();
+    let Some(pos) = evil.windows(32).position(|w| w == old_digest.as_slice()) else {
+        eprintln!("the signed digest is not stored plainly here");
+        return;
+    };
+    evil[pos..pos + 32].copy_from_slice(&new_digest);
+
+    let dir = tempfile::tempdir().unwrap();
+    let (good, bad, link) = (
+        dir.path().join("good"),
+        dir.path().join("evil"),
+        dir.path().join("j"),
+    );
+    std::fs::create_dir_all(&good).unwrap();
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(good.join("setup.exe"), &bytes).unwrap();
+    std::fs::write(bad.join("setup.exe"), &evil).unwrap();
+    junction(&link, &bad);
+    let path = link.join("setup.exe");
+    let exp = expected_for(&legit);
+    let sw = Swapping {
+        inner: NativeChecks::default(),
+        link: link.clone(),
+        good,
+        evil: bad,
+    };
+    let v = check(&path, &exp, &sw, &Limits::default()).unwrap();
+    eprintln!("{:?} {:?}", v.signature, v.decide());
+    assert_ne!(v.signature, Signature::Trusted);
+    assert!(matches!(v.decide(), Decision::NeedsAction { .. }));
+    let found = Bytes {
+        size: evil.len() as u64,
+        sha256: Sha256(H::digest(&evil).into()),
+    };
+    assert!(!approved_bytes_match(&v.decide(), &found));
+    let _ = std::process::Command::new("cmd")
+        .args(["/d", "/c", "rmdir"])
+        .arg(&link)
+        .output();
 }

@@ -123,26 +123,41 @@ pub const REMOVABLE_BUSES: [u16; 4] = [7, 4, 12, 13];
 pub const NETWORK_BUSES: [u16; 2] = [9, 6];
 
 /// Windows: decides the placement from the folder's real path, the bus of the disk its volume is
-/// on (`None`: it could not be found, or the volume is on no disk this laptop lists) and whether
-/// the volume list shows the drive as removable (`None`: not listed). Only a disk positively on
-/// a bus inside the laptop, listed as not removable, is local; anything else, including a disk
-/// file mounted as a drive (`FileBackedVirtual`: the file could be anywhere) and an unknown bus,
-/// is not ("in doubt" counts as no).
+/// on (`None`: it could not be found, or the volume is on no disk this laptop lists), whether the
+/// volume list shows the drive as removable (`None`: not listed) and whether the disk itself says
+/// it can be unplugged or its medium taken out (`hotplug`; `None`: it would not say). Only a disk
+/// positively on a bus inside the laptop, listed as not removable and saying it cannot be
+/// unplugged, is local: an NVMe disk in a Thunderbolt or USB4 case reports the NVMe bus but can
+/// be unplugged (second review, low finding). Anything else, including a disk file mounted as a
+/// drive (`FileBackedVirtual`: the file could be anywhere) and an unknown bus, is not ("in doubt"
+/// counts as no).
 pub fn windows_placement(
     real: &str,
     bus: Option<u16>,
     listed_removable: Option<bool>,
+    hotplug: Option<bool>,
 ) -> Placement {
     if classify(real, FsKind::Unknown, None) == Placement::Network {
         return Placement::Network;
     }
-    match (bus, listed_removable) {
-        (Some(b), _) if NETWORK_BUSES.contains(&b) => Placement::Network,
-        (Some(b), _) if REMOVABLE_BUSES.contains(&b) => Placement::Removable,
-        (_, Some(true)) => Placement::Removable,
-        (Some(b), Some(false)) if LOCAL_BUSES.contains(&b) => Placement::Local,
+    match (bus, listed_removable, hotplug) {
+        (Some(b), _, _) if NETWORK_BUSES.contains(&b) => Placement::Network,
+        (Some(b), _, _) if REMOVABLE_BUSES.contains(&b) => Placement::Removable,
+        (_, Some(true), _) | (_, _, Some(true)) => Placement::Removable,
+        (Some(b), Some(false), Some(false)) if LOCAL_BUSES.contains(&b) => Placement::Local,
         _ => Placement::Unknown,
     }
+}
+
+/// Linux: whether the device holding a block device, or any device on the way up to its bus,
+/// says it can be removed. `dev` is the block device's real folder under `/sys/devices`; `read`
+/// reads a file there. A block device's own `removable` says `1`; a bus device's (PCI behind an
+/// external-facing port such as Thunderbolt or USB4, or USB) says `removable` (second review, low
+/// finding: an NVMe disk in a Thunderbolt case has a block `removable` of 0).
+pub fn linux_removable_chain(dev: &Path, read: &dyn Fn(&Path) -> Option<String>) -> bool {
+    dev.ancestors()
+        .take_while(|d| d.starts_with("/sys/devices") && *d != Path::new("/sys/devices"))
+        .any(|d| read(&d.join("removable")).is_some_and(|v| matches!(v.trim(), "1" | "removable")))
 }
 
 /// Judges the drive of `folder` (which must exist).
@@ -157,16 +172,25 @@ pub fn judge(folder: &Path) -> Placement {
             .map(|d| {
                 (
                     d.mount_point().to_string_lossy().into_owned(),
-                    d.is_removable(),
+                    d.is_removable() || device_removable(d.name()),
                 )
             })
             .collect();
     #[cfg(windows)]
-    let placement = windows_placement(
-        &real_text,
-        windows_bus::bus_of(&real_text),
-        removable_in(&real_text, &volumes),
-    );
+    let placement = {
+        let found = windows_bus::bus_of(&real_text);
+        let hotplug = found.and_then(|(_, disk)| {
+            pctwin_helper_os::disk_hotplug(disk)
+                .ok()
+                .map(|h| h.device_hotplug || h.media_removable)
+        });
+        windows_placement(
+            &real_text,
+            found.map(|(bus, _)| bus),
+            removable_in(&real_text, &volumes),
+            hotplug,
+        )
+    };
     #[cfg(not(windows))]
     let placement = classify(
         &real_text,
@@ -197,15 +221,16 @@ mod windows_bus {
         BusType: u16,
     }
 
-    /// The bus of the disk whose partition has the longest access path (a drive letter, or a
-    /// folder a volume is mounted in) that holds `real`; `None` when none does or the system
-    /// cannot say. Asked on a thread of its own, so the caller's own COM setup never matters.
-    pub(super) fn bus_of(real: &str) -> Option<u16> {
+    /// The bus and number of the disk whose partition has the longest access path (a drive
+    /// letter, or a folder a volume is mounted in) that holds `real`; `None` when none does or
+    /// the system cannot say. Asked on a thread of its own, so the caller's own COM setup never
+    /// matters.
+    pub(super) fn bus_of(real: &str) -> Option<(u16, u32)> {
         let real = real.to_string();
         std::thread::spawn(move || ask(&real)).join().ok().flatten()
     }
 
-    fn ask(real: &str) -> Option<u16> {
+    fn ask(real: &str) -> Option<(u16, u32)> {
         let fold = |s: &str| {
             s.trim_start_matches(r"\\?\")
                 .to_lowercase()
@@ -234,8 +259,31 @@ mod windows_bus {
         let disks: Vec<Disk> = con
             .raw_query("SELECT Number, BusType FROM MSFT_Disk")
             .ok()?;
-        disks.iter().find(|d| d.Number == disk).map(|d| d.BusType)
+        disks
+            .iter()
+            .find(|d| d.Number == disk)
+            .map(|d| (d.BusType, d.Number))
     }
+}
+
+/// Linux: whether the device named `name` (`/dev/nvme1n1p2`, say) or a device above it says it
+/// can be removed ([`linux_removable_chain`]).
+#[cfg(target_os = "linux")]
+fn device_removable(name: &std::ffi::OsStr) -> bool {
+    let Some(short) = Path::new(name).file_name() else {
+        return false;
+    };
+    let Ok(dev) = std::fs::canonicalize(Path::new("/sys/class/block").join(short)) else {
+        return false;
+    };
+    linux_removable_chain(&dev, &|p| std::fs::read_to_string(p).ok())
+}
+
+/// Elsewhere the volume list alone says whether a drive can be removed (Windows asks the disk
+/// itself in [`judge`]; macOS counts an ejectable disk, such as a Thunderbolt one, as removable).
+#[cfg(not(target_os = "linux"))]
+fn device_removable(_: &std::ffi::OsStr) -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]

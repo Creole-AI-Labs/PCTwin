@@ -1,5 +1,6 @@
 //! The system's own checks on this laptop, through its own tools.
 
+use std::fs::File;
 use std::path::Path;
 
 use crate::check::{Limits, SystemChecks, SystemSignature};
@@ -30,19 +31,30 @@ fn not_checked(why: &str) -> SystemSignature {
 }
 
 impl<R: Runner> SystemChecks for NativeChecks<R> {
-    fn signature(&self, path: &Path, format: Format, limits: &Limits) -> SystemSignature {
+    fn signature(
+        &self,
+        file: &File,
+        path: &Path,
+        format: Format,
+        limits: &Limits,
+    ) -> SystemSignature {
         let t = limits.signature_timeout;
         match format {
             Format::WindowsProgram | Format::WindowsInstaller => {
-                if !cfg!(windows) {
-                    return not_checked("a Windows installer is checked on Windows");
+                #[cfg(windows)]
+                {
+                    let w = crate::windows::check_signature(file, path);
+                    SystemSignature {
+                        signature: w.signature,
+                        embedded: w.embedded,
+                        maker: w.signer.map(|s| s.map(Maker::Windows)),
+                        arch: None,
+                    }
                 }
-                let w = crate::windows::check_signature(&self.runner, path, t);
-                SystemSignature {
-                    signature: w.signature,
-                    embedded: w.embedded,
-                    maker: w.signer.map(|s| s.map(Maker::Windows)),
-                    arch: None,
+                #[cfg(not(windows))]
+                {
+                    let _ = file;
+                    not_checked("a Windows installer is checked on Windows")
                 }
             }
             Format::MacInstaller => {
@@ -98,7 +110,8 @@ impl<R: Runner> SystemChecks for NativeChecks<R> {
         limits: &Limits,
     ) -> Malware {
         match format {
-            Format::WindowsProgram | Format::WindowsInstaller if cfg!(windows) => {
+            #[cfg(windows)]
+            Format::WindowsProgram | Format::WindowsInstaller => {
                 crate::windows::scan(&self.runner, path, limits.scan_timeout)
             }
             Format::MacInstaller if cfg!(target_os = "macos") => {
@@ -140,14 +153,26 @@ mod tests {
 
     const P: &str = "/x/setup";
 
+    /// An open file to ask about (its bytes do not matter to these stand-in tools).
+    fn file() -> File {
+        tempfile::tempfile().unwrap()
+    }
+
+    /// Windows itself is asked, about the open file, whatever any tool would say: a file with no
+    /// signature is never trusted (second review, finding B3).
     #[test]
-    fn windows_files_are_asked_of_windows_only_on_windows() {
+    fn windows_files_are_asked_of_windows_itself_only_on_windows() {
         let json = r#"{"status":"Valid","kind":"Authenticode","message":"","signer":""}"#;
-        let s = native(json).signature(Path::new(P), Format::WindowsInstaller, &Limits::default());
-        if cfg!(windows) {
-            assert_eq!(s.signature, Signature::Trusted);
-            assert!(s.embedded);
-        } else {
+        let mut f = file();
+        std::io::Write::write_all(&mut f, b"MZ not really a program").unwrap();
+        let s = native(json).signature(
+            &f,
+            Path::new(P),
+            Format::WindowsInstaller,
+            &Limits::default(),
+        );
+        assert_ne!(s.signature, Signature::Trusted);
+        if !cfg!(windows) {
             assert!(matches!(s.signature, Signature::NotChecked { .. }));
             assert!(!s.embedded);
         }
@@ -157,13 +182,13 @@ mod tests {
     fn packages_without_a_checkable_signature() {
         let n = native("");
         for f in [Format::DebPackage, Format::LinuxProgram] {
-            let s = n.signature(Path::new(P), f, &Limits::default());
+            let s = n.signature(&file(), Path::new(P), f, &Limits::default());
             assert_eq!(s.signature, Signature::Missing);
             assert!(!s.embedded);
             assert!(s.maker.is_none());
         }
         for f in [Format::MacDiskImage, Format::Zip, Format::Unknown] {
-            let s = n.signature(Path::new(P), f, &Limits::default());
+            let s = n.signature(&file(), Path::new(P), f, &Limits::default());
             assert!(matches!(s.signature, Signature::NotChecked { .. }));
             assert!(!s.embedded);
         }
@@ -173,7 +198,12 @@ mod tests {
     fn rpm_is_asked_of_linux_only_on_linux() {
         let ok = "x.rpm:\n    Header V4 RSA/SHA256 Signature, key ID 24901d0c: OK\n    Header SHA256 digest: OK\n";
         let n = native(ok);
-        let s = n.signature(Path::new(P), Format::RpmPackage, &Limits::default());
+        let s = n.signature(
+            &file(),
+            Path::new(P),
+            Format::RpmPackage,
+            &Limits::default(),
+        );
         let m = n.malware(
             Path::new(P),
             Format::RpmPackage,
@@ -195,7 +225,12 @@ mod tests {
         // Output that pkgutil and spctl would both read as signed, notarised and accepted.
         let yes = "/x.pkg: accepted\nsource=Notarized Developer ID\n   Status: signed by a developer certificate issued by Apple for distribution\n    1. Developer ID Installer: Example Ltd (ABCDE12345)\n";
         let n = native(yes);
-        let s = n.signature(Path::new(P), Format::MacInstaller, &Limits::default());
+        let s = n.signature(
+            &file(),
+            Path::new(P),
+            Format::MacInstaller,
+            &Limits::default(),
+        );
         let m = n.malware(
             Path::new(P),
             Format::MacInstaller,

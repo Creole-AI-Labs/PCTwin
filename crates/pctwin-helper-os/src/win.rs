@@ -24,6 +24,12 @@ use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
     SE_KERNEL_OBJECT,
 };
+use windows::Win32::Security::WinTrust::{
+    WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO,
+    WTD_CHOICE_FILE, WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN,
+    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE, WTHelperGetProvCertFromChain,
+    WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData, WinVerifyTrust,
+};
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, RevertToSelf,
     SECURITY_ATTRIBUTES, SetKernelObjectSecurity, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
@@ -33,6 +39,8 @@ use windows::Win32::Storage::FileSystem::{
     CreateDirectoryW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW,
     GetVolumePathNameW, PIPE_ACCESS_DUPLEX, SECURITY_IDENTIFICATION,
 };
+use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::Ioctl::{IOCTL_STORAGE_GET_HOTPLUG_INFO, STORAGE_HOTPLUG_INFO};
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
     ImpersonateNamedPipeClient, NAMED_PIPE_MODE, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
@@ -864,7 +872,186 @@ fn os_machine_text(subkey: &[u16], value: &[u16]) -> Result<OsString, HRESULT> {
     Ok(OsString::from_wide(&buffer))
 }
 
+/// Windows' own signature check (`WinVerifyTrust`, Authenticode policy, the whole chain checked
+/// for withdrawn certificates except the root) of the signature inside the open file `file`,
+/// named `path` (NUL-terminated) for the system's records only: Windows reads the bytes through
+/// the handle, so the file checked is the very file held (second review, finding B2). Returns
+/// Windows' answer (0: trusted) and, when it is trusted, the signing certificate's bytes as
+/// Windows read them. Added 27 October 2026 (second review, finding B3), awaiting the user's
+/// approval: before, the answer came from PowerShell, which loads code from the person's own
+/// folders.
+fn os_win_verify_trust(file: BorrowedHandle<'_>, path: &[u16]) -> (i32, Option<Vec<u8>>) {
+    assert!(path.ends_with(&[0]), "NUL-terminated");
+    let mut info = WINTRUST_FILE_INFO {
+        cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: PCWSTR(path.as_ptr()),
+        hFile: raw(file),
+        pgKnownSubject: std::ptr::null_mut(),
+    };
+    let mut data = WINTRUST_DATA {
+        cbStruct: std::mem::size_of::<WINTRUST_DATA>() as u32,
+        dwUIChoice: WTD_UI_NONE,
+        fdwRevocationChecks: WTD_REVOKE_WHOLECHAIN,
+        dwUnionChoice: WTD_CHOICE_FILE,
+        Anonymous: WINTRUST_DATA_0 {
+            pFile: &raw mut info,
+        },
+        dwStateAction: WTD_STATEACTION_VERIFY,
+        dwProvFlags: WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT,
+        ..Default::default()
+    };
+    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    let no_window = windows::Win32::Foundation::HWND(INVALID_HANDLE_VALUE.0);
+    // SAFETY: `info` and `data` are fully set (sizes true, the rest zero) and live across both
+    // calls; the path is NUL-terminated (checked above) and the handle is borrowed for the call.
+    // The second call (close) is always made with the state the first left, so Windows frees
+    // it. The signer's certificate is read only when the check passed, through Windows' own
+    // helpers, each result checked for null before it is read, and its bytes are copied out
+    // before the state is closed.
+    #[expect(
+        unsafe_code,
+        reason = "WinVerifyTrust and its provider helpers have no safe binding"
+    )]
+    let r = unsafe {
+        let code = WinVerifyTrust(no_window, &mut action, (&raw mut data).cast());
+        let mut signer = None;
+        if code == 0 {
+            let provider = WTHelperProvDataFromStateData(data.hWVTStateData);
+            if !provider.is_null() {
+                let sgnr = WTHelperGetProvSignerFromChain(provider, 0, false, 0);
+                if !sgnr.is_null() {
+                    let cert = WTHelperGetProvCertFromChain(sgnr, 0);
+                    if !cert.is_null() && !(*cert).pCert.is_null() {
+                        let ctx = &*(*cert).pCert;
+                        if !ctx.pbCertEncoded.is_null() {
+                            signer = Some(
+                                std::slice::from_raw_parts(
+                                    ctx.pbCertEncoded,
+                                    ctx.cbCertEncoded as usize,
+                                )
+                                .to_vec(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        data.dwStateAction = WTD_STATEACTION_CLOSE;
+        WinVerifyTrust(no_window, &mut action, (&raw mut data).cast());
+        (code, signer)
+    };
+    r
+}
+
+/// Whether a disk (opened for no access, only to be asked) says it can be removed: its hotplug
+/// information (`IOCTL_STORAGE_GET_HOTPLUG_INFO`), which needs no administrator. Added
+/// 27 October 2026 (second review, low finding: an NVMe disk in a Thunderbolt or USB4 case reads
+/// as a bus inside the laptop), awaiting the user's approval.
+fn os_disk_hotplug(disk: BorrowedHandle<'_>) -> Result<STORAGE_HOTPLUG_INFO, HRESULT> {
+    let mut info = STORAGE_HOTPLUG_INFO {
+        Size: std::mem::size_of::<STORAGE_HOTPLUG_INFO>() as u32,
+        ..Default::default()
+    };
+    let mut returned = 0u32;
+    // SAFETY: the handle is borrowed for the call; no input is passed; the output is `info`,
+    // whose true size is passed, so the system cannot write past it; the call is synchronous
+    // (no overlapped structure), so nothing is written after it returns.
+    #[expect(unsafe_code, reason = "DeviceIoControl has no safe binding")]
+    let r = unsafe {
+        DeviceIoControl(
+            raw(disk),
+            IOCTL_STORAGE_GET_HOTPLUG_INFO,
+            None,
+            0,
+            Some((&raw mut info).cast()),
+            std::mem::size_of::<STORAGE_HOTPLUG_INFO>() as u32,
+            Some(&mut returned),
+            None,
+        )
+    };
+    r.map_err(|e| e.code())?;
+    if returned as usize != std::mem::size_of::<STORAGE_HOTPLUG_INFO>() {
+        return Err(HRESULT::from_win32(ERROR_ACCESS_DENIED.0));
+    }
+    Ok(info)
+}
+
 // ---- Safe code from here on. ----
+
+/// What a disk says about being removed ([`disk_hotplug`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiskHotplug {
+    /// Its medium can be taken out (a card reader).
+    pub media_removable: bool,
+    /// The disk itself can be unplugged while running (USB, Thunderbolt, USB4, ExpressCard).
+    pub device_hotplug: bool,
+}
+
+/// Asks disk number `n` (as Windows numbers its disks) whether it can be removed. Needs no
+/// administrator: the disk is opened for no access, only to be asked.
+pub fn disk_hotplug(n: u32) -> Result<DiskHotplug, Error> {
+    let disk = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .share_mode(0x1 | 0x2)
+        .open(format!(r"\\.\PhysicalDrive{n}"))
+        .map_err(Error::Io)?;
+    let info = os_disk_hotplug(disk.as_handle())
+        .map_err(|c| os_err("IOCTL_STORAGE_GET_HOTPLUG_INFO", c))?;
+    Ok(DiskHotplug {
+        media_removable: info.MediaRemovable,
+        device_hotplug: info.DeviceHotplug,
+    })
+}
+
+/// Windows' own answer about the signature inside one open file ([`verify_file_trust`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileTrust {
+    /// Windows' result: 0 when it trusts the signature, otherwise its error code (for example
+    /// `TRUST_E_NOSIGNATURE`, `TRUST_E_BAD_DIGEST`, `CERT_E_UNTRUSTEDROOT`).
+    pub code: i32,
+    /// The signing certificate's bytes as Windows read them, when it trusts the signature.
+    pub signer: Option<Vec<u8>>,
+}
+
+/// Asks Windows itself, with no tool or script in between, whether it trusts the signature
+/// inside `file` (open, held by the caller; `path` names it for the system's records only). A
+/// file signed only through a Windows catalog has no signature inside it and is not trusted
+/// here. The answer is the system's own and cannot be replaced by code in the person's folders.
+pub fn verify_file_trust(file: &File, path: &std::path::Path) -> FileTrust {
+    let (code, signer) = os_win_verify_trust(file.as_handle(), &wide(path.as_os_str()));
+    FileTrust { code, signer }
+}
+
+/// Microsoft Defender's command-line scanner, found where Windows itself records Defender
+/// (`InstallLocation` under Defender's key in `HKEY_LOCAL_MACHINE`, which only administrators and
+/// Defender can change), or else in `Program Files` as the registry names it: never from an
+/// environment value (second review, finding B3).
+pub fn defender_scanner() -> Result<PathBuf, Error> {
+    let installed = os_machine_text(
+        &wide(OsStr::new(r"SOFTWARE\Microsoft\Windows Defender")),
+        &wide(OsStr::new("InstallLocation")),
+    )
+    .ok()
+    .map(PathBuf::from)
+    .filter(|p| p.is_absolute())
+    .map(|p| p.join("MpCmdRun.exe"))
+    .filter(|p| p.is_file());
+    match installed {
+        Some(p) => Ok(p),
+        None => {
+            let p = system_folder(SystemFolder::ProgramFiles)?
+                .join("Windows Defender")
+                .join("MpCmdRun.exe");
+            if p.is_file() {
+                Ok(p)
+            } else {
+                Err(Error::NotSupported(
+                    "Microsoft Defender's scanner is not on this laptop",
+                ))
+            }
+        }
+    }
+}
 
 /// A folder of the system's own, as Windows names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

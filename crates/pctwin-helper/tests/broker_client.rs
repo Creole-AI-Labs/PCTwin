@@ -26,6 +26,13 @@ impl NativeAuthority for Approves {
 /// A laptop whose System Protection is off.
 struct ProtectionOff;
 impl Adapters for ProtectionOff {
+    fn check_maker(
+        &mut self,
+        _: &VerifiedArtifact,
+        _: &pctwin_helper::broker::actions::InstallVerifiedPackage,
+    ) -> pctwin_helper::broker::maker::MakerCheck {
+        unreachable!("no install in this plan")
+    }
     fn install(
         &mut self,
         _: &VerifiedArtifact,

@@ -84,3 +84,14 @@ fn programs_started_by_the_helper_get_only_the_minimal_environment() {
         assert!(seen.contains(&format!("{key}=")), "{key} missing: {seen}");
     }
 }
+
+/// Second review, low finding: a disk can be asked, without an administrator, whether it can be
+/// unplugged; this laptop's first disk (inside it) says it cannot.
+#[cfg(windows)]
+#[test]
+fn the_laptops_own_disk_says_it_cannot_be_unplugged() {
+    let h = pctwin_helper_os::disk_hotplug(0).expect("disk 0 answers");
+    assert!(!h.device_hotplug, "{h:?}");
+    assert!(!h.media_removable, "{h:?}");
+    assert!(pctwin_helper_os::disk_hotplug(9999).is_err());
+}

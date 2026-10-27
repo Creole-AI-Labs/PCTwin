@@ -17,6 +17,9 @@ pctwin-grant = { path = "../pctwin-grant" }
 pctwin-helper-os = { path = "../pctwin-helper-os" }
 # The broker's intents and outcomes, kept durably in the helper's own journal (2.2 joined to 2.3).
 pctwin-journal = { path = "../pctwin-journal" }
+# The maker check of a package, made by the helper itself on its own copy before an elevated
+# install (second review, findings B2 and B3).
+pctwin-maker = { path = "../pctwin-maker" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 serde = { version = "1", features = ["derive"] }

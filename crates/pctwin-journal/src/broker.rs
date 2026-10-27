@@ -159,7 +159,7 @@ impl BrokerRecorder<'_> {
             keys.insert(action.key, id).map_err(storage)?;
             id
         };
-        tx.commit().map_err(storage)?;
+        j.commit_sealed(tx, &key)?;
         Ok(id)
     }
 
@@ -192,6 +192,6 @@ impl BrokerRecorder<'_> {
                 .insert(id, seal(&key, id, &stored)?.as_slice())
                 .map_err(storage)?;
         }
-        tx.commit().map_err(storage)
+        j.commit_sealed(tx, &key)
     }
 }

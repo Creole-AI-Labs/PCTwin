@@ -91,6 +91,24 @@ struct FakeAdapters {
     revoke_during: Rc<RefCell<Option<Revoker>>>,
     /// The bytes the installer was given, read from the held file.
     seen: Vec<Vec<u8>>,
+    /// What the helper's own maker check says, and the bytes it was asked about.
+    maker: super::maker::MakerCheck,
+    maker_checked: Vec<Vec<u8>>,
+}
+
+fn test_maker() -> pctwin_maker::facts::WindowsSigner {
+    pctwin_maker::facts::WindowsSigner {
+        subject: pctwin_maker::facts::Subject {
+            common_name: Some("Example Ltd".into()),
+            organization: Some("Example Ltd".into()),
+            country: Some("NG".into()),
+            ..Default::default()
+        },
+        certificate: pctwin_maker::facts::Sha256([1; 32]),
+        issuer: "CN=Some CA".into(),
+        issuer_organization: Some("Some CA".into()),
+        public_key: None,
+    }
 }
 
 impl Default for FakeAdapters {
@@ -105,11 +123,21 @@ impl Default for FakeAdapters {
             observed: Observed::Unknown,
             revoke_during: Rc::default(),
             seen: Vec::new(),
+            maker: super::maker::MakerCheck::Approved,
+            maker_checked: Vec::new(),
         }
     }
 }
 
 impl Adapters for FakeAdapters {
+    fn check_maker(
+        &mut self,
+        p: &VerifiedArtifact,
+        _: &InstallVerifiedPackage,
+    ) -> super::maker::MakerCheck {
+        self.maker_checked.push(std::fs::read(p.path()).unwrap());
+        self.maker
+    }
     fn install(&mut self, p: &VerifiedArtifact, _: &InstallVerifiedPackage, _: &Revoker) -> Effect {
         self.installs += 1;
         self.seen.push(std::fs::read(p.path()).unwrap());
@@ -148,6 +176,7 @@ fn install_action(handle: u64, scope: InstallScope) -> Action {
         sha256: Hex32(sha(PACKAGE)),
         kind: PackageKind::Msi,
         scope,
+        maker: Box::new(test_maker()),
     })
 }
 
@@ -975,6 +1004,7 @@ fn the_built_in_adapters_claim_nothing_they_cannot_do() {
         sha256: Hex32(sha(b"x")),
         kind: PackageKind::Msi,
         scope: InstallScope::Machine,
+        maker: Box::new(test_maker()),
     };
     assert!(matches!(
         a.install(&v, &p, &stop),
@@ -1483,4 +1513,108 @@ fn t22_023_a_sleep_seen_by_the_watcher_ends_the_grants() {
     assert_eq!(denied(b.handle(&then)), Denial::Revoked);
     drop(b);
     assert_eq!(rig.adapters.settings, 0);
+}
+
+/// Second review, finding B2: an install with an administrator's rights goes on only when the
+/// helper's own maker check of its held copy says so; it is asked about exactly the bytes the
+/// installer would be given, after the approval, and its "no" changes nothing.
+#[test]
+fn an_install_needs_the_helpers_own_maker_check() {
+    let mut rig = Rig::new();
+    rig.adapters.maker = super::maker::MakerCheck::Refused;
+    let req = rig.request("install.app");
+    let mut b = rig.broker();
+    assert_eq!(denied(b.handle(&req)), Denial::NotTheMaker);
+    drop(b);
+    assert_eq!(rig.adapters.installs, 0);
+    assert_eq!(rig.adapters.maker_checked, [PACKAGE.to_vec()]);
+    assert!(
+        rig.journal.entries.is_empty(),
+        "nothing recorded as intended"
+    );
+    // Asked after the approval, never instead of it.
+    assert_eq!(rig.authority.asked, 1);
+
+    let mut rig = Rig::new();
+    let req = rig.request("install.app");
+    let mut b = rig.broker();
+    done(b.handle(&req));
+    drop(b);
+    assert_eq!(rig.adapters.maker_checked, [PACKAGE.to_vec()]);
+    assert_eq!(rig.adapters.installs, 1);
+    // Settings and restore points are not packages: no maker check.
+    let mut rig = Rig::new();
+    rig.adapters.maker = super::maker::MakerCheck::Refused;
+    let req = rig.request("restore-point");
+    let mut b = rig.broker();
+    done(b.handle(&req));
+    drop(b);
+    assert!(rig.adapters.maker_checked.is_empty());
+}
+
+/// Second review, findings B2 and B3, for real: the helper's own maker check of a real signed
+/// Windows Installer package on this laptop, staged in the helper's own folder and held. It
+/// approves the package only for its own maker and exact bytes.
+#[cfg(windows)]
+#[test]
+fn the_helpers_own_maker_check_of_a_real_package() {
+    use super::maker::{MakerCheck, check_package};
+    let Some(msi) = std::fs::read_dir(r"C:\Windows\Installer")
+        .ok()
+        .and_then(|list| {
+            list.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("msi")))
+                .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.len() < 64 * 1024 * 1024))
+                .find(|p| pctwin_maker::windows_maker_of(p).is_ok())
+        })
+    else {
+        eprintln!("no signed Windows Installer package here");
+        return;
+    };
+    let ready = matches!(
+        pctwin_maker::windows::judge_status(pctwin_maker::windows::defender_status()),
+        pctwin_maker::windows::DefenderState::Ready { signature_age_days, .. }
+            if signature_age_days <= pctwin_maker::windows::MAX_SIGNATURE_AGE_DAYS
+    );
+    let bytes = std::fs::read(&msi).unwrap();
+    let digest = sha(&bytes);
+    let dir = tempfile::tempdir().unwrap();
+    let mut staging = Staging::new(dir.path().to_path_buf());
+    let handle = staging.admit(&mut bytes.as_slice(), digest).unwrap();
+    let held = staging.open_verified(handle, digest).unwrap();
+    let maker = pctwin_maker::windows_maker_of(&msi).unwrap();
+    let action =
+        |maker: pctwin_maker::facts::WindowsSigner, sha256: [u8; 32]| InstallVerifiedPackage {
+            artifact: handle,
+            sha256: Hex32(sha256),
+            kind: PackageKind::Msi,
+            scope: InstallScope::Machine,
+            maker: Box::new(maker),
+        };
+    let limits = pctwin_maker::Limits::default();
+    let got = check_package(&held, &action(maker.clone(), digest), &limits);
+    eprintln!("{}: {got:?} (Defender ready: {ready})", msi.display());
+    if ready {
+        assert_eq!(got, MakerCheck::Approved);
+    } else {
+        assert_eq!(got, MakerCheck::Refused);
+    }
+    // Another maker: refused.
+    let mut other = maker.clone();
+    other.certificate.0[0] ^= 1;
+    other.public_key = None;
+    other.issuer_organization = Some("Another CA".into());
+    other.subject.organization = Some("Another Ltd".into());
+    assert_eq!(
+        check_package(&held, &action(other, digest), &limits),
+        MakerCheck::Refused
+    );
+    // Other approved bytes than the ones held: refused.
+    let mut wrong = digest;
+    wrong[0] ^= 1;
+    assert_eq!(
+        check_package(&held, &action(maker, wrong), &limits),
+        MakerCheck::Refused
+    );
 }

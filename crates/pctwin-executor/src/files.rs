@@ -52,12 +52,18 @@ pub enum Swapped {
 
 /// One file to put back: where it is moved aside, PCTwin's version's content hash, and the
 /// earlier version's bytes (`None`: there was no file before).
+///
+/// With `only_unhide`, nothing is put back: whatever is under the private name goes back under
+/// its name (or, if that is PCTwin's own version and the name is taken, it is removed). Undo uses
+/// it to finish a file left part way when the earlier version can no longer be had (its kept
+/// copy damaged, or the checked instructions gone): the person's file is never left hidden.
 #[derive(Debug, Clone, Copy)]
 pub struct Swap<'a> {
     /// The private name, already in the journal: `.pctwin-undo-` and 32 hexadecimal digits.
     pub private: &'a str,
     pub ours: [u8; 32],
     pub earlier: Option<&'a [u8]>,
+    pub only_unhide: bool,
 }
 
 /// A moment between the steps, for tests to act in (a person saving).
@@ -142,6 +148,21 @@ pub fn replace_if_unchanged(
         return Ok(Swapped::Kept);
     }
     moment(Moment::Checked);
+    if swap.only_unhide {
+        drop(held);
+        return match move_no_replace(dir, swap.private, name) {
+            // PCTwin's own version, back under its name: as it was before undo started.
+            Ok(()) => Ok(Swapped::Kept),
+            // The name is taken (the person saved, or the earlier version was already put
+            // back): PCTwin's own version is not needed.
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                std::fs::remove_file(&aside)?;
+                sync_dir(dir)?;
+                Ok(Swapped::Kept)
+            }
+            Err(e) => Err(e),
+        };
+    }
     let mut taken = false;
     if let Some(bytes) = swap.earlier {
         let mut out = OpenOptions::new()
