@@ -216,6 +216,10 @@ pub struct Component {
     /// Other components it needs to be usable (the originals a catalog points at, the key store
     /// that opens it).
     pub needs: Vec<ComponentId>,
+    /// A labelled copy is kept even though the service holds the data, because items that never
+    /// reached the service cannot be ruled out (a server mailbox's offline copy).
+    #[serde(default)]
+    pub preserve: bool,
 }
 
 impl Component {
@@ -237,6 +241,7 @@ impl Component {
             secret,
             evidence,
             needs: Vec::new(),
+            preserve: false,
         }
     }
 }
@@ -460,9 +465,11 @@ mod tests {
         assert_eq!(status(&o, Custody::Portable).0, ItemStatus::Copied);
     }
 
+    type Case = (Box<dyn Fn(&mut Outcome)>, ItemStatus, Option<Reason>);
+
     #[test]
     fn each_unfinished_dimension_gives_its_own_honest_word() {
-        let cases: Vec<(Box<dyn Fn(&mut Outcome)>, ItemStatus, Option<Reason>)> = vec![
+        let cases: Vec<Case> = vec![
             (
                 Box::new(|o| o.preservation = Preservation::NotSelected),
                 ItemStatus::SkippedByUser,

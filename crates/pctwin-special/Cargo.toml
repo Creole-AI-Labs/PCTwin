@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 pctwin-types = { path = "../pctwin-types" }
+pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-record = { path = "../pctwin-record" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,9 +24,11 @@ pctwin-settings = { path = "../pctwin-settings" }
 rusqlite = { version = "0.41.0", features = ["bundled", "backup"] }
 # Private snapshot folders for reading a live database's tables (already in the tree).
 tempfile = "3"
+# Files named by their own SHA-256 (model libraries) are checked against it.
+sha2 = "0.10.9"
 
 [dev-dependencies]
-tempfile = "3"
+pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 
 [lints]
 workspace = true
