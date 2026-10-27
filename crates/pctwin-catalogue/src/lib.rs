@@ -79,6 +79,14 @@ pub trait Row: DeserializeOwned {
 /// The record of the highest version of each catalogue PCTwin has accepted (its rollback mark).
 /// Kept by PCTwin where an older copy of the app's files cannot put it back (the system's key
 /// store), and read and raised by [`Catalogue::signed`] itself.
+///
+/// What it protects against, and what not (fifth review, finding 7): it stops an older signed
+/// catalogue coming back by itself, from a stale copy of the app's files or a mirror that serves
+/// an old version. It does not stop a program already running as the person: that program can
+/// remove the mark from the person's own key store (Windows' `cmdkey` does it, no administrator
+/// needed) and then an older signed catalogue would be accepted again. Such a program can
+/// already change the person's settings and files directly, so the mark is not a defence
+/// against it; the signature still ensures every catalogue accepted is one PCTwin published.
 pub trait RollbackMarks {
     /// The highest version of `catalogue` accepted so far (`None`: never one).
     fn highest(&self, catalogue: &str) -> Result<Option<u32>, MarkUnavailable>;
