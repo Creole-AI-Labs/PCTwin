@@ -1,0 +1,1 @@
+{"format":3,"id":"org.videolan.vlc","version":1,"platforms":[{"os":"windows","arch":"x86-64"}],"steps":[{"install":{"catalog":"winget","package":"VideoLAN.VLC"}}],"undo":{"uninstall":true,"side-effects":["leaves-settings"]}}

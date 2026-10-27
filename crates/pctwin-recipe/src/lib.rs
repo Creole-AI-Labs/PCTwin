@@ -20,22 +20,28 @@
 //!   else removing it touches ([`UndoDeclaration`]; System Design S14, "Apps, imports and source
 //!   policy", and S02-P06). One that says nothing is never removed by undo.
 
+use std::sync::OnceLock;
+
+use pctwin_catalogue::{Catalogue, Row};
 use pctwin_types::format::{Format, FormatError, Verdict};
 use serde::{Deserialize, Serialize};
 
 /// The recipe format this app writes and reads.
 ///
+/// - **3** (27 October 2026): a step's `catalog` is an open ID, mapped to one of the package
+///   adapters by the `package-catalogs` catalogue ([`CatalogRow`]); an ID with no row makes that
+///   recipe "found, not yet supported" ([`RecipeError::NotYetSupported`]), never a damaged file.
 /// - **2** (26 October 2026): every recipe carries `undo`, its [`UndoDeclaration`].
 /// - **1**: no `undo`. Still read, as a recipe that says nothing about undo (so undo never
 ///   removes its app); one that carries an `undo` field anyway is damaged. Read recipes are
 ///   written back as format 2.
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 
 /// Recipes in the shared format rule.
 pub const RECIPE_FORMAT: Format = Format {
     name: "setup recipe",
     current: FORMAT,
-    readable: &[1],
+    readable: &[1, 2],
 };
 
 /// The longest ID, package ID, setting key or path part a recipe may hold.
@@ -70,6 +76,10 @@ pub enum RecipeError {
     BadText,
     #[error("the checklist key {0:?} is not allowed (lowercase letters, digits and `-` only)")]
     BadChecklistKey(String),
+    /// The recipe installs from a catalog no row maps to an adapter yet: this app is found, not
+    /// yet supported (the rest of a file of recipes still reads).
+    #[error("PCTwin cannot install from the catalog {0:?} yet")]
+    NotYetSupported(String),
 }
 
 /// A recipe's stable ID, such as `org.mozilla.firefox`.
@@ -119,7 +129,8 @@ pub struct RecipeRef {
     pub version: u32,
 }
 
-/// The package catalogs PCTwin installs from. Each one fetches and checks its own packages.
+/// The package adapters PCTwin installs with (a mechanism each: code). Each one fetches and checks
+/// its own packages. Which catalog IDs use which adapter is data ([`CatalogRow`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Catalog {
@@ -617,8 +628,18 @@ impl Recipe {
         serde_json::to_vec(self).unwrap_or_default()
     }
 
-    /// Reads a saved recipe: the format first (a newer one is refused safely), then every field.
+    /// Reads a saved recipe with the shipped `package-catalogs` rows.
     pub fn from_json(bytes: &[u8]) -> Result<Self, RecipeError> {
+        Self::from_json_with(shipped_catalogs(), bytes)
+    }
+
+    /// Reads a saved recipe: the format first (a newer one is refused safely), then every
+    /// step's catalog ID through `catalogs` (one with no row: [`RecipeError::NotYetSupported`]),
+    /// then every field.
+    pub fn from_json_with(
+        catalogs: &Catalogue<CatalogRow>,
+        bytes: &[u8],
+    ) -> Result<Self, RecipeError> {
         let verdict = RECIPE_FORMAT.check_json(bytes)?;
         if verdict == Verdict::Older(1) {
             // Format 1 had no undo field: one carrying it was not made by format 1.
@@ -634,10 +655,127 @@ impl Recipe {
                 ));
             }
         }
-        let mut r: Self =
+        let mut value: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|e| RecipeError::Damaged(e.to_string()))?;
+        if let Some(steps) = value.get_mut("steps").and_then(|s| s.as_array_mut()) {
+            for step in steps {
+                let at = if step.get("install").is_some() {
+                    step.pointer_mut("/install/catalog")
+                } else {
+                    step.pointer_mut("/verify/check/package-installed/catalog")
+                };
+                if let Some(catalog) = at {
+                    let id = match catalog.as_str() {
+                        Some(id) if catalog_id_ok(id) => id.to_string(),
+                        _ => {
+                            return Err(RecipeError::Damaged(
+                                "a catalog ID breaks the rules".into(),
+                            ));
+                        }
+                    };
+                    *catalog = serde_json::Value::String(adapter_for(catalogs, &id)?.to_string());
+                }
+            }
+        }
+        let mut r: Self =
+            serde_json::from_value(value).map_err(|e| RecipeError::Damaged(e.to_string()))?;
         r.format = FORMAT;
         r.validate()?;
         Ok(r)
     }
+}
+
+impl Catalog {
+    /// The adapter's own name, as recipes write it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Catalog::Winget => "winget",
+            Catalog::MicrosoftStore => "microsoft-store",
+            Catalog::Homebrew => "homebrew",
+            Catalog::MacAppStore => "mac-app-store",
+            Catalog::Flathub => "flathub",
+            Catalog::Snap => "snap",
+            Catalog::Apt => "apt",
+            Catalog::Dnf => "dnf",
+        }
+    }
+}
+
+impl std::fmt::Display for Catalog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One row of the `package-catalogs` catalogue: a catalog ID recipes may name, and the adapter
+/// (mechanism) that installs from it. A new ID for an existing mechanism needs only a row.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct CatalogRow {
+    pub id: String,
+    pub adapter: Catalog,
+    /// Its name, to show.
+    pub name: String,
+}
+
+/// Whether `id` is a catalog ID: 1 to 64 bytes of `a-z`, `0-9`, `-` and `.`, not starting with
+/// `-` or `.`.
+pub fn catalog_id_ok(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'.')
+        && !id.starts_with(['-', '.'])
+}
+
+impl Row for CatalogRow {
+    const CATALOGUE: &'static str = "package-catalogs";
+    const FIELDS: &'static [&'static str] = &["id", "adapter", "name"];
+    fn check(&self) -> Result<(), String> {
+        if !catalog_id_ok(&self.id) {
+            return Err("a catalog ID is lowercase letters, digits, `-` and `.`".into());
+        }
+        if self.name.trim().is_empty() || self.name.len() > 64 || !text_ok(&self.name) {
+            return Err("a name is 1 to 64 plain characters".into());
+        }
+        Ok(())
+    }
+}
+
+/// The rows compiled into this build.
+pub fn shipped_catalogs() -> &'static Catalogue<CatalogRow> {
+    static ROWS: OnceLock<Catalogue<CatalogRow>> = OnceLock::new();
+    ROWS.get_or_init(|| Catalogue::shipped(include_str!("../catalogues/package-catalogs.json")))
+}
+
+/// The adapter for catalog ID `id`; [`RecipeError::NotYetSupported`] when no row maps it.
+pub fn adapter_for(catalogs: &Catalogue<CatalogRow>, id: &str) -> Result<Catalog, RecipeError> {
+    let reading = catalogs.read([id], |id, row| row.id == *id);
+    match reading.known.first() {
+        Some((_, row)) => Ok(row.adapter),
+        None => Err(RecipeError::NotYetSupported(id.to_string())),
+    }
+}
+
+/// What a set of saved recipes gives: the ones that read, the ones found but not yet supported
+/// (with the catalog ID), and the damaged ones (with why). Every recipe lands in one of the three.
+#[derive(Debug, Default)]
+pub struct RecipeReading {
+    pub ready: Vec<Recipe>,
+    pub not_yet_supported: Vec<(usize, String)>,
+    pub damaged: Vec<(usize, RecipeError)>,
+}
+
+/// Reads each saved recipe on its own: one that cannot be read never stops the others.
+pub fn read_recipes(catalogs: &Catalogue<CatalogRow>, files: &[&[u8]]) -> RecipeReading {
+    let mut out = RecipeReading::default();
+    for (i, bytes) in files.iter().enumerate() {
+        match Recipe::from_json_with(catalogs, bytes) {
+            Ok(r) => out.ready.push(r),
+            Err(RecipeError::NotYetSupported(id)) => out.not_yet_supported.push((i, id)),
+            Err(e) => out.damaged.push((i, e)),
+        }
+    }
+    out
 }
