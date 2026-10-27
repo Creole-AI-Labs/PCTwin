@@ -1,8 +1,10 @@
 //! Saving PCTwin's own records (the before-wipe list, the recovery kit): the one place this crate
 //! writes. A record is written to a fresh temporary file beside its place, flushed to disk, then
-//! moved into place, so a crash leaves the earlier save or this one, never a mix.
+//! moved into place, so a crash leaves the earlier save or this one, never a mix. An export into a
+//! folder the person picked never replaces a file already there.
 
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -41,4 +43,29 @@ pub fn load<T: DeserializeOwned>(path: &Path) -> std::io::Result<T> {
         return Err(std::io::Error::other("the saved record is too large"));
     }
     serde_json::from_reader(std::io::BufReader::new(file)).map_err(std::io::Error::other)
+}
+
+/// Writes `bytes` as a new file named `name` (then `stem (2).ext` and so on) in `folder`, never
+/// over a file already there; returns where.
+pub fn save_new(folder: &Path, name: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s, format!(".{e}")),
+        None => (name, String::new()),
+    };
+    for n in 1..=999u32 {
+        let candidate = if n == 1 {
+            folder.join(name)
+        } else {
+            folder.join(format!("{stem} ({n}){ext}"))
+        };
+        let mut temp = temp_in(folder)?;
+        temp.write_all(bytes)?;
+        temp.as_file().sync_all()?;
+        match temp.persist_noclobber(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.error),
+        }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
 }
