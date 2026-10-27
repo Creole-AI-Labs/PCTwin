@@ -203,6 +203,9 @@ struct Walk {
     web: Vec<String>,
     not_moved: Vec<NotMoved>,
     unreadable: Vec<(String, String)>,
+    /// The deepest folder and most files read ([`MAX_DEPTH`], [`MAX_FILES`]; smaller in tests).
+    max_depth: usize,
+    max_files: usize,
 }
 
 fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
@@ -251,7 +254,7 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
                     rel: child,
                     why: Skip::Cache,
                 });
-            } else if depth + 1 > MAX_DEPTH || w.files.len() >= MAX_FILES {
+            } else if depth + 1 > w.max_depth || w.files.len() >= w.max_files {
                 w.not_moved.push(NotMoved {
                     rel: child,
                     why: Skip::NotRead,
@@ -264,7 +267,7 @@ fn walk(dir: &Path, rel: &str, depth: usize, w: &mut Walk) {
         if !meta.is_file() {
             continue;
         }
-        if w.files.len() >= MAX_FILES {
+        if w.files.len() >= w.max_files {
             w.not_moved.push(NotMoved {
                 rel: child,
                 why: Skip::NotRead,
@@ -499,11 +502,23 @@ impl Build<'_> {
 /// Splits and classifies the app data folder `folder`, found on `system`, with the catalogue
 /// row `row` that knows it (if any).
 pub fn classify_folder(folder: &AppDataFolder, row: Option<&SpecialRow>) -> FolderReport {
+    classify_within(folder, row, MAX_DEPTH, MAX_FILES)
+}
+
+/// [`classify_folder`] with its walk's limits given.
+fn classify_within(
+    folder: &AppDataFolder,
+    row: Option<&SpecialRow>,
+    max_depth: usize,
+    max_files: usize,
+) -> FolderReport {
     let mut w = Walk {
         files: Vec::new(),
         web: Vec::new(),
         not_moved: Vec::new(),
         unreadable: Vec::new(),
+        max_depth,
+        max_files,
     };
     let base = folder.path();
     match std::fs::symlink_metadata(&base) {
@@ -1199,6 +1214,84 @@ mod tests {
         let p = dir.path().join("m.gguf");
         std::fs::write(&p, &b).unwrap();
         assert_eq!(gguf_split(&p), Some((1, 2)));
+    }
+
+    fn folder_at(path: &std::path::Path) -> AppDataFolder {
+        AppDataFolder {
+            root: RootKind::Roaming,
+            root_path: path.parent().unwrap().to_path_buf(),
+            rel: path.file_name().unwrap().to_string_lossy().into_owned(),
+            owner: pctwin_record::Owner::Shared,
+            app: None,
+            tie: None,
+        }
+    }
+
+    #[test]
+    fn the_walk_stops_at_its_limits_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("App");
+        let deep = app.join("a/b/c");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(app.join("a/b/in.txt"), b"x").unwrap();
+        std::fs::write(deep.join("too-deep.txt"), b"x").unwrap();
+        // Two folders down are read; the third is reported, not read.
+        let r = classify_within(&folder_at(&app), None, 2, 100);
+        let members: Vec<&String> = r.components.iter().flat_map(|c| &c.members).collect();
+        assert!(members.contains(&&"a/b/in.txt".to_string()));
+        assert!(!members.iter().any(|m| m.ends_with("too-deep.txt")));
+        assert!(r.not_moved.contains(&NotMoved {
+            rel: "a/b/c".into(),
+            why: Skip::NotRead
+        }));
+        let r = classify_within(&folder_at(&app), None, 3, 100);
+        assert!(r.not_moved.is_empty());
+
+        // Past the count, files and folders are reported, not read.
+        let many = dir.path().join("Many");
+        std::fs::create_dir_all(many.join("z-folder")).unwrap();
+        for n in ["1.txt", "2.txt", "3.txt", "4.txt"] {
+            std::fs::write(many.join(n), b"x").unwrap();
+        }
+        let r = classify_within(&folder_at(&many), None, 10, 3);
+        let not_read: Vec<&str> = r
+            .not_moved
+            .iter()
+            .filter(|n| n.why == Skip::NotRead)
+            .map(|n| n.rel.as_str())
+            .collect();
+        assert_eq!(not_read, vec!["4.txt", "z-folder"]);
+        let read: usize = r.components.iter().map(|c| c.members.len()).sum();
+        assert_eq!(read, 3);
+    }
+
+    #[test]
+    fn a_folder_with_a_cache_tag_is_a_cache_whatever_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("App");
+        std::fs::create_dir_all(app.join("store")).unwrap();
+        std::fs::write(
+            app.join("store/CACHEDIR.TAG"),
+            b"Signature: 8a477f597d28d172789f06886806bc55
+",
+        )
+        .unwrap();
+        std::fs::write(app.join("store/blob"), b"x").unwrap();
+        std::fs::create_dir_all(app.join("kept")).unwrap();
+        std::fs::write(
+            app.join("kept/CACHEDIR.TAG"),
+            b"not the signature
+",
+        )
+        .unwrap();
+        let r = classify_folder(&folder_at(&app), None);
+        assert!(r.not_moved.contains(&NotMoved {
+            rel: "store".into(),
+            why: Skip::Cache
+        }));
+        let members: Vec<&String> = r.components.iter().flat_map(|c| &c.members).collect();
+        assert!(members.contains(&&"kept/CACHEDIR.TAG".to_string()));
+        assert!(!members.iter().any(|m| m.starts_with("store")));
     }
 
     #[test]
