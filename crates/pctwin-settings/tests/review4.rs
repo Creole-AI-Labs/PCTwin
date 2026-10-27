@@ -149,6 +149,7 @@ fn plan(cat: &Catalogue, found: Vec<FoundSetting>, hints: bool) -> FoundPlan {
         paths: &map,
         same_screens: false,
         hints: if hints { &cat.action_hints } else { &[] },
+        facts: pctwin_settings::judge::Facts::system(),
     };
     plan_found(cat, System::Windows, System::Windows, &d, &ctx)
 }
@@ -417,6 +418,7 @@ fn file_plan(name: &str, bytes: &[u8]) -> FileOutcome {
             paths: &e.map,
             same_screens: false,
             hints: &cat.action_hints,
+            facts: pctwin_settings::judge::Facts::system(),
         },
         from: System::Windows,
         to: System::Windows,

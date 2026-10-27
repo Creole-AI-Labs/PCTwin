@@ -151,3 +151,45 @@ pub fn strings(text: &str) -> Option<Vec<String>> {
     }
     Some(out)
 }
+
+/// Every whole number in a GVariant text outside its strings that fits in a byte, in order: a
+/// byte array (`[byte 0x73, 0x6d]`, `@ay [115, 109]`) as the bytes it holds, so the texts in it
+/// are judged too. Other numbers come along harmlessly (they only add runs to judge).
+pub fn bytes(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        if c == '\'' || c == '"' {
+            match string(rest) {
+                Some((_, r)) => rest = r,
+                None => break,
+            }
+            continue;
+        }
+        if c.is_ascii_digit() {
+            let end = rest
+                .find(|x: char| !x.is_ascii_alphanumeric())
+                .unwrap_or(rest.len());
+            let word = &rest[..end];
+            let n = match word.strip_prefix("0x").or_else(|| word.strip_prefix("0X")) {
+                Some(h) => u32::from_str_radix(h, 16).ok(),
+                None => word.parse::<u32>().ok(),
+            };
+            if let Some(b) = n.and_then(|n| u8::try_from(n).ok()) {
+                out.push(b);
+            }
+            rest = &rest[end..];
+            continue;
+        }
+        if c.is_ascii_alphabetic() || c == '_' {
+            // A word (`byte`, `uint32`, `true`): skipped whole, so its letters are no number.
+            let end = rest
+                .find(|x: char| !(x.is_ascii_alphanumeric() || x == '_'))
+                .unwrap_or(rest.len());
+            rest = &rest[end..];
+            continue;
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    out
+}

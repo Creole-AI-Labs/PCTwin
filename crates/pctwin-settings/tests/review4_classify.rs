@@ -4,13 +4,16 @@
 
 use pctwin_settings::catalogue::{Catalogue, HintKind};
 use pctwin_settings::classify::{
-    Action, Why, action_kind, file_shaped_name, may_write_text, run_or_fetch,
+    Action, Why, action_kind, danger, file_shaped_name, may_write_text, run_or_fetch,
 };
+use pctwin_settings::judge::Facts;
 
 const STORE: &str = r"Software\Vendor\App";
 
+/// No catalogue hints, and a system that runs no file ending and opens no scheme: the shape
+/// rule alone.
 fn bare(t: &str) -> Option<Why> {
-    run_or_fetch(&[], STORE, "Value", t)
+    danger(&Facts::new([], Some(vec![])), &[], STORE, "Value", t)
 }
 
 #[test]
@@ -20,9 +23,6 @@ fn plain_data_passes() {
         "Segoe UI",
         "12:30",
         "Arial:12",
-        "HH:mm:ss",
-        "mm:ss",
-        "ms-settings:display",
         "abc:1",
         "abc: x",
         "1.5",
@@ -67,17 +67,28 @@ fn another_computer_or_an_address_could_fetch_something() {
         "//srv/s",
         "https://example.com/u.xml",
         "ftp://x",
-        "mailto:a@b",
-        "search-ms:query=x",
         "file://host/s",
         "FILE://host/s",
         r"see \\srv\s now",
         "x=https://y",
-        "ab:x/y",
-        "javascript:alert(1)",
-        long.as_str(),
     ] {
         assert_eq!(bare(t), Some(Why::Fetches), "{t:?}");
+    }
+    // A scheme followed by a name is held back even when no handler is registered for it (the
+    // shell opens `shell:` names no registry lists; fifth review, finding 2), and so is a time
+    // format that has the same shape: PCTwin cannot tell them apart.
+    for t in [
+        "ab:x/y",
+        "mailto:a@b",
+        "search-ms:query=x",
+        "javascript:alert(1)",
+        long.as_str(),
+        "shell:startup",
+        "HH:mm:ss",
+        "mm:ss",
+        "ms-settings:display",
+    ] {
+        assert_eq!(bare(t), Some(Why::PlaceUnknown), "{t:?}");
     }
     // A scheme longer than any is not one; digits after the colon are a time or a pair.
     assert_eq!(bare(&format!("{}:x?y", "a".repeat(33))), None);
@@ -182,12 +193,10 @@ fn the_catalogue_hints_only_add_caution() {
             "{t:?}"
         );
     }
-    // The same values with no hints: a full local path is data, a bare name is text.
-    assert_eq!(
-        run_or_fetch(&[], STORE, "Value", r"C:\Tools\edit.exe"),
-        None
-    );
-    assert_eq!(run_or_fetch(&[], STORE, "Value", "notepad.exe"), None);
+    // The same values with no hints and a system that names no program ending: a full local
+    // path is data, a bare name is text (on a real laptop its own facts keep them back).
+    assert_eq!(bare(r"C:\Tools\edit.exe"), None);
+    assert_eq!(bare("notepad.exe"), None);
     // A run hint: anything but a number is kept back.
     assert_eq!(
         run_or_fetch(h, STORE, "Editor", "notepad"),

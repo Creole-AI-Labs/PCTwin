@@ -46,6 +46,7 @@ impl Env {
                 paths: &self.map,
                 same_screens: false,
                 hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+                facts: pctwin_settings::judge::Facts::system(),
             },
             from,
             to,
