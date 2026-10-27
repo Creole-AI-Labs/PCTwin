@@ -916,7 +916,7 @@ fn calls() -> Value {
             { "name": "laptop_name_use", "args": [] },
             { "name": "laptop_name_type", "args": [["name", "Ezzy Laptop"]] },
             { "name": "guard_view", "args": [] },
-            { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "intent": { "kind": "try-again", "line": 0 } }]] },
+            { "name": "guard_intent", "args": [["intent", { "job": "job-1", "epoch": 2, "generation": 3, "press": "press-1", "intent": { "kind": "try-again", "line": 0 } }]] },
         ],
         "events": {
             "old": OLD_EVENT,
