@@ -12,6 +12,8 @@ description = "PCTwin's administrator helper: started only for a move of several
 workspace = true
 
 [dependencies]
+# Privileged setting rows: their shape and loader (the rows in use are compiled in).
+pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-grant = { path = "../pctwin-grant" }
 pctwin-helper-os = { path = "../pctwin-helper-os" }
@@ -37,5 +39,6 @@ wmi = "0.18.4"
 rustix = { version = "1.1.5", features = ["fs", "process"] }
 
 [dev-dependencies]
+pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"
 zeroize = "1.9.0"

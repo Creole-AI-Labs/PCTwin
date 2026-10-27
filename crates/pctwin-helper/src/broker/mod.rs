@@ -39,6 +39,7 @@ pub mod journal;
 pub mod maker;
 pub mod receipt;
 pub mod restore;
+pub mod setting_rows;
 pub mod staging;
 pub mod tool;
 pub mod watch;

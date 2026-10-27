@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "catalogue": "privileged-settings",
+  "version": 1,
+  "rows": [
+    {"mechanism": "time-zone", "name": "Time zone", "min-helper": "0.1.0"},
+    {"mechanism": "hibernate", "name": "Hibernate", "min-helper": "0.1.0"}
+  ]
+}
