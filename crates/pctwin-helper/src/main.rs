@@ -236,7 +236,7 @@ fn run(args: &Args) -> Result<(), String> {
         Some(seal) => {
             let packages =
                 pctwin_helper_os::admin_only_folder("packages").map_err(|e| e.to_string())?;
-            session.with_broker(pctwin_helper::broker::Broker::new(
+            let broker = pctwin_helper::broker::Broker::new(
                 seal,
                 &args.session,
                 pctwin_helper::broker::staging::Staging::new(packages),
@@ -244,7 +244,11 @@ fn run(args: &Args) -> Result<(), String> {
                 journal,
                 &mut adapters,
                 &clock,
-            ))
+            );
+            // Sleep, hibernation and switching person end the broker's grants (T22-023); signing
+            // out ends the helper itself.
+            let _watcher = pctwin_helper::broker::watch::start(broker.revoker());
+            session.with_broker(broker)
         }
         None => session,
     };

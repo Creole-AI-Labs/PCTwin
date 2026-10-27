@@ -38,6 +38,7 @@ pub mod receipt;
 pub mod restore;
 pub mod staging;
 pub mod tool;
+pub mod watch;
 
 #[cfg(test)]
 mod tests;

@@ -26,7 +26,8 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, RevertToSelf,
-    SECURITY_ATTRIBUTES, SetKernelObjectSecurity, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    SECURITY_ATTRIBUTES, SetKernelObjectSecurity, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
+    TokenElevation, TokenUser,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateDirectoryW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAGS_AND_ATTRIBUTES, GetDriveTypeW,
@@ -39,6 +40,10 @@ use windows::Win32::System::Pipes::{
 };
 use windows::Win32::System::Registry::{
     HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY, RegGetValueW,
+};
+use windows::Win32::System::RemoteDesktop::{
+    WTS_CONNECTSTATE_CLASS, WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSActive,
+    WTSConnectState, WTSFreeMemory, WTSQuerySessionInformationW,
 };
 use windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
 use windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE;
@@ -347,6 +352,66 @@ fn os_client_token(pipe: BorrowedHandle<'_>) -> Result<OwnedHandle, HRESULT> {
             })
     };
     r
+}
+
+/// Whether a token has an administrator's full rights (`TokenElevation`).
+fn os_token_elevated(token: BorrowedHandle<'_>) -> Result<bool, HRESULT> {
+    let h = raw(token);
+    let mut elevation = TOKEN_ELEVATION::default();
+    let mut needed = 0u32;
+    // SAFETY: `h` is a token handle borrowed for the call; the answer is written into
+    // `elevation`, whose true size is passed, so the call cannot write past it.
+    #[expect(
+        unsafe_code,
+        reason = "reading a token's elevation has no safe binding"
+    )]
+    let r = unsafe {
+        GetTokenInformation(
+            h,
+            TokenElevation,
+            Some((&raw mut elevation).cast()),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut needed,
+        )
+    };
+    r.map(|()| elevation.TokenIsElevated != 0)
+        .map_err(|e| e.code())
+}
+
+/// Whether this program's own session is the one on the screen and keyboard (its connection
+/// state is `WTSActive`): after switching to another person, it is not.
+fn os_session_on_screen() -> Result<bool, HRESULT> {
+    let mut buffer = PWSTR::null();
+    let mut bytes = 0u32;
+    // SAFETY: the current server and current session name this program's own session. On
+    // success the system allocates the buffer and says its size; one connection state (a 32-bit
+    // value) is read from it only if the size holds one, and the buffer is freed exactly once.
+    #[expect(
+        unsafe_code,
+        reason = "WTSQuerySessionInformationW and WTSFreeMemory have no safe binding"
+    )]
+    let r = unsafe {
+        WTSQuerySessionInformationW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            WTS_CURRENT_SESSION,
+            WTSConnectState,
+            &mut buffer,
+            &mut bytes,
+        )
+        .map_err(|e| e.code())
+        .map(|()| {
+            let holds = !buffer.is_null()
+                && bytes as usize >= std::mem::size_of::<WTS_CONNECTSTATE_CLASS>();
+            let state = holds.then(|| buffer.0.cast::<WTS_CONNECTSTATE_CLASS>().read_unaligned());
+            WTSFreeMemory(buffer.0.cast());
+            state
+        })
+    };
+    match r {
+        Ok(Some(state)) => Ok(state == WTSActive),
+        Ok(None) => Err(HRESULT::from_win32(ERROR_ACCESS_DENIED.0)),
+        Err(code) => Err(code),
+    }
 }
 
 /// The account (its security identifier, as text) a token belongs to.
@@ -965,6 +1030,18 @@ pub(crate) fn wait(process: &OwnedHandle, millis: Option<u32>) -> Result<Option<
     os_wait(process.as_handle(), millis.unwrap_or(INFINITE))
         .map(|code| code.map(|c| Ended::Exited(c as i32)))
         .map_err(|c| os_err("WaitForSingleObject", c))
+}
+
+/// Whether this program runs with an administrator's full rights.
+pub(crate) fn this_process_elevated() -> Result<bool, Error> {
+    let me = os_open_process(std::process::id()).map_err(|c| os_err("OpenProcess", c))?;
+    let token = os_process_token(me.as_handle()).map_err(|c| os_err("OpenProcessToken", c))?;
+    os_token_elevated(token.as_handle()).map_err(|c| os_err("GetTokenInformation", c))
+}
+
+/// Whether this program's session is on the screen (see [`os_session_on_screen`]).
+pub(crate) fn session_on_screen() -> Result<bool, Error> {
+    os_session_on_screen().map_err(|c| os_err("WTSQuerySessionInformationW", c))
 }
 
 pub(crate) fn current_sid() -> Result<Sid, Error> {

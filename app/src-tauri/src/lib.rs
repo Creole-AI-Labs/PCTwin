@@ -17,6 +17,7 @@ mod history;
 #[cfg(test)]
 mod info_plist;
 mod laptop_name;
+pub mod launch;
 pub mod limits;
 #[cfg(test)]
 mod lockdown;

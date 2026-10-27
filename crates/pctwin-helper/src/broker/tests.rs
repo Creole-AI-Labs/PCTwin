@@ -1446,3 +1446,41 @@ fn the_real_journal_records_a_finished_action_under_its_number() {
         pctwin_journal::BrokerState::Finished(1, _)
     ));
 }
+
+/// T22-023 through the broker: once the session watcher sees the laptop sleep (or another
+/// person's session come to the screen), the broker's grants are over: nothing more is done.
+#[test]
+fn t22_023_a_sleep_seen_by_the_watcher_ends_the_grants() {
+    let mut rig = Rig::new();
+    let first = rig.request("restore-point");
+    let then = rig.request("setting.hibernate");
+    let mut b = rig.broker();
+    assert!(matches!(b.handle(&first), Answer::Done(_)));
+    let base = (std::time::Instant::now(), std::time::SystemTime::now());
+    let looks = [
+        watch::Look {
+            mono: base.0,
+            wall: base.1,
+            on_screen: Some(true),
+        },
+        watch::Look {
+            mono: base.0 + Duration::from_secs(2),
+            wall: base.1 + Duration::from_secs(7_200),
+            on_screen: Some(true),
+        },
+    ];
+    let mut n = 0;
+    let why = watch::watch(
+        &b.revoker(),
+        watch::TICK,
+        || {
+            n += 1;
+            looks[n - 1]
+        },
+        |_| {},
+    );
+    assert_eq!(why, Some(watch::Ended::Slept));
+    assert_eq!(denied(b.handle(&then)), Denial::Revoked);
+    drop(b);
+    assert_eq!(rig.adapters.settings, 0);
+}
