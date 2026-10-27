@@ -23,7 +23,7 @@ describe("screen samples", () => {
   it("every group file is in the shared list, each with samples (a group left out would skip its checks without a word)", () => {
     // Named here, not found the same way the list finds them: a file the list missed is caught.
     // A new group file is added here too.
-    const groups = ["connection.tsx", "people.tsx", "plan.tsx", "progress.tsx", "quicksend.tsx", "start.tsx"];
+    const groups = ["connection.tsx", "guard.tsx", "people.tsx", "plan.tsx", "progress.tsx", "quicksend.tsx", "start.tsx"];
     expect(GROUPS.map((g) => g.file)).toEqual(groups);
     expect(GROUPS.filter((g) => g.count === 0)).toEqual([]);
   });

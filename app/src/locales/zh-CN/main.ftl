@@ -1454,3 +1454,294 @@ qs-problem-room-title = { $folder }中的空间不足。
 qs-problem-room-body = 这些文件需要{ $needed }，那里可用的空间为{ $room }。没有保存任何内容。请释放空间或选择另一个文件夹，然后再试一次。
 qs-done-refused-title = 接收方电脑没有接收这些文件。
 qs-done-refused-body = 它的空间可能不足。没有发送任何内容。
+
+## 第二阶段屏幕（任务清单 2.8）：通用部分
+
+guard-state-not-started = 还没开始
+guard-state-preparing = 正在准备
+guard-state-awaiting-person = 等你选择
+guard-state-awaiting-system = 等你的系统批准
+guard-state-awaiting-maker = 等应用的开发者或在线服务
+guard-state-working = 正在处理
+guard-state-checking = 正在检查已完成的内容
+guard-state-applying = 正在放到位
+guard-state-pause-requested = 会在下一个安全的时间点暂停。目前还没有暂停。
+guard-state-paused = 已在安全的时间点暂停
+guard-state-source-unavailable = 旧笔记本电脑或硬盘没有连接
+guard-state-blocked = 需要先解决一个问题
+guard-state-partial = 部分完成
+guard-state-retrying = 正在重试
+guard-state-reconciling = 正在检查进行到哪里
+guard-state-failed = 没有成功
+guard-state-complete = 已完成
+guard-state-cancelled = 已停止。已经完成的部分会保留。
+guard-refused-unavailable = PCTwin 暂时无法检查这一项。什么都没有做。请稍后再试。
+guard-refused-wrong-job = 这是另一次迁移的内容。什么都没有做。
+guard-refused-old-session = 这个屏幕已经过时，所以什么都没有做。下面是现在的实际情况。
+guard-refused-plan-changed = 你查看时方案发生了变化，所以什么都没有做。请重新查看。
+guard-refused-not-now = 这一步不能这样做。什么都没有做。
+guard-refused-not-shown = 这个选项已不在这个屏幕上。什么都没有做。
+guard-progress-label = 进度
+guard-progress-mark = 已完成 { $percent }%
+guard-progress-of = { $done }/{ $total }
+guard-progress-unknown-total = 目前 { $done }。总数还不知道。
+guard-progress-none = 还没有测量到任何内容。
+guard-and-more =
+    { $count ->
+       *[other] 还有 { $count } 项，已列在报告里。
+    }
+guard-not-known-yet = 还不知道
+guard-free = 可用 { $free }
+guard-free-unknown = 可用空间未知
+guard-items-size = { $items } 个项目，{ $size }
+guard-try-again = 重试
+guard-pause = 暂停
+guard-resume = 继续
+guard-check-again = 再次检查
+guard-strip-plan = 你的方案
+guard-strip-report = 你的报告
+guard-strip-permission = 批准
+guard-strip-rescue = 抢救
+guard-strip-undo = 撤销
+guard-strip-checking = 检查中
+
+## X09 重启后的检查，以及状态不可用
+
+guard-checking-title = 正在检查进行到哪里
+guard-checking-body = PCTwin 正在查看关闭前已完成的内容。它弄清楚后，你的选项就会回来。
+guard-unavailable-title = 状态不可用
+guard-unavailable-body = PCTwin 暂时无法说明这次迁移在做什么。在弄清楚之前，不会把任何内容显示为已完成。请稍后再检查。
+
+## 2.9 做任何更改之前
+
+guard-changes-title = 做任何更改之前
+guard-changes-body = 这是这次迁移会在这台笔记本电脑上更改的全部内容，以及撤销对每一项能做什么。目前还没有任何更改。
+guard-changes-download = 从互联网下载
+guard-changes-download-none = 无
+guard-changes-permissions = 系统批准
+guard-changes-one-prompt = 你的系统只会询问一次
+guard-changes-no-prompt = 不需要
+guard-changes-restore-point = Windows 还原点
+guard-changes-restore-point-first = 先请求
+guard-changes-restore-point-none = 不使用
+guard-changes-install =
+    { $count ->
+       *[other] 要安装：{ $count } 个应用
+    }
+guard-changes-merge =
+    { $count ->
+       *[other] 加在现有内容旁边：{ $count } 个项目
+    }
+guard-changes-replace =
+    { $count ->
+       *[other] 要替换，并保留旧版本：{ $count } 个项目
+    }
+guard-changes-leave-alone =
+    { $count ->
+       *[other] 保持原样：{ $count } 个项目
+    }
+guard-changes-space = 最忙的时候每个硬盘上需要的空间
+guard-changes-why-prompt = 你的系统为什么会询问
+guard-changes-approve = 批准这些更改
+guard-undo-legend-can = PCTwin 可以撤销。
+guard-undo-legend-keeps = PCTwin 会保留。撤销不会动它。
+guard-undo-legend-you = 需要你处理。只有它的服务或开发者才能撤销。
+guard-undo-can-reverse = PCTwin 可以撤销
+guard-undo-can-remove-app = PCTwin 可以删除它，并保留你的工作
+guard-undo-must-keep = 保留：它本来就在这里
+guard-undo-needs-you-service = 需要你处理：只有在线服务才能撤销
+guard-undo-needs-you-maker = 需要你处理：登录和许可证归开发者管
+guard-drive-needs = 需要 { $needed }。可用 { $free }。
+guard-drive-needs-free-unknown = 需要 { $needed }。这个硬盘没有说明还剩多少空间。
+guard-drive-fits = 放得下
+guard-drive-short = 还差 { $short }
+guard-drive-unknown = 未知
+guard-permission-read-other-people = 读取旧笔记本电脑上其他人的文件
+guard-permission-make-accounts = 在这台笔记本电脑上创建他们的账户
+guard-permission-shared-folders = 把内容放进你的账户无法更改的共享文件夹
+guard-permission-install-for-everyone = 为这台笔记本电脑上的所有人安装应用
+guard-permission-restore-point = 先创建一个 Windows 还原点
+
+## X06 和 H10 批准之后有内容发生变化
+
+guard-changed-title =
+    { $count ->
+       *[other] 你批准之后，有 { $count } 项发生了变化
+    }
+guard-changed-body = 只有这些需要重新看一下。其他内容仍然保持批准，会继续进行。
+guard-changed-changed-on-old-laptop = 它在旧笔记本电脑上发生了变化。
+guard-changed-app-updated = 这个应用自己更新了。
+guard-changed-destination-changed = 它要去的位置发生了变化。
+guard-changed-new-scope = 这是新增的：有另一个人或另一台笔记本电脑加入了这次迁移。
+guard-changed-permission-ended = 它的批准已经失效。
+guard-changed-leave-out = 不包含这些
+guard-changed-approve = 重新批准这些
+
+## M31、M05 新笔记本电脑上的空间
+
+guard-space-title = 新笔记本电脑上的空间
+guard-space-title-short = 新笔记本电脑的空间不够
+guard-space-body = PCTwin 算过了每个硬盘上会放的全部内容，包括撤销所需的空间。你选的内容不会为了放得下而被丢掉。
+guard-space-proposal = PCTwin 对放不下的内容的建议
+guard-keep-off-leave-in-cloud = 留在它们的云端，在那里是安全的
+guard-keep-off-offload-drive = 放到你的另一个硬盘上
+guard-keep-off-leave-on-old-laptop = 留在旧笔记本电脑上。在它们迁移完之前请保留好它。
+guard-offload-title = 你的另一个硬盘
+guard-offload-connected = 已连接
+guard-offload-not-connected = 未连接
+guard-offload-approved = 你选了这个硬盘。上面的文件不在新笔记本电脑上：要打开它们，请连接这个硬盘。
+guard-offload-ask = PCTwin 可以把一些内容放到这个硬盘上。它需要你单独同意使用这个硬盘。
+guard-offload-use = 使用这个硬盘
+guard-space-approve = 批准这个方案
+guard-safe-in = 安全保存在 { $provider }
+guard-safe-in-cloud = 安全保存在你的云端
+guard-safe-in-detail =
+    { $count ->
+       *[other] 有 { $count } 个文件只存放在线上。你在新笔记本电脑上登录后，它们就会回来。
+    }
+guard-your-cloud = 你的云端
+
+## M09 保留只存放在线上的文件的副本
+
+guard-local-title = 要保留你只存放在线上的文件的副本吗？
+guard-local-body =
+    { $count ->
+       *[other] { $provider } 里有 { $count } 个文件只存放在线上。你也可以在新笔记本电脑上保留一份副本。
+    }
+guard-local-download = 要在旧笔记本电脑上下载
+guard-local-old-space = 旧笔记本电脑上的空间
+guard-local-how = PCTwin 每次取下来几个，发送出去，再把它们在旧笔记本电脑上改回只存放在线上。
+guard-local-paused-metered = 已暂停：这个连接可能按流量收费。换成免费连接后会自动继续，你允许的话也可以现在继续。
+guard-local-paused-no-space = 已暂停：旧笔记本电脑没有空间放接下来的几个文件了。其余的仍然安全保存在 { $provider }。
+guard-local-done = 已完成。副本已在新笔记本电脑上。
+guard-local-keep = 保留副本
+guard-local-leave = 留在 { $provider }
+guard-local-allow-metered = 允许在这个连接上进行
+
+## M07 谁去哪里
+
+guard-owners-title = 谁去哪里
+guard-owners-body = 每个人的内容都会放进他们自己在这台笔记本电脑上的账户。仅凭名称相同，永远不会决定这一点。
+guard-owners-from = 来自 { $laptop }
+guard-owners-to-account = 放进这台笔记本电脑上的账户 { $account }
+guard-owners-new-account = 放进这台笔记本电脑上的新账户
+guard-owners-own-folder = 他们自己的“来自 { $laptop }”文件夹，因为名称有冲突
+guard-owners-usual-folders = 他们平时用的文件夹
+guard-owners-approve = 批准
+
+## X12 没有完成的内容
+
+guard-report-title-partial = 大部分内容已迁移。有几项没有。
+guard-report-title-done = 这一部分的全部内容都已迁移。
+guard-report-body-partial = 下面的内容仍在旧笔记本电脑上。准备好后，请逐项再试一次。已经迁移的内容会保留。
+guard-report-body-done = 没有需要重试的内容了。
+guard-line-app = 应用 { $name }
+guard-line-items =
+    { $count ->
+       *[other] { $count } 个项目
+    }
+guard-line-settings =
+    { $count ->
+       *[other] { $count } 项设置
+    }
+guard-line-why-failed = 来自 { $laptop }：没有完成。
+guard-line-why-laptop-not-connected = 来自 { $laptop }：那台笔记本电脑没有连接。请把它连到同一个 Wi-Fi，并保持开机。
+guard-line-why-waits-for-another = 来自 { $laptop }：它在等另一个没有完成的步骤。请先解决那一个。
+guard-line-why-not-started = 来自 { $laptop }：迁移还没开始就停了。
+
+## M25、H10 系统的批准，以及还原点
+
+guard-permission-title-explain = PCTwin 需要你的系统批准一次
+guard-permission-title-waiting-for-system = 请回答你的系统的提问
+guard-permission-title-denied = 你选了不同意
+guard-permission-title-closed-without-answer = 提问被关闭了，没有回答
+guard-permission-title-given = 已批准用于这次迁移
+guard-permission-title-ended-by-sleep = 笔记本电脑进入睡眠后，批准失效了
+guard-permission-title-ended-other-session = 有其他人登录后，批准失效了
+guard-permission-body-explain = 你的系统会为整个迁移只询问一次。只有下面列出的步骤会用到它，它会随迁移结束而失效。
+guard-permission-body-waiting-for-system = 你的系统自己的窗口已打开。如果它要求，请在那里输入密码。
+guard-permission-body-denied = 只有需要它的步骤会被略过。其他内容继续进行。
+guard-permission-body-closed-without-answer = 关闭窗口不等于同意，所以需要它的内容都没有做。你可以再次请求，或者不用它继续。
+guard-permission-body-given = PCTwin 只会把它用于下面列出的步骤，它会随这次迁移结束而失效。
+guard-permission-body-ended-by-sleep = 此后需要它的内容都没有做。要继续，请再次请求。
+guard-permission-body-ended-other-session = 此后需要它的内容都没有做。等你回到自己的账户后，请再次请求。
+guard-permission-never-password = PCTwin 从不索要你的密码，也永远看不到它。只有你的系统能看到。
+guard-permission-not-now = 不用它继续
+guard-permission-ask = 前往你的系统
+guard-permission-ask-again = 再次请求
+guard-restore-title = Windows 还原点
+guard-restore-made = 已在 { $time } 创建。
+guard-restore-earlier-exists = Windows 已有一个 { $time } 的还原点，所以没有再创建。
+guard-restore-not-chosen = 未创建：你选择了不创建。
+guard-restore-not-made-not-windows = 未创建：只有 Windows 才有还原点。
+guard-restore-not-made-protection-off = 未创建：这个硬盘的 System Protection 是关闭的。你可以在 System Properties 里把它打开。
+guard-restore-not-made-needs-admin = 未创建：需要你的系统批准。
+guard-restore-not-made-unconfirmed = 未创建：Windows 说可以，但找不到任何还原点。
+guard-restore-not-made-failed = 未创建：Windows 没能创建。
+
+## T01 到 T04 从无法启动的笔记本电脑中抢救
+
+guard-rescue-title-intro = 从无法启动的笔记本电脑里抢救重要的内容
+guard-rescue-title-pick-drive = 选择要抢救的硬盘
+guard-rescue-title-locked = 这个硬盘已锁定
+guard-rescue-title-no-system = 这不是笔记本电脑的硬盘
+guard-rescue-title-salvage = 以下是能读取到的内容
+guard-rescue-body-intro = 把硬盘从旧笔记本电脑里取出来，用硬盘转接器或硬盘盒连到这台笔记本电脑上。
+guard-rescue-body-pick-drive = 选择旧笔记本电脑的硬盘。存放内容的硬盘不能是你要抢救的这个。
+guard-rescue-body-locked = 请先在你的系统里解锁它，然后再检查。
+guard-rescue-body-no-system = 这个硬盘上没有笔记本电脑的系统和个人文件夹。如果它是普通的 USB 硬盘，请把它用在新笔记本电脑上。
+guard-rescue-body-salvage = 看一下列表，然后使用能读取到的内容。
+guard-rescue-can = 抢救能做什么
+guard-rescue-can-body = 从仍能工作的硬盘中，读取你的文件，以及硬盘上找到的人员和设置。
+guard-rescue-cannot = 它不能做什么
+guard-rescue-cannot-body = 修复硬盘、读取已损坏的部分，或打开你没有密钥的硬盘。
+guard-rescue-read-only-title = 这个硬盘只会被读取
+guard-rescue-read-only-promise = PCTwin 只读取它。上面的任何内容都不会被更改、修复或格式化。
+guard-rescue-system-read-only = 你的系统以只读方式打开了它，所以上面的内容不可能被更改。
+guard-rescue-pctwin-reads-only = PCTwin 只读取了它。但你的系统是以可更改的方式打开它的，所以其他应用仍有可能更改它。
+guard-rescue-refused-target = 那个硬盘是存放内容的地方，所以不能同时被抢救。请选择另一个硬盘。
+guard-rescue-drive-detail = { $size }，{ $fs }
+guard-rescue-drive-is-target = 这次迁移的内容会放到这个硬盘上。
+guard-rescue-drive-cannot = 无法抢救
+guard-rescue-choose = 抢救这个硬盘
+guard-rescue-bit-locker-step-1 = 在 File Explorer 里打开这个硬盘。
+guard-rescue-bit-locker-step-2 = Windows 要求时，输入它的恢复密钥。密钥通常保存在所有者的 Microsoft 账户里，网址是 aka.ms/myrecoverykey。
+guard-rescue-bit-locker-step-3 = 回到这里，选择“再次检查”。
+guard-rescue-file-vault-step-1 = 在 Mac 上用所有者的登录密码或恢复密钥解锁它。
+guard-rescue-file-vault-step-2 = 回到这里，选择“再次检查”。
+guard-rescue-apple-chip-step-1 = 这台 Mac 把硬盘锁定为只供它自己使用，所以把硬盘取出来没有用。
+guard-rescue-apple-chip-step-2 = 如果这台 Mac 还能进入 Recovery，请用数据线配合 Share Disk。如果它完全无法启动，只有 Apple 的维修中心能帮忙。
+guard-rescue-never-key = PCTwin 从不索要密钥，也从不保存它。
+guard-rescue-readable =
+    { $count ->
+       *[other] 能读取 { $n } 个项目。
+    }
+guard-rescue-unreadable =
+    { $count ->
+       *[other] 有 { $count } 个项目无法读取
+    }
+guard-rescue-look = 查找硬盘
+guard-rescue-check-again = 再次检查
+guard-rescue-use = 使用能读取到的内容
+
+## R05、R06 撤销
+
+guard-undo-preview-title = 撤销会做什么
+guard-undo-preview-body = PCTwin 刚刚查看了每一项更改。迁移之后你改动过的内容都会保留。在你选择“撤销”之前，什么都不会发生。
+guard-undo-plan-put-back = 恢复原样
+guard-undo-plan-remove-app = 应用已删除，你的工作已保留
+guard-undo-plan-keep-changed = 保留：你改动过它
+guard-undo-plan-elsewhere = 需要你处理：在别处完成
+guard-undo-plan-leave-alone = 不动：它本来就在这里
+guard-undo-keep = 全部保持现状
+guard-undo-run = 撤销
+guard-undo-running-title = 正在撤销更改
+guard-undo-done-title = 撤销做了什么
+guard-undo-result-restored = 已还原
+guard-undo-result-removed = 已删除
+guard-undo-result-as-before = 本来就和之前一样
+guard-undo-result-kept-changed = 已保留，因为你改动过
+guard-undo-result-kept-other = 已保留，请看“更多详情”
+guard-undo-result-kept-at = 已保留，名称为 { $name }
+guard-undo-result-done-elsewhere = 在别处完成：只有它的服务或开发者才能撤销
+guard-undo-result-not-done-yet = 还没完成。撤销下次会再试。

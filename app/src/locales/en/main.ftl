@@ -1552,3 +1552,306 @@ qs-problem-room-title = Not enough room in { $folder }.
 qs-problem-room-body = These files need { $needed }, and { $room } can be used there. Nothing was saved. Free up space or choose another folder, then try again.
 qs-done-refused-title = The receiving laptop did not take these files.
 qs-done-refused-body = It may not have enough room. Nothing was sent.
+
+## Phase 2 screens (Task List 2.8): shared parts
+
+guard-state-not-started = Not started yet
+guard-state-preparing = Getting ready
+guard-state-awaiting-person = Waiting for your choice
+guard-state-awaiting-system = Waiting for your system’s approval
+guard-state-awaiting-maker = Waiting for the app’s maker or online service
+guard-state-working = Working
+guard-state-checking = Checking what was done
+guard-state-applying = Putting things in place
+guard-state-pause-requested = Pausing at the next safe point. Not paused yet.
+guard-state-paused = Paused at a safe point
+guard-state-source-unavailable = The old laptop or drive is not connected
+guard-state-blocked = Something needs fixing first
+guard-state-partial = Partly done
+guard-state-retrying = Trying again
+guard-state-reconciling = Checking where things got to
+guard-state-failed = This did not work
+guard-state-complete = Done
+guard-state-cancelled = Stopped. What was already done is kept.
+guard-refused-unavailable = PCTwin could not check this right now. Nothing was done. Try again in a moment.
+guard-refused-wrong-job = This was for another move. Nothing was done.
+guard-refused-old-session = This screen was out of date, so nothing was done. Here is what is true now.
+guard-refused-plan-changed = The plan changed while you were looking, so nothing was done. Look at it again.
+guard-refused-not-now = That cannot be done at this step. Nothing was done.
+guard-refused-not-shown = That choice is not on this screen any more. Nothing was done.
+guard-progress-label = Progress
+guard-progress-mark = { $percent }% done
+guard-progress-of = { $done } of { $total }
+guard-progress-unknown-total = { $done } so far. The total is not known yet.
+guard-progress-none = Nothing measured yet.
+guard-and-more =
+    { $count ->
+        [one] And { $count } more, listed in the report.
+       *[other] And { $count } more, listed in the report.
+    }
+guard-not-known-yet = Not known yet
+guard-free = { $free } free
+guard-free-unknown = Free space not known
+guard-items-size = { $items } items, { $size }
+guard-try-again = Try again
+guard-pause = Pause
+guard-resume = Carry on
+guard-check-again = Check again
+guard-strip-plan = Your plan
+guard-strip-report = Your report
+guard-strip-permission = Approval
+guard-strip-rescue = Rescue
+guard-strip-undo = Undo
+guard-strip-checking = Checking
+
+## X09 checking after a restart, and status unavailable
+
+guard-checking-title = Checking where things got to
+guard-checking-body = PCTwin is looking at what was finished before it closed. Your choices come back once it knows.
+guard-unavailable-title = Status unavailable
+guard-unavailable-body = PCTwin cannot say right now what this move is doing. Nothing is shown as done until it can. Check again in a moment.
+
+## 2.9 Before we change anything
+
+guard-changes-title = Before we change anything
+guard-changes-body = This is everything the move will change on this laptop, and what undo can do for each. Nothing has changed yet.
+guard-changes-download = Download from the internet
+guard-changes-download-none = None
+guard-changes-permissions = System approval
+guard-changes-one-prompt = Your system asks once
+guard-changes-no-prompt = Not needed
+guard-changes-restore-point = Windows restore point
+guard-changes-restore-point-first = Asked for first
+guard-changes-restore-point-none = Not used
+guard-changes-install =
+    { $count ->
+        [one] To install: { $count } app
+       *[other] To install: { $count } apps
+    }
+guard-changes-merge =
+    { $count ->
+        [one] Added beside what is here: { $count } item
+       *[other] Added beside what is here: { $count } items
+    }
+guard-changes-replace =
+    { $count ->
+        [one] To replace, keeping the old version: { $count } item
+       *[other] To replace, keeping the old versions: { $count } items
+    }
+guard-changes-leave-alone =
+    { $count ->
+        [one] Left as it is: { $count } item
+       *[other] Left as they are: { $count } items
+    }
+guard-changes-space = Room on each drive at the busiest moment
+guard-changes-why-prompt = Why your system will ask
+guard-changes-approve = Approve these changes
+guard-undo-legend-can = PCTwin can undo it.
+guard-undo-legend-keeps = PCTwin keeps it. Undo leaves it alone.
+guard-undo-legend-you = Needs you. Only its service or maker can undo it.
+guard-undo-can-reverse = PCTwin can undo it
+guard-undo-can-remove-app = PCTwin can remove it, keeping your work
+guard-undo-must-keep = Kept: it was already here
+guard-undo-needs-you-service = Needs you: only the online service can undo it
+guard-undo-needs-you-maker = Needs you: sign-ins and licences are the maker’s
+guard-drive-needs = Needs { $needed }. { $free } free.
+guard-drive-needs-free-unknown = Needs { $needed }. The drive does not say how much is free.
+guard-drive-fits = Fits
+guard-drive-short = Short by { $short }
+guard-drive-unknown = Not known
+guard-permission-read-other-people = To read the files of other people on the old laptop
+guard-permission-make-accounts = To make their accounts on this laptop
+guard-permission-shared-folders = To put things in shared folders your account cannot change
+guard-permission-install-for-everyone = To install apps for everyone on this laptop
+guard-permission-restore-point = To make a Windows restore point first
+
+## X06 and H10 something changed after approval
+
+guard-changed-title =
+    { $count ->
+        [one] { $count } thing changed after you approved
+       *[other] { $count } things changed after you approved
+    }
+guard-changed-body = Only these need a fresh look. Everything else stays approved and carries on.
+guard-changed-changed-on-old-laptop = It changed on the old laptop.
+guard-changed-app-updated = The app updated itself.
+guard-changed-destination-changed = The place it goes to changed.
+guard-changed-new-scope = It is new: another person or laptop joined the move.
+guard-changed-permission-ended = The approval for it has ended.
+guard-changed-leave-out = Leave these out
+guard-changed-approve = Approve these again
+
+## M31, M05 space on the new laptop
+
+guard-space-title = Space on the new laptop
+guard-space-title-short = The new laptop is short of space
+guard-space-body = PCTwin counted everything that lands on each drive, including room for undo. Nothing you chose is dropped to make it fit.
+guard-space-proposal = What PCTwin suggests for what does not fit
+guard-keep-off-leave-in-cloud = Left in their cloud, where they are safe
+guard-keep-off-offload-drive = Put on your other drive
+guard-keep-off-leave-on-old-laptop = Left on the old laptop. Keep it until these are moved.
+guard-offload-title = Your other drive
+guard-offload-connected = Connected
+guard-offload-not-connected = Not connected
+guard-offload-approved = You chose this drive. Files on it are not on the new laptop: connect it to open them.
+guard-offload-ask = PCTwin can put some things on this drive. It needs your yes for this drive on its own.
+guard-offload-use = Use this drive
+guard-space-approve = Approve this plan
+guard-safe-in = Safe in { $provider }
+guard-safe-in-cloud = Safe in your cloud
+guard-safe-in-detail =
+    { $count ->
+        [one] { $count } file is stored online only. It comes back when you sign in on the new laptop.
+       *[other] { $count } files are stored online only. They come back when you sign in on the new laptop.
+    }
+guard-your-cloud = your cloud
+
+## M09 keeping a copy of online-only files
+
+guard-local-title = Keep a copy of your online-only files?
+guard-local-body =
+    { $count ->
+        [one] { $count } file in { $provider } is stored online only. You can keep a copy of it on the new laptop too.
+       *[other] { $count } files in { $provider } are stored online only. You can keep a copy of them on the new laptop too.
+    }
+guard-local-download = To download on the old laptop
+guard-local-old-space = Room on the old laptop
+guard-local-how = PCTwin brings them down a few at a time, sends them, then makes them online only again on the old laptop.
+guard-local-paused-metered = Paused: this connection may charge for data. It carries on by itself on a free connection, or now if you allow it.
+guard-local-paused-no-space = Paused: the old laptop is out of room for the next few files. The rest stay safe in { $provider }.
+guard-local-done = Done. The copies are on the new laptop.
+guard-local-keep = Keep a copy
+guard-local-leave = Leave them in { $provider }
+guard-local-allow-metered = Allow on this connection
+
+## M07 who goes where
+
+guard-owners-title = Who goes where
+guard-owners-body = Each person’s things go to their own account on this laptop. Matching names alone never decide it.
+guard-owners-from = From { $laptop }
+guard-owners-to-account = To the account { $account } on this laptop
+guard-owners-new-account = To a new account on this laptop
+guard-owners-own-folder = Their own “From { $laptop }” folders, because names clash
+guard-owners-usual-folders = Their usual folders
+guard-owners-approve = Approve
+
+## X12 what did not finish
+
+guard-report-title-partial = Most things moved. A few did not.
+guard-report-title-done = Everything in this part moved.
+guard-report-body-partial = Everything below is still on the old laptop. Try each again when you are ready. What already moved stays.
+guard-report-body-done = Nothing is left to try again.
+guard-line-app = The app { $name }
+guard-line-items =
+    { $count ->
+        [one] { $count } item
+       *[other] { $count } items
+    }
+guard-line-settings =
+    { $count ->
+        [one] { $count } setting
+       *[other] { $count } settings
+    }
+guard-line-why-failed = From { $laptop }: it did not finish.
+guard-line-why-laptop-not-connected = From { $laptop }: that laptop is not connected. Connect it to the same Wi-Fi and keep it awake.
+guard-line-why-waits-for-another = From { $laptop }: it waits for another step that did not finish. Fix that one first.
+guard-line-why-not-started = From { $laptop }: the move stopped before it started.
+
+## M25, H10 the system’s approval, and the restore point
+
+guard-permission-title-explain = PCTwin needs one approval from your system
+guard-permission-title-waiting-for-system = Answer your system’s question
+guard-permission-title-denied = You said no
+guard-permission-title-closed-without-answer = The question was closed without an answer
+guard-permission-title-given = Approved for this move
+guard-permission-title-ended-by-sleep = The approval ended when the laptop went to sleep
+guard-permission-title-ended-other-session = The approval ended when someone else signed in
+guard-permission-body-explain = Your system asks once for the whole move. Only the steps listed below use it, and it ends with the move.
+guard-permission-body-waiting-for-system = Your system’s own window is open. Type your password there if it asks.
+guard-permission-body-denied = Only the steps that needed it are left out. Everything else carries on.
+guard-permission-body-closed-without-answer = Closing it is not a yes, so nothing that needs it was done. Ask again, or carry on without it.
+guard-permission-body-given = PCTwin uses it only for the steps listed below, and it ends with this move.
+guard-permission-body-ended-by-sleep = Nothing that needs it was done after that. Ask again to carry on.
+guard-permission-body-ended-other-session = Nothing that needs it was done after that. Ask again when you are back on your account.
+guard-permission-never-password = PCTwin never asks for your password and never sees it. Only your system does.
+guard-permission-not-now = Carry on without it
+guard-permission-ask = Continue to your system
+guard-permission-ask-again = Ask again
+guard-restore-title = Windows restore point
+guard-restore-made = Made at { $time }.
+guard-restore-earlier-exists = Windows already has one from { $time }, so it did not make another.
+guard-restore-not-chosen = Not made: you chose not to.
+guard-restore-not-made-not-windows = Not made: restore points are only on Windows.
+guard-restore-not-made-protection-off = Not made: System Protection is off for this drive. You can turn it on in System Properties.
+guard-restore-not-made-needs-admin = Not made: it needs your system’s approval.
+guard-restore-not-made-unconfirmed = Not made: Windows said yes, but no restore point can be found.
+guard-restore-not-made-failed = Not made: Windows could not make one.
+
+## T01 to T04 rescue from a laptop that will not start
+
+guard-rescue-title-intro = Save what matters from a laptop that will not start
+guard-rescue-title-pick-drive = Choose the drive to rescue
+guard-rescue-title-locked = This drive is locked
+guard-rescue-title-no-system = This is not a laptop’s drive
+guard-rescue-title-salvage = Here is what could be read
+guard-rescue-body-intro = Take the drive out of the old laptop and connect it to this one with a drive adapter or enclosure.
+guard-rescue-body-pick-drive = Choose the old laptop’s drive. The drive things go to cannot be the one you rescue.
+guard-rescue-body-locked = Unlock it in your system first. Then check again.
+guard-rescue-body-no-system = This drive has no laptop system and home folders. If it is an ordinary USB drive, use it on the new laptop instead.
+guard-rescue-body-salvage = Check the list, then use what could be read.
+guard-rescue-can = What a rescue can do
+guard-rescue-can-body = Read your files, and the people and settings found on the drive, from a drive that still works.
+guard-rescue-cannot = What it cannot do
+guard-rescue-cannot-body = Repair the drive, read parts that are damaged, or open a drive whose key you do not have.
+guard-rescue-read-only-title = The drive is only read
+guard-rescue-read-only-promise = PCTwin only reads it. Nothing on it is changed, repaired or formatted.
+guard-rescue-system-read-only = Your system opened it read only, so nothing on it can change.
+guard-rescue-pctwin-reads-only = PCTwin only read it. Your system had it open for changes, so other apps could still change it.
+guard-rescue-refused-target = That drive is where things are put, so it cannot also be rescued. Choose another drive.
+guard-rescue-drive-detail = { $size }, { $fs }
+guard-rescue-drive-is-target = Things from the move go to this drive.
+guard-rescue-drive-cannot = Cannot be rescued
+guard-rescue-choose = Rescue this drive
+guard-rescue-bit-locker-step-1 = Open the drive in File Explorer.
+guard-rescue-bit-locker-step-2 = Type its recovery key when Windows asks. It is often saved in the owner’s Microsoft account, at aka.ms/myrecoverykey.
+guard-rescue-bit-locker-step-3 = Come back here and choose Check again.
+guard-rescue-file-vault-step-1 = Unlock it on a Mac with the owner’s login password or recovery key.
+guard-rescue-file-vault-step-2 = Come back here and choose Check again.
+guard-rescue-apple-chip-step-1 = This Mac keeps its drive locked to itself, so taking the drive out does not work.
+guard-rescue-apple-chip-step-2 = If the Mac still starts in Recovery, use Share Disk with a cable. If it does not start at all, only an Apple repair centre can help.
+guard-rescue-never-key = PCTwin never asks for the key and never keeps it.
+guard-rescue-readable =
+    { $count ->
+        [one] { $n } item can be read.
+       *[other] { $n } items can be read.
+    }
+guard-rescue-unreadable =
+    { $count ->
+        [one] { $count } item could not be read
+       *[other] { $count } items could not be read
+    }
+guard-rescue-look = Look for the drive
+guard-rescue-check-again = Check again
+guard-rescue-use = Use what could be read
+
+## R05, R06 undo
+
+guard-undo-preview-title = What undo will do
+guard-undo-preview-body = PCTwin looked at each change just now. Anything you changed after the move is kept. Nothing happens until you choose Undo.
+guard-undo-plan-put-back = Put back as it was
+guard-undo-plan-remove-app = App removed, your work kept
+guard-undo-plan-keep-changed = Kept: you changed it
+guard-undo-plan-elsewhere = Needs you: done elsewhere
+guard-undo-plan-leave-alone = Left alone: it was already here
+guard-undo-keep = Keep everything as it is
+guard-undo-run = Undo
+guard-undo-running-title = Undoing the changes
+guard-undo-done-title = What undo did
+guard-undo-result-restored = Restored
+guard-undo-result-removed = Removed
+guard-undo-result-as-before = Already as before
+guard-undo-result-kept-changed = Kept because you changed it
+guard-undo-result-kept-other = Kept, see More details
+guard-undo-result-kept-at = Kept as { $name }
+guard-undo-result-done-elsewhere = Done elsewhere: only its service or maker can undo it
+guard-undo-result-not-done-yet = Not done yet. Undo tries again next time.

@@ -1912,3 +1912,354 @@ qs-problem-room-title = لا توجد مساحة كافية في { $folder }.
 qs-problem-room-body = تحتاج هذه الملفات إلى { $needed }، ويمكن استخدام { $room } هناك. لم يُحفظ أي شيء. أفرغ بعض المساحة أو اختر مجلدًا آخر، ثم حاول مرة أخرى.
 qs-done-refused-title = لم يقبل الحاسوب المستلم هذه الملفات.
 qs-done-refused-body = ربما لا توجد عليه مساحة كافية. لم يُرسل أي شيء.
+
+## شاشات المرحلة 2 (قائمة المهام 2.8): الأجزاء المشتركة
+
+guard-state-not-started = لم تبدأ بعد
+guard-state-preparing = جارٍ التحضير
+guard-state-awaiting-person = في انتظار اختيارك
+guard-state-awaiting-system = في انتظار موافقة نظامك
+guard-state-awaiting-maker = في انتظار مطوّر التطبيق أو الخدمة عبر الإنترنت
+guard-state-working = جارٍ العمل
+guard-state-checking = جارٍ التحقق مما تم
+guard-state-applying = جارٍ وضع الأشياء في أماكنها
+guard-state-pause-requested = سيتوقف مؤقتًا عند أقرب نقطة آمنة. لم يتوقف بعد.
+guard-state-paused = متوقف مؤقتًا عند نقطة آمنة
+guard-state-source-unavailable = الحاسوب المحمول القديم أو محرك الأقراص غير متصل
+guard-state-blocked = هناك أمر يجب إصلاحه أولًا
+guard-state-partial = تم جزء منه
+guard-state-retrying = جارٍ إعادة المحاولة
+guard-state-reconciling = جارٍ التحقق من المرحلة التي وصلنا إليها
+guard-state-failed = لم ينجح هذا
+guard-state-complete = تم
+guard-state-cancelled = تم الإيقاف. ما تم إنجازه من قبل محفوظ.
+guard-refused-unavailable = لم يتمكن PCTwin من التحقق من هذا الآن. لم يتم شيء. أعد المحاولة بعد قليل.
+guard-refused-wrong-job = كان هذا لعملية نقل أخرى. لم يتم شيء.
+guard-refused-old-session = كانت هذه الشاشة قديمة، لذلك لم يتم شيء. هذا هو الوضع الصحيح الآن.
+guard-refused-plan-changed = تغيّرت الخطة أثناء نظرك إليها، لذلك لم يتم شيء. ألقِ نظرة عليها مرة أخرى.
+guard-refused-not-now = لا يمكن فعل ذلك في هذه الخطوة. لم يتم شيء.
+guard-refused-not-shown = هذا الخيار لم يعد في هذه الشاشة. لم يتم شيء.
+guard-progress-label = التقدم
+guard-progress-mark = اكتمل { $percent }%
+guard-progress-of = { $done } من { $total }
+guard-progress-unknown-total = { $done } حتى الآن. العدد الإجمالي غير معروف بعد.
+guard-progress-none = لم يُقَس أي شيء بعد.
+guard-and-more =
+    { $count ->
+        [zero] و{ $count } أخرى، مذكورة في التقرير.
+        [one] وعنصر واحد آخر، مذكور في التقرير.
+        [two] وعنصران آخران، مذكوران في التقرير.
+        [few] و{ $count } عناصر أخرى، مذكورة في التقرير.
+        [many] و{ $count } عنصرًا آخر، مذكورة في التقرير.
+       *[other] و{ $count } عنصر آخر، مذكورة في التقرير.
+    }
+guard-not-known-yet = غير معروف بعد
+guard-free = { $free } متاحة
+guard-free-unknown = المساحة الحرة غير معروفة
+guard-items-size = { $items } عناصر، { $size }
+guard-try-again = إعادة المحاولة
+guard-pause = إيقاف مؤقت
+guard-resume = متابعة
+guard-check-again = التحقق مرة أخرى
+guard-strip-plan = خطتك
+guard-strip-report = تقريرك
+guard-strip-permission = الموافقة
+guard-strip-rescue = الإنقاذ
+guard-strip-undo = التراجع
+guard-strip-checking = التحقق
+
+## X09 التحقق بعد إعادة التشغيل، وعدم توفر الحالة
+
+guard-checking-title = جارٍ التحقق من المرحلة التي وصلنا إليها
+guard-checking-body = يفحص PCTwin ما كان قد اكتمل قبل أن يُغلق. ستعود خياراتك فور أن يعرف ذلك.
+guard-unavailable-title = الحالة غير متاحة
+guard-unavailable-body = لا يستطيع PCTwin أن يقول الآن ما الذي تفعله عملية النقل هذه. لن يظهر أي شيء على أنه تم حتى يستطيع ذلك. تحقق مرة أخرى بعد قليل.
+
+## 2.9 قبل أن نغيّر أي شيء
+
+guard-changes-title = قبل أن نغيّر أي شيء
+guard-changes-body = هذا كل ما ستغيّره عملية النقل على هذا الحاسوب المحمول، وما يستطيع التراجع فعله مع كل شيء. لم يتغيّر أي شيء بعد.
+guard-changes-download = التنزيل من الإنترنت
+guard-changes-download-none = لا شيء
+guard-changes-permissions = موافقة النظام
+guard-changes-one-prompt = يسأل نظامك مرة واحدة
+guard-changes-no-prompt = غير مطلوبة
+guard-changes-restore-point = نقطة استعادة في Windows
+guard-changes-restore-point-first = تُطلب أولًا
+guard-changes-restore-point-none = غير مستخدمة
+guard-changes-install =
+    { $count ->
+        [zero] للتثبيت: لا تطبيقات
+        [one] للتثبيت: تطبيق واحد
+        [two] للتثبيت: تطبيقان
+        [few] للتثبيت: { $count } تطبيقات
+        [many] للتثبيت: { $count } تطبيقًا
+       *[other] للتثبيت: { $count } تطبيق
+    }
+guard-changes-merge =
+    { $count ->
+        [zero] تُضاف بجانب ما هو موجود هنا: لا عناصر
+        [one] يُضاف بجانب ما هو موجود هنا: عنصر واحد
+        [two] يُضافان بجانب ما هو موجود هنا: عنصران
+        [few] تُضاف بجانب ما هو موجود هنا: { $count } عناصر
+        [many] تُضاف بجانب ما هو موجود هنا: { $count } عنصرًا
+       *[other] تُضاف بجانب ما هو موجود هنا: { $count } عنصر
+    }
+guard-changes-replace =
+    { $count ->
+        [zero] للاستبدال مع الاحتفاظ بالنسخ القديمة: لا عناصر
+        [one] للاستبدال مع الاحتفاظ بالنسخة القديمة: عنصر واحد
+        [two] للاستبدال مع الاحتفاظ بالنسختين القديمتين: عنصران
+        [few] للاستبدال مع الاحتفاظ بالنسخ القديمة: { $count } عناصر
+        [many] للاستبدال مع الاحتفاظ بالنسخ القديمة: { $count } عنصرًا
+       *[other] للاستبدال مع الاحتفاظ بالنسخ القديمة: { $count } عنصر
+    }
+guard-changes-leave-alone =
+    { $count ->
+        [zero] تبقى كما هي: لا عناصر
+        [one] يبقى كما هو: عنصر واحد
+        [two] يبقيان كما هما: عنصران
+        [few] تبقى كما هي: { $count } عناصر
+        [many] تبقى كما هي: { $count } عنصرًا
+       *[other] تبقى كما هي: { $count } عنصر
+    }
+guard-changes-space = المساحة المطلوبة على كل محرك أقراص في أكثر لحظة ازدحامًا
+guard-changes-why-prompt = لماذا سيسأل نظامك
+guard-changes-approve = الموافقة على هذه التغييرات
+guard-undo-legend-can = يستطيع PCTwin التراجع عنه.
+guard-undo-legend-keeps = يحتفظ به PCTwin. لا يمسّه التراجع.
+guard-undo-legend-you = يحتاج إليك. لا يستطيع التراجع عنه إلا خدمته أو مطوّره.
+guard-undo-can-reverse = يستطيع PCTwin التراجع عنه
+guard-undo-can-remove-app = يستطيع PCTwin إزالته مع الاحتفاظ بعملك
+guard-undo-must-keep = محفوظ: كان موجودًا هنا من قبل
+guard-undo-needs-you-service = يحتاج إليك: لا تستطيع التراجع عنه إلا الخدمة عبر الإنترنت
+guard-undo-needs-you-maker = يحتاج إليك: تسجيلات الدخول والتراخيص تعود إلى المطوّر
+guard-drive-needs = يحتاج إلى { $needed }. المتاح { $free }.
+guard-drive-needs-free-unknown = يحتاج إلى { $needed }. لا يذكر محرك الأقراص كم بقي فيه من مساحة.
+guard-drive-fits = يتّسع
+guard-drive-short = ينقصه { $short }
+guard-drive-unknown = غير معروف
+guard-permission-read-other-people = لقراءة ملفات الأشخاص الآخرين على الحاسوب المحمول القديم
+guard-permission-make-accounts = لإنشاء حساباتهم على هذا الحاسوب المحمول
+guard-permission-shared-folders = لوضع أشياء في مجلدات مشتركة لا يستطيع حسابك تغييرها
+guard-permission-install-for-everyone = لتثبيت التطبيقات للجميع على هذا الحاسوب المحمول
+guard-permission-restore-point = لإنشاء نقطة استعادة في Windows أولًا
+
+## X06 وH10 تغيّر شيء بعد الموافقة
+
+guard-changed-title =
+    { $count ->
+        [zero] لم يتغيّر أي شيء بعد موافقتك
+        [one] تغيّر شيء واحد بعد موافقتك
+        [two] تغيّر شيئان بعد موافقتك
+        [few] تغيّرت { $count } أشياء بعد موافقتك
+        [many] تغيّر { $count } شيئًا بعد موافقتك
+       *[other] تغيّر { $count } شيء بعد موافقتك
+    }
+guard-changed-body = هذه وحدها تحتاج إلى نظرة جديدة. كل ما عداها يبقى موافقًا عليه ويستمر.
+guard-changed-changed-on-old-laptop = تغيّر على الحاسوب المحمول القديم.
+guard-changed-app-updated = حدّث التطبيق نفسه بنفسه.
+guard-changed-destination-changed = تغيّر المكان الذي يذهب إليه.
+guard-changed-new-scope = إنه جديد: انضم شخص آخر أو حاسوب محمول آخر إلى عملية النقل.
+guard-changed-permission-ended = انتهت الموافقة الخاصة به.
+guard-changed-leave-out = استبعاد هذه
+guard-changed-approve = الموافقة على هذه مرة أخرى
+
+## M31 وM05 المساحة على الحاسوب المحمول الجديد
+
+guard-space-title = المساحة على الحاسوب المحمول الجديد
+guard-space-title-short = المساحة على الحاسوب المحمول الجديد غير كافية
+guard-space-body = حسب PCTwin كل ما سيصل إلى كل محرك أقراص، بما في ذلك المساحة اللازمة للتراجع. لا يُسقَط أي شيء اخترته من أجل أن يتّسع.
+guard-space-proposal = ما يقترحه PCTwin لما لا يتّسع
+guard-keep-off-leave-in-cloud = تُترك في سحابتها، حيث هي آمنة
+guard-keep-off-offload-drive = تُوضع على محرك الأقراص الآخر لديك
+guard-keep-off-leave-on-old-laptop = تُترك على الحاسوب المحمول القديم. احتفظ به حتى يتم نقلها.
+guard-offload-title = محرك الأقراص الآخر لديك
+guard-offload-connected = متصل
+guard-offload-not-connected = غير متصل
+guard-offload-approved = اخترت محرك الأقراص هذا. الملفات الموجودة عليه ليست على الحاسوب المحمول الجديد: وصّله لفتحها.
+guard-offload-ask = يستطيع PCTwin وضع بعض الأشياء على محرك الأقراص هذا. يحتاج إلى موافقتك على هذا المحرك بالذات.
+guard-offload-use = استخدام محرك الأقراص هذا
+guard-space-approve = الموافقة على هذه الخطة
+guard-safe-in = آمنة في { $provider }
+guard-safe-in-cloud = آمنة في سحابتك
+guard-safe-in-detail =
+    { $count ->
+        [zero] لا توجد ملفات محفوظة على الإنترنت فقط.
+        [one] ملف واحد محفوظ على الإنترنت فقط. سيعود عندما تسجّل الدخول على الحاسوب المحمول الجديد.
+        [two] ملفان محفوظان على الإنترنت فقط. سيعودان عندما تسجّل الدخول على الحاسوب المحمول الجديد.
+        [few] { $count } ملفات محفوظة على الإنترنت فقط. ستعود عندما تسجّل الدخول على الحاسوب المحمول الجديد.
+        [many] { $count } ملفًا محفوظة على الإنترنت فقط. ستعود عندما تسجّل الدخول على الحاسوب المحمول الجديد.
+       *[other] { $count } ملف محفوظة على الإنترنت فقط. ستعود عندما تسجّل الدخول على الحاسوب المحمول الجديد.
+    }
+guard-your-cloud = سحابتك
+
+## M09 الاحتفاظ بنسخة من الملفات الموجودة على الإنترنت فقط
+
+guard-local-title = هل تريد الاحتفاظ بنسخة من ملفاتك الموجودة على الإنترنت فقط؟
+guard-local-body =
+    { $count ->
+        [zero] لا توجد ملفات في { $provider } محفوظة على الإنترنت فقط.
+        [one] ملف واحد في { $provider } محفوظ على الإنترنت فقط. يمكنك الاحتفاظ بنسخة منه على الحاسوب المحمول الجديد أيضًا.
+        [two] ملفان في { $provider } محفوظان على الإنترنت فقط. يمكنك الاحتفاظ بنسخة منهما على الحاسوب المحمول الجديد أيضًا.
+        [few] { $count } ملفات في { $provider } محفوظة على الإنترنت فقط. يمكنك الاحتفاظ بنسخة منها على الحاسوب المحمول الجديد أيضًا.
+        [many] { $count } ملفًا في { $provider } محفوظة على الإنترنت فقط. يمكنك الاحتفاظ بنسخة منها على الحاسوب المحمول الجديد أيضًا.
+       *[other] { $count } ملف في { $provider } محفوظة على الإنترنت فقط. يمكنك الاحتفاظ بنسخة منها على الحاسوب المحمول الجديد أيضًا.
+    }
+guard-local-download = للتنزيل على الحاسوب المحمول القديم
+guard-local-old-space = المساحة على الحاسوب المحمول القديم
+guard-local-how = ينزّل PCTwin بضعة ملفات في كل مرة، ثم يرسلها، ثم يعيدها إلى الإنترنت فقط على الحاسوب المحمول القديم.
+guard-local-paused-metered = متوقف مؤقتًا: قد يحاسبك هذا الاتصال على البيانات. سيتابع من تلقاء نفسه عند توفر اتصال مجاني، أو الآن إن سمحت.
+guard-local-paused-no-space = متوقف مؤقتًا: لم تعد هناك مساحة على الحاسوب المحمول القديم للملفات التالية. يبقى الباقي آمنًا في { $provider }.
+guard-local-done = تم. النسخ موجودة على الحاسوب المحمول الجديد.
+guard-local-keep = الاحتفاظ بنسخة
+guard-local-leave = تركها في { $provider }
+guard-local-allow-metered = السماح على هذا الاتصال
+
+## M07 من يذهب إلى أين
+
+guard-owners-title = من يذهب إلى أين
+guard-owners-body = تذهب أشياء كل شخص إلى حسابه الخاص على هذا الحاسوب المحمول. تطابق الأسماء وحده لا يحسم ذلك أبدًا.
+guard-owners-from = من { $laptop }
+guard-owners-to-account = إلى الحساب { $account } على هذا الحاسوب المحمول
+guard-owners-new-account = إلى حساب جديد على هذا الحاسوب المحمول
+guard-owners-own-folder = مجلداتهم الخاصة "من { $laptop }"، لأن الأسماء متعارضة
+guard-owners-usual-folders = مجلداتهم المعتادة
+guard-owners-approve = موافقة
+
+## X12 ما لم يكتمل
+
+guard-report-title-partial = تم نقل معظم الأشياء. لكن بعضها لم يُنقل.
+guard-report-title-done = تم نقل كل شيء في هذا الجزء.
+guard-report-body-partial = كل ما يلي لا يزال على الحاسوب المحمول القديم. أعد محاولة كل واحد عندما تكون مستعدًا. ما تم نقله يبقى.
+guard-report-body-done = لا يوجد شيء متبقٍ لإعادة المحاولة.
+guard-line-app = التطبيق { $name }
+guard-line-items =
+    { $count ->
+        [zero] لا عناصر
+        [one] عنصر واحد
+        [two] عنصران
+        [few] { $count } عناصر
+        [many] { $count } عنصرًا
+       *[other] { $count } عنصر
+    }
+guard-line-settings =
+    { $count ->
+        [zero] لا إعدادات
+        [one] إعداد واحد
+        [two] إعدادان
+        [few] { $count } إعدادات
+        [many] { $count } إعدادًا
+       *[other] { $count } إعداد
+    }
+guard-line-why-failed = من { $laptop }: لم يكتمل.
+guard-line-why-laptop-not-connected = من { $laptop }: ذلك الحاسوب المحمول غير متصل. وصّله بشبكة Wi-Fi نفسها وأبقه قيد التشغيل.
+guard-line-why-waits-for-another = من { $laptop }: ينتظر خطوة أخرى لم تكتمل. أصلح تلك أولًا.
+guard-line-why-not-started = من { $laptop }: توقفت عملية النقل قبل أن تبدأ.
+
+## M25 وH10 موافقة النظام، ونقطة الاستعادة
+
+guard-permission-title-explain = يحتاج PCTwin إلى موافقة واحدة من نظامك
+guard-permission-title-waiting-for-system = أجب عن سؤال نظامك
+guard-permission-title-denied = قلت لا
+guard-permission-title-closed-without-answer = أُغلق السؤال دون إجابة
+guard-permission-title-given = تمت الموافقة لعملية النقل هذه
+guard-permission-title-ended-by-sleep = انتهت الموافقة عندما دخل الحاسوب المحمول في وضع السكون
+guard-permission-title-ended-other-session = انتهت الموافقة عندما سجّل شخص آخر الدخول
+guard-permission-body-explain = يسأل نظامك مرة واحدة لعملية النقل كلها. لا تستخدمها إلا الخطوات المذكورة أدناه، وتنتهي بانتهاء عملية النقل.
+guard-permission-body-waiting-for-system = نافذة نظامك نفسه مفتوحة. اكتب كلمة المرور هناك إن طلبها.
+guard-permission-body-denied = لا تُستبعد إلا الخطوات التي كانت تحتاج إليها. كل ما عداها يستمر.
+guard-permission-body-closed-without-answer = إغلاقها ليس موافقة، لذلك لم يتم أي شيء يحتاج إليها. اطلبها مرة أخرى، أو تابع بدونها.
+guard-permission-body-given = يستخدمها PCTwin للخطوات المذكورة أدناه فقط، وتنتهي بانتهاء عملية النقل هذه.
+guard-permission-body-ended-by-sleep = لم يتم بعد ذلك أي شيء يحتاج إليها. اطلبها مرة أخرى لتتابع.
+guard-permission-body-ended-other-session = لم يتم بعد ذلك أي شيء يحتاج إليها. اطلبها مرة أخرى عندما تعود إلى حسابك.
+guard-permission-never-password = لا يطلب PCTwin كلمة مرورك أبدًا ولا يراها أبدًا. نظامك وحده هو من يراها.
+guard-permission-not-now = المتابعة بدونها
+guard-permission-ask = المتابعة إلى نظامك
+guard-permission-ask-again = اطلبها مرة أخرى
+guard-restore-title = نقطة استعادة في Windows
+guard-restore-made = أُنشئت في { $time }.
+guard-restore-earlier-exists = لدى Windows نقطة سابقة من { $time }، لذلك لم ينشئ أخرى.
+guard-restore-not-chosen = لم تُنشأ: اخترت ألا تُنشأ.
+guard-restore-not-made-not-windows = لم تُنشأ: نقاط الاستعادة موجودة في Windows فقط.
+guard-restore-not-made-protection-off = لم تُنشأ: System Protection متوقفة لمحرك الأقراص هذا. يمكنك تشغيلها في System Properties.
+guard-restore-not-made-needs-admin = لم تُنشأ: تحتاج إلى موافقة نظامك.
+guard-restore-not-made-unconfirmed = لم تُنشأ: قال Windows نعم، لكن لا يمكن العثور على أي نقطة استعادة.
+guard-restore-not-made-failed = لم تُنشأ: لم يستطع Windows إنشاء واحدة.
+
+## T01 إلى T04 الإنقاذ من حاسوب محمول لا يعمل
+
+guard-rescue-title-intro = أنقذ ما يهمك من حاسوب محمول لا يعمل
+guard-rescue-title-pick-drive = اختر محرك الأقراص المراد إنقاذه
+guard-rescue-title-locked = محرك الأقراص هذا مقفل
+guard-rescue-title-no-system = هذا ليس محرك أقراص حاسوب محمول
+guard-rescue-title-salvage = هذا ما أمكن قراءته
+guard-rescue-body-intro = أخرج محرك الأقراص من الحاسوب المحمول القديم ووصّله بهذا الحاسوب بمحوّل أو علبة لمحركات الأقراص.
+guard-rescue-body-pick-drive = اختر محرك أقراص الحاسوب المحمول القديم. لا يمكن أن يكون محرك الأقراص الذي تذهب إليه الأشياء هو نفسه الذي تنقذه.
+guard-rescue-body-locked = افتح قفله أولًا في نظامك. ثم تحقق مرة أخرى.
+guard-rescue-body-no-system = لا يحتوي محرك الأقراص هذا على نظام حاسوب محمول ولا على مجلدات رئيسية. إن كان محرك USB عاديًا، فاستخدمه على الحاسوب المحمول الجديد بدلًا من ذلك.
+guard-rescue-body-salvage = راجع القائمة، ثم استخدم ما أمكن قراءته.
+guard-rescue-can = ما يستطيع الإنقاذ فعله
+guard-rescue-can-body = قراءة ملفاتك، والأشخاص والإعدادات الموجودة على محرك الأقراص، من محرك أقراص ما زال يعمل.
+guard-rescue-cannot = ما لا يستطيع فعله
+guard-rescue-cannot-body = إصلاح محرك الأقراص، أو قراءة الأجزاء التالفة، أو فتح محرك أقراص ليس لديك مفتاحه.
+guard-rescue-read-only-title = محرك الأقراص يُقرأ فقط
+guard-rescue-read-only-promise = يقرأه PCTwin فقط. لا يتغيّر شيء عليه ولا يُصلَح ولا يُهيَّأ.
+guard-rescue-system-read-only = فتحه نظامك للقراءة فقط، لذلك لا يمكن أن يتغيّر شيء عليه.
+guard-rescue-pctwin-reads-only = قرأه PCTwin فقط. لكن نظامك كان قد فتحه للتعديل، لذلك كان بإمكان تطبيقات أخرى أن تغيّره.
+guard-rescue-refused-target = محرك الأقراص هذا هو المكان الذي توضع فيه الأشياء، لذلك لا يمكن إنقاذه أيضًا. اختر محرك أقراص آخر.
+guard-rescue-drive-detail = { $size }، { $fs }
+guard-rescue-drive-is-target = تذهب أشياء عملية النقل إلى محرك الأقراص هذا.
+guard-rescue-drive-cannot = لا يمكن إنقاذه
+guard-rescue-choose = إنقاذ محرك الأقراص هذا
+guard-rescue-bit-locker-step-1 = افتح محرك الأقراص في File Explorer.
+guard-rescue-bit-locker-step-2 = اكتب مفتاح الاسترداد الخاص به عندما يطلبه Windows. غالبًا ما يكون محفوظًا في حساب Microsoft الخاص بالمالك، على aka.ms/myrecoverykey.
+guard-rescue-bit-locker-step-3 = عد إلى هنا واختر التحقق مرة أخرى.
+guard-rescue-file-vault-step-1 = افتح قفله على جهاز Mac بكلمة مرور تسجيل الدخول الخاصة بالمالك أو بمفتاح الاسترداد.
+guard-rescue-file-vault-step-2 = عد إلى هنا واختر التحقق مرة أخرى.
+guard-rescue-apple-chip-step-1 = يُبقي جهاز Mac هذا محرك أقراصه مقفلًا عليه وحده، لذلك لا يفيد إخراج محرك الأقراص.
+guard-rescue-apple-chip-step-2 = إن كان جهاز Mac ما زال يبدأ في Recovery، فاستخدم Share Disk مع كابل. وإن لم يبدأ إطلاقًا، فلا يستطيع المساعدة إلا مركز إصلاح Apple.
+guard-rescue-never-key = لا يطلب PCTwin المفتاح أبدًا ولا يحتفظ به أبدًا.
+guard-rescue-readable =
+    { $count ->
+        [zero] لا يمكن قراءة أي عنصر.
+        [one] يمكن قراءة عنصر واحد.
+        [two] يمكن قراءة عنصرين.
+        [few] يمكن قراءة { $n } عناصر.
+        [many] يمكن قراءة { $n } عنصرًا.
+       *[other] يمكن قراءة { $n } عنصر.
+    }
+guard-rescue-unreadable =
+    { $count ->
+        [zero] لا عناصر تعذّرت قراءتها
+        [one] تعذّرت قراءة عنصر واحد
+        [two] تعذّرت قراءة عنصرين
+        [few] تعذّرت قراءة { $count } عناصر
+        [many] تعذّرت قراءة { $count } عنصرًا
+       *[other] تعذّرت قراءة { $count } عنصر
+    }
+guard-rescue-look = البحث عن محرك الأقراص
+guard-rescue-check-again = التحقق مرة أخرى
+guard-rescue-use = استخدام ما أمكن قراءته
+
+## R05 وR06 التراجع
+
+guard-undo-preview-title = ما الذي سيفعله التراجع
+guard-undo-preview-body = نظر PCTwin في كل تغيير قبل لحظات. يتم الاحتفاظ بكل ما غيّرته بعد عملية النقل. لا يحدث شيء حتى تختار التراجع.
+guard-undo-plan-put-back = يُعاد كما كان
+guard-undo-plan-remove-app = أُزيل التطبيق وبقي عملك
+guard-undo-plan-keep-changed = محفوظ: لأنك غيّرته
+guard-undo-plan-elsewhere = يحتاج إليك: تم في مكان آخر
+guard-undo-plan-leave-alone = يُترك كما هو: كان موجودًا هنا من قبل
+guard-undo-keep = إبقاء كل شيء كما هو
+guard-undo-run = تراجع
+guard-undo-running-title = جارٍ التراجع عن التغييرات
+guard-undo-done-title = ما الذي فعله التراجع
+guard-undo-result-restored = تمت الاستعادة
+guard-undo-result-removed = تمت الإزالة
+guard-undo-result-as-before = كان كما هو من قبل
+guard-undo-result-kept-changed = محفوظ لأنك غيّرته
+guard-undo-result-kept-other = محفوظ، انظر مزيد من التفاصيل
+guard-undo-result-kept-at = محفوظ باسم { $name }
+guard-undo-result-done-elsewhere = تم في مكان آخر: لا تستطيع التراجع عنه إلا خدمته أو مطوّره
+guard-undo-result-not-done-yet = لم يتم بعد. سيحاول التراجع مرة أخرى في المرة القادمة.
