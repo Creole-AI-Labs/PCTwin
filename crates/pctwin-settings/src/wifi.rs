@@ -122,8 +122,7 @@ pub fn offer(mover_is_admin: bool) -> Offer {
 }
 
 const NS: &str = "http://www.microsoft.com/networking/WLAN/profile/v1";
-const MAX_PROFILE: u64 = 64 * 1024;
-const MAX_PROFILES: usize = 1000;
+use pctwin_types::limits::{WIFI_PROFILE_BYTES as MAX_PROFILE, WIFI_PROFILES as MAX_PROFILES};
 
 fn child<'a, 'i>(n: roxmltree::Node<'a, 'i>, name: &str) -> Option<roxmltree::Node<'a, 'i>> {
     n.children()
@@ -136,6 +135,8 @@ fn text_of(n: Option<roxmltree::Node<'_, '_>>) -> Option<String> {
 
 /// Reads one Windows WLAN profile (as `netsh` exports it).
 pub fn parse_profile(xml: &str) -> Result<Network, WifiError> {
+    pctwin_types::nesting::check(xml, pctwin_types::nesting::Syntax::Xml)
+        .map_err(|_| WifiError::Unreadable)?;
     let doc = roxmltree::Document::parse(xml).map_err(|_| WifiError::Unreadable)?;
     let root = doc.root_element();
     if root.tag_name().name() != "WLANProfile" || root.tag_name().namespace() != Some(NS) {
@@ -267,19 +268,126 @@ pub fn profile_xml(n: &Network) -> Result<Zeroizing<String>, WifiError> {
 /// The prefix of PCTwin's Wi-Fi folders in the temporary folder.
 pub const FOLDER_PREFIX: &str = "pctwin-wifi-";
 
+/// Why a private folder could not be made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderError {
+    /// Something already has that name: never used, another name is tried.
+    NameTaken,
+    Failed,
+}
+
+/// Makes the folder the Wi-Fi tool writes the password into (in plain text): new, and only
+/// this account (and the system) may open it, from its first moment, nothing inherited from the
+/// folder above (fourth review, finding F3). Handed in by the app, which makes it through the
+/// helper's fenced system calls (`pctwin_helper_os::private_folder`); this crate never links
+/// those (the same pattern as the maker check and the journal).
+pub trait PrivateFolders {
+    fn make(&self, path: &Path) -> Result<(), FolderError>;
+    /// The folder's access list as Windows writes it (`D:P(A;OICI;FA;;;S-1-...)`), read back.
+    fn access_list(&self, path: &Path) -> Option<String>;
+}
+
+/// Private folders through the standard library: mode 0700 from the first moment (Mac and
+/// Linux, where that is the whole of a folder's access).
+#[cfg(unix)]
+pub struct UnixPrivateFolders;
+
+#[cfg(unix)]
+impl PrivateFolders for UnixPrivateFolders {
+    fn make(&self, path: &Path) -> Result<(), FolderError> {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    FolderError::NameTaken
+                } else {
+                    FolderError::Failed
+                }
+            })
+    }
+    fn access_list(&self, _: &Path) -> Option<String> {
+        None
+    }
+}
+
 /// A fresh folder for the Wi-Fi tool, inside `parent` (the person's own temporary folder).
-fn fresh_folder(parent: &Path) -> Result<TempFolder, WifiError> {
+fn fresh_folder(folders: &dyn PrivateFolders, parent: &Path) -> Result<TempFolder, WifiError> {
     for _ in 0..8 {
         let mut b = [0u8; 12];
         getrandom::fill(&mut b).map_err(|_| WifiError::Tool)?;
         let name: String = b.iter().map(|x| format!("{x:02x}")).collect();
         let path = parent.join(format!("{FOLDER_PREFIX}{name}"));
-        // `create_dir` fails if it exists: never a folder someone else prepared.
-        if std::fs::create_dir(&path).is_ok() {
-            return Ok(TempFolder(path));
+        // Owner-only and protected from its first moment (the password is written into it in
+        // plain text): never a folder someone else prepared, never one that inherits its
+        // parent's access. If that cannot be done, nothing goes on.
+        match folders.make(&path) {
+            Ok(()) => {
+                let folder = TempFolder(path);
+                check_private(folders, &folder.0)?;
+                return Ok(folder);
+            }
+            Err(FolderError::NameTaken) => continue,
+            Err(FolderError::Failed) => return Err(WifiError::Tool),
         }
     }
     Err(WifiError::Tool)
+}
+
+/// Reads the folder's access back: protected, nothing inherited, only this account and the
+/// system (Windows); only this account (elsewhere).
+fn check_private(folders: &dyn PrivateFolders, path: &Path) -> Result<(), WifiError> {
+    #[cfg(windows)]
+    {
+        let sddl = folders.access_list(path).ok_or(WifiError::Tool)?;
+        if !private_sddl(&sddl) {
+            return Err(WifiError::Tool);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = folders;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::symlink_metadata(path)
+            .map_err(|_| WifiError::Tool)?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err(WifiError::Tool);
+        }
+    }
+    Ok(())
+}
+
+/// Whether an access list (its text form) is protected, inherits nothing, and allows only the
+/// system and one account.
+pub fn private_sddl(sddl: &str) -> bool {
+    let Some(dacl) = sddl.strip_prefix("D:") else {
+        return false;
+    };
+    let Some(aces) = dacl.strip_prefix('P') else {
+        return false;
+    };
+    let aces = aces.trim_start_matches(|c: char| c.is_ascii_uppercase());
+    let list: Vec<&str> = aces
+        .split(')')
+        .filter(|a| !a.is_empty())
+        .map(|a| a.trim_start_matches('('))
+        .collect();
+    let mut accounts = std::collections::BTreeSet::new();
+    for ace in &list {
+        let f: Vec<&str> = ace.split(';').collect();
+        // type;flags;rights;object;inherited object;account
+        if f.len() != 6 || f[0] != "A" || f[1].contains("ID") {
+            return false;
+        }
+        if f[5] != "SY" {
+            accounts.insert(f[5]);
+        }
+    }
+    !list.is_empty() && accounts.len() <= 1
 }
 
 /// A folder removed with everything in it when dropped (also on failure).
@@ -321,10 +429,11 @@ fn netsh_quoted(p: &Path) -> Result<String, WifiError> {
 /// each file read into memory and deleted at once.
 pub fn export_all(
     runner: &mut dyn Runner,
+    folders: &dyn PrivateFolders,
     parent: &Path,
     with_keys: bool,
 ) -> Result<Vec<Network>, WifiError> {
-    let folder = fresh_folder(parent)?;
+    let folder = fresh_folder(folders, parent)?;
     let arg = format!("folder={}", netsh_quoted(&folder.0)?);
     let mut args = vec!["wlan", "export", "profile"];
     if with_keys {
@@ -361,10 +470,15 @@ pub fn export_all(
 }
 
 /// Adds one network for the person (Windows), then checks it is there.
-pub fn import(runner: &mut dyn Runner, parent: &Path, n: &Network) -> Result<(), WifiError> {
+pub fn import(
+    runner: &mut dyn Runner,
+    folders: &dyn PrivateFolders,
+    parent: &Path,
+    n: &Network,
+) -> Result<(), WifiError> {
     let xml = profile_xml(n)?;
     {
-        let folder = fresh_folder(parent)?;
+        let folder = fresh_folder(folders, parent)?;
         let file = folder.0.join("profile.xml");
         {
             use std::io::Write;
@@ -388,7 +502,7 @@ pub fn import(runner: &mut dyn Runner, parent: &Path, n: &Network) -> Result<(),
     }
     drop(xml);
     // Read back, without any password.
-    let now = export_all(runner, parent, false)?;
+    let now = export_all(runner, folders, parent, false)?;
     if now.iter().any(|x| x.name == n.name && x.ssid == n.ssid) {
         Ok(())
     } else {

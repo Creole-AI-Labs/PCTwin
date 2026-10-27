@@ -128,6 +128,7 @@ fn a_package_changed_behind_a_folder_link_is_never_installed() {
 #[test]
 fn the_helpers_own_copy_is_checked_by_windows() {
     struct Staged(PathBuf);
+    impl pctwin_staged_seal::Sealed for Staged {}
     impl pctwin_maker::HelperStaged for Staged {
         fn staged_path(&self) -> &Path {
             &self.0

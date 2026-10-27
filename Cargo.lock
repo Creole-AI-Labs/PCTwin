@@ -617,6 +617,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cap-fs-ext"
+version = "4.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56ff379b70af8e08307a8f65e7040c7301cb4a572538ade16b4984f0da77847f"
+dependencies = [
+ "cap-primitives",
+ "io-lifetimes 3.0.1",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "cap-primitives"
 version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3777,6 +3788,7 @@ dependencies = [
  "pctwin-maker",
  "pctwin-record",
  "pctwin-scan",
+ "pctwin-staged-seal",
  "rustix",
  "serde",
  "serde_json",
@@ -3814,6 +3826,7 @@ dependencies = [
  "blake3",
  "getrandom 0.4.3",
  "keyring-core",
+ "pctwin-catalogue",
  "pctwin-grant",
  "pctwin-recipe",
  "pctwin-record",
@@ -3908,6 +3921,7 @@ dependencies = [
  "libc",
  "object",
  "pctwin-helper-os",
+ "pctwin-staged-seal",
  "pctwin-types",
  "same-file",
  "serde",
@@ -3926,6 +3940,7 @@ name = "pctwin-move"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "cap-fs-ext",
  "cap-primitives",
  "pctwin-gate",
  "pctwin-helper",
@@ -3948,6 +3963,7 @@ name = "pctwin-orchestrate"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "cap-fs-ext",
  "cap-primitives",
  "pctwin-catalogue",
  "pctwin-record",
@@ -4087,6 +4103,7 @@ dependencies = [
  "getrandom 0.4.3",
  "pctwin-executor",
  "pctwin-grant",
+ "pctwin-helper-os",
  "pctwin-journal",
  "pctwin-recipe",
  "pctwin-record",
@@ -4100,6 +4117,10 @@ dependencies = [
  "winreg",
  "zeroize",
 ]
+
+[[package]]
+name = "pctwin-staged-seal"
+version = "0.1.0"
 
 [[package]]
 name = "pctwin-transfer"

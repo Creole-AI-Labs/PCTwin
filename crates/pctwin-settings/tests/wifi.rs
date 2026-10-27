@@ -12,6 +12,30 @@ use pctwin_settings::wifi::{
 };
 use zeroize::Zeroizing;
 
+/// The private folders, made as the app makes them.
+#[cfg(windows)]
+struct HelperFolders;
+
+#[cfg(windows)]
+impl pctwin_settings::wifi::PrivateFolders for HelperFolders {
+    fn make(&self, path: &Path) -> Result<(), pctwin_settings::wifi::FolderError> {
+        pctwin_helper_os::private_folder(path).map_err(|e| match e {
+            pctwin_helper_os::Error::NameTaken => pctwin_settings::wifi::FolderError::NameTaken,
+            _ => pctwin_settings::wifi::FolderError::Failed,
+        })
+    }
+    fn access_list(&self, path: &Path) -> Option<String> {
+        pctwin_helper_os::folder_access_list(path).ok()
+    }
+}
+
+fn folders() -> &'static dyn pctwin_settings::wifi::PrivateFolders {
+    #[cfg(windows)]
+    return &HelperFolders;
+    #[cfg(unix)]
+    return &pctwin_settings::wifi::UnixPrivateFolders;
+}
+
 const NS: &str = "http://www.microsoft.com/networking/WLAN/profile/v1";
 
 fn home_profile(name: &str, ssid: &str, key: Option<&str>) -> String {
@@ -181,7 +205,7 @@ fn passwords_are_read_into_memory_and_never_left_on_disk() {
         "Example-Home".into(),
         Some("correct-horse-example".into()),
     ));
-    let nets = export_all(&mut netsh, tmp.path(), true).unwrap();
+    let nets = export_all(&mut netsh, folders(), tmp.path(), true).unwrap();
     assert_eq!(nets.len(), 2);
     let home = nets.iter().find(|n| n.ssid == "Example-Home").unwrap();
     assert_eq!(
@@ -214,10 +238,10 @@ fn a_network_is_added_from_a_file_deleted_at_once_and_read_back() {
         "Example-Home".into(),
         Some("correct-horse-example".into()),
     ));
-    let nets = export_all(&mut old, tmp.path(), true).unwrap();
+    let nets = export_all(&mut old, folders(), tmp.path(), true).unwrap();
     let home = nets.into_iter().find(|n| n.ssid == "Example-Home").unwrap();
     let mut new = Netsh::default();
-    import(&mut new, tmp.path(), &home).unwrap();
+    import(&mut new, folders(), tmp.path(), &home).unwrap();
     assert_eq!(
         new.saved.borrow()[0].2.as_deref(),
         Some("correct-horse-example")
@@ -242,7 +266,7 @@ fn a_network_the_tool_did_not_keep_is_not_reported_added() {
         &home_profile("Example-Home", "Example-Home", Some("x-example")).replace('\u{feff}', ""),
     )
     .unwrap();
-    assert!(import(&mut Forgets, tmp.path(), &n).is_err());
+    assert!(import(&mut Forgets, folders(), tmp.path(), &n).is_err());
     assert!(leftovers(tmp.path()).is_empty());
 }
 
@@ -337,6 +361,139 @@ fn an_oversized_profile_file_is_not_read() {
         }
     }
     let tmp = tempfile::tempdir().unwrap();
-    assert!(export_all(&mut Big, tmp.path(), true).unwrap().is_empty());
+    assert!(
+        export_all(&mut Big, folders(), tmp.path(), true)
+            .unwrap()
+            .is_empty()
+    );
     assert!(leftovers(tmp.path()).is_empty());
+}
+
+/// Fourth review, finding F3: the folder the password is written into in plain text inherited
+/// its parent's access. It is now owner-only and protected from its first moment, read back.
+#[test]
+fn f3_the_wifi_folder_is_owner_only_from_its_first_moment() {
+    struct Acl(Vec<String>);
+    impl Runner for Acl {
+        fn run(&mut self, _t: Tool, args: &[&str]) -> Result<Output, String> {
+            for a in args {
+                if let Some(p) = a
+                    .strip_prefix("folder=")
+                    .or_else(|| a.strip_prefix("filename="))
+                {
+                    let p = Path::new(p.trim_matches('"'));
+                    let dir = if a.starts_with("filename=") {
+                        p.parent().unwrap().to_path_buf()
+                    } else {
+                        p.to_path_buf()
+                    };
+                    #[cfg(windows)]
+                    self.0
+                        .push(pctwin_helper_os::folder_access_list(&dir).unwrap());
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let m = std::fs::metadata(&dir).unwrap().permissions().mode();
+                        self.0.push(format!("{:o}", m & 0o777));
+                    }
+                }
+            }
+            Ok(Output {
+                ok: true,
+                stdout: String::new(),
+            })
+        }
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let n = Network {
+        name: "Example-Home".into(),
+        ssid: "Example-Home".into(),
+        hidden: false,
+        auto_connect: true,
+        security: Security::Personal {
+            auth: "WPA2PSK".into(),
+            encryption: "AES".into(),
+        },
+        secret: Some(Secret::new(Zeroizing::new("correct-horse-example".into()))),
+    };
+    let mut r = Acl(Vec::new());
+    let _ = import(&mut r, folders(), parent.path(), &n);
+    assert!(r.0.len() >= 2, "{:?}", r.0);
+    for acl in &r.0 {
+        #[cfg(windows)]
+        {
+            assert!(pctwin_settings::wifi::private_sddl(acl), "{acl}");
+            assert!(acl.starts_with("D:P"), "{acl}");
+            assert!(!acl.contains(";ID;") && !acl.contains("ID;;"), "{acl}");
+        }
+        #[cfg(unix)]
+        assert_eq!(acl, "700");
+    }
+}
+
+#[test]
+fn f3_an_inherited_or_shared_access_list_is_not_private() {
+    use pctwin_settings::wifi::private_sddl;
+    let me = "S-1-5-21-1-2-3-1001";
+    assert!(private_sddl(&format!(
+        "D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)"
+    )));
+    assert!(private_sddl(&format!("D:PAI(A;OICI;FA;;;{me})")));
+    // Not protected, inherited, or a second account or group.
+    assert!(!private_sddl(&format!("D:(A;OICI;FA;;;{me})")));
+    assert!(!private_sddl(&format!("D:P(A;OICIID;FA;;;{me})")));
+    assert!(!private_sddl(&format!(
+        "D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;BA)"
+    )));
+    assert!(!private_sddl(&format!("D:P(A;OICI;FA;;;{me})(A;;FR;;;WD)")));
+    assert!(!private_sddl("D:P(D;;FA;;;WD)"));
+    assert!(!private_sddl("D:P"));
+    assert!(!private_sddl("O:SY"));
+}
+
+/// If the folder cannot be made private (or does not read back private), nothing goes on: the
+/// system's Wi-Fi tool is never asked to write the password anywhere.
+#[test]
+fn f3_no_private_folder_means_the_tool_is_never_run() {
+    use pctwin_settings::wifi::{FolderError, PrivateFolders};
+    struct Counts(usize);
+    impl Runner for Counts {
+        fn run(&mut self, _t: Tool, _a: &[&str]) -> Result<Output, String> {
+            self.0 += 1;
+            Ok(Output {
+                ok: true,
+                stdout: String::new(),
+            })
+        }
+    }
+    struct Fails;
+    impl PrivateFolders for Fails {
+        fn make(&self, _: &Path) -> Result<(), FolderError> {
+            Err(FolderError::Failed)
+        }
+        fn access_list(&self, _: &Path) -> Option<String> {
+            None
+        }
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let mut r = Counts(0);
+    assert!(export_all(&mut r, &Fails, parent.path(), true).is_err());
+    assert_eq!(r.0, 0);
+    // Made, but it reads back as sharing its parent's access (Windows).
+    #[cfg(windows)]
+    {
+        struct Inherits;
+        impl PrivateFolders for Inherits {
+            fn make(&self, path: &Path) -> Result<(), FolderError> {
+                std::fs::create_dir(path).map_err(|_| FolderError::Failed)
+            }
+            fn access_list(&self, _: &Path) -> Option<String> {
+                Some("D:AI(A;OICIID;FA;;;S-1-5-21-1-2-3-1001)(A;OICIID;FA;;;BA)".into())
+            }
+        }
+        assert!(export_all(&mut r, &Inherits, parent.path(), true).is_err());
+        assert_eq!(r.0, 0);
+        // And the folder it made is gone again.
+        assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
+    }
 }

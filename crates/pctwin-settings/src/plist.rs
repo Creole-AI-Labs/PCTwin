@@ -2,6 +2,8 @@
 //! bounded depth and size, never by string search. Mac preferences are only ever written through
 //! `defaults` (the preferences system), never by editing a property list file.
 
+use pctwin_types::nesting::{self, Syntax};
+
 /// A property list value.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Plist {
@@ -15,8 +17,7 @@ pub enum Plist {
     Other,
 }
 
-const MAX_DEPTH: usize = 32;
-const MAX_BYTES: usize = 8 * 1024 * 1024;
+use pctwin_types::limits::{NESTING as MAX_DEPTH, PREFERENCES_BYTES as MAX_BYTES};
 
 impl Plist {
     /// The value under `key` in a dictionary.
@@ -41,6 +42,12 @@ pub fn parse(text: &str) -> Result<Plist, String> {
     if text.len() > MAX_BYTES {
         return Err("the preferences are too large".into());
     }
+    // The depth gate first: the parser below calls itself for every level.
+    nesting::check(text, Syntax::Xml).map_err(|e| e.to_string())?;
+    // `defaults` never declares entities; one that does could nest past the gate when expanded.
+    if text.contains("<!ENTITY") {
+        return Err("the preferences could not be read".into());
+    }
     let opts = roxmltree::ParsingOptions {
         // `defaults` prints the standard property list DOCTYPE; no external entity is ever
         // fetched (no resolver), and roxmltree refuses entity expansion attacks.
@@ -63,7 +70,7 @@ pub fn parse(text: &str) -> Result<Plist, String> {
 
 fn value(n: roxmltree::Node<'_, '_>, depth: usize) -> Result<Plist, String> {
     if depth > MAX_DEPTH {
-        return Err("the preferences are nested too deeply".into());
+        return Err(nesting::TOO_DEEP.into());
     }
     let text = || n.text().unwrap_or("").to_string();
     Ok(match n.tag_name().name() {
@@ -148,4 +155,24 @@ fn escape(t: &str) -> String {
 /// Parses one value written by [`to_xml`] (a fragment, without the `<plist>` wrapper).
 pub fn from_xml(fragment: &str) -> Result<Plist, String> {
     parse(&format!("<plist version=\"1.0\">{fragment}</plist>"))
+}
+
+/// Every text inside a property list value (dictionary keys and strings), in order.
+pub fn strings(v: &Plist) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        match v {
+            Plist::Dict(items) => {
+                for (k, x) in items.iter().rev() {
+                    stack.push(x);
+                    out.push(k.clone());
+                }
+            }
+            Plist::Array(items) => stack.extend(items.iter().rev()),
+            Plist::String(s) => out.push(s.clone()),
+            _ => {}
+        }
+    }
+    out
 }

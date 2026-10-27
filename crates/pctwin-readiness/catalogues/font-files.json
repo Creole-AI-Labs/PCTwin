@@ -3,6 +3,10 @@
   "catalogue": "font-files",
   "version": 1,
   "rows": [
+    {"extension": "ttf", "name": "TrueType font", "readable": true},
+    {"extension": "otf", "name": "OpenType font", "readable": true},
+    {"extension": "ttc", "name": "TrueType font collection", "readable": true},
+    {"extension": "otc", "name": "OpenType font collection", "readable": true},
     {"extension": "woff", "name": "Web font"},
     {"extension": "woff2", "name": "Web font"},
     {"extension": "fon", "name": "Windows bitmap font"},

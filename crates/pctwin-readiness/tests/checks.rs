@@ -726,7 +726,13 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
         {"extension":"abcdefghijklmnopq","name":"Long"}
     ]}"#;
     let sig = test_key::sign(bytes, "font-files", 2);
-    let rows = Catalogue::<FontFileRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let rows = Catalogue::<FontFileRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     assert_eq!(rows.rows().len(), 1);
     assert_eq!(rows.report().skipped.len(), 4);
     assert_eq!(
@@ -748,4 +754,39 @@ fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
             ..
         }
     ));
+}
+
+/// Fourth review, finding F5: a damaged `.ttf` alone in the folder made the check say it had
+/// looked at everything and the family was not installed. A file of a kind PCTwin reads that is
+/// not whole, and a font whose names cannot be read, are found, not checked, and said so.
+#[test]
+fn f5_a_font_file_that_cannot_be_read_is_never_counted_as_checked() {
+    use pctwin_readiness::checks::{DAMAGED_FONT, UNREADABLE_FONT, font_with, shipped_font_files};
+    let only = tempfile::tempdir().unwrap();
+    write(only.path(), "Family.ttf", b"\0\0\0\0garbage");
+    write(only.path(), "Family.xyzfont", b"zz");
+    assert_eq!(
+        font_with(shipped_font_files(), "Family", &[only.path().to_path_buf()]),
+        Outcome::NotRun {
+            why: NotRun::CouldNotRead
+        }
+    );
+    // A font by its first bytes whose name table is missing, beside one PCTwin reads.
+    let two = tempfile::tempdir().unwrap();
+    write(two.path(), "Other.ttf", &font_bytes("Other Sans"));
+    write(two.path(), "Broken.otf", b"OTTO\0\0\0\0\0\0\0\0");
+    write(two.path(), "Bad.ttf", b"not a font");
+    assert_eq!(
+        font_with(shipped_font_files(), "Family", &[two.path().to_path_buf()]),
+        Outcome::NeedsAttention {
+            missing: vec![Missing::Font {
+                family: "Family".into(),
+                not_checked: vec![
+                    format!("{UNREADABLE_FONT} (.otf)"),
+                    format!("TrueType font {DAMAGED_FONT} (.ttf)"),
+                ]
+            }],
+            coverage: Coverage::Sample { checked: 1, of: 3 }
+        }
+    );
 }

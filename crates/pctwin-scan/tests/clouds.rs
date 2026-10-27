@@ -144,7 +144,13 @@ fn a_new_signed_row_names_a_found_service_with_no_code_change() {
         {"id":"t","name":"T","routes":[{"teleport":{"system":"windows"}}]}
     ]}"#;
     let sig = test_key::sign(bytes, "cloud-providers", 2);
-    let rows = Catalogue::<ProviderRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let rows = Catalogue::<ProviderRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     assert_eq!(rows.rows().len(), 1);
     let skipped: Vec<usize> = rows.report().skipped.iter().map(|s| s.row).collect();
     assert_eq!(skipped, [1, 2, 3, 4, 5, 6, 7, 8]);

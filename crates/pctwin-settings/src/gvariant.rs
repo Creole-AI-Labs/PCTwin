@@ -123,3 +123,31 @@ pub fn format(v: &GValue) -> String {
         ),
     }
 }
+
+/// Every string inside a GVariant text (a list, a tuple, a dictionary, a variant), in order;
+/// `None` when the text holds anything other than strings, numbers, booleans, type words and
+/// the brackets around them. Read once, left to right, without recursion (the depth gate has
+/// already bounded it).
+pub fn strings(text: &str) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut rest = text.trim();
+    while let Some(c) = rest.chars().next() {
+        if c == '\'' || c == '"' {
+            let (s, r) = string(rest)?;
+            out.push(s);
+            rest = r;
+            continue;
+        }
+        let plain = c.is_ascii_alphanumeric()
+            || c.is_whitespace()
+            || matches!(
+                c,
+                '[' | ']' | '(' | ')' | '{' | '}' | '<' | '>' | ',' | ':' | '.' | '-' | '+' | '@'
+            );
+        if !plain {
+            return None;
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    Some(out)
+}

@@ -229,6 +229,7 @@ fn without_its_row_the_same_value_still_moves_by_the_generic_rules() {
     let ctx = Ctx {
         paths: &map,
         same_screens: false,
+        hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
     };
     let plain = plan_found(
         &Catalogue::starter().unwrap(),

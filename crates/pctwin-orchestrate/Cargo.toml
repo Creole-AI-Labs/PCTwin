@@ -14,6 +14,9 @@ blake3 = "1.8"
 # A rescued drive is read through folder handles, one name at a time, never through a link
 # (third security review, finding 1): the crate under cap-std, as the hand-over uses it.
 cap-primitives = "4.0.3"
+# "Never follow a link" on an open, through its public extension (fourth review: not the
+# doc-hidden method under it).
+cap-fs-ext = { version = "4.0.3", default-features = false }
 # Known places and names as data: they only add to what is found.
 pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-record = { path = "../pctwin-record" }

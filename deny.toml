@@ -78,7 +78,10 @@ deny = [
   # The dead-laptop rescue reads the rescued drive the same way: every folder and file through its
   # parent's handle, never through a link, only on the drive's own volume (third security
   # review, finding 1, 27 October 2026).
-  { crate = "cap-primitives", wrappers = ["cap-std", "pctwin-move", "pctwin-orchestrate"] },
+  # Its "never follow a link" option is set through cap-fs-ext's public extension (fourth review),
+  # and only those two crates may use cap-fs-ext.
+  { crate = "cap-primitives", wrappers = ["cap-std", "cap-fs-ext", "pctwin-move", "pctwin-orchestrate"] },
+  { crate = "cap-fs-ext", wrappers = ["pctwin-move", "pctwin-orchestrate"] },
   # Undo puts copies in the Trash itself, checked and by handle (21 October 2026), so no crate may.
   { crate = "trash" },
   # The first crate allowed to use unsafe (approved, October 2026; see scripts/unsafe-fence.sh).
@@ -94,6 +97,9 @@ deny = [
   # handed to them by the helper and the app (third security review, finding 8): they do not link
   # this crate.
   { crate = "pctwin-helper-os", wrappers = ["pctwin-helper", "pctwin-app"] },
+  # The seal on the maker check's HelperStaged (fourth review): only the helper's staging may
+  # vouch for a package as its own held copy, and the maker check's own tests.
+  { crate = "pctwin-staged-seal", wrappers = ["pctwin-maker", "pctwin-helper"] },
   { crate = "objc2-service-management", wrappers = ["pctwin-helper-os", "smappservice-rs"] },
   # macOS: making a new person's account (21 October 2026), only by the helper's system calls.
   { crate = "objc2-open-directory", wrappers = ["pctwin-helper-os"] },

@@ -18,6 +18,9 @@ pctwin-move = { path = "../crates/pctwin-move" }
 pctwin-pairing = { path = "../crates/pctwin-pairing" }
 pctwin-record = { path = "../crates/pctwin-record" }
 pctwin-transfer = { path = "../crates/pctwin-transfer" }
+pctwin-recipe = { path = "../crates/pctwin-recipe" }
+pctwin-settings = { path = "../crates/pctwin-settings" }
+pctwin-types = { path = "../crates/pctwin-types" }
 serde_json = "1"
 
 [workspace]
@@ -75,6 +78,13 @@ bench = false
 [[bin]]
 name = "landing_messages"
 path = "fuzz_targets/landing_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "settings_parsers"
+path = "fuzz_targets/settings_parsers.rs"
 test = false
 doc = false
 bench = false

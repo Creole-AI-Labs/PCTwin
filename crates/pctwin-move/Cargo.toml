@@ -13,6 +13,9 @@ blake3 = "1.8"
 # The hand-over walks the holding area and opens what it hands over through folder handles,
 # never following a link out of it (the crate under cap-std, which the safety gate opens with).
 cap-primitives = "4.0.3"
+# "Never follow a link" on an open, through its public extension (fourth review: not the
+# doc-hidden method under it).
+cap-fs-ext = { version = "4.0.3", default-features = false }
 pctwin-gate = { path = "../pctwin-gate" }
 pctwin-helper = { path = "../pctwin-helper" }
 pctwin-journal = { path = "../pctwin-journal" }

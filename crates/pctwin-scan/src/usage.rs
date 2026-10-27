@@ -125,6 +125,10 @@ pub fn recent_from_mdfind(output: &str) -> Vec<PathBuf> {
 
 /// Linux: `recently-used.xbel` lists `<bookmark href="file:///…" modified=… visited=…>`.
 pub fn recent_from_xbel(xml: &str) -> Vec<(PathBuf, Option<i64>)> {
+    // The depth gate first: the parser calls itself for every level.
+    if pctwin_types::nesting::check(xml, pctwin_types::nesting::Syntax::Xml).is_err() {
+        return Vec::new();
+    }
     let Ok(doc) = roxmltree::Document::parse(xml) else {
         return Vec::new();
     };

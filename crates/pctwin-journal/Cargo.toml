@@ -13,6 +13,8 @@ blake3 = "1.8"
 # Each Phase 2 role's key: only the installs, settings or imports role's own key makes its recorder.
 pctwin-grant = { path = "../pctwin-grant" }
 getrandom = "0.4.3"
+# Delivered catalogues' rollback marks are kept beside the journal's key (fourth review).
+pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-types = { path = "../pctwin-types" }

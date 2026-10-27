@@ -200,7 +200,13 @@ fn a_new_signed_row_names_a_found_store() {
         {"name":"Dashes","found-as":["--"]}
     ]}"#;
     let sig = test_key::sign(bytes, "mail-clients", 2);
-    let rows = Catalogue::<MailClientRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let rows = Catalogue::<MailClientRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     assert_eq!(rows.rows().len(), 1);
     assert_eq!(rows.report().skipped.len(), 5);
     let mail = name_stores(
@@ -239,10 +245,7 @@ fn the_walk_finds_mail_by_shape_and_never_inside_a_store_already_found() {
     let store = root.join("Bird");
     std::fs::create_dir_all(&store).unwrap();
     std::fs::write(store.join("Inbox.mbox"), b"From x\nhi").unwrap();
-    let mut walk = Walk {
-        looked: 0,
-        found: Vec::new(),
-    };
+    let mut walk = Walk::new();
     walk.below(root, 0, &[store]);
     let mut got: Vec<(StoreKind, String)> = walk
         .found
@@ -281,4 +284,37 @@ fn dirs_home() -> PathBuf {
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
         .unwrap()
+}
+
+/// Fourth review, finding F5: mail past the walk's cap was dropped without a word. The folder
+/// the walk stopped in, and every one after it, is now reported.
+#[test]
+fn f5_mail_past_the_walk_cap_is_reported_not_dropped() {
+    let d = tempfile::tempdir().unwrap();
+    let base = d.path().join("AppData");
+    std::fs::create_dir_all(base.join("aaa")).unwrap();
+    for i in 0..=pctwin_scan::MAX_LOOKED_AT {
+        std::fs::write(base.join("aaa").join(format!("f{i:06}")), b"").unwrap();
+    }
+    std::fs::create_dir_all(base.join("zzz")).unwrap();
+    std::fs::write(base.join("zzz").join("archive.pst"), b"!BDN....").unwrap();
+    let mut w = Walk::new();
+    w.below(&base, 0, &[]);
+    w.below(&d.path().join("Later"), 0, &[]);
+    assert!(w.found.is_empty());
+    assert!(
+        w.not_looked_at.contains(&base.join("aaa")),
+        "{:?}",
+        w.not_looked_at
+    );
+    assert!(
+        w.not_looked_at.contains(&d.path().join("Later")),
+        "{:?}",
+        w.not_looked_at
+    );
+    // On its own, the store is found.
+    let mut w = Walk::new();
+    w.below(&base.join("zzz"), 0, &[]);
+    assert_eq!(w.found.len(), 1);
+    assert!(w.not_looked_at.is_empty());
 }

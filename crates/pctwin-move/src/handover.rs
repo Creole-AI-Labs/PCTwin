@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use std::fs::File;
 
+use cap_fs_ext::OpenOptionsFollowExt;
 use cap_primitives::fs as cap;
 use pctwin_journal::FileId;
 
@@ -153,9 +154,7 @@ fn open_plain(dir: &File, name: &Path) -> io::Result<Option<(File, FileId)>> {
     let mut options = cap::OpenOptions::new();
     // Never through a link at the name (cap-fs-ext's `follow`, which cap-primitives provides
     // under this name).
-    options
-        .read(true)
-        ._cap_fs_ext_follow(cap::FollowSymlinks::No);
+    options.read(true).follow(cap::FollowSymlinks::No);
     let file = cap::open(dir, name, &options)?;
     let meta = file.metadata()?;
     if !meta.is_file() || meta.file_type().is_symlink() {

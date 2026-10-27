@@ -76,9 +76,10 @@ pub use laptop::{
     Flow, LaptopScan, PersonSummary, ScanError, build_scan, build_scan_resumable, scan_this_laptop,
 };
 pub use mail::{
-    MailAccounts, MailClientRow, MailStore, StoreKind, Walk, mac_mail_accounts_in, mail_accounts,
-    mapi_accounts_in, name_stores, names_mail_servers, office_version_keys,
-    profile_mail_accounts_in, profile_paths_in, shape_of, shipped_mail_clients, worth_a_look,
+    MAX_LOOKED_AT, MailAccounts, MailClientRow, MailStore, NOT_LOOKED_AT, StoreKind, Walk,
+    mac_mail_accounts_in, mail_accounts, mapi_accounts_in, name_stores, names_mail_servers,
+    office_version_keys, profile_mail_accounts_in, profile_paths_in, shape_of,
+    shipped_mail_clients, worth_a_look,
 };
 pub use marks::{MarkSample, has_download_mark, sample_folder};
 pub use measure::{

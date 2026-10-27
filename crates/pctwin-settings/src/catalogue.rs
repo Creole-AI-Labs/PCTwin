@@ -711,6 +711,39 @@ pub struct Catalogue {
     pub exceptions: Vec<Exception>,
     #[serde(default)]
     pub labels: Vec<Label>,
+    /// Hints that a key's value is something to run or load (fourth review, finding F1). They
+    /// only add caution: the general rule keeps back what it sees without any of them.
+    #[serde(default)]
+    pub action_hints: Vec<ActionHint>,
+}
+
+/// What an action hint says a value is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HintKind {
+    /// Something to run: a command, a program, a handler or hook, a proxy, an editor or shell.
+    Run,
+    /// A file the system loads and shows or plays: a cursor, an icon, a sound.
+    File,
+}
+
+/// One action hint: keys whose store and name match the patterns (`*` matches anything; case
+/// ignored) hold something of `kind`; or, with `ending`, a value or word ending so names a
+/// program (`.exe`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionHint {
+    #[serde(default = "any_pattern")]
+    pub store: String,
+    #[serde(default = "any_pattern")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ending: Option<String>,
+    pub kind: HintKind,
+}
+
+fn any_pattern() -> String {
+    "*".into()
 }
 
 /// Registry stores no catalogue may make PCTwin write (prefixes, letter case ignored):
@@ -767,8 +800,17 @@ impl Catalogue {
         Self::from_json(STARTER.as_bytes())
     }
 
+    /// The starter catalogue's action hints, read once (empty if it could not be read, which
+    /// its own tests rule out; the general rule works without any).
+    pub fn starter_hints() -> &'static [ActionHint] {
+        static HINTS: std::sync::OnceLock<Vec<ActionHint>> = std::sync::OnceLock::new();
+        HINTS.get_or_init(|| Self::starter().map(|c| c.action_hints).unwrap_or_default())
+    }
+
     /// Reads a catalogue: the format first (a newer one is refused safely), then every row.
     pub fn from_json(bytes: &[u8]) -> Result<Self, CatalogueError> {
+        pctwin_types::nesting::check_bytes(bytes, pctwin_types::nesting::Syntax::Json)
+            .map_err(|e| CatalogueError::Damaged(e.to_string()))?;
         CATALOGUE_FORMAT.check_json(bytes)?;
         let c: Catalogue =
             serde_json::from_slice(bytes).map_err(|e| CatalogueError::Damaged(e.to_string()))?;
@@ -855,6 +897,19 @@ impl Catalogue {
                 .any(|l| !text(&l.store, 255) || !text(&l.label, 120))
         {
             return damaged("an exception or label is not plain text");
+        }
+        for h in &self.action_hints {
+            let ending_ok = h.ending.as_deref().is_none_or(|e| {
+                (2..=16).contains(&e.len())
+                    && e.starts_with('.')
+                    && e[1..]
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            });
+            let matches_something = h.ending.is_some() || h.store != "*" || h.name != "*";
+            if !text(&h.store, 255) || !text(&h.name, 255) || !ending_ok || !matches_something {
+                return damaged("an action hint is not allowed");
+            }
         }
         for a in &self.apps {
             crate::apps::check_entry(a).map_err(|why| CatalogueError::Row {

@@ -303,6 +303,9 @@ impl Store {
         }
         if key.starts_with("found.") {
             let a = self.found(key).ok_or(Reason::RefusedBySafetyCheck)?;
+            // Checked again here, on the new laptop, by the same rule as planning.
+            crate::generic::may_write(&self.cat.action_hints, &a, value)
+                .map_err(|_| Reason::RefusedBySafetyCheck)?;
             return match write_found(&mut self.mech, &a, Some(value), &mut self.created) {
                 Ok(()) => Ok(()),
                 Err(WriteError::Denied) => Err(Reason::Permission),

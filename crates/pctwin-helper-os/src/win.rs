@@ -1433,6 +1433,28 @@ impl PipeClient {
     }
 }
 
+/// A new folder `path` that only this account (and the system itself) may open, made so from its
+/// first moment: protected from the folder above (nothing inherited), never one that exists.
+pub fn private_folder(path: &std::path::Path) -> Result<(), Error> {
+    let me = current_sid()?;
+    create_folder_with_access(
+        path,
+        &format!("D:P(A;OICI;FA;;;{})(A;OICI;FA;;;SY)", me.as_str()),
+    )
+}
+
+/// The access list a folder has now, in its text form (read back to check it).
+pub fn folder_access_list(path: &std::path::Path) -> Result<String, Error> {
+    // READ_CONTROL, and the flag that lets a folder be opened as a handle.
+    const READ_CONTROL: u32 = 0x0002_0000;
+    const BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let f = std::fs::OpenOptions::new()
+        .access_mode(READ_CONTROL)
+        .custom_flags(BACKUP_SEMANTICS)
+        .open(path)?;
+    os_access_list(f.as_handle()).map_err(|c| os_err("GetSecurityInfo", c))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

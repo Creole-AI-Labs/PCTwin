@@ -36,7 +36,13 @@ fn a_new_signed_row_names_a_kind_with_no_code_change() {
         {"category":"hologram","extensions":["holo"]}
     ]}"#;
     let sig = test_key::sign(bytes, "file-categories", 2);
-    let rows = Catalogue::<CategoryRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let rows = Catalogue::<CategoryRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     assert_eq!(rows.rows().len(), 2);
     assert_eq!(rows.report().skipped.len(), 5);
     let c = Categories::from_catalogue(&rows);

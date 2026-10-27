@@ -12,15 +12,23 @@
 //! - a cache;
 //! - a window's position or size (the new laptop's screens differ), unless the screens match;
 //! - a hardware path (a device instance, `/dev/...`);
-//! - a program to start (a path to a `.exe`, `.sh`, ...): kept for the person, not switched on;
-//! - a full path: rewritten through the move's folder map when it points at something moved,
-//!   otherwise left out (a recent-files entry whose file did not move is left out the same way);
+//! - anything that could make the new laptop run or fetch something ([`run_or_fetch`], the
+//!   fourth review's finding F1): a value of a key whose name or store marks something to run
+//!   or load (commands, handlers, hooks, proxies, editors, shells, screensavers; cursors, icons,
+//!   sounds), a command line, a program's file, or a path or address in any spelling that is not
+//!   one full local path (another computer, a web or app address, an environment variable, a
+//!   relative place): kept for the person to look at, never written;
+//! - one full local path to data: rewritten through the move's folder map when it points at
+//!   something moved, otherwise left out (a recent-files entry whose file did not move is left
+//!   out the same way);
 //! - too large, or holding hidden characters.
 //!
 //! Everything else is copied as it is.
 
 use pctwin_recipe::{SettingValue, text_ok};
 
+use crate::apps::glob;
+use crate::catalogue::ActionHint;
 use crate::value::full_path;
 
 /// Why a found setting was not moved. Shown to the person in plain words ([`Why::words`]);
@@ -40,6 +48,18 @@ pub enum Why {
     RecentMissing,
     TooLarge,
     HiddenText,
+    /// It points at another computer or a web address (opening it would fetch something, and
+    /// can hand the old laptop's sign-in to whoever runs that computer).
+    Fetches,
+    /// It points at a place PCTwin cannot check (written with an environment variable, or
+    /// relative to somewhere).
+    PlaceUnknown,
+    /// Nested deeper than any parser is let read ([`pctwin_types::nesting`]).
+    TooDeep,
+    /// Past the most settings one discovery reads.
+    TooMany,
+    /// A registry key's unnamed (default) value.
+    Unnamed,
     /// A kind of value PCTwin does not copy (dates, raw data in preferences).
     Kind,
     /// Moving between different systems needs a known translation (a catalogue row).
@@ -67,6 +87,11 @@ impl Why {
             Why::RecentMissing => "a recent file that was not moved".into(),
             Why::TooLarge => "too large to move as a setting".into(),
             Why::HiddenText => "it holds hidden characters".into(),
+            Why::Fetches => "it points at another computer or a web address: kept for you to look at, not written".into(),
+            Why::PlaceUnknown => "it points at a place PCTwin cannot check: kept for you to look at, not written".into(),
+            Why::TooDeep => pctwin_types::nesting::TOO_DEEP.into(),
+            Why::TooMany => "found, not read: there were too many settings here to read them all".into(),
+            Why::Unnamed => "found, not moved: a key's unnamed value, which PCTwin does not move yet".into(),
             Why::Kind => "a kind of value PCTwin does not copy".into(),
             Why::OtherSystem => "the new laptop's system keeps this differently, and PCTwin does not know how to translate it yet".into(),
             Why::SystemStore => "the system's own settings: only the ones PCTwin knows move".into(),
@@ -134,10 +159,13 @@ pub struct Ctx<'a> {
     pub paths: &'a dyn Relocate,
     /// The new laptop's screens are the old laptop's (window places may move).
     pub same_screens: bool,
+    /// The catalogue's action-hint rows ([`crate::catalogue::Catalogue::action_hints`]): they
+    /// only add caution to the general rule, which keeps back what it can see without them.
+    pub hints: &'a [ActionHint],
 }
 
-/// The longest text a setting may carry.
-pub const MAX_VALUE: usize = 4000;
+/// The longest text a setting may carry ([`pctwin_types::limits`]).
+pub use pctwin_types::limits::SETTING_TEXT_BYTES as MAX_VALUE;
 
 /// Store paths (registry keys, preference domains, dconf paths; lowercase, `\` or `/` or `.`
 /// separated) that hold security or privacy settings.
@@ -333,10 +361,315 @@ const RECENT_WORDS: &[&str] = &[
     "lastused",
     "lastfile",
 ];
-const PROGRAM_ENDS: &[&str] = &[
-    ".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs", ".js", ".msi", ".lnk", ".sh", ".command",
-    ".app", ".py", ".jar", ".scr",
-];
+/// What a key's name or store says its value is for.
+pub use crate::catalogue::HintKind as Action;
+
+/// Whether a key's name has the shape of a file's name (`SCRNSAVE.EXE`, `x.cur`): a stem with a
+/// letter in it, a dot, and a short ending of letters and digits with a letter in it. Such a key
+/// names the file the system uses, so a path in it is kept back. Pure shape: no list of names.
+pub fn file_shaped_name(name: &str) -> bool {
+    let Some((stem, ending)) = name.rsplit_once('.') else {
+        return false;
+    };
+    let letter = |s: &str| s.bytes().any(|b| b.is_ascii_alphabetic());
+    !stem.is_empty()
+        && !stem.contains(['\\', '/', ' '])
+        && letter(stem)
+        && (1..=4).contains(&ending.len())
+        && ending.bytes().all(|b| b.is_ascii_alphanumeric())
+        && letter(ending)
+}
+
+/// Whether the key `name` in `store` holds something to run or load. The general rule is the
+/// name's shape ([`file_shaped_name`]); the catalogue's action-hint rows only add caution
+/// (screensavers, cursors, commands, handlers, proxies ...), never take it away.
+pub fn action_kind(hints: &[ActionHint], store: &str, name: &str) -> Option<Action> {
+    let mut kind = file_shaped_name(name).then_some(Action::File);
+    for h in hints.iter().filter(|h| h.ending.is_none()) {
+        if glob(&h.store, store) && glob(&h.name, name) {
+            if h.kind == Action::Run {
+                return Some(Action::Run);
+            }
+            kind = Some(Action::File);
+        }
+    }
+    kind
+}
+
+/// Whether a word ends the way the catalogue's hints say programs end (`.exe`, `.sh` ...).
+fn program_end(hints: &[ActionHint], token: &str) -> bool {
+    let l = token.trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    hints.iter().filter_map(|h| h.ending.as_deref()).any(|e| {
+        let e = e.to_ascii_lowercase();
+        l.len() > e.len() && l.ends_with(&e)
+    })
+}
+
+/// A plain number: it can name nothing to run or fetch.
+fn plain_number(t: &str) -> bool {
+    let t = t.strip_prefix('-').unwrap_or(t);
+    !t.is_empty()
+        && !t.starts_with('.')
+        && t.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        && t.bytes().filter(|b| *b == b'.').count() <= 1
+}
+
+/// A path or an address found in a text, in any spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Spot {
+    /// Another computer (`\\server\share`, `//server/share`, `file://server/...`) or a web or
+    /// app address (`https:`, `ftp:`, `mailto:`, `shell:`, `ms-settings:` ...).
+    Remote,
+    /// A place on this computer PCTwin cannot check: written with an environment variable
+    /// (`%SystemRoot%`, `$HOME`), relative (`..\x`, `bin\x`, `~/x`), or `C:x`.
+    Unchecked,
+    /// A full local path (`C:\...`, `C:/...`, `/...`) or a local `file:///` address.
+    Local,
+}
+
+fn is_drive(b: &[u8]) -> bool {
+    b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
+}
+
+/// The scheme of what may be an address (`https` in `https://x`), when `t` starts with one. One
+/// letter is a drive; a digit after the colon is a time or a number pair (`12:30`, `Arial:12`).
+fn scheme(t: &str) -> Option<&str> {
+    let (s, rest) = t.split_once(':')?;
+    let ok = s.len() >= 2
+        && s.len() <= 32
+        && s.as_bytes()[0].is_ascii_alphabetic()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'.' | b'-'));
+    let next = rest.as_bytes().first();
+    (ok && next.is_some_and(|c| !c.is_ascii_digit() && !c.is_ascii_whitespace())).then_some(s)
+}
+
+/// What one word of a text (or the whole text) points at.
+fn spot(token: &str) -> Option<Spot> {
+    let t = token.trim_matches(['"', '\'']);
+    let b = t.as_bytes();
+    if t.is_empty() {
+        return None;
+    }
+    if t.starts_with("\\\\") || t.starts_with("//") {
+        return Some(Spot::Remote);
+    }
+    if let Some(s) = scheme(t) {
+        if s.eq_ignore_ascii_case("file") {
+            return Some(if t[5..].starts_with("///") {
+                Spot::Local
+            } else {
+                Spot::Remote
+            });
+        }
+        // An address that names a place to reach: another computer (`//host`), a mailbox
+        // (`@`), a path or a query. A word before a colon alone (`HH:mm:ss`, a time format) is
+        // not one.
+        let rest = &t[s.len() + 1..];
+        if rest.starts_with("//") || rest.contains(['@', '/', '\\', '?', '=', '(']) {
+            return Some(Spot::Remote);
+        }
+    }
+    if is_drive(b) {
+        return Some(if matches!(b.get(2), Some(b'\\' | b'/')) {
+            Spot::Local
+        } else {
+            Spot::Unchecked
+        });
+    }
+    if t.starts_with('/') && t.len() > 1 {
+        return Some(Spot::Local);
+    }
+    let env = t.matches('%').count() >= 2 || t.contains('$');
+    if env || t.starts_with('~') || t.starts_with("./") || t.starts_with("../") || t.contains('\\')
+    {
+        return Some(Spot::Unchecked);
+    }
+    None
+}
+
+/// Where a command line or a list would split a text.
+fn splits(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '"' | '\''
+                | ','
+                | ';'
+                | '='
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '|'
+                | '*'
+                | '`'
+                | '&'
+        )
+}
+
+/// The words of a text, split where a command line or a list would split them.
+fn tokens(t: &str) -> impl Iterator<Item = &str> {
+    t.split(splits).filter(|s| !s.is_empty())
+}
+
+/// A word that is a switch of a command line (`/c`, `-c`, `--run`, `-ExecutionPolicy`).
+fn switch(token: &str) -> bool {
+    match token.as_bytes() {
+        [b'/', c, rest @ ..] => {
+            (c.is_ascii_alphabetic() || *c == b'?')
+                && rest.len() <= 2
+                && rest.iter().all(|x| x.is_ascii_alphanumeric() || *x == b':')
+        }
+        b @ [b'-', ..] => {
+            let body = b.strip_prefix(b"--").unwrap_or(&b[1..]);
+            body.first().is_some_and(u8::is_ascii_alphabetic)
+                && body
+                    .iter()
+                    .all(|x| x.is_ascii_alphanumeric() || matches!(x, b'-' | b'_' | b'.'))
+        }
+        _ => false,
+    }
+}
+
+/// Whether a text has the shape of a command line: shell operators, command substitution, or a
+/// word followed by switches.
+fn command_shaped(t: &str) -> bool {
+    ["&&", "||", "|", ">", "<", "`", "$(", "${"]
+        .iter()
+        .any(|op| t.contains(op))
+        || tokens(t).skip(1).any(switch)
+}
+
+/// Whether a word looks like a file name (it has an ending such as `.cur`).
+fn file_like(token: &str) -> bool {
+    token.rsplit_once('.').is_some_and(|(stem, ext)| {
+        !stem.is_empty()
+            && (1..=8).contains(&ext.len())
+            && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
+}
+
+/// Whether a text could make the new laptop run or fetch something, and why (the general rule
+/// of the fourth review, finding F1: by the key's kind and the value, never by app name).
+///
+/// Anything that is, or holds, a path or an address in any spelling, a command line, or a value
+/// of a key whose name or store marks something to run or load, is kept back. `None` means plain
+/// text, a plain number, or a single full local path (which the caller points at the moved file
+/// when it is plain data, or leaves out when it is not moved).
+pub fn run_or_fetch(hints: &[ActionHint], store: &str, name: &str, t: &str) -> Option<Why> {
+    let action = action_kind(hints, store, name);
+    let t = t.trim();
+    if t.is_empty() || plain_number(t) {
+        return None;
+    }
+    if action == Some(Action::Run) {
+        return Some(Why::StartsProgram);
+    }
+    // One full local path (spaces allowed): data, unless it is a program or a file the system
+    // loads.
+    if path_in(unquoted(t)).is_some() {
+        return (program_end(hints, t) || action == Some(Action::File))
+            .then_some(Why::StartsProgram);
+    }
+    if command_shaped(t) {
+        return Some(Why::StartsProgram);
+    }
+    let mut spots = Vec::new();
+    for tok in tokens(t) {
+        if program_end(hints, tok) || (action == Some(Action::File) && file_like(tok)) {
+            return Some(Why::StartsProgram);
+        }
+        spots.extend(spot(tok));
+    }
+    // The whole text too: a path with spaces in it is one place.
+    spots.extend(spot(t));
+    if program_end(hints, t) {
+        return Some(Why::StartsProgram);
+    }
+    if spots.contains(&Spot::Remote) {
+        return Some(Why::Fetches);
+    }
+    if action == Some(Action::File) && !spots.is_empty() {
+        return Some(Why::StartsProgram);
+    }
+    if spots.contains(&Spot::Unchecked) {
+        return Some(Why::PlaceUnknown);
+    }
+    None
+}
+
+/// A text without one pair of double quotes around it.
+fn unquoted(t: &str) -> &str {
+    t.strip_prefix('"')
+        .and_then(|r| r.strip_suffix('"'))
+        .filter(|r| !r.contains('"'))
+        .unwrap_or(t)
+}
+
+/// The one full local path a text is (the whole text, `C:/...` with forward slashes, or a local
+/// `file:///` address), and how to write a new one back in the same spelling.
+struct PathHit {
+    path: String,
+    rebuild: Box<dyn Fn(&str) -> String>,
+}
+
+fn path_in(t: &str) -> Option<PathHit> {
+    if full_path(t) {
+        return Some(PathHit {
+            path: t.to_string(),
+            rebuild: Box::new(|n| n.to_string()),
+        });
+    }
+    let b = t.as_bytes();
+    if is_drive(b) && b.get(2) == Some(&b'/') && !t.contains('\\') {
+        let win = t.replace('/', "\\");
+        return full_path(&win).then(|| PathHit {
+            path: win,
+            rebuild: Box::new(|n: &str| n.replace('\\', "/")),
+        });
+    }
+    if t.len() > 8 && t.is_char_boundary(7) && t[..7].eq_ignore_ascii_case("file://") {
+        let decoded = crate::value::path_of_file_uri(&format!("file://{}", &t[7..]))?;
+        // `file:///c:/Users/...` names a Windows path.
+        let d = decoded.as_bytes();
+        if d.len() > 3 && d[0] == b'/' && d[1].is_ascii_alphabetic() && d[2] == b':' {
+            let win = decoded[1..].replace('/', "\\");
+            return full_path(&win).then(|| PathHit {
+                path: win,
+                rebuild: Box::new(|n: &str| {
+                    let unix = format!("/{}", n.replace('\\', "/"));
+                    crate::value::file_uri(&unix).unwrap_or_default()
+                }),
+            });
+        }
+        return full_path(&decoded).then(|| PathHit {
+            path: decoded,
+            rebuild: Box::new(|n: &str| crate::value::file_uri(n).unwrap_or_default()),
+        });
+    }
+    None
+}
+
+/// Whether PCTwin may write the text `t` to the key `name` in `store`, checked again on the new
+/// laptop at the moment of writing with the same rule as planning ([`run_or_fetch`]). A single
+/// full local path passes: it was pointed at the moved file when it was planned.
+pub fn may_write_text(hints: &[ActionHint], store: &str, name: &str, t: &str) -> Result<(), Why> {
+    if !text_ok(t) {
+        return Err(Why::HiddenText);
+    }
+    if t.len() > MAX_VALUE {
+        return Err(Why::TooLarge);
+    }
+    match run_or_fetch(hints, store, name, t) {
+        None => Ok(()),
+        Some(why) => Err(why),
+    }
+}
 
 /// What happens to the value `value` named `name` in the store `store`.
 pub fn classify(store: &str, name: &str, value: &SettingValue, ctx: &Ctx<'_>) -> Fate {
@@ -391,16 +724,26 @@ pub fn classify_kind(
                 .starts_with("01000000d08c9ddf0115d1118c7a00c04fc297eb")
             {
                 Fate::NotMoved(Why::Secret)
+            } else if action_kind(ctx.hints, store, name).is_some() {
+                // Raw bytes of a key that runs or loads something can hold a path too.
+                Fate::NotMoved(Why::StartsProgram)
             } else {
                 Fate::Copy(value.clone())
             }
         }
-        SettingValue::Text(t) => text_fate(t, value, recent, ctx),
+        SettingValue::Text(t) => text_fate(store, name, t, value, recent, ctx),
         _ => Fate::Copy(value.clone()),
     }
 }
 
-fn text_fate(t: &str, value: &SettingValue, recent: bool, ctx: &Ctx<'_>) -> Fate {
+fn text_fate(
+    store: &str,
+    name: &str,
+    t: &str,
+    value: &SettingValue,
+    recent: bool,
+    ctx: &Ctx<'_>,
+) -> Fate {
     if !text_ok(t) {
         return Fate::NotMoved(Why::HiddenText);
     }
@@ -423,7 +766,14 @@ fn text_fate(t: &str, value: &SettingValue, recent: bool, ctx: &Ctx<'_>) -> Fate
         let mut out = Vec::with_capacity(items.len());
         let mut changed = false;
         for item in &items {
-            match text_fate(item, &SettingValue::Text(item.clone()), recent, ctx) {
+            match text_fate(
+                store,
+                name,
+                item,
+                &SettingValue::Text(item.clone()),
+                recent,
+                ctx,
+            ) {
                 Fate::Copy(_) => out.push(item.clone()),
                 Fate::Rewritten(SettingValue::Text(n)) => {
                     changed = true;
@@ -442,68 +792,28 @@ fn text_fate(t: &str, value: &SettingValue, recent: bool, ctx: &Ctx<'_>) -> Fate
             Fate::Copy(value.clone())
         };
     }
-    if let Some(hit) = path_in(t) {
-        let pl = hit.path.to_lowercase();
-        if PROGRAM_ENDS.iter().any(|e| pl.ends_with(e)) || (hit.args && pl.contains(".exe")) {
-            return Fate::NotMoved(Why::StartsProgram);
+    // Anything that could make the new laptop run or fetch something stays behind.
+    if let Some(why) = run_or_fetch(ctx.hints, store, name, t) {
+        return Fate::NotMoved(why);
+    }
+    // What is left is plain text or one full local path to data: pointed at the moved file.
+    let inner = unquoted(t);
+    let Some(hit) = path_in(inner) else {
+        return Fate::Copy(value.clone());
+    };
+    let quoted = inner.len() != t.len();
+    match ctx.paths.new_path(&hit.path) {
+        Some(n) => {
+            let n = (hit.rebuild)(&n);
+            Fate::Rewritten(SettingValue::Text(if quoted {
+                format!("\"{n}\"")
+            } else {
+                n
+            }))
         }
-        return match ctx.paths.new_path(&hit.path) {
-            Some(n) => Fate::Rewritten(SettingValue::Text((hit.rebuild)(&n))),
-            None if recent => Fate::NotMoved(Why::RecentMissing),
-            None => Fate::NotMoved(Why::PathNotMoved),
-        };
+        None if recent => Fate::NotMoved(Why::RecentMissing),
+        None => Fate::NotMoved(Why::PathNotMoved),
     }
-    Fate::Copy(value.clone())
-}
-
-/// A full path found in a text, and how to put a new one in its place.
-struct PathHit<'a> {
-    path: String,
-    /// Text follows the path (a command line's arguments).
-    args: bool,
-    rebuild: Box<dyn Fn(&str) -> String + 'a>,
-}
-
-/// The full path a text holds: the whole text, a `file://` address, or a quoted path at the
-/// start (followed by arguments).
-fn path_in(t: &str) -> Option<PathHit<'_>> {
-    if full_path(t) {
-        return Some(PathHit {
-            path: t.to_string(),
-            args: false,
-            rebuild: Box::new(|n| n.to_string()),
-        });
-    }
-    if t.starts_with("file://") {
-        let decoded = crate::value::path_of_file_uri(t)?;
-        // `file:///c:/Users/...` names a Windows path.
-        let b = decoded.as_bytes();
-        if b.len() > 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
-            let win = decoded[1..].replace('/', "\\");
-            return full_path(&win).then(|| PathHit {
-                path: win,
-                args: false,
-                rebuild: Box::new(|n: &str| {
-                    let unix = format!("/{}", n.replace('\\', "/"));
-                    crate::value::file_uri(&unix).unwrap_or_default()
-                }),
-            });
-        }
-        return full_path(&decoded).then(|| PathHit {
-            path: decoded,
-            args: false,
-            rebuild: Box::new(|n: &str| crate::value::file_uri(n).unwrap_or_default()),
-        });
-    }
-    let inner = t.strip_prefix('"')?;
-    let end = inner.find('"')?;
-    let path = &inner[..end];
-    let rest = &inner[end + 1..];
-    full_path(path).then(|| PathHit {
-        path: path.to_string(),
-        args: !rest.trim().is_empty(),
-        rebuild: Box::new(move |n: &str| format!("\"{n}\"{rest}")),
-    })
 }
 
 /// A Windows account ID (`S-1-5-21-...`).

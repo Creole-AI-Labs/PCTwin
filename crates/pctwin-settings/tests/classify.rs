@@ -29,6 +29,7 @@ fn fate(name: &str, v: SettingValue) -> Fate {
         &Ctx {
             paths: &m,
             same_screens: false,
+            hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
         },
     )
 }
@@ -143,7 +144,8 @@ fn caches_window_places_and_devices() {
             &t("2c00"),
             &Ctx {
                 paths: &m,
-                same_screens: true
+                same_screens: true,
+                hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
             }
         ),
         Fate::Copy(_)
@@ -210,10 +212,11 @@ fn paths_are_rewritten_or_left_with_the_reason() {
     let list =
         serde_json::to_string(&["fine", "ghp_0123456789abcdefghijABCDEFGHIJ012345"]).unwrap();
     assert_eq!(fate("Items", t(&list)), Fate::NotMoved(Why::Secret));
-    // Environment-variable paths are portable as they are.
+    // A place written with an environment variable cannot be checked: kept back, never written
+    // (fourth review, finding F1: `%SystemRoot%\System32\cmd.exe` is the same spelling).
     assert_eq!(
         fate("Out", t("%USERPROFILE%\\Exports")),
-        Fate::Copy(t("%USERPROFILE%\\Exports"))
+        Fate::NotMoved(Why::PlaceUnknown)
     );
 }
 
@@ -291,6 +294,7 @@ fn binary_values_are_only_checked_for_known_credential_forms() {
     let ctx = Ctx {
         paths: &m,
         same_screens: false,
+        hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
     };
     let random = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
     assert_eq!(

@@ -9,6 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+# HelperStaged is sealed: only the helper (and this crate) may depend on the seal (deny.toml).
+pctwin-staged-seal = { path = "../pctwin-staged-seal" }
 pctwin-types = { path = "../pctwin-types" }
 authenticode = { version = "0.6.0", features = ["std"] }
 base64 = "0.22.1"

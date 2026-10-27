@@ -22,16 +22,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use pctwin_recipe::{SettingValue, SettingsRoot};
+use pctwin_types::nesting::{self, MAX_NESTING, Syntax};
 use serde_json::Value;
 
 use crate::apps::{parse_version, path_matches};
 use crate::catalogue::{AppEntry, AppFile, Catalogue, FileFormat, MacroRoot, Rule, System, Writer};
 use crate::classify::{Ctx, Fate, Why, classify};
 
-/// The largest settings file read.
-pub const MAX_FILE: u64 = 1024 * 1024;
-const MAX_DEPTH: usize = 8;
-const MAX_FILES: usize = 20_000;
+/// The largest settings file read ([`pctwin_types::limits`]).
+pub use pctwin_types::limits::SETTINGS_FILE_BYTES as MAX_FILE;
+use pctwin_types::limits::{SETTINGS_FILE_DEPTH as MAX_DEPTH, SETTINGS_FILES as MAX_FILES};
 
 /// Folder names that hold caches, logs and browser-engine data, never settings.
 const SKIP_DIRS: &[&str] = &[
@@ -197,6 +197,10 @@ pub fn entry_for<'a>(cat: &'a Catalogue, f: &FoundFile) -> Option<(&'a AppEntry,
 
 /// Plans one found file from its bytes on the old laptop.
 pub fn plan_file(cat: &Catalogue, f: &FoundFile, bytes: &[u8], ctx: &FileCtx<'_>) -> FileOutcome {
+    // Its own size cap, whoever read the bytes (fourth review, small finding).
+    if u64::try_from(bytes.len()).map_or(true, |n| n > MAX_FILE) {
+        return FileOutcome::NotMoved(Why::TooLarge);
+    }
     let entry = entry_for(cat, f);
     if let Some((_, af)) = entry
         && af.writer != Writer::Settings
@@ -404,8 +408,9 @@ impl Walker<'_, '_> {
 
     fn json(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
         let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        nesting::check(text, Syntax::Jsonc).map_err(|_| Why::TooDeep)?;
         let clean = strip_jsonc(text.trim_start_matches('\u{feff}')).ok_or(Why::Kind)?;
-        let v: Value = serde_json::from_str(&clean).map_err(|_| Why::Kind)?;
+        let v: Value = serde_json::from_str(&clean).map_err(json_why)?;
         let v = self.value(v, "", "", 0).ok_or(Why::Kind)?;
         let mut out = Vec::new();
         let fmt = serde_json::ser::PrettyFormatter::with_indent(b"    ");
@@ -417,6 +422,7 @@ impl Walker<'_, '_> {
 
     fn toml(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
         let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        nesting::check(text, Syntax::Toml).map_err(|_| Why::TooDeep)?;
         let v: Value = toml::from_str(text).map_err(|_| Why::Kind)?;
         let v = self.value(v, "", "", 0).ok_or(Why::Kind)?;
         toml::to_string(&v)
@@ -427,7 +433,9 @@ impl Walker<'_, '_> {
     /// Walks a JSON value: `None` when it is removed. In a list, an entry that lost a path (a
     /// recent file that did not move) is removed whole.
     fn value(&mut self, v: Value, path: &str, name: &str, depth: usize) -> Option<Value> {
-        if depth > 64 {
+        if depth > MAX_NESTING {
+            // Never reached past the gate; reported, never dropped silently.
+            self.leave(path, Why::TooDeep);
             return None;
         }
         let join = |p: &str, k: &str| {
@@ -473,9 +481,15 @@ impl Walker<'_, '_> {
                     let p = join(path, &i.to_string());
                     let before = self.left.len();
                     let kept = self.value(child, &p, name, depth + 1);
-                    let lost_path = self.left[before..]
-                        .iter()
-                        .any(|l| matches!(l.why, Why::PathNotMoved | Why::RecentMissing));
+                    let lost_path = self.left[before..].iter().any(|l| {
+                        matches!(
+                            l.why,
+                            Why::PathNotMoved
+                                | Why::RecentMissing
+                                | Why::Fetches
+                                | Why::PlaceUnknown
+                        )
+                    });
                     match kept {
                         Some(c) if !lost_path => out.push(c),
                         _ => {}
@@ -512,32 +526,26 @@ impl Walker<'_, '_> {
                 out.push_str(line);
                 continue;
             }
-            let Some((k, v)) = body.split_once('=') else {
+            let Some(parts) = IniLine::parse(body) else {
                 out.push_str(line);
                 continue;
             };
-            let key = k.trim();
+            let key = parts.key.trim();
             let path = if section.is_empty() {
                 key.to_string()
             } else {
                 format!("{section}/{key}")
             };
-            let raw = v.trim();
-            let unq = raw
-                .strip_prefix('"')
-                .and_then(|r| r.strip_suffix('"'))
-                .unwrap_or(raw);
-            match self.leaf(&path, key, &Value::String(unq.to_string())) {
+            match self.leaf(&path, key, &Value::String(parts.value.to_string())) {
                 Leaf::Keep => out.push_str(line),
                 Leaf::Replace(Value::String(n)) => {
-                    let n = if raw.starts_with('"') {
-                        format!("\"{n}\"")
-                    } else {
-                        n
-                    };
-                    out.push_str(&format!("{}={}{}", k, n, ending));
+                    out.push_str(&parts.with_value(&n));
+                    out.push_str(ending);
                 }
-                Leaf::Replace(other) => out.push_str(&format!("{k}={other}{ending}")),
+                Leaf::Replace(other) => {
+                    out.push_str(&parts.with_value(&other.to_string()));
+                    out.push_str(ending);
+                }
                 Leaf::Remove(why) => self.leave(&path, why),
             }
         }
@@ -549,6 +557,7 @@ impl Walker<'_, '_> {
     /// would be removed means the file does not move.
     fn xml(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
         let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
+        nesting::check(text, Syntax::Xml).map_err(|_| Why::TooDeep)?;
         let opts = roxmltree::ParsingOptions {
             allow_dtd: false,
             nodes_limit: 200_000,
@@ -632,6 +641,68 @@ impl Walker<'_, '_> {
             out.replace_range(r, &s);
         }
         Ok(out.into_bytes())
+    }
+}
+
+/// Why JSON could not be read: its parser's own nesting limit (128 levels, below the gate's) is
+/// reported as nesting too, never as a damaged file.
+fn json_why(e: serde_json::Error) -> Why {
+    if e.to_string().starts_with("recursion limit exceeded") {
+        Why::TooDeep
+    } else {
+        Why::Kind
+    }
+}
+
+/// One `key = value ; comment` line of an INI file, in its parts, so a new value is written
+/// back between the line's own text: its spacing, its quotes and its comment kept exactly.
+struct IniLine<'a> {
+    /// Everything before the value (the key, the `=`, the spaces after it).
+    before: &'a str,
+    key: &'a str,
+    /// The value, without its quotes.
+    value: &'a str,
+    quoted: bool,
+    /// Everything after the value (a closing quote is not part of it; spaces and a comment are).
+    after: &'a str,
+}
+
+impl<'a> IniLine<'a> {
+    fn parse(body: &'a str) -> Option<Self> {
+        let eq = body.find('=')?;
+        let key = &body[..eq];
+        let rest = &body[eq + 1..];
+        let start = eq + 1 + (rest.len() - rest.trim_start().len());
+        let tail = &body[start..];
+        if let Some(inner) = tail.strip_prefix('"')
+            && let Some(end) = inner.find('"')
+        {
+            return Some(IniLine {
+                before: &body[..start],
+                key,
+                value: &inner[..end],
+                quoted: true,
+                after: &inner[end + 1..],
+            });
+        }
+        // Unquoted: a `;` or `#` after a space starts a comment.
+        let b = tail.as_bytes();
+        let comment = (0..b.len())
+            .find(|&i| matches!(b[i], b';' | b'#') && (i == 0 || b[i - 1].is_ascii_whitespace()))
+            .unwrap_or(b.len());
+        let value = tail[..comment].trim_end();
+        Some(IniLine {
+            before: &body[..start],
+            key,
+            value,
+            quoted: false,
+            after: &tail[value.len()..],
+        })
+    }
+
+    fn with_value(&self, v: &str) -> String {
+        let q = if self.quoted { "\"" } else { "" };
+        format!("{}{q}{v}{q}{}", self.before, self.after)
     }
 }
 
@@ -778,7 +849,8 @@ pub fn rewrite_recent_list(json: &str, ctx: &FileCtx<'_>) -> Result<(String, Vec
         left: Vec::new(),
         equivalent: false,
     };
-    let v: Value = serde_json::from_str(json).map_err(|_| Why::Kind)?;
+    nesting::check(json, Syntax::Json).map_err(|_| Why::TooDeep)?;
+    let v: Value = serde_json::from_str(json).map_err(json_why)?;
     let v = w.value(v, "", "recent", 0).ok_or(Why::Kind)?;
     Ok((serde_json::to_string(&v).map_err(|_| Why::Kind)?, w.left))
 }

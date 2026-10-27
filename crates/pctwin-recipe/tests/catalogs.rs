@@ -100,7 +100,13 @@ fn a_new_signed_row_maps_a_new_catalog_id_with_no_code_change() {
         {"id":"x","adapter":"winget","name":""}
     ]}"#;
     let sig = test_key::sign(bytes, "package-catalogs", 2);
-    let rows = Catalogue::<CatalogRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let rows = Catalogue::<CatalogRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     assert_eq!(rows.rows().len(), 2);
     assert_eq!(rows.report().skipped.len(), 3);
     let r = Recipe::from_json_with(&rows, recipe_json("winget-community").as_bytes()).unwrap();
@@ -134,4 +140,45 @@ fn catalog_ids_are_checked() {
 fn recipe_ids_refuse_underscores() {
     assert!(pctwin_recipe::RecipeId::new("org.example.app").is_ok());
     assert!(pctwin_recipe::RecipeId::new("org_example").is_err());
+}
+
+/// Fourth review: a damaged recipe naming a catalog no row maps was reported "not yet supported"
+/// (the ID was looked up before the recipe was checked). The recipe is checked first.
+#[test]
+fn review4_a_damaged_recipe_is_damaged_whatever_catalog_it_names() {
+    let damaged = recipe_json("chocolatey").replacen('}', r#","bogus":1}"#, 1);
+    assert!(matches!(
+        Recipe::from_json_with(shipped_catalogs(), damaged.as_bytes()),
+        Err(RecipeError::Damaged(_))
+    ));
+    let bad_package = recipe_json("chocolatey").replace("Example.App", "../../x");
+    let e = Recipe::from_json_with(shipped_catalogs(), bad_package.as_bytes()).unwrap_err();
+    assert!(!matches!(e, RecipeError::NotYetSupported(_)), "{e:?}");
+    // A sound recipe with an unknown catalog is still found, not yet supported.
+    assert_eq!(
+        Recipe::from_json_with(shipped_catalogs(), recipe_json("chocolatey").as_bytes())
+            .unwrap_err(),
+        RecipeError::NotYetSupported("chocolatey".into())
+    );
+    let set = read_recipes(
+        shipped_catalogs(),
+        &[damaged.as_bytes(), recipe_json("chocolatey").as_bytes()],
+    );
+    assert_eq!(set.damaged.len(), 1);
+    assert_eq!(set.not_yet_supported, [(1, "chocolatey".to_string())]);
+}
+
+/// Fourth review: two rows mapping one catalog ID to two adapters loaded clean, the first
+/// silently winning. Neither is used, and the report says so.
+#[test]
+fn review4_two_rows_for_one_catalog_id_are_both_refused_and_reported() {
+    let cat = Catalogue::<CatalogRow>::shipped(
+        r#"{"format":1,"catalogue":"package-catalogs","version":1,"rows":[{"id":"winget","adapter":"apt","name":"x"},{"id":"winget","adapter":"winget","name":"winget"}]}"#,
+    );
+    assert!(!cat.report().is_clean());
+    assert_eq!(cat.report().skipped.len(), 2);
+    assert_eq!(
+        adapter_for(&cat, "winget").unwrap_err(),
+        RecipeError::NotYetSupported("winget".into())
+    );
 }

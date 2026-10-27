@@ -15,7 +15,13 @@ fn a_new_signed_kind_names_places_with_no_code_change() {
         {"kind":{"id":"later","name":"Later","traits":["teleport"]}}
     ]}"#;
     let sig = test_key::sign(bytes, "place-kinds", 2);
-    let table = Catalogue::<WhatRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    let table = Catalogue::<WhatRow>::signed(
+        bytes,
+        &sig,
+        &test_key::keys(),
+        &pctwin_catalogue::MemoryMarks::at(1),
+    )
+    .unwrap();
     let r = Recogniser::from_catalogue(&table, System::Windows);
     let drone = What::new("drone-footage").unwrap();
     assert_eq!(
