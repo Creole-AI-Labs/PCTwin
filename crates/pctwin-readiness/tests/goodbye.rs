@@ -138,6 +138,7 @@ fn build(
             left_on_old_laptop: left,
             steps_not_finished: steps,
             undo_open: true,
+            special: &[],
         },
         prev,
         T0 + 100,
@@ -310,6 +311,7 @@ fn t27_014_an_unreachable_old_laptop_keeps_the_list_unclear() {
         left_on_old_laptop: &[],
         steps_not_finished: &[],
         undo_open: false,
+        special: &[],
     };
     let clear = Checklist::build(&inputs(OldLaptop::Scanned(&approved)), None, T0 + 100);
     assert!(clear.exceptions.is_empty());
@@ -400,6 +402,7 @@ fn one_thing_is_it() {
             left_on_old_laptop: &[],
             steps_not_finished: &[],
             undo_open: true,
+            special: &[],
         },
         None,
         T0 + 100,
@@ -425,4 +428,57 @@ fn one_thing_is_it() {
             .words
             .contains("Move them, or choose to leave them behind.")
     );
+}
+
+/// D21 (2.5): special-category steps appear on the list, each its own exception, resolved like any
+/// other (a relink the person does is their word; a step on the old laptop first too).
+#[test]
+fn special_category_steps_are_on_the_list_each_on_its_own() {
+    use pctwin_readiness::goodbye::SpecialStep;
+    let w = world();
+    let special = vec![
+        SpecialStep {
+            kind: ExceptionKind::TiedToOldLaptop,
+            place: "Chat app".into(),
+            component: "aa".into(),
+            words: "Link Chat app to your phone again on the new laptop.".into(),
+        },
+        SpecialStep {
+            kind: ExceptionKind::TiedToOldLaptop,
+            place: "Chat app".into(),
+            component: "bb".into(),
+            words: "Set up your security key again.".into(),
+        },
+        SpecialStep {
+            kind: ExceptionKind::DoFirstOnOldLaptop,
+            place: "Browser".into(),
+            component: "cc".into(),
+            words: "Export your saved passwords from Browser on the old laptop.".into(),
+        },
+    ];
+    let c = Checklist::build(
+        &Inputs {
+            ledger: &w.l,
+            approved: &w.approved,
+            old_laptop: OldLaptop::Scanned(&w.approved),
+            left_on_old_laptop: &[],
+            steps_not_finished: &[],
+            undo_open: false,
+            special: &special,
+        },
+        None,
+        T0 + 100,
+    );
+    for s in &special {
+        let e = c
+            .exceptions
+            .iter()
+            .find(|e| e.words == s.words)
+            .expect("each step is on the list");
+        assert_eq!((e.kind, e.places.clone()), (s.kind, vec![s.place.clone()]));
+        assert!(e.is_open());
+    }
+    let ids: BTreeSet<[u8; 32]> = c.exceptions.iter().map(|e| e.id).collect();
+    assert_eq!(ids.len(), c.exceptions.len(), "no two steps merge");
+    assert!(!c.is_clear());
 }

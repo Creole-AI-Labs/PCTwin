@@ -137,6 +137,23 @@ pub struct Inputs<'a> {
     pub steps_not_finished: &'a [MissingJob],
     /// Whether undo is still open (the journal's own gate).
     pub undo_open: bool,
+    /// Special-category steps (2.5): a sign-in or relink to do on the new laptop, an export to
+    /// make on the old laptop first, data whose kind could not be told, a labelled copy of
+    /// something a service holds, a secret not chosen to move.
+    pub special: &'a [SpecialStep],
+}
+
+/// One special-category step (2.5) that must be settled before the old laptop is wiped. 2.5
+/// builds these from each component's outcome; the list shows them like any other exception.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpecialStep {
+    pub kind: ExceptionKind,
+    /// Where it is on the old laptop (the app data folder, as shown to the person).
+    pub place: String,
+    /// The component it is about (its identity, as text), so two steps never merge.
+    pub component: String,
+    /// What to do, in plain words.
+    pub words: String,
 }
 
 /// Why a change to the list was refused.
@@ -320,6 +337,16 @@ impl Checklist {
                     "{} of the move did not finish. Try again before you wipe the old laptop.",
                     plural(steps.len(), "step", "steps"),
                 ),
+            ));
+        }
+
+        for s in i.special {
+            ex.push(Exception::new(
+                s.kind,
+                vec![],
+                vec![s.place.clone()],
+                vec![s.component.clone()],
+                s.words.clone(),
             ));
         }
 
