@@ -10,8 +10,8 @@
 //! 2. **Normalise** ([`normalise`]): quotes around a text, Windows' path spellings that name the
 //!    same file (trailing dots and spaces, `\\?\` and `\\.\` prefixes), letter case where the
 //!    system ignores it.
-//! 3. **Judge** ([`danger`]): an address is anything the WHATWG URL parser reads with a host, or
-//!    any scheme-shaped word (`shell:startup`, `ms-settings:`): no list of schemes, because the
+//! 3. **Judge** ([`crate::classify::danger`]): an address is anything the WHATWG URL parser
+//!    reads with a host, or any scheme-shaped word (`shell:startup`, `ms-settings:`): no list of schemes, because the
 //!    shell opens names no registry lists (`shell:` is one); only a scheme followed by nothing
 //!    or a number (`Arial:12`) is plain text, and only when the new laptop says no handler is
 //!    registered for it. Whether a path can run is the new laptop's own facts ([`Facts`]), never
