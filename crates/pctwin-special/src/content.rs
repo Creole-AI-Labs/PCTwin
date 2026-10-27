@@ -164,7 +164,7 @@ fn string_facts(s: &str, f: &mut JsonFacts) {
     }
     // A key the system wrapped for this laptop and app, written in hex (Electron's safe storage
     // writes `v10`/`v11` and Chromium-style app-bound keys `v20`, as their first bytes).
-    if t.len() >= 32 && t.len() % 2 == 0 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if t.len() >= 32 && t.len().is_multiple_of(2) && t.bytes().all(|b| b.is_ascii_hexdigit()) {
         let first: Vec<u8> = (0..6)
             .step_by(2)
             .filter_map(|i| u8::from_str_radix(&t[i..i + 2], 16).ok())
