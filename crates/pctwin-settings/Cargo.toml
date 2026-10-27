@@ -18,8 +18,6 @@ blake3 = "1.8"
 getrandom = "0.4.3"
 pctwin-executor = { path = "../pctwin-executor" }
 pctwin-grant = { path = "../pctwin-grant" }
-# The Wi-Fi tool's folder is made owner-only from its first moment (fourth review, finding F3).
-pctwin-helper-os = { path = "../pctwin-helper-os" }
 pctwin-journal = { path = "../pctwin-journal" }
 pctwin-recipe = { path = "../pctwin-recipe" }
 pctwin-types = { path = "../pctwin-types" }
@@ -47,5 +45,8 @@ pctwin-record = { path = "../pctwin-record" }
 tempfile = "3"
 
 [target.'cfg(windows)'.dev-dependencies]
+# The tests make the Wi-Fi folder as the app does, through the helper's fenced system calls
+# (fourth review, finding F3); the crate itself never links them.
+pctwin-helper-os = { path = "../pctwin-helper-os" }
 # Removes each test's own registry key afterwards.
 winreg = "0.55"
