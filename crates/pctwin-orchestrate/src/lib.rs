@@ -12,6 +12,10 @@
 //!   on it; what does not fit is proposed (left in the cloud, an approved offload drive, or left on
 //!   the old laptop), never dropped silently; an offload drive that is not connected is never
 //!   counted as on the new laptop.
+//! - [`topology`]: several people and several old laptops. People are known by their account on
+//!   one laptop, never by equal names or numbers; clashing names from two laptops land in their
+//!   own "From <laptop>" folders; each laptop keeps its own record, journal, undo and session
+//!   number; a change after approval holds only the affected items.
 //!
 //! Nothing here changes a file on the old laptop's drives: the crate's clippy fence bans every
 //! way to make, write, rename or remove one. The one effect on the old laptop is the cloud app's
@@ -23,3 +27,4 @@
 pub mod capacity;
 pub mod cloud;
 pub mod local_copy;
+pub mod topology;
