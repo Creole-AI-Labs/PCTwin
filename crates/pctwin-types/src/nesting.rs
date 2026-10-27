@@ -154,12 +154,17 @@ fn json(b: &[u8], d: &mut Depth, comments: bool) {
 }
 
 /// TOML: arrays and inline tables nest, and so do dotted keys (`a.b.c = 1` and `[a.b.c]` make
-/// tables inside tables), so every dot in a key counts as a level too.
+/// tables inside tables), so every dot in a key counts as a level too. A key under a table
+/// header counts from that table's own depth (`[h.h]` then `k.k = 1` is four levels deep: fifth
+/// review, finding 10), and an array-of-tables header `[[a.b]]` counts like `[a.b]`.
 fn toml(b: &[u8], d: &mut Depth) {
     // What each open bracket is: `true` for an inline table (its commas start keys again).
     let mut open: Vec<bool> = Vec::new();
     let mut key_dots = 0usize;
     let mut in_key = true;
+    // Inside a table header, and the depth of the table the last header opened.
+    let mut header = false;
+    let mut base = 0usize;
     let mut i = 0;
     while i < b.len() && !d.over() {
         let c = b[i];
@@ -192,16 +197,37 @@ fn toml(b: &[u8], d: &mut Depth) {
                 key_dots = 0;
                 in_key = true;
             }
-            b'[' => {
-                // A table header (`[a.b]`, `[[a]]`) keeps reading keys; an array holds values.
-                let header = open.is_empty() && in_key;
+            b'[' if open.is_empty() && in_key && !header => {
+                // A table header (`[a.b]`, or `[[a.b]]`, one level for either form): it keeps
+                // reading keys, and its dots count from the top.
+                if b.get(i + 1) == Some(&b'[') {
+                    i += 1;
+                }
+                header = true;
+                key_dots = 0;
                 open.push(false);
-                d.open(key_dots);
-                in_key = header;
+                d.open(0);
+            }
+            b']' if header && open.len() == 1 => {
+                if b.get(i + 1) == Some(&b']') {
+                    i += 1;
+                }
+                open.pop();
+                d.close();
+                header = false;
+                // The keys that follow are inside the table the header named.
+                base = key_dots + 1;
+                in_key = false;
+            }
+            b'[' => {
+                // An array holds values.
+                open.push(false);
+                d.open(base + key_dots);
+                in_key = false;
             }
             b'{' => {
                 open.push(true);
-                d.open(key_dots);
+                d.open(base + key_dots);
                 in_key = true;
             }
             b']' | b'}' => {
@@ -213,7 +239,8 @@ fn toml(b: &[u8], d: &mut Depth) {
             b',' if open.last() == Some(&true) => in_key = true,
             b'.' if in_key => {
                 key_dots += 1;
-                d.max = d.max.max(d.now + key_dots);
+                let from = if header { 0 } else { base };
+                d.max = d.max.max(d.now + from + key_dots);
             }
             _ => {}
         }
@@ -376,6 +403,26 @@ mod tests {
             ),
             4
         );
+        // Fifth review, finding 10: a key under a header counts from the header's table, and an
+        // array-of-tables header counts like a table header.
+        assert_eq!(depth("[h.h]\nk.k = 1\n", Syntax::Toml, 1000), 3);
+        assert_eq!(depth("[h.h]\nk.k.k = {a = 1}\n", Syntax::Toml, 1000), 5);
+        assert_eq!(depth("[[a.b.c]]\nx = 1\n", Syntax::Toml, 1000), 3);
+        assert_eq!(depth("[[a]]\n[[a]]\nx.y = 1\n", Syntax::Toml, 1000), 2);
+        let aot = format!("[[{}]]\nx = 1\n", vec!["k"; 20_000].join("."));
+        assert_eq!(check(&aot, Syntax::Toml), Err(TooDeep));
+        let split = format!(
+            "[{}]\n{} = 1\n",
+            vec!["h"; 200].join("."),
+            vec!["k"; 200].join(".")
+        );
+        assert_eq!(check(&split, Syntax::Toml), Err(TooDeep));
+        let fits = format!(
+            "[{}]\n{} = 1\n",
+            vec!["h"; 100].join("."),
+            vec!["k"; 100].join(".")
+        );
+        assert_eq!(check(&fits, Syntax::Toml), Ok(()));
         // Dotted keys and headers make tables inside tables.
         assert_eq!(depth("a.b.c.d = 1\n", Syntax::Toml, 1000), 3);
         assert_eq!(depth("[a.b.c]\nx = 1\n", Syntax::Toml, 1000), 3);

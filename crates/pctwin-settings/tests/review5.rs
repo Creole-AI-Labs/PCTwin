@@ -557,3 +557,31 @@ fn m_a_too_deep_dconf_value_is_refused_when_written() {
     assert_eq!(may_write_with(&f, &[], &a, &text(&deep)), Err(Why::TooDeep));
     assert_eq!(may_write_with(&f, &[], &a, &text("[['x']]")), Ok(()));
 }
+
+/// Finding 10: a TOML file nested past the gate, or past the TOML parser's own limit, is
+/// reported as too deeply nested, never as a damaged file (and never overflows the stack).
+#[test]
+fn f10_deep_toml_is_reported_as_too_deep() {
+    for text in [
+        format!("[[{}]]\nx = 1\n", vec!["k"; 20_000].join(".")),
+        format!(
+            "[{}]\n{} = 1\n",
+            vec!["h"; 200].join("."),
+            vec!["k"; 200].join(".")
+        ),
+        // Under the gate, past the TOML parser's own limit.
+        format!(
+            "[{}]\n{} = 1\n",
+            vec!["h"; 100].join("."),
+            vec!["k"; 100].join(".")
+        ),
+    ] {
+        let out = std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || file_plan("deep.toml", text.as_bytes()))
+            .unwrap()
+            .join()
+            .expect("no stack overflow");
+        assert_eq!(out, FileOutcome::NotMoved(Why::TooDeep));
+    }
+}

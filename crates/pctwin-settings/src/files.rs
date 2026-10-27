@@ -423,7 +423,7 @@ impl Walker<'_, '_> {
     fn toml(&mut self, bytes: &[u8]) -> Result<Vec<u8>, Why> {
         let text = std::str::from_utf8(bytes).map_err(|_| Why::Kind)?;
         nesting::check(text, Syntax::Toml).map_err(|_| Why::TooDeep)?;
-        let v: Value = toml::from_str(text).map_err(|_| Why::Kind)?;
+        let v: Value = toml::from_str(text).map_err(toml_why)?;
         let v = self.value(v, "", "", 0).ok_or(Why::Kind)?;
         toml::to_string(&v)
             .map(String::into_bytes)
@@ -648,6 +648,16 @@ impl Walker<'_, '_> {
 /// reported as nesting too, never as a damaged file.
 fn json_why(e: serde_json::Error) -> Why {
     if e.to_string().starts_with("recursion limit exceeded") {
+        Why::TooDeep
+    } else {
+        Why::Kind
+    }
+}
+
+/// Why TOML could not be read: its parser's own nesting limit is reported as nesting too, never
+/// as a damaged file (fifth review, finding 10; the same as [`json_why`]).
+fn toml_why(e: toml::de::Error) -> Why {
+    if e.to_string().contains("recursion limit") {
         Why::TooDeep
     } else {
         Why::Kind
