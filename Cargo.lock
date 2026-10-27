@@ -3646,6 +3646,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-catalogue"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "blake2",
+ "minisign-verify",
+ "pctwin-types",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pctwin-discovery"
 version = "0.1.0"
 dependencies = [
