@@ -7,6 +7,9 @@
 //! - [`ledger`]: one stable line per item with its result word and, kept apart, the evidence of
 //!   each kind that real observations gave (plan section 3). A worker's "done" is never taken on
 //!   its word: it is checked against the real state (the journal on disk, the 2.6 scheduler).
+//! - [`checks`]: "Can I actually work?" checks the person picks: bounded, read only, never
+//!   running anything; each result machine-checked, person-confirmed or still needs attention;
+//!   what is missing becomes a focused repair request to its owner.
 //!
 //! Nothing here changes a file on either laptop or starts a program: the crate's clippy fence
 //! bans every way to write, rename or remove a file, to start a program and to open a network
@@ -14,4 +17,5 @@
 
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
+pub mod checks;
 pub mod ledger;
