@@ -16,6 +16,8 @@ pctwin-scan = { path = "../pctwin-scan" }
 # Every item ends one honest result; a plan only ever names the needs-action ones.
 pctwin-types = { path = "../pctwin-types" }
 serde = { version = "1", features = ["derive"] }
+# Whether a rescued drive is mounted read-only, as the system reports it (vetted; safe calls).
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 thiserror = "2.0.21"
 # Names from two old laptops are compared as the new laptop will hold them.
 unicode-normalization = "0.1.25"
