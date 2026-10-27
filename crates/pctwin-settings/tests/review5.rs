@@ -585,3 +585,100 @@ fn f10_deep_toml_is_reported_as_too_deep() {
         assert_eq!(out, FileOutcome::NotMoved(Why::TooDeep));
     }
 }
+
+/// Mutant J2: a registered verb that runs the file itself or hands it a command line marks a
+/// program's file type; a verb that opens it as a document does not.
+#[test]
+fn m_a_verb_that_runs_the_file_or_takes_a_command_line_marks_a_program() {
+    use pctwin_settings::judge::command_runs_file;
+    for c in [
+        r#""%1" %*"#,
+        "%1 /S",
+        r#"C:\Windows\System32\WScript.exe "%1" %*"#,
+        r#""C:\Py\py.exe" "%L" %*"#,
+        r#"msiexec.exe /i "%1" %*"#,
+    ] {
+        assert!(command_runs_file(c), "{c}");
+    }
+    for c in [
+        r#""C:\Program Files\Office\swriter.exe" -o "%1""#,
+        r#""C:\Program Files\VLC\vlc.exe" --started-from-file "%1""#,
+        "",
+    ] {
+        assert!(!command_runs_file(c), "{c}");
+    }
+}
+
+/// Mutant J17: a printable run of four characters in raw bytes is judged.
+#[test]
+fn m_a_four_character_run_in_raw_bytes_is_judged() {
+    let (m, f) = (FolderMap::default(), facts());
+    let c = ctx(&m, &[], &f);
+    let short = r"\\ab";
+    let utf8: String = short.bytes().map(|b| format!("{b:02x}")).collect();
+    for hex in [utf8, utf16_hex(short, false)] {
+        assert_eq!(
+            classify_kind(STORE, "Blob", &text(&hex), true, &c),
+            Fate::NotMoved(Why::Fetches),
+            "{hex}"
+        );
+    }
+}
+
+/// Mutant C23: a path inside a longer text is judged by the laptop's facts too (its file, its
+/// streams), not only a path that is the whole text.
+#[test]
+fn m_a_path_inside_a_longer_text_is_judged_by_the_facts() {
+    let f = Facts::new([], Some(vec![]));
+    let dir = tempfile::tempdir().unwrap();
+    let prog = dir.path().join("report");
+    std::fs::write(&prog, b"MZ\x90\x00").unwrap();
+    let t = format!("see {} now", prog.to_string_lossy());
+    assert_eq!(danger(&f, &[], STORE, "V", &t), Some(Why::StartsProgram));
+    assert_eq!(
+        danger(
+            &f,
+            &[],
+            STORE,
+            "V",
+            r"see C:\Users\old\notes.txt:hidden now"
+        ),
+        Some(Why::PlaceUnknown)
+    );
+}
+
+/// Mutants C24 and C27: credentials and account IDs are refused at the moment of writing too.
+#[test]
+fn m_credentials_and_account_ids_are_refused_when_written() {
+    let f = facts();
+    let a = reg("Theme", RegKind::Sz);
+    assert_eq!(
+        may_write_with(
+            &f,
+            &[],
+            &a,
+            &text("ghp_abcdefghijklmnopqrstuvwxyz0123456789")
+        ),
+        Err(Why::Secret)
+    );
+    assert_eq!(
+        may_write_with(&f, &[], &a, &text("S-1-5-21-1111-2222-3333-1001")),
+        Err(Why::AccountBound)
+    );
+    assert_eq!(may_write_with(&f, &[], &a, &text("ocean")), Ok(()));
+}
+
+/// Mutant C25: a catalogue ending matches a file name Windows reads without its trailing dots
+/// and spaces.
+#[test]
+fn m_a_hint_ending_matches_through_trailing_dots() {
+    let cat = Catalogue::starter().unwrap();
+    let none = Facts::new([], Some(vec![]));
+    for t in [r"C:\Users\old\run.ps1.", r"C:\Users\old\run.ps1 . "] {
+        assert_eq!(
+            danger(&none, &cat.action_hints, STORE, "V", t),
+            Some(Why::StartsProgram),
+            "{t}"
+        );
+    }
+}
