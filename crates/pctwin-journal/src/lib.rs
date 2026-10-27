@@ -2021,6 +2021,8 @@ impl Journal {
         if self.undo_gate()? == UndoGate::Closed {
             return Err(JournalError::UndoClosed);
         }
+        // An older copy of the journal put back never reopens undo (third review, finding 9).
+        self.refuse_stale_for_undo()?;
         undo.permits += 1;
         Ok(UndoPermit { journal: self })
     }
@@ -2123,11 +2125,10 @@ impl Journal {
         if !stuck.is_empty() {
             return Err(CloseError::Unresolved { items: stuck });
         }
-        let key = {
-            let effects = self.db.begin_read().map_err(storage)?;
-            let effects = effects.open_table(effects::EFFECTS).map_err(storage)?;
-            self.key_if_any(&effects)
-        };
+        // Every close is counted, also in a journal of Phase 1 file records only (third review,
+        // finding 9): its record key is made now if it has none. A key that cannot be had, or a
+        // journal older than its count, refuses the close; the wipe waits.
+        let key = self.record_key()?;
         let tx = self.db.begin_write().map_err(storage)?;
         {
             let entries = tx.open_table(ENTRIES).map_err(storage)?;
@@ -2162,12 +2163,9 @@ impl Journal {
             let mut gate = tx.open_table(GATE).map_err(storage)?;
             gate.insert(UNDO_GATE, CLOSED).map_err(storage)?;
         }
-        // The close is counted with the sealed records (when there are any), so a copy of the
-        // journal from before it is refused rather than reopening undo (second review, S2).
-        let counted = match &key {
-            Some(key) => Some(mark::bump(&tx, key)?),
-            None => None,
-        };
+        // The close is counted, so a copy of the journal from before it is refused rather than
+        // reopening undo (second review, S2; third review, finding 9).
+        let counted = Some(mark::bump(&tx, &key)?);
         // If the commit fails, it is not known whether the close reached the disk: undo stays
         // shut in this PCTwin, and the disk decides at the next start.
         reopen.closing_stays = true;

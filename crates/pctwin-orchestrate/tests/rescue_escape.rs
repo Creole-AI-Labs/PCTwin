@@ -330,7 +330,10 @@ fn every_folder_in_a_home_is_read() {
     );
     touch(&r.join("Users/Eve/.ssh/id_ed25519"), b"key");
     // An app's own data, which is neither hidden nor a known place: counted, not moved.
-    touch(&r.join("Users/Eve/AppData/Roaming/SomeApp/settings.ini"), b"x=1");
+    touch(
+        &r.join("Users/Eve/AppData/Roaming/SomeApp/settings.ini"),
+        b"x=1",
+    );
     // A credential store in the person's own folder: never moved.
     touch(&r.join("Users/Eve/Documents/Cookies"), b"db");
     touch(&r.join("Users/Eve/notes.txt"), b"top-level file");

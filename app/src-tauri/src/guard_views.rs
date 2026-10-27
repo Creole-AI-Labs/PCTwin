@@ -498,6 +498,13 @@ impl RescueStage {
             RescueError::Locked(lock) => RescueStage::Locked {
                 lock: (*lock).into(),
             },
+            // The drive in that place is not the one listed (it was swapped), or where things
+            // would be put cannot be told apart from it: choose again, from a fresh list (third
+            // review, findings 1 and 2). The screens have no words of their own for these yet.
+            RescueError::NotTheDrive | RescueError::TargetUnknown => RescueStage::PickDrive {
+                drives,
+                refused: None,
+            },
             RescueError::NoSystemFound => RescueStage::NoSystem,
             RescueError::Unreadable(what) => RescueStage::Salvage {
                 readable: 0,

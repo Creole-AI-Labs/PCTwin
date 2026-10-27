@@ -435,22 +435,16 @@ fn a_missing_key_is_waited_for_never_replaced() {
         pctwin_journal::keystore::TagKey::from_bytes([1; 32]),
     )
     .unwrap();
-    let permit = wrong.begin_undo().unwrap();
-    let got = undo_effects(
-        &rebuild(&wrong),
-        &permit,
-        &mut laptop,
-        SCOPE,
-        &common::book(),
-    );
     // With another key nothing in it reads as PCTwin's, its counter included (second review,
-    // S2): the whole record is refused as damaged, and nothing is done.
+    // S2): undo does not even begin (third review, finding 9), and nothing is done.
     assert!(
-        matches!(got, Err(pctwin_journal::JournalError::Damaged(_))),
-        "{got:?}"
+        matches!(
+            wrong.begin_undo(),
+            Err(pctwin_journal::JournalError::Damaged(_))
+        ),
+        "undo began without the key"
     );
     assert!(laptop.installed.contains_key("A.B"));
-    drop(permit);
     drop(wrong);
     let j = common::open(&path).unwrap();
     assert_eq!(j.effects().unwrap().len(), 1, "nothing was erased");
@@ -876,12 +870,11 @@ fn a_journal_put_back_from_an_older_copy_is_refused() {
     std::fs::copy(&path, &newest).unwrap();
     std::fs::copy(&snap, &path).unwrap();
     let j = common::open(&path).unwrap();
-    let permit = j.begin_undo().unwrap();
-    let got = undo_effects(&rebuild(&j), &permit, &mut laptop, SCOPE, &common::book());
-    assert!(
-        matches!(got, Err(pctwin_journal::JournalError::RolledBack)),
-        "{got:?}"
-    );
+    // Undo does not even begin on it (third review, finding 9).
+    assert!(matches!(
+        j.begin_undo(),
+        Err(pctwin_journal::JournalError::RolledBack)
+    ));
     assert!(laptop.done.is_empty(), "{:?}", laptop.done);
     assert!(laptop.installed.contains_key("A.B"));
     // Nothing is trusted from it, not even what is part way, and it closes nothing.
@@ -889,7 +882,6 @@ fn a_journal_put_back_from_an_older_copy_is_refused() {
         j.effects_part_way(),
         Err(pctwin_journal::JournalError::RolledBack)
     ));
-    drop(permit);
     assert!(matches!(
         j.close_undo(&mut |_, _| unreachable!()),
         Err(pctwin_journal::CloseError::Journal(
