@@ -311,3 +311,76 @@ fn every_part_is_one_name() {
         assert!(d.open_file(&names).is_err(), "{bad:?}");
     }
 }
+
+/// Every folder at the top of a person's home is read, not only the usual six; apps' own data
+/// and account state are counted but never moved; a folder that leads off the drive is said as
+/// unreadable.
+#[test]
+fn every_folder_in_a_home_is_read() {
+    let drive = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let r = drive.path();
+    touch(&r.join("Windows/System32/config/SYSTEM"), b"");
+    touch(&r.join("Users/Eve/Projects/a.txt"), b"project");
+    touch(&r.join("Users/Eve/Saved Games/a.txt"), b"game");
+    touch(&r.join("Users/Eve/Documents/thesis.docx"), b"thesis");
+    touch(
+        &r.join("Users/Eve/AppData/Local/Microsoft/Credentials/blob"),
+        b"key",
+    );
+    touch(&r.join("Users/Eve/.ssh/id_ed25519"), b"key");
+    // An app's own data, which is neither hidden nor a known place: counted, not moved.
+    touch(&r.join("Users/Eve/AppData/Roaming/SomeApp/settings.ini"), b"x=1");
+    // A credential store in the person's own folder: never moved.
+    touch(&r.join("Users/Eve/Documents/Cookies"), b"db");
+    touch(&r.join("Users/Eve/notes.txt"), b"top-level file");
+    junction(&r.join("Users/Eve/Elsewhere"), outside.path());
+    let scan = scan_rescued_drive(r, &id_of(r), &mut NoOwners).unwrap();
+    let find = |want: &[&str]| {
+        scan.record
+            .items
+            .iter()
+            .find(|i| {
+                let parts: Vec<String> = i
+                    .path
+                    .parts()
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect();
+                parts == want
+            })
+            .unwrap_or_else(|| panic!("{want:?} not in the plan"))
+    };
+    let project = find(&["Projects", "a.txt"]);
+    let game = find(&["Saved Games", "a.txt"]);
+    assert_eq!(project.inclusion, pctwin_record::Inclusion::Included);
+    assert_eq!(game.inclusion, pctwin_record::Inclusion::Included);
+    assert_ne!(project.id, game.id, "two folders' files never share an ID");
+    let read = std::io::read_to_string(scan.open(&scan.source_of(project).unwrap()).unwrap());
+    assert_eq!(read.unwrap(), "project");
+    assert_eq!(
+        find(&["thesis.docx"]).inclusion,
+        pctwin_record::Inclusion::Included
+    );
+    for kept in [
+        &["AppData", "Local", "Microsoft", "Credentials", "blob"][..],
+        &[".ssh", "id_ed25519"][..],
+        &["AppData", "Roaming", "SomeApp", "settings.ini"][..],
+        &["Cookies"][..],
+    ] {
+        assert!(
+            matches!(
+                find(kept).inclusion,
+                pctwin_record::Inclusion::LeftOut { .. }
+            ),
+            "{kept:?}"
+        );
+    }
+    assert!(
+        scan.unreadable
+            .iter()
+            .any(|u| u.ends_with(Path::new("Eve").join("Elsewhere"))),
+        "{:?}",
+        scan.unreadable
+    );
+}

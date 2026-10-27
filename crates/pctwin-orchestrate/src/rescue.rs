@@ -17,7 +17,9 @@
 //!   Windows drive each person is the account that owns their settings file (`NTUSER.DAT`), never
 //!   their folder's name; a person whose account cannot be read is still listed, under their
 //!   folder on this drive only, keyed by its exact name and which folder it is, so two people
-//!   are never one;
+//!   are never one; every folder at the top of each home is read, not only the usual six (apps'
+//!   own data and any account state are counted, never moved), and what could not be read is
+//!   listed;
 //! - **only reads**: files are opened for reading and nothing is ever written to the drive (this
 //!   crate cannot write files at all), and a drive chosen as both source and target is refused
 //!   by the volume each target folder is really on, never by how its path is written
@@ -49,8 +51,11 @@ use std::sync::Arc;
 
 use cap_primitives::fs as cap;
 use pctwin_record::{
-    FolderRole, Inclusion, ItemId, ItemKind, LaptopId, MAX_PERSONAL, Owner, Place, Record, Storage,
+    FolderRole, Inclusion, ItemId, ItemKind, ItemName, ItemPath, LaptopId, LeftOutReason,
+    MAX_PERSONAL, Owner, Place, Record, Storage,
 };
+
+use crate::cloud::{Os, account_state_by_name};
 use pctwin_scan::{AccessFact, AccessReader, Category, OtherSystem, ReadPlan, category};
 
 /// A drive, as the system identifies it. No drive letter or mount point is part of it.
@@ -651,6 +656,41 @@ fn shared_folder(system: OtherSystem) -> Option<[&'static str; 2]> {
     }
 }
 
+/// One folder to read on the drive: whose, under which role, its names from the top, and, for a
+/// folder at the top of a home that is not one of the usual six, its own name (its things are
+/// recorded below the home under that name).
+struct Place_ {
+    owner: Owner,
+    role: FolderRole,
+    names: Vec<OsString>,
+    below_home: Option<OsString>,
+}
+
+/// A folder at the top of a home that holds apps' own data: read and counted, never moved.
+fn is_app_data(system: OtherSystem, top: &str) -> bool {
+    top.starts_with('.')
+        || match system {
+            OtherSystem::Windows => top.eq_ignore_ascii_case("AppData"),
+            OtherSystem::MacOs => top.eq_ignore_ascii_case("Library"),
+            OtherSystem::Linux => false,
+        }
+}
+
+/// A name from the drive as the plan records it.
+fn name_of(name: &OsStr) -> ItemName {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = name.encode_wide().collect();
+        ItemName::from_windows_wide(&wide)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        ItemName::from_unix_bytes(name.as_bytes())
+    }
+}
+
 /// What a rescued drive gives: an ordinary plan, read carefully.
 #[derive(Debug, Clone)]
 pub struct RescueScan {
@@ -744,29 +784,62 @@ pub fn scan_rescued_drive(
         drive: "rescue".into(),
     };
     let homes = OsString::from(homes_name(system));
-    let mut places: Vec<(Owner, FolderRole, Vec<OsString>)> = Vec::new();
+    // Every folder at the top of each person's home is read, not only the usual six: the usual
+    // ones under their own role, every other one below the home under its own name (Phase 2
+    // adoption, changes 7 and 8: PCTwin works from what it finds). What could not be read is
+    // listed as unreadable.
+    let mut places: Vec<Place_> = Vec::new();
     for p in &people {
         let owner = Owner::Person {
             account_id: p.account_id(),
         };
-        for (name, role) in own_folders(system) {
-            places.push((
-                owner.clone(),
-                *role,
-                vec![homes.clone(), p.name.clone(), OsString::from(name)],
-            ));
+        let home = [homes.clone(), p.name.clone()];
+        let names = match drive.list(&[homes.as_os_str(), p.name.as_os_str()]) {
+            Ok(names) => names,
+            Err(_) => {
+                unreadable.push(p.home.clone());
+                continue;
+            }
+        };
+        let mut names = names;
+        names.sort();
+        for name in names {
+            let own = own_folders(system)
+                .iter()
+                .find(|(n, _)| OsStr::new(n) == name.as_os_str())
+                .map(|(_, role)| *role);
+            let mut at = home.to_vec();
+            at.push(name.clone());
+            places.push(Place_ {
+                owner: owner.clone(),
+                role: own.unwrap_or(FolderRole::Home),
+                names: at,
+                below_home: own.is_none().then_some(name),
+            });
         }
     }
     if let Some(shared) = shared_folder(system) {
-        places.push((
-            Owner::Shared,
-            FolderRole::Public,
-            shared.iter().map(OsString::from).collect(),
-        ));
+        places.push(Place_ {
+            owner: Owner::Shared,
+            role: FolderRole::Public,
+            names: shared.iter().map(OsString::from).collect(),
+            below_home: None,
+        });
     }
+    let os = match system {
+        OtherSystem::Windows => Os::Windows,
+        OtherSystem::MacOs => Os::Mac,
+        OtherSystem::Linux => Os::Linux,
+    };
     // (category rank, place order, path) for the most-important-first order.
     let mut order: Vec<(u8, usize, ItemId)> = Vec::new();
-    for (n, (owner, role, names)) in places.into_iter().enumerate() {
+    for (n, place_) in places.into_iter().enumerate() {
+        let Place_ {
+            owner,
+            role,
+            names,
+            below_home,
+        } = place_;
         let names: Vec<&OsStr> = names.iter().map(OsString::as_os_str).collect();
         let folder = names
             .iter()
@@ -777,6 +850,8 @@ pub fn scan_rescued_drive(
         let before = match drive.folders(&names) {
             Ok((_, keys)) => keys,
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+            // A plain file at the top of the home is not a folder to read.
+            Err(_) if below_home.is_some() && drive.open_file(&names).is_ok() => continue,
             Err(_) => {
                 unreadable.push(folder);
                 continue;
@@ -792,7 +867,48 @@ pub fn scan_rescued_drive(
             continue;
         }
         unreadable.extend(scan.unreadable);
-        for item in scan.items {
+        let home_parts: Vec<String> = names
+            .iter()
+            .skip(2)
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect();
+        for mut item in scan.items {
+            if let Some(name) = &below_home {
+                // Recorded below the home under the folder's own name, so two such folders'
+                // things never share a name.
+                let mut parts = vec![name_of(name)];
+                parts.extend(item.path.parts().iter().cloned());
+                let Ok(path) = ItemPath::new(parts) else {
+                    unreadable.push(folder.clone());
+                    continue;
+                };
+                item.path = path;
+                item.id = ItemId::derive(&laptop, &owner, &place, &item.path);
+            }
+            // A sync app's or the system's own account state is never moved (third review,
+            // finding 4), nor is an app's own data (counted only, for now).
+            let shown: Vec<String> = item
+                .path
+                .parts()
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect();
+            let mut under_home: Vec<&str> = home_parts.iter().map(String::as_str).collect();
+            if below_home.is_none() {
+                under_home.extend(shown.iter().map(String::as_str));
+            } else {
+                under_home = shown.iter().map(String::as_str).collect();
+            }
+            let apps_own = under_home
+                .first()
+                .is_some_and(|top| is_app_data(system, top));
+            if (apps_own || account_state_by_name(os, Some(&under_home), &under_home).is_some())
+                && item.inclusion == Inclusion::Included
+            {
+                item.inclusion = Inclusion::LeftOut {
+                    reason: LeftOutReason::System,
+                };
+            }
             if item.kind == ItemKind::File && item.inclusion == Inclusion::Included {
                 let name = item
                     .path
@@ -804,7 +920,12 @@ pub fn scan_rescued_drive(
             }
             record.items.push(item);
         }
-        roots.insert((owner_key(&owner), role), folder);
+        let root = if below_home.is_some() {
+            folder.parent().map(Path::to_path_buf).unwrap_or(folder)
+        } else {
+            folder
+        };
+        roots.insert((owner_key(&owner), role), root);
     }
     order.sort();
     record.personal = order
