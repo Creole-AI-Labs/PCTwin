@@ -11,6 +11,9 @@ publish.workspace = true
 [dependencies]
 # A child job's digest, so a result for another job is told apart (an identity, not a secret).
 blake3 = "1.8"
+# A rescued drive is read through folder handles, one name at a time, never through a link
+# (third security review, finding 1): the crate under cap-std, as the hand-over uses it.
+cap-primitives = "4.0.3"
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 # Every item ends one honest result; a plan only ever names the needs-action ones.
@@ -21,6 +24,11 @@ sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 thiserror = "2.0.21"
 # Names from two old laptops are compared as the new laptop will hold them.
 unicode-normalization = "0.1.25"
+
+[target.'cfg(windows)'.dependencies]
+# Which volume an open file is on and which file it is (its volume serial and file index), read
+# from the handle with safe calls.
+winapi-util = "0.1.11"
 
 [dev-dependencies]
 proptest = "1.11.0"
