@@ -874,12 +874,18 @@ fn os_machine_text(subkey: &[u16], value: &[u16]) -> Result<OsString, HRESULT> {
 
 /// Windows' own signature check (`WinVerifyTrust`, Authenticode policy, the whole chain checked
 /// for withdrawn certificates except the root) of the signature inside the open file `file`,
-/// named `path` (NUL-terminated) for the system's records only: Windows reads the bytes through
-/// the handle, so the file checked is the very file held (second review, finding B2). Returns
-/// Windows' answer (0: trusted) and, when it is trusted, the signing certificate's bytes as
-/// Windows read them. Added 27 October 2026 (second review, finding B3), awaiting the user's
-/// approval: before, the answer came from PowerShell, which loads code from the person's own
-/// folders.
+/// named `path` (NUL-terminated). Returns Windows' answer (0: trusted) and, when it is trusted,
+/// the signing certificate's bytes as Windows read them.
+///
+/// Which bytes Windows checks depends on the kind of file. For a Windows program (PE) Windows
+/// reads through the handle, so the file checked is the very file held (second review, finding
+/// B2). For a Windows Installer package it does not: the package checker opens the file again by
+/// `path` and ignores the handle (third review, finding 3, shown by a folder link swapped while
+/// Windows looked), so that answer is about whatever `path` names at that moment. The maker check
+/// counts a package's answer only for the administrator helper's own copy, in its
+/// administrators-only folder, held so nobody can change it (`pctwin_maker::check::check_staged`).
+/// Added 27 October 2026 (second review, finding B3: before, the answer came from PowerShell,
+/// which loads code from the person's own folders); approved by the user, 27 October 2026.
 fn os_win_verify_trust(file: BorrowedHandle<'_>, path: &[u16]) -> (i32, Option<Vec<u8>>) {
     assert!(path.ends_with(&[0]), "NUL-terminated");
     let mut info = WINTRUST_FILE_INFO {
@@ -946,7 +952,7 @@ fn os_win_verify_trust(file: BorrowedHandle<'_>, path: &[u16]) -> (i32, Option<V
 /// Whether a disk (opened for no access, only to be asked) says it can be removed: its hotplug
 /// information (`IOCTL_STORAGE_GET_HOTPLUG_INFO`), which needs no administrator. Added
 /// 27 October 2026 (second review, low finding: an NVMe disk in a Thunderbolt or USB4 case reads
-/// as a bus inside the laptop), awaiting the user's approval.
+/// as a bus inside the laptop); approved by the user, 27 October 2026.
 fn os_disk_hotplug(disk: BorrowedHandle<'_>) -> Result<STORAGE_HOTPLUG_INFO, HRESULT> {
     let mut info = STORAGE_HOTPLUG_INFO {
         Size: std::mem::size_of::<STORAGE_HOTPLUG_INFO>() as u32,
@@ -1014,9 +1020,12 @@ pub struct FileTrust {
 }
 
 /// Asks Windows itself, with no tool or script in between, whether it trusts the signature
-/// inside `file` (open, held by the caller; `path` names it for the system's records only). A
-/// file signed only through a Windows catalog has no signature inside it and is not trusted
-/// here. The answer is the system's own and cannot be replaced by code in the person's folders.
+/// inside `file` (open, held by the caller) at `path`. For a Windows program the bytes checked are
+/// the held file's; for a Windows Installer package Windows reads `path` again instead (third
+/// review, finding 3), so a package's answer is only as good as the folder `path` is in: it
+/// counts only for the administrator helper's own copy (see [`os_win_verify_trust`]). A file
+/// signed only through a Windows catalog has no signature inside it and is not trusted here. The
+/// answer is the system's own and cannot be replaced by code in the person's folders.
 pub fn verify_file_trust(file: &File, path: &std::path::Path) -> FileTrust {
     let (code, signer) = os_win_verify_trust(file.as_handle(), &wide(path.as_os_str()));
     FileTrust { code, signer }
