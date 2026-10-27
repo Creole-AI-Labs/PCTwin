@@ -13,8 +13,12 @@
 //!   ([`CloudOutcome::ManagedByEmployer`]).
 //!
 //! A sync app's own sign-in state (its tokens and settings) is never copied in place of signing
-//! in: [`sign_in_state`] names those folders so no later step that copies app data can take them.
-//! Today app data is only counted, never listed, so none can be copied in the first place.
+//! in. Rather than list what must never be taken (a list that always misses something: a short
+//! `ONEDRI~1` name, a name with a trailing dot, the Store version of an app, the system's own
+//! credential stores), [`capture_scope`] lists the only places of each app PCTwin may take from:
+//! the person's own synced files folder. Anything else of the app is out of scope whatever it is
+//! called, and a name that is not exactly an allowed one is out of scope too (third security
+//! review, finding 4). Keeping local copies ([`crate::local_copy`]) takes only files in scope.
 
 use pctwin_record::{CloudProvider, Inclusion, Item, LeftOutReason, ManagedBy, Storage};
 use pctwin_types::{ItemResult, Reason};
@@ -177,87 +181,96 @@ pub enum Os {
     Linux,
 }
 
-/// Where each sync app keeps its sign-in state and settings, below a person's home folder.
-const SIGN_IN_STATE: [(Os, &[&str], CloudProvider); 15] = [
+/// One folder name in an allowed place: exactly this name, or a name starting with this (an
+/// account's own folder, `GoogleDrive-ada@example.com`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Part {
+    Is(&'static str),
+    StartsWith(&'static str),
+}
+
+use Part::{Is, StartsWith};
+
+/// The only places of each sync app PCTwin may take from, below a person's home folder: the
+/// person's own synced files. Work or school folders are told apart elsewhere (they stay with
+/// the employer); they are not listed here either.
+const CAPTURE: [(Os, CloudProvider, &[Part]); 14] = [
+    (Os::Windows, CloudProvider::OneDrive, &[Is("OneDrive")]),
     (
         Os::Windows,
-        &["AppData", "Local", "Microsoft", "OneDrive"],
         CloudProvider::OneDrive,
+        &[Is("OneDrive - Personal")],
     ),
+    (Os::Windows, CloudProvider::Dropbox, &[Is("Dropbox")]),
+    (Os::Windows, CloudProvider::GoogleDrive, &[Is("My Drive")]),
+    (Os::Windows, CloudProvider::ICloud, &[Is("iCloudDrive")]),
     (
         Os::Windows,
-        &["AppData", "Local", "Dropbox"],
-        CloudProvider::Dropbox,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Roaming", "Dropbox"],
-        CloudProvider::Dropbox,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Local", "Google", "DriveFS"],
-        CloudProvider::GoogleDrive,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Roaming", "Apple Computer", "iCloud"],
         CloudProvider::ICloud,
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Local", "Apple Inc", "iCloudDrive"],
-        CloudProvider::ICloud,
+        &[Is("Pictures"), Is("iCloud Photos")],
     ),
     (
         Os::Mac,
-        &["Library", "Application Support", "CloudDocs"],
         CloudProvider::ICloud,
-    ),
-    (
-        Os::Mac,
         &[
-            "Library",
-            "Group Containers",
-            "UBF8T346G9.OneDriveSyncClientSuite",
+            Is("Library"),
+            Is("Mobile Documents"),
+            Is("com~apple~CloudDocs"),
         ],
-        CloudProvider::OneDrive,
     ),
     (
         Os::Mac,
-        &["Library", "Containers", "com.microsoft.OneDrive-mac"],
         CloudProvider::OneDrive,
+        &[Is("Library"), Is("CloudStorage"), Is("OneDrive-Personal")],
     ),
+    (Os::Mac, CloudProvider::OneDrive, &[Is("OneDrive")]),
     (
         Os::Mac,
-        &["Library", "Application Support", "OneDrive"],
-        CloudProvider::OneDrive,
+        CloudProvider::Dropbox,
+        &[Is("Library"), Is("CloudStorage"), Is("Dropbox")],
     ),
-    (Os::Mac, &[".dropbox"], CloudProvider::Dropbox),
+    (Os::Mac, CloudProvider::Dropbox, &[Is("Dropbox")]),
     (
         Os::Mac,
-        &["Library", "Application Support", "Google", "DriveFS"],
         CloudProvider::GoogleDrive,
+        &[
+            Is("Library"),
+            Is("CloudStorage"),
+            StartsWith("GoogleDrive-"),
+            Is("My Drive"),
+        ],
     ),
-    (Os::Linux, &[".config", "onedrive"], CloudProvider::OneDrive),
-    (Os::Linux, &[".dropbox"], CloudProvider::Dropbox),
-    (Os::Linux, &[".config", "rclone"], CloudProvider::Other),
+    (Os::Linux, CloudProvider::OneDrive, &[Is("OneDrive")]),
+    (Os::Linux, CloudProvider::Dropbox, &[Is("Dropbox")]),
 ];
 
-/// Whether `under_home` (folders below a person's home folder, then a name) is a sync app's own
-/// sign-in state, which is never copied: the person signs in again on the new laptop. Names are
-/// compared ignoring case on Windows and macOS, exactly on Linux.
-pub fn sign_in_state(os: Os, under_home: &[&str]) -> Option<CloudProvider> {
-    let same = |a: &str, b: &str| match os {
-        Os::Windows | Os::Mac => a.eq_ignore_ascii_case(b),
-        Os::Linux => a == b,
+/// Whether `under_home` (folders below a person's home folder, then a name) is inside a sync
+/// app's allowed place, and which app's: the only things of a sync app PCTwin may take. Its
+/// sign-in state, settings and caches never are, and neither are the system's own credential
+/// stores, whatever they are called. Names must be exactly an allowed name: on Windows and macOS
+/// letters may differ in case only (as those systems compare names); a short `ONEDRI~1` name, a
+/// trailing dot or space, or any other spelling is out of scope. The allowed folder itself is a
+/// place, not something to take: only what is inside it is in scope.
+pub fn capture_scope(os: Os, under_home: &[&str]) -> Option<CloudProvider> {
+    let same = |want: &str, name: &str| match os {
+        Os::Windows | Os::Mac => want.eq_ignore_ascii_case(name),
+        Os::Linux => want == name,
     };
-    SIGN_IN_STATE
+    let fits = |part: &Part, name: &str| match part {
+        Is(want) => same(want, name),
+        StartsWith(want) => {
+            name.len() > want.len()
+                && name.is_char_boundary(want.len())
+                && same(want, &name[..want.len()])
+                && !name.ends_with(['.', ' '])
+        }
+    };
+    CAPTURE
         .iter()
-        .find(|(o, prefix, _)| {
+        .find(|(o, _, place)| {
             *o == os
-                && under_home.len() >= prefix.len()
-                && prefix.iter().zip(under_home).all(|(p, n)| same(p, n))
+                && under_home.len() > place.len()
+                && place.iter().zip(under_home).all(|(p, n)| fits(p, n))
         })
-        .map(|(_, _, provider)| *provider)
+        .map(|(_, provider, _)| *provider)
 }

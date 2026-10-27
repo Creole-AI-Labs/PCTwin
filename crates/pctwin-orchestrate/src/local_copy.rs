@@ -6,6 +6,10 @@
 //! to send, then asks the cloud app to make each one online only again:
 //!
 //! - **only with that person's consent**, for that provider; nobody else's files are touched;
+//! - **only the person's own synced files**: a file is brought down only if it is inside that
+//!   app's allowed place in the person's home folder ([`crate::cloud::capture_scope`]); an app's
+//!   sign-in tokens, settings and the system's credential stores never are, whatever they are
+//!   called (third security review, finding 4);
 //! - **space first**: each batch fits the old laptop's free space with [`KEEP_FREE_OLD`] to spare,
 //!   checked again before every batch; a file that can never fit stays safe in its cloud;
 //! - **the connection**: on a connection that may charge for data (or one PCTwin cannot tell),
@@ -28,7 +32,7 @@ use std::time::{Duration, Instant};
 
 use pctwin_record::{CloudProvider, ItemId};
 
-use crate::cloud::provider_name;
+use crate::cloud::{Os, capture_scope, provider_name};
 
 /// Space always left free on the old laptop's drive while copies are kept: a drive filled to the
 /// last byte stops a laptop working (the same room the move keeps on the new laptop).
@@ -57,6 +61,27 @@ pub struct Consent {
     pub provider: CloudProvider,
     /// They also allowed it on a connection that may charge for data.
     pub on_metered: bool,
+    /// Their home folder on the old laptop: only that app's allowed place inside it is in scope.
+    pub home: PathBuf,
+}
+
+impl Consent {
+    /// Whether `path` is one of this person's own synced files of this provider: inside the
+    /// app's allowed place in their home folder, named plainly (no `..`, no other drive), every
+    /// name valid text.
+    pub fn covers(&self, os: Os, path: &Path) -> bool {
+        let Ok(below) = path.strip_prefix(&self.home) else {
+            return false;
+        };
+        let parts: Option<Vec<&str>> = below
+            .components()
+            .map(|c| match c {
+                std::path::Component::Normal(n) => n.to_str(),
+                _ => None,
+            })
+            .collect();
+        parts.is_some_and(|p| capture_scope(os, &p) == Some(self.provider))
+    }
 }
 
 /// The connection right now.
@@ -134,6 +159,9 @@ pub fn plan_batches(files: &[(ItemId, u64)], free: u64, batch_max: u64) -> Batch
 pub enum WhyNot {
     /// Its person did not choose this for it (or for its provider).
     NoConsent,
+    /// It is not one of the person's own synced files (an app's own sign-in or settings, say):
+    /// never brought down.
+    OutOfScope,
     /// It is already on the laptop: copied as always, not part of this.
     AlreadyOnLaptop,
     /// Bigger than the old laptop can hold with room to spare.
@@ -212,6 +240,9 @@ impl Report {
             Some(WhyNot::NoConsent) => format!(
                 "Safe in {p}. It was not downloaded to keep a copy, because that was not chosen for it."
             ),
+            Some(WhyNot::OutOfScope) => format!(
+                "Not copied. PCTwin keeps copies only of the files you keep in {p}, never the app's own sign-in or settings. Sign in to {p} on the new laptop."
+            ),
             Some(WhyNot::TooBig) => format!(
                 "Safe in {p}. It is too big to download on the old laptop with the space it has."
             ),
@@ -245,14 +276,17 @@ pub type Taken = Vec<(ItemId, bool)>;
 /// Keeps local copies for the people who chose it.
 #[derive(Debug, Clone)]
 pub struct KeepLocal {
+    /// The old laptop's system, whose app folders the consents name.
+    os: Os,
     consents: Vec<Consent>,
     batch_max: u64,
 }
 
 impl KeepLocal {
     /// `batch_max`: most bytes brought down at once.
-    pub fn new(consents: Vec<Consent>, batch_max: u64) -> Self {
+    pub fn new(os: Os, consents: Vec<Consent>, batch_max: u64) -> Self {
         Self {
+            os,
             consents,
             batch_max,
         }
@@ -288,8 +322,11 @@ impl KeepLocal {
         };
         let mut queue = Vec::new();
         for w in wanted {
-            if self.consent(&w).is_none() {
+            let consent = self.consent(&w);
+            if consent.is_none() {
                 mark(&mut report, &w, Some(WhyNot::NoConsent));
+            } else if !consent.is_some_and(|c| c.covers(self.os, &w.path)) {
+                mark(&mut report, &w, Some(WhyNot::OutOfScope));
             } else if !cloud.is_online_only(&w.path).unwrap_or(true) {
                 mark(&mut report, &w, Some(WhyNot::AlreadyOnLaptop));
             } else {
@@ -384,23 +421,59 @@ impl KeepLocal {
 /// The Windows cloud apps (OneDrive and others built on the system's cloud files support).
 #[derive(Debug, Clone)]
 pub struct WindowsCloudFiles {
-    /// The cloud folder, to find its drive's free space.
+    /// The consented person's cloud folder: nothing outside it is touched.
     root: PathBuf,
     /// How long to wait for the cloud app to make a file online only again.
     wait: Duration,
+    /// Windows' own `System32`, as the kernel names it (never from the environment).
+    system32: Option<PathBuf>,
+}
+
+/// Why a file was not touched.
+fn not_in_scope() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "it is not in the person's own cloud folder",
+    )
 }
 
 impl WindowsCloudFiles {
-    pub fn new(root: &Path, wait: Duration) -> Self {
+    /// `root`: the consented person's cloud folder. `system32`: Windows' own `System32` folder as
+    /// the kernel names it (`pctwin_helper_os::system_folder`), where `attrib` is run from;
+    /// `None` when it is not known, and then nothing is put back.
+    pub fn new(root: &Path, wait: Duration, system32: Option<&Path>) -> Self {
         Self {
             root: root.to_path_buf(),
             wait,
+            system32: system32.map(Path::to_path_buf),
         }
+    }
+
+    /// Only a file inside the consented folder (third review, finding 7): named plainly below it
+    /// (no `..`), with no link on the way, and really inside it.
+    fn in_scope(&self, path: &Path) -> io::Result<()> {
+        let below = path.strip_prefix(&self.root).map_err(|_| not_in_scope())?;
+        let mut at = self.root.clone();
+        for part in below.components() {
+            let std::path::Component::Normal(name) = part else {
+                return Err(not_in_scope());
+            };
+            at.push(name);
+            if std::fs::symlink_metadata(&at)?.file_type().is_symlink() {
+                return Err(not_in_scope());
+            }
+        }
+        let real = std::fs::canonicalize(path)?;
+        if !real.starts_with(std::fs::canonicalize(&self.root)?) {
+            return Err(not_in_scope());
+        }
+        Ok(())
     }
 }
 
 impl CloudFiles for WindowsCloudFiles {
     fn bring_down(&mut self, path: &Path) -> io::Result<()> {
+        self.in_scope(path)?;
         let mut file = std::fs::File::open(path)?;
         io::copy(&mut file, &mut io::sink())?;
         Ok(())
@@ -417,24 +490,15 @@ impl CloudFiles for WindowsCloudFiles {
     }
 
     fn put_back(&mut self, path: &Path) -> io::Result<()> {
-        // The system's own attrib, by its full path, never one found on PATH.
-        let attrib = std::env::var_os("SystemRoot")
-            .map(|r| PathBuf::from(r).join(r"System32\attrib.exe"))
+        self.in_scope(path)?;
+        // The system's own attrib, by its full path in the folder the kernel names, never one
+        // found on PATH or through an environment value; started there, with no environment of
+        // this process's.
+        let system32 = self
+            .system32
+            .as_deref()
             .ok_or_else(|| io::Error::other("the system folder is not known"))?;
-        let mut command = std::process::Command::new(attrib);
-        command
-            .arg("-P")
-            .arg("+U")
-            .arg(path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
+        let mut command = attrib_command(system32, path);
         if !command.status()?.success() {
             return Err(io::Error::other("the cloud app was not asked"));
         }
@@ -454,6 +518,29 @@ impl CloudFiles for WindowsCloudFiles {
     fn free_space(&self) -> Option<u64> {
         free_space_of(&self.root, &pctwin_scan::volumes_this_laptop())
     }
+}
+
+/// `attrib -P +U <path>` ("unpinned": the cloud app may make it online only again): Windows' own
+/// `attrib` by its full path in `system32`, started in that folder, with none of this process's
+/// environment, no window and nothing in or out.
+pub fn attrib_command(system32: &Path, path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new(system32.join("attrib.exe"));
+    command
+        .env_clear()
+        .current_dir(system32)
+        .arg("-P")
+        .arg("+U")
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// Free space on the volume holding `root`: the one mounted deepest above it (a drive mounted in

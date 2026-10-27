@@ -6,7 +6,7 @@ mod common;
 
 use common::*;
 use pctwin_orchestrate::cloud::{
-    CloudOutcome, Os, SyncFact, Whose, cloud_outcome, provider_name, sign_in_state, sync_fact,
+    CloudOutcome, Os, SyncFact, Whose, capture_scope, cloud_outcome, provider_name, sync_fact,
 };
 use pctwin_record::{CloudProvider, Inclusion, LeftOutReason, ManagedBy, Storage};
 use pctwin_types::{ItemResult, ItemStatus, Reason};
@@ -156,11 +156,12 @@ fn a_work_or_school_file_stays_with_the_employer() {
     }
 }
 
-/// T26-016: a sync app's own sign-in state is never copied in place of signing in, on every
-/// system, whatever the case of its folders.
+/// T26-016 and the third review's finding 4: only a sync app's allowed place (the person's own
+/// synced files) is ever in scope; its sign-in state, settings and the system's credential stores
+/// never are, whatever they are called.
 #[test]
-fn a_sync_apps_sign_in_state_is_never_copied() {
-    let cases: [(Os, &[&str], CloudProvider); 12] = [
+fn only_the_persons_own_synced_files_are_in_scope() {
+    let never: [(Os, &[&str]); 20] = [
         (
             Os::Windows,
             &[
@@ -172,33 +173,49 @@ fn a_sync_apps_sign_in_state_is_never_copied() {
                 "Personal",
                 "a.dat",
             ],
-            CloudProvider::OneDrive,
         ),
         (
             Os::Windows,
-            &["appdata", "local", "microsoft", "onedrive"],
-            CloudProvider::OneDrive,
+            &["appdata", "local", "microsoft", "onedrive", "x"],
         ),
-        (
-            Os::Windows,
-            &["AppData", "Local", "Dropbox", "info.json"],
-            CloudProvider::Dropbox,
-        ),
-        (
-            Os::Windows,
-            &["AppData", "Roaming", "Dropbox", "host.db"],
-            CloudProvider::Dropbox,
-        ),
+        (Os::Windows, &["AppData", "Local", "Dropbox", "info.json"]),
+        (Os::Windows, &["AppData", "Roaming", "Dropbox", "host.db"]),
         (
             Os::Windows,
             &["AppData", "Local", "Google", "DriveFS", "a", "b"],
-            CloudProvider::GoogleDrive,
         ),
         (
             Os::Windows,
-            &["AppData", "Roaming", "Apple Computer", "iCloud"],
-            CloudProvider::ICloud,
+            &["AppData", "Roaming", "Apple Computer", "iCloud", "x"],
         ),
+        // What a list of things never to take missed (third review, finding 4):
+        (
+            Os::Windows,
+            &["APPDAT~1", "Local", "Microsoft", "OneDrive", "x"],
+        ),
+        (Os::Windows, &["ONEDRI~1", "x"]),
+        (Os::Windows, &["OneDrive.", "x"]),
+        (Os::Windows, &["OneDrive ", "x"]),
+        (
+            Os::Windows,
+            &[
+                "AppData",
+                "Local",
+                "Packages",
+                "AppleInc.iCloud_nzyj5cx40ttqa",
+                "LocalState",
+                "x",
+            ],
+        ),
+        (
+            Os::Windows,
+            &["AppData", "Local", "Microsoft", "Credentials", "x"],
+        ),
+        (
+            Os::Windows,
+            &["AppData", "Roaming", "Microsoft", "Credentials", "x"],
+        ),
+        (Os::Mac, &["Library", "Keychains", "login.keychain-db"]),
         (
             Os::Mac,
             &[
@@ -208,7 +225,6 @@ fn a_sync_apps_sign_in_state_is_never_copied() {
                 "session",
                 "db",
             ],
-            CloudProvider::ICloud,
         ),
         (
             Os::Mac,
@@ -216,41 +232,40 @@ fn a_sync_apps_sign_in_state_is_never_copied() {
                 "Library",
                 "Group Containers",
                 "UBF8T346G9.OneDriveSyncClientSuite",
+                "x",
             ],
-            CloudProvider::OneDrive,
         ),
+        (Os::Mac, &[".dropbox", "info.json"]),
         (
             Os::Mac,
-            &[
-                "Library",
-                "Containers",
-                "com.microsoft.OneDrive-mac",
-                "Data",
-            ],
-            CloudProvider::OneDrive,
+            &["Library", "CloudStorage", "GoogleDrive-", "My Drive", "x"],
         ),
-        (Os::Mac, &[".dropbox", "info.json"], CloudProvider::Dropbox),
-        (
-            Os::Mac,
-            &["Library", "Application Support", "Google", "DriveFS"],
-            CloudProvider::GoogleDrive,
-        ),
-        (
-            Os::Linux,
-            &[".config", "onedrive", "refresh_token"],
-            CloudProvider::OneDrive,
-        ),
+        (Os::Linux, &[".config", "onedrive", "refresh_token"]),
+        (Os::Linux, &["onedrive", "x"]),
     ];
-    for (os, parts, provider) in cases {
-        assert_eq!(sign_in_state(os, parts), Some(provider), "{os:?} {parts:?}");
+    for (os, parts) in never {
+        assert_eq!(capture_scope(os, parts), None, "{os:?} {parts:?}");
     }
-    // The person's own files in the cloud folder, and other programs' data, are not sign-in
-    // state.
-    for (os, parts) in [
-        (Os::Windows, &["OneDrive", "Documents", "a.txt"][..]),
-        (Os::Windows, &["AppData", "Local", "Microsoft", "Edge"][..]),
-        (Os::Windows, &["AppData", "Local", "Microsoft"][..]),
-        (Os::Windows, &["Dropbox", "info.json"][..]),
+    let mine: [(Os, &[&str], CloudProvider); 13] = [
+        (
+            Os::Windows,
+            &["OneDrive", "Documents", "a.txt"],
+            CloudProvider::OneDrive,
+        ),
+        (Os::Windows, &["onedrive", "a.txt"], CloudProvider::OneDrive),
+        (
+            Os::Windows,
+            &["OneDrive - Personal", "a.txt"],
+            CloudProvider::OneDrive,
+        ),
+        (Os::Windows, &["Dropbox", "x"], CloudProvider::Dropbox),
+        (Os::Windows, &["My Drive", "x"], CloudProvider::GoogleDrive),
+        (Os::Windows, &["iCloudDrive", "x"], CloudProvider::ICloud),
+        (
+            Os::Windows,
+            &["Pictures", "iCloud Photos", "x"],
+            CloudProvider::ICloud,
+        ),
         (
             Os::Mac,
             &[
@@ -258,21 +273,55 @@ fn a_sync_apps_sign_in_state_is_never_copied() {
                 "Mobile Documents",
                 "com~apple~CloudDocs",
                 "a.txt",
-            ][..],
+            ],
+            CloudProvider::ICloud,
         ),
         (
             Os::Mac,
-            &["Library", "CloudStorage", "OneDrive-Personal", "a.txt"][..],
+            &["Library", "CloudStorage", "OneDrive-Personal", "a.txt"],
+            CloudProvider::OneDrive,
         ),
-        (Os::Linux, &[".config", "other"][..]),
-        (Os::Linux, &["AppData", "Local", "Dropbox"][..]),
-        (Os::Windows, &[".config", "onedrive"][..]),
-        (Os::Windows, &[][..]),
-    ] {
-        assert_eq!(sign_in_state(os, parts), None, "{os:?} {parts:?}");
+        (
+            Os::Mac,
+            &["Library", "CloudStorage", "Dropbox", "a.txt"],
+            CloudProvider::Dropbox,
+        ),
+        (
+            Os::Mac,
+            &[
+                "Library",
+                "CloudStorage",
+                "GoogleDrive-ada@example.com",
+                "My Drive",
+                "x",
+            ],
+            CloudProvider::GoogleDrive,
+        ),
+        (Os::Linux, &["OneDrive", "x"], CloudProvider::OneDrive),
+        (Os::Linux, &["Dropbox", "x"], CloudProvider::Dropbox),
+    ];
+    for (os, parts, provider) in mine {
+        assert_eq!(capture_scope(os, parts), Some(provider), "{os:?} {parts:?}");
     }
-    // Linux names are kept exactly: another case is another folder.
-    assert_eq!(sign_in_state(Os::Linux, &[".Config", "onedrive"]), None);
+    // The allowed folder itself is a place, not a thing to take; another system's places are not
+    // this one's; an account folder must name its account.
+    assert_eq!(capture_scope(Os::Windows, &["OneDrive"]), None);
+    assert_eq!(capture_scope(Os::Windows, &[]), None);
+    assert_eq!(capture_scope(Os::Linux, &["iCloudDrive", "x"]), None);
+    assert_eq!(
+        capture_scope(
+            Os::Mac,
+            &["Library", "CloudStorage", "GoogleDrive-a.", "My Drive", "x"]
+        ),
+        None
+    );
+    assert_eq!(
+        capture_scope(
+            Os::Mac,
+            &["Library", "CloudStorage", "googledrive-a", "My Drive", "x"]
+        ),
+        Some(CloudProvider::GoogleDrive)
+    );
 }
 
 #[test]
