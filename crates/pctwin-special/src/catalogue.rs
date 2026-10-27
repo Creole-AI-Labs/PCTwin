@@ -324,21 +324,30 @@ mod tests {
             "exceptions":[{"members":"tokens/*","custody":"D","why":"sign-in tokens"}]}"#;
         let bad = [
             r#"{"system":"any","root":"roaming","folder":"../x","checked_on":"2026-10-27"}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"27 Oct"}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-13-01"}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","relink":"http://x"}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","export":{"kind":"open-page","url":"javascript:x"}}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","export":{"kind":"tool","tool":"sh -c","args":[{"kind":"output-file"}]}}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","export":{"kind":"tool","tool":"t","args":[{"kind":"switch","value":"; rm"},{"kind":"output-file"}]}}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","export":{"kind":"tool","tool":"t","args":[]}}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","exceptions":[{"members":"*","custody":"P","why":"looser"}]}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","fixups":[{"kind":"ini-path","key":"a b","flag":null}]}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","elsewhere":[{"system":"mac","root":"system-cache","folder":"x"}]}"#,
-            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","export":{"kind":"run-shell","cmd":"x"}}"#,
+            r#"{"system":"any","root":"roaming","folder":"x1","checked_on":"27 Oct"}"#,
+            r#"{"system":"any","root":"roaming","folder":"x2","checked_on":"2026-13-01"}"#,
+            r#"{"system":"any","root":"roaming","folder":"x3","checked_on":"2026-10-27","relink":"http://x"}"#,
+            r#"{"system":"any","root":"roaming","folder":"x4","checked_on":"2026-10-27","export":{"kind":"open-page","url":"javascript:x"}}"#,
+            r#"{"system":"any","root":"roaming","folder":"x5","checked_on":"2026-10-27","export":{"kind":"tool","tool":"sh -c","args":[{"kind":"output-file"}]}}"#,
+            r#"{"system":"any","root":"roaming","folder":"x6","checked_on":"2026-10-27","export":{"kind":"tool","tool":"t","args":[{"kind":"switch","value":"; rm"},{"kind":"output-file"}]}}"#,
+            r#"{"system":"any","root":"roaming","folder":"x7","checked_on":"2026-10-27","export":{"kind":"tool","tool":"t","args":[]}}"#,
+            r#"{"system":"any","root":"roaming","folder":"x8","checked_on":"2026-10-27","exceptions":[{"members":"*","custody":"P","why":"looser"}]}"#,
+            r#"{"system":"any","root":"roaming","folder":"x9","checked_on":"2026-10-27","fixups":[{"kind":"ini-path","key":"a b","flag":null}]}"#,
+            r#"{"system":"any","root":"roaming","folder":"x10","checked_on":"2026-10-27","elsewhere":[{"system":"mac","root":"system-cache","folder":"x11"}]}"#,
+            r#"{"system":"any","root":"roaming","folder":"x12","checked_on":"2026-10-27","export":{"kind":"run-shell","cmd":"x"}}"#,
         ];
         let c = load(&format!("{good},{}", bad.join(",")));
         assert_eq!(c.rows().len(), 1, "{:?}", c.report());
         assert_eq!(c.report().skipped.len(), bad.len());
+        // Each bad row is skipped for its own fault, never as a duplicate of another.
+        assert!(
+            c.report()
+                .skipped
+                .iter()
+                .all(|s| s.why != "another row names the same thing"),
+            "{:?}",
+            c.report()
+        );
         let row = &c.rows()[0];
         assert_eq!(
             row.tighten("tokens/a.json", Custody::Portable),
@@ -366,6 +375,141 @@ mod tests {
                {"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","name":"b"}"#,
         );
         assert!(twice.rows().is_empty());
+    }
+
+    fn one(extra: &str) -> usize {
+        load(&format!(
+            r#"{{"system":"any","root":"roaming","folder":"f","checked_on":"2026-10-27"{extra}}}"#
+        ))
+        .rows()
+        .len()
+    }
+
+    #[test]
+    fn every_row_check_holds_at_its_edges() {
+        assert_eq!(one(""), 1);
+        for (date, ok) in [
+            ("2026-10-27", 1),
+            ("2020-01-01", 1),
+            ("2100-12-31", 1),
+            ("2019-12-31", 0),
+            ("2101-01-01", 0),
+            ("2026-00-10", 0),
+            ("2026-10-00", 0),
+            ("2026-10-32", 0),
+            ("2026/10/27", 0),
+            ("2026-10-2", 0),
+        ] {
+            let n = load(&format!(
+                r#"{{"system":"any","root":"roaming","folder":"f","checked_on":"{date}"}}"#
+            ))
+            .rows()
+            .len();
+            assert_eq!(n, ok, "{date}");
+        }
+        let long = "n".repeat(100);
+        assert_eq!(one(&format!(r#","name":"{long}""#)), 1);
+        assert_eq!(one(&format!(r#","name":"{long}x""#)), 0);
+        assert_eq!(one(r#","name":"""#), 0);
+        for (page, ok) in [
+            ("https://example.org/x", 1),
+            ("https://", 0),
+            ("https://a b", 0),
+            ("ftp://example.org", 0),
+        ] {
+            assert_eq!(one(&format!(r#","relink":"{page}""#)), ok, "{page}");
+            assert_eq!(
+                one(&format!(
+                    r#","export":{{"kind":"open-page","url":"{page}"}}"#
+                )),
+                ok,
+                "{page}"
+            );
+        }
+        let tool = |t: &str, sw: &str| {
+            one(&format!(
+                r#","export":{{"kind":"tool","tool":"{t}","args":[{{"kind":"switch","value":"{sw}"}},{{"kind":"output-file"}}]}}"#
+            ))
+        };
+        assert_eq!(tool("export-tool.exe", "--all"), 1);
+        assert_eq!(tool(&"t".repeat(64), &format!("-{}", "a".repeat(63))), 1);
+        assert_eq!(tool(&"t".repeat(65), "--all"), 0);
+        assert_eq!(tool(".hidden", "--all"), 0);
+        assert_eq!(tool("", "--all"), 0);
+        assert_eq!(tool("t", "-"), 0);
+        assert_eq!(tool("t", &format!("-{}", "a".repeat(64))), 0);
+        assert_eq!(tool("t", "all"), 0);
+        assert_eq!(
+            one(
+                r#","export":{"kind":"tool","tool":"t","args":[{"kind":"output-file"},{"kind":"output-file"}]}"#
+            ),
+            0
+        );
+        let fixup = |k: &str| {
+            one(&format!(
+                r#","fixups":[{{"kind":"ini-path","key":"{k}","flag":"IsRelative"}}]"#
+            ))
+        };
+        assert_eq!(fixup("Path"), 1);
+        assert_eq!(fixup(&"k".repeat(64)), 1);
+        assert_eq!(fixup(&"k".repeat(65)), 0);
+        assert_eq!(fixup(""), 0);
+        assert_eq!(
+            one(r#","fixups":[{"kind":"ini-path","key":"Path","flag":"bad flag"}]"#),
+            0
+        );
+        let why = |w: &str| {
+            one(&format!(
+                r#","exceptions":[{{"members":"*","custody":"D","why":"{w}"}}]"#
+            ))
+        };
+        assert_eq!(why(&"w".repeat(300)), 1);
+        assert_eq!(why(&"w".repeat(301)), 0);
+        assert_eq!(why(""), 0);
+        assert_eq!(
+            one(r#","exceptions":[{"members":"","custody":"D","why":"w"}]"#),
+            0
+        );
+        assert_eq!(
+            one(r#","elsewhere":[{"system":"mac","root":"application-support","folder":"a/b/c"}]"#),
+            0
+        );
+        for f in ["a/b", "a"] {
+            assert_eq!(
+                load(&format!(
+                    r#"{{"system":"any","root":"roaming","folder":"{f}","checked_on":"2026-10-27"}}"#
+                ))
+                .rows()
+                .len(),
+                1
+            );
+        }
+        for f in ["a/b/c", "", "./a", r"a\b", &"f".repeat(256)] {
+            assert_eq!(
+                load(&format!(
+                    r#"{{"system":"any","root":"roaming","folder":"{}","checked_on":"2026-10-27"}}"#,
+                    f.replace('\\', r"\\")
+                ))
+                .rows()
+                .len(),
+                0,
+                "{f}"
+            );
+        }
+        // Rows about different folders are each kept.
+        let two = load(
+            r#"{"system":"any","root":"roaming","folder":"a","checked_on":"2026-10-27"},
+               {"system":"any","root":"roaming","folder":"b","checked_on":"2026-10-27"}"#,
+        );
+        assert_eq!(two.rows().len(), 2);
+        // An exception of the same strictness adds nothing.
+        let same = load(
+            r#"{"system":"any","root":"roaming","folder":"x","checked_on":"2026-10-27","exceptions":[{"members":"*","custody":"E","why":"w"}]}"#,
+        );
+        assert_eq!(
+            same.rows()[0].tighten("a", Custody::NeedsExport),
+            (Custody::NeedsExport, None)
+        );
     }
 
     #[test]

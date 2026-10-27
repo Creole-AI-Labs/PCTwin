@@ -1101,6 +1101,106 @@ mod tests {
         assert_eq!(gguf_split_in(&gguf(&[kv("x", 99, &[0])])), None);
     }
 
+    fn noise(n: usize) -> Vec<u8> {
+        let mut x: u64 = 0x2545_f491_4f6c_dd1d;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x >> 24) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn near_random_needs_enough_bytes_and_spread() {
+        assert!(!near_random(&noise(1023)));
+        assert!(near_random(&noise(1024)));
+        assert!(!near_random(&vec![0u8; 4096]));
+        // Text-like spread is far below the threshold.
+        assert!(!near_random(&b"the quick brown fox ".repeat(100)));
+        // Half the byte values, evenly used: 7 bits a byte, below 7.5.
+        let half: Vec<u8> = (0..4096u32).map(|i| (i % 128) as u8).collect();
+        assert!(!near_random(&half));
+    }
+
+    #[test]
+    fn every_skip_says_something_of_its_own() {
+        let all = [
+            Skip::Cache,
+            Skip::Rebuilt,
+            Skip::Program,
+            Skip::Link,
+            Skip::AddOn,
+            Skip::NotRead,
+        ];
+        let words: std::collections::BTreeSet<&str> = all.iter().map(Skip::words).collect();
+        assert_eq!(words.len(), all.len());
+        assert!(words.iter().all(|w| w.len() > 10));
+    }
+
+    #[test]
+    fn an_add_on_manifest_is_read_only_up_to_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = dir.path().join("manifest.json");
+        let body = br#"{"manifest_version": 3}"#;
+        let pad = |n: usize| {
+            let mut b = body.to_vec();
+            b.resize(n, b' ');
+            b
+        };
+        std::fs::write(&m, pad(1024 * 1024)).unwrap();
+        assert!(is_add_on(dir.path()));
+        std::fs::write(&m, pad(1024 * 1024 + 1)).unwrap();
+        assert!(!is_add_on(dir.path()));
+        std::fs::write(&m, br#"{"manifest_version": "3"}"#).unwrap();
+        assert!(!is_add_on(dir.path()), "a version must be a number");
+        std::fs::write(&m, br#"{"name": "x"}"#).unwrap();
+        assert!(!is_add_on(dir.path()));
+        std::fs::remove_file(&m).unwrap();
+        std::fs::create_dir(&m).unwrap();
+        assert!(
+            !is_add_on(dir.path()),
+            "a folder named so is not a manifest"
+        );
+    }
+
+    #[test]
+    fn credentials_are_looked_for_through_the_whole_text_up_to_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.ini");
+        let mut text = "a=1\n".repeat(2000);
+        text.push_str("token=ghp_0123456789abcdefABCDEF0123456789abcd\n");
+        std::fs::write(&p, &text).unwrap();
+        assert!(text_has_credentials(&p, text.len() as u64));
+        assert!(!text_has_credentials(&p, MAX_TEXT + 1));
+        assert!(text_has_credentials(&p, MAX_TEXT));
+        std::fs::write(&p, "a=1\nb: plain words\n").unwrap();
+        assert!(!text_has_credentials(&p, 20));
+    }
+
+    #[test]
+    fn a_gguf_split_is_found_past_a_large_vocabulary() {
+        // A vocabulary of 200 000 short strings (about 2.4 MB) before the split facts.
+        let mut arr = 8u32.to_le_bytes().to_vec();
+        arr.extend_from_slice(&200_000u64.to_le_bytes());
+        for _ in 0..200_000 {
+            arr.extend_from_slice(&4u64.to_le_bytes());
+            arr.extend_from_slice(b"word");
+        }
+        let b = gguf(&[
+            kv("tokenizer.tokens", 9, &arr),
+            kv("split.no", 2, &1u16.to_le_bytes()),
+            kv("split.count", 2, &2u16.to_le_bytes()),
+        ]);
+        assert!(b.len() as u64 > 2 * 1024 * 1024 && (b.len() as u64) < GGUF_HEADER);
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("m.gguf");
+        std::fs::write(&p, &b).unwrap();
+        assert_eq!(gguf_split(&p), Some((1, 2)));
+    }
+
     #[test]
     fn hash_names_are_recognised() {
         let h = "A".repeat(64);
