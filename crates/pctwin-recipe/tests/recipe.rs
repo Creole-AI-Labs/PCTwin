@@ -292,11 +292,11 @@ fn saved_recipes_with_unknown_steps_or_fields_are_refused() {
 #[test]
 fn a_recipe_from_a_newer_pctwin_is_refused_safely() {
     let json = String::from_utf8(firefox().to_json()).unwrap();
-    let newer = json.replacen(r#""format":2"#, r#""format":3,"new":"shape""#, 1);
+    let newer = json.replacen(r#""format":3"#, r#""format":4,"new":"shape""#, 1);
     assert!(matches!(
         Recipe::from_json(newer.as_bytes()),
         Err(RecipeError::Format(
-            pctwin_types::format::FormatError::Newer { found: 3, .. }
+            pctwin_types::format::FormatError::Newer { found: 4, .. }
         ))
     ));
 }

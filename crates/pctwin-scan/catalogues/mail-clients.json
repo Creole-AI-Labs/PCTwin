@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "catalogue": "mail-clients",
+  "version": 1,
+  "rows": [
+    {"name": "Outlook", "found-as": ["Outlook"]},
+    {"name": "Thunderbird", "found-as": ["Thunderbird"], "account-kinds": ["imap", "pop3", "owl", "exchange", "ews"]},
+    {"name": "Betterbird", "found-as": ["Betterbird"], "account-kinds": ["imap", "pop3", "owl", "exchange", "ews"]},
+    {"name": "SeaMonkey", "found-as": ["SeaMonkey"], "account-kinds": ["imap", "pop3"]},
+    {"name": "Apple Mail", "found-as": ["Mail"]},
+    {"name": "Evolution", "found-as": ["evolution"]},
+    {"name": "Claws Mail", "found-as": ["claws-mail"]},
+    {"name": "KMail", "found-as": ["kmail2", "kmail"]}
+  ]
+}

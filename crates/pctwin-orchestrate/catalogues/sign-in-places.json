@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "catalogue": "sign-in-places",
+  "version": 1,
+  "rows": [
+    {"system": "windows", "place": ["AppData", "Local", "Microsoft", "OneDrive"], "app": "OneDrive"},
+    {"system": "windows", "place": ["AppData", "Local", "Dropbox"], "app": "Dropbox"},
+    {"system": "windows", "place": ["AppData", "Roaming", "Dropbox"], "app": "Dropbox"},
+    {"system": "windows", "place": ["AppData", "Local", "Google", "DriveFS"], "app": "Google Drive"},
+    {"system": "windows", "place": ["AppData", "Roaming", "Apple Computer", "iCloud"], "app": "iCloud"},
+    {"system": "windows", "place": ["AppData", "Local", "Apple Inc", "iCloudDrive"], "app": "iCloud"},
+    {"system": "windows", "place": ["AppData", "Local", "Microsoft", "Credentials"]},
+    {"system": "windows", "place": ["AppData", "Roaming", "Microsoft", "Credentials"]},
+    {"system": "windows", "place": ["AppData", "Roaming", "Microsoft", "Protect"]},
+    {"system": "windows", "place": ["AppData", "Local", "Microsoft", "Vault"]},
+    {"system": "mac", "place": ["Library", "Keychains"]},
+    {"system": "mac", "place": ["Library", "Application Support", "CloudDocs"], "app": "iCloud"},
+    {"system": "mac", "place": ["Library", "Group Containers", "UBF8T346G9.OneDriveSyncClientSuite"], "app": "OneDrive"},
+    {"system": "mac", "place": ["Library", "Containers", "com.microsoft.OneDrive-mac"], "app": "OneDrive"},
+    {"system": "mac", "place": ["Library", "Application Support", "Google", "DriveFS"], "app": "Google Drive"},
+    {"system": "linux", "place": [".config", "onedrive"], "app": "OneDrive"},
+    {"system": "linux", "place": [".local", "share", "keyrings"]}
+  ]
+}

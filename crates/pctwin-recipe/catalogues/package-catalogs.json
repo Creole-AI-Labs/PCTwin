@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "catalogue": "package-catalogs",
+  "version": 1,
+  "rows": [
+    {"id": "winget", "adapter": "winget", "name": "winget"},
+    {"id": "microsoft-store", "adapter": "microsoft-store", "name": "Microsoft Store"},
+    {"id": "msstore", "adapter": "microsoft-store", "name": "Microsoft Store"},
+    {"id": "homebrew", "adapter": "homebrew", "name": "Homebrew"},
+    {"id": "brew", "adapter": "homebrew", "name": "Homebrew"},
+    {"id": "mac-app-store", "adapter": "mac-app-store", "name": "Mac App Store"},
+    {"id": "mas", "adapter": "mac-app-store", "name": "Mac App Store"},
+    {"id": "flathub", "adapter": "flathub", "name": "Flathub"},
+    {"id": "flatpak", "adapter": "flathub", "name": "Flathub"},
+    {"id": "snap", "adapter": "snap", "name": "Snap Store"},
+    {"id": "apt", "adapter": "apt", "name": "apt"},
+    {"id": "dnf", "adapter": "dnf", "name": "dnf"}
+  ]
+}

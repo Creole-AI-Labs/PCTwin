@@ -325,3 +325,88 @@ fn a_real_files_upload_state_reads_as_not_known() {
         SyncFact::NotKnown
     );
 }
+
+/// Phase 2 adoption, changes 7 and 8: the known sign-in places are a catalogue that loads whole,
+/// and a place added only as a signed row is known with no code change.
+#[test]
+fn sign_in_places_are_catalogue_rows() {
+    use pctwin_catalogue::{Catalogue, test_key};
+    use pctwin_orchestrate::cloud::{
+        AccountState, SignInPlace, account_state_by_name_with, shipped_sign_in_places,
+    };
+    let shipped = shipped_sign_in_places();
+    assert!(shipped.report().is_clean(), "{:?}", shipped.report());
+    assert!(shipped.rows().len() >= 17);
+
+    // An app nobody listed: its settings folder is not known by name, and nothing in its name
+    // marks it, so the general rules (what the file holds) decide when it is read.
+    let acme = ["AppData", "Local", "Acme Sync", "state.bin"];
+    assert_eq!(
+        account_state_by_name_with(shipped, Os::Windows, Some(&acme), &["state.bin"]),
+        None
+    );
+    // Its hidden folder inside what it syncs is still its own, with no row.
+    assert_eq!(
+        account_state_by_name_with(shipped, Os::Windows, None, &[".acmesync", "db"]),
+        Some(AccountState::AppsOwnFile)
+    );
+
+    // One signed row later, the same place is known, on that system only.
+    let bytes = br#"{"format":1,"catalogue":"sign-in-places","version":2,"rows":[
+        {"system":"windows","place":["AppData","Local","Acme Sync"],"app":"Acme Sync"},
+        {"system":"windows","place":["AppData","..","x"]},
+        {"system":"beos","place":["x"]}
+    ]}"#;
+    let sig = test_key::sign(bytes, "sign-in-places", 2);
+    let delivered =
+        Catalogue::<SignInPlace>::signed(bytes, &sig, &test_key::keys(), shipped.version())
+            .unwrap();
+    assert_eq!(delivered.rows().len(), 1);
+    assert_eq!(delivered.report().skipped.len(), 2);
+    assert_eq!(
+        account_state_by_name_with(&delivered, Os::Windows, Some(&acme), &["state.bin"]),
+        Some(AccountState::KnownPlace)
+    );
+    assert_eq!(
+        account_state_by_name_with(&delivered, Os::Mac, Some(&acme), &["state.bin"]),
+        None
+    );
+    // A shorter path than the row is not inside it.
+    assert_eq!(
+        account_state_by_name_with(&delivered, Os::Windows, Some(&acme[..2]), &["x"]),
+        None
+    );
+}
+
+#[test]
+fn a_sign_in_place_row_is_checked() {
+    use pctwin_catalogue::Catalogue;
+    use pctwin_orchestrate::cloud::SignInPlace;
+    let long: Vec<String> = (0..17).map(|i| format!("\"f{i}\"")).collect();
+    let text = format!(
+        r#"{{"format":1,"catalogue":"sign-in-places","version":1,"rows":[
+        {{"system":"linux","place":[]}},
+        {{"system":"linux","place":[{}]}},
+        {{"system":"linux","place":[""]}},
+        {{"system":"linux","place":["."]}},
+        {{"system":"linux","place":["a/b"]}},
+        {{"system":"linux","place":["a\\b"]}},
+        {{"system":"linux","place":["a\u0000"]}},
+        {{"system":"linux","place":["{}"]}},
+        {{"system":"linux","place":["ok"]}}
+    ]}}"#,
+        long.join(","),
+        "x".repeat(256)
+    );
+    let c = Catalogue::<SignInPlace>::shipped(&text);
+    let skipped: Vec<usize> = c.report().skipped.iter().map(|s| s.row).collect();
+    assert_eq!(skipped, [0, 1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(c.rows().len(), 1);
+    let sixteen: Vec<String> = (0..16).map(|i| format!("\"f{i}\"")).collect();
+    let ok = format!(
+        r#"{{"format":1,"catalogue":"sign-in-places","version":1,"rows":[{{"system":"linux","place":[{}]}},{{"system":"linux","place":["{}"]}}]}}"#,
+        sixteen.join(","),
+        "x".repeat(255)
+    );
+    assert_eq!(Catalogue::<SignInPlace>::shipped(&ok).rows().len(), 2);
+}

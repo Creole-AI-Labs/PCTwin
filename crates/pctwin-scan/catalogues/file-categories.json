@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "catalogue": "file-categories",
+  "version": 1,
+  "rows": [
+    {"category": "photo", "extensions": ["jpg", "jpeg", "jpe", "png", "gif", "bmp", "tif", "tiff", "heic", "heif", "webp", "avif", "jxl", "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", "raf", "orf", "rw2", "pef", "srw", "x3f", "3fr", "erf", "kdc", "dcr", "mos", "mef", "iiq"]},
+    {"category": "video", "extensions": ["mp4", "m4v", "mov", "avi", "mkv", "wmv", "webm", "3gp", "mts", "m2ts", "mpg", "mpeg", "flv"]},
+    {"category": "music", "extensions": ["mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "wma", "aiff", "aif", "alac", "mid", "midi"]},
+    {"category": "document", "extensions": ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "txt", "md", "csv", "pages", "numbers", "key", "epub"]}
+  ]
+}

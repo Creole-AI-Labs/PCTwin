@@ -36,6 +36,7 @@ fn windows_facts() -> Facts {
         ],
         icloud_desktop_and_documents: false,
         work_roots: Vec::new(),
+        found_clouds: Vec::new(),
     }
 }
 
@@ -116,6 +117,7 @@ fn unix_facts() -> Facts {
         ],
         icloud_desktop_and_documents: false,
         work_roots: Vec::new(),
+        found_clouds: Vec::new(),
     }
 }
 
@@ -162,6 +164,7 @@ fn the_longest_matching_cloud_folder_wins() {
         ],
         icloud_desktop_and_documents: false,
         work_roots: Vec::new(),
+        found_clouds: Vec::new(),
     };
     assert_eq!(
         classify(&inner.join("x"), &f),

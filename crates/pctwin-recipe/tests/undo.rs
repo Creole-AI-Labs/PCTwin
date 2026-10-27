@@ -119,17 +119,17 @@ fn a_declaration_round_trips_and_a_repeated_side_effect_is_refused() {
 }
 
 #[test]
-fn the_recipe_format_is_2_and_a_format_1_recipe_is_read_as_saying_nothing_about_undo() {
-    assert_eq!(pctwin_recipe::FORMAT, 2);
+fn the_recipe_format_is_3_and_a_format_1_recipe_is_read_as_saying_nothing_about_undo() {
+    assert_eq!(pctwin_recipe::FORMAT, 3);
     let r = app(UndoDeclaration {
         uninstall: true,
         side_effects: vec![],
     })
     .unwrap();
     let json = String::from_utf8(r.to_json()).unwrap();
-    assert!(json.contains(r#""format":2"#));
+    assert!(json.contains(r#""format":3"#));
     // The same recipe as format 1 wrote it: no undo field.
-    let one = json.replacen(r#""format":2"#, r#""format":1"#, 1).replacen(
+    let one = json.replacen(r#""format":3"#, r#""format":1"#, 1).replacen(
         r#","undo":{"uninstall":true,"side-effects":[]}"#,
         "",
         1,
@@ -138,38 +138,44 @@ fn the_recipe_format_is_2_and_a_format_1_recipe_is_read_as_saying_nothing_about_
     let read = Recipe::from_json(one.as_bytes()).unwrap();
     assert_eq!(read.undo, UndoDeclaration::default());
     assert!(!read.undo.removable());
-    // Written back, it is a format-2 recipe.
+    // Written back, it is a format-3 recipe.
     assert!(
         String::from_utf8(read.to_json())
             .unwrap()
-            .contains(r#""format":2"#)
+            .contains(r#""format":3"#)
     );
+    // Format 2 reads as it was.
+    let two = json.replacen(r#""format":3"#, r#""format":2"#, 1);
+    assert_eq!(Recipe::from_json(two.as_bytes()).unwrap(), r);
     // A format-1 recipe that somehow carries an undo field is damaged, not trusted.
-    let forged = json.replacen(r#""format":2"#, r#""format":1"#, 1);
+    let forged = json.replacen(r#""format":3"#, r#""format":1"#, 1);
     assert!(matches!(
         Recipe::from_json(forged.as_bytes()),
         Err(RecipeError::Damaged(_))
     ));
 }
 
-/// The saved examples of formats 1 and 2, read by every later build (engineering notes 9.11).
+/// The saved examples of formats 1, 2 and 3, read by every later build (engineering notes 9.11).
 /// Set `PCTWIN_WRITE_FORMAT_FIXTURES=1` to write the current one, only when its number is new.
 #[test]
 fn the_saved_recipe_examples_still_read() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/formats");
     let two = dir.join("recipe-2.json");
-    if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_recipe::FORMAT == 2 {
+    let three = dir.join("recipe-3.json");
+    if std::env::var_os("PCTWIN_WRITE_FORMAT_FIXTURES").is_some() && pctwin_recipe::FORMAT == 3 {
         let r = app(UndoDeclaration {
             uninstall: true,
             side_effects: vec![SideEffect::LeavesSettings],
         })
         .unwrap();
-        std::fs::write(&two, r.to_json()).unwrap();
+        std::fs::write(&three, r.to_json()).unwrap();
     }
     let one = Recipe::from_json(&std::fs::read(dir.join("recipe-1.json")).unwrap()).unwrap();
     assert_eq!(one.undo, UndoDeclaration::default());
     assert_eq!(one.steps.len(), 1);
-    let read = Recipe::from_json(&std::fs::read(two).unwrap()).unwrap();
-    assert!(read.undo.removable());
-    assert_eq!(read.undo.side_effects, vec![SideEffect::LeavesSettings]);
+    for file in [two, three] {
+        let read = Recipe::from_json(&std::fs::read(file).unwrap()).unwrap();
+        assert!(read.undo.removable());
+        assert_eq!(read.undo.side_effects, vec![SideEffect::LeavesSettings]);
+    }
 }

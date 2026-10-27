@@ -3646,6 +3646,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-catalogue"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "blake2",
+ "minisign-verify",
+ "pctwin-types",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "pctwin-discovery"
 version = "0.1.0"
 dependencies = [
@@ -3726,6 +3740,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "getrandom 0.4.3",
+ "pctwin-catalogue",
  "pctwin-gate",
  "pctwin-grant",
  "pctwin-helper-os",
@@ -3904,6 +3919,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "cap-primitives",
+ "pctwin-catalogue",
  "pctwin-record",
  "pctwin-scan",
  "pctwin-types",
@@ -3961,6 +3977,7 @@ name = "pctwin-readiness"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "pctwin-catalogue",
  "pctwin-journal",
  "pctwin-orchestrate",
  "pctwin-record",
@@ -3975,6 +3992,7 @@ dependencies = [
 name = "pctwin-recipe"
 version = "0.1.0"
 dependencies = [
+ "pctwin-catalogue",
  "pctwin-types",
  "serde",
  "serde_json",
@@ -4002,6 +4020,7 @@ dependencies = [
  "cfb 0.15.0",
  "dirs 7.0.0",
  "lnk",
+ "pctwin-catalogue",
  "pctwin-record",
  "pctwin-types",
  "plist",

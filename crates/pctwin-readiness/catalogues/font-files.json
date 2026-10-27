@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "catalogue": "font-files",
+  "version": 1,
+  "rows": [
+    {"extension": "woff", "name": "Web font"},
+    {"extension": "woff2", "name": "Web font"},
+    {"extension": "fon", "name": "Windows bitmap font"},
+    {"extension": "fnt", "name": "Windows bitmap font"},
+    {"extension": "pfb", "name": "PostScript Type 1 font"},
+    {"extension": "pfm", "name": "PostScript Type 1 font metrics"},
+    {"extension": "pfa", "name": "PostScript Type 1 font"},
+    {"extension": "afm", "name": "PostScript font metrics"},
+    {"extension": "otb", "name": "Bitmap font"},
+    {"extension": "bdf", "name": "Bitmap font"},
+    {"extension": "pcf", "name": "Bitmap font"},
+    {"extension": "dfont", "name": "Mac font suitcase"},
+    {"extension": "suit", "name": "Mac font suitcase"},
+    {"extension": "eot", "name": "Embedded web font"}
+  ]
+}
