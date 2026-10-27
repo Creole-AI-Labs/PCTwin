@@ -15,6 +15,11 @@ pctwin-maker = { path = "../pctwin-maker" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-types = { path = "../pctwin-types" }
 plist = "1.10"
+# Downloads, in the locked-down fetch process only (src/fetch): the same HTTP and TLS stack the
+# app's updater already uses (rustls with ring, the system's own trust store).
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "1.53.2", features = ["rt"] }
 roxmltree = "0.21.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,11 +29,11 @@ url = "2.5.8"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-
-[target.'cfg(windows)'.dev-dependencies]
-pctwin-helper-os = { path = "../pctwin-helper-os" }
+# Whether the network is metered: Windows' own connection profile (safe WinRT calls).
+windows = { version = "0.62.2", features = ["Networking_Connectivity"] }
 
 [dev-dependencies]
+tokio = { version = "1.53.2", features = ["rt", "macros", "net", "io-util"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"
 

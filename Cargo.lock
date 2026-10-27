@@ -3653,18 +3653,21 @@ version = "0.1.0"
 dependencies = [
  "pctwin-catalogue",
  "pctwin-grant",
- "pctwin-helper-os",
  "pctwin-maker",
  "pctwin-record",
  "pctwin-types",
  "plist",
+ "reqwest",
  "roxmltree",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
  "url",
+ "windows",
  "winreg",
 ]
 

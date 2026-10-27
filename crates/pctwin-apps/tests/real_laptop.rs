@@ -75,3 +75,75 @@ fn this_laptops_apps_are_all_found_with_their_makers() {
     println!("places not read: {}", list.not_read.len());
     assert!(!list.found.is_empty());
 }
+
+/// The download program, locked down at low integrity, cannot write a file in the person's own
+/// folders. Run by hand (it needs the program built: `cargo build -p pctwin-apps --bin
+/// pctwin-fetch`).
+#[test]
+#[ignore = "starts the download program; run by hand"]
+fn the_download_program_cannot_write_the_persons_files() {
+    let program = std::path::PathBuf::from(env!("CARGO_BIN_EXE_pctwin-fetch"));
+    let home = pctwin_apps::fetch::process::default_home()
+        .unwrap()
+        .join("test");
+    let f = pctwin_apps::fetch::process::Fetcher::new(program, home).unwrap();
+    let mine = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap())
+        .join(format!("pctwin-probe-{}.txt", std::process::id()));
+    let wrote = f.could_write(&mine).unwrap();
+    let _ = std::fs::remove_file(&mine);
+    println!("download program could write the person's folder: {wrote}");
+    assert!(!wrote);
+    // And it can write its own staging.
+    let own = f.staging().join("probe.txt");
+    assert!(f.could_write(&own).unwrap());
+}
+
+/// A real download through the locked-down download program: the public rules (https, public
+/// addresses, the system's trust store), the bytes winget's manifest names, and the mark of the
+/// web kept on the file. Run by hand.
+#[test]
+#[ignore = "downloads from the internet; run by hand"]
+fn the_download_program_fetches_exact_bytes_and_marks_them() {
+    use pctwin_apps::fetch::{Expected, Outcome, Request};
+    let program = std::path::PathBuf::from(env!("CARGO_BIN_EXE_pctwin-fetch"));
+    let home = pctwin_apps::fetch::process::default_home()
+        .unwrap()
+        .join("test-fetch");
+    let f = pctwin_apps::fetch::process::Fetcher::new(program, home).unwrap();
+    let file = f.staging().join("putty.msi");
+    let _ = std::fs::remove_file(&file);
+    let req = Request {
+        url: "https://the.earth.li/~sgtatham/putty/0.85/w64/putty-64bit-0.85-installer.msi".into(),
+        also_hosts: vec![],
+        max_bytes: 64 * 1024 * 1024,
+        expected: Some(Expected::Sha256(
+            "2213ebacf962b709411d654a40087508a694756bc4e41c5a1c24ad86596b2511".into(),
+        )),
+        file: file.clone(),
+        allow_metered: true,
+    };
+    let got = f.fetch(&req, std::time::Duration::from_secs(600)).unwrap();
+    println!("download program: {got:?}");
+    assert!(matches!(got, Outcome::Done { .. }), "{got:?}");
+    assert!(pctwin_apps::fetch::marks::marked(&file));
+    // The same address with other bytes named: refused, nothing kept.
+    let mut wrong = req.clone();
+    wrong.expected = Some(Expected::Sha256("00".repeat(32)));
+    wrong.file = f.staging().join("wrong.msi");
+    assert_eq!(
+        f.fetch(&wrong, std::time::Duration::from_secs(600))
+            .unwrap(),
+        Outcome::NotExpectedBytes
+    );
+    assert!(!wrong.file.exists());
+    // A private address is refused before any connection.
+    let mut private = req.clone();
+    private.url = "https://169.254.169.254/latest/meta-data/".into();
+    private.file = f.staging().join("meta.bin");
+    assert!(matches!(
+        f.fetch(&private, std::time::Duration::from_secs(60))
+            .unwrap(),
+        Outcome::Refused { .. }
+    ));
+    let _ = std::fs::remove_file(&file);
+}
