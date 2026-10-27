@@ -11,6 +11,11 @@ description = "PCTwin's administrator helper: started only for a move of several
 [lints]
 workspace = true
 
+[features]
+# Lets other crates' tests stage packages in any folder (HelperFolder::for_tests). Never in a
+# release build: the crate refuses to compile with it there.
+test-staging = []
+
 [dependencies]
 # Privileged setting rows: their shape and loader (the rows in use are compiled in).
 pctwin-catalogue = { path = "../pctwin-catalogue" }
@@ -46,6 +51,8 @@ winreg = "0.55"
 rustix = { version = "1.1.5", features = ["fs", "process"] }
 
 [dev-dependencies]
+# The helper's own integration tests stage packages in temporary folders.
+pctwin-helper = { path = ".", features = ["test-staging"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"
 zeroize = "1.9.0"

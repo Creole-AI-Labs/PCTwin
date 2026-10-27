@@ -235,7 +235,9 @@ mod tests {
         let rogue = tempfile::tempdir().unwrap();
         std::fs::write(rogue.path().join("msiexec.exe"), b"MZ rogue").unwrap();
         let staged = tempfile::tempdir().unwrap();
-        let mut s = Staging::new(staged.path().to_path_buf());
+        let mut s = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            staged.path().to_path_buf(),
+        ));
         let bytes = b"msi".to_vec();
         let digest: [u8; 32] = Sha256::digest(&bytes).into();
         let h = s.admit(&mut bytes.as_slice(), digest).unwrap();
@@ -296,7 +298,9 @@ mod tests {
     #[test]
     fn a_package_for_the_person_alone_is_never_given_to_msiexec() {
         let staged = tempfile::tempdir().unwrap();
-        let mut s = Staging::new(staged.path().to_path_buf());
+        let mut s = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            staged.path().to_path_buf(),
+        ));
         let digest: [u8; 32] = Sha256::digest(b"x").into();
         let h = s.admit(&mut &b"x"[..], digest).unwrap();
         let package = s.open_verified(h, digest).unwrap();

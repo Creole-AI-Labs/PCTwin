@@ -168,7 +168,9 @@ fn an_elevated_install_stopped_before_its_outcome_is_never_done_twice() {
     let keys = pctwin_grant::RoleKeys::mint().unwrap();
 
     let stage = || {
-        let mut s = Staging::new(packages.clone());
+        let mut s = Staging::new(pctwin_helper::broker::staging::HelperFolder::for_tests(
+            packages.clone(),
+        ));
         let handle = s.admit(&mut bytes.as_slice(), sha).unwrap();
         (s, handle)
     };

@@ -108,7 +108,9 @@ fn a_restore_point_through_the_client_is_answered_and_recorded() {
                 digest: plan.digest(),
             },
             "tok",
-            Staging::new(packages.path().to_path_buf()),
+            Staging::new(pctwin_helper::broker::staging::HelperFolder::for_tests(
+                packages.path().to_path_buf(),
+            )),
             &mut authority,
             &mut journal,
             &mut adapters,

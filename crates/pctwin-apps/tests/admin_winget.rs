@@ -75,7 +75,9 @@ fn a_winget_download_is_installed_by_the_helper_and_found_by_its_exact_bytes() {
     };
     let packages = work.path().join("packages");
     std::fs::create_dir(&packages).unwrap();
-    let mut staging = pctwin_helper::broker::staging::Staging::new(packages);
+    let mut staging = pctwin_helper::broker::staging::Staging::new(
+        pctwin_helper::broker::staging::HelperFolder::for_tests(packages),
+    );
     let handle = staging.admit(&mut bytes.as_slice(), sha).unwrap();
     let action = InstallVerifiedPackage {
         artifact: handle,

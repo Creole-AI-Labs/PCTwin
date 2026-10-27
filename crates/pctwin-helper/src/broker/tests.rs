@@ -214,7 +214,9 @@ struct Rig {
 impl Rig {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let mut staging = Staging::new(dir.path().to_path_buf());
+        let mut staging = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            dir.path().to_path_buf(),
+        ));
         let handle = staging.admit(&mut &PACKAGE[..], sha(PACKAGE)).unwrap();
         let package_path = staging.path_of(handle).unwrap().to_path_buf();
         let op = |name: &str, action: Action| PlannedOperation {
@@ -560,7 +562,9 @@ fn a_seal_must_match_in_every_part() {
         ),
     ];
     for (launch, offered) in seals {
-        let staging = Staging::new(rig._dir.path().to_path_buf());
+        let staging = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            rig._dir.path().to_path_buf(),
+        ));
         let mut b = Broker::new(
             launch,
             TOKEN,
@@ -879,7 +883,9 @@ fn t22_021_after_a_crash_the_real_state_is_checked_before_a_retry() {
         rig.adapters.observed = observed;
         // The package is staged again by the new helper, under the same handle.
         std::fs::remove_file(&rig.package_path).unwrap();
-        let mut staging = Staging::new(rig._dir.path().to_path_buf());
+        let mut staging = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            rig._dir.path().to_path_buf(),
+        ));
         assert_eq!(staging.admit(&mut &PACKAGE[..], sha(PACKAGE)).unwrap(), 1);
         rig.staging = Some(staging);
         let mut b = rig.broker();
@@ -994,7 +1000,9 @@ fn a_session_answers_a_bounded_number_of_requests() {
 #[test]
 fn the_built_in_adapters_claim_nothing_they_cannot_do() {
     let dir = tempfile::tempdir().unwrap();
-    let mut s = Staging::new(dir.path().to_path_buf());
+    let mut s = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+        dir.path().to_path_buf(),
+    ));
     let h = s.admit(&mut &b"x"[..], sha(b"x")).unwrap();
     let v = s.open_verified(h, sha(b"x")).unwrap();
     let mut a = BuiltInAdapters;
@@ -1407,7 +1415,9 @@ fn the_real_journal_keeps_the_intent_first_and_a_crash_is_reconciled() {
     for (request, replayed_from_record) in [(&retry, false), (&again, true)] {
         let j = open();
         let mut intents = journal::JournalIntents::new(j.broker(&role_keys().broker));
-        let mut staging = Staging::new(rig._dir.path().to_path_buf());
+        let mut staging = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            rig._dir.path().to_path_buf(),
+        ));
         assert_eq!(staging.admit(&mut &PACKAGE[..], sha(PACKAGE)).unwrap(), 1);
         let mut b = Broker::new(
             launch,
@@ -1587,7 +1597,9 @@ fn the_helpers_own_maker_check_of_a_real_package() {
     let bytes = std::fs::read(&msi).unwrap();
     let digest = sha(&bytes);
     let dir = tempfile::tempdir().unwrap();
-    let mut staging = Staging::new(dir.path().to_path_buf());
+    let mut staging = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+        dir.path().to_path_buf(),
+    ));
     let handle = staging.admit(&mut bytes.as_slice(), digest).unwrap();
     let held = staging.open_verified(handle, digest).unwrap();
     let maker = pctwin_maker::windows_maker_of(&msi).unwrap();
@@ -1654,7 +1666,9 @@ fn a_package_is_kept_only_for_the_sealed_plan_and_only_whole() {
     let mut b = Broker::new(
         launch,
         TOKEN,
-        Staging::new(dir.path().to_path_buf()),
+        Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            dir.path().to_path_buf(),
+        )),
         &mut authority,
         &mut journal,
         &mut adapters,
@@ -1753,7 +1767,9 @@ fn the_mac_app_store_action_is_a_number_only() {
 #[test]
 fn staging_keeps_only_whole_packages_once() {
     let dir = tempfile::tempdir().unwrap();
-    let mut s = Staging::new(dir.path().to_path_buf());
+    let mut s = Staging::new(crate::broker::staging::HelperFolder::for_tests(
+        dir.path().to_path_buf(),
+    ));
     let digest = sha(PACKAGE);
     let mut a = s.begin(4, digest, PACKAGE.len() as u64 + 1).unwrap();
     a.write(PACKAGE).unwrap();
@@ -1795,7 +1811,9 @@ fn a_package_part_way_leaves_nothing_when_the_session_closes() {
     let mut b = Broker::new(
         launch,
         TOKEN,
-        Staging::new(dir.path().to_path_buf()),
+        Staging::new(crate::broker::staging::HelperFolder::for_tests(
+            dir.path().to_path_buf(),
+        )),
         &mut authority,
         &mut journal,
         &mut adapters,
