@@ -18,11 +18,15 @@
 //! examples, PCTwin works from what it finds): by its names ([`account_state_by_name`]: anything
 //! hidden inside a synced folder, keychains, cookie, login and token databases) and by what it
 //! holds ([`account_state_by_content`]: Windows data-protection blobs, keychains, token text). A
-//! short catalogue of known places only adds to that. Anything PCTwin cannot tell is not taken:
+//! catalogue of known places (`sign-in-places`, [`SignInPlace`]) only adds to that. Anything PCTwin cannot tell is not taken:
 //! keeping local copies ([`crate::local_copy`]) brings down only files that pass both checks.
 
+use std::sync::OnceLock;
+
+use pctwin_catalogue::{Catalogue, Row};
 use pctwin_record::{CloudProvider, Inclusion, Item, LeftOutReason, ManagedBy, Storage};
 use pctwin_types::{ItemResult, Reason};
+use serde::Deserialize;
 
 /// Whether a file on the laptop has been uploaded to its cloud.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,7 +179,8 @@ impl CloudOutcome {
 }
 
 /// The system an old laptop's home folder comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Os {
     Windows,
     Mac,
@@ -199,53 +204,41 @@ pub enum AccountState {
     Tokens,
 }
 
-/// Places known apps keep their sign-in state, below a person's home folder. Examples that add
-/// to the general rules ([`account_state_by_name`], [`account_state_by_content`]); an app not
-/// listed here is still recognised by those.
-const KNOWN_PLACES: [(Os, &[&str]); 17] = [
-    (Os::Windows, &["AppData", "Local", "Microsoft", "OneDrive"]),
-    (Os::Windows, &["AppData", "Local", "Dropbox"]),
-    (Os::Windows, &["AppData", "Roaming", "Dropbox"]),
-    (Os::Windows, &["AppData", "Local", "Google", "DriveFS"]),
-    (
-        Os::Windows,
-        &["AppData", "Roaming", "Apple Computer", "iCloud"],
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Local", "Apple Inc", "iCloudDrive"],
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Local", "Microsoft", "Credentials"],
-    ),
-    (
-        Os::Windows,
-        &["AppData", "Roaming", "Microsoft", "Credentials"],
-    ),
-    (Os::Windows, &["AppData", "Roaming", "Microsoft", "Protect"]),
-    (Os::Windows, &["AppData", "Local", "Microsoft", "Vault"]),
-    (Os::Mac, &["Library", "Keychains"]),
-    (Os::Mac, &["Library", "Application Support", "CloudDocs"]),
-    (
-        Os::Mac,
-        &[
-            "Library",
-            "Group Containers",
-            "UBF8T346G9.OneDriveSyncClientSuite",
-        ],
-    ),
-    (
-        Os::Mac,
-        &["Library", "Containers", "com.microsoft.OneDrive-mac"],
-    ),
-    (
-        Os::Mac,
-        &["Library", "Application Support", "Google", "DriveFS"],
-    ),
-    (Os::Linux, &[".config", "onedrive"]),
-    (Os::Linux, &[".local", "share", "keyrings"]),
-];
+/// A place a known app keeps its sign-in state, below a person's home folder: one row of the
+/// `sign-in-places` catalogue (`catalogues/sign-in-places.json`). Rows only add to the general
+/// rules ([`account_state_by_name`], [`account_state_by_content`]): an app with no row is still
+/// recognised by those, and a row can never make something movable.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct SignInPlace {
+    pub system: Os,
+    /// The folder's names below the home folder.
+    pub place: Vec<String>,
+    /// The app's name, to show; `None` for the system's own stores.
+    #[serde(default)]
+    pub app: Option<String>,
+}
+
+impl Row for SignInPlace {
+    const CATALOGUE: &'static str = "sign-in-places";
+    const FIELDS: &'static [&'static str] = &["system", "place", "app"];
+    fn check(&self) -> Result<(), String> {
+        if self.place.is_empty() || self.place.len() > 16 {
+            return Err("a place has 1 to 16 names".into());
+        }
+        if self.place.iter().any(|n| {
+            n.is_empty() || n == "." || n == ".." || n.contains(['/', '\\', '\0']) || n.len() > 255
+        }) {
+            return Err("a place's names are plain folder names".into());
+        }
+        Ok(())
+    }
+}
+
+/// The places compiled into this build.
+pub fn shipped_sign_in_places() -> &'static Catalogue<SignInPlace> {
+    static PLACES: OnceLock<Catalogue<SignInPlace>> = OnceLock::new();
+    PLACES.get_or_init(|| Catalogue::shipped(include_str!("../catalogues/sign-in-places.json")))
+}
 
 /// File names that are credential stores whatever app made them (browsers' and apps' cookie,
 /// login and token databases; keychains), compared ignoring case.
@@ -269,18 +262,30 @@ pub fn account_state_by_name(
     under_home: Option<&[&str]>,
     under_root: &[&str],
 ) -> Option<AccountState> {
+    account_state_by_name_with(shipped_sign_in_places(), os, under_home, under_root)
+}
+
+/// [`account_state_by_name`] with these known places (a delivered catalogue, or a test's).
+pub fn account_state_by_name_with(
+    places: &Catalogue<SignInPlace>,
+    os: Os,
+    under_home: Option<&[&str]>,
+    under_root: &[&str],
+) -> Option<AccountState> {
     let same = |a: &str, b: &str| match os {
         Os::Windows | Os::Mac => a.eq_ignore_ascii_case(b),
         Os::Linux => a == b,
     };
-    if let Some(parts) = under_home
-        && KNOWN_PLACES.iter().any(|(o, place)| {
-            *o == os
-                && parts.len() >= place.len()
-                && place.iter().zip(parts).all(|(p, n)| same(p, n))
-        })
-    {
-        return Some(AccountState::KnownPlace);
+    if let Some(parts) = under_home {
+        let reading = places.read([parts], |parts, row| {
+            row.system == os
+                && parts.len() >= row.place.len()
+                && row.place.iter().zip(parts.iter()).all(|(p, n)| same(p, n))
+        });
+        if !reading.known.is_empty() {
+            return Some(AccountState::KnownPlace);
+        }
+        // Not a known place: the general rules below decide, for any app.
     }
     if under_root.iter().any(|n| n.starts_with('.')) {
         return Some(AccountState::AppsOwnFile);

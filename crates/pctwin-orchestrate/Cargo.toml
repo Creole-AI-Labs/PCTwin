@@ -14,6 +14,8 @@ blake3 = "1.8"
 # A rescued drive is read through folder handles, one name at a time, never through a link
 # (third security review, finding 1): the crate under cap-std, as the hand-over uses it.
 cap-primitives = "4.0.3"
+# Known places and names as data: they only add to what is found.
+pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-scan = { path = "../pctwin-scan" }
 # Every item ends one honest result; a plan only ever names the needs-action ones.
@@ -31,6 +33,7 @@ unicode-normalization = "0.1.25"
 winapi-util = "0.1.11"
 
 [dev-dependencies]
+pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 proptest = "1.11.0"
 serde_json = "1"
 tempfile = "3"
