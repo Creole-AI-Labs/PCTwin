@@ -270,7 +270,8 @@ fn a_font_is_found_by_its_own_name_table() {
         only(&pick(vec![font("MyFont")])),
         Outcome::NeedsAttention {
             missing: vec![Missing::Font {
-                family: "MyFont".into()
+                family: "MyFont".into(),
+                not_checked: vec![]
             }],
             coverage: Coverage::Whole
         }
@@ -665,4 +666,82 @@ fn any_zip64_field_needs_the_locator() {
             assert_eq!(got, want, "field {field} locator {locator}");
         }
     }
+}
+
+/// Phase 2 adoption, changes 7 and 8: a font is told by what it holds, never its name; a font
+/// file of a kind PCTwin cannot read is found, not checked, and said so (never "not installed"
+/// for certain); a kind added only as a signed row is named with no code change.
+#[test]
+fn font_files_are_found_by_what_they_hold_and_unread_kinds_are_said() {
+    use pctwin_catalogue::{Catalogue, test_key};
+    use pctwin_readiness::checks::{FontFileRow, font_with, is_readable_font, shipped_font_files};
+    assert!(shipped_font_files().report().is_clean());
+    let dir = tempfile::tempdir().unwrap();
+    // A real font under a name that says nothing.
+    let odd = write(dir.path(), "font-cache.dat", &font_bytes("Odd Name Sans"));
+    assert!(is_readable_font(&odd));
+    let folders = vec![dir.path().to_path_buf()];
+    assert_eq!(
+        font_with(shipped_font_files(), "Odd Name Sans", &folders),
+        Outcome::MachineChecked {
+            coverage: Coverage::Whole
+        }
+    );
+    // A web font and a notes file beside it: the web font is found, not checked.
+    write(dir.path(), "Brand.woff2", b"wOF2....");
+    write(dir.path(), "Brand2.WOFF2", b"wOF2....");
+    write(dir.path(), "readme.txt", b"hello");
+    write(dir.path(), "x.xfont", b"XF");
+    assert_eq!(
+        font_with(shipped_font_files(), "Brand", &folders),
+        Outcome::NeedsAttention {
+            missing: vec![Missing::Font {
+                family: "Brand".into(),
+                not_checked: vec!["Web font (.woff2)".into()]
+            }],
+            coverage: Coverage::Sample { checked: 1, of: 3 }
+        }
+    );
+    // Only fonts PCTwin cannot read: not run, never "not installed".
+    let only_web = tempfile::tempdir().unwrap();
+    write(only_web.path(), "a.woff", b"wOFF");
+    assert_eq!(
+        font_with(
+            shipped_font_files(),
+            "Brand",
+            &[only_web.path().to_path_buf()]
+        ),
+        Outcome::NotRun {
+            why: NotRun::CouldNotRead
+        }
+    );
+    // A new kind, added only as a signed row, is named.
+    let bytes = br#"{"format":1,"catalogue":"font-files","version":2,"rows":[
+        {"extension":"xfont","name":"X font"},
+        {"extension":"X.Y","name":"bad"},
+        {"extension":"ok","name":" "}
+    ]}"#;
+    let sig = test_key::sign(bytes, "font-files", 2);
+    let rows = Catalogue::<FontFileRow>::signed(bytes, &sig, &test_key::keys(), 1).unwrap();
+    assert_eq!(rows.rows().len(), 1);
+    assert_eq!(rows.report().skipped.len(), 2);
+    assert_eq!(
+        font_with(&rows, "Brand", &folders),
+        Outcome::NeedsAttention {
+            missing: vec![Missing::Font {
+                family: "Brand".into(),
+                not_checked: vec!["X font (.xfont)".into()]
+            }],
+            coverage: Coverage::Sample { checked: 1, of: 2 }
+        }
+    );
+    // Nothing at all in the folders: not installed there.
+    let empty = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        font_with(shipped_font_files(), "Brand", &[empty.path().to_path_buf()]),
+        Outcome::NeedsAttention {
+            coverage: Coverage::Whole,
+            ..
+        }
+    ));
 }

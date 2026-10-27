@@ -289,6 +289,7 @@ fn t27_030_the_crate_has_no_way_to_send() {
         names,
         [
             "blake3",
+            "pctwin-catalogue",
             "pctwin-journal",
             "pctwin-orchestrate",
             "pctwin-record",

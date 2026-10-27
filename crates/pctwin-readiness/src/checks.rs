@@ -5,8 +5,9 @@
 //! Each check only reads, a bounded amount, and never runs anything:
 //!
 //! - [`Goal::LinkedFiles`]: a project's linked files are there (each looked up, not opened);
-//! - [`Goal::Font`]: a needed font is installed (each font file's own name table is read, not
-//!   the file name guessed from);
+//! - [`Goal::Font`]: a needed font is installed (each font file is told by its first bytes and
+//!   its own name table is read, never guessed from its file name; a font file of a kind PCTwin
+//!   cannot read is found, not checked, and said so: the `font-files` rows name those kinds);
 //! - [`Goal::ArchiveOpens`]: a ZIP archive's index is whole (its end record and the start of its
 //!   list of files; nothing is unpacked);
 //! - [`Goal::DatabaseOpens`]: a SQLite database's header is sound (the first 100 bytes and the
@@ -29,6 +30,10 @@ use std::path::{Component, Path, PathBuf};
 
 use pctwin_record::ItemId;
 use serde::{Deserialize, Serialize};
+
+use std::sync::OnceLock;
+
+use pctwin_catalogue::{Catalogue, Row};
 
 use crate::ledger::{Access, Coverage, Ledger, Role, Selection, Standing};
 
@@ -201,8 +206,14 @@ pub enum Label {
 pub enum Missing {
     /// A linked file is not there.
     LinkedFile { name: String },
-    /// No installed font has this family name.
-    Font { family: String },
+    /// No installed font has this family name. `not_checked`: font files found that PCTwin
+    /// cannot read the names of (by kind, such as "Web font (.woff2)"), so the family may be
+    /// among them.
+    Font {
+        family: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        not_checked: Vec<String>,
+    },
     /// The file is not whole, or not what it should be.
     Damaged { what: Damage },
     /// The file is not there at all.
@@ -397,39 +408,115 @@ fn plain_name(name: &str) -> String {
         .collect()
 }
 
+/// One row of the `font-files` catalogue: a kind of font file PCTwin cannot read the names of
+/// (yet), by its name ending, so the report can say what was found and not checked.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FontFileRow {
+    /// The name ending, without the dot, lower case.
+    pub extension: String,
+    /// What it is, to show.
+    pub name: String,
+}
+
+impl Row for FontFileRow {
+    const CATALOGUE: &'static str = "font-files";
+    const FIELDS: &'static [&'static str] = &["extension", "name"];
+    fn check(&self) -> Result<(), String> {
+        let ext_ok = !self.extension.is_empty()
+            && self.extension.len() <= 16
+            && self
+                .extension
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+        if !ext_ok || self.name.trim().is_empty() || self.name.len() > 64 {
+            return Err("a row is a lower-case name ending and a name".into());
+        }
+        Ok(())
+    }
+}
+
+/// The rows compiled into this build.
+pub fn shipped_font_files() -> &'static Catalogue<FontFileRow> {
+    static ROWS: OnceLock<Catalogue<FontFileRow>> = OnceLock::new();
+    ROWS.get_or_init(|| Catalogue::shipped(include_str!("../catalogues/font-files.json")))
+}
+
+/// Whether a file is a font PCTwin reads the names of, by its first bytes (an OpenType or
+/// TrueType font, or a collection of them), never by its name.
+pub fn is_readable_font(path: &Path) -> bool {
+    let mut head = [0u8; 4];
+    File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|()| matches!(&head, [0, 1, 0, 0] | b"OTTO" | b"true" | b"typ1" | b"ttcf"))
+}
+
 fn font(family: &str, folders: &[PathBuf]) -> Outcome {
+    font_with(shipped_font_files(), family, folders)
+}
+
+/// The font check with these rows. Every file in the folders is listed (names only); the first
+/// [`MAX_FONT_FILES`] are looked at by their first bytes, and the names inside each readable
+/// font are read. A font file of a kind PCTwin cannot read (a row names its kind) is found, not
+/// checked, and said so; a family not found among only some of them is a sample, never "not
+/// installed" for certain.
+pub fn font_with(rows: &Catalogue<FontFileRow>, family: &str, folders: &[PathBuf]) -> Outcome {
     let want = plain_name(family);
-    // Every font file in the folders is listed (names only); the names inside the first
-    // MAX_FONT_FILES are read. A family not found among only some of them is said so.
-    let mut fonts: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<PathBuf> = Vec::new();
     for folder in folders {
         let Ok(dir) = std::fs::read_dir(folder) else {
             continue;
         };
-        fonts.extend(dir.flatten().map(|e| e.path()).filter(|p| {
-            p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
-                matches!(
-                    e.to_ascii_lowercase().as_str(),
-                    "ttf" | "otf" | "ttc" | "otc"
-                )
-            })
-        }));
+        files.extend(
+            dir.flatten()
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+                .map(|e| e.path()),
+        );
     }
-    let checked = fonts.len().min(MAX_FONT_FILES);
-    if fonts[..checked]
-        .iter()
-        .any(|p| font_families(p).iter().any(|f| plain_name(f) == want))
-    {
-        return Outcome::MachineChecked {
+    files.sort();
+    let looked = files.len().min(MAX_FONT_FILES);
+    let mut readable = 0u64;
+    let mut unread = 0u64;
+    let mut kinds: Vec<String> = Vec::new();
+    let mut other: Vec<String> = Vec::new();
+    for p in &files[..looked] {
+        if is_readable_font(p) {
+            readable += 1;
+            if font_families(p).iter().any(|f| plain_name(f) == want) {
+                return Outcome::MachineChecked {
+                    coverage: Coverage::Whole,
+                };
+            }
+        } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+            other.push(ext.to_ascii_lowercase());
+        }
+    }
+    let reading = rows.read(other, |ext, row| row.extension == *ext);
+    for (ext, row) in reading.known {
+        unread += 1;
+        let kind = format!("{} (.{ext})", row.name);
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    // Files no row names are not fonts PCTwin knows of (a settings file, a note): not counted.
+    let beyond = (files.len() - looked) as u64;
+    let of = readable + unread + beyond;
+    let missing = vec![Missing::Font {
+        family: family.to_string(),
+        not_checked: kinds,
+    }];
+    match Coverage::sample(readable, of) {
+        Ok(coverage) => Outcome::NeedsAttention { missing, coverage },
+        // Nothing found at all: the family is not installed in these folders.
+        Err(_) if of == 0 => Outcome::NeedsAttention {
+            missing,
             coverage: Coverage::Whole,
-        };
-    }
-    let coverage = Coverage::sample(checked as u64, fonts.len() as u64).unwrap_or(Coverage::Whole);
-    Outcome::NeedsAttention {
-        missing: vec![Missing::Font {
-            family: family.to_string(),
-        }],
-        coverage,
+        },
+        // Font files found, none of them readable: not checked, never "not installed".
+        Err(_) => Outcome::NotRun {
+            why: NotRun::CouldNotRead,
+        },
     }
 }
 
