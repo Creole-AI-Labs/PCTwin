@@ -502,3 +502,174 @@ fn store_calls(_s: &mut Store) -> Vec<String> {
 thread_local! {
     static CALLS: std::rc::Rc<std::cell::RefCell<Vec<String>>> = std::rc::Rc::default();
 }
+
+/// A tool that always gives the same answer.
+struct Says(bool, &'static str);
+
+impl Runner for Says {
+    fn run(&mut self, _: Tool, _: &[&str]) -> Result<Output, String> {
+        Ok(Output {
+            ok: self.0,
+            stdout: self.1.to_string(),
+        })
+    }
+}
+
+fn says(system: System, ok: bool, out: &'static str) -> Mechanisms {
+    Mechanisms {
+        system,
+        user: None,
+        machine: None,
+        runner: Some(Box::new(Says(ok, out))),
+        localtime: None,
+    }
+}
+
+#[test]
+fn a_tool_that_failed_is_never_read_as_an_answer() {
+    let cat = Catalogue::starter().unwrap();
+    // KDE: the tool failed while printing something.
+    let mut s = Store::new(cat.clone(), says(System::Kde, false, "BreezeDark"));
+    assert_eq!(s.read("appearance.theme"), Ok(None));
+    let mut s = Store::new(cat.clone(), says(System::Kde, true, "BreezeDark"));
+    assert_eq!(
+        s.read("appearance.theme"),
+        Ok(Some(SettingValue::Text("dark".into())))
+    );
+    // xdg-settings likewise.
+    let mut s = Store::new(cat.clone(), says(System::Gnome, false, "firefox.desktop"));
+    assert_eq!(s.read("apps.default-browser"), Ok(None));
+    let mut s = Store::new(cat.clone(), says(System::Gnome, true, "firefox.desktop"));
+    assert_eq!(
+        s.read("apps.default-browser"),
+        Ok(Some(SettingValue::Text("firefox".into())))
+    );
+    // A gsettings write the tool refused is an error.
+    let mut m = says(System::Gnome, false, "");
+    let row = cat.row("pointer.natural-scroll").unwrap();
+    let place = row.places.get(&System::Gnome).unwrap();
+    assert!(
+        m.write(place, &[Some(pctwin_settings::codec::Native::Bool(true))])
+            .is_err()
+    );
+}
+
+#[test]
+fn registry_probes_lists_and_names() {
+    use pctwin_settings::catalogue::Probe;
+    use pctwin_settings::registry::{Hive, MemHive, RegValue};
+    let mut machine = MemHive::default();
+    let key = "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\StandardProfile";
+    machine.put(key, "EnableFirewall", RegValue::Dword(0));
+    let mut user = MemHive::default();
+    user.put(
+        "Keyboard Layout\\Preload",
+        "1",
+        RegValue::Sz("00000409".into()),
+    );
+    user.put(
+        "Keyboard Layout\\Preload",
+        "2",
+        RegValue::Sz("0000040c".into()),
+    );
+    user.put(
+        "Control Panel\\Keyboard",
+        "",
+        RegValue::Sz("default".into()),
+    );
+    user.put(
+        "Control Panel\\Keyboard",
+        "KeyboardSpeed",
+        RegValue::Sz("31".into()),
+    );
+    let mut m = Mechanisms {
+        system: System::Windows,
+        user: Some(Box::new(user)),
+        machine: Some(Box::new(machine)),
+        runner: None,
+        localtime: None,
+    };
+    let off = Probe::RegistryEquals {
+        hive: pctwin_settings::catalogue::Hive::Machine,
+        key: key.into(),
+        value: "EnableFirewall".into(),
+        equals: serde_json::json!(0),
+    };
+    assert_eq!(m.probe(&off), Ok(true));
+    let on = Probe::RegistryEquals {
+        hive: pctwin_settings::catalogue::Hive::Machine,
+        key: key.into(),
+        value: "EnableFirewall".into(),
+        equals: serde_json::json!(1),
+    };
+    assert_eq!(m.probe(&on), Ok(false));
+    let names = m
+        .store_names(&pctwin_settings::catalogue::Store::Registry {
+            hive: pctwin_settings::catalogue::Hive::User,
+            key: "Control Panel\\Keyboard".into(),
+        })
+        .unwrap();
+    assert_eq!(names, vec!["KeyboardSpeed".to_string()]);
+    let cat = Catalogue::starter().unwrap();
+    let mut s = Store::new(cat.clone(), m);
+    assert_eq!(
+        s.read("keyboard.layouts"),
+        Ok(Some(SettingValue::Text("us,fr".into())))
+    );
+    let empty = Mechanisms {
+        system: System::Windows,
+        user: Some(Box::new(MemHive::default())),
+        machine: None,
+        runner: None,
+        localtime: None,
+    };
+    let mut s = Store::new(cat, empty);
+    assert_eq!(s.read("keyboard.layouts"), Ok(None));
+    let _ = MemHive::default().names("x");
+}
+
+#[test]
+fn only_keyboard_layouts_are_read_from_the_mac_input_list() {
+    let mut tools = Tools::default();
+    tools.prefs.insert(
+        "com.apple.HIToolbox".into(),
+        vec![(
+            "AppleEnabledInputSources".into(),
+            Plist::Array(vec![
+                Plist::Dict(vec![
+                    (
+                        "InputSourceKind".into(),
+                        Plist::String("Keyboard Layout".into()),
+                    ),
+                    (
+                        "KeyboardLayout Name".into(),
+                        Plist::String("British".into()),
+                    ),
+                ]),
+                Plist::Dict(vec![
+                    ("InputSourceKind".into(), Plist::String("Input Mode".into())),
+                    ("KeyboardLayout Name".into(), Plist::String("French".into())),
+                ]),
+            ]),
+        )],
+    );
+    let mut s = Store::new(Catalogue::starter().unwrap(), mech(System::Mac, tools));
+    assert_eq!(
+        s.read("keyboard.layouts"),
+        Ok(Some(SettingValue::Text("gb".into())))
+    );
+}
+
+#[test]
+fn a_desktop_group_that_cannot_be_listed_is_an_error() {
+    let mut m = says(System::Gnome, false, "some-key\n");
+    let r = m.store_names(&pctwin_settings::catalogue::Store::Gsettings {
+        schema: "org.fake".into(),
+    });
+    assert!(r.is_err());
+    let mut m = says(System::Gnome, true, "a\n\nb\n");
+    let r = m.store_names(&pctwin_settings::catalogue::Store::Gsettings {
+        schema: "org.fake".into(),
+    });
+    assert_eq!(r, Ok(vec!["a".to_string(), "b".to_string()]));
+}

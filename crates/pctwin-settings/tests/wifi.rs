@@ -285,3 +285,58 @@ fn the_real_tool_runs_with_its_folder_argument_and_leaves_nothing() {
     let _ = out.ok;
     assert!(leftovers(tmp.path()).is_empty());
 }
+
+#[test]
+fn the_written_profile_is_exactly_the_systems_shape() {
+    let n = parse_profile(
+        &home_profile(
+            "Example-Home",
+            "Example-Home",
+            Some("correct-horse-example"),
+        )
+        .replace('\u{feff}', ""),
+    )
+    .unwrap();
+    let xml = profile_xml(&n).unwrap();
+    assert!(xml.contains("<connectionType>ESS</connectionType>"));
+    assert!(xml.contains("</security></MSM></WLANProfile>"));
+    // Names up to 255 characters; an SSID up to 32 bytes.
+    let mut long =
+        parse_profile(&home_profile("x", "Example", Some("k-example")).replace('\u{feff}', ""))
+            .unwrap();
+    long.name = "n".repeat(255);
+    assert!(profile_xml(&long).is_ok());
+    long.name = "n".repeat(256);
+    assert_eq!(profile_xml(&long).unwrap_err(), WifiError::BadName);
+    // An "open" network with a cipher is not an open network.
+    let wep = format!(
+        "<WLANProfile xmlns=\"{NS}\"><name>Old</name><SSIDConfig><SSID><name>Old</name></SSID></SSIDConfig><MSM><security><authEncryption><authentication>open</authentication><encryption>WEP</encryption><useOneX>false</useOneX></authEncryption></security></MSM></WLANProfile>"
+    );
+    assert!(matches!(
+        parse_profile(&wep).unwrap().security,
+        Security::Other(_)
+    ));
+}
+
+#[test]
+fn an_oversized_profile_file_is_not_read() {
+    struct Big;
+    impl Runner for Big {
+        fn run(&mut self, _: Tool, args: &[&str]) -> Result<Output, String> {
+            let folder = args.iter().find_map(|a| quoted(a, "folder=")).unwrap();
+            let padded = format!(
+                "{}{}",
+                home_profile("Example-Home", "Example-Home", Some("k-example")),
+                " ".repeat(70 * 1024)
+            );
+            std::fs::write(folder.join("big.xml"), padded).unwrap();
+            Ok(Output {
+                ok: true,
+                stdout: String::new(),
+            })
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    assert!(export_all(&mut Big, tmp.path(), true).unwrap().is_empty());
+    assert!(leftovers(tmp.path()).is_empty());
+}

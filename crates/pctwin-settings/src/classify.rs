@@ -581,16 +581,20 @@ pub fn looks_secret(t: &str) -> Option<Why> {
     if parts.len() == 3 && s.starts_with("eyJ") && parts.iter().all(|p| p.len() >= 4 && b64url(p)) {
         return Some(Why::Secret);
     }
-    // A long random-looking string.
-    if s.len() >= 32 && !s.contains([' ', '\\', '/']) || s.len() >= 32 && b64(s) && !s.contains(' ')
-    {
+    // A long random-looking string (base64 alphabets include `/`, so only spaces rule it out).
+    if s.len() >= 32 && !s.contains(' ') {
         let hex = s.bytes().all(|b| b.is_ascii_hexdigit());
         let e = entropy(s);
         if (hex && s.len() >= 40 && e >= 3.0) || (!hex && b64(s) && e >= 4.2) {
             return Some(Why::Secret);
         }
     }
-    None
+    // A credential inside a longer text (a list, a quoted value): each word on its own.
+    let token =
+        |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '_' | '-' | '.');
+    s.split(|c: char| !token(c))
+        .filter(|t| t.len() >= 16 && t.len() < s.len())
+        .find_map(looks_secret)
 }
 
 fn b64(s: &str) -> bool {
