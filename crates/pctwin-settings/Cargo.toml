@@ -1,0 +1,49 @@
+[package]
+name = "pctwin-settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Settings and personalisation (Task List 2.4): a fixed, versioned list of named settings, read on the old laptop and applied on the new one through the executor's journaled compare-and-write, with honest outcomes."
+
+[lints]
+workspace = true
+
+[dependencies]
+# Each found setting's executor key is a digest of its exact place.
+blake3 = "1.8"
+# Names of the Wi-Fi tool's temporary folders.
+getrandom = "0.4.3"
+pctwin-executor = { path = "../pctwin-executor" }
+pctwin-grant = { path = "../pctwin-grant" }
+pctwin-journal = { path = "../pctwin-journal" }
+pctwin-recipe = { path = "../pctwin-recipe" }
+pctwin-types = { path = "../pctwin-types" }
+# Wi-Fi profiles and app settings files are XML: read structurally, never by string search.
+roxmltree = "0.21.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+# TOML settings files, read structurally (already in the tree through Tauri).
+toml = "1"
+# Wi-Fi passwords are wiped from memory when they are no longer needed.
+zeroize = "1.9.0"
+
+[target.'cfg(windows)'.dependencies]
+# The person's own settings (HKEY_CURRENT_USER) through a safe registry wrapper (MIT), already in
+# the dependency tree through the autostart plugin.
+winreg = "0.55"
+# The owner-only folder the system's Wi-Fi tool writes into and reads from.
+tempfile = "3"
+
+[dev-dependencies]
+roxmltree = "0.21.1"
+zeroize = "1.9.0"
+pctwin-record = { path = "../pctwin-record" }
+tempfile = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+# Removes each test's own registry key afterwards.
+winreg = "0.55"

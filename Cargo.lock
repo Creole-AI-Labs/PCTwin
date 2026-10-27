@@ -4031,6 +4031,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-settings"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "getrandom 0.4.3",
+ "pctwin-executor",
+ "pctwin-grant",
+ "pctwin-journal",
+ "pctwin-recipe",
+ "pctwin-record",
+ "pctwin-types",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "toml 1.1.6+spec-1.1.0",
+ "winreg",
+ "zeroize",
+]
+
+[[package]]
 name = "pctwin-transfer"
 version = "0.1.0"
 dependencies = [
