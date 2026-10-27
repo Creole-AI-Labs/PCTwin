@@ -27,6 +27,12 @@ impl pctwin_settings::wifi::PrivateFolders for HelperFolders {
     fn access_list(&self, path: &Path) -> Option<String> {
         pctwin_helper_os::folder_access_list(path).ok()
     }
+    fn me(&self) -> Option<String> {
+        match pctwin_helper_os::current_account().ok()? {
+            pctwin_helper_os::Account::Sid(s) => Some(s.as_str().to_string()),
+            _ => None,
+        }
+    }
 }
 
 fn folders() -> &'static dyn pctwin_settings::wifi::PrivateFolders {
@@ -422,7 +428,8 @@ fn f3_the_wifi_folder_is_owner_only_from_its_first_moment() {
     for acl in &r.0 {
         #[cfg(windows)]
         {
-            assert!(pctwin_settings::wifi::private_sddl(acl), "{acl}");
+            let me = folders().me().unwrap();
+            assert!(pctwin_settings::wifi::private_sddl(acl, &me), "{acl}");
             assert!(acl.starts_with("D:P"), "{acl}");
             assert!(!acl.contains(";ID;") && !acl.contains("ID;;"), "{acl}");
         }
@@ -435,20 +442,54 @@ fn f3_the_wifi_folder_is_owner_only_from_its_first_moment() {
 fn f3_an_inherited_or_shared_access_list_is_not_private() {
     use pctwin_settings::wifi::private_sddl;
     let me = "S-1-5-21-1-2-3-1001";
-    assert!(private_sddl(&format!(
-        "D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)"
-    )));
-    assert!(private_sddl(&format!("D:PAI(A;OICI;FA;;;{me})")));
-    // Not protected, inherited, or a second account or group.
-    assert!(!private_sddl(&format!("D:(A;OICI;FA;;;{me})")));
-    assert!(!private_sddl(&format!("D:P(A;OICIID;FA;;;{me})")));
-    assert!(!private_sddl(&format!(
-        "D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;BA)"
-    )));
-    assert!(!private_sddl(&format!("D:P(A;OICI;FA;;;{me})(A;;FR;;;WD)")));
-    assert!(!private_sddl("D:P(D;;FA;;;WD)"));
-    assert!(!private_sddl("D:P"));
-    assert!(!private_sddl("O:SY"));
+    // Exactly what the folder is made with: the person and the system, protected.
+    assert!(private_sddl(
+        &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)"),
+        me
+    ));
+    assert!(private_sddl(
+        &format!("D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;{me})"),
+        me
+    ));
+    // Not protected, inherited, missing the system, or a second account or group.
+    assert!(!private_sddl(&format!("D:PAI(A;OICI;FA;;;{me})"), me));
+    assert!(!private_sddl(
+        &format!("D:(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)"),
+        me
+    ));
+    assert!(!private_sddl(
+        &format!("D:P(A;OICIID;FA;;;{me})(A;OICI;FA;;;SY)"),
+        me
+    ));
+    assert!(!private_sddl(
+        &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"),
+        me
+    ));
+    assert!(!private_sddl(
+        &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)(A;;FR;;;WD)"),
+        me
+    ));
+    assert!(!private_sddl("D:P(D;;FA;;;WD)", me));
+    assert!(!private_sddl("D:P", me));
+    assert!(!private_sddl("O:SY", me));
+    assert!(!private_sddl(
+        &format!("D:P(A;OICI;FA;;;{me})(A;OICI;FA;;;SY)"),
+        ""
+    ));
+    // Fifth review, finding 8: another single account is never the person, whoever it is.
+    for other in ["WD", "BU", "AU", "BA", "S-1-5-21-1-2-3-1002"] {
+        for s in [
+            format!("D:P(A;OICI;FA;;;{other})"),
+            format!("D:PAI(A;OICI;FA;;;{other})(A;OICI;FA;;;SY)"),
+        ] {
+            assert!(!private_sddl(&s, me), "{s}");
+        }
+    }
+    // Less than full access for the person is not what the folder is made with either.
+    assert!(!private_sddl(
+        &format!("D:P(A;OICI;FR;;;{me})(A;OICI;FA;;;SY)"),
+        me
+    ));
 }
 
 /// If the folder cannot be made private (or does not read back private), nothing goes on: the
@@ -474,6 +515,9 @@ fn f3_no_private_folder_means_the_tool_is_never_run() {
         fn access_list(&self, _: &Path) -> Option<String> {
             None
         }
+        fn me(&self) -> Option<String> {
+            None
+        }
     }
     let parent = tempfile::tempdir().unwrap();
     let mut r = Counts(0);
@@ -489,6 +533,9 @@ fn f3_no_private_folder_means_the_tool_is_never_run() {
             }
             fn access_list(&self, _: &Path) -> Option<String> {
                 Some("D:AI(A;OICIID;FA;;;S-1-5-21-1-2-3-1001)(A;OICIID;FA;;;BA)".into())
+            }
+            fn me(&self) -> Option<String> {
+                Some("S-1-5-21-1-2-3-1001".into())
             }
         }
         assert!(export_all(&mut r, &Inherits, parent.path(), true).is_err());
