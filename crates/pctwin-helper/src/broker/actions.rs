@@ -136,6 +136,9 @@ pub struct InstallVerifiedPackage {
     pub sha256: Hex32,
     pub kind: PackageKind,
     pub scope: InstallScope,
+    /// The maker of the app on the old laptop, as the old laptop's own copy names it: the helper
+    /// checks the package against it itself before installing ([`super::maker`]).
+    pub maker: Box<pctwin_maker::facts::WindowsSigner>,
 }
 
 /// The kinds of package the compiled adapters know. Each adapter builds its own fixed arguments;
@@ -299,12 +302,28 @@ impl ApprovedPlan {
 mod tests {
     use super::*;
 
+    fn maker() -> pctwin_maker::facts::WindowsSigner {
+        pctwin_maker::facts::WindowsSigner {
+            subject: pctwin_maker::facts::Subject {
+                common_name: Some("Example Ltd".into()),
+                organization: Some("Example Ltd".into()),
+                country: Some("NG".into()),
+                ..Default::default()
+            },
+            certificate: pctwin_maker::facts::Sha256([1; 32]),
+            issuer: "CN=Some CA".into(),
+            issuer_organization: Some("Some CA".into()),
+            public_key: None,
+        }
+    }
+
     fn install(scope: InstallScope) -> Action {
         Action::InstallVerifiedPackage(InstallVerifiedPackage {
             artifact: 1,
             sha256: Hex32([0xab; 32]),
             kind: PackageKind::Msi,
             scope,
+            maker: Box::new(maker()),
         })
     }
 
@@ -355,9 +374,16 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<Action>(bad).is_err(), "{bad}");
         }
-        let good = format!(
+        // No maker named: refused.
+        let unnamed = format!(
             r#"{{"install-verified-package":{{"artifact":1,"sha256":"{}","kind":"msi","scope":"machine"}}}}"#,
             "ab".repeat(32)
+        );
+        assert!(serde_json::from_str::<Action>(&unnamed).is_err());
+        let good = format!(
+            r#"{{"install-verified-package":{{"artifact":1,"sha256":"{}","kind":"msi","scope":"machine","maker":{}}}}}"#,
+            "ab".repeat(32),
+            serde_json::to_string(&maker()).unwrap()
         );
         assert_eq!(
             serde_json::from_str::<Action>(&good).unwrap(),
@@ -444,6 +470,7 @@ mod tests {
             sha256: Hex32([0xab; 32]),
             kind: PackageKind::Msi,
             scope: InstallScope::Machine,
+            maker: Box::new(maker()),
         };
         other.sha256.0[31] ^= 1;
         assert_ne!(

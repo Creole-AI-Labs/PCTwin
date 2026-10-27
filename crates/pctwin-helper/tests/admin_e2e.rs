@@ -64,6 +64,15 @@ struct TestMsi {
 }
 
 impl Adapters for TestMsi {
+    /// The test package is PCTwin's own unsigned one; the helper's real maker check is proven on
+    /// real signed packages in the broker's own tests.
+    fn check_maker(
+        &mut self,
+        _: &VerifiedArtifact,
+        _: &InstallVerifiedPackage,
+    ) -> pctwin_helper::broker::maker::MakerCheck {
+        pctwin_helper::broker::maker::MakerCheck::Approved
+    }
     fn install(&mut self, p: &VerifiedArtifact, a: &InstallVerifiedPackage, _: &Revoker) -> Effect {
         self.installs += 1;
         let mut command = pctwin_helper::broker::tool::msiexec_install(p, a.scope).unwrap();
@@ -174,6 +183,13 @@ fn an_elevated_install_stopped_before_its_outcome_is_never_done_twice() {
                     sha256: Hex32(sha),
                     kind: PackageKind::Msi,
                     scope: InstallScope::Machine,
+                    maker: Box::new(pctwin_maker::facts::WindowsSigner {
+                        subject: Default::default(),
+                        certificate: pctwin_maker::facts::Sha256([0; 32]),
+                        issuer: String::new(),
+                        issuer_organization: None,
+                        public_key: None,
+                    }),
                 }),
             },
             PlannedOperation {

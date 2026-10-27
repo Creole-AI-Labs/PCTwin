@@ -23,7 +23,9 @@
 //! 7. the exact object (a package is opened and hashed again);
 //! 8. the system's own approval ([`NativeAuthority`]): not approved, or no answer, is no;
 //! 9. everything again after the approval, since the person may have taken a while: revocation,
-//!    the lease, the package, opened and hashed once more and then held unchanged;
+//!    the lease, the package, opened and hashed once more and then held unchanged; and, for a
+//!    package, the helper's own maker check of that held copy ([`maker`]): the app's answer is
+//!    never used for an install with an administrator's rights;
 //! 10. the intent written durably to the journal: if it cannot be, nothing changes;
 //! 11. revocation once more, then the compiled adapter, which reports what it observed;
 //! 12. the outcome written to the journal before the answer is sent, so an app that went away
@@ -34,6 +36,7 @@
 
 pub mod actions;
 pub mod journal;
+pub mod maker;
 pub mod receipt;
 pub mod restore;
 pub mod staging;
@@ -136,6 +139,10 @@ pub enum Denial {
     Unsafe,
     #[error("someone has the package open, so it was not used; try again")]
     InUse,
+    #[error(
+        "the package is not from the app's maker, or Windows' own checks did not pass, so it was not installed"
+    )]
+    NotTheMaker,
     #[error("the administrator did not approve, so nothing was changed")]
     NativeDenied,
     #[error("the system's approval was not answered, so nothing was changed")]
@@ -301,6 +308,13 @@ pub trait Adapters {
     fn restore_point(&mut self, stop: &Revoker) -> Effect;
     /// Whether `action` is really in place now (after the helper stopped mid-way).
     fn observe(&mut self, action: &Action) -> Observed;
+    /// The helper's own maker check of `package`, held, for `action` ([`maker::check_package`]
+    /// in the real helper).
+    fn check_maker(
+        &mut self,
+        package: &VerifiedArtifact,
+        action: &InstallVerifiedPackage,
+    ) -> maker::MakerCheck;
 }
 
 /// The adapters this build has: installers and settings come with 2.1 and 2.4, so they say "not
@@ -311,6 +325,14 @@ pub struct BuiltInAdapters;
 pub const NOT_AVAILABLE: i64 = -2;
 
 impl Adapters for BuiltInAdapters {
+    fn check_maker(
+        &mut self,
+        package: &VerifiedArtifact,
+        action: &InstallVerifiedPackage,
+    ) -> maker::MakerCheck {
+        maker::check_package(package, action, &pctwin_maker::Limits::default())
+    }
+
     fn install(&mut self, _: &VerifiedArtifact, _: &InstallVerifiedPackage, _: &Revoker) -> Effect {
         Effect::Failed {
             code: NOT_AVAILABLE,
@@ -591,6 +613,11 @@ impl<'a> Broker<'a> {
         // 9. Everything again: the approval may have taken a while.
         self.still_open()?;
         let package = self.verify_object(&request.action)?;
+        if let (Action::InstallVerifiedPackage(p), Some(held)) = (&request.action, &package)
+            && self.adapters.check_maker(held, p) != maker::MakerCheck::Approved
+        {
+            return Err(Denial::NotTheMaker);
+        }
         // 10.
         let at = match earlier {
             Some(at) => at,
