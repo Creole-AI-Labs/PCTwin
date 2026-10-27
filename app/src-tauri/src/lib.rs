@@ -355,6 +355,8 @@ pub fn app<R: Runtime>(builder: Builder<R>) -> Builder<R> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // The change journal asks the system through the helper's probe (third review, finding 8).
+    pctwin_helper::os_probes::install();
     app(Builder::default())
         .run(context())
         .expect("error while running PCTwin");

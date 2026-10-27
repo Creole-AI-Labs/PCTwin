@@ -74,8 +74,10 @@ pub struct SystemSignature {
 /// The system's own checks. The real ones call the system's tools; tests stand in for them.
 pub trait SystemChecks {
     /// The signature of `file`, held open by the check, at `path`. A check that can be asked
-    /// about the open file (Windows) must use `file`, never reopen `path`: the bytes trusted are
-    /// then the bytes the check hashed (second review, finding B2).
+    /// about the open file must use `file`, never reopen `path`: the bytes trusted are then the
+    /// bytes the check hashed (second review, finding B2). Windows does so for a program, but its
+    /// installer-package checker reads `path` again (third review, finding 3): see
+    /// [`check_staged`].
     fn signature(
         &self,
         file: &File,
@@ -170,14 +172,53 @@ enum OwnRead {
     Broken(String),
     Signed {
         signer: Result<crate::facts::WindowsSigner, String>,
-        /// None for an MSI, whose digest Windows alone checks.
+        /// None for an MSI: PCTwin's own reader does not work out a package's digest; Windows
+        /// does, reading it by name, so only the helper's own copy counts ([`check_staged`]).
         digest_matches: Option<bool>,
     },
 }
 
-/// Checks one installer file against what is expected of it.
+/// The administrator helper's own copy of a package: in its administrators-only folder, opened by
+/// the helper and held so nobody can write, rename or delete it while it is checked and
+/// installed. Windows' installer-package checker reads a package by its name, not through the
+/// held file (third review, finding 3), so its answer is about the bytes the helper holds only
+/// when nobody else can change what that name leads to: here, and nowhere else. Implemented only
+/// by the helper's staging (`pctwin-helper`, `broker::staging::VerifiedArtifact`); a test checks
+/// that no other code implements it.
+pub trait HelperStaged {
+    /// Where the copy is, in the helper's administrators-only folder.
+    fn staged_path(&self) -> &Path;
+}
+
+/// Why an installer package's signature is not counted outside the helper's own copy.
+pub const PACKAGE_READ_BY_NAME: &str = "Windows reads an installer package by its name, not the copy PCTwin holds, so its signature is checked only on the administrator helper's own copy";
+
+/// Checks one installer file against what is expected of it. A Windows Installer package checked
+/// here is never trusted ("not checked": see [`HelperStaged`]); the administrator helper checks
+/// its own copy with [`check_staged`].
 pub fn check(
     path: &Path,
+    expected: &Expected,
+    system: &dyn SystemChecks,
+    limits: &Limits,
+) -> Result<Verdict, CheckError> {
+    check_at(path, false, expected, system, limits)
+}
+
+/// Checks the administrator helper's own copy of a package, the only place a Windows Installer
+/// package's signature counts.
+pub fn check_staged(
+    staged: &dyn HelperStaged,
+    expected: &Expected,
+    system: &dyn SystemChecks,
+    limits: &Limits,
+) -> Result<Verdict, CheckError> {
+    check_at(staged.staged_path(), true, expected, system, limits)
+}
+
+fn check_at(
+    path: &Path,
+    staged: bool,
     expected: &Expected,
     system: &dyn SystemChecks,
     limits: &Limits,
@@ -294,7 +335,20 @@ pub fn check(
         );
     }
 
-    let sys = system.signature(&file, path, format, limits);
+    let mut sys = system.signature(&file, path, format, limits);
+    if format == Format::WindowsInstaller && !staged {
+        // Windows' answer is about whatever the name leads to, not the bytes held: only PCTwin's
+        // own reading of the held bytes counts here. No signature in them is still "missing";
+        // one in them is not checked.
+        sys.signature = match own {
+            OwnRead::None => Signature::Missing,
+            _ => Signature::NotChecked {
+                why: PACKAGE_READ_BY_NAME.into(),
+            },
+        };
+        sys.embedded = false;
+        sys.maker = None;
+    }
     let (signature, found) = match own {
         OwnRead::NotRead => (sys.signature.clone(), sys.maker.clone()),
         own => combine_windows(own, &sys),

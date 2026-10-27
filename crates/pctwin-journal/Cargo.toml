@@ -29,9 +29,6 @@ rustix = { version = "1.1.5", features = ["fs", "process"] }
 # The key that seals each effect record, kept where the system keeps the person's secrets
 # (security review finding 3): Windows' Credential Manager (DPAPI), macOS' login Keychain.
 [target.'cfg(windows)'.dependencies]
-# Whether a disk can be unplugged (an NVMe disk in a Thunderbolt or USB4 case), asked of the
-# disk itself through the helper's fenced system call (second review, low finding).
-pctwin-helper-os = { path = "../pctwin-helper-os" }
 keyring-core = "1"
 # The bus of the disk the journal's folder is on (USB hard disks report themselves "fixed"), from
 # the system's storage list (security review finding 4). Safe Rust; already used by the helper.

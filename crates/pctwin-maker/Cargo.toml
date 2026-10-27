@@ -32,8 +32,12 @@ libc = "0.2"
 # where Defender is, through the helper's fenced system calls; Defender's state through Windows'
 # management service.
 [target.'cfg(windows)'.dependencies]
-pctwin-helper-os = { path = "../pctwin-helper-os" }
 wmi = "0.18.4"
+
+[target.'cfg(windows)'.dev-dependencies]
+# The tests ask Windows itself through the real answers, as the helper does (the maker check never
+# links the crate that makes the system calls; third security review, finding 8).
+pctwin-helper-os = { path = "../pctwin-helper-os" }
 
 [dev-dependencies]
 authenticode = { version = "0.6.0", features = ["std", "object"] }

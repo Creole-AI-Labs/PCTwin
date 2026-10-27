@@ -22,6 +22,13 @@ pub struct Call {
     /// code; second review, finding B3).
     pub env: Vec<(OsString, OsString)>,
     pub timeout: Duration,
+    /// What the tool reads on its standard input (a key, say), never a file name for it to open;
+    /// `None`: nothing.
+    pub stdin: Option<Vec<u8>>,
+    /// The folder the tool starts in (Windows' own `System32` for its tools, never the caller's
+    /// folder, which could be one of the person's own; third review, finding 7). `None`: this
+    /// process's.
+    pub cwd: Option<PathBuf>,
 }
 
 /// What a tool did.
@@ -84,12 +91,27 @@ impl Runner for SystemRunner {
         cmd.args(&call.args)
             .env_clear()
             .envs(call.env.iter().map(|(k, v)| (k, v)))
-            .stdin(Stdio::null())
+            .stdin(if call.stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(dir) = &call.cwd {
+            cmd.current_dir(dir);
+        }
         let mut child = cmd
             .spawn()
             .map_err(|e| RunError::NotStarted(e.to_string()))?;
+        if let (Some(bytes), Some(mut input)) = (call.stdin.clone(), child.stdin.take()) {
+            // Written on a thread of its own and closed after, so a tool that reads only part of
+            // it, or none, cannot stall this one.
+            thread::spawn(move || {
+                use std::io::Write;
+                let _ = input.write_all(&bytes);
+            });
+        }
         let out = drain(
             child
                 .stdout
@@ -141,6 +163,8 @@ mod tests {
             args: vec!["/d".into(), "/c".into(), script.into()],
             env: vec![("PCTWIN_RUN_TEST".into(), "kept".into())],
             timeout: Duration::from_secs(20),
+            stdin: None,
+            cwd: None,
         }
     }
 
@@ -151,6 +175,8 @@ mod tests {
             args: vec!["-c".into(), script.into()],
             env: vec![("PCTWIN_RUN_TEST".into(), "kept".into())],
             timeout: Duration::from_secs(20),
+            stdin: None,
+            cwd: None,
         }
     }
 
@@ -207,6 +233,40 @@ mod tests {
         assert_eq!(r.stdout.len(), MAX_OUTPUT);
     }
 
+    /// What a tool reads comes on its standard input, and it starts in the folder given.
+    #[test]
+    fn input_and_working_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        #[cfg(windows)]
+        let (program, args): (PathBuf, Vec<OsString>) = (
+            PathBuf::from(r"C:\Windows\System32\cmd.exe"),
+            vec![
+                "/d".into(),
+                "/c".into(),
+                r"cd & C:\Windows\System32\sort.exe".into(),
+            ],
+        );
+        #[cfg(unix)]
+        let (program, args): (PathBuf, Vec<OsString>) = (
+            PathBuf::from("/bin/sh"),
+            vec!["-c".into(), "pwd; /bin/cat".into()],
+        );
+        let r = SystemRunner
+            .run(&Call {
+                program,
+                args,
+                env: vec![],
+                timeout: Duration::from_secs(20),
+                stdin: Some(b"pctwin-key-bytes\n".to_vec()),
+                cwd: Some(dir.path().to_path_buf()),
+            })
+            .unwrap();
+        assert!(r.stdout.contains("pctwin-key-bytes"), "{r:?}");
+        let shown = std::fs::canonicalize(dir.path()).unwrap();
+        let name = shown.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(r.stdout.contains(&name), "{r:?}");
+    }
+
     #[test]
     fn a_missing_tool_is_not_started() {
         let c = Call {
@@ -214,6 +274,8 @@ mod tests {
             args: vec![],
             env: vec![],
             timeout: Duration::from_secs(5),
+            stdin: None,
+            cwd: None,
         };
         assert!(matches!(SystemRunner.run(&c), Err(RunError::NotStarted(_))));
     }

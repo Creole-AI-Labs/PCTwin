@@ -11,7 +11,8 @@
 //!   finished ([`super::staging::VerifiedArtifact`]);
 //! - the maker check reads and hashes that file, asks Windows itself (not PowerShell) whether it
 //!   trusts the signature in the bytes it holds, and has Microsoft Defender scan it
-//!   ([`pctwin_maker::check`] with [`pctwin_maker::NativeChecks`]);
+//!   ([`pctwin_maker::check_staged`]: Windows reads an installer package by its name, so only this
+//!   copy, which nobody else can change, is checked that way; third review, finding 3);
 //! - only "install" for exactly the approved bytes, by the old laptop's maker named in the
 //!   approved plan, lets the install go on.
 //!
@@ -20,7 +21,7 @@
 //! plan that names another maker.
 
 use pctwin_maker::facts::{Arch, Decision, Format, Maker, Sha256, System};
-use pctwin_maker::{Expected, Limits, NativeChecks, check};
+use pctwin_maker::{Expected, Limits, NativeChecks, check_staged};
 
 use super::actions::{InstallVerifiedPackage, PackageKind};
 use super::staging::VerifiedArtifact;
@@ -68,12 +69,8 @@ pub fn check_package(
     let Some(arch) = laptop_arch() else {
         return MakerCheck::Refused;
     };
-    let Ok(verdict) = check(
-        package.path(),
-        &expected_of(action, arch),
-        &NativeChecks::default(),
-        limits,
-    ) else {
+    let checks = NativeChecks::with_oracle(Box::new(crate::os_probes::OsTrust));
+    let Ok(verdict) = check_staged(package, &expected_of(action, arch), &checks, limits) else {
         return MakerCheck::Refused;
     };
     match verdict.decide() {

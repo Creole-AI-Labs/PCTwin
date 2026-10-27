@@ -19,6 +19,7 @@ pub mod linux;
 pub mod mac;
 pub mod msi;
 pub mod native;
+pub mod oracle;
 pub mod pe;
 pub mod run;
 pub mod signer;
@@ -26,7 +27,8 @@ pub mod sniff;
 pub mod windows;
 
 pub use check::{
-    CheckError, Expected, Limits, SystemChecks, SystemSignature, check, windows_maker_of,
+    CheckError, Expected, HelperStaged, Limits, SystemChecks, SystemSignature, check, check_staged,
+    windows_maker_of,
 };
 pub use facts::{
     Arch, ArchFact, ArchSet, Bytes, Coverage, Decision, Format, FormatFact, LinuxSource, MacTeam,
@@ -34,3 +36,4 @@ pub use facts::{
     WindowsSigner, approved_bytes_match, compare,
 };
 pub use native::NativeChecks;
+pub use oracle::{NoOracle, TrustOracle};

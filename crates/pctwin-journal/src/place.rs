@@ -12,6 +12,40 @@
 //! system as the system reports it, and the list of volumes for whether it is removable.
 
 use std::path::Path;
+use std::sync::OnceLock;
+
+/// Whether a disk can be unplugged, as the disk itself says (Windows numbers its disks). The
+/// journal never makes the system call itself and never links the crate that does (third
+/// security review, finding 8): the app and the administrator helper install the real probe at
+/// start ([`install_disk_probe`]); tests use stand-ins.
+pub trait DiskProbe: Send + Sync {
+    /// `Some(true)`: it can be unplugged; `Some(false)`: it cannot; `None`: it would not say.
+    fn hotplug(&self, disk: u32) -> Option<bool>;
+}
+
+static PROBE: OnceLock<Box<dyn DiskProbe>> = OnceLock::new();
+
+/// Gives the journal its disk probe, once for this program; a second one is ignored. Returns
+/// whether this one was taken.
+pub fn install_disk_probe(probe: Box<dyn DiskProbe>) -> bool {
+    PROBE.set(probe).is_ok()
+}
+
+/// Whether a disk probe was installed in this program.
+pub fn disk_probe_installed() -> bool {
+    PROBE.get().is_some()
+}
+
+/// What the probe says of disk `disk`. With no probe installed (a test, a tool) the disk is not
+/// asked, and the bus and the list of volumes decide alone, as they did before 27 October 2026;
+/// the app and the helper always install one.
+#[cfg(windows)]
+fn hotplug_of(disk: u32) -> Option<bool> {
+    match PROBE.get() {
+        Some(probe) => probe.hotplug(disk),
+        None => Some(false),
+    }
+}
 
 /// What kind of place a folder is on, for keeping the journal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,11 +213,7 @@ pub fn judge(folder: &Path) -> Placement {
     #[cfg(windows)]
     let placement = {
         let found = windows_bus::bus_of(&real_text);
-        let hotplug = found.and_then(|(_, disk)| {
-            pctwin_helper_os::disk_hotplug(disk)
-                .ok()
-                .map(|h| h.device_hotplug || h.media_removable)
-        });
+        let hotplug = found.and_then(|(_, disk)| hotplug_of(disk));
         windows_placement(
             &real_text,
             found.map(|(bus, _)| bus),
