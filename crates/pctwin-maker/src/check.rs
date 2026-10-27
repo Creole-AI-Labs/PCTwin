@@ -73,7 +73,16 @@ pub struct SystemSignature {
 
 /// The system's own checks. The real ones call the system's tools; tests stand in for them.
 pub trait SystemChecks {
-    fn signature(&self, path: &Path, format: Format, limits: &Limits) -> SystemSignature;
+    /// The signature of `file`, held open by the check, at `path`. A check that can be asked
+    /// about the open file (Windows) must use `file`, never reopen `path`: the bytes trusted are
+    /// then the bytes the check hashed (second review, finding B2).
+    fn signature(
+        &self,
+        file: &File,
+        path: &Path,
+        format: Format,
+        limits: &Limits,
+    ) -> SystemSignature;
     fn malware(
         &self,
         path: &Path,
@@ -285,7 +294,7 @@ pub fn check(
         );
     }
 
-    let sys = system.signature(path, format, limits);
+    let sys = system.signature(&file, path, format, limits);
     let (signature, found) = match own {
         OwnRead::NotRead => (sys.signature.clone(), sys.maker.clone()),
         own => combine_windows(own, &sys),

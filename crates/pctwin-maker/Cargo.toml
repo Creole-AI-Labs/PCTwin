@@ -28,6 +28,13 @@ x509-cert = { version = "0.2.5", default-features = false }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Windows' own checks, asked of Windows itself (second review, finding B3): WinVerifyTrust and
+# where Defender is, through the helper's fenced system calls; Defender's state through Windows'
+# management service.
+[target.'cfg(windows)'.dependencies]
+pctwin-helper-os = { path = "../pctwin-helper-os" }
+wmi = "0.18.4"
+
 [dev-dependencies]
 authenticode = { version = "0.6.0", features = ["std", "object"] }
 object = { version = "0.39", default-features = false, features = ["read_core", "pe", "std"] }

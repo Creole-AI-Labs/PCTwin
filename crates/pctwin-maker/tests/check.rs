@@ -86,7 +86,7 @@ impl Fake {
 }
 
 impl SystemChecks for Fake {
-    fn signature(&self, _: &Path, _: Format, _: &Limits) -> SystemSignature {
+    fn signature(&self, _: &std::fs::File, _: &Path, _: Format, _: &Limits) -> SystemSignature {
         self.calls.set(self.calls.get() + 1);
         self.signature.clone()
     }

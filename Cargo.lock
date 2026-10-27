@@ -3860,6 +3860,7 @@ dependencies = [
  "der",
  "libc",
  "object",
+ "pctwin-helper-os",
  "pctwin-types",
  "same-file",
  "serde",
@@ -3869,6 +3870,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
+ "wmi",
  "x509-cert",
 ]
 

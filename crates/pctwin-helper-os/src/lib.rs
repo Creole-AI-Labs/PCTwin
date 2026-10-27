@@ -53,7 +53,9 @@
 //!   for the join of 2.2 and 2.3 (awaiting the user's approval of the fence's two new members),
 //!   `os_token_elevated` (whether this program is elevated: an app is never started from one)
 //!   and `os_session_on_screen` (whether the helper's session is still on the screen: switching
-//!   person ends the broker's grants).
+//!   person ends the broker's grants); and, added 27 October 2026 after the second review
+//!   (awaiting the user's approval), `os_win_verify_trust` (Windows' own signature check on a
+//!   held file, replacing PowerShell, whose answer code in the person's folders could replace).
 //! - macOS (`src/mac.rs`): `os_daemon_register`, `os_daemon_unregister`, `os_daemon_status`,
 //!   `os_open_login_items`, `os_od_create_user`, `os_authorization_holds`.
 //! - Linux: none. `pkexec` is started through the standard library, and `SO_PEERCRED` is read
@@ -76,8 +78,8 @@ pub mod signin;
 mod win;
 #[cfg(windows)]
 pub use win::{
-    PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder, caller_of, clean_command,
-    minimal_env, program_folder, system_folder,
+    FileTrust, PipeClient, PipeName, PipeServer, SystemFolder, admin_only_folder, caller_of,
+    clean_command, defender_scanner, minimal_env, program_folder, system_folder, verify_file_trust,
 };
 
 #[cfg(unix)]
