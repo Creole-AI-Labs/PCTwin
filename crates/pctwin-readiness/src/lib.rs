@@ -1,0 +1,17 @@
+//! Finishing a move (Task List 2.7 and the 2.9 deliverables "Can I actually work?", focused
+//! repair and the offline recovery kit; Phase 2 plan 2.7 as adopted 26 October 2026).
+//!
+//! It answers three questions: what is usable on the new laptop, what still depends on the old
+//! one, and what the person must do before handing the old one on.
+//!
+//! - [`ledger`]: one stable line per item with its result word and, kept apart, the evidence of
+//!   each kind that real observations gave (plan section 3). A worker's "done" is never taken on
+//!   its word: it is checked against the real state (the journal on disk, the 2.6 scheduler).
+//!
+//! Nothing here changes a file on either laptop or starts a program: the crate's clippy fence
+//! bans every way to write, rename or remove a file, to start a program and to open a network
+//! connection. Saving PCTwin's own records is the one exception, in one place.
+
+#![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
+
+pub mod ledger;
