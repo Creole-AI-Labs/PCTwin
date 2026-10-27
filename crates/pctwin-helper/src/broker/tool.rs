@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::actions::InstallScope;
+use super::actions::{ExeKind, InstallScope};
 use super::staging::VerifiedArtifact;
 
 /// A system program an adapter may start.
@@ -85,6 +85,141 @@ pub fn msiexec_install(
         .arg(package.path())
         .args(["/qn", "/norestart", "ALLUSERS=1"]);
     Ok(command)
+}
+
+/// The fixed switches for an installer program of `kind`: quiet, for everyone, never restarting
+/// the laptop, and saying when a restart is needed (exit code 3010). Documented by the makers:
+/// Inno Setup's "Setup Command Line Parameters" (`/RESTARTEXITCODE` sets the code for "restart
+/// needed", 0 by default); WiX Burn's standard bundle switches. Nothing here comes from a
+/// manifest, a recipe or a website.
+pub fn exe_switches(kind: ExeKind) -> &'static [&'static str] {
+    match kind {
+        ExeKind::Inno => &[
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/RESTARTEXITCODE=3010",
+            "/SP-",
+            "/ALLUSERS",
+        ],
+        ExeKind::Burn => &["/quiet", "/norestart"],
+    }
+}
+
+/// An installer program's command: the helper's own held copy, started by its full path with
+/// only the minimal environment, in the helper's administrators-only folder, with
+/// [`exe_switches`]. Only for [`InstallScope::Machine`].
+pub fn exe_install(
+    package: &VerifiedArtifact,
+    kind: ExeKind,
+    scope: InstallScope,
+) -> Result<Command, ToolError> {
+    if scope != InstallScope::Machine {
+        return Err(ToolError::NotHere);
+    }
+    #[cfg(windows)]
+    {
+        let mut command = pctwin_helper_os::clean_command(package.path())
+            .map_err(|_| ToolError::NoSystemFolder)?;
+        if let Some(folder) = package.path().parent() {
+            command.current_dir(folder);
+        }
+        command.args(exe_switches(kind));
+        Ok(command)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (package, kind);
+        Err(ToolError::NotHere)
+    }
+}
+
+/// What an installer's exit code means, by the kind of installer: done (with or without a
+/// restart needed), another install running (wait and try again: T21-039), or failed. Windows
+/// Installer's codes are documented ("MsiExec.exe and InstMsi.exe error messages"); a Burn bundle
+/// passes them on; Inno Setup returns 0 or, with `/RESTARTEXITCODE`, 3010.
+pub fn meaning(kind: Option<ExeKind>, code: i32) -> ExitMeaning {
+    match (kind, code) {
+        (_, 0) => ExitMeaning::Done {
+            restart_needed: false,
+        },
+        (_, 3010) => ExitMeaning::Done {
+            restart_needed: true,
+        },
+        // Restart started: never asked for (/norestart), so it is said, not hidden.
+        (None | Some(ExeKind::Burn), 1641) => ExitMeaning::Done {
+            restart_needed: true,
+        },
+        (None | Some(ExeKind::Burn), 1618) => ExitMeaning::Busy,
+        (None | Some(ExeKind::Burn), 1602) | (Some(ExeKind::Inno), 2 | 5) => ExitMeaning::Cancelled,
+        _ => ExitMeaning::Failed,
+    }
+}
+
+/// See [`meaning`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitMeaning {
+    Done {
+        restart_needed: bool,
+    },
+    /// Another install was running; nothing was changed.
+    Busy,
+    /// The installer was cancelled (by a person at its own window).
+    Cancelled,
+    Failed,
+}
+
+#[cfg(test)]
+mod meaning_tests {
+    use super::*;
+
+    #[test]
+    fn exit_codes_mean_what_their_makers_document() {
+        assert_eq!(
+            meaning(None, 0),
+            ExitMeaning::Done {
+                restart_needed: false
+            }
+        );
+        assert_eq!(
+            meaning(None, 3010),
+            ExitMeaning::Done {
+                restart_needed: true
+            }
+        );
+        assert_eq!(
+            meaning(None, 1641),
+            ExitMeaning::Done {
+                restart_needed: true
+            }
+        );
+        assert_eq!(meaning(None, 1618), ExitMeaning::Busy);
+        assert_eq!(meaning(None, 1602), ExitMeaning::Cancelled);
+        assert_eq!(meaning(None, 1603), ExitMeaning::Failed);
+        assert_eq!(
+            meaning(Some(ExeKind::Inno), 3010),
+            ExitMeaning::Done {
+                restart_needed: true
+            }
+        );
+        // Inno Setup's own codes are not Windows Installer's.
+        assert_eq!(meaning(Some(ExeKind::Inno), 1641), ExitMeaning::Failed);
+        assert_eq!(meaning(Some(ExeKind::Inno), 1618), ExitMeaning::Failed);
+        assert_eq!(meaning(Some(ExeKind::Inno), 5), ExitMeaning::Cancelled);
+        assert_eq!(meaning(Some(ExeKind::Burn), 1618), ExitMeaning::Busy);
+    }
+
+    #[test]
+    fn installer_switches_never_restart_and_never_come_from_outside() {
+        for kind in [ExeKind::Inno, ExeKind::Burn] {
+            let s = exe_switches(kind);
+            assert!(
+                s.iter().any(|a| a.eq_ignore_ascii_case("/norestart")),
+                "{kind:?}"
+            );
+        }
+        assert!(exe_switches(ExeKind::Inno).contains(&"/RESTARTEXITCODE=3010"));
+    }
 }
 
 #[cfg(all(test, windows))]

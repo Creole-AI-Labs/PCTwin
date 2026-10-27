@@ -21,5 +21,6 @@
 
 pub mod fetch;
 pub mod found;
+pub mod install;
 pub mod routes;
 pub mod version;

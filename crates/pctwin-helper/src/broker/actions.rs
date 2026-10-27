@@ -1,7 +1,7 @@
 //! The broker's fixed actions, each with its own schema, and the approved plan they belong to.
 //!
-//! There are three actions and no others: [`InstallVerifiedPackage`], [`ApplyNamedSetting`] and
-//! [`CreateRestorePoint`]. None takes a command, a path, a program, an environment value or a web
+//! There are four actions and no others: [`InstallVerifiedPackage`], [`InstallFromMacAppStore`],
+//! [`ApplyNamedSetting`] and [`CreateRestorePoint`]. None takes a command, a path, a program, an environment value or a web
 //! address; every field is a typed, bounded choice. A permission for one is never read as
 //! another: each action names the one role that may ask for it.
 
@@ -122,6 +122,7 @@ impl<'de> Deserialize<'de> for Id {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Action {
     InstallVerifiedPackage(InstallVerifiedPackage),
+    InstallFromMacAppStore(InstallFromMacAppStore),
     ApplyNamedSetting(ApplyNamedSetting),
     CreateRestorePoint(CreateRestorePoint),
 }
@@ -142,12 +143,38 @@ pub struct InstallVerifiedPackage {
 }
 
 /// The kinds of package the compiled adapters know. Each adapter builds its own fixed arguments;
-/// none comes from a recipe or a website.
+/// none comes from a recipe or a website. The kind comes from the package manifest's typed
+/// installer type (winget's `InstallerType`), never from switches written as free text: a
+/// manifest's own `InstallerSwitches` are never used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PackageKind {
     /// A Windows Installer package, installed by Windows' own `msiexec` for everyone.
     Msi,
+    /// A program built by one of the installer makers below, run with that maker's own
+    /// documented switches for a quiet install for everyone, never restarting the laptop.
+    Exe(ExeKind),
+}
+
+/// Installer programs whose quiet, no-restart switches are documented by their makers. A
+/// Nullsoft (NSIS) installer has no switch that stops it restarting the laptop, so it is not
+/// one: it ends needs-action (T21-040).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ExeKind {
+    /// Inno Setup.
+    Inno,
+    /// A WiX Burn bundle.
+    Burn,
+}
+
+/// Install one app from the Mac App Store by its store ID, through the `mas` tool, which needs
+/// root since its version 4. The person must be signed in to the App Store app with the Apple
+/// Account that has the app; a store ID is a number and nothing else.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InstallFromMacAppStore {
+    pub adam_id: u64,
 }
 
 /// For whom a package is installed.
@@ -225,7 +252,9 @@ impl Action {
     /// The one role that may ask for this action.
     pub fn audience(&self) -> Audience {
         match self {
-            Action::InstallVerifiedPackage(_) => Audience::Install,
+            Action::InstallVerifiedPackage(_) | Action::InstallFromMacAppStore(_) => {
+                Audience::Install
+            }
             Action::ApplyNamedSetting(_) => Audience::Settings,
             Action::CreateRestorePoint(_) => Audience::Recovery,
         }
@@ -236,6 +265,8 @@ impl Action {
     pub fn needs_admin(&self) -> bool {
         match self {
             Action::InstallVerifiedPackage(p) => p.scope == InstallScope::Machine,
+            // Only a Mac has the App Store; elsewhere the helper never runs it.
+            Action::InstallFromMacAppStore(_) => cfg!(target_os = "macos"),
             // Windows lets every account change the time zone; macOS and Linux ask an
             // administrator.
             Action::ApplyNamedSetting(ApplyNamedSetting {

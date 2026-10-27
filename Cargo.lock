@@ -3653,6 +3653,8 @@ version = "0.1.0"
 dependencies = [
  "pctwin-catalogue",
  "pctwin-grant",
+ "pctwin-helper",
+ "pctwin-helper-os",
  "pctwin-maker",
  "pctwin-record",
  "pctwin-types",
@@ -3764,6 +3766,7 @@ dependencies = [
 name = "pctwin-helper"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "getrandom 0.4.3",
  "pctwin-catalogue",
@@ -3780,6 +3783,7 @@ dependencies = [
  "sha2 0.11.1",
  "tempfile",
  "thiserror 2.0.21",
+ "winreg",
  "wmi",
  "zeroize",
 ]

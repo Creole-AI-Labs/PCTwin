@@ -20,6 +20,9 @@ pub const MAX_SYSTEM_ASK: usize = 64;
 pub const MAX_SYSTEM_PATH: usize = 900;
 /// Most places asked about in one session.
 pub const MAX_SYSTEM_ASKED: usize = 4096;
+/// Most bytes of a package in one [`Request::StageBytes`] (its base64 text, with the request
+/// around it, stays inside [`MAX_REQUEST`]).
+pub const STAGE_PIECE: usize = 32 * 1024;
 /// Longest read in one `ReadBlocks`: one block of the largest size a move uses.
 pub const MAX_READ: u32 = 16 * 1024 * 1024;
 /// Most files one person's scan hands out (the move record's own limit is lower).
@@ -121,6 +124,17 @@ pub enum Request {
     },
     /// Phase 2 broker: one of the fixed privileged actions of the sealed plan.
     Act(Box<crate::broker::BrokerRequest>),
+    /// Phase 2.1: the app is about to send package `artifact` of the sealed plan, `size` bytes
+    /// whose SHA-256 is `sha256`, in [`Request::StageBytes`] pieces. The helper keeps it in its
+    /// own administrators-only folder only if every byte arrives and they are those bytes.
+    StagePackage {
+        artifact: u64,
+        sha256: crate::broker::actions::Hex32,
+        size: u64,
+    },
+    /// Phase 2.1: the next piece of the package, as standard base64, at most [`STAGE_PIECE`]
+    /// bytes once decoded.
+    StageBytes { bytes: String },
     /// Phase 2 broker: the move was stopped; no new change starts in this session.
     Revoke,
     /// The move is over: the helper ends.
@@ -211,6 +225,12 @@ pub enum Answer {
     Refused(Refusal),
     /// The broker kept the approved plan.
     Sealed,
+    /// The package piece was kept; more are expected.
+    Staging,
+    /// Every byte of the package arrived and they are the approved ones: kept as `artifact`.
+    Staged {
+        artifact: u64,
+    },
     /// The broker acted: what it observed, signed for this session.
     Receipt(Box<crate::broker::receipt::Receipt>),
     /// The broker did not act, and why.

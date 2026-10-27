@@ -27,6 +27,8 @@ pctwin-scan = { path = "../pctwin-scan" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.4.3"
+# A package the app sends to the helper's own folder crosses the channel in pieces, as text.
+base64 = "0.22.1"
 blake3 = "1.8"
 sha2 = "0.11.0"
 thiserror = "2.0.21"
@@ -34,6 +36,9 @@ zeroize = "1.9.0"
 
 [target.'cfg(windows)'.dependencies]
 wmi = "0.18.4"
+# Windows Installer's own list of the packages it installed (2.1: after a crash, whether these
+# exact bytes were installed).
+winreg = "0.55"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.5", features = ["fs", "process"] }

@@ -76,6 +76,100 @@ fn this_laptops_apps_are_all_found_with_their_makers() {
     assert!(!list.found.is_empty());
 }
 
+/// Downloads PuTTY (a small, signed Windows Installer package) with winget, as the person, into
+/// a temporary folder; reads the manifest winget wrote; checks it describes the app by its
+/// product code; then has the administrator helper's own maker check (Windows' signature trust
+/// and Microsoft Defender's scan, on the helper's held copy) decide. Nothing is installed.
+/// Run by hand: `cargo test -p pctwin-apps --test real_laptop -- --ignored --nocapture winget`.
+#[test]
+#[ignore = "downloads from the internet with winget; run by hand"]
+fn a_winget_download_passes_the_helpers_own_maker_check_and_a_wrong_maker_fails() {
+    use pctwin_apps::routes::winget::{Manifest, confirms, download_call, downloaded, winget_path};
+    use pctwin_helper::broker::Adapters;
+    use pctwin_helper::broker::actions::{Hex32, InstallScope, InstallVerifiedPackage};
+    use pctwin_helper::broker::maker::MakerCheck;
+    use pctwin_maker::run::Runner;
+    use sha2::Digest;
+
+    let work = tempfile::tempdir().unwrap();
+    let folder = work.path().join("download");
+    std::fs::create_dir(&folder).unwrap();
+    let winget = winget_path(std::path::Path::new(
+        &std::env::var_os("LOCALAPPDATA").unwrap(),
+    ));
+    let call = download_call(&winget, "PuTTY.PuTTY", "x64", &folder).unwrap();
+    let ran = pctwin_maker::run::SystemRunner.run(&call).unwrap();
+    assert_eq!(ran.code, Some(0), "{}", ran.stdout);
+    let (yaml, msi) = downloaded(&folder).unwrap();
+    let manifest = Manifest::parse(&std::fs::read_to_string(&yaml).unwrap()).unwrap();
+    let bytes = std::fs::read(&msi).unwrap();
+    let sha: [u8; 32] = sha2::Sha256::digest(&bytes).into();
+    assert_eq!(
+        manifest.sha256,
+        Some(sha),
+        "winget's bytes are the manifest's"
+    );
+    assert_eq!(
+        pctwin_apps::install::kind_of(
+            manifest.installer_type.as_deref().unwrap(),
+            manifest.scope.as_deref()
+        ),
+        Ok(pctwin_helper::broker::actions::PackageKind::Msi)
+    );
+    // The app as an old laptop would list it.
+    let app = pctwin_record::FoundApp {
+        name: "PuTTY".into(),
+        version: Some("0.80".into()),
+        publisher: Some("Simon Tatham".into()),
+        owner: pctwin_record::Owner::Shared,
+        system: pctwin_record::AppSystem::Windows,
+        found: FoundWhere::WindowsEntry {
+            view: pctwin_record::RegistryView::Machine,
+            key: manifest.product_code.clone().unwrap(),
+            product_code: manifest.product_code.clone(),
+        },
+        arch: pctwin_record::AppArch::UNKNOWN,
+        maker: AppMaker::Unsigned,
+        web: None,
+        update_feed: None,
+        installers: vec![],
+        notes: vec![],
+    };
+    assert!(confirms(&manifest, &app).is_some());
+    // The old laptop's maker: here, PuTTY's own signer (as an old laptop's copy of PuTTY would
+    // carry), read by PCTwin's own reader.
+    let pctwin_maker::OldMaker::Signed(signer) = pctwin_maker::windows_old_copy(&msi).maker else {
+        panic!("PuTTY's package is signed");
+    };
+    let mut staging = pctwin_helper::broker::staging::Staging::new(work.path().join("packages"));
+    std::fs::create_dir_all(work.path().join("packages")).unwrap();
+    let handle = staging.admit(&mut bytes.as_slice(), sha).unwrap();
+    let held = staging.open_verified(handle, sha).unwrap();
+    let action = |maker: pctwin_maker::WindowsSigner| InstallVerifiedPackage {
+        artifact: handle,
+        sha256: Hex32(sha),
+        kind: pctwin_helper::broker::actions::PackageKind::Msi,
+        scope: InstallScope::Machine,
+        maker: Box::new(maker),
+    };
+    let mut adapters = pctwin_helper::broker::BuiltInAdapters;
+    let verdict = adapters.check_maker(&held, &action(signer.clone()));
+    println!("helper's maker check, same maker: {verdict:?}");
+    assert_eq!(verdict, MakerCheck::Approved);
+    // Another maker named by the plan: refused, whatever the download.
+    let mut other = signer;
+    other.certificate = pctwin_maker::Sha256([0x11; 32]);
+    other.subject.organization = Some("Someone Else Ltd".into());
+    other.subject.common_name = Some("Someone Else Ltd".into());
+    other.public_key = None;
+    other.issuer_organization = Some("Another CA".into());
+    assert_eq!(
+        adapters.check_maker(&held, &action(other)),
+        MakerCheck::Refused
+    );
+    println!("helper's maker check, another maker: Refused");
+}
+
 /// The download program, locked down at low integrity, cannot write a file in the person's own
 /// folders. Run by hand (it needs the program built: `cargo build -p pctwin-apps --bin
 /// pctwin-fetch`).

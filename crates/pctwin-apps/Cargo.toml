@@ -11,6 +11,8 @@ publish.workspace = true
 [dependencies]
 pctwin-catalogue = { path = "../pctwin-catalogue" }
 pctwin-grant = { path = "../pctwin-grant" }
+# The broker's typed install action and its package channel (2.1 installs only through the helper).
+pctwin-helper = { path = "../pctwin-helper" }
 pctwin-maker = { path = "../pctwin-maker" }
 pctwin-record = { path = "../pctwin-record" }
 pctwin-types = { path = "../pctwin-types" }
@@ -31,6 +33,9 @@ url = "2.5.8"
 winreg = "0.55"
 # Whether the network is metered: Windows' own connection profile (safe WinRT calls).
 windows = { version = "0.62.2", features = ["Networking_Connectivity"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+pctwin-helper-os = { path = "../pctwin-helper-os" }
 
 [dev-dependencies]
 tokio = { version = "1.53.2", features = ["rt", "macros", "net", "io-util"] }
