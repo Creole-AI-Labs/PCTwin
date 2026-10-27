@@ -633,7 +633,7 @@ fn sign_in_tokens_are_never_in_scope() {
     let own = fake.add("Documents/thesis.docx", 1);
     let report = keep.run(
         &mut fake,
-        wanted("me", &[own.clone()]),
+        wanted("me", std::slice::from_ref(&own)),
         &|| Network::Unmetered,
         &mut |b| b.iter().map(|(i, _)| (*i, true)).collect(),
     );
