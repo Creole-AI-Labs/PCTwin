@@ -3859,6 +3859,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pctwin-orchestrate"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "pctwin-record",
+ "pctwin-scan",
+ "pctwin-types",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "unicode-normalization",
+]
+
+[[package]]
 name = "pctwin-pairing"
 version = "0.1.0"
 dependencies = [
