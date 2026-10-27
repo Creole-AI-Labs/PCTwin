@@ -19,6 +19,7 @@
 //! installs role's grant cannot be turned into any other role's; the receipt handed to 2.5 carries
 //! no permission ([`after`]).
 
+pub mod after;
 pub mod fetch;
 pub mod found;
 pub mod install;

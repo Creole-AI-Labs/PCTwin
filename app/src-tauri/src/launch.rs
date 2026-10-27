@@ -81,9 +81,60 @@ pub fn launch(as_person: &AsPerson, program: &Path) -> std::io::Result<Child> {
     Command::new(program).spawn()
 }
 
+/// The 2.1 launch check (step 5): starts `program` as the person and says whether it opened. It
+/// opened when it is still running after `wait`, or ended by itself without an error (a launcher
+/// that hands over to its own window). It is left open: it is the person's app, and they see
+/// it. Started only when the person asks for the check; never with an administrator's rights.
+pub fn launch_check(
+    as_person: Result<AsPerson, NotAsPerson>,
+    program: &Path,
+    wait: std::time::Duration,
+) -> pctwin_apps::after::Opened {
+    use pctwin_apps::after::Opened;
+    let Ok(as_person) = as_person else {
+        return Opened::NotChecked;
+    };
+    let Ok(mut child) = launch(&as_person, program) else {
+        return Opened::No;
+    };
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    Opened::Yes
+                } else {
+                    Opened::No
+                };
+            }
+            Ok(None) if start.elapsed() >= wait => return Opened::Yes,
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) => return Opened::NotChecked,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Not as the person: nothing is started and nothing is claimed.
+    #[test]
+    fn the_launch_check_starts_nothing_without_the_proof() {
+        use pctwin_apps::after::Opened;
+        let none = Path::new("this-program-is-never-started.exe");
+        assert_eq!(
+            launch_check(Err(NotAsPerson::Elevated), none, std::time::Duration::ZERO),
+            Opened::NotChecked
+        );
+        // A program that is not there did not open.
+        if let Ok(p) = AsPerson::here() {
+            assert_eq!(
+                launch_check(Ok(p), none, std::time::Duration::ZERO),
+                Opened::No
+            );
+        }
+    }
 
     #[test]
     fn only_a_program_running_as_the_person_may_start_apps() {
