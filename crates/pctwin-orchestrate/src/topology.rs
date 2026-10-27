@@ -16,7 +16,10 @@
 //!   session number: a late result from an older session, or for an item not in its approved
 //!   plan, is refused ([`Topology::accept`]).
 //! - **A change after approval** ([`Topology::refresh`]) holds only the affected items until the
-//!   person approves again; everything else carries on.
+//!   person approves again; everything else carries on. Where each person goes is part of what
+//!   is approved ([`Topology::plan_fingerprint`]): a person put into another account after
+//!   approval has their items held the same way until it is approved again (third security
+//!   review, finding 5).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -63,10 +66,24 @@ pub enum TopologyError {
 struct Source {
     label: String,
     record: Record,
-    /// The items as approved, and the revision's fingerprint.
-    approved: Option<(Fingerprint, BTreeMap<ItemId, Item>)>,
+    approved: Option<Approved>,
     session: u64,
 }
+
+/// What the person approved for one old laptop.
+#[derive(Debug, Clone)]
+struct Approved {
+    /// The plan's fingerprint: the record's and where each person goes.
+    fingerprint: PlanFingerprint,
+    items: BTreeMap<ItemId, Item>,
+    /// Where each of this laptop's people goes, by their account ID there.
+    places: BTreeMap<String, PersonTarget>,
+}
+
+/// The fingerprint of one old laptop's plan as the person approves it: the record's own
+/// fingerprint and where each of its people goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PlanFingerprint(pub [u8; 32]);
 
 /// A result an old laptop reports for one item, in one session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,6 +211,34 @@ impl Topology {
         self.mapping.get(person)
     }
 
+    /// Where each of this old laptop's people goes now, by their account ID there.
+    fn places_of(&self, laptop: &LaptopId) -> BTreeMap<String, PersonTarget> {
+        self.mapping
+            .iter()
+            .filter(|(p, _)| p.laptop == *laptop)
+            .map(|(p, t)| (p.account_id.clone(), t.clone()))
+            .collect()
+    }
+
+    /// The fingerprint of this old laptop's plan as it stands: its record and where each of its
+    /// people goes. Any change to either is a new plan to approve.
+    pub fn plan_fingerprint(&self, laptop: &LaptopId) -> Option<PlanFingerprint> {
+        let s = self.sources.get(laptop)?;
+        Some(plan_fingerprint(
+            &s.record.fingerprint(),
+            &self.places_of(laptop),
+        ))
+    }
+
+    /// The fingerprint of the plan last approved for this old laptop.
+    pub fn approved_fingerprint(&self, laptop: &LaptopId) -> Option<PlanFingerprint> {
+        self.sources
+            .get(laptop)?
+            .approved
+            .as_ref()
+            .map(|a| a.fingerprint)
+    }
+
     /// Every person with something included has a place to go.
     pub fn check_mapping(&self) -> Result<(), TopologyError> {
         for laptop in self.sources.keys() {
@@ -294,13 +339,22 @@ impl Topology {
         self.check_mapping_of(laptop)?;
         let s = self
             .sources
-            .get_mut(laptop)
+            .get(laptop)
             .ok_or(TopologyError::UnknownSource)?;
         s.record
             .validate()
             .map_err(|e| TopologyError::BadRecord(e.to_string()))?;
         let items = s.record.items.iter().map(|i| (i.id, i.clone())).collect();
-        s.approved = Some((s.record.fingerprint(), items));
+        let places = self.places_of(laptop);
+        let s = self
+            .sources
+            .get_mut(laptop)
+            .ok_or(TopologyError::UnknownSource)?;
+        s.approved = Some(Approved {
+            fingerprint: plan_fingerprint(&s.record.fingerprint(), &places),
+            items,
+            places,
+        });
         Ok(())
     }
 
@@ -325,16 +379,25 @@ impl Topology {
             .sources
             .get(laptop)
             .ok_or(TopologyError::UnknownSource)?;
-        let Some((_, approved)) = &s.approved else {
+        let Some(approved) = &s.approved else {
             return Err(TopologyError::NotApproved);
         };
-        let Some(was) = approved.get(item) else {
+        let Some(was) = approved.items.get(item) else {
             return Err(TopologyError::NotInApprovedPlan);
         };
-        match s.record.items.iter().find(|i| i.id == *item) {
-            Some(now) if now == was => Ok(()),
-            _ => Err(TopologyError::NeedsFreshApproval),
+        let Some(now) = s.record.items.iter().find(|i| i.id == *item) else {
+            return Err(TopologyError::NeedsFreshApproval);
+        };
+        if now != was {
+            return Err(TopologyError::NeedsFreshApproval);
         }
+        // Its person must still go where the approval said.
+        if let Some(person) = owner_of(laptop, now)
+            && self.mapping.get(&person) != approved.places.get(&person.account_id)
+        {
+            return Err(TopologyError::NeedsFreshApproval);
+        }
+        Ok(())
     }
 
     /// Accepts a result only from the current session with its laptop, for an item that laptop's
@@ -368,7 +431,7 @@ impl Topology {
             .get_mut(laptop)
             .ok_or(TopologyError::UnknownSource)?;
         let before: BTreeMap<ItemId, Item> = match &s.approved {
-            Some((_, items)) => items.clone(),
+            Some(a) => a.items.clone(),
             None => s.record.items.iter().map(|i| (i.id, i.clone())).collect(),
         };
         let after: BTreeMap<ItemId, &Item> = record.items.iter().map(|i| (i.id, i)).collect();
@@ -382,6 +445,36 @@ impl Topology {
         s.record = record;
         Ok(affected.into_iter().collect())
     }
+}
+
+/// The fingerprint of a record's revision and where each person goes, each part written with
+/// its length so no two plans write the same bytes.
+fn plan_fingerprint(
+    record: &Fingerprint,
+    places: &BTreeMap<String, PersonTarget>,
+) -> PlanFingerprint {
+    let mut h = blake3::Hasher::new();
+    h.update(b"pctwin/v1/approved-plan:");
+    h.update(record.to_hex().as_bytes());
+    let mut part = |b: &[u8]| {
+        h.update(&(b.len() as u64).to_le_bytes());
+        h.update(b);
+    };
+    for (account, target) in places {
+        part(account.as_bytes());
+        match target {
+            PersonTarget::ExistingAccount { account_id } => {
+                part(b"existing");
+                part(account_id.as_bytes());
+            }
+            PersonTarget::NewAccount { name } => {
+                part(b"new");
+                part(name.as_bytes());
+            }
+            PersonTarget::Skip => part(b"skip"),
+        }
+    }
+    PlanFingerprint(*h.finalize().as_bytes())
 }
 
 /// Where an item lands in its account's folder.
