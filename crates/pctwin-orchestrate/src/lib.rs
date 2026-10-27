@@ -19,6 +19,8 @@
 //! - [`rescue`]: a dead laptop's drive, read only: the drive known by its own identity, its people
 //!   found from the drive itself, locked drives explained, a weak drive read carefully, and the
 //!   result an ordinary plan.
+//! - [`jobs`]: the plan that orders the work: child jobs with their own scopes, cycles found,
+//!   bounded scheduling that never drops a job, wrong results refused, exact partial reports.
 //!
 //! Nothing here changes a file on the old laptop's drives: the crate's clippy fence bans every
 //! way to make, write, rename or remove one. The one effect on the old laptop is the cloud app's
@@ -29,6 +31,7 @@
 
 pub mod capacity;
 pub mod cloud;
+pub mod jobs;
 pub mod local_copy;
 pub mod rescue;
 pub mod topology;
