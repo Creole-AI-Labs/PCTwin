@@ -108,7 +108,9 @@ fn a_package_crosses_the_channel_whole_and_is_installed_from_the_helpers_copy() 
                 digest: helper_plan.digest(),
             },
             "tok",
-            Staging::new(packages.path().to_path_buf()),
+            Staging::new(pctwin_helper::broker::staging::HelperFolder::for_tests(
+                packages.path().to_path_buf(),
+            )),
             &mut authority,
             &mut journal,
             &mut adapters,

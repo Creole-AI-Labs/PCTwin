@@ -141,7 +141,9 @@ fn a_winget_download_passes_the_helpers_own_maker_check_and_a_wrong_maker_fails(
     let pctwin_maker::OldMaker::Signed(signer) = pctwin_maker::windows_old_copy(&msi).maker else {
         panic!("PuTTY's package is signed");
     };
-    let mut staging = pctwin_helper::broker::staging::Staging::new(work.path().join("packages"));
+    let mut staging = pctwin_helper::broker::staging::Staging::new(
+        pctwin_helper::broker::staging::HelperFolder::for_tests(work.path().join("packages")),
+    );
     std::fs::create_dir_all(work.path().join("packages")).unwrap();
     let handle = staging.admit(&mut bytes.as_slice(), sha).unwrap();
     let held = staging.open_verified(handle, sha).unwrap();

@@ -30,6 +30,7 @@ fn fate(name: &str, v: SettingValue) -> Fate {
             paths: &m,
             same_screens: false,
             hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+            facts: pctwin_settings::judge::Facts::system(),
         },
     )
 }
@@ -146,6 +147,7 @@ fn caches_window_places_and_devices() {
                 paths: &m,
                 same_screens: true,
                 hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+                facts: pctwin_settings::judge::Facts::system(),
             }
         ),
         Fate::Copy(_)
@@ -295,6 +297,7 @@ fn binary_values_are_only_checked_for_known_credential_forms() {
         paths: &m,
         same_screens: false,
         hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
     };
     let random = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
     assert_eq!(

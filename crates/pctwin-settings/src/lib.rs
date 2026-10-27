@@ -27,7 +27,10 @@
 //! a web or app address, an environment variable, a relative place, a key named like a file), a
 //! command line, and anything a catalogue action-hint row marks as run or loaded; only one full
 //! local path to data is pointed at the moved file. Every write is checked again on the new
-//! laptop ([`generic::may_write`]).
+//! laptop ([`generic::may_write`]). Both go through one judging pipeline ([`judge`], the fifth
+//! review): every value of every kind is decoded into the texts it holds (raw bytes, property
+//! list data and byte arrays included), normalised, and judged by the new laptop's own facts
+//! about what runs and what opens a handler; catalogue rows only add caution.
 //!
 //! **What is still not covered (the 2.4 plan's residual, written down on purpose).** Copying a
 //! third-party app's settings generically can carry an app-specific command that no general
@@ -46,6 +49,7 @@ pub mod found;
 pub mod generic;
 pub mod gvariant;
 pub mod handoff;
+pub mod judge;
 pub mod map;
 pub mod mechanism;
 pub mod ownership;

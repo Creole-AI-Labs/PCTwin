@@ -414,6 +414,10 @@ impl SystemStore {
 /// the system's key store beside the journal's key and counter (fourth review: never a number a
 /// caller passes in). A catalogue older than its mark is refused
 /// ([`pctwin_catalogue::Catalogue::signed`]).
+///
+/// The person's key store belongs to the person: any program running as them can read and
+/// delete these entries (fifth review, finding 7). The mark protects against an older file or a
+/// lying mirror, never against such a program ([`pctwin_catalogue::RollbackMarks`] says why).
 pub struct CatalogueMarks;
 
 fn catalogue_mark_name(catalogue: &str) -> String {

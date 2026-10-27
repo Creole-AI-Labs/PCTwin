@@ -290,6 +290,7 @@ fn every_mac_domain_is_found_and_an_unknown_apps_preferences_move_and_undo() {
         paths: &map,
         same_screens: false,
         hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
     };
     let cat = Catalogue::starter().unwrap();
     let p = plan_found(&cat, System::Mac, System::Mac, &d, &ctx);
@@ -374,6 +375,7 @@ fn gnome_values_are_found_in_dconf_and_move_and_undo() {
         paths: &map,
         same_screens: false,
         hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
     };
     let cat = Catalogue::starter().unwrap();
     let p = plan_found(&cat, System::Gnome, System::Gnome, &d, &ctx);

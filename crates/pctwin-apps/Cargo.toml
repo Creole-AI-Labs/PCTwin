@@ -38,6 +38,8 @@ windows = { version = "0.62.2", features = ["Networking_Connectivity"] }
 pctwin-helper-os = { path = "../pctwin-helper-os" }
 
 [dev-dependencies]
+# The tests stage packages in temporary folders (never in a release build).
+pctwin-helper = { path = "../pctwin-helper", features = ["test-staging"] }
 tokio = { version = "1.53.2", features = ["rt", "macros", "net", "io-util"] }
 pctwin-catalogue = { path = "../pctwin-catalogue", features = ["test-key"] }
 tempfile = "3"

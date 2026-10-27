@@ -121,6 +121,7 @@ fn planned(old: &dyn Hive) -> FoundPlan {
         paths: &map,
         same_screens: false,
         hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
     };
     plan_found(&cat, System::Windows, System::Windows, &d, &ctx)
 }
@@ -230,6 +231,7 @@ fn another_system_gets_only_what_the_catalogue_translates() {
         paths: &map,
         same_screens: false,
         hints: pctwin_settings::catalogue::Catalogue::starter_hints(),
+        facts: pctwin_settings::judge::Facts::system(),
     };
     let p = plan_found(
         &cat,
