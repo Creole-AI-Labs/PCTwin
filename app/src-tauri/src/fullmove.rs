@@ -614,6 +614,10 @@ pub fn rebuild_here<R: Runtime>(
     };
     let can_undo = !done.undo.recipes.is_empty() || !done.undo.apps.is_empty();
     *lock(&state.last) = Some(done.undo.clone());
+    // Kept beside the journal too, so Undo still works after PCTwin restarts.
+    if can_undo && let Some(path) = book_path(app) {
+        let _ = std::fs::write(path, serde_json::to_vec(&done.undo).unwrap_or_default());
+    }
     RebuiltView {
         lines,
         more,
@@ -744,6 +748,11 @@ fn undo_line(l: pctwin_fullmove::undo::Line) -> UndoLine {
 
 const JOB: &str = "move-undo";
 
+/// Where the last move's undo book is kept (PCTwin's own data folder, beside the journal).
+fn book_path<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
+    crate::moving::journal_path(app).map(|j| j.with_file_name("fullmove-undo.json"))
+}
+
 fn publish<R: Runtime>(
     app: &AppHandle<R>,
     guard: &AppGuard,
@@ -778,6 +787,10 @@ pub fn fullmove_undo<R: Runtime>(
 ) -> Result<(), crate::moving::MoveProblem> {
     let book = lock(&state.last)
         .clone()
+        .or_else(|| {
+            let bytes = std::fs::read(book_path(&app)?).ok()?;
+            serde_json::from_slice::<UndoBook>(&bytes).ok()
+        })
         .ok_or(crate::moving::MoveProblem::NotMoving)?;
     let epoch = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
     {
