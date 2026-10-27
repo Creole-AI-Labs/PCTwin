@@ -6,6 +6,8 @@ pub mod catalogue;
 pub mod classify;
 pub mod component;
 pub mod content;
+pub mod export;
 pub mod land;
 pub mod roots;
+pub mod select;
 pub mod sniff;
