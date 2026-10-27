@@ -20,6 +20,9 @@ fn plain_data_passes() {
         "Segoe UI",
         "12:30",
         "Arial:12",
+        "HH:mm:ss",
+        "mm:ss",
+        "ms-settings:display",
         "abc:1",
         "abc: x",
         "1.5",
@@ -57,7 +60,7 @@ fn one_full_local_path_is_data_for_the_caller_to_point_at_the_moved_file() {
 
 #[test]
 fn another_computer_or_an_address_could_fetch_something() {
-    let long = format!("{}:x", "a".repeat(32));
+    let long = format!("{}:x/y", "a".repeat(32));
     for t in [
         r"\\srv\s",
         r"\\srv\s\x.jpg",
@@ -65,21 +68,22 @@ fn another_computer_or_an_address_could_fetch_something() {
         "https://example.com/u.xml",
         "ftp://x",
         "mailto:a@b",
-        "ms-settings:display",
         "search-ms:query=x",
         "file://host/s",
         "FILE://host/s",
         r"see \\srv\s now",
         "x=https://y",
-        "ab:x",
+        "ab:x/y",
+        "javascript:alert(1)",
         long.as_str(),
     ] {
         assert_eq!(bare(t), Some(Why::Fetches), "{t:?}");
     }
     // A scheme longer than any is not one; digits after the colon are a time or a pair.
-    assert_eq!(bare(&format!("{}:x", "a".repeat(33))), None);
-    assert_eq!(bare("1a:x"), None);
-    assert_eq!(bare("a_b:x"), None);
+    assert_eq!(bare(&format!("{}:x?y", "a".repeat(33))), None);
+    assert_eq!(bare("1a:x?y"), None);
+    assert_eq!(bare("a_b:x?y"), None);
+    assert_eq!(bare("ab:1/2"), None);
 }
 
 #[test]

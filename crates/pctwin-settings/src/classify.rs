@@ -431,8 +431,8 @@ fn is_drive(b: &[u8]) -> bool {
     b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
 }
 
-/// The scheme of an address (`https` in `https://x`), when `t` starts with one. One letter is a
-/// drive; a digit after the colon is a time or a number pair (`12:30`, `Arial:12`).
+/// The scheme of what may be an address (`https` in `https://x`), when `t` starts with one. One
+/// letter is a drive; a digit after the colon is a time or a number pair (`12:30`, `Arial:12`).
 fn scheme(t: &str) -> Option<&str> {
     let (s, rest) = t.split_once(':')?;
     let ok = s.len() >= 2
@@ -462,7 +462,13 @@ fn spot(token: &str) -> Option<Spot> {
                 Spot::Remote
             });
         }
-        return Some(Spot::Remote);
+        // An address that names a place to reach: another computer (`//host`), a mailbox
+        // (`@`), a path or a query. A word before a colon alone (`HH:mm:ss`, a time format) is
+        // not one.
+        let rest = &t[s.len() + 1..];
+        if rest.starts_with("//") || rest.contains(['@', '/', '\\', '?', '=', '(']) {
+            return Some(Spot::Remote);
+        }
     }
     if is_drive(b) {
         return Some(if matches!(b.get(2), Some(b'\\' | b'/')) {
