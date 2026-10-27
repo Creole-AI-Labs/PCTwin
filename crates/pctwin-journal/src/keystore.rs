@@ -446,12 +446,12 @@ mod tests {
         let store = Arc::new(Memory::default());
         let open = |store: &Arc<Memory>| {
             let mut j = Journal::open(&path).unwrap();
-            j.record_key = Held {
+            j.record_key = Box::new(Held {
                 given: None,
                 store: store.clone(),
                 held: Mutex::new(None),
                 mark: Mutex::new(None),
-            };
+            });
             j
         };
         let keys = role_keys();
@@ -502,12 +502,12 @@ mod tests {
         let store = Arc::new(Memory::default());
         let open = |store: &Arc<Memory>| {
             let mut j = Journal::open(&path).unwrap();
-            j.record_key = Held {
+            j.record_key = Box::new(Held {
                 given: None,
                 store: store.clone(),
                 held: Mutex::new(None),
                 mark: Mutex::new(None),
-            };
+            });
             j
         };
         let keys = role_keys();

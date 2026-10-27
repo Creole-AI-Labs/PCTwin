@@ -190,9 +190,24 @@ pub fn judge_status(status: Result<DefenderStatus, String>) -> DefenderState {
     }
 }
 
-/// Asks Windows' management service for Defender's state.
+/// Asks Windows' management service for Defender's state, on a thread of its own so the
+/// caller's own COM setup never matters, trying a few times (the service can be busy).
 #[cfg(windows)]
 pub fn defender_status() -> Result<DefenderStatus, String> {
+    let mut last = String::new();
+    for wait in [0u64, 200, 1000] {
+        std::thread::sleep(std::time::Duration::from_millis(wait));
+        match std::thread::spawn(ask_defender_status).join() {
+            Ok(Ok(s)) => return Ok(s),
+            Ok(Err(e)) => last = e,
+            Err(_) => last = "the question stopped part way".into(),
+        }
+    }
+    Err(last)
+}
+
+#[cfg(windows)]
+fn ask_defender_status() -> Result<DefenderStatus, String> {
     let wmi = wmi::WMIConnection::with_namespace_path("ROOT\\Microsoft\\Windows\\Defender")
         .map_err(|e| e.to_string())?;
     let mut all: Vec<DefenderStatus> = wmi.query().map_err(|e| e.to_string())?;

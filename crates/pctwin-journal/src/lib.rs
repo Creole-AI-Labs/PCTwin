@@ -1185,7 +1185,8 @@ pub struct Journal {
     /// Woken when a permit is given back.
     undo_free: Condvar,
     /// The key that seals effect records ([`keystore`]).
-    record_key: keystore::Held,
+    /// Boxed: kept out of line so a `Journal` stays small to move.
+    record_key: Box<keystore::Held>,
     /// The offer to leave part-way files that an answer is awaited for (kept in memory only: an
     /// offer never outlives the PCTwin that showed it).
     escape: Mutex<Option<StoredOffer>>,
@@ -1249,7 +1250,7 @@ impl Journal {
             journal_id,
             undo: Mutex::new(UndoUse::default()),
             undo_free: Condvar::new(),
-            record_key: keystore::Held::system(),
+            record_key: Box::new(keystore::Held::system()),
             escape: Mutex::new(None),
         })
     }
@@ -1259,7 +1260,7 @@ impl Journal {
     /// elsewhere).
     pub fn open_with_record_key(path: &Path, key: keystore::TagKey) -> Result<Self, JournalError> {
         let mut j = Self::open(path)?;
-        j.record_key = keystore::Held::given(key);
+        j.record_key = Box::new(keystore::Held::given(key));
         Ok(j)
     }
 
