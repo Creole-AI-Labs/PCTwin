@@ -13,6 +13,9 @@
 //! - [`repair`]: "Fix these" reruns only the unfinished items and what they need; final changes
 //!   are a reviewed delta that never overwrites an edit on the new laptop; a returned laptop is a
 //!   three-way comparison.
+//! - [`goodbye`]: the before-wipe list: what is only on the old laptop, keys, licences, steps not
+//!   finished, places not searched; each resolved by evidence or accepted as a specific loss;
+//!   saved on the new laptop.
 //!
 //! Nothing here changes a file on either laptop or starts a program: the crate's clippy fence
 //! bans every way to write, rename or remove a file, to start a program and to open a network
@@ -21,5 +24,7 @@
 #![cfg_attr(not(test), forbid(clippy::disallowed_methods))]
 
 pub mod checks;
+pub mod goodbye;
 pub mod ledger;
 pub mod repair;
+mod store;
